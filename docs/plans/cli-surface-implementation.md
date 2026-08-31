@@ -21,12 +21,19 @@ breaks for someone who already learned the current spelling. The two want
 different sequencing, different tests, and different appetites for landing
 quickly.
 
+## Where this stands
+
+Stages 1 through 3 are on main, and step 6b has removed the piece-mounted
+`get`, `set` and `call` — `cf get`, `cf set` and `cf call` are the only
+spellings. Stage 4 is the open work, along with step 7 and the second arc's
+step 10 in [the shape document](cli-surface-shape.md).
+
 ## Governing decisions
 
 **Additive until 6b.** Steps 4 through 6a only add: 6a adds a warning, not a
-removal. Every spelling that works today still works, and the old ones keep
-working until the date those warnings name — two weeks after 6a reaches main,
-written into the warning as a literal so it reads the same on any day.
+removal, so each old spelling kept working until the date its warning named —
+two weeks after 6a reached main, written into the warning as a literal so it
+read the same on any day. 6b is the removal that date was for.
 
 **A deprecated spelling keeps working.** It costs a line of aliasing to leave a
 redirect in place, and it costs every script and skill file that used it to
@@ -54,12 +61,11 @@ Four decisions it explicitly declines to make are inherited as constraints:
 
 ## The accounting
 
-`cf piece` has twenty-two subcommands today:
+`cf piece` has nineteen subcommands:
 
 ```
 ls  search  new  set-slug  step  apply  getsrc  setsrc  inspect  view
-render  link  get  set  map  call  verbs  rm  recreate-root  set-home
-get-label  set-label
+render  link  map  verbs  rm  recreate-root  set-home  get-label  set-label
 ```
 
 The target surface keeps eight — `new`, `setsrc`, `getsrc`, `rm`, `ls`,
@@ -71,7 +77,6 @@ than silently kept or moved. The rest move:
 
 | Today | Becomes | Step |
 | --- | --- | --- |
-| `piece get` / `set` / `call` | `cf get` / `set` / `call` | 5 |
 | `piece inspect` | merged with `cf inspect piece` | 7 |
 | `piece view`, `piece render` | merged with `cf view` | 7 |
 | `piece map` | merged with `cf inspect graph` | 7 |
@@ -104,21 +109,22 @@ because nothing has been removed yet.
 
 ## Stage 2 — the honest names
 
-**N1. `cf get`, `cf set`, `cf call`.** *(S)* Top-level aliases of
-`piece get|set|call`. The same implementation reached by a second name, not a
-copy — the aliasing is a routing entry, and a divergence between the two
-spellings is the defect this stage can introduce.
+**N1. `cf get`, `cf set`, `cf call`.** *(S)* The data commands take top-level
+names. One definition per command, reached by a routing entry rather than
+copied; while both names were mounted, a divergence between them was the defect
+this stage could introduce.
 
 **N2. `cf wish` and `cf exec` keep their names** and gain nothing here. They are
 already top-level and already honest.
 
-*Exit:* `cf get X` and `cf piece get X` produce byte-identical output for the
-same input, asserted rather than assumed.
+*Exit:* while both spellings were mounted, `cf get X` and `cf piece get X`
+produced byte-identical output for the same input, asserted rather than
+assumed.
 
 ## Stage 3 — deprecation
 
-**D1. The old spellings warn.** *(S)* `cf piece get|set|call` continue to work
-and say what replaced them.
+**D1. The old spellings warn.** *(S)* `cf piece get|set|call` kept working and
+said what replaced them, until 6b removed them.
 
 **D2. The documentation moves.** *(M)* Twenty files under `docs/` and `skills/`
 teach `--piece` or `--input` today. They move to the new spellings in one pass,
@@ -197,9 +203,10 @@ the ones that change behavior, not because they are blocked.
 produces the same result. That is the whole property, and it is cheap to assert
 across every command that gains a positional.
 
-**N1 is byte-identity.** `cf get` and `cf piece get` are the same implementation,
-so the test is that their outputs do not differ — including error output, which
-is where an aliasing seam usually shows first.
+**N1 was byte-identity.** While both names were mounted they were one
+implementation, so the test was that their outputs did not differ — including
+error output, which is where an aliasing seam shows first. With one name left,
+what remains to guard is that the piece mount is absent.
 
 **D1 is that the warning does not reach stdout.** A deprecation notice on stdout
 corrupts the JSON an agent parses. It goes to stderr, and a test pins that.

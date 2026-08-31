@@ -249,7 +249,7 @@ including under `--no-wait`, which returns none today and is therefore a dead
 end for collecting work later.
 
 This is also what gives items 8 and 9 a consumer: a receipt's schema is read by
-`piece get` against the address this publishes, not by the call path.
+`cf get` against the address this publishes, not by the call path.
 
 *Exit:* a detached call returns an address that reads back the outcome it
 names.
@@ -720,8 +720,8 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | #5534 | a capability probe passes while covering nothing: a dispatch rejection is not a synchronous throw | carried alongside |
 | #5685 | no CI job runs any verb integration script, and one of them says it does | **fixed** — `integration.sh`'s `piece-call` section runs both scripts (`verbs-over-the-cli.sh` since #5289, `verb-session-gaps.sh` since #5793), and CI's `cli-integration-test` matrix runs that section on every pull request. The arc's honesty checks gate |
 | #5663 | the compat checker admits a newly required verb event field, breaking every existing caller | **unscheduled.** It sits in `packages/piece/src/schema-compatibility.ts`, the set item 2 derives its tolerated tier from, so a change there meets this |
-| #5689 | `cf piece call` accepts any name into dispatch; a non-verb fails with no diagnostic | unscheduled. The listing now refuses to offer a non-verb (#5683, #5794); the dispatcher still accepts one |
-| #5684 | `cf piece get --select` returns `{}` for a field path that cannot match | unscheduled. Item 2's shape on the concise path, which item 2 puts out of scope — a projection that answers nothing rather than refusing |
+| #5689 | `cf call` accepts any name into dispatch; a non-verb fails with no diagnostic | unscheduled. The listing now refuses to offer a non-verb (#5683, #5794); the dispatcher still accepts one |
+| #5684 | `cf get --select` returns `{}` for a field path that cannot match | unscheduled. Item 2's shape on the concise path, which item 2 puts out of scope — a projection that answers nothing rather than refusing |
 | #5686 | design rule 1 says input schemas are closed-world; after the #5589 ruling the runtime does the opposite | unscheduled and unowned. Not settled by [designing verbs so they can change](verb-evolution.md), which says nothing about closed-world inputs — searched, not assumed |
 | #5756 | `ensureKeylessPatternIdentity`'s doc comment claims a structural-dedup property the code does not have | runner-owned. Measured: two structurally identical patterns get different keyless identities |
 | #5758 | a call's readback traverses the reference graph with no work budget | memory-owned. `maxDepth` and `maxEntities` are in `docs/specs/memory-v2/05-queries.md` and not on the wire |

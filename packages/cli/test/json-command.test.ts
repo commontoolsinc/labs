@@ -45,6 +45,18 @@ describe("JSON command contracts", () => {
     expect(reservesStdoutForCommandOutput(["get", "path"])).toBe(true);
     expect(reservesStdoutForCommandOutput(["call", "search"])).toBe(true);
     expect(reservesStdoutForCommandOutput(["set", "path"])).toBe(false);
+    // The piece-mounted spellings are gone, so nothing reserves stdout for
+    // them; a leftover entry would suppress the help an unknown subcommand
+    // prints, and `cf piece set` would answer differently from the other two.
+    expect(reservesStdoutForCommandOutput(["piece", "get", "path"])).toBe(
+      false,
+    );
+    expect(reservesStdoutForCommandOutput(["piece", "set", "path"])).toBe(
+      false,
+    );
+    expect(reservesStdoutForCommandOutput(["piece", "call", "verb"])).toBe(
+      false,
+    );
     expect(reservesStdoutForCommandOutput(["piece", "get-label", "path"]))
       .toBe(true);
     expect(reservesStdoutForCommandOutput(["piece", "set-label", "path"]))
@@ -63,34 +75,18 @@ describe("JSON command contracts", () => {
     // it reserves stdout as the plan-driven commands above do.
     expect(reservesStdoutForCommandOutput(["piece", "restore", "--piece", "b"]))
       .toBe(true);
-    expect(
-      reservesStdoutForCommandOutput([
-        "piece",
-        "call",
-        "--piece",
-        "example",
-        "search",
-        '{"query":"milk"}',
-      ]),
-    ).toBe(true);
-    expect(
-      reservesStdoutForCommandOutput([
-        "piece",
-        "--space",
-        "test",
-        "call",
-        "search",
-      ]),
-    ).toBe(true);
+    // A word that names a reserving subcommand does not reserve when it sits
+    // in a flag's value or as another command's argument. Written against a
+    // removed command these could only pass.
     expect(
       reservesStdoutForCommandOutput([
         "piece",
         "ls",
         "--space",
-        "call",
+        "survey",
       ]),
     ).toBe(false);
-    expect(reservesStdoutForCommandOutput(["piece", "new", "get"]))
+    expect(reservesStdoutForCommandOutput(["piece", "new", "get-label"]))
       .toBe(false);
     expect(reservesStdoutForCommandOutput(["exec", "/tmp/search.tool"]))
       .toBe(true);
@@ -130,8 +126,7 @@ describe("JSON command contracts", () => {
         "get --bogus",
         "piece get-label --bogus",
         "piece set-label --bogus",
-        "piece --bogus get",
-        "piece --bogus call",
+        "piece --bogus survey",
         "wish --bogus #profile",
       ]
     ) {
@@ -146,8 +141,8 @@ describe("JSON command contracts", () => {
   it("does not reserve stdout for unrelated piece argument values", async () => {
     for (
       const command of [
-        "piece new get --bogus",
-        "piece ls --space call --bogus",
+        "piece new get-label --bogus",
+        "piece ls --space survey --bogus",
       ]
     ) {
       const { code, stdout, stderr } = await cf(command);

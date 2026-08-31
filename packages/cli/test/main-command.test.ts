@@ -219,6 +219,33 @@ describe("main command", () => {
     );
   });
 
+  it("mounts the data commands at top level and nowhere under piece", async () => {
+    // The removal is only observable as an absence, so it needs its own
+    // assertion: every other test here names a command that exists, and would
+    // pass unchanged if `cf piece get` came back.
+    const { main } = await import(
+      "../commands/main.ts?piece-data-absence"
+    );
+    const top = main.getCommands().map((command) => command.getName());
+    expect(top).toContain("get");
+    expect(top).toContain("set");
+    expect(top).toContain("call");
+
+    const piece = main.getCommands().find((command) =>
+      command.getName() === "piece"
+    );
+    expect(piece).toBeDefined();
+    const nested = piece!.getCommands(true).map((command) => command.getName());
+    expect(nested).not.toContain("get");
+    expect(nested).not.toContain("set");
+    expect(nested).not.toContain("call");
+    // The lifecycle commands that merely start with the same word stay.
+    expect(nested).toContain("setsrc");
+    expect(nested).toContain("getsrc");
+    expect(nested).toContain("get-label");
+    expect(nested).toContain("set-label");
+  });
+
   it("registers visible commands and reports configured environment defaults", async () => {
     await withEnv("CF_IDENTITY", "./identity.key", async () => {
       await withEnv("CF_API_URL", "http://127.0.0.1:8000", async () => {

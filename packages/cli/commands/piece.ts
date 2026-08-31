@@ -1472,18 +1472,16 @@ COMMON WORKFLOWS:
 ${pieceEnvStatus()}
 TIPS:
   • Use 'setsrc' for iteration, not repeated 'new' (avoids clutter)
-  • After 'set', run 'step' to trigger computed value updates
+  • After 'cf set', run 'cf piece step' to update computed values
   • Path format: forward slashes only (items/0/name, not items[0].name)
   • JSON values: strings need quotes: echo '"hello"' | cf set ...`);
 
 /**
  * The target-selection surface every piece data command carries: quiet, the
  * combined URL, the API URL and identity with their environment fallbacks,
- * and the space. One function defines them for both surfaces that must
- * agree — `piece` declares them as globals its subcommands inherit, and the
- * top-level `cf get`/`cf set`/`cf call` instances carry them as their own,
- * having no parent globals to inherit — so the two spellings of a command
- * cannot drift apart in what they accept.
+ * and the space. `piece` declares them as globals its subcommands inherit;
+ * `cf get`, `cf set` and `cf call` have no parent globals, so each carries
+ * them as its own.
  */
 export function targetOptions(
   // deno-lint-ignore no-explicit-any
@@ -1510,7 +1508,6 @@ export function targetOptions(
   return cmd;
 }
 
-/**
 /**
  * An action that refuses a `--` before it runs.
  *
