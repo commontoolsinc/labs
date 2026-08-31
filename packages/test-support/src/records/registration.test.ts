@@ -409,10 +409,18 @@ describe("what the capture does with what it cannot read", () => {
 });
 
 describe("activeCapture()", () => {
-  it("is nothing in a process that installed no capture", () => {
-    // Every invocation that is not recording, which is the one this test
-    // runs in: the bdd re-exports consult this and must find nothing.
-    expect(activeCapture()).toBeUndefined();
+  it("is one capture for the whole process, or none", () => {
+    // Whether a capture is installed depends on whether this run was
+    // preloaded, so that is not what is asserted. What holds either way
+    // is that there is at most one: the bdd re-exports and the wrapper
+    // must be writing names into the same map, and a getter that built a
+    // capture per call would give each of them its own.
+    const first = activeCapture();
+    expect(activeCapture()).toBe(first);
+    if (first !== undefined) {
+      expect(typeof first.flush).toBe("function");
+      expect(first.names instanceof Map).toBe(true);
+    }
   });
 });
 
