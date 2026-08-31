@@ -58,9 +58,10 @@ export interface PieceContextMenuDetail {
   /** The piece's full schemed id. */
   pieceId: string;
 
-  /** Client coordinates of the click, for placing the menu. */
+  /** Client X coordinate of the click, for placing the menu. */
   x: number;
 
+  /** Client Y coordinate of the click, read the same way. */
   y: number;
 
   /** The variant the piece was rendered at. */
