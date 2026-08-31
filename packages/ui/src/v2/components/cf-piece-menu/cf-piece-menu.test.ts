@@ -1111,6 +1111,97 @@ describe("the menu over a space with no piece", () => {
   });
 });
 
+describe("placing the menu", () => {
+  /**
+   * Where `#placeMenu` puts a menu whose box is `width` by `height`, opened at
+   * (`x`, `y`) in a viewport of `viewport`. The element standing in for the
+   * rendered menu reports that box however it is positioned, which is what the
+   * corner measurement buys: the size does not change under the clamp.
+   */
+  function placement(
+    { x, y, width, height, viewport }: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      viewport: { width: number; height: number };
+    },
+  ): { left: string; top: string } {
+    const style = { left: "", top: "" };
+    const element = {
+      style,
+      getBoundingClientRect: () => ({ width, height }),
+    };
+    const menu = newMenu();
+    menu.open({ space: SPACE, runtime: spaceRuntime(), x, y });
+    Object.defineProperty(menu, "shadowRoot", {
+      configurable: true,
+      value: {
+        querySelector: (selector: string) =>
+          selector === ".menu" ? element : null,
+      },
+    });
+    const globals = globalThis as unknown as Record<string, unknown>;
+    const priorWidth = globals.innerWidth;
+    const priorHeight = globals.innerHeight;
+    globals.innerWidth = viewport.width;
+    globals.innerHeight = viewport.height;
+    try {
+      (menu as unknown as { updated(changed: Map<string, unknown>): void })
+        .updated(new Map());
+    } finally {
+      globals.innerWidth = priorWidth;
+      globals.innerHeight = priorHeight;
+    }
+    return style;
+  }
+
+  const VIEWPORT = { width: 1000, height: 800 };
+
+  it("leaves the menu at the click when it fits there", () => {
+    expect(
+      placement({ x: 40, y: 60, width: 240, height: 300, viewport: VIEWPORT }),
+    ).toEqual({ left: "40px", top: "60px" });
+  });
+
+  it("pulls a menu clicked near the far corner back inside the viewport", () => {
+    expect(
+      placement({
+        x: 990,
+        y: 790,
+        width: 240,
+        height: 300,
+        viewport: VIEWPORT,
+      }),
+    ).toEqual({ left: "756px", top: "496px" });
+  });
+
+  it("holds a menu too big for the viewport against the near edges", () => {
+    expect(
+      placement({
+        x: 500,
+        y: 500,
+        width: 1200,
+        height: 900,
+        viewport: VIEWPORT,
+      }),
+    ).toEqual({ left: "4px", top: "4px" });
+  });
+
+  it("places nothing while a panel is open in the menu's place", () => {
+    const menu = newMenu();
+    menu.open({ space: SPACE, runtime: spaceRuntime(), x: 40, y: 60 });
+    Object.defineProperty(menu, "shadowRoot", {
+      configurable: true,
+      value: { querySelector: () => null },
+    });
+    expect(() =>
+      (menu as unknown as { updated(changed: Map<string, unknown>): void })
+        .updated(new Map())
+    ).not.toThrow();
+  });
+});
+
 describe("the menu over a piece", () => {
   it("names the space the piece belongs to", () => {
     expect(shows(openMenu())).toContain(`Space ${SPACE}`);
