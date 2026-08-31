@@ -26,10 +26,10 @@ contract, and the short list is the record of which internals have a
 second caller. (The view substrate's entries wait for B3, which is when
 they earn their place on that record.)
 
-**A2 — connection injection for the write path.** Done. The write path
-takes the connection as a parameter, so a held `PiecesController` serves
-every call rather than each opening a runtime, a storage manager, and a
-socket of its own: `setCellValue`, `removePiece`, `linkPieces`,
+**A2 — connection injection for the write path.** Done (#6646). The write
+path takes the connection as a parameter, so a held `PiecesController`
+serves every call rather than each opening a runtime, a storage manager,
+and a socket of its own: `setCellValue`, `removePiece`, `linkPieces`,
 `renderPiece`, `callPieceHandler`, and `getPieceView` in `lib/piece.ts`
 and `lib/piece-render.ts`, plus the `lib/acl.ts` loaders, beside
 `stepPiece`, whose seam (#6556) the rest are modeled on. `withAcl`
