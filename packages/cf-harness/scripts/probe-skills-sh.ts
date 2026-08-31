@@ -40,44 +40,50 @@ const parseArguments = (
   return { query: words.join(" "), ...(owner === undefined ? {} : { owner }) };
 };
 
-const main = async (): Promise<number> => {
-  const parsed = parseArguments(Deno.args);
+/** Runs the read-only probe and returns its process exit code. */
+export const main = async (
+  args: readonly string[],
+  client?: Pick<SkillsShSearchClient, "search">,
+  log: (line: string) => void = console.log,
+  logError: (line: string) => void = console.error,
+): Promise<number> => {
+  const parsed = parseArguments(args);
   if ("usageError" in parsed || parsed.query.trim().length < 2) {
-    if ("usageError" in parsed) console.error(parsed.usageError);
-    console.error(
+    if ("usageError" in parsed) logError(parsed.usageError);
+    logError(
       'usage: deno task probe-skills-sh [--owner <owner>] "<query>"',
     );
     return 2;
   }
   const { query, owner } = parsed;
 
-  const client = new SkillsShSearchClient();
+  const searchClient = client ?? new SkillsShSearchClient();
   let result;
   try {
-    result = await client.search({
+    result = await searchClient.search({
       query,
       ...(owner === undefined ? {} : { owner }),
     });
   } catch (error) {
     if (error instanceof SkillsShSearchError) {
-      console.error(`refused (${error.code}): ${error.message}`);
+      logError(`refused (${error.code}): ${error.message}`);
       return 1;
     }
     throw error;
   }
 
-  console.log(`${result.hits.length} hit(s), ${result.rejected} refused`);
+  log(`${result.hits.length} hit(s), ${result.rejected} refused`);
   for (const hit of result.hits) {
     const installs = hit.installs === undefined
       ? "installs unknown"
       : `${hit.installs} reported installs (unverifiable)`;
-    console.log(`  ${hit.id}`);
-    console.log(`    name:    ${hit.name}`);
-    console.log(`    source:  ${hit.source}`);
-    console.log(`    signal:  ${installs}`);
+    log(`  ${hit.id}`);
+    log(`    name:    ${hit.name}`);
+    log(`    source:  ${hit.source}`);
+    log(`    signal:  ${installs}`);
   }
   if (result.rejected > 0) {
-    console.log(
+    log(
       `\n${result.rejected} entry(s) did not match the shape this client ` +
         "accepts and were dropped.",
     );
@@ -85,6 +91,9 @@ const main = async (): Promise<number> => {
   return 0;
 };
 
+// deno-coverage-ignore-start -- the entrypoint guard is false under every test
+// that imports this module, which is what it is for
 if (import.meta.main) {
-  Deno.exit(await main());
+  Deno.exit(await main(Deno.args));
 }
+// deno-coverage-ignore-stop

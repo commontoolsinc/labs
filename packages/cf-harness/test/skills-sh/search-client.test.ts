@@ -200,6 +200,28 @@ describe("skills.sh search client", () => {
       expect(result.rejected).toBe(5);
     });
 
+    it("drops non-object entries and entries whose source is invalid", async () => {
+      const { client } = clientAnswering(jsonResponse({
+        skills: [
+          null,
+          {
+            id: "owner/repo/slug",
+            name: "wrong source shape",
+            source: "owner",
+          },
+          {
+            id: "42/repo/slug",
+            name: "wrong source type",
+            source: 42,
+          },
+        ],
+      }));
+
+      const result = await client.search({ query: "anything" });
+      expect(result.hits).toEqual([]);
+      expect(result.rejected).toBe(3);
+    });
+
     it("keeps a slug carrying the colons a real listing uses", async () => {
       // Observed live on 2026-08-28: a listing with 5,574 reported installs
       // that a single tight character class for all three segments drops.
@@ -284,6 +306,15 @@ describe("skills.sh search client", () => {
       );
       expect(refusal.code).toBe("invalid_query");
       expect(urls).toEqual([]);
+    });
+
+    it("sends a valid owner as a search filter", async () => {
+      const { client, urls } = clientAnswering(jsonResponse({ skills: [] }));
+      await client.search({ query: "react native", owner: "vercel-labs" });
+
+      expect(urls).toEqual([
+        "https://registry.example/api/search?q=react+native&limit=20&owner=vercel-labs",
+      ]);
     });
 
     it("reports a transport failure as request_failed rather than throwing raw", async () => {
