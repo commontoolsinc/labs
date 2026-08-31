@@ -221,10 +221,13 @@ export interface TopicInput {
   >;
   titleUpdatedAt?: Writable<number | Default<0>>;
 
-  /** The board's own topics list — the mention universe the body editor
-   * autocompletes over. A reference to the tracker's array, wired at creation
-   * and backfillable as a one-time link-bind. Absent, the editor simply offers
-   * no completions. */
+  /** The board's mention universe — what the body editor autocompletes
+   * over. Wired at creation to the board's mention index (one derived
+   * document of two-string rows; `TopicMentionableRow` in `main.tsx`), and
+   * rewired onto a piece from before the index as a one-time link-bind.
+   * A plain list of the pieces themselves also satisfies the demand — a
+   * board not yet rewired, or a composer without a board. Absent, the
+   * editor simply offers no completions. */
   mentionable?: Writable<TopicMentionable[] | Default<[]>>;
 
   /** Where this topic's `[Label][key]` mentions point, keyed by the token that
@@ -328,14 +331,22 @@ export interface TopicCrossrefRow {
 }
 
 /**
- * What the body editor's `@`-mention autocomplete needs of a sibling: the
- * display name it lists, and the title it matches on.
+ * What the body editor's `@`-mention autocomplete needs of a mention
+ * universe entry: the display name it lists, and the title it matches on.
  *
  * `[NAME]` is not decoration here. `cf-code-editor` declares its entries as
  * `Mentionable`, whose schema carries `required: [NAME]`
  * (`packages/ui/src/v2/core/mentionable.ts`), so a sibling projection without
  * it silently offers no completions — the JSX prop binding is loose enough
  * that TypeScript does not object.
+ *
+ * Two strings are also deliberately the WHOLE demand. A board's index row
+ * carries its topic as a `piece` reference besides them, and leaving that
+ * out of this projection is what keeps every walk under a topic's argument
+ * out of the sibling topics: a property the declared demand does not select
+ * is invisible to the walks that warm and watch the argument. The editor
+ * reaches `piece` through its own declared contract instead, at the moment
+ * a completion is picked.
  */
 export interface TopicMentionable {
   [NAME]: string | Default<""> | undefined;

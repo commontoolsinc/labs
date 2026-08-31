@@ -1161,7 +1161,14 @@ export class CFCodeEditor extends BaseElement {
       if (!pieceValue) continue;
       const pieceId = this._getPieceId(i);
       if (pieceId === id) {
-        return handle.key(i) as CellHandle<Mentionable>;
+        // The resolved cell IS the piece. For an index row the sub-cell is
+        // the row rather than the topic behind it, and every caller here
+        // wants the piece — to navigate to it, subscribe to its title, or
+        // write its name back. Before resolution completes the sub-cell is
+        // the best available, with exactly _getPieceId's instability
+        // caveat.
+        return this._resolvedPieceCells.get(i) ??
+          (handle.key(i) as CellHandle<Mentionable>);
       }
     }
 
@@ -1186,6 +1193,10 @@ export class CFCodeEditor extends BaseElement {
    * Each mentionable sub-cell (mentionable.key(i)) may be an indirect
    * reference whose ID changes when the list recomputes. resolveAsCell()
    * follows the indirection to get the piece's own stable cell ID.
+   *
+   * An entry carrying `piece` resolves through it instead: such an entry is
+   * a derived index row standing for the piece, and resolving the entry
+   * itself would make every mention name a row of somebody's bookkeeping.
    */
   private async _resolvePieceIds(): Promise<void> {
     const handle = this.mentionable;
@@ -1202,10 +1213,21 @@ export class CFCodeEditor extends BaseElement {
     const promises = mentionableData.map(async (item, i) => {
       if (!item) return;
       try {
-        const subCell = handle.key(i);
-        const resolved = await subCell.resolveAsCell();
-        newCells.set(i, resolved as CellHandle<Mentionable>);
-        const resolvedId = resolved.id();
+        const viaPiece = isCellHandle(item.piece);
+        const source = viaPiece
+          ? (item.piece as CellHandle<unknown>)
+          : handle.key(i);
+        const resolved = await source.resolveAsCell();
+        // Under the entry schema `piece` is an opaque cell — the
+        // `_refDestination` shape — so reads of the piece's own fields (the
+        // title subscription, the name write-back) materialize only under
+        // the mentionable schema, bound on here once for every consumer of
+        // the resolved cell.
+        const pieceCell = viaPiece
+          ? resolved.asSchema<Mentionable>(MentionableSchema)
+          : (resolved as CellHandle<Mentionable>);
+        newCells.set(i, pieceCell);
+        const resolvedId = pieceCell.id();
         if (resolvedId) {
           newResolved.set(i, resolvedId);
         }

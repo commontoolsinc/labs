@@ -23,6 +23,7 @@ import Topic, {
   topicAuthorFromPerson,
   topicAuthorLabel,
   type TopicCrossrefRow,
+  type TopicMentionable,
   type TopicMentionSource,
   TOPICS_THEME,
   type TopicSummary,
@@ -67,9 +68,10 @@ export type {
  * pattern defaults its input and publishes that path unconditionally.
  */
 export interface TopicDemand extends TopicSummary {
-  /** The display name, which the board publishes onward as each topic's
-   * `mentionable` entry — and `cf-code-editor` requires it there. Dropping it
-   * costs no type error and silently empties every `@`-mention completion. */
+  /** The display name, which the board's mention index copies into each
+   * topic's row — the label every `@`-mention completion carries. The index
+   * lift states the same two-string demand for itself; this entry is the
+   * board-level record of it. */
   [NAME]: string | Default<""> | undefined;
   body: string | Default<"">;
   mentions: unknown[] | Default<[]>;
@@ -282,6 +284,92 @@ const crossrefTable = lift(
 );
 
 /**
+ * One row of the board's mention index: the display name the editor's
+ * autocomplete lists, the title it matches on, and the topic itself held as
+ * a reference.
+ *
+ * The two strings are COPIES, and the copies are the design rather than a
+ * shortcut. The autocomplete needs every row's strings just to open, so a
+ * row that pointed at its topic for them would make every reader of the
+ * index expand every topic — each a document of its own, shipped whole to
+ * serve two strings. Copies make the index one self-contained document;
+ * the deriving lift below is the one reader that still pays the board-wide
+ * walk, once per change, instead of every reader paying it on every load.
+ *
+ * `piece` is the topic, written as a reference and never read through
+ * here: the editor resolves it when a completion is picked, so what a
+ * mention stores is the topic and never this row (`Mentionable.piece` in
+ * `packages/ui/src/v2/core/mentionable.ts` is the consuming contract).
+ * It is deliberately NOT part of `TopicMentionable`: a property a topic's
+ * declared demand does not select is invisible to the walks that warm and
+ * watch the topic's argument, and that invisibility is what keeps a
+ * topic's resume from reaching any sibling topic through its mention
+ * universe.
+ */
+export interface TopicMentionableRow {
+  [NAME]: string;
+  title: string | Default<"">;
+  piece: unknown;
+}
+
+/**
+ * Each source's index row, read once per source.
+ *
+ * Declared structurally for the reason `mentionListsOf` is: `get()` on
+ * `ReadonlyCell` is declared to return a value, so only the structural
+ * parameter makes the mid-sync guard a compile-checked read. An entry with
+ * nothing behind it yet gets no row — there is no name to list and no
+ * settled identity for `piece` to record — and the row appears on the
+ * derivation's next run, once the append has materialized.
+ */
+export function mentionableRowsOf(
+  sources: readonly ({ get(): TopicMentionable | undefined } | undefined)[],
+): TopicMentionableRow[] {
+  const rows: TopicMentionableRow[] = [];
+  for (const source of sources) {
+    const value = source?.get();
+    if (!value) continue;
+    rows.push({
+      // The display-name chain a reader would otherwise walk the topic
+      // for: a cold topic has not produced its derived `[NAME]` yet, and
+      // its persisted title is authoritative until it does (`TopicPiece`).
+      [NAME]: value[NAME] || value.title || "",
+      title: value.title ?? "",
+      piece: source,
+    });
+  }
+  return rows;
+}
+
+/**
+ * The board's mention index: the whole mention universe as one small
+ * document.
+ *
+ * `mentionable` is read by every topic on the board — each child's editor
+ * autocompletes over it — so whatever it is wired to is multiplied by the
+ * board's own size. Wired to the topics themselves, every topic's walk
+ * crossed into every other topic. The index bounds that product: this
+ * derivation reads the two strings out of each topic, and every reader
+ * everywhere reads the one document the copies land in.
+ *
+ * The parameter is an array of CELLS for the pivot's two reasons: the cell
+ * is the identity each row's `piece` records, and a cell always writes as
+ * a link, so an unchanged board recomputes to the same rows and writes
+ * nothing.
+ */
+const mentionableIndex = lift(
+  (
+    { sources }: {
+      sources: ReadonlyCell<TopicMentionable>[] | Default<[]>;
+    },
+  ): TopicMentionableRow[] =>
+    // A plain array, read once per topic, as the pivot reads its sources:
+    // an element read through the reactive array costs a link resolution
+    // per access.
+    mentionableRowsOf(Array.from(sources)),
+);
+
+/**
  * The board's cards, most recently active first.
  *
  * Sorts and returns the topics themselves. It does not build a card object per
@@ -336,9 +424,12 @@ export interface TopicsOutput {
    * already know which topic you are expanding. */
   topics: TopicDemand[];
 
-  /** The same list, under the name the topic pattern's editor autocompletes
-   * over — what `addTopic` wires into each child as its mention universe. */
-  mentionable: TopicDemand[] | Default<[]>;
+  /** The board's mention universe, under the name the topic pattern's editor
+   * autocompletes over — what `addTopic` wires into each child. One derived
+   * document of two-string rows, each holding its topic as an unread
+   * reference, rather than the topics themselves, so a reader of the
+   * universe expands no topic; see `TopicMentionableRow`. */
+  mentionable: TopicMentionableRow[] | Default<[]>;
 
   /** How many topics the board holds, nulls included. */
   topicCount: number;
@@ -374,7 +465,11 @@ export interface TopicsOutput {
  * independently testable without weakening the canonical Profile path. */
 export const submitProfileTopic = handler<void, {
   topics: Writable<TopicDemand[] | Default<[]>>;
-  mentionable: Writable<TopicDemand[] | Default<[]>>;
+
+  /** Declared at the child's own demand — the two strings its editor lists
+   * and matches on — so the board's index rows and a plain list of pieces
+   * both satisfy it. */
+  mentionable: Writable<TopicMentionable[] | Default<[]>>;
 
   /** `Writable` only because that is what the factory boundary accepts: the
    * input this is handed straight to declares `ReadonlyCell`, and a
@@ -400,8 +495,8 @@ export const submitProfileTopic = handler<void, {
     title: trimmed,
     createdAt: Date.now(),
     createdBy: author,
-    // Same wiring `addTopic` gives its children: the board's own list is the
-    // mention universe the new topic's editor autocompletes over, and the
+    // Same wiring `addTopic` gives its children: the board's mention index
+    // is the universe the new topic's editor autocompletes over, and the
     // board's pivot is where it reads its inbound references.
     mentionable,
     boardCrossrefs,
@@ -421,6 +516,10 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics }) => {
   const cards = cardsByActivity({ rows: topics });
   // Derived once for the whole board; every topic reads its own row out of it.
   const crossrefs = crossrefTable({ sources: topics });
+  // Also derived once for the whole board: the mention universe every
+  // child's editor autocompletes over, as one document of copies instead of
+  // the topics themselves.
+  const mentionable = mentionableIndex({ sources: topics });
   const hasNoTopics = topicCount === 0;
 
   // Browser authorship comes from the current viewer's canonical Profile.
@@ -457,9 +556,10 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics }) => {
       body: body ?? "",
       createdAt: Date.now(),
       createdBy: author,
-      // The board's own list, so the editor has a mention universe (backfilled
-      // as a one-time link-bind on pieces created before this input existed).
-      mentionable: topics,
+      // The board's mention index, so the editor has a mention universe. A
+      // piece from before the index is rewired to it as a one-time
+      // link-bind, the backfill the input declares for itself.
+      mentionable,
       // The board's mention pivot. A topic reads its inbound references out of
       // the row the board already built for it rather than rebuilding the join.
       boardCrossrefs: crossrefs,
@@ -473,7 +573,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics }) => {
 
   const submitTopic = submitProfileTopic({
     topics,
-    mentionable: topics,
+    mentionable,
     boardCrossrefs: crossrefs,
     newTitle,
     profileName,
@@ -564,7 +664,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics }) => {
       </cf-theme>
     ),
     topics,
-    mentionable: topics,
+    mentionable,
     topicCount,
     crossrefs,
     // The topics themselves, declared through the index's narrow row schema:

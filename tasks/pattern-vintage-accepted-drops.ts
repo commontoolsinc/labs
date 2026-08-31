@@ -107,21 +107,26 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
       "topics[].createdByName",
       "topics[].links",
       "topics[].setBody",
-      "mentionable[].addComment",
-      "mentionable[].addLink",
-      "mentionable[].bodyUpdatedAt",
-      "mentionable[].bodyUpdatedBy",
-      "mentionable[].comments",
-      "mentionable[].createdByName",
-      "mentionable[].links",
-      "mentionable[].setBody",
+      // --- the mention-universe index follows
+      // (docs/history/topics-mentionable-index-break.md)
+      // `mentionable` is listed WHOLE: it was an alias of `topics` — a link,
+      // no state of its own — and is now a derived document of two-string
+      // rows, so nothing of the old value survives to be compared field by
+      // field while the topics themselves survive at their own addresses.
+      // Listing the root retires the per-element demand-narrowing paths that
+      // used to sit here (`mentionable[].addComment` and kin): the strip
+      // never descends past a dropped root, so an element path under it
+      // could forgive nothing and would fail the liveness guard.
+      "mentionable",
       // --- the reference-graph rebuild follows
       "crossrefs",
       "index[].refsOut",
       "index[].referencedBy",
       "index[].topic",
       "topics[].crossrefs",
-      "mentionable[].crossrefs",
+      // The retired edge row's `mentionable[]` copy needs no path of its
+      // own: the whole-`mentionable` drop above already strips the list it
+      // sat on.
       // `crossrefs` is listed WHOLE, and that is the honest shape of what
       // happened: the old graph row carried an fid, a title, summary counts and
       // two edge sets, and the pivot row that replaced it carries a topic and
@@ -133,19 +138,22 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
       // sit beside it goes; the row's own address is the topic's. The copied
       // `fid` field goes with it, and needs no entry here: no replayed vintage
       // holds a resolved one.
-      // The retired per-topic edge row, seen through each of the board's two
-      // lists of children.
     ],
-    // The newest topics vintage predating the rebuild. Both replayed fixtures
-    // sit at or under it, and any captured from here on hold the pivot rows,
-    // which owe the comparison the same answer as anything else.
+    // The newest topics vintage predating the rebuild AND the mention-universe
+    // index — both replayed fixtures sit at or under it. Anything captured
+    // from here on holds pivot rows and index rows, which owe the comparison
+    // the same answer as anything else.
     capturedThrough: "2026-08-06T23-04-13.189Z",
     reason:
       "Topics' reference graph was rebuilt on cell identity — see the matching " +
       "entry in tasks/pattern-compat-accepted-breaks.ts. A topic publishes " +
       "`referencedBy` instead of deriving its own edge row, so the old row is " +
       "gone from every child the board lists. The index rows became the topics " +
-      "themselves, which is what retires their copied address and reference.",
+      "themselves, which is what retires their copied address and reference. " +
+      "Carried with it, same pattern and window, so one entry: the mention " +
+      "universe became a derived index " +
+      "(docs/history/topics-mentionable-index-break.md), which replaces the " +
+      "`mentionable` alias wholesale.",
     record: "docs/history/topics-crossref-identity-break.md",
   },
   {
