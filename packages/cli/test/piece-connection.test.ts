@@ -1,9 +1,13 @@
 /**
  * Unit tests for the `lib/piece.ts` functions that take the connection as a
- * parameter. Each drives its whole body against an injected controller stub,
- * so what the function does with a piece — the value it writes, the piece it
- * removes, the link it makes, the payload it dispatches, the view it returns
- * — is asserted with no runtime, no socket, and no server behind it.
+ * parameter. The piece behind the connection is a double throughout, so what
+ * each function does with one — the value it writes, the piece it removes,
+ * the link it makes, the payload it dispatches, the view it returns — is what
+ * the assertions turn on, and no socket and no server stand behind any of it.
+ *
+ * Most of it needs no runtime either. `getPieceView()` is the exception: the
+ * inspection it delegates to reads a cell's runtime, so that block builds one
+ * over an emulated storage manager and doubles only the piece around it.
  */
 
 import { describe, it } from "@std/testing/bdd";

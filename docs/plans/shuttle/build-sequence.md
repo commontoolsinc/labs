@@ -35,8 +35,9 @@ and `lib/piece-render.ts`, plus the `lib/acl.ts` loaders, beside
 `stepPiece`, whose seam (#6556) the rest are modeled on. `withAcl`
 disposes only a runtime it opened itself, so an ACL call over a held
 connection leaves it open. Each carries the unit test the seam makes
-possible — a controller stub driving the function's body with no runtime,
-no socket, and no server behind it — which is the PR's standalone value.
+possible — a controller stub driving the function's body against a doubled
+piece, with no socket and no server behind it — which is the PR's
+standalone value.
 
 **A3 — extract `callFromCommand`.** `buildCallCommand`'s action is inline
 and bound to Cliffy's `this` (`getLiteralArgs`); its constituents are

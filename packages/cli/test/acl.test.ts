@@ -1,8 +1,8 @@
 /**
  * Unit tests for the ACL library functions. Each takes the connection as a
  * parameter, so a stub controller carrying a stub runtime is enough to drive
- * the whole read-mutate-write cycle with no runtime, no socket, and no server
- * behind it.
+ * the whole read-mutate-write cycle: nothing here builds a runtime, opens a
+ * socket, or reaches a server.
  */
 
 import { describe, it } from "@std/testing/bdd";
