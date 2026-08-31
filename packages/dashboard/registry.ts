@@ -20,6 +20,8 @@ import { benchmark } from "./tiles/benchmark.ts";
 import { dau } from "./tiles/dau.ts";
 import { githubMembers } from "./tiles/github-members.ts";
 import { recentRuns } from "./tiles/recent-runs.ts";
+import { testFlakes } from "./tiles/test-flakes.ts";
+import { testSelection } from "./tiles/test-selection.ts";
 
 // Order controls placement: a normal tile takes the next slot in the grid, and
 // a wide tile renders full-width below the grid, in this same order.
@@ -39,9 +41,12 @@ export const TILES: Tile[] = [
   prodUptime,
   prodErrors,
   dau,
-  // Row 4: the remaining spend and community tiles
+  // Row 4: what the test suite is doing to itself
+  testFlakes,
+  testSelection,
   modelSpend,
   gcpSpend,
+  // Row 5: the remaining spend and community tiles
   discordOnline,
   githubMembers,
   recentRuns, // wide — renders full-width below the grid

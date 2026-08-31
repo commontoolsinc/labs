@@ -24,6 +24,7 @@ import {
   type Environment,
   ingestJUnit,
   readEnv,
+  readNameMaps,
   readSpool,
   recordsDir,
   serializeRecordLine,
@@ -97,6 +98,12 @@ export async function gather(options: GatherOptions): Promise<void> {
     throw new Error("--variant must not be empty");
   }
   const records: TestRecord[] = [];
+  // The registration preload leaves a name-to-file map in the spool, and
+  // it is the only thing that can tell a bdd leaf's file: Deno names a
+  // case by its describe chain and puts that chain in the classname too.
+  const fileByName = options.spoolDir === undefined
+    ? new Map<string, string>()
+    : await readNameMaps(options.spoolDir);
   if (options.spoolDir !== undefined) {
     const spooled = await readSpool(options.spoolDir);
     for (const warning of spooled.warnings) {
@@ -117,6 +124,7 @@ export async function gather(options: GatherOptions): Promise<void> {
           const ingestOptions: Parameters<typeof ingestJUnit>[1] = {
             kind: spec.kind,
             scope: spec.scope,
+            fileByName,
           };
           if (spec.prefix !== undefined) ingestOptions.filePrefix = spec.prefix;
           records.push(...ingestJUnit(xml, ingestOptions));

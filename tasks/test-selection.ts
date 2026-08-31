@@ -1,0 +1,296 @@
+#!/usr/bin/env -S deno run --allow-read --allow-env --allow-net
+
+/**
+ * Everything a person types about test selection goes through here, and
+ * these modes are also how the system is checked by hand.
+ *
+ *   deno task test-selection dials
+ *   deno task test-selection coverage
+ *   deno task test-selection explain <identity>
+ *   deno task test-selection plan --dry-run [--lane N]
+ *   deno task test-selection plan --verify
+ *
+ * `explain` is the one this will be asked most often, because "why did my
+ * test not run?" is the question a selected run provokes and the one it
+ * would otherwise answer badly.
+ */
+
+import { join } from "@std/path";
+import {
+  loadAliasResolver,
+  repositoryRoot,
+  type TestIdentity,
+  testIdentityKey,
+} from "@commonfabric/test-support/records";
+import {
+  DIALS,
+  EXCLUDED_FROM_COVERAGE_GATE,
+  LANE_BUDGET_SECONDS,
+  LANES,
+} from "./test-selection/policy.ts";
+import { fetchManifest } from "./test-selection/store.ts";
+import type { Manifest, ManifestEntry } from "./test-selection/manifest.ts";
+import { plan } from "./test-selection/plan.ts";
+import { readWorkspaceMembers } from "./workspace-tests.ts";
+
+const USAGE = `usage: test-selection <mode>
+
+  dials                       every dial, its value, and why you would move it
+  coverage                    every workspace member and its coverage gate
+  explain <identity>          one test's score, and whether it is selected
+  plan --dry-run [--lane N]   what would run, and what it would cost
+  plan --verify               what the topology and the store disagree about
+
+An identity is its canonical key, either three parts or four when the
+test ran in a non-default configuration:
+
+  ["unit","memory","space > writes a fact"]
+  ["integration","patterns","counter.test.ts","server-execution"]
+`;
+
+function fail(message: string): never {
+  console.error(message);
+  Deno.exit(2);
+}
+
+/** Pads a column so a printed table lines up. */
+function pad(text: string, width: number): string {
+  return text.length >= width ? text : text + " ".repeat(width - text.length);
+}
+
+function printDials(): void {
+  const width = Math.max(...DIALS.map((dial) => dial.name.length));
+  for (const dial of DIALS) {
+    const shown = Array.isArray(dial.value)
+      ? dial.value.join(", ")
+      : dial.value === undefined
+      ? "off"
+      : String(dial.value);
+    console.log(
+      `${pad(dial.name, width)}  ${shown} ${dial.unit} (${dial.setBy})`,
+    );
+    console.log(`${" ".repeat(width)}  ${dial.why}`);
+    console.log("");
+  }
+  console.log(
+    "setupCost, suiteOverhead and correction are measured too, and are " +
+      "published\nin each manifest rather than kept here.",
+  );
+}
+
+async function printCoverage(manifest: Manifest | undefined): Promise<void> {
+  const root = repositoryRoot() ?? Deno.cwd();
+  const members = (await readWorkspaceMembers(join(root, "deno.jsonc")))
+    .map((member) => member.replace(/^\.\//, ""))
+    .filter((member) => member.startsWith("packages/"))
+    .sort();
+  const width = Math.max(...members.map((member) => member.length));
+  const baselines = new Map(
+    (manifest?.coverageBaselines ?? []).map((base) => [base.member, base]),
+  );
+  for (const member of members) {
+    const excluded = EXCLUDED_FROM_COVERAGE_GATE.get(member);
+    if (excluded !== undefined) {
+      console.log(`${pad(member, width)}  not gated: ${excluded}`);
+      continue;
+    }
+    const baseline = baselines.get(member);
+    const against = baseline === undefined
+      ? "no baseline yet"
+      : `${baseline.uncoveredLines} uncovered lines at ${baseline.commit}`;
+    console.log(`${pad(member, width)}  gated, against ${against}`);
+  }
+}
+
+/** The identity a command-line argument names. */
+export function parseIdentityArgument(text: string): TestIdentity | undefined {
+  let parts: unknown;
+  try {
+    parts = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parts) || parts.length < 3 || parts.length > 4) {
+    return undefined;
+  }
+  const [k, s, n, v] = parts;
+  if (typeof k !== "string" || typeof s !== "string" || typeof n !== "string") {
+    return undefined;
+  }
+  if (v !== undefined && typeof v !== "string") return undefined;
+  const test: TestIdentity = { k, s, n };
+  if (typeof v === "string") test.v = v;
+  return test;
+}
+
+/** What `explain` says about one identity, as lines. */
+export function explainLines(
+  manifest: Manifest,
+  test: TestIdentity,
+): string[] {
+  const key = testIdentityKey(test);
+  const entry = manifest.entries.find(
+    (candidate) => testIdentityKey(candidate.test) === key,
+  );
+  if (entry === undefined) {
+    return [
+      `${key}`,
+      "  The store has no record of it, so it is mandatory: an identity",
+      "  with no history runs. A test just added is in this position, and",
+      "  so is one just renamed, until a run on `main` records it.",
+    ];
+  }
+  const lines = [
+    `${key}`,
+    `  suite ${entry.suite}, in ${entry.unit}`,
+    `  score ${entry.score.toFixed(3)}, costing ${entry.cost.toFixed(3)}s`,
+    `  ${entry.inputs.catches.toFixed(1)} weighted catches, ` +
+    `${entry.inputs.mainCatches} of them on main, across ` +
+    `${entry.inputs.sources} sources`,
+    entry.inputs.lastCatch === undefined
+      ? "  it has never caught anything"
+      : `  the most recent catch was on ${entry.inputs.lastCatch}`,
+    `  churn ${entry.inputs.churn.toFixed(4)}, flake rate ` +
+    `${entry.flakeRate.toFixed(4)}`,
+  ];
+  const held = manifest.withheld.find(
+    (candidate) => testIdentityKey(candidate.test) === key,
+  );
+  if (held !== undefined) {
+    lines.push(
+      held.reason === "main-red"
+        ? "  withheld: it is failing in the newest run on main, so a pull " +
+          "request cannot act on it"
+        : "  withheld: it is too flaky to judge a change by",
+    );
+  } else if (entry.repeats > 1) {
+    lines.push(`  run ${entry.repeats} times, and every one must pass`);
+  }
+  return lines;
+}
+
+/** A one-line summary of what a lane would do. */
+function laneLine(
+  lane: { lane: number; selections: unknown[]; projectedSeconds: number },
+): string {
+  return `  lane ${lane.lane}: ${lane.selections.length} tests, ` +
+    `${lane.projectedSeconds.toFixed(1)}s of ${LANE_BUDGET_SECONDS}s`;
+}
+
+function printDryRun(manifest: Manifest, laneNumber: number | undefined): void {
+  const result = plan({
+    manifest,
+    mandatory: new Map(),
+    capabilities: new Map(),
+  });
+  const lanes = laneNumber === undefined
+    ? result.lanes
+    : result.lanes.filter((lane) => lane.lane === laneNumber);
+  console.log(
+    `manifest of ${manifest.generatedAt}, from ${manifest.runs} runs at ` +
+      `${manifest.commit}`,
+  );
+  console.log(
+    `${manifest.entries.length} known identities, ` +
+      `${manifest.withheld.length} withheld`,
+  );
+  for (const lane of lanes) {
+    console.log(laneLine(lane));
+    if (lane.capabilities.length > 0) {
+      console.log(`    needs ${lane.capabilities.join(", ")}`);
+    }
+    const byReason = new Map<string, number>();
+    for (const selection of lane.selections) {
+      byReason.set(
+        selection.reason,
+        (byReason.get(selection.reason) ?? 0) + 1,
+      );
+    }
+    for (const [reason, count] of [...byReason].sort()) {
+      console.log(`    ${count} by ${reason}`);
+    }
+  }
+  if (result.overBudgetSeconds > 0) {
+    console.log(
+      `the mandatory set alone overran by ` +
+        `${result.overBudgetSeconds.toFixed(1)}s`,
+    );
+  }
+  const unschedulable = manifest.entries.filter(
+    (entry: ManifestEntry) => entry.cost > LANE_BUDGET_SECONDS,
+  );
+  for (const entry of unschedulable) {
+    console.log(
+      `unschedulable: ${testIdentityKey(entry.test)} costs ` +
+        `${entry.cost.toFixed(1)}s, past a lane's whole budget`,
+    );
+  }
+  console.log(`${LANES} lanes, ${LANE_BUDGET_SECONDS}s of work each`);
+}
+
+/** The manifest the newest publisher run wrote, or nothing with a reason. */
+async function newestManifest(): Promise<Manifest | undefined> {
+  const found = await fetchManifest({ at: new Date().toISOString() });
+  if (found.manifest === undefined) {
+    console.error(`no manifest: ${found.absent}`);
+    return undefined;
+  }
+  return found.manifest;
+}
+
+async function main(args: readonly string[]): Promise<void> {
+  const mode = args[0];
+  if (mode === undefined || mode === "--help" || mode === "-h") {
+    console.log(USAGE);
+    return;
+  }
+  switch (mode) {
+    case "dials":
+      printDials();
+      return;
+    case "coverage":
+      await printCoverage(await newestManifest());
+      return;
+    case "explain": {
+      const argument = args[1];
+      if (argument === undefined) fail(USAGE);
+      const test = parseIdentityArgument(argument);
+      if (test === undefined) {
+        fail(`not an identity key: ${argument}\n\n${USAGE}`);
+      }
+      const manifest = await newestManifest();
+      if (manifest === undefined) Deno.exit(1);
+      // Resolving through the alias file is what joins the two halves of
+      // a renamed test's history under today's name.
+      const resolver = await loadAliasResolver();
+      const resolved = resolver.resolve(
+        test,
+        manifest.generatedAt.slice(0, 10),
+      );
+      for (const line of explainLines(manifest, resolved)) console.log(line);
+      return;
+    }
+    case "plan": {
+      const manifest = await newestManifest();
+      if (manifest === undefined) Deno.exit(1);
+      const laneIndex = args.indexOf("--lane");
+      const laneNumber = laneIndex < 0
+        ? undefined
+        : Number(args[laneIndex + 1]);
+      if (args.includes("--verify")) {
+        fail(
+          "plan --verify needs the test topology, which is not in the tree " +
+            "yet.\nSee docs/plans/pull-request-test-selection.md, part two.",
+        );
+      }
+      printDryRun(manifest, laneNumber);
+      return;
+    }
+    default:
+      fail(`unknown mode ${mode}\n\n${USAGE}`);
+  }
+}
+
+if (import.meta.main) {
+  await main(Deno.args);
+}

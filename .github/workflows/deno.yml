@@ -495,16 +495,19 @@ jobs:
           printf '  %s\n' $TEST_FILES
           mkdir -p ../../test-results
           # --no-check: the Check job type-checks packages/runner
-          # (tasks/check.sh). --preload runs the fake clock before every test
-          # module, the same as the package test task; without it the global
-          # `clock` the converted tests use is undefined. See
-          # test/clock-preload.ts.
+          # (tasks/check.sh). The first --preload runs the fake clock before
+          # every test module, the same as the package test task; without it
+          # the global `clock` the converted tests use is undefined. See
+          # test/clock-preload.ts. The second captures the file each test
+          # registers from, which is what gives the shipped records their
+          # file metadata.
           # These permissions mirror the `test` task in
           # packages/runner/deno.jsonc; a test that needs a new one needs it
           # in both places, because this shard runs deno test directly.
           ENV=test deno test \
             --no-check \
             --preload=test/clock-preload.ts \
+            --preload=../../packages/test-support/src/records/preload.ts \
             --junit-path=../../test-results/runner-${{ matrix.shard }}.xml \
             --allow-ffi \
             --allow-env \

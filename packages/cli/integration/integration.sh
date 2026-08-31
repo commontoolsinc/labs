@@ -1282,6 +1282,12 @@ run_piece_data_files() {
 # dispatches: piece-values, piece-call, and piece-links. Both hold in
 # packages/cli/test/integration-sections.test.ts, which reads this table and
 # the cli-integration-test matrix in .github/workflows/deno.yml.
+#
+# Two kinds of arm live here. A **step arm** runs exactly one step, and
+# every step has one, so any step can be run and scheduled on its own. A
+# **group arm** runs several, for a person running the script by hand and
+# for the continuous-integration legs. Where a group arm and a step arm
+# would share a name, the step arm takes an `-only` suffix.
 case "$SECTION" in
   all)
     cf_test_step_begin piece-values
@@ -1321,11 +1327,23 @@ case "$SECTION" in
     cf_test_step_begin piece-data-files
     run_piece_data_files
     ;;
+  piece-values-only)
+    cf_test_step_begin piece-values
+    run_piece_values
+    ;;
+  piece-data-files)
+    cf_test_step_begin piece-data-files
+    run_piece_data_files
+    ;;
   piece-links)
     cf_test_step_begin piece-links
     run_piece_links
     cf_test_step_begin wish
     run_wish
+    ;;
+  piece-links-only)
+    cf_test_step_begin piece-links
+    run_piece_links
     ;;
   piece-call)
     cf_test_step_begin piece-call
@@ -1344,6 +1362,10 @@ case "$SECTION" in
     run_topics_restore_drill
     cf_test_step_begin bulk-survey-drill
     run_bulk_survey_drill
+    ;;
+  piece-call-only)
+    cf_test_step_begin piece-call
+    run_piece_call
     ;;
   piece-call-retry)
     cf_test_step_begin piece-call-retry

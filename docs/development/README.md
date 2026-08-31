@@ -80,6 +80,9 @@ mapped in [`../README.md`](../README.md).
 - [`test-records-adoption.md`](test-records-adoption.md) — implementing the
   test-run record system in another repository of the organization: what is
   shared, what the repository adds, and the rules that are not optional
+- [`test-selection.md`](test-selection.md) — what a test is worth running,
+  how to ask why one did or did not run, where the dials are, and what the
+  publisher does
 - [`deno-coverage-guard-line-artifact.md`](deno-coverage-guard-line-artifact.md)
   — why `deno coverage` reports a one-line guard as uncovered whenever its
   branch is not taken

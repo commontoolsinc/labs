@@ -65,6 +65,13 @@ every variant.
   there is left alone. Anything else — a bash workstation whose agents run
   non-interactive shells, a harness nothing here knows — puts the variable
   in whatever starts the agent.
+- `CF_TEST_SKIP_LIST` — a file naming the tests this invocation is not to
+  run, keyed by registering file and by name. The registration preload
+  reads it and registers a listed test as ignored rather than dropping it,
+  so a skipped test appears in the report as skipped instead of
+  disappearing. An identity the file does not name runs, so a test added
+  or renamed since the list was built runs. A file that is missing or
+  malformed runs everything.
 - `CF_TEST_AGENT` — an opaque label for the operating agent, recorded
   verbatim in the run context. Set it to tell one agent from another, or
   one checkout of a fleet from the next; it is never required. Left
@@ -281,7 +288,27 @@ is the record of who minted what for whom.
 ## Covering a new test surface
 
 A runner that already emits JUnit needs nothing but a `--junit`
-specification on its job's ship step. A harness with per-result callbacks
+specification on its job's ship step, and a `--preload` naming
+`packages/test-support/src/records/preload.ts` where the surface is
+`deno test`. `preloadArgument()` from `@commonfabric/test-support/records`
+spells that flag; Deno resolves `--preload` as a path rather than through
+the import map, so it must be absolute and no caller writes it out.
+
+The preload does two things, and it only installs itself when it has one
+of them to do: it captures the file each test was registered from and
+leaves the map in the spool, and it applies `CF_TEST_SKIP_LIST`. Wrapping
+`Deno.test` costs a JUnit report the file attribution it carries on its
+own, so a process with nothing to skip and no spool it may write leaves
+`Deno.test` alone and the report's own class names are read instead.
+
+A test task naming its own `--import-map` does not take the preload. That
+map governs every module of the invocation, the preload included, so a
+specifier the preload needs and the map does not carry fails the whole
+run rather than the preload alone. Such a member keeps its JUnit path and
+loses nothing by the omission: with no wrapper installed, the report
+keeps its own class names and ingestion reads the file from those.
+
+A harness with per-result callbacks
 appends records through `FragmentWriter` (see the hooks in
 `packages/cli/lib/test-runner.ts` and `packages/deno-web-test/runner.ts`).
 Anything else wraps its command:

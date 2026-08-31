@@ -81,6 +81,17 @@ source path when the producer reliably knows it — metadata, not identity.
 `cfcheck` items carry a zero duration: the batch is one TypeScript program
 and per-file durations do not exist there.
 
+For a suite ingested from a JUnit report, `file` comes from one of two
+places and the second overrides the first. Deno names a case's class after
+the module that registered the test, so the case a `describe` registers
+carries the file of every leaf beneath it, and the report joins itself: a
+leaf is named as its describe chain, and its file is the one whose
+registered name is the longest prefix of that chain. That source
+disappears the moment anything wraps `Deno.test`, because every class then
+names the wrapper. The registration preload is such a wrapper, and it
+replaces what it takes: it writes a name-to-file map into the spool, and
+ingestion lays that over what the report says.
+
 The context line carries `schema` (this document describes version 1, the
 `v1` in object paths), a per-object ULID `reportId`, the canonical `repo`
 name (a constant owned by the repository's tooling, never derived from git
@@ -163,6 +174,20 @@ area, managed by the infra repository's `tofu/test-records` root:
 <repo>/test-records/aggregated/ci/v1/<yyyy>/<mm>/<dd>/rollup.json
 ```
 
+One further dataset area sits beside it and is written by the
+test-selection publisher rather than by anything recording:
+
+```
+<repo>/test-selection/v1/manifest-<ISO 8601 timestamp>-<ULID>.json.gz
+<repo>/test-selection/v1/state/<yyyy-mm-dd>-<ULID>.json.gz
+```
+
+The timestamp leads a manifest's name, so a lexical listing is a
+chronological one and a reader takes the newest that is not after the
+moment it asks about. There is no name meaning "the current one": the
+writer holds create and nothing else, so nothing can be overwritten, and
+that is the property the whole store rests on.
+
 The date partition comes from the run's start, so late-shipped orphans
 land in their run's partition; readers list a trailing window rather than
 only the newest partition. The whole dataset is readable by `allUsers`.
@@ -171,11 +196,12 @@ which cannot read, list, overwrite, or delete; nothing already stored can
 be modified by any append credential. An incompatible schema writes under
 `v2/` and readers migrate at their own pace.
 
-Three writer principals exist. The **relay** — the only one that writes
-what CI produced — holds create on `submissions/ci/` through a Workload
-Identity provider pinned to one workflow file on the default branch, with
-the impersonation binding keyed to that exact workflow ref. **People**
-hold per-person service accounts (`test-records-gh-<username>`, the login lowercased)
+Four writer principals exist, three of them recording. The **relay** —
+the only one that writes what CI produced — holds create on
+`submissions/ci/` through a Workload Identity provider pinned to one
+workflow file on the default branch, with the impersonation binding keyed
+to that exact workflow ref. **People** hold per-person service accounts
+(`test-records-gh-<username>`, the login lowercased)
 with create on their own `submissions/local/<username>/` folders, minted
 by a dispatch-gated workflow and delivered sealed to a
 requester-generated X25519 identity. Minting revokes the account's
@@ -190,7 +216,9 @@ records — after a seven-day late-arrival lag — as validated rollup shards
 that keep each report's context line ahead of its records; a day with
 no records stays open, since a write-once rollup would permanently
 exclude late arrivals. Rollups are a read optimization, and
-full-fidelity readers list the raw area.
+full-fidelity readers list the raw area. The **publisher** holds create on
+`test-selection/` through a provider pinned to its own workflow file on
+the default branch, on the relay's pattern and for the relay's reason.
 
 A day is several shards. A busy day is over a gigabyte of NDJSON, against
 V8's maximum string length of about half that, and an object has to fit in
@@ -281,6 +309,22 @@ identity it has no fresh records for as one that must run: records exist
 only for tests that ran, so a selector that never re-runs the unselected
 starves its own data, and a renamed test is an unknown identity until an
 alias line lands.
+
+Test selection reads `submissions/local/` as well, and weighs a failure
+seen there above one seen in continuous integration. That is a deliberate
+widening of the rule above, and the reason is the quality of the
+evidence: somebody at a workstation, part way through writing something,
+ran a test and it went red because of what they had just written. There
+is no ambiguity about what changed, no shared infrastructure to blame,
+and no question about whether the failure was real, because they went on
+to fix it. What it costs is that a local record can now displace another
+test from a budgeted run rather than only ever adding to what runs. Three
+things bound that: local keys are held by people with repository write
+access, which is the trust boundary the continuous-integration records
+already sit inside; every manifest records the inputs behind every score,
+so a strange selection traces back to the records that produced it; and
+the worst outcome is a pull request that ran a less useful set of tests,
+which the full run on the default branch catches.
 
 ## The sixty-second rule
 

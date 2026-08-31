@@ -1,0 +1,97 @@
+# The publisher: reads the test-record store, folds what is new into a
+# rolling aggregate, scores every identity, and creates one manifest
+# object. The five pull-request lanes read that manifest to decide what to
+# run. Nothing gates on it: when this fails, the previous manifest is
+# still the newest one and lanes keep using it, so selection quality
+# decays slowly rather than anything turning red.
+#
+# Its Google Cloud identity comes from a Workload Identity Federation
+# provider pinned to exactly this workflow file on main, so no other
+# workflow, ref, or repository can mint it (infra: tofu/test-records). The
+# account holds objectCreator on the selection prefix and nothing else: it
+# cannot read, list, overwrite, or delete.
+#
+# Four-hourly rather than daily because aggregation is incremental and so
+# cheap, and a flake that appears in the morning should not wait until the
+# small hours to be prioritized. Manual dispatch is there so somebody who
+# has just fixed something can refresh without waiting, and it carries the
+# one-off bootstrap that a cold start needs.
+
+name: Test Selection
+
+on:
+  schedule:
+    - cron: "17 */4 * * *"
+  workflow_dispatch:
+    inputs:
+      bootstrap:
+        description: Read the whole window rather than what is unfolded
+        type: boolean
+        default: false
+      days:
+        description: Days of submissions to read
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: "Publish Test Selection Manifest"
+    # The provider variable gates the whole job. Where test records are not
+    # provisioned there is no identity to assume and nothing to create.
+    if: vars.TEST_SELECTION_WIF_PROVIDER != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Every third-party action in this credentialed workflow is pinned to
+      # an immutable commit, so a moved tag cannot alter the one privileged
+      # write path.
+      - name: 📥 Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      - name: 🔑 Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: commontools-core
+          workload_identity_provider: ${{ vars.TEST_SELECTION_WIF_PROVIDER }}
+          service_account: ${{ vars.TEST_SELECTION_SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: false
+
+      - name: 📊 Publish the manifest
+        env:
+          TEST_RECORDS_GCS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          TEST_RECORDS_BUCKET: ${{ vars.TEST_RECORDS_BUCKET }}
+          TEST_RECORDS_PREFIX: ${{ vars.TEST_RECORDS_PREFIX }}
+          TEST_SELECTION_PREFIX: ${{ vars.TEST_SELECTION_PREFIX }}
+        run: |
+          args=""
+          if [ "${{ inputs.bootstrap }}" = "true" ]; then
+            args="--bootstrap"
+          fi
+          if [ -n "${{ inputs.days }}" ]; then
+            args="$args --days ${{ inputs.days }}"
+          fi
+          deno run --allow-read --allow-env --allow-net --allow-write \
+            tasks/test-selection-publish.ts $args \
+            | tee publish.log
+
+      - name: 📝 Summarize
+        if: always()
+        run: |
+          {
+            echo "## Test selection"
+            echo ""
+            echo '```'
+            grep -v '^test selection: folded [0-9]* of ' publish.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

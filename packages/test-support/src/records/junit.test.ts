@@ -210,10 +210,46 @@ describe("junit", () => {
       });
       const bare = records.find((r) => r.test.n === "bare deno test case");
       expect(bare?.file).toBe("packages/bakery/test/glaze.test.ts");
+    });
+
+    it("gives a leaf the file of the container that registered it", () => {
+      const records = ingestJUnit(DENO_SAMPLE, {
+        kind: "unit",
+        scope: "bakery",
+        filePrefix: "packages/bakery",
+      });
       const leaf = records.find(
         (r) => r.test.n === "glaze > thickness > thickens when heated",
       );
-      expect(leaf?.file).toBeUndefined();
+      expect(leaf?.file).toBe("packages/bakery/test/glaze.test.ts");
+    });
+
+    it("prefers the preload's map over what the report claims", () => {
+      const records = ingestJUnit(DENO_SAMPLE, {
+        kind: "unit",
+        scope: "bakery",
+        filePrefix: "packages/bakery",
+        fileByName: new Map([["glaze", "packages/bakery/test/moved.test.ts"]]),
+      });
+      const leaf = records.find(
+        (r) => r.test.n === "glaze > thickness > thickens when heated",
+      );
+      expect(leaf?.file).toBe("packages/bakery/test/moved.test.ts");
+      const bare = records.find((r) => r.test.n === "bare deno test case");
+      expect(bare?.file).toBe("packages/bakery/test/glaze.test.ts");
+    });
+
+    it("declines a classname naming the registration wrapper", () => {
+      const wrapped = DENO_SAMPLE.replaceAll(
+        'classname="test/glaze.test.ts"',
+        'classname="../../packages/test-support/src/records/registration.ts"',
+      );
+      const records = ingestJUnit(wrapped, {
+        kind: "unit",
+        scope: "bakery",
+        filePrefix: "packages/bakery",
+      });
+      for (const record of records) expect(record.file).toBeUndefined();
     });
 
     it("records no file without a prefix", () => {
