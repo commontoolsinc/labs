@@ -115,14 +115,21 @@ interface QuerySet {
   unlabelledObservedQueries: { id: string; text: string; why: string }[];
 }
 
-const flag = (name: string, fallback: string): string =>
-  Deno.args.find((arg) => arg.startsWith(`--${name}=`))?.slice(
+const flag = (
+  args: readonly string[],
+  name: string,
+  fallback: string,
+): string =>
+  args.find((arg) => arg.startsWith(`--${name}=`))?.slice(
     name.length + 3,
   ) ??
     fallback;
 
-const requireEnv = (name: string): string => {
-  const value = Deno.env.get(name);
+const requireEnv = (
+  name: string,
+  readEnv: (name: string) => string | undefined,
+): string => {
+  const value = readEnv(name);
   if (value === undefined || value === "") {
     throw new Error(`${name} must be set`);
   }
@@ -134,21 +141,31 @@ const searchableText = (entry: PatternIndexListedPattern): string =>
   [entry.description, ...entry.keywords, ...entry.hashtags].join("\n")
     .toLowerCase();
 
-async function main(): Promise<number> {
+/**
+ * Runs the retrieval measurement command and returns its process exit code.
+ */
+export const main = async (
+  args: readonly string[],
+  readEnv: (name: string) => string | undefined,
+  log: (line: string) => void = console.log,
+  logError: (line: string) => void = console.error,
+  now: () => Date = () => new Date(),
+): Promise<number> => {
   const setPath = flag(
+    args,
     "queries",
     new URL("./pattern-index-retrieval-queries.json", import.meta.url).pathname,
   );
-  const outPath = flag("out", "");
-  const minHitAt5 = Number(flag("min-hit-at-5", "0"));
-  const maxDirtyNegatives = Number(flag("max-dirty-negatives", "99"));
+  const outPath = flag(args, "out", "");
+  const minHitAt5 = Number(flag(args, "min-hit-at-5", "0"));
+  const maxDirtyNegatives = Number(flag(args, "max-dirty-negatives", "99"));
 
   const set: QuerySet = JSON.parse(await Deno.readTextFile(setPath));
   const identity = await Identity.fromPkcs8(
-    await Deno.readFile(requireEnv("CF_IDENTITY")),
+    await Deno.readFile(requireEnv("CF_IDENTITY", readEnv)),
   );
   const client = new PatternIndexClient({
-    baseUrl: requireEnv("PATTERN_INDEX_BASE_URL"),
+    baseUrl: requireEnv("PATTERN_INDEX_BASE_URL", readEnv),
     signer: identity,
   });
 
@@ -157,7 +174,7 @@ async function main(): Promise<number> {
   // be attached to a reading is not comparable to the next one.
   const listed = await client.listPatterns();
   const corpusText = listed.patterns.map(searchableText);
-  const readAt = new Date().toISOString();
+  const readAt = now().toISOString();
 
   const answersByQuery = new Map<string, readonly string[]>();
   const diagnostics: Record<string, unknown>[] = [];
@@ -241,7 +258,7 @@ async function main(): Promise<number> {
     ? 0
     : report.overall.hitAt5 / report.overall.queries;
   const dirtyNegatives = report.negativeScores.length - report.negativesClean;
-  console.log(JSON.stringify(
+  log(JSON.stringify(
     {
       corpus,
       overall: report.overall,
@@ -265,10 +282,13 @@ async function main(): Promise<number> {
       `${dirtyNegatives} negative queries returned results, above --max-dirty-negatives=${maxDirtyNegatives}`,
     );
   }
-  for (const breach of breaches) console.error(`FAIL: ${breach}`);
+  for (const breach of breaches) logError(`FAIL: ${breach}`);
   return breaches.length === 0 ? 0 : 1;
-}
+};
 
+// deno-coverage-ignore-start -- the entrypoint guard is false under every test
+// that imports this module, which is what it is for
 if (import.meta.main) {
-  Deno.exit(await main());
+  Deno.exit(await main(Deno.args, (name) => Deno.env.get(name)));
 }
+// deno-coverage-ignore-stop

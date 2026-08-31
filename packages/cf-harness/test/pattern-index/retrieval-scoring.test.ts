@@ -206,6 +206,11 @@ describe("retrieval scoring", () => {
         .toBe(0);
     });
 
+    it("returns zero overlap when the query has no content words", () => {
+      expect(descriptionOverlap("a to", "any target", new Set(["a", "to"])))
+        .toBe(0);
+    });
+
     it("drops stop words and single characters from a query's content words", () => {
       expect(
         contentWords("I need a list to tick off", new Set(["i", "a", "to"])),
