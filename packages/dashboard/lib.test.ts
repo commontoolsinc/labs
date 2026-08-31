@@ -174,6 +174,21 @@ Deno.test("durationTag renders an auto-formatted span; sparkline itself has no l
   assert([...svg.matchAll(/<polyline/g)].length === 2, "the line + highlight are still drawn");
 });
 
+Deno.test("sparklines share one rendered height", () => {
+  const single = sparkline([1, 2], "#111");
+  const multi = multiSparkline([{ vals: [1, 2], color: "#111" }]);
+  const labeled = multiSparkline([{
+    vals: [1, 2],
+    color: "#111",
+    label: "2",
+  }]);
+
+  assert(single.includes('height="28"'));
+  assert(multi.includes('height="28"'));
+  assert(labeled.includes('height="28"'));
+  assert(labeled.includes("height:28px"));
+});
+
 Deno.test("sparkline: fadeFrom makes the base line a gradient to color at the highlight edge", () => {
   const svg = sparkline([30, 20, 10, 11, 12, 13], "#727882", { count: 3, color: "#c7ccd4" }, "#101010");
   assert(/<linearGradient id="[^"]+" x1="0" y1="0" x2="1" y2="0"/.test(svg), "horizontal gradient defined");
@@ -276,8 +291,25 @@ Deno.test("multiSparkline: overlapping end-labels are spread apart, not stacked"
   const tops = [...svg.matchAll(/top:([0-9.]+)px;transform/g)].map((m) => parseFloat(m[1]));
   assertEquals(tops.length, 2);
   assert(Math.abs(tops[0] - tops[1]) >= 11, `labels should stay ~12px apart, got ${tops}`);
-  // And they stay within the 32px-tall label band.
-  for (const t of tops) assert(t >= 0 && t <= 32, `label ${t} within band`);
+  // And they stay within the 28px-tall label band.
+  for (const t of tops) assert(t >= 0 && t <= 28, `label ${t} within band`);
+
+  const crowded = multiSparkline([
+    { vals: [5, 5, 0], color: "#0a0", label: "$100" },
+    { vals: [3, 3, 0], color: "#00a", label: "$75" },
+    { vals: [1, 1, 0], color: "#a00", label: "$50" },
+  ]);
+  const crowdedTops = [...crowded.matchAll(/top:([0-9.]+)px;transform/g)]
+    .map((match) => parseFloat(match[1]));
+  assertEquals(crowdedTops.length, 3);
+  for (const top of crowdedTops) {
+    assert(top >= 6 && top <= 22, `label ${top} inside the chart`);
+  }
+  assert(
+    crowdedTops[1] - crowdedTops[0] >= 8 &&
+      crowdedTops[2] - crowdedTops[1] >= 8,
+    `crowded labels use the available height: ${crowdedTops}`,
+  );
 });
 
 Deno.test("lighten: blends a color toward white; non-hex is left alone", () => {
