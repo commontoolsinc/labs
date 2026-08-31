@@ -142,9 +142,13 @@ interface Filling {
   selections: Selection[];
   capabilities: Set<string>;
 
-  /** The suites and invocation units whose overheads this lane has paid. */
+  /** The suites whose overheads this lane has paid. */
   suites: Set<string>;
+
+  /** The invocation units whose overheads this lane has paid. */
   units: Set<string>;
+
+  /** Seconds of work placed here so far. */
   load: number;
 }
 

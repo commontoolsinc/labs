@@ -69,9 +69,13 @@ export interface Observation {
 
 /** What one identity's history has accumulated. */
 export interface IdentityState {
-  /** Catches, counted separately by where each happened. */
+  /** Catches on a workstation. */
   localCatches: number;
+
+  /** Catches on a pull request. */
   prCatches: number;
+
+  /** Catches on the default branch. */
   mainCatches: number;
 
   /** The day of the most recent catch, absent when there are none. */
@@ -80,8 +84,10 @@ export interface IdentityState {
   /** The distinct sources among the catches. */
   sources: string[];
 
-  /** Failures and runs per day, for the churn term. */
+  /** Failures per day, the numerator of the churn term. */
   failuresByDay: Record<string, number>;
+
+  /** Runs per day, its denominator. */
   runsByDay: Record<string, number>;
 
   /** Flake observations per day, against the failures of the same day. */
@@ -575,6 +581,8 @@ export const COST_SAMPLE_CAP = 64;
 export interface DaySamples {
   /** Ascending, at most `COST_SAMPLE_CAP` of them. */
   slowest: number[];
+
+  /** How many ran in all, which is what a percentile's rank is taken over. */
   count: number;
 }
 

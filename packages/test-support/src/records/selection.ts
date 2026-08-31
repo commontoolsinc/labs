@@ -92,7 +92,11 @@ export interface UnavailableEntry {
 
   /** The exact leaf, when only one identity inside the unit is skipped. */
   leafName?: string;
+
+  /** Which part of the run it was unavailable in. */
   phase?: string;
+
+  /** Why it is unavailable, in words a person reads. */
   reason: string;
 }
 
