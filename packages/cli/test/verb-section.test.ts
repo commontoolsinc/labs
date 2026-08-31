@@ -2,10 +2,12 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { ValidationError } from "@cliffy/command";
 import {
+  EVERY_FLAG_TAKES_A_VALUE,
   parseReadSection,
   readSectionAsksVerbHelp,
   refuseFieldsReadAsProjection,
   refuseProjectionBeforeSection,
+  sectionUnits,
   sectionWithVerbHelp,
 } from "../lib/verb-section.ts";
 import { parseExecArgs } from "../lib/exec-schema.ts";
@@ -43,6 +45,58 @@ describe("verb-section", () => {
     }
     return "";
   }
+
+  describe("sectionUnits()", () => {
+    it("returns a flag holding the word after it where that word is its value", () => {
+      expect(sectionUnits(["--title", "--select"], EVERY_FLAG_TAKES_A_VALUE))
+        .toStrictEqual([{ flag: "title", tokens: ["--title", "--select"] }]);
+    });
+
+    it("returns each flag alone where none of them spends a word", () => {
+      expect(sectionUnits(["--draft", "--select", "a"], () => false))
+        .toStrictEqual([
+          { flag: "draft", tokens: ["--draft"] },
+          { flag: "select", tokens: ["--select"] },
+          { tokens: ["a"] },
+        ]);
+    });
+
+    it("returns the `=` spelling alone, which carries its value inside itself", () => {
+      expect(sectionUnits(["--select=a", "b"], EVERY_FLAG_TAKES_A_VALUE))
+        .toStrictEqual([
+          { flag: "select", tokens: ["--select=a"] },
+          { tokens: ["b"] },
+        ]);
+    });
+
+    it("returns a trailing flag alone, without weighing it against nothing", () => {
+      // The spend is asked about a word, so it is asked only where one is
+      // there — which is what lets every spend read `next` without a guard.
+      const asked: string[] = [];
+      const spend = (_flag: string, next: string) => {
+        asked.push(next);
+        return true;
+      };
+      expect(sectionUnits(["--select"], spend))
+        .toStrictEqual([{ flag: "select", tokens: ["--select"] }]);
+      expect(asked).toStrictEqual([]);
+    });
+
+    it("returns a bare `--` as a word rather than a flag named nothing", () => {
+      expect(sectionUnits(["--", "x"], EVERY_FLAG_TAKES_A_VALUE))
+        .toStrictEqual([{ tokens: ["--"] }, { tokens: ["x"] }]);
+    });
+
+    it("passes the word in question to the spend, which may decline it", () => {
+      // `--json` takes a payload and still refuses a flag-shaped one, and only
+      // the word itself says which case this is.
+      const spend = (_flag: string, next: string) => !next.startsWith("--");
+      expect(sectionUnits(["--json", "--select", "a"], spend)).toStrictEqual([
+        { flag: "json", tokens: ["--json"] },
+        { flag: "select", tokens: ["--select", "a"] },
+      ]);
+    });
+  });
 
   describe("refuseProjectionBeforeSection()", () => {
     it("returns for a line that writes no projection before the verb", () => {
@@ -377,6 +431,21 @@ describe("verb-section", () => {
       expect(() =>
         refuseFieldsReadAsProjection("cf call ... v", "invoke", [], declaring)
       ).not.toThrow();
+    });
+
+    it("names the flag alone where the word after it is that flag's value", () => {
+      // Past the marker every read option takes a value, so `--filter` here is
+      // the word `--select` was given rather than a second colliding name.
+      const message = messageFrom(() =>
+        refuseFieldsReadAsProjection(
+          "cf call ... addItem",
+          "invoke",
+          ["--select", "--filter"],
+          declaring,
+        )
+      );
+      expect(message).toContain('"--select" is a field');
+      expect(message).not.toContain('"--filter"');
     });
   });
 

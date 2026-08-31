@@ -73,18 +73,92 @@ function readOptionName(token: string): string | undefined {
 }
 
 /**
- * The first read option written among `tokens`, or `undefined` where none is.
+ * Whether the word after `flag` is spent as that flag's value.
  *
- * For the doors that judge a section holding no declared names of its own, and
- * so have nothing to weigh a read option against: the first one found is the
- * one the refusal is about.
+ * A section is argv, and argv does not say on its own which of its words are
+ * flags: `--title --select` is one field holding the string `--select` where
+ * the verb declares a string `title`, and two flags where it declares a
+ * boolean one. Nothing but the thing that owns the vocabulary can tell those
+ * apart, so every walk below is handed the answer rather than guessing it.
+ *
+ * `next` is the word in question, because a flag that takes a value may still
+ * decline a flag-shaped one — `--json` refuses one outright rather than
+ * swallowing it. It is asked only where such a word exists, so a flag ending
+ * the section is never weighed against nothing.
+ */
+export type SpendsNextWord = (flag: string, next: string) => boolean;
+
+/**
+ * The spend of a section whose every flag takes the word after it: the read
+ * step's own three, and a callable taking a single value, whose four flags
+ * each name where that one value comes from.
+ */
+export const EVERY_FLAG_TAKES_A_VALUE: SpendsNextWord = () => true;
+
+/** A flag with the words it spends, or a word that is nobody's flag. */
+export interface SectionUnit {
+  /** The flag's name without its `--`, or `undefined` for a bare word. */
+  readonly flag?: string;
+  /** The unit's words, in the order they were written. */
+  readonly tokens: readonly string[];
+}
+
+/**
+ * A section split into the units the callable reads it as: each flag with the
+ * words it spends, and every other word on its own.
+ *
+ * Every door here that asks where the read options in a section are asks
+ * through this. Walking the tokens instead — testing each one for a `--` and
+ * moving on — answers about words the callable already spent, and the answer
+ * is wrong in both directions at once: a value that looks like a flag is read
+ * as one, and the flag that owns it is left holding nothing. A refusal built
+ * that way prints a corrected line that means something the caller did not
+ * write.
+ *
+ * The one walk that does not come through here is `liftReadOptions`, which
+ * reads the words BEFORE the section and has the same question answered for
+ * it already: it lifts only what the command's own parser returned a value
+ * for, so a word that parser spent elsewhere is never mistaken for a flag.
+ */
+export function sectionUnits(
+  sectionArgs: readonly string[],
+  spendsNext: SpendsNextWord,
+): SectionUnit[] {
+  const units: SectionUnit[] = [];
+  for (let i = 0; i < sectionArgs.length; i++) {
+    const token = sectionArgs[i];
+    // A bare `--` names no flag, and neither does a word with no leading
+    // dashes. Both stand alone, for whoever asked to judge.
+    if (!token.startsWith("--") || token === "--") {
+      units.push({ tokens: [token] });
+      continue;
+    }
+    const flag = optionName(token);
+    // The `=` spelling carries its value inside the token and spends nothing.
+    const spends = !token.includes("=") && i + 1 < sectionArgs.length &&
+      spendsNext(flag, sectionArgs[i + 1]);
+    units.push({ flag, tokens: sectionArgs.slice(i, i + (spends ? 2 : 1)) });
+    if (spends) i++;
+  }
+  return units;
+}
+
+/**
+ * The first read option a section writes as a flag, or `undefined` where it
+ * writes none.
+ *
+ * For the doors judging a section that declares no names of its own, and so
+ * have nothing to weigh a read option against: the first one found is the one
+ * the refusal is about.
  */
 export function firstReadOption(
-  tokens: readonly string[],
+  sectionArgs: readonly string[],
+  spendsNext: SpendsNextWord,
 ): string | undefined {
-  for (const token of tokens) {
-    const name = readOptionName(token);
-    if (name !== undefined) return name;
+  for (const unit of sectionUnits(sectionArgs, spendsNext)) {
+    if (unit.flag !== undefined && READ_OPTION_NAMES.includes(unit.flag)) {
+      return unit.flag;
+    }
   }
   return undefined;
 }
@@ -234,27 +308,23 @@ export function refuseProjectionBeforeSection(
  *
  * `declared` is what keeps the corrected line honest when a verb declares one
  * of these names and not another: a line writing both moves only the one that
- * names no field, and leaves the field where its owner reads it.
+ * names no field, and leaves the field where its owner reads it. `spendsNext`
+ * is what keeps it honest about the words in between, since a field's own
+ * value may be spelled like a flag and belongs to the field either way.
  */
 export function projectionInSectionRefusal(
   flagName: string,
   prefix: string,
   sectionArgs: readonly string[],
   declared: ReadonlySet<string>,
+  spendsNext: SpendsNextWord,
 ): string {
   const kept: string[] = [];
   const lifted: string[] = [];
-  for (let i = 0; i < sectionArgs.length; i++) {
-    const token = sectionArgs[i];
-    const name = readOptionName(token);
-    if (name === undefined || declared.has(name)) {
-      kept.push(token);
-      continue;
-    }
-    lifted.push(token);
-    if (!token.includes("=") && i + 1 < sectionArgs.length) {
-      lifted.push(sectionArgs[++i]);
-    }
+  for (const unit of sectionUnits(sectionArgs, spendsNext)) {
+    const moves = unit.flag !== undefined &&
+      READ_OPTION_NAMES.includes(unit.flag) && !declared.has(unit.flag);
+    (moves ? lifted : kept).push(...unit.tokens);
   }
   const render = (tokens: readonly string[]) =>
     [prefix, ...tokens.map(quoteToken)].join(" ").trimEnd();
@@ -427,14 +497,17 @@ export async function parseReadSection(
   literalArgs: readonly string[],
 ): Promise<ReadSection> {
   if (literalArgs.length === 0) return {};
-  for (let i = 0; i < literalArgs.length; i++) {
-    const token = literalArgs[i];
+  // The value of a read option is the caller's own word and is not checked
+  // against anything here; the parse below is what judges it. So only the
+  // flag each unit opens with reaches the doors above it.
+  let index = 0;
+  for (const unit of sectionUnits(literalArgs, EVERY_FLAG_TAKES_A_VALUE)) {
+    const token = unit.tokens[0];
     if (token === "--") refuseSecondMarker(spelling, rawArgs);
-    const name = readOptionName(token);
-    if (name === undefined) refuseWordPastMarker(spelling, rawArgs, token, i);
-    // The value of a spaced read option is the caller's own word and is not
-    // checked against anything here; the parse below is what judges it.
-    if (!token.includes("=")) i++;
+    if (unit.flag === undefined || !READ_OPTION_NAMES.includes(unit.flag)) {
+      refuseWordPastMarker(spelling, rawArgs, token, index);
+    }
+    index += unit.tokens.length;
   }
   const { options } = await readSectionCommand().parse([...literalArgs]);
   return options as unknown as ReadSection;
@@ -465,9 +538,11 @@ export function refuseFieldsReadAsProjection(
   literalArgs: readonly string[],
   declared: ReadonlySet<string>,
 ): void {
-  const names = literalArgs
-    .map(readOptionName)
-    .filter((name): name is string => name !== undefined);
+  const names = sectionUnits(literalArgs, EVERY_FLAG_TAKES_A_VALUE)
+    .map((unit) => unit.flag)
+    .filter((flag): flag is string =>
+      flag !== undefined && READ_OPTION_NAMES.includes(flag)
+    );
   if (names.length === 0) return;
   if (names.some((name) => !declared.has(name))) return;
 

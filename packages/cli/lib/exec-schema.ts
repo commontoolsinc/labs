@@ -16,9 +16,11 @@ import {
 } from "./callable.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 import {
+  EVERY_FLAG_TAKES_A_VALUE,
   firstReadOption,
   projectionInSectionRefusal,
   READ_OPTION_NAMES,
+  type SpendsNextWord,
   VERB_KEYWORDS,
 } from "./verb-section.ts";
 
@@ -328,6 +330,32 @@ function undeclaredFlagError(
       }`);
 }
 
+/**
+ * Which words of this verb's section are values rather than flags.
+ *
+ * The same answer the loop below acts on, in the form the refusals need it:
+ * they are handed a section to re-render and have to divide it exactly as the
+ * verb's own parser did, or they move a word the verb had already spent.
+ */
+function sectionValueSpend(
+  descriptors: ReadonlyMap<string, FlagDescriptor>,
+): SpendsNextWord {
+  return (flag, next) => {
+    // Both refuse a flag-shaped word outright rather than taking it as the
+    // payload, so one never stands as their value.
+    if (flag === "json" || flag === "json-file") return !next.startsWith("--");
+    // A negation carries its own answer, and so does a boolean field.
+    if (!descriptors.has(flag) && flag.startsWith("no-")) {
+      return !descriptors.has(flag.slice(3));
+    }
+    const descriptor = descriptors.get(flag);
+    if (descriptor) return schemaType(descriptor.schema) !== "boolean";
+    // An undeclared name against a schema that judges nothing is taken as the
+    // string the caller typed, which is the word after it.
+    return true;
+  };
+}
+
 function parseObjectInput(
   schema: JSONSchema,
   args: string[],
@@ -428,6 +456,7 @@ function parseObjectInput(
             sectionPrefix,
             args,
             new Set(descriptors.keys()),
+            sectionValueSpend(descriptors),
           ),
         );
       }
@@ -537,14 +566,25 @@ function parseNonObjectInput(
 ): ParsedInputMode {
   // The boundary the field door draws, on a verb with no fields for a read
   // option to collide with. Such a verb declares nothing, so every read option
-  // written here is a projection inside the callable's section — answered with
-  // the position it belongs to and the line that puts it there, the same as at
-  // the field door. The vocabulary refusal below would otherwise name the four
-  // value flags, which is a true sentence about the wrong subject.
-  const projection = firstReadOption(args);
+  // written here as a FLAG is a projection inside the callable's section —
+  // answered with the position it belongs to and the line that puts it there,
+  // the same as at the field door. The vocabulary refusal below would
+  // otherwise name the four value flags, which is a true sentence about the
+  // wrong subject.
+  //
+  // Written as a value it is the payload, and this verb's payload is one whole
+  // word the caller chose: `--value --select` asks for the string "--select",
+  // which is not a projection and not this door's to touch.
+  const projection = firstReadOption(args, EVERY_FLAG_TAKES_A_VALUE);
   if (projection !== undefined) {
     throw new Error(
-      projectionInSectionRefusal(projection, sectionPrefix, args, new Set()),
+      projectionInSectionRefusal(
+        projection,
+        sectionPrefix,
+        args,
+        new Set(),
+        EVERY_FLAG_TAKES_A_VALUE,
+      ),
     );
   }
 

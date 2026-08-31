@@ -364,10 +364,14 @@ one where the callable's section ends and the read step's begins.
 cf call <target> <verb> <verb input>
 cf call <target> <verb> <verb input> -- <read opts>
 cf call <target> <verb> -- <read opts>             # a verb that takes none
+cf call <target> <verb> -- --help                  # the verb's own page
 cf exec <mountedFile> <verb input> -- <read opts>
 ```
 
-One marker at most, and it appears only on a call that asks for a projection.
+One marker at most, and it appears only where something stands past it: a
+projection, or the `--help` that is given the callable's page rather than this
+command's. That second spelling is the one exception to what follows the
+marker, and it is settled below.
 
 `cf exec` already read this way — its arguments written directly after the
 mounted file, with nothing between — so `call` was brought to the sibling's
@@ -397,9 +401,9 @@ The split that used to run through them was imposed by the grammar rather than
 chosen, and closing it converged the surface rather than giving `call` a
 spelling of its own.
 
-**Parsing what follows the marker needs nothing new.** The tokens past it are
-the read options and only those, so they parse against a command carrying just
-those three. Value typing, the near-miss suggestion for a misspelled flag, and
+**Parsing what follows the marker needs nothing new.** Setting the `--help`
+exception aside, the tokens past it are the read options and only those, so
+they parse against a command carrying just those three. Value typing, the near-miss suggestion for a misspelled flag, and
 the refusal of `--schema` beside `--select` all come from the declaration that
 already exists.
 
@@ -426,14 +430,14 @@ it.
 and reported rather than absorbed in both places.
 
 **`--help` reaches the callable from both spellings.** Written after the verb
-it falls inside the callable's section and prints that verb's own page, which is
-what it does today. Written as `<verb> -- --help` — the spelling the
-documentation currently teaches — it would otherwise land among the read options
-and print this command's page instead, with nothing to refuse it, since `--help`
-is the one flag that is never an unknown one. That shape has no competing
-reading: a caller wanting this command's help writes it without a verb. So it is
-given the meaning it already has, as a rule about the grammar rather than a
-window that closes.
+it falls inside the callable's section and prints that verb's own page. Written
+as `<verb> -- --help` it would otherwise land among the read options and print
+this command's page instead, with nothing to refuse it, since `--help` is the
+one flag that is never an unknown one. That shape has no competing reading: a
+caller wanting this command's help writes it without a verb. So it is given the
+meaning it already has, as a rule about the grammar rather than a window that
+closes — which is why the marker's contents are the read options plus this one
+word, rather than the read options alone.
 
 **Every way to get this wrong is answered with the line that would work.** The
 vocabularies on both sides of the boundary are known — `cf`'s flags are
@@ -655,17 +659,15 @@ the canonical reference's structure is right and only its vocabulary is
 missing. That assumption is worth testing before 9 and 11 are built, because a
 resolution layer would make both of them smaller — or unnecessary.
 
-The sweep step 10 carried ran to twenty-one files across `docs/`, `skills/`,
-`packages/cli/README.md`, and the CLI's own tests and integration scripts — the
-count is worth recording because the estimate written before it was twelve, and
-`git grep -E` reads `\b` as a literal rather than a word boundary, so a pattern
-written that way finds nothing and says so silently. Two of the twenty-one are
-the verb session documents, whose commands `check-verb-session-sync` holds to
-what the demo script runs, so those changed in the same commit as the script.
-
 **The trailing form is taught throughout.** The read options go after the thing
 they shape on every command that has them, which is what `get` and `wish`
 already showed and what `call` and `exec` gained.
+
+**The verb session documents change with the demo script.** Their commands are
+held by `deno task check-verb-session-sync` to what
+`packages/cli/integration/verb-session-demo.sh` runs. They quote the demo's
+commands and never compose them, so a command that changes changes in the
+script and in both documents together, in one commit.
 
 **Each step carries its own documentation.** `--input`, `--piece`, and
 `cf get` appear across the tutorial, `packages/cli/README.md`, and the
@@ -718,9 +720,3 @@ preserve that.
 
 **`piece link` stays.** It writes a link with reactive-wiring meaning that a
 general value write does not express.
-
-**That the position which once worked everywhere stopped working.** The read
-options could precede the positional on all six commands. A projection before
-the verb is now refused, so the one spelling a caller could carry between
-commands was taken away and replaced by a spelling that works on all six. That
-was the trade, and it is recorded rather than left to be discovered.

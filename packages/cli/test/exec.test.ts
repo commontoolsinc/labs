@@ -36,6 +36,20 @@ function makeSpec(
   };
 }
 
+/** The message `parseExecArgs` refused `args` with, or "" where it did not. */
+function refusalFrom(
+  spec: ExecCommandSpec,
+  args: string[],
+  sectionPrefix?: string,
+): string {
+  try {
+    parseExecArgs(spec, args, sectionPrefix);
+  } catch (error) {
+    return (error as Error).message;
+  }
+  return "";
+}
+
 describe("parseExecArgs", () => {
   it("defaults handlers to invoke and tools to run when flags are provided", () => {
     const handler = parseExecArgs(
@@ -560,20 +574,91 @@ describe("parseExecArgs", () => {
 
     // The keyword rejoins the prefix here too, so the corrected line is the
     // caller's own rather than one with a word silently dropped.
-    const withKeyword = (() => {
-      try {
-        parseExecArgs(
-          makeSpec("handler", { type: "string" }),
-          ["invoke", "--filter", "open"],
-          "cf call ... setTitle",
-        );
-      } catch (error) {
-        return (error as Error).message;
-      }
-      return "";
-    })();
-    expect(withKeyword).toContain(
-      "write:    cf call ... setTitle invoke -- --filter open",
+    expect(
+      refusalFrom(
+        makeSpec("handler", { type: "string" }),
+        ["invoke", "--filter", "open"],
+        "cf call ... setTitle",
+      ),
+    ).toContain("write:    cf call ... setTitle invoke -- --filter open");
+  });
+
+  it("takes a flag-shaped word after `--value` as the value it is", () => {
+    // Such a verb's whole payload is one word the caller chose, and a word
+    // beginning with dashes is a payload like any other. Reading it as a
+    // projection refuses a call that names no projection at all.
+    expect(
+      parseExecArgs(makeSpec("handler", { type: "string" }), [
+        "--value",
+        "--select",
+      ]).input,
+    ).toBe("--select");
+  });
+
+  it("leaves a field's own value in the section, flag-shaped or not", () => {
+    // `--title` declares a string, so the word after it is that string. A
+    // correction re-reading it as a flag moves the title's value out of the
+    // section, breaks the pairing of the flag that really is misplaced, and
+    // prints a line asking for something the caller never wrote.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { title: { type: "string" } },
+      required: ["title"],
+    });
+    expect(
+      refusalFrom(
+        spec,
+        ["--title", "--select", "--schema", "topic"],
+        "cf call ... addItem",
+      ),
+    ).toContain(
+      "write:    cf call ... addItem --title --select -- --schema topic",
+    );
+  });
+
+  it("moves a read option with its value where the field before it takes none", () => {
+    // A boolean field spends no word, so the read option after it opens its
+    // own pair and both words move together.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { draft: { type: "boolean" }, title: { type: "string" } },
+    });
+    expect(
+      refusalFrom(
+        spec,
+        ["--draft", "--select", "topic.title"],
+        "cf call ... addItem",
+      ),
+    ).toContain(
+      "write:    cf call ... addItem --draft -- --select topic.title",
+    );
+    // A negation says which value it means, so it spends no word either.
+    expect(
+      refusalFrom(
+        spec,
+        ["--no-draft", "--select", "topic.title"],
+        "cf call ... addItem",
+      ),
+    ).toContain(
+      "write:    cf call ... addItem --no-draft -- --select topic.title",
+    );
+  });
+
+  it("leaves a flag after `--json` standing as a flag, which `--json` refuses to take", () => {
+    // `--json` takes a payload and refuses a flag-shaped word outright, so a
+    // read option written after it is a read option rather than its value.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { title: { type: "string" } },
+    });
+    expect(
+      refusalFrom(
+        spec,
+        ["--select", "a", "--json", "--filter", "b"],
+        "cf call ... addItem",
+      ),
+    ).toContain(
+      "write:    cf call ... addItem --json -- --select a --filter b",
     );
   });
 });
