@@ -734,11 +734,6 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(created.watermark).toBeGreaterThanOrEqual(second.seq);
   });
 
-  // stage P2-F: the demand-cycle terminal state (OW19)
-
-  /** A facade whose watch registry names exactly the given demanded
-   * roots — the unit-level stand-in for client sessions' watches (the
-   * production feed is pinned in the serving-loop E2E). */
   //
   // The demand-seam apparatus
   //
@@ -801,6 +796,10 @@ describe("stage G SpaceServer recovery seams", () => {
     }
     return rows;
   };
+
+  /** A facade whose watch registry names exactly the given demanded
+   * roots — the unit-level stand-in for client sessions' watches (the
+   * production feed is pinned in the serving-loop E2E). */
   const demandFacade = (
     roots: Array<{
       id: string;
