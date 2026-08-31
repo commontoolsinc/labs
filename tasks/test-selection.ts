@@ -130,6 +130,7 @@ export function parseIdentityArgument(text: string): TestIdentity | undefined {
 export function explainLines(
   manifest: Manifest,
   test: TestIdentity,
+  selected = false,
 ): string[] {
   const key = testIdentityKey(test);
   const entry = manifest.entries.find(
@@ -166,8 +167,19 @@ export function explainLines(
           "request cannot act on it"
         : "  withheld: it is too flaky to judge a change by",
     );
-  } else if (entry.repeats > 1) {
-    lines.push(`  run ${entry.repeats} times, and every one must pass`);
+  } else {
+    if (entry.repeats > 1) {
+      lines.push(`  run ${entry.repeats} times, and every one must pass`);
+    }
+    // The question this mode exists to answer. Withheld and repeated are
+    // facts about the entry; whether it is reached at all is a fact about
+    // the packing, and only the packing knows it.
+    lines.push(
+      selected
+        ? "  the current manifest selects it"
+        : "  the current manifest does not reach it: the budget runs out " +
+          "first, on tests worth more per second",
+    );
   }
   return lines;
 }
@@ -180,12 +192,13 @@ function laneLine(
     `${lane.projectedSeconds.toFixed(1)}s of ${LANE_BUDGET_SECONDS}s`;
 }
 
+/** The packing, over a manifest and no diff, as a lane would compute it. */
+function planFor(manifest: Manifest) {
+  return plan({ manifest, mandatory: new Map(), capabilities: new Map() });
+}
+
 function printDryRun(manifest: Manifest, laneNumber: number | undefined): void {
-  const result = plan({
-    manifest,
-    mandatory: new Map(),
-    capabilities: new Map(),
-  });
+  const result = planFor(manifest);
   const lanes = laneNumber === undefined
     ? result.lanes
     : result.lanes.filter((lane) => lane.lane === laneNumber);
@@ -270,7 +283,16 @@ async function main(args: readonly string[]): Promise<void> {
         test,
         manifest.generatedAt.slice(0, 10),
       );
-      for (const line of explainLines(manifest, resolved)) console.log(line);
+      // Run the same packing a lane runs, so the answer is the one the
+      // lanes would give rather than a guess from the entry alone.
+      const plan = planFor(manifest);
+      const key = testIdentityKey(resolved);
+      const selected = plan.lanes.some((lane) =>
+        lane.selections.some((s) => testIdentityKey(s.entry.test) === key)
+      );
+      for (const line of explainLines(manifest, resolved, selected)) {
+        console.log(line);
+      }
       return;
     }
     case "plan": {

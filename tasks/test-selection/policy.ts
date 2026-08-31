@@ -16,7 +16,10 @@
 /** How many jobs a pull request's tests are packed into. */
 export const LANES = 5;
 
-/** The hard bound on a lane's work step. */
+/**
+ * The hard bound on a lane's work step. A lane job's own timeouts have to
+ * be set against this, and no lane job exists yet to carry them.
+ */
 export const LANE_BOUND_SECONDS = 300;
 
 /** Checkout, Deno, cache restore, ship, and job overhead. */
@@ -233,9 +236,10 @@ export const DIALS: readonly Dial[] = [
     setBy: "chosen",
     why:
       "Up when more should fit in a lane; down when five minutes is longer " +
-      "than anybody will wait for a first answer. Either way " +
-      "LANE_WORK_TIMEOUT_MINUTES and LANE_JOB_TIMEOUT_MINUTES in deno.yml " +
-      "move with it.",
+      "than anybody will wait for a first answer. The lane jobs that this " +
+      "bounds do not exist yet; when they do, their work-step and job " +
+      "timeouts in deno.yml have to move with it, and nothing checks that " +
+      "until they are written.",
   },
   {
     name: "LANE_PROLOGUE_SECONDS",

@@ -16,9 +16,10 @@ import {
   value,
 } from "./score.ts";
 import { VALUE_FLOOR } from "./policy.ts";
+import { testIdentityKey } from "@commonfabric/test-support/records";
 
 const TEST = { k: "unit", s: "memory", n: "space > writes a fact" };
-const KEY = JSON.stringify([TEST.k, TEST.s, TEST.n]);
+const KEY = testIdentityKey(TEST);
 
 /** One observation, with the parts a case does not care about filled in. */
 function saw(
@@ -30,6 +31,7 @@ function saw(
     outcome,
     durationMs: 100,
     day: "2026-08-20",
+    startedAt: "2026-08-20T00:00:00.000Z",
     commit: "c1",
     source: "main",
     place: "main",

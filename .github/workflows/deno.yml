@@ -500,7 +500,9 @@ jobs:
           # the global `clock` the converted tests use is undefined. See
           # test/clock-preload.ts. The second captures the file each test
           # registers from, which is what gives the shipped records their
-          # file metadata.
+          # file metadata; it writes that map into the spool, so the spool
+          # is in the write list beside the temporary directories, or the
+          # preload finds nowhere to put it and declines to install.
           # These permissions mirror the `test` task in
           # packages/runner/deno.jsonc; a test that needs a new one needs it
           # in both places, because this shard runs deno test directly.
@@ -512,7 +514,7 @@ jobs:
             --allow-ffi \
             --allow-env \
             --allow-read \
-            --allow-write=/tmp,/var/folders \
+            --allow-write=/tmp,/var/folders,$CF_TEST_RECORDS_DIR \
             --allow-run=git,deno \
             $TEST_FILES
 

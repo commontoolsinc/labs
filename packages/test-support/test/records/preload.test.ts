@@ -160,8 +160,10 @@ describe("preload", () => {
         "whole definition",
       ].sort());
       for (const outcome of reported.values()) expect(outcome).toEqual("pass");
-      // The options each form carried have to survive the wrapper, or a
-      // test that opted out of a sanitizer is run under it again.
+      // That each form registers and runs. That the options it carried
+      // reach the definition is asserted directly against `asDefinition`
+      // in registration.test.ts: Deno's sanitizers do not fire on a leak
+      // these bodies could stage, so no outcome here would differ.
       const names = await readNameMaps(fixture.spool);
       expect(names.get("name, options and body")).toEqual("overloads.test.ts");
       expect(names.get("options and body")).toEqual("overloads.test.ts");

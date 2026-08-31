@@ -206,6 +206,7 @@ export function readReport(
         outcome: record.outcome,
         durationMs: record.durationMs,
         day,
+        startedAt: group.context.startedAt,
         commit: group.context.commit,
         source: where.source,
         place: where.place,
@@ -366,6 +367,7 @@ export class Fold {
   readonly #surfaces = new Map<string, Surface>();
   readonly #samples = new Map<string, Map<string, DaySamples>>();
   readonly #folded: string[];
+  readonly #foldedIndex: Set<string>;
   readonly #compactedDays: string[];
   readonly #resolver: AliasResolver;
   readonly #today: string;
@@ -382,6 +384,10 @@ export class Fold {
       ) => [key, { ...emptyState(), ...state }]),
     );
     this.#folded = [...aggregate.folded];
+    // The array is what is persisted; membership is asked once per listed
+    // object per run, and the list grows without bound, so the question
+    // is answered against a set rather than by scanning.
+    this.#foldedIndex = new Set(this.#folded);
     this.#compactedDays = [...aggregate.compactedDays];
     this.#resolver = resolver;
     this.#today = today;
@@ -394,7 +400,7 @@ export class Fold {
 
   /** Whether this object's records are already part of the aggregate. */
   knows(objectName: string): boolean {
-    return this.#folded.includes(objectName);
+    return this.#foldedIndex.has(objectName);
   }
 
   /**
@@ -421,11 +427,8 @@ export class Fold {
    * and forwards at what it says next.
    */
   add(reports: readonly StoredReport[]): void {
-    const ordered = [...reports].sort((a, b) =>
-      (a.context?.startedAt ?? "").localeCompare(b.context?.startedAt ?? "")
-    );
     const observations: Observation[] = [];
-    for (const report of ordered) {
+    for (const report of reports) {
       const read = readReport(report, this.#resolver);
       observations.push(...read.observations);
       for (const [key, surface] of read.surfaces) {
@@ -444,7 +447,16 @@ export class Fold {
         }
       }
       this.#folded.push(report.objectName);
+      this.#foldedIndex.add(report.objectName);
     }
+    // Sorted here rather than by object, because one object can hold many
+    // reports — a rollup holds a whole day of them — and a batch can hold
+    // objects whose reports interleave in time. The rules that decide
+    // whether a failure is a catch look backwards and forwards along this
+    // order, so it has to be the order the runs actually happened in.
+    observations.sort((a, b) =>
+      a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0
+    );
     this.#observations += observations.length;
     foldObservations(observations, {
       prior: this.#states,

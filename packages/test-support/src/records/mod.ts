@@ -60,6 +60,7 @@ export {
 export type { HeldSpool, SpoolContents } from "./spool.ts";
 export {
   activeCapture,
+  asDefinition,
   fileForName,
   installRegistrationCapture,
   NAME_MAP_PREFIX,

@@ -85,7 +85,7 @@ const CTX: Ctx = {
 };
 
 /** A store holding one manifest under a fixed name. */
-async function storeHolding(manifest: Parameters<typeof serializeManifest>[0]) {
+function storeHolding(manifest: Parameters<typeof serializeManifest>[0]) {
   return storeOf({
     [`${PREFIX}/manifest-2026-08-20T04:00:00.000Z-a.json.gz`]:
       serializeManifest(manifest),
@@ -107,7 +107,7 @@ Deno.test("both test tiles are unknown when there is no manifest", async () => {
 });
 
 Deno.test("the flake tile is green when nothing is withheld as flaky", async () => {
-  const tile = makeTestFlakes({ fetchImpl: await storeHolding(sampleManifest()) });
+  const tile = makeTestFlakes({ fetchImpl: storeHolding(sampleManifest()) });
   const view = await tile.collect(CTX);
   assertEquals(view.status, "good");
   assertEquals(view.value, "0");
@@ -121,7 +121,7 @@ Deno.test("the flake tile counts what selection held back, and names the worst",
     entries: [noisy],
     withheld: [{ test: noisy.test, suite: noisy.suite, reason: "flaky" }],
   });
-  const view = await makeTestFlakes({ fetchImpl: await storeHolding(manifest) })
+  const view = await makeTestFlakes({ fetchImpl: storeHolding(manifest) })
     .collect(CTX);
   assertEquals(view.status, "warn");
   assertEquals(view.value, "1");
@@ -143,7 +143,7 @@ Deno.test("the selection tile says what share of the corpus would run", async ()
     }],
   });
   const view = await makeTestSelection({
-    fetchImpl: await storeHolding(manifest),
+    fetchImpl: storeHolding(manifest),
     now: () => Date.parse("2026-08-20T05:00:00.000Z"),
   }).collect(CTX);
   assertEquals(view.status, "good");
@@ -156,7 +156,7 @@ Deno.test("the selection tile says what share of the corpus would run", async ()
 
 Deno.test("the selection tile goes amber once the manifest has gone stale", async () => {
   const view = await makeTestSelection({
-    fetchImpl: await storeHolding(sampleManifest()),
+    fetchImpl: storeHolding(sampleManifest()),
     now: () => Date.parse("2026-08-21T04:00:00.000Z"),
   }).collect(CTX);
   assertEquals(view.status, "warn");
@@ -184,7 +184,7 @@ Deno.test("the selection tile goes red when a lane is past its budget", async ()
     }],
   });
   const view = await makeTestSelection({
-    fetchImpl: await storeHolding(manifest),
+    fetchImpl: storeHolding(manifest),
     now: () => Date.parse("2026-08-20T05:00:00.000Z"),
   }).collect(CTX);
   assertEquals(view.status, "bad");

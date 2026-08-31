@@ -47,6 +47,13 @@ export interface Observation {
   /** UTC calendar day, "yyyy-mm-dd". */
   day: string;
 
+  /**
+   * When the run this came from started, ISO 8601 UTC. The day is what
+   * the counters are kept by; this is what the order is taken from, which
+   * a day is too coarse for.
+   */
+  startedAt: string;
+
   /** The commit the tests ran against. */
   commit: string;
 
@@ -317,6 +324,23 @@ export function foldObservations(
     }
   }
 
+  // What the default branch said at each commit, gathered before anything
+  // is judged. Otherwise a failure elsewhere at the same commit is
+  // classified against whatever `main` had said *last*, which depends on
+  // whether this batch happened to list the `main` run first.
+  const mainAtCommit = new Map<string, "pass" | "fail" | "skip">();
+  for (const observation of observations) {
+    if (observation.place !== "main" || observation.outcome === "skip") {
+      continue;
+    }
+    const at = `${testIdentityKey(observation.test)} ${observation.commit}`;
+    // A failure anywhere at one commit is the commit being broken; a pass
+    // beside it does not clear that.
+    if (observation.outcome === "fail" || !mainAtCommit.has(at)) {
+      mainAtCommit.set(at, observation.outcome);
+    }
+  }
+
   const environmental = (key: string, day: string, source: string): boolean => {
     const nearby = new Set<string>([source]);
     for (const failure of failures.get(key) ?? []) {
@@ -365,10 +389,19 @@ export function foldObservations(
       continue;
     }
     if (environmental(key, day, observation.source)) continue;
-    if (observation.place !== "main" && state.lastMainOutcome === "fail") {
-      // Already broken on `main`, so this run learned nothing about the
-      // change in front of it.
-      continue;
+    if (observation.place !== "main") {
+      // Already broken on the default branch, so this run learned nothing
+      // about the change in front of it. What that branch says at this
+      // very commit outranks what it last said, and is known ahead of
+      // time so that the order this batch happened to arrive in cannot
+      // decide the verdict.
+      const here = mainAtCommit.get(`${key} ${observation.commit}`);
+      if (
+        here === "fail" ||
+        (here === undefined && state.lastMainOutcome === "fail")
+      ) {
+        continue;
+      }
     }
     if (observation.place === "main") {
       // Whether this was a catch depends on what the next `main` run

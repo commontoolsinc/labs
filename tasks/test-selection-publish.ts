@@ -188,22 +188,19 @@ async function listSubmissions(days: readonly string[]): Promise<string[]> {
   const bucket = storeBucket();
   const wanted = new Set(days);
   const names: string[] = [];
+  // A listing that fails is not an empty day. Folding what did list and
+  // publishing from it would score every identity in the missing day as
+  // though it had not run, and the manifest saying so would become the
+  // one every lane obeys. The run ends instead, and the previous manifest
+  // stays newest.
   for (const day of days) {
     const prefix = `${ciSubmissionsPrefix()}/v1/${day}/`;
-    try {
-      names.push(...await listObjects({ bucket, prefix }));
-    } catch (error) {
-      console.warn(`test selection: listing ${prefix} failed: ${error}`);
-    }
+    names.push(...await listObjects({ bucket, prefix }));
   }
   const local = `${storePrefix()}/submissions/local/`;
-  try {
-    for (const name of await listObjects({ bucket, prefix: local })) {
-      const day = name.match(/\/v1\/(\d{4}\/\d{2}\/\d{2})\//)?.[1];
-      if (day !== undefined && wanted.has(day)) names.push(name);
-    }
-  } catch (error) {
-    console.warn(`test selection: listing ${local} failed: ${error}`);
+  for (const name of await listObjects({ bucket, prefix: local })) {
+    const day = name.match(/\/v1\/(\d{4}\/\d{2}\/\d{2})\//)?.[1];
+    if (day !== undefined && wanted.has(day)) names.push(name);
   }
   return [...new Set(names)].sort(byDayThenName);
 }
@@ -381,7 +378,17 @@ async function main(args: readonly string[]): Promise<number> {
   }
 
   const open = partitions.filter((day) => !fold.knowsDay(day));
-  const listed = await listSubmissions(open);
+  let listed: string[];
+  try {
+    listed = await listSubmissions(open);
+  } catch (error) {
+    console.warn(`test selection: listing the submissions failed: ${error}`);
+    console.warn(
+      "test selection: refusing to publish from part of the window. The " +
+        "previous manifest is still the newest one.",
+    );
+    return 1;
+  }
   const fresh = listed.filter((name) => !fold.knows(name));
   console.log(
     `test selection: ${listed.length} object(s) under ${open.length} ` +
@@ -392,28 +399,30 @@ async function main(args: readonly string[]): Promise<number> {
   // tens of thousands of objects, each holding hundreds of executions,
   // and holding them all would be bounded by the number of runs rather
   // than by the number of tests.
-  for (let at = 0; at < fresh.length; at += CHUNK) {
-    const chunk = fresh.slice(at, at + CHUNK);
-    const reports = (await mapConcurrent(
-      chunk,
-      options.concurrency,
-      async (objectName): Promise<StoredReport | undefined> => {
-        try {
-          return await readObject({ bucket, objectName });
-        } catch (error) {
-          console.warn(
-            `test selection: reading ${objectName} failed: ${error}`,
-          );
-          return undefined;
-        }
-      },
-    )).filter((report): report is StoredReport => report !== undefined);
-    for (const report of reports) noteReport(report);
-    fold.add(reports);
-    console.log(
-      `test selection: folded ${at + chunk.length} of ${fresh.length} ` +
-        `object(s)`,
+  try {
+    for (let at = 0; at < fresh.length; at += CHUNK) {
+      const chunk = fresh.slice(at, at + CHUNK);
+      const reports = await mapConcurrent(
+        chunk,
+        options.concurrency,
+        // A read that fails is not an object with no records, so it is not
+        // swallowed: the same partial-history argument as the listing.
+        (objectName) => readObject({ bucket, objectName }),
+      );
+      for (const report of reports) noteReport(report);
+      fold.add(reports);
+      console.log(
+        `test selection: folded ${at + chunk.length} of ${fresh.length} ` +
+          `object(s)`,
+      );
+    }
+  } catch (error) {
+    console.warn(`test selection: reading a submission failed: ${error}`);
+    console.warn(
+      "test selection: refusing to publish from part of the window. The " +
+        "previous manifest is still the newest one.",
     );
+    return 1;
   }
   const folded = fold.finish();
 

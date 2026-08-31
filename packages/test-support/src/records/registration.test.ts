@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { join } from "@std/path";
 
 import {
+  asDefinition,
   fileForName,
   NAME_MAP_PREFIX,
   NAME_MAP_SUFFIX,
@@ -63,6 +64,63 @@ describe("registration", () => {
     it("returns undefined when no frame names a file", () => {
       expect(registeringModule("")).toBeUndefined();
       expect(registeringModule("Error\n    at <anonymous>")).toBeUndefined();
+    });
+  });
+
+  describe("asDefinition()", () => {
+    const body = () => {};
+
+    it("takes a name and a body", () => {
+      expect(asDefinition(["a name", body])).toEqual({
+        name: "a name",
+        fn: body,
+      });
+    });
+
+    it("keeps the options a name-and-options call carried", () => {
+      // Dropping these is the shape that registers a definition with no
+      // body, which Deno refuses and which fails the whole module.
+      expect(asDefinition(["a name", { sanitizeOps: false }, body])).toEqual({
+        name: "a name",
+        sanitizeOps: false,
+        fn: body,
+      });
+    });
+
+    it("keeps the options an options-and-body call carried", () => {
+      expect(
+        asDefinition([{ name: "a name", sanitizeResources: false }, body]),
+      ).toEqual({ name: "a name", sanitizeResources: false, fn: body });
+    });
+
+    it("names an options-and-body call after its function", () => {
+      function namedByItsFunction() {}
+      expect(asDefinition([{ ignore: true }, namedByItsFunction])).toEqual({
+        name: "namedByItsFunction",
+        ignore: true,
+        fn: namedByItsFunction,
+      });
+    });
+
+    it("takes a whole definition as it is", () => {
+      const definition = { name: "a name", fn: body, only: true };
+      expect(asDefinition([definition])).toBe(definition);
+    });
+
+    it("names a bare function after itself", () => {
+      function bodyAlone() {}
+      expect(asDefinition([bodyAlone])).toEqual({
+        name: "bodyAlone",
+        fn: bodyAlone,
+      });
+    });
+
+    it("returns undefined for a shape it does not model", () => {
+      // Those reach the real registrar untouched, so Deno reports them.
+      expect(asDefinition([])).toBeUndefined();
+      expect(asDefinition(["a name"])).toBeUndefined();
+      expect(asDefinition([{ sanitizeOps: false }, () => {}])).toBeUndefined();
+      expect(asDefinition([42, body])).toBeUndefined();
     });
   });
 

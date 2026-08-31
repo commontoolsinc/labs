@@ -370,7 +370,7 @@ export function installRegistrationCapture(
  * function with no name to take. The caller passes those through
  * untouched, so Deno reports them as it would have.
  */
-function asDefinition(
+export function asDefinition(
   args: readonly unknown[],
 ): Deno.TestDefinition | undefined {
   const [first, second, third] = args;
