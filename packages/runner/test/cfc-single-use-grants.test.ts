@@ -185,9 +185,14 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     });
   });
 
-  // Shared harness (cfc-grant-records.test.ts style): a labeled cell, a
-  // policyState-guarded sink rule, and a Runtime whose experimental
-  // commitPreconditions flag is the receipts dial.
+  //
+  // Shared harness
+  //
+  // In `cfc-grant-records.test.ts` style: a labeled cell, a policyState-guarded
+  // sink rule, and a Runtime whose experimental commitPreconditions flag is the
+  // receipts dial. Every region below draws on these.
+  //
+
   const SECRET_SCHEMA = internSchema(
     {
       type: "object",

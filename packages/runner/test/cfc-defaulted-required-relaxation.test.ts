@@ -80,6 +80,7 @@ describe("relaxDefaultedRequired", () => {
       })).toBeUndefined();
     });
   });
+
   it("relaxes a default the subtree's own $defs scope provides", () => {
     // A subtree that declares its own `$defs` opens a new local-ref scope
     // (`cfcSchemaChildRoot`), so its refs must resolve against ITS definitions,
@@ -141,6 +142,7 @@ describe("relaxDefaultedRequired", () => {
       })).toBeUndefined();
     });
   });
+
   it("follows a $ref chain to find the default", () => {
     expect(relaxedValidationError({}, {
       type: "object",

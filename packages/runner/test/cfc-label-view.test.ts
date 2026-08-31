@@ -1675,8 +1675,10 @@ describe("redactSigilCfcLabelViewsForDisplay", () => {
   // copy-on-write gate: such a value has zero enumerable own properties, so no
   // member can come back changed, `changed` stays false, and the original goes
   // back by identity. That is a real guarantee resting on nothing but the
-  // zero-property fact, so these pin it -- give a special object an enumerable
-  // property and this walk starts flattening values on the ingress path.
+  // zero-property fact -- give a special object an enumerable property and
+  // this walk starts flattening values on the ingress path. Where the walk
+  // cannot make that guarantee it refuses instead, rather than leaving a view
+  // in place.
   //
 
   it("keeps a `FabricBytes` whole while stripping a sibling's view", () => {
