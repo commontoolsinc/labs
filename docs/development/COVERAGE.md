@@ -408,6 +408,42 @@ follows those five lines from the group-level `+5` down to the single artifact
 that covered them, and to the sibling rethrow that no artifact in either run
 covered.
 
+### Branches reached only when a batch carries unrelated work
+
+A fifth shape is the branch that handles what a failure did not touch: the
+skip for the entry a bulk operation leaves alone, the arm that keeps the
+survivors of a partial failure moving. Whether the branch runs is decided by
+what else was in the batch when the failure landed, and that is assembled by
+scheduling rather than named by any test.
+
+The server executor's wave withdrawal is one of those. When a foreign space's
+co-hosted engine cannot be resolved, `commitWave()` in
+`packages/runner/src/executor/wave.ts` walks the wave's contributions and
+withdraws the ones that sealed into that space — an event handler requeues, a
+derivation drops — while everything else commits. Reaching the skip that lets
+everything else through takes a wave holding both a contribution that crossed
+into the failed space and one that did not. An end-to-end test can provoke the
+first; the second is whatever the serving loop had sealed by then. The loop was
+entered by exactly one artifact in each of two consecutive runs, and it saw two
+contributions on one and one on the other.
+
+Assemble the batch in the test rather than provoking one. `WaveAccumulator`
+takes its space, lease and replica lookup as arguments and exposes
+`failForeignSpace()` as a method, so a test seals the contributions it wants,
+fails a space, and commits, with nothing else deciding what the wave holds. The
+`an unresolvable foreign space withdraws exactly its own crossings` case in
+`packages/runner/test/executor-wave.test.ts` puts one contribution of each kind
+in the wave and asserts the disposition of each, so a version that withdrew the
+bystander with the crossings fails rather than staying green on the line count.
+State all the arms in the one case rather than only the arm that moved. The
+derivation drop arm beside this flapping skip had never been covered on any
+run, and it comes for free once the wave is built by hand — whereas a case
+written for the skip alone leaves it exactly where it was, and a second case
+added for it later would set up the same wave twice.
+[The investigation record](../history/development/coverage-flake-foreign-space-withdrawal-2026-08-26.md)
+follows the single line from the group-level `+1` down to the one artifact that
+covered it, and to the two arms neither run reached.
+
 ### Checks the layer below already makes
 
 Not every line that moves deserves a test. Sometimes a line decides nothing:
