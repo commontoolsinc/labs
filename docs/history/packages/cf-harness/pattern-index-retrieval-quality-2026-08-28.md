@@ -69,6 +69,10 @@ holds 13 capabilities, 73 capability queries and 15 negatives. Choosing a
 fixture is choosing a population, so the choices are stated in the file and
 summarized here.
 
+These recorded measurements predate pattern-index #10 (`ded05dd`), which
+narrowed ranking to visible metadata; they use the earlier, wider haystack
+that included the private query fields described below.
+
 **Labels come from behaviour, not from wording.** Every discoverable entry was
 fetched with `getPattern` `includeSource: true` and its program and both
 declared schemas were read. An entry answers a need when a session could use

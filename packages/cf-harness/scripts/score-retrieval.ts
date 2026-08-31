@@ -136,7 +136,10 @@ const requireEnv = (
   return value;
 };
 
-/** The searchable text of one entry, as the index itself assembles it. */
+/**
+ * The visible-metadata haystack used by pattern-index #10 and later:
+ * description, keywords, and hashtags.
+ */
 const searchableText = (entry: PatternIndexListedPattern): string =>
   [entry.description, ...entry.keywords, ...entry.hashtags].join("\n")
     .toLowerCase();
