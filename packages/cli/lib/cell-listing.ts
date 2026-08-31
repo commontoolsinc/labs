@@ -1,11 +1,8 @@
 /**
  * The keys directly under a cell path, and the shaping that produces them.
  *
- * This is the listing primitive two surfaces read: path completion offers the
- * keys one level below the word being typed, and an interactive shell lists
- * the children of the place it stands in. The connection is a parameter, so a
- * caller already holding a runtime reads through it and only a caller that
- * passes none opens a fresh one.
+ * The connection is a parameter, so a caller already holding a runtime reads
+ * through it and only a caller that passes none opens a fresh one.
  *
  * A failure raises. An empty listing means the path names a leaf, which is a
  * different answer from "the read did not happen", and only the caller knows

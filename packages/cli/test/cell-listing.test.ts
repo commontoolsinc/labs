@@ -1,7 +1,6 @@
 /**
- * Unit tests for the cell listing that path completion and an interactive
- * shell both read. The injected controller stub is what lets the listing's
- * body run with no runtime, no socket, and no server behind it.
+ * Unit tests for the cell listing. The injected controller stub is what lets
+ * the listing's body run with no runtime, no socket, and no server behind it.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -80,9 +79,17 @@ describe("cell-listing", () => {
     });
 
     it("returns nothing for a leaf", async () => {
-      const pieces = stubController({ result: { items: { title: "a" } } });
+      // `keysOf(undefined)` is empty too, so the collected read is what tells
+      // an answered leaf apart from a read that never happened.
+
+      const read: (string | number)[][] = [];
+      const pieces = stubController(
+        { result: { items: { title: "a" } } },
+        read,
+      );
       expect(await listCellKeys(config, "items/title", {}, over(pieces)))
         .toEqual([]);
+      expect(read).toEqual([["items", "title"]]);
     });
 
     it("returns the root's keys given an empty path", async () => {

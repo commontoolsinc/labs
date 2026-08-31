@@ -10,9 +10,9 @@
   },
   "exports": {
     // Importing `.` builds the whole command tree, so a sibling package that
-    // calls a library seam names the module holding it. Each entry here is a
-    // contract with a second caller; a module with only one caller keeps its
-    // relative path.
+    // calls a library seam names the module holding it instead. An entry is a
+    // contract the package owes everyone outside it, which is what keeps the
+    // list short: a module reached only from within stays on relative paths.
     ".": "./mod.ts",
     "./commands/piece": "./commands/piece.ts",
     "./lib/cell-listing": "./lib/cell-listing.ts",
