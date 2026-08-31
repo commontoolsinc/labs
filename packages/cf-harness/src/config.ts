@@ -67,11 +67,18 @@ export interface HarnessPatternIndexConfig {
 
   /**
    * Whether a pattern the model authored and ran successfully is published
-   * back to the index. Absent means published: a run that can read the index
-   * contributes to it, so what one run worked out is available to the next.
-   * `false` makes the run a reader only.
+   * back to the index. Absent means published as a recorded entry. `false`
+   * makes the run a reader only.
    */
   publish?: boolean;
+
+  /**
+   * Whether successful authored patterns that pass the render gate are
+   * offered to search immediately. Absent means recorded only:
+   * discoverability is earned from later evidence. `true` is for deliberate
+   * corpus seeding.
+   */
+  publishDiscoverable?: boolean;
 }
 export type HarnessModelProviderId =
   | "openai-compatible-gateway"

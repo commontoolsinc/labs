@@ -5,8 +5,8 @@ import type {
 import { PATTERN_DISCOVERABILITY_REASONS } from "./publish-render-gate.ts";
 
 /**
- * One session's contributions to the pattern index, offered to search once
- * per capability rather than once per successful run.
+ * One session's contributions to the pattern index, retaining one candidate
+ * per capability rather than publishing every iteration as a candidate.
  *
  * ## The problem this exists for
  *
@@ -21,18 +21,20 @@ import { PATTERN_DISCOVERABILITY_REASONS } from "./publish-render-gate.ts";
  * ## What it does instead
  *
  * Every iteration is still RECORDED — nothing an authoring session produced
- * is lost, and `getPattern` and `cf:pattern:` answer for all of it. What the
- * ledger decides is which one search is offered.
+ * is lost, and `getPattern` and `cf:pattern:` answer for all of it. The
+ * request decides whether the retained candidate is discoverable; ordinary
+ * authored runs record it, while curated seeding requests discoverability.
  *
  * A staged request is held. Staging the same capability again publishes the
  * one being displaced immediately, as `discoverable: false`, and holds the
  * new one. What is still held when the session ends is published with the
- * discoverability its own render gate decided. So a session that authored a
- * capability four times leaves four records and one search result.
+ * discoverability the caller requested. So a session that authored a
+ * capability four times leaves four records and at most one search result.
  *
  * A staged request naming a held entry among its `dependencies` publishes
- * that dependency first, and discoverably, since it is not being superseded
- * — the index refuses a publication whose dependency it does not hold, so a
+ * that dependency first, with its requested discoverability, since it is not
+ * being superseded — the index refuses a publication whose dependency it does
+ * not hold, so a
  * session composing an atom it authored earlier needs that atom in the index
  * before the composite arrives. An entry published that way becomes the
  * `priorPatternId` of the next iteration staged under the same capability,
@@ -48,7 +50,7 @@ import { PATTERN_DISCOVERABILITY_REASONS } from "./publish-render-gate.ts";
  * does not bear on the run.
  *
  * **Two different capabilities described in identical words collapse**, the
- * later one taking the discoverable slot and the earlier being recorded. The
+ * later one taking the retained slot and the earlier being recorded. The
  * key is the model's own description and hashtags, which is also what the
  * index ranks a search against — so two entries this key cannot tell apart
  * are two entries a search cannot tell apart either.
@@ -108,14 +110,19 @@ export const createPatternIndexPublicationLedger = (
     supersede: boolean,
   ): void => {
     publishedByKey.set(key, request.patternId);
-    // A superseded entry the render gate already hid keeps the gate's
-    // reason: what a person reads later should say what was found, and being
-    // displaced is the less informative of the two facts.
+    // A render-gate reason is more informative than displacement and stays on
+    // a superseded entry. The generic automatic-recording reason is replaced:
+    // supersession specifically explains why an earlier iteration is not the
+    // retained candidate.
+    const automaticReason =
+      PATTERN_DISCOVERABILITY_REASONS["recorded-automatically"];
     const body = supersede
       ? {
         ...request,
-        nonDiscoverable: request.nonDiscoverable ??
-          { reason: PATTERN_DISCOVERABILITY_REASONS.superseded },
+        nonDiscoverable: request.nonDiscoverable?.reason === automaticReason
+          ? { reason: PATTERN_DISCOVERABILITY_REASONS.superseded }
+          : request.nonDiscoverable ??
+            { reason: PATTERN_DISCOVERABILITY_REASONS.superseded },
       }
       : request;
     chain = chain.then(async () => {

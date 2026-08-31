@@ -90,13 +90,12 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 /**
  * What a run's authored pattern was told about its contribution to the index.
  *
- * Recording a pattern and surfacing it in search are separate things, and the
- * gate decides only the second. Every pattern that ran is recorded in full:
- * `getPattern` answers for it and a `cf:pattern:` import resolves it, whatever
- * the gate found. `discoverable` — the render gate passed, or there was no
- * `$UI` for it to read, and the entry is offered to search. `recorded` — the
- * gate found a defect, or could reach no verdict, so the entry exists but
- * search does not offer it.
+ * Recording a pattern and surfacing it in search are separate things. Every
+ * pattern that ran is recorded in full: `getPattern` returns it and a
+ * `cf:pattern:` import resolves it, whatever the gate found. `discoverable`
+ * means deliberate seeding was enabled and the render gate passed, or there
+ * was no `$UI` for it to read. `recorded` is the ordinary default and is also
+ * the outcome whenever the gate found a defect or could reach no verdict.
  *
  * Nothing here is destructive: a wrong call costs an entry its discoverability
  * and a field flip restores it, where a refused publication could not be
@@ -113,6 +112,8 @@ export type PatternPublicationStatus = "discoverable" | "recorded";
  * derived from the rendered DOM may join it.
  */
 export type PatternPublicationReason =
+  /** The run was recorded without asking search to surface it. */
+  | "recorded-automatically"
   /** The probe rendered element content carrying no default-`toString` text. */
   | "ui-rendered"
   /**
@@ -198,6 +199,8 @@ export interface PatternRenderVerdict {
 export const PATTERN_PUBLICATION_MESSAGES: Readonly<
   Record<PatternPublicationReason, string>
 > = {
+  "recorded-automatically":
+    "recorded in the pattern index but NOT offered to search. Automatic publication records the run; discoverability is earned from later evidence.",
   "ui-rendered":
     "published to the pattern index and offered to search. Its $UI was rendered host-side against a synthetic instance of its own argument schema and produced text with no default-toString in it. That is all this certifies — not that the component works.",
   "no-ui":
@@ -209,7 +212,7 @@ export const PATTERN_PUBLICATION_MESSAGES: Readonly<
   "probe-failed":
     "recorded in the pattern index but NOT offered to search: a second instance of the pattern, built from synthetic inputs, could not be started, did not settle, or errored while rendering, so nothing was rendered and nothing was checked. The entry is uncertified rather than condemned.",
   "superseded":
-    "recorded in the pattern index but NOT offered to search: a later iteration in this session published under the same description and hashtags, and that one is what search offers. Iterating no longer leaves an entry behind per attempt.",
+    "recorded in the pattern index but NOT offered to search: a later iteration in this session published under the same description and hashtags, and that one is the session's retained candidate. Iterating no longer leaves a candidate behind per attempt.",
 };
 
 /**
@@ -226,6 +229,8 @@ export const PATTERN_PUBLICATION_MESSAGES: Readonly<
 export const PATTERN_DISCOVERABILITY_REASONS: Readonly<
   Record<PatternPublicationReason, string>
 > = {
+  "recorded-automatically":
+    "recorded automatically; discoverability is earned by evidence",
   "ui-rendered": "render gate: passed",
   "no-ui": "render gate: not applicable, the pattern declares no $UI",
   "ui-default-tostring":

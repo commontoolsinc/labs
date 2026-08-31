@@ -531,7 +531,7 @@ describe("cf-code-editor cursor stability", () => {
   });
 
   //
-  // NEGATIVE TESTS: Verify cursor DOES move when it should
+  // Where the cursor should move
   //
 
   it("should apply external update and move cursor after editor blur", async () => {
@@ -583,7 +583,7 @@ describe("cf-code-editor cursor stability", () => {
   });
 
   //
-  // STRESS TESTS: Edge cases and rapid operations
+  // Rapid operations and edge cases
   //
 
   it("should handle multiple rapid external updates correctly", async () => {
@@ -763,7 +763,7 @@ describe("cf-code-editor cursor stability", () => {
   });
 
   //
-  // ADVERSARIAL TESTS: Race conditions, timing attacks, edge cases
+  // Race conditions and timing edges
   //
 
   it("ADVERSARIAL: Cell update at exact debounce boundary should not corrupt state", async () => {
