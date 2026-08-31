@@ -331,8 +331,10 @@ Deno.test("collectDrift reports a package that declares no exports", () => {
 });
 
 //
-// The tests below drive the command entry point over temp git fixtures, so they
-// cover the clean and drift paths without depending on the real tree.
+// The entry point over temp git fixtures
+//
+// These drive the command over fixtures, so they cover the clean and drift
+// paths without depending on the real tree.
 //
 
 Deno.test("main reports success and returns 0 on a clean repo", async () => {
@@ -386,6 +388,13 @@ Deno.test("main reports an unresolvable specifier", async () => {
     await Deno.remove(root, { recursive: true });
   }
 });
+
+//
+// Reading the tree and the workspace exports
+//
+// The two readers on their own, over fixtures: what each drops, marks, and
+// surfaces when the input is not what it expects.
+//
 
 Deno.test("readTree drops a file the working tree has lost", async () => {
   const root = await fixtureRepo(
@@ -482,6 +491,13 @@ Deno.test("readWorkspaceExports surfaces an unreadable member config", async () 
  * inherit the test runner's lock flags and resolving its imports must not write
  * to the real deno.lock.
  */
+//
+// The real repository
+//
+// The two runs that read this tree rather than a fixture, which is what makes
+// the gate answer for the repository as it stands.
+//
+
 Deno.test("the script runs as a command over the real repo", async () => {
   const root = fromFileUrl(new URL("..", import.meta.url));
   const output = await runDenoCommandWithTemporaryLock({
@@ -523,7 +539,9 @@ Deno.test("every cited path and specifier resolves", async () => {
 });
 
 //
-// The three kinds of document this covers are named by different conventions,
+// The three kinds of document the scan reaches
+//
+// They are named by different conventions,
 // so each is pinned: a rename that drops one from the scan would otherwise be
 // invisible.
 //

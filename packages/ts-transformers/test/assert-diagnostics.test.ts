@@ -422,6 +422,8 @@ Deno.test("assert records a body that returns early", async () => {
 });
 
 //
+// What the stage leaves alone
+//
 // The stage sees the AST before type-checking has rejected anything, so it has
 // to survive a callback it cannot read and leave the call alone rather than
 // emit a broken body. These sources are deliberately not well-typed.
@@ -509,6 +511,10 @@ export default pattern(() => {
   // recording call; the operand itself is recorded instead.
   assertEquals(assertCaptureLabels(root), ["maybe.get()?.includes(1)"]);
 });
+
+//
+// Recording a receiver
+//
 
 Deno.test("assert reads the receiver of a recorded method call", async () => {
   const root = await transformed(

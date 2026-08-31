@@ -1,3 +1,11 @@
+/**
+ * The api package is the public type surface for `commonfabric`. Most of it
+ * is ambient type and `declare const` material with no runtime footprint, but
+ * the module itself still evaluates its concrete re-exports when imported.
+ * Loading it here exercises that evaluation, and pins the vocabulary the
+ * primitive predicate accepts along with the fetch result surface.
+ */
+
 import { expect } from "@std/expect";
 import {
   CFC_CANONICAL_ALIAS_NAMES,
@@ -6,13 +14,6 @@ import {
   type FetchBinaryResult,
   isFabricPrimitiveSchemaType,
 } from "@commonfabric/api";
-
-//
-// The api package is the public type surface for `commonfabric`. Most of it is
-// ambient type and `declare const` material with no runtime footprint, but the
-// module itself still evaluates its concrete re-exports when imported. Loading
-// it here exercises that evaluation and pins the new fetch result surface.
-//
 
 Deno.test("api module loads and re-exports the CFC canonical alias names", () => {
   expect(Array.isArray(CFC_CANONICAL_ALIAS_NAMES)).toBe(true);
