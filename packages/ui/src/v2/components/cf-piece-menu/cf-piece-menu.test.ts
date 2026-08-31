@@ -1085,6 +1085,18 @@ describe("the menu over a space with no piece", () => {
     expect(isDisabled(menu, "piece-menu-space-access")).toBe(true);
   });
 
+  it("reads no access rights it has no runtime to read them through", async () => {
+    // The entry that opens this panel is disabled without a runtime, so a
+    // caller reaching the panel anyway finds it still waiting rather than
+    // reporting a failure it never attempted.
+    const menu = newMenu();
+    menu.open({ space: SPACE, x: 40, y: 60 });
+
+    await menu.showPanel("access");
+
+    expect(shows(menu)).toContain("Reading access rights…");
+  });
+
   it("stays down when it is opened over neither a piece nor a space", () => {
     const menu = newMenu();
     menu.open({ x: 40, y: 60 });
