@@ -287,6 +287,15 @@ From [packages/cf-harness](.):
 - `deno task console` — build the console page and serve it on `127.0.0.1:8100`
 - `deno task console:build`, `deno task console:watch` — the build on its own,
   and a rebuild on save while changing the page
+- `deno task probe-skills-sh [--owner <owner>] "<query>"` — read a public skill
+  registry's search route and print the identifiers, names, and sources it
+  answers with, along with a count of the entries the client refused. It is the
+  one thing here that calls the live registry, which is why it is a script you
+  run rather than a test that runs itself; the committed tests use a captured
+  response. It prints no skill text, and the client behind it is not registered
+  as a tool, so no model can reach it. The discovery half of
+  [`../../docs/plans/external-skill-acquisition.md`](../../docs/plans/external-skill-acquisition.md)
+  is what it exists to exercise.
 
 ## CLI Example
 
