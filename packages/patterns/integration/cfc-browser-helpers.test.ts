@@ -1094,9 +1094,10 @@ describe("CFC browser helpers", () => {
   //
   // Filling, typing, and submitting
   //
-  // The helpers that reach a control by its keyboard rather than by a click:
-  // the same settle discipline as the click helpers, and what happens when a
-  // commit replaces the control they were typing into.
+  // The helpers that work a control without clicking it — filling a value,
+  // typing into it, pressing Enter to submit: the same settle discipline as
+  // the click helpers, and what happens when a commit replaces the control
+  // they were typing into.
   //
 
   it("settles the view before pressing Enter in a submit input", async () => {

@@ -78,8 +78,9 @@ Deno.test("spans pass through the OpenInference processor to the exporter", asyn
 //
 // The module's telemetry lifecycle
 //
-// The module registers its integration on import, and shutdown behaves
-// differently before that has happened and after.
+// The module registers an AI SDK telemetry integration on import, and
+// `shutdownOpenTelemetry()` behaves differently before `initOpenTelemetry()`
+// has run and after.
 //
 
 Deno.test("importing the module registers an AI SDK telemetry integration", () => {

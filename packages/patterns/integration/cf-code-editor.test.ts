@@ -763,7 +763,7 @@ describe("cf-code-editor cursor stability", () => {
   });
 
   //
-  // Race conditions and timing edges
+  // Race conditions, timing edges, and awkward content
   //
 
   it("ADVERSARIAL: Cell update at exact debounce boundary should not corrupt state", async () => {
