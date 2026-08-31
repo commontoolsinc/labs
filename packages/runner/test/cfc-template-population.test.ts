@@ -53,6 +53,7 @@ describe("CFC template population (Stage A): the two under-taints", () => {
   // {path:[...container,"*"], origin:"structure", observes} for observes ∈
   // {shape, value, followRef} — all carrying the same per-tx J, under the same
   // replace-from-criteria discipline.
+
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
@@ -551,6 +552,7 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
   // into the next op's action chain (the measured phase-B pointwise re-smear
   // that kept the route off in Stage A). The end-to-end smear pin is the
   // cfc-flow-pointwise map test, which runs with the generic route on.
+
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
@@ -773,6 +775,7 @@ describe("CFC template population (Stage A): class-split resolution", () => {
   // Resolution semantics over hand-seeded template entries with DISTINCT
   // per-class atoms — the runtime mints identical labels per class, so the
   // class split is only observable with seeded metadata.
+
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
@@ -1051,6 +1054,7 @@ describe("CFC template population (Stage A): record-only additionalProperties wa
   // as a `*` segment; mixed properties+additionalProperties schemas mint NO `*`
   // entry (pinned — the restriction is load-bearing, `*` matches any segment
   // and would over-taint the named fields).
+
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
@@ -1181,6 +1185,7 @@ describe("CFC template population (Stage A): cross-space label protection", () =
   // cross-space representation transform at mint exactly like the container
   // stamps they accompany — a membership J fed by a foreign labeled read
   // persists in commitment form under `enforce`.
+
   const userAtom = { type: CFC_ATOM_TYPE.User, subject: "did:key:alice" };
 
   it("templates with cross-space J persist commitment forms under enforce", async () => {
@@ -1274,6 +1279,7 @@ describe("CFC template population (Stage A): cross-space label protection", () =
 describe("CFC template population (Stage A): canonical form with `*` paths", () => {
   // Canonicalization and coalescing over multi-`*` paths (design §3.3 "no
   // changes required" — verified, not assumed).
+
   const entry = (
     path: string[],
     atom: string,

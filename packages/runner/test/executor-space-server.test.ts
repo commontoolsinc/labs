@@ -676,9 +676,7 @@ describe("stage G SpaceServer recovery seams", () => {
   });
 
   //
-  // Stage P2-F: late-notice accounting
-  //
-  // (the sx2 unskip flake)
+  // Stage P2-F: late-notice accounting (the sx2 unskip flake)
   //
 
   it("counts an authored notice that arrives AFTER a higher-seq echo (the two-producer notice race): late records still count and re-arm, and coverage stays in-order", async () => {
@@ -741,6 +739,13 @@ describe("stage G SpaceServer recovery seams", () => {
   /** A facade whose watch registry names exactly the given demanded
    * roots — the unit-level stand-in for client sessions' watches (the
    * production feed is pinned in the serving-loop E2E). */
+  //
+  // The demand-seam apparatus
+  //
+  // The helpers the regions below share: what they hand-feed, and the shape
+  // demand takes under (d′).
+  //
+
   // W0 (d′) SCRATCH: these seams hand-feed DEMAND with no client session.
   // Under (d′) demand is the tracked-ids CLOSURE (`demandedInstancesForSpace`
   // rows: instance-keyed, `root` marked) — a client watching a piece's

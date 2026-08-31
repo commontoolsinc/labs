@@ -1,9 +1,15 @@
 /**
- * Defense-in-depth on the real registrar (run-once / closed-window /
- * transactional) lives in cfreg-builder-identity.test.ts. What verifier-gating
- * relies on is pinned here: the rejecting variant, the trust gate, and the
- * approval signal, alongside the transformer↔verifier round trip and
- * re-registration under one identity.
+ * Security invariants for the `__cfReg` content-addressed registration
+ * mechanism (CT-1623). The compiled module body is treated as UNTRUSTED, and
+ * the defenses live in four layers: the verifier, the registrar capability,
+ * the per-value trust gate, and content addressing.
+ *
+ * The runtime layers are pinned here — the approval signal, the rejecting
+ * registrar and the sink it leaves untouched, the trust gate, the
+ * transformer↔verifier round trip, and re-registration under one identity.
+ * The adversarial verifier corpus lives in esm-verifier-adversarial.test.ts,
+ * and defense-in-depth on the real registrar (run-once, closed-window,
+ * transactional) in cfreg-builder-identity.test.ts.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -20,12 +26,6 @@ import {
   isTrustedBuilderArtifact,
   noteDerivedCopy,
 } from "../src/builder/pattern-metadata.ts";
-
-// Security invariants for the `__cfReg` content-addressed registration mechanism
-// (CT-1623). The compiled module body is treated as UNTRUSTED; defenses live in
-// four layers (verifier, registrar capability, per-value trust gate, content
-// addressing). The adversarial *verifier* corpus lives in
-// esm-verifier-adversarial.test.ts; this file pins the runtime layers.
 
 const IMPORT = `const cf = require("commonfabric");`;
 

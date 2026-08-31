@@ -1138,8 +1138,8 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
   //
   // The class THREADING (the predicate's plumbing)
   //
-  // The replica records the covering commit's class
-  // on its confirmed record — from the frame's `coverClass` on integrate,
+  // The replica records the covering commit's class on its confirmed record
+  // — from the frame's `coverClass` on integrate,
   // preserved across a same-seq re-upsert without one, dropped when the seq
   // moves without one, and `authored` for an own commit's promotion — and
   // `speculationRetirementView` surfaces it to the sweep.
