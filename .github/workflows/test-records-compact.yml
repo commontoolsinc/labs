@@ -42,9 +42,12 @@ jobs:
     if: vars.TEST_RECORDS_COMPACTOR_WIF_PROVIDER != ''
     runs-on: ubuntu-latest
     steps:
-      # Every third-party action in this credentialed workflow is pinned
-      # to an immutable commit, so a moved tag cannot alter the one
-      # privileged write path.
+      # The third-party actions named here are pinned to immutable
+      # commits, so a moved tag cannot alter the one privileged write
+      # path. The local deno-setup action this job also uses pulls
+      # actions/cache and denoland/setup-deno by tag, which is the
+      # repository's arrangement for every workflow rather than something
+      # this one sets.
       - name: 📥 Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 

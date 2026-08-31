@@ -171,11 +171,11 @@ which cannot read, list, overwrite, or delete; nothing already stored can
 be modified by any append credential. An incompatible schema writes under
 `v2/` and readers migrate at their own pace.
 
-Four writer principals exist. The **relay** — the only one that writes
+Three writer principals exist. The **relay** — the only one that writes
 what CI produced — holds create on `submissions/ci/` through a Workload
 Identity provider pinned to one workflow file on the default branch, with
-the impersonation binding keyed to that exact workflow ref. **People** hold per-person
-service accounts (`test-records-gh-<username>`, the login lowercased)
+the impersonation binding keyed to that exact workflow ref. **People**
+hold per-person service accounts (`test-records-gh-<username>`, the login lowercased)
 with create on their own `submissions/local/<username>/` folders, minted
 by a dispatch-gated workflow and delivered sealed to a
 requester-generated X25519 identity. Minting revokes the account's
