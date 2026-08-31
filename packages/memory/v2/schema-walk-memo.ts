@@ -490,6 +490,16 @@ export class SchemaWalkMemoSession implements CrossTraversalSchemaMemo {
 
   #replay(key: string, entry: SchemaWalkMemoEntry): void {
     if (this.#replayed.has(key)) {
+      // A second hit in this evaluation consumes the closure again. Cold
+      // entries may have been inserted since its first replay, so refresh the
+      // descendants before their parent just as the first replay did. Touching
+      // only `key` would leave an otherwise-hot child at the LRU's oldest end;
+      // later pressure could evict it and strand the parent for the next
+      // evaluation.
+      for (const childKey of this.#resolvedChildren.get(key) ?? []) {
+        const child = this.#store.entries.get(childKey);
+        if (child !== undefined) this.#replay(childKey, child);
+      }
       this.#touch(key, entry);
       return;
     }

@@ -415,6 +415,77 @@ describe("v2 schema walk memo", () => {
     expect(stillWarm.stats.dagTraversals).toBe(0);
   });
 
+  it("retouches descendants when a closure is served twice in one evaluation", async () => {
+    const space = "did:key:z6Mk-walk-memo-repeat-lru";
+    const engine = await openEngine({
+      url: new URL("memory:///walk-memo-repeat-lru"),
+    });
+    seed(engine, space, 1, [
+      { op: "set", id: "of:doc:hot-c", value: { value: { leaf: 3 } } },
+      {
+        op: "set",
+        id: "of:doc:hot-b",
+        value: { value: { next: link(space, "of:doc:hot-c") } },
+      },
+      {
+        op: "set",
+        id: "of:doc:hot-a",
+        value: { value: { next: link(space, "of:doc:hot-b") } },
+      },
+      {
+        op: "set",
+        id: "of:doc:hot-d",
+        value: { value: { next: link(space, "of:doc:hot-b") } },
+      },
+      { op: "set", id: "of:doc:cold", value: { value: { leaf: "cold" } } },
+      {
+        op: "set",
+        id: "of:doc:pressure",
+        value: { value: { leaf: "pressure" } },
+      },
+    ]);
+    const identity = { principal: "did:key:z6Mk-wm-p1", sessionId: "wm-s1" };
+    const store = createSchemaWalkMemoStore();
+    trackGraph(space, engine, QUERY_FOR("of:doc:hot-a"), undefined, {
+      ...identity,
+      schemaWalkMemo: store,
+    });
+    trackGraph(space, engine, QUERY_FOR("of:doc:hot-d"), undefined, {
+      ...identity,
+      schemaWalkMemo: store,
+    });
+    store.maxEntries = store.entries.size + 1;
+
+    // The first root replays A -> B -> C. The cold root is then inserted,
+    // and the third root consumes D -> B -> C, reaching B through the
+    // already-replayed branch. Pressure after that must evict A, not C: D's
+    // whole closure was the most recently consumed one.
+    const mixed = trackGraph(
+      space,
+      engine,
+      {
+        roots: [
+          "of:doc:hot-a",
+          "of:doc:cold",
+          "of:doc:hot-d",
+          "of:doc:pressure",
+        ].map((id) => ({ id, selector: { path: [], schema: true } })),
+      },
+      undefined,
+      { ...identity, schemaWalkMemo: store },
+    );
+    expect(mixed.stats.crossTraversalMemoHits).toBeGreaterThan(0);
+
+    const stillWarm = trackGraph(
+      space,
+      engine,
+      QUERY_FOR("of:doc:hot-d"),
+      undefined,
+      { ...identity, schemaWalkMemo: store },
+    );
+    expect(stillWarm.stats.dagTraversals).toBe(0);
+  });
+
   it("delivers through a memo-served watch", async () => {
     const space = "did:key:z6Mk-walk-memo-delivery";
     const server = new Server({
