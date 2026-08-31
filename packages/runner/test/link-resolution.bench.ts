@@ -229,10 +229,10 @@ Deno.bench("array element resolution in circular structures", () => {
 //
 // A list scanned through the reactive proxy: what a lift does when it reads a
 // collection of linked entries, and the shape the transaction-scoped memo
-// exists for. `one element read` is the per-element cost; `whole array read
-// per element` is a full pass for each element. The unmemoized cost of both is linear in the
-// number of resolutions, so a scan that touches each element more than once
-// pays it again per touch.
+// exists for. `one element read` is the per-element cost; `whole array read per
+// element` is a full pass for each element. The unmemoized cost of both is
+// linear in the number of resolutions, so a scan that touches each element more
+// than once pays it again per touch.
 //
 
 const LIST_LENGTH = 50;

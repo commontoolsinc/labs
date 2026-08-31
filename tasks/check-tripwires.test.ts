@@ -5,6 +5,8 @@ import { checkTripwire, main, TRIPWIRES } from "./check-tripwires.ts";
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 
 //
+// The manifest against the tree
+//
 // The check is only as good as its manifest: a typo'd path would make it pass
 // vacuously while reporting "intact", which is the failure mode that matters
 // most for a guard nobody looks at until the day it fires.
@@ -35,6 +37,8 @@ Deno.test("every tripwire's weakness is currently present", async () => {
   }
 });
 
+//
+// The obligation text
 //
 // The obligation text IS the deliverable — it is the only thing the person who
 // trips this will read. A tripwire whose instructions have gone stale is a
@@ -68,7 +72,8 @@ Deno.test("the real manifest passes end to end", async () => {
 // quietly stops working. Beside them sit the intact baseline, the legitimate
 // resolved weakness, and the driver that reports them all.
 //
-// Each case writes its own fixture file rather than pointing at a real one.
+// No case points at a real repository file: four write their own fixture,
+// and two name a path the repository does not have.
 // Self-reference bites here: a literal ".ignore(" anywhere in this file would
 // make the healthy case trip the DISABLED branch.
 //

@@ -1,6 +1,6 @@
 /**
- * Parsing tests for toolshed's `EnvSchema`: each strict-boolean and defaulted
- * variable is pinned against the misparse its type invites.
+ * Parsing tests for toolshed's `EnvSchema`: strict-boolean flags and
+ * defaulted variables, pinned against the misparse their types invite.
  *
  * The EXPERIMENTAL_* → ExperimentalOptions mapping (including its tri-state
  * unset/true/false fidelity) now lives in the runner's canonical

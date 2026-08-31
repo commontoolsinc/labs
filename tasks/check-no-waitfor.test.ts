@@ -70,7 +70,7 @@ Deno.test("importsPollingWaitFor detects an aliased import", () => {
 });
 
 //
-// Type-only imports, which cannot poll
+// Type members, and the value imports beside them
 //
 // A type-only import binds the type of `waitFor` and is erased before the test
 // runs, so it cannot poll. The value forms below it still have to be caught.
@@ -228,6 +228,8 @@ Deno.test("importsPollingWaitFor ignores an import inside a template literal", (
 });
 
 //
+// Blanking comments and strings
+//
 // The blanking of comments and strings must not swallow the code around them.
 //
 
@@ -267,7 +269,7 @@ Deno.test("importsPollingWaitFor ignores an import in a line-continued string", 
 });
 
 //
-// A relative path reaches the same waitFor without naming the package.
+// Relative paths that reach the same `waitFor`, and those that do not
 //
 
 Deno.test("importsPollingWaitFor detects a relative import of the package's utils.ts", () => {
@@ -349,6 +351,8 @@ Deno.test("isIntegrationTestFile excludes non-integration and non-ts files", () 
   );
 });
 
+//
+// The repository's own tree
 //
 // The following two tests run against the real repository tree. Together they
 // assert that the set of in-scope files importing the polling `waitFor` equals

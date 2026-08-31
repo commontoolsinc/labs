@@ -283,7 +283,9 @@ describe("Cell Static Methods", () => {
     });
 
     //
-    // More `Cell.of()` value cases
+    // More `Cell.of()` cases
+    //
+    // The values it takes, and the cell it hands back.
     //
 
     it("should create a cell with undefined value", () => {

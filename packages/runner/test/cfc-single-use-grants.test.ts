@@ -74,7 +74,7 @@ const baseInput = {
 
 describe("CFC single-use grants (§2.2 single-use releases)", () => {
   //
-  // Item 1: the `singleUse` field.
+  // Item 1: the `singleUse` field
   //
 
   describe("singleUse field (writer validation)", () => {
@@ -165,7 +165,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
   });
 
   //
-  // Item 2: the consumption receipt identity.
+  // Item 2: the consumption receipt identity
   //
 
   describe("consumption receipt derivation", () => {
@@ -188,9 +188,9 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
   //
   // Shared harness
   //
-  // In `cfc-grant-records.test.ts` style: a labeled cell, a policyState-guarded
-  // sink rule, and a Runtime whose experimental commitPreconditions flag is the
-  // receipts dial. Every region below draws on these.
+  // A labeled cell, a policyState-guarded sink rule, and a Runtime whose
+  // experimental commitPreconditions flag is the receipts dial. Every region
+  // below draws on these.
   //
 
   const SECRET_SCHEMA = internSchema(
@@ -698,7 +698,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
   });
 
   //
-  // Claim staging arms.
+  // Claim staging arms
   //
 
   describe("claim staging (flushCfcGrantConsumptionClaims)", () => {

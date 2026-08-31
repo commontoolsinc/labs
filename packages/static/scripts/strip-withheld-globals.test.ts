@@ -194,8 +194,8 @@ Deno.test("cliMain exits with the CLI status when it is the entry point", async 
 //
 // The error and write paths
 //
-// Driven with injected files rather than the
-// checked-in libraries, which are kept clean.
+// Driven with injected files rather than the checked-in libraries, which are
+// kept clean.
 //
 
 Deno.test("runCli --check fails when a library still declares a withheld global", async () => {
@@ -464,6 +464,8 @@ Deno.test("drops a namespace value member's trailing blank line", () => {
   );
 });
 
+//
+// `stillDeclared` on a namespace
 //
 // `stillDeclared` is the post-strip safety net. `runCli` only ever hands it
 // already-stripped text, where a withheld namespace has no value members left,

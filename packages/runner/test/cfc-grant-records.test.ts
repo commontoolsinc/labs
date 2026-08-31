@@ -112,8 +112,9 @@ const aliceShareFact = (audience: CfcAtom = userBob) => ({
 });
 
 describe("CFC grant records (§8.12.7 route 2a)", () => {
-  // The shared harness every region below draws on: a labeled cell, a
-  // policyState-guarded sink rule, a Runtime, and the grant writer and reader.
+  // The shared harness the regions from build-order item 2 on draw on: a
+  // labeled cell, a policyState-guarded sink rule, a Runtime, and the grant
+  // writer and reader.
 
   const SECRET_SCHEMA = internSchema(
     {
@@ -264,7 +265,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
   };
 
   //
-  // Build-order item 1: the `policyState` guard kind.
+  // Build-order item 1: the `policyState` guard kind
   //
 
   describe("policyState guard validation (boot, fail closed)", () => {
@@ -487,7 +488,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
   });
 
   //
-  // Build-order item 2: grant records + reserved-path storage discipline.
+  // Build-order item 2: grant records + reserved-path storage discipline
   //
 
   describe("grant document addressing", () => {
@@ -782,7 +783,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
   });
 
   //
-  // Resolution wired into the egress gate (build-order items 1+3).
+  // Resolution wired into the egress gate (build-order items 1+3)
   //
 
   describe("grant resolution at the sink egress gate", () => {

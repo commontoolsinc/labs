@@ -790,8 +790,9 @@ describe("stage G outbox + sqlite discharge", () => {
   // Refusals and failures at delivery
   //
   // What the drain does at the floor: a declared userless row delivers, an
-  // undeclared one and a deterministic rejection retire, and a transport
-  // failure keeps the row for the next drain.
+  // undeclared one retires, a deterministic rejection retires after writing
+  // its failure notice back onto the source event, and a transport failure
+  // keeps the row for the next drain.
   //
 
   it("does not retry an LT4 deterministic admission rejection: the row is deleted and counted failed", async () => {

@@ -75,6 +75,8 @@ Deno.test("pinned libsqlite3 release matches the resolved @db/sqlite", () => {
 });
 
 //
+// Picking the library file
+//
 // Provenance has to be read from the same libsqlite3 image that runs the query,
 // so the only acceptable file is the one `@db/sqlite` picks. These cover the
 // picking rule and the refusal to substitute a different file for one that
@@ -137,6 +139,13 @@ Deno.test("a local @db/sqlite build reports rather than binding another file", a
   );
 });
 
+//
+// Reading column origins
+//
+// These cover that the symbols bind at all, and what the bound library
+// reports for a query once the picking rule above has chosen a file.
+//
+
 function seed(path: string): void {
   const db = new Database(path); // writable for setup
   db.exec("CREATE TABLE emails (from_email TEXT, subject TEXT, body TEXT)");
@@ -160,13 +169,6 @@ function origins(
     stmt.finalize();
   }
 }
-
-//
-// Column-origin soundness
-//
-// What the bound library reports for a query, once the picking rule above
-// has chosen a file.
-//
 
 Deno.test({
   name: "column-origin metadata is reachable in this deployment",

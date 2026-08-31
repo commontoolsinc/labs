@@ -207,10 +207,14 @@ console.error(
     `total body bytes: ${parkingBodies.reduce((s, [, b]) => s + b.length, 0)}`,
 );
 
-// Bench naming: performance tracking keys each benchmark's timeline by the
-// origin file, group, and verbatim name, so groups and names must stay
-// stable across commits — no content hashes, byte counts, or module counts.
-// Volatile sizes go to stderr.
+//
+// Bench naming, and the module labels it needs
+//
+// Performance tracking keys each benchmark's timeline by the origin file,
+// group, and verbatim name, so groups and names must stay stable across
+// commits — no content hashes, byte counts, or module counts. Volatile
+// sizes go to stderr.
+//
 
 /** Basenames too vague to identify a module on their own. */
 const GENERIC_BASENAMES = new Set([

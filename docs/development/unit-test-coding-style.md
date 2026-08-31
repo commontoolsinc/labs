@@ -220,36 +220,41 @@ This holds for a test and for a group of them: `describe()`, `it()`, and
 not reach the `beforeEach()` family. A hook is setup rather than a case, and
 reads the way any other statement does with a line or two of `//` over it.
 
-A callback that opens no body of its own has nowhere to hold a comment, and
-the note stays beside it. Two shapes do that — a body that is a bare
-expression, and an empty body written on the opener's line:
+A callback that opens no body of its own has nowhere to hold a comment, and the
+note stays beside it. Three shapes do that — a body that is a bare expression,
+an empty body written on the opener's line, and an options object whose `fn` is
+the name of a function declared elsewhere:
 
 ```ts
 // Shown for illustration only.
 
 it("returns `undefined` for a bad name", () => expect(f(x)).toBeUndefined());
 Deno.test("would-pass", function () {});
+Deno.test({ name: "derive array leak", fn: runTest, sanitizeOps: false });
 ```
 
 This is the same allowance
 [`code-comment-style.md`](code-comment-style.md#where-one-goes) makes for a
 declaration with no body to put a note in.
 
+An options object whose `fn` is written out — `fn() { … }` or
+`fn: async () => { … }` — has a body like any other callback, and the
+comment goes inside it.
+
 Three nearby shapes are not this one:
 
-- A comment whose subject is a **run of sibling blocks** — two or three
-  adjacent cases that each pin one part of what it says — has no home inside
-  any one of them. That comment is telling you the run wants a
-  `describe()`: give the run its own block, and the comment goes inside that
-  block by the rule above, which is where a long rationale belongs anyway.
-  Wrapping a run renames every test in it, so where the history is worth
-  keeping, bridge the rename as [test records](test-records.md) describes. A
-  run that should not become a block takes a
-  [section marker](code-comment-style.md#section-markers) instead, and then the
-  region needs closing — a second marker after the run, or the end of the
-  enclosing block — or a reader cannot see where it ends. And where what you
-  have to say names the cases one at a time, say each part in the case it
-  belongs to rather than all of it in one place.
+- A comment whose subject is a **run of sibling blocks** — two or three adjacent
+  cases that each pin one part of what it says — has no home inside any one of
+  them. That comment is telling you the run wants a `describe()`: give the run
+  its own block, and the comment goes inside that block by the rule above, which
+  is where a long rationale belongs anyway. Wrapping a run renames every test in
+  it, so where the history is worth keeping, bridge the rename as [test
+  records](test-records.md) describes. A run that should not become a block
+  takes a [section marker](code-comment-style.md#section-markers) instead, and
+  then the region needs closing — a second marker after the run, or the end of
+  the enclosing block or file — or a reader cannot see where it ends. And where
+  what you have to say names the cases one at a time, say each part in the case
+  it belongs to rather than all of it in one place.
 - A comment describing the **file** rather than any block in it is a file
   header. It goes at the top of the file as a doc comment, per
   [File headers](code-comment-style.md#file-headers), and not above the
@@ -277,11 +282,11 @@ Three nearby shapes are not this one:
 A reader should be able to tell what a comment covers from where it sits, and
 each place carries one reach. First thing inside a callback, it covers that
 block — the single case, or the whole group, whichever the callback opens.
-Framed as a section marker, it covers the region running to the next marker or
-to the end of the block. Beside a hook or a body-less callback, it covers the
-statement it touches. At the top of the file, as a doc comment, it covers the
-file. Write each comment into the place that matches its reach and a reader
-never has to guess.
+Framed as a section marker, it covers the region running to the next marker at
+the same level, or to the end of the enclosing block or file. Beside a hook or a
+body-less callback, it covers the statement it touches. At the top of the file,
+as a doc comment, it covers the file. Write each comment into the place that
+matches its reach and a reader never has to guess.
 
 Give a file one way of showing its regions and keep to it. Where a file marks
 regions, a marker ends the one before it, so a series of them reads as a series
