@@ -94,6 +94,7 @@ export interface ExecutedMountedCallableFile {
 
   /** Tool result cell address, passed through from ExecutedCallable. */
   resultRef?: CallableResultRef;
+
   parsed: ParsedExecArgs;
   resolved: ResolvedMountedCallableFile;
 }

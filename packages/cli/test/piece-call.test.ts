@@ -1495,6 +1495,7 @@ function createPieceCallableHarness(options: {
    * nothing reaches the runtime error log: the reason on the transaction is
    * the whole signal. */
   abortedWithReason?: string;
+
   callableScope?: "space" | "user" | "session";
 
   /** Value the handling's receipt cell reads back ({} = value-less verb). */
@@ -3199,6 +3200,7 @@ describe("collectInvocationResultLinks", () => {
 
   /** The space the call targeted: an address in it carries no `@did`. */
   const contextSpace = "did:key:test-home" as MemorySpace;
+
   const receiptRef = "/of:receipt-1";
 
   it("yields just the receipt for a plain-JSON-only result", () => {

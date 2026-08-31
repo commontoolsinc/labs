@@ -31,6 +31,7 @@ import { executePieceCallable, handlerVerbEvents } from "../lib/piece.ts";
 /** A real-shaped piece id, so the address parser judges the spelling and not
  * a malformed hash. */
 const ID = "of:fid1:d2cuq3cMqJY3oaG3fkalMq4uO7BgLfBFkvI-Dm-Kk94";
+
 const ADDRESS = `/${ID}`;
 const ENVELOPE = { "/": { "link@1": { id: ID } } };
 
@@ -456,6 +457,7 @@ describe("verb-emitted-address", () => {
 
       /** `links[0]` read THROUGH, so it says where the edge landed. */
       linkedLabel: () => string | undefined;
+
       notes: () => string[];
 
       /** How many times the dispatch path loaded the compiled pattern. */

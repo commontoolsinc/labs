@@ -54,6 +54,7 @@ export interface ViewOptions {
 
   /** Start in the rendered representation when one is available. */
   rendered?: boolean;
+
   file?: string;
 
   /** Select piped source with this stable language identifier. */

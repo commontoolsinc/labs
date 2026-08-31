@@ -54,6 +54,7 @@ export interface ExpandResult {
 
   /** Exact workspace endings for the rows inserted into `text`. */
   insertedLineEndings: readonly (LineEndingProvenance | undefined)[];
+
   up: boolean;
   removedAt: number | null;
 
@@ -92,6 +93,7 @@ export interface EditableSource {
    * is read-only. `reason` is shown when a cursor move is attempted on a
    * non-editable view. */
   readonly editable: boolean;
+
   readonly reason?: string;
 
   /** Representation used when the caller did not choose one explicitly. */

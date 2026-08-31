@@ -160,6 +160,7 @@ interface Tracker {
   /** How many times a caller reached for the compiled pattern. The declared
    * result is behind it, so this is what a readback pays to bound itself. */
   patternLoads: () => number;
+
   root: Cell<any>;
 }
 

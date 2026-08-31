@@ -102,6 +102,7 @@ export interface CompletionLine {
 
   /** Command path below the program name, e.g. `["piece", "ls"]`. */
   readonly path: readonly string[];
+
   readonly slot: CompletionSlot | null;
 
   /** The partial word under the cursor; `""` at a fresh position. */
@@ -574,6 +575,7 @@ export interface DeclaredPositional {
 export interface DeclaredSlots {
   /** Option long name -> the command paths declaring it. */
   readonly options: ReadonlyMap<string, readonly string[]>;
+
   readonly positionals: readonly DeclaredPositional[];
 
   /**

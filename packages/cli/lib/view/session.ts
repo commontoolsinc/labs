@@ -178,6 +178,7 @@ interface ExpandOffer {
 
   /** Document line passed to the context expander. */
   readonly line: number;
+
   readonly up: boolean;
 }
 
@@ -218,6 +219,7 @@ export class Session {
 
   /** The parsed source document used for editing, offsets, and source cards. */
   #sourceDoc: Document;
+
   #currentDoc: Document;
   #viewMode: ViewMode = "source";
   #color: boolean;
@@ -236,6 +238,7 @@ export class Session {
 
   /** Bumped whenever `collapsed` changes, to invalidate the fold-plan cache. */
   #foldVersion = 0;
+
   #foldFileCache?: { doc: Document; files: DiffFileRange[] };
   #foldPlanCache?: { doc: Document; version: number; plan: FoldPlan };
   #wrapPlanCache?: {
@@ -293,6 +296,7 @@ export class Session {
    * first at or after the cursor and Enter lands the cursor there. Null for a
    * normal-mode `/` search. */
   #searchAnchor: { row: number; col: number } | null = null;
+
   #message = "";
   #mode: Mode = "normal";
   #input = "";
@@ -303,6 +307,7 @@ export class Session {
    * the chain of cards and file peeks. Empty when the current overlay is the
    * first one opened from the main view. */
   #overlayStack: Array<{ overlay: PeekOverlay; scroll: number }> = [];
+
   #semantics?: Semantics;
   quit = false;
 
@@ -349,6 +354,7 @@ export class Session {
    * editing an author-written -/+ pair to match does not. Overwritten by the
    * next split, cleared on a collapse or when the buffer text is replaced. */
   #splitRow: number | null = null;
+
   #cursorOn = false;
 
   /** Pending C-x prefix (Emacs chord), reset by the next key. */
@@ -383,6 +389,7 @@ export class Session {
   /** Every file and commit in the diff, in document order; the filter narrows
    * this into the shown `#jumpEntries`. */
   #jumpAll: JumpEntry[] = [];
+
   #jumpEntries: JumpEntry[] = [];
   #jumpFilter = "";
   #jumpSel = 0;

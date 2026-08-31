@@ -395,6 +395,7 @@ export interface ExecutedPieceCallable {
 
   /** Tool result cell address, passed through from ExecutedCallable. */
   resultRef?: CallableResultRef;
+
   parsed: ParsedExecArgs;
   resolved: ResolvedPieceCallable;
 }
@@ -1985,6 +1986,7 @@ export interface PieceCallablesListing {
    * `probeForcedStreamCell`, whose cast is the only thing that finds one and
    * finds every data field with it. */
   incomplete?: "pattern-unavailable";
+
   verbs: PieceCallableListing[];
 }
 
@@ -2316,6 +2318,7 @@ export function declaredVerbProse(
 interface DescriptionEdit {
   /** Keys from the served document's root down to the `description` slot. */
   readonly path: readonly string[];
+
   readonly description: string;
 }
 
@@ -3902,6 +3905,7 @@ export interface PieceInspection {
 
   /** The fields of `result` whose resolution crosses a computed-cell cache. */
   cachedResultFields: CachedResultField[];
+
   readingFrom: Array<{ id: string; name?: string }>;
   readBy: Array<{ id: string; name?: string }>;
 }

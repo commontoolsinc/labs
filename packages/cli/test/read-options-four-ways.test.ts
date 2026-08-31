@@ -59,6 +59,7 @@ import { safeStringify } from "../lib/render.ts";
  * every arrival.
  */
 const userIdentity = await Identity.fromPassphrase("cf-four-ways-user");
+
 const profileSpace = (await Identity.fromPassphrase("cf-four-ways-profile"))
   .did();
 

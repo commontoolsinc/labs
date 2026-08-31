@@ -35,6 +35,7 @@ function registeredRefTo(schema: JSONSchema): string {
   }
   return rootRef;
 }
+
 import { declaredVerbProse, withDeclaredFieldProse } from "../lib/piece.ts";
 
 /** `withDeclaredFieldProse` with both sides as plain objects. */

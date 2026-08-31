@@ -61,6 +61,7 @@ export type DiffAnnotationKind =
 export interface DiffAnnotation {
   /** Folded logical line carrying the annotation. */
   readonly line: number;
+
   readonly kind: DiffAnnotationKind;
 }
 
@@ -189,6 +190,7 @@ export interface ViewState {
 
   /** Whether the source is a diff. */
   isDiff?: boolean;
+
   showLineNumbers: boolean;
 
   /** How long logical lines continue on later screen rows. */
@@ -219,6 +221,7 @@ export interface ViewState {
 
   /** Command/search input line, e.g. "/token"; null in normal mode. */
   inputLine: string | null;
+
   overlay: OverlayState | null;
 
   /** A modal prompt drawn as a centered Turbo Vision dialog (the save, revert and

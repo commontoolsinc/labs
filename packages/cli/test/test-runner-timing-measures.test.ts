@@ -9,6 +9,7 @@
  * which is why it is pinned here rather than left to a reading of the code.
  */
 import { describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import { resolve } from "@std/path";
 import { runTests } from "../lib/test-runner.ts";

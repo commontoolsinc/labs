@@ -44,6 +44,7 @@ interface SectionFile {
 
   /** Global offset of the section's first character in the blob. */
   start: number;
+
   end: number;
   text: string;
 }
