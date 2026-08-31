@@ -4,9 +4,10 @@ Status: v1 design settled — the decisions below are ruled, and nothing
 blocks construction. The v1 cutline is drawn: a handful of settled designs
 are deferred past v1 and preserved in [`futures.md`](futures.md), so they
 are re-scheduled later rather than re-litigated, and the decisions below
-say so where they defer. Nothing here is built yet; the order of
-construction is [`build-sequence.md`](build-sequence.md). This document
-stays the working design state: new decisions land here as they are made.
+say so where they defer. Construction is under way;
+[`build-sequence.md`](build-sequence.md) carries the order and where each
+item stands. This document stays the working design state: new decisions
+land here as they are made.
 
 Shuttle is an interactive terminal tool for exploring and editing fabric
 state: a line-oriented REPL whose prompt carries a mutable **current place**,
