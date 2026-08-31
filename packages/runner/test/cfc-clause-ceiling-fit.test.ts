@@ -7,6 +7,7 @@ import {
   meetCfcObservationCeilings,
 } from "../src/cfc/observation.ts";
 import { normalizeClause } from "../src/cfc/clause.ts";
+import { commitCfcFieldValue } from "../src/cfc/label-representation.ts";
 
 // Epic A2 (docs/history/plans/cfc-future-work-implementation.md): the ceiling-fit
 // check becomes CNF clause subsumption (spec §8.10.3). The load-bearing case
@@ -16,6 +17,23 @@ import { normalizeClause } from "../src/cfc/clause.ts";
 const A = { type: "https://commonfabric.org/cfc/atom/User", subject: "A" };
 const B = { type: "https://commonfabric.org/cfc/atom/User", subject: "B" };
 const C = { type: "https://commonfabric.org/cfc/atom/User", subject: "C" };
+
+// The three spellings of one principal (§15.2), and the container atom that
+// carries the same DID without naming a person.
+const ALICE = "did:key:zAlice";
+const BOB = "did:key:zBob";
+const aliceUser = {
+  type: "https://commonfabric.org/cfc/atom/User",
+  subject: ALICE,
+};
+const alicePersonalSpace = {
+  type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+  owner: ALICE,
+};
+const aliceSpace = {
+  type: "https://commonfabric.org/cfc/atom/Space",
+  id: ALICE,
+};
 
 describe("CFC clause-aware ceiling fit", () => {
   describe("flat labels/ceilings behave exactly as before (golden)", () => {
@@ -107,6 +125,171 @@ describe("CFC clause-aware ceiling fit", () => {
       expect(
         cfcObservationFitsCeiling([{ anyOf: [A, C] }], [{ anyOf: [A, B] }]),
       ).toBe(false);
+    });
+  });
+
+  describe("a personal space's owner is one of its readers", () => {
+    // §3.6.4: the owner owns the space, so the owner is always among its
+    // readers. A ceiling whose audience is that owner is therefore inside a
+    // `PersonalSpace(owner)` label's audience however wide the space's
+    // membership has grown. The reverse containment does not hold: §3.6.5
+    // gives a newly added member access to all data in the space with no
+    // label rewriting, so the atom's audience is not the owner alone.
+
+    it("a personal-space LABEL fits a ceiling naming its owner", () => {
+      expect(cfcObservationFitsCeiling([alicePersonalSpace], [aliceUser]))
+        .toBe(true);
+    });
+
+    it("a personal-space CEILING does not admit its owner's label", () => {
+      expect(cfcObservationFitsCeiling([aliceUser], [alicePersonalSpace]))
+        .toBe(false);
+    });
+
+    it("names one person: another owner's space stays outside", () => {
+      const bobPersonalSpace = {
+        type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+        owner: BOB,
+      };
+      expect(cfcObservationFitsCeiling([bobPersonalSpace], [aliceUser]))
+        .toBe(false);
+    });
+
+    it("a Space atom carrying the same DID is not covered", () => {
+      // §15.2: a `Space(id)` reader is derived through verified `HasRole`
+      // exchange, which the kernel cannot run. Writer-fit also joins the
+      // target's own `Space(...)` onto every ceiling as the residency
+      // clause, so covering it here would admit that data space-wide.
+      expect(cfcObservationFitsCeiling([aliceSpace], [aliceUser])).toBe(false);
+      expect(cfcObservationFitsCeiling([aliceUser], [aliceSpace])).toBe(false);
+      expect(cfcObservationFitsCeiling([aliceSpace], [alicePersonalSpace]))
+        .toBe(false);
+    });
+
+    it("the bare DID string is not an atom and gets no reading", () => {
+      // §4.1.1: an atom is a structured value, not a simple string. The
+      // legacy bare form stays opaque in both positions.
+      expect(cfcObservationFitsCeiling([ALICE], [aliceUser])).toBe(false);
+      expect(cfcObservationFitsCeiling([aliceUser], [ALICE])).toBe(false);
+      expect(cfcObservationFitsCeiling([alicePersonalSpace], [ALICE]))
+        .toBe(false);
+    });
+
+    it("only a canonical two-field personal space with a DID owner", () => {
+      const scoped = { ...alicePersonalSpace, scope: "drafts" };
+      expect(cfcObservationFitsCeiling([scoped], [aliceUser])).toBe(false);
+      const numeric = {
+        type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+        owner: 42,
+      };
+      expect(cfcObservationFitsCeiling([numeric], [{
+        type: "https://commonfabric.org/cfc/atom/User",
+        subject: 42,
+      }])).toBe(false);
+      // §15.2 types the field as a DID; a string that is not one is a
+      // malformed atom and gets no reading, so two degenerate atoms do not
+      // meet each other through it.
+      // `isDID` and not a `did:` prefix: a truncated or method-only string
+      // is not a DID, and a method-specific id carrying a third colon is
+      // refused too — over-refusal, the safe way for this gate to be wrong.
+      for (const owner of ["", "alice", "did:", "did:key", "did:web:h:p"]) {
+        expect(cfcObservationFitsCeiling([{
+          type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+          owner,
+        }], [{
+          type: "https://commonfabric.org/cfc/atom/User",
+          subject: owner,
+        }])).toBe(false);
+      }
+    });
+
+    it("reaches into an OR-clause on the label side", () => {
+      expect(
+        cfcObservationFitsCeiling([{ anyOf: [alicePersonalSpace, C] }], [
+          aliceUser,
+        ]),
+      ).toBe(true);
+      // A ceiling enumeration still demands every alternative it names.
+      expect(
+        cfcObservationFitsCeiling([alicePersonalSpace], [{
+          anyOf: [aliceUser, C],
+        }]),
+      ).toBe(false);
+    });
+
+    it("meets a committed owner field against its plaintext twin", () => {
+      // `label-field-classification.ts` commits `PersonalSpace.owner` and
+      // `User.subject` alike, and the digest is of the field value, so a
+      // label persisted at a cross-space seam still meets a ceiling naming
+      // the same owner in plaintext.
+      const committedOwner = {
+        type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+        owner: commitCfcFieldValue(ALICE),
+      };
+      expect(cfcObservationFitsCeiling([committedOwner], [aliceUser]))
+        .toBe(true);
+      expect(
+        cfcObservationFitsCeiling([{
+          type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+          owner: commitCfcFieldValue(BOB),
+        }], [aliceUser]),
+      ).toBe(false);
+    });
+
+    it("reads own properties only", () => {
+      // The rewrite builds an atom out of the field it reads, so a prototype
+      // supplying `type`/`owner` must not reach it. Two own enumerable keys
+      // make `Object.keys` report the canonical arity without the canonical
+      // shape.
+      const inherited = Object.create(alicePersonalSpace) as Record<
+        string,
+        unknown
+      >;
+      inherited.a = 1;
+      inherited.b = 2;
+      expect(cfcObservationFitsCeiling([inherited as never], [aliceUser]))
+        .toBe(false);
+    });
+
+    it("a committed owner is admitted where its plaintext twin is refused", () => {
+      // A commitment is a digest of whatever the field held, so the
+      // well-formedness test cannot reach it: a malformed owner digests
+      // exactly as a DID does. Pinned so the asymmetry is explicit rather
+      // than a surprise — and pinned with what bounds it, that reaching the
+      // committed form takes a ceiling naming the same malformed subject.
+      const malformed = "alice";
+      expect(
+        cfcObservationFitsCeiling([{
+          type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+          owner: malformed,
+        }], [{
+          type: "https://commonfabric.org/cfc/atom/User",
+          subject: malformed,
+        }]),
+      ).toBe(false);
+      expect(
+        cfcObservationFitsCeiling([{
+          type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+          owner: commitCfcFieldValue(malformed),
+        }], [{
+          type: "https://commonfabric.org/cfc/atom/User",
+          subject: malformed,
+        }]),
+      ).toBe(true);
+      // A well-formed ceiling is unreachable from the malformed committed
+      // label, which is the bound that makes the gap tolerable.
+      expect(
+        cfcObservationFitsCeiling([{
+          type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+          owner: commitCfcFieldValue(malformed),
+        }], [aliceUser]),
+      ).toBe(false);
+    });
+
+    it("does not admit a label the ceiling omits entirely", () => {
+      expect(cfcObservationFitsCeiling([alicePersonalSpace], [])).toBe(false);
+      expect(atomsOutsideCeiling([alicePersonalSpace], [C]))
+        .toEqual([alicePersonalSpace]);
     });
   });
 

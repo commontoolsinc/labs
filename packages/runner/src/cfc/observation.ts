@@ -334,10 +334,14 @@ export const cfcIntegritySatisfiesFloorCoherently = (
  * iff SOME ceiling clause `c` subsumes it — `alts(c) ⊆ alts(l)` — so a reader
  * the ceiling admits (satisfying `c`) is entitled to data guarded by `l`.
  *
- * On flat labels (every clause a singleton) this is byte-for-byte the previous
- * membership check: `clauseSubsumes(a, l)` reduces to `deepEqual(a, l)`, so
- * `∃ c ∈ ceiling: deepEqual(c, l)` ≡ "the atom is in the allowlist". The
- * clause form additionally makes a **reader-enumeration** ceiling clause
+ * On flat labels (every clause a singleton) this is the previous membership
+ * check on every atom but one: `clauseSubsumes(a, l)` reduces to
+ * `deepEqual(a, l)`, so `∃ c ∈ ceiling: deepEqual(c, l)` ≡ "the atom is in
+ * the allowlist". The exception is a `PersonalSpace(owner)` LABEL, which also
+ * meets a ceiling naming that owner — the owner is one of the space's
+ * readers (`clause.ts`).
+ *
+ * The clause form additionally makes a **reader-enumeration** ceiling clause
  * `{anyOf:[r₁,…,rₖ]}` require EVERY listed reader to satisfy each label clause
  * (`∀reader ∀clause`) — closing the quantifier hole where a multi-party label
  * `[User(A),User(B)]` (nobody alone may read) wrongly fit a flat `[A,B]`
