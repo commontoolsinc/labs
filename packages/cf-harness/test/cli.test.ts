@@ -5177,6 +5177,71 @@ Deno.test("runCfHarnessCli threads sandbox-image into engine sandbox config", as
   );
 });
 
+Deno.test("runCfHarnessCli routes skills.sh discovery through its injected fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  let defaultFetchCalls = 0;
+  const injectedUrls: string[] = [];
+  let toolStatus: string | undefined;
+  globalThis.fetch = (() => {
+    defaultFetchCalls += 1;
+    return Promise.resolve(Response.json({ skills: [] }));
+  }) as typeof globalThis.fetch;
+
+  let exitCode: number;
+  try {
+    exitCode = await runCfHarnessCli(
+      [
+        "--model-provider",
+        "openai-compatible-gateway",
+        "--gateway-auth-mode",
+        "none",
+        "--cfc-enforcement-mode",
+        "disabled",
+        "--workspace",
+        "/tmp/project",
+        "--skills-registry-url",
+        "https://registry.example",
+        "--prompt",
+        "Find a skill",
+      ],
+      {
+        env: {},
+        fetchFn: (input) => {
+          injectedUrls.push(String(input));
+          return Promise.resolve(Response.json({ skills: [] }));
+        },
+        createPromptLoop: (options) => {
+          if (options.engine === undefined) {
+            throw new Error("expected CLI-created engine");
+          }
+          const engine = options.engine;
+          return {
+            runPrompt: async () => {
+              const result = await engine.invokeBuiltinTool(
+                "search_skills",
+                { query: "react native" },
+              );
+              toolStatus = (result.output as { status?: string }).status;
+              return completedCliResult("run-skills-sh-fetch");
+            },
+            runTranscript: () =>
+              Promise.reject(new Error("unexpected resume path")),
+          };
+        },
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assertEquals(exitCode, 0);
+  assertEquals(defaultFetchCalls, 0);
+  assertEquals(injectedUrls, [
+    "https://registry.example/api/search?q=react+native&limit=20",
+  ]);
+  assertEquals(toolStatus, "ok");
+});
+
 Deno.test("parseCfHarnessCliArgs selects openai-codex without an API key", async () => {
   const parsed = await parseCfHarnessCliArgs(
     ["--model-provider", "openai-codex", "--prompt", "hello"],

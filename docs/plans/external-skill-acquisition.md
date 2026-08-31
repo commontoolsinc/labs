@@ -358,7 +358,7 @@ there.
 - It does not retire the trusted operator `--skills-root` path.
 - It does not build CT-2068's declassification predicate, and nothing here
   should be taken as a precedent for an integrity fact granting permission.
-- It does not close the search-query channel. Stage 6 does; until then a
+- It does not close the search-query channel. Stage 5 does; until then a
   parent that has read a secret and then chooses a query is a channel, and
   that is a known, stated gap rather than a solved problem.
 - It does not make the registry trustworthy. Nothing here is a claim about

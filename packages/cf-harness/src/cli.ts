@@ -89,6 +89,9 @@ import {
 import { loadHarnessSkillContext } from "./skills/registry.ts";
 import { persistHarnessRunSkillRegistry } from "./skills/run-registry.ts";
 import {
+  createHarnessSkillsShSearchClientFactory,
+} from "./skills-sh/search-client.ts";
+import {
   parseAllowedSkillScriptSpec,
   uniqueAllowedSkillScripts,
 } from "./skills/scripts.ts";
@@ -3117,6 +3120,13 @@ export const runCfHarnessCli = async (
       }
       : undefined;
     const additionalMounts = createAdditionalMountConfigs(parsed);
+    const skillsShSearchClientFactory = parsed.skillsSh !== undefined &&
+        deps.fetchFn !== undefined
+      ? createHarnessSkillsShSearchClientFactory(
+        parsed.skillsSh.baseUrl,
+        deps.fetchFn,
+      )
+      : undefined;
     const prepareSkillContextMessages = async (
       engine: CfHarnessEngine,
     ): Promise<string[]> => {
@@ -3272,6 +3282,9 @@ export const runCfHarnessCli = async (
           ? { patternIndex: parsed.patternIndex }
           : {}),
         ...(parsed.skillsSh !== undefined ? { skillsSh: parsed.skillsSh } : {}),
+        ...(skillsShSearchClientFactory !== undefined
+          ? { skillsShSearchClientFactory }
+          : {}),
         // What the run was asked to do, in the operator's words. A pattern
         // the run publishes carries it as the request it answers.
         ...(parsed.prompt !== undefined ? { taskText: parsed.prompt } : {}),
@@ -3452,6 +3465,9 @@ export const runCfHarnessCli = async (
           ? { patternIndex: parsed.patternIndex }
           : {}),
         ...(parsed.skillsSh !== undefined ? { skillsSh: parsed.skillsSh } : {}),
+        ...(skillsShSearchClientFactory !== undefined
+          ? { skillsShSearchClientFactory }
+          : {}),
         // What the run was asked to do, in the operator's words. A pattern
         // the run publishes carries it as the request it answers.
         ...(parsed.prompt !== undefined ? { taskText: parsed.prompt } : {}),
