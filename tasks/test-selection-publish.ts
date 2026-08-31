@@ -75,15 +75,17 @@ export interface StoreAccess {
    * which shards it holds. Reading those replaces reading the day's
    * thousands of raw objects.
    *
-   * Only a bootstrap reads them. A rollup is written by the one principal
-   * here whose credential exists as key material, so it carries weaker
-   * provenance than the raw records it summarizes, and the record spec
-   * asks a consumer that feeds decisions to treat it as a cache of a day
-   * rather than the record of it. Seeding catch counts once, from days
-   * closed a week or more ago, is that use; the four-hourly path that
-   * keeps the manifest current never touches one.
+   * Only a bootstrap reads them, and not because the incremental path
+   * declines to: compaction waits a week for late arrivals, and the
+   * window that path reads is two days, so it never reaches a day that
+   * has one. A rollup is a read optimization rather than the record of
+   * its day — an object arriving after its shard is written stays in the
+   * raw area alone — which suits seeding sixty days of catch counts once
+   * and would not suit the run that keeps the manifest current.
    */
   rollupShards(day: string): Promise<string[] | undefined>;
+
+  /** The credential for creating an object, when one is reachable. */
   token(): string | undefined;
 }
 

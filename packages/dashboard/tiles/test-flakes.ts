@@ -14,8 +14,10 @@ import type { Status, Tile, TileView } from "../types.ts";
 import { escapeHtml } from "../lib.ts";
 import { newestManifest } from "../test-selection-manifest.ts";
 
-/** Flaky tests the wall goes amber at, and the count it goes red at. */
+/** How many flaky tests turn the wall amber. */
 export const FLAKES_WARN = 1;
+
+/** How many turn it red. */
 export const FLAKES_BAD = 10;
 
 /** How many of the worst are named under the count. */

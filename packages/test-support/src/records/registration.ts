@@ -16,8 +16,10 @@
 import { dirname, join, resolve } from "@std/path";
 import { type Environment, readEnv, recordsDir } from "./paths.ts";
 
-/** Name-map files are `names-<ulid>.json` inside the spool. */
+/** What a name-map file's name starts with, inside the spool. */
 export const NAME_MAP_PREFIX = "names-";
+
+/** What it ends with; the whole name is `names-<uuid>.json`. */
 export const NAME_MAP_SUFFIX = ".json";
 
 /** Variable naming the file holding this invocation's skip list. */
