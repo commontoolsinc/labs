@@ -113,8 +113,8 @@ describe("ingest channel operator scripts", () => {
     const installId = "lost-phone";
     const lost = () => channelId(space, installId);
 
-    // What a swallowed index write leaves behind: a live registration cell and
-    // no index entry anywhere.
+    // The state under recovery: a live registration cell and no index entry
+    // anywhere.
     const orphan = async () => {
       await saveRegistration(
         runtime,

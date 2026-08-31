@@ -406,6 +406,13 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
+  //
+  // Shared harness
+  //
+  // A labeled cell, a policyState-guarded sink rule, a Runtime, and the grant
+  // writer and reader the regions below share.
+  //
+
   const SECRET_SCHEMA = internSchema(
     {
       type: "object",

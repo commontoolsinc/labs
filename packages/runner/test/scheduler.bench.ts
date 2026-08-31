@@ -565,8 +565,6 @@ Deno.bench(
   "Overhead - setup/teardown only",
   { group: "overhead" },
   async () => {
-    // Benchmark: Just setup/teardown overhead
-
     const { runtime, storageManager, tx } = setup();
     await cleanup(runtime, storageManager, tx);
   },
@@ -576,8 +574,6 @@ Deno.bench(
   "Overhead - create 100 cells (getCell + set)",
   { group: "overhead" },
   async () => {
-    // Benchmark: Cell creation overhead
-
     const { runtime, storageManager, tx } = setup();
 
     for (let i = 0; i < 100; i++) {
@@ -598,8 +594,6 @@ Deno.bench(
   "Overhead - 100x getCell only (no set)",
   { group: "overhead" },
   async () => {
-    // Benchmark: Just getCell without set
-
     const { runtime, storageManager, tx } = setup();
 
     for (let i = 0; i < 100; i++) {
@@ -619,8 +613,6 @@ Deno.bench(
   "Overhead - 100x set on existing cells",
   { group: "overhead" },
   async () => {
-    // Benchmark: set on pre-created cells
-
     const { runtime, storageManager, tx } = setup();
 
     // Pre-create cells
@@ -645,8 +637,6 @@ Deno.bench(
   "Overhead - runtime.idle() empty",
   { group: "overhead" },
   async () => {
-    // Benchmark: runtime.idle() overhead with no work
-
     const { runtime, storageManager, tx } = setup();
     await runtime.idle();
     await cleanup(runtime, storageManager, tx);
@@ -690,8 +680,6 @@ Deno.bench(
   "Overhead - empty commit",
   { group: "overhead" },
   async () => {
-    // Benchmark: just commit with no writes
-
     const { runtime, storageManager, tx } = setup();
     await tx.commit();
     await runtime.dispose();

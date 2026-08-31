@@ -1388,7 +1388,7 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
   //
   // Tolerance on the remaining load paths
   //
-  // The battery above drives the plain cold load. T9 crosses a JS-trailer
+  // The T1-T6 battery drives the plain cold load. T9 crosses a JS-trailer
   // module variant through that same path, and T10 the authoring path, which
   // feeds storage-fetched mounts through its own `injectMountSources` call
   // and so needs the tolerance in a second place.

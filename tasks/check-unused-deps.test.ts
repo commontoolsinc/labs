@@ -92,6 +92,8 @@ Deno.test("importsAlias matches a @deno-types companion comment", () => {
 });
 
 //
+// The current `@ts-types` spelling of the companion-type comment
+//
 // `@ts-types` is Deno's current spelling of the companion-type comment; the
 // older `@deno-types` above still works and both must be recognized, or an
 // `@types/*` alias reached through the current form would be reported unused.
@@ -108,6 +110,13 @@ Deno.test("importsAlias matches a @ts-types companion comment", () => {
 Deno.test("importsAlias matches @ts-types with single quotes and spaces", () => {
   assert(importsAlias("// @ts-types = '@types/leaflet'", "@types/leaflet"));
 });
+
+//
+// What an alias reaches, and what it does not
+//
+// Subpaths and slash-terminated forms, against the near misses: a longer
+// sibling, a bare identifier, a substring of another specifier.
+//
 
 Deno.test("importsAlias matches a subpath import of a bare alias", () => {
   assert(
@@ -219,6 +228,13 @@ Deno.test("parseWorkspaceMembers normalizes leading ./ and trailing /", () => {
 Deno.test("parseWorkspaceMembers returns empty when there is no workspace array", () => {
   assertEquals(parseWorkspaceMembers(`{ "name": "x" }`), []);
 });
+
+//
+// Running against this repository
+//
+// The entry point over the real tree, and the git helper it leans on when
+// that tree is not a checkout at all.
+//
 
 Deno.test("runs as a command-line program against the repository", async () => {
   // Exercises the module's command-line entry point (the import.meta.main

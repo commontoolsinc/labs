@@ -265,6 +265,35 @@ after a blank line:
 export function fry(): void {}
 ```
 
+A blank line sets the frame off above as well as below. Without the one above,
+the marker runs into whatever comment precedes it and the two read as one
+comment; without the one below, the frame reads as a note on the declaration it
+touches rather than as a heading over what follows.
+
+**A region has an end, and writing the marker is choosing it.** A marker opens
+a region that runs to the next marker at the same level, or to the end of the
+enclosing block or file. Read what sits between the marker and that point and
+check the title covers all of it. Where the material the title owns stops before
+the enclosing block does, put a marker there titling what follows. A file whose
+last marker does not head the file's last section has a region whose end nobody
+chose.
+
+**A title is a claim about everything in its region**, not an introduction to
+what comes next. The same words that pass as a label above the first of a run
+become false as a title over a region holding more than they name: "the two
+things that are not values" is a fact about a region with two of them in it.
+When a region grows, its title is read against it again.
+
+A title can be wrong by being too narrow as easily as too wide. Where the
+subject it names also appears outside its region, either the region is in the
+wrong place or the title names something smaller than its subject.
+
+**A region holds more than its blocks.** Everything between the marker and the
+region's end falls inside it: a helper function, a fixture constant, a
+`beforeEach()`. A helper that serves the whole file but happens to sit inside
+one region reads as belonging to that region, so shared setup goes above the
+first marker.
+
 **CSS takes a block comment.** CSS has no line comments, so a section marker in
 a `.css` file, a `css` template literal, or a `<style>` block is a `/* */`
 block, with each delimiter on its own line and every line at the same

@@ -533,7 +533,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
   });
 
   //
-  // filter builtin tests
+  // Filter builtin tests
   //
 
   it("should filter an array by predicate", async () => {
@@ -919,7 +919,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
   });
 
   //
-  // flatMap builtin tests
+  // FlatMap builtin tests
   //
 
   it("should flatMap an array", async () => {
