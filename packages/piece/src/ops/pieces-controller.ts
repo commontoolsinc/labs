@@ -195,6 +195,7 @@ function filterOutCell(
  */
 const FRAMED_MIGRATION_REASON =
   `: ${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: `;
+
 const isCfcMigrationRejection = (error: unknown): boolean =>
   error instanceof Error &&
   error.message.startsWith("CFC enforcement rejected commit") &&
@@ -297,6 +298,7 @@ export class PiecesController<T = unknown> {
        * does not need those contents.
        */
       deferSpaceCellSync?: boolean;
+
       // Optional compiled-module-byte cache to share across controllers. Supplied
       // only by test code (see the integration suite's compile-byte-cache helper);
       // unset in production, so no cache is installed.

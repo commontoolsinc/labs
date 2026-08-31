@@ -19,6 +19,7 @@ export type ColumnSchema = {
 
   /** Marks a `_cf_link` column (stored TEXT, surfaced as a Cell). */
   cfLink?: true;
+
   [key: string]: FabricValue;
 };
 

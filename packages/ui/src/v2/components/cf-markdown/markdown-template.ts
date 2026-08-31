@@ -52,6 +52,7 @@ export interface MarkdownCallbacks {
  * comes back is the single text node the parser built.
  */
 let scratch: HTMLElement | undefined;
+
 function decodeEntities(text: string): string {
   if (!text.includes("&")) return text;
   scratch ??= document.createElement("div");

@@ -61,6 +61,7 @@ export type OutboxAppendRow = {
   /** The ORIGINATING chain actor (events.md §2): absent only for a
    * chain with no acting user (a space-scope derivation's emission). */
   actingPrincipal?: string;
+
   actingSession?: string;
 
   /** The OW15 declaration (protocol.md §2's Phase-3 floor carve-out,

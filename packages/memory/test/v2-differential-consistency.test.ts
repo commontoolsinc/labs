@@ -120,10 +120,12 @@ interface ScheduleStats {
   rejected: number;
   pendingReadAccepts: number;
 
-  /** Commits whose pending read was sparsely mutated, split by verdict —
-   * both sides must stay exercised for the declared-set exclusion to keep
+  /** Sparsely-mutated pending reads the schedule accepted. Both this and
+   * `sparseRejects` must stay non-zero for the declared-set exclusion to keep
    * differential coverage (see the vacuity guard). */
   sparseAccepts: number;
+
+  /** The same, for the ones it rejected. */
   sparseRejects: number;
 }
 

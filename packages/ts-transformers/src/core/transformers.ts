@@ -11,6 +11,7 @@ import type { BuilderSourceSite } from "./runtime-contract.ts";
 export type SchemaHint = {
   /** Override for array items schema (e.g., false for items: false) */
   readonly items?: unknown;
+
   readonly cfcUiContract?: {
     readonly helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
     readonly action?: string;
@@ -55,6 +56,7 @@ export type CapabilityParamSummary = {
    * (`const f = cell.send; f(x)`) are outside the contract.
    */
   readonly hasUnverifiedCellUse?: boolean;
+
   readonly identityOnly?: boolean;
   readonly identityPaths?: readonly (readonly string[])[];
   readonly identityCellPaths?: readonly (readonly string[])[];
@@ -127,6 +129,7 @@ export interface BuilderSourceSiteOptions {
  * Type is used in multiple places with different access patterns.
  */
 export type SchemaHints = WeakMap<ts.Node, SchemaHint>;
+
 export type SyntheticReactiveCollectionRegistry = WeakSet<ts.Symbol>;
 
 export type TransformationOptions = {
@@ -146,6 +149,7 @@ export type TransformationOptions = {
    * If provided, diagnostics are pushed to this array in addition to the local context.
    */
   readonly diagnosticsCollector?: TransformationDiagnostic[];
+
   readonly patternCoverage?: PatternCoverageOptions;
   readonly builderSourceSites?: BuilderSourceSiteOptions;
 

@@ -60,6 +60,7 @@ export interface PieceContextMenuDetail {
 
   /** Client coordinates of the click, for placing the menu. */
   x: number;
+
   y: number;
 
   /** The variant the piece was rendered at. */

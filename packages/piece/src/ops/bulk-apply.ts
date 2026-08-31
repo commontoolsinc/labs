@@ -78,6 +78,7 @@ export interface ApplyRow {
   piece: string;
   /** The plan row's phase label, carried as the plan stamped it. */
   phase?: string;
+
   verdict: ApplyVerdict;
   /**
    * What a moved, refused, or failed row broke; absent otherwise. A row
@@ -85,6 +86,7 @@ export interface ApplyRow {
    * would not open or close, is the report's `stopReason`.
    */
   problem?: string;
+
   /**
    * What the runtime warned about a write that DID land — the source was
    * saved and something after it complained. Distinct from `problem`, which
@@ -93,6 +95,7 @@ export interface ApplyRow {
    * only a console nobody keeps.
    */
   warning?: string;
+
   /**
    * The origin the plan recorded for this piece, absent when the plan
    * recorded none. A survey's reading, carried verbatim: it says what the
@@ -106,6 +109,7 @@ export interface ApplyRow {
    * [docs/features/piece-bulk-operations.md](../../../../docs/features/piece-bulk-operations.md).
    */
   origin?: string;
+
   /**
    * The origin this run's write actually detached, present only on a row
    * this run wrote and only when that write detached one.
@@ -125,6 +129,7 @@ export interface ApplyRow {
    * exactly the case a substitution would have hidden.
    */
   detachedOrigin?: string;
+
   /**
    * The row's wall-clock cost in milliseconds, present on every row an
    * apply session began work on: a row reclassified as landed, moved, or
@@ -142,6 +147,7 @@ export interface ApplyReport {
   rows: readonly ApplyRow[];
   /** Operations applied. Zero on a dry run and on a fully landed re-run. */
   applied: number;
+
   /**
    * True when every row reached what this run was for and no session
    * boundary failed: under `apply`, every row is `landed` or `applied`;
@@ -152,6 +158,7 @@ export interface ApplyReport {
    * `warning` is still complete: the write happened.
    */
   complete: boolean;
+
   /**
    * Why the run stopped when no piece is at fault: a session that could not
    * be opened, could not be released, or opened onto a space other than the
@@ -185,6 +192,7 @@ export interface WorkRow<Op extends ReferenceOp> {
    * refuse.
    */
   origin?: string;
+
   expect: { patternIdentity: string; symbol: string };
   op: Op;
 }
@@ -196,8 +204,10 @@ export interface WorkRow<Op extends ReferenceOp> {
 export interface WriteOutcome {
   /** Why this row must not apply. Nothing was written. */
   refused?: string;
+
   /** What the runtime warned about a write that landed anyway. */
   warning?: string;
+
   /**
    * The origin the write detached, when it detached one. The write step is
    * the only place this can be observed honestly — the detach happens
@@ -215,6 +225,7 @@ export interface WriteOutcome {
 export interface PlanOperation<Op extends ReferenceOp> {
   /** The op kind this run applies; a plan carrying any other is refused. */
   kind: Op["kind"];
+
   /**
    * The word a refusal uses for one of this run's rows — "retarget",
    * "restore" — pluralized by the engine where a message needs it. Both
@@ -222,6 +233,7 @@ export interface PlanOperation<Op extends ReferenceOp> {
    * operation this vocabulary does not hold.
    */
   noun: string;
+
   /**
    * Write one outstanding row, in the session in hand, immediately after
    * its precondition was proved. Returns `undefined` when the write landed
@@ -251,6 +263,7 @@ export interface ApplyOptions<Op extends ReferenceOp> {
    * classification alone — where every piece stands, and no write at all.
    */
   apply?: boolean;
+
   /**
    * Pieces the operator has accepted, by name, as ones no reversal can
    * return — their prior source is not retained. Only a run that writes
@@ -258,12 +271,14 @@ export interface ApplyOptions<Op extends ReferenceOp> {
    * moves nothing. See {@link acceptUnretained}.
    */
   accepted?: readonly string[];
+
   /**
    * Pieces served by one session before it is replaced. The knob the
    * design requires: warm-up amortizes across a group while the pieces
    * live at once stay bounded by it.
    */
   groupSize?: number;
+
   /**
    * Called as each row settles, for reporting as the run proceeds. A throw
    * from it is the caller's error rather than the run's: it reaches the
@@ -272,6 +287,7 @@ export interface ApplyOptions<Op extends ReferenceOp> {
    * `failed`.
    */
   onRow?: (row: ApplyRow) => void;
+
   /** The clock behind `elapsedMs`, injectable for deterministic tests. */
   now?: () => number;
 }
@@ -446,6 +462,7 @@ export async function applyPlan<Op extends ReferenceOp>(
   let startBlocked = false;
   /** The run's own trouble, as opposed to any piece's: see `stopReason`. */
   let sessionProblem: string | undefined;
+
   {
     const pieces = await sessions.open();
     try {

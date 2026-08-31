@@ -20,6 +20,7 @@ export const ALIAS_FILE = "tasks/test-identity-aliases.jsonl";
 export interface AliasLine {
   /** ISO date of the rename; readers apply the alias to older records. */
   date: string;
+
   from: { k: string; s: string; n?: string };
   to: { k: string; s: string; n?: string };
 }

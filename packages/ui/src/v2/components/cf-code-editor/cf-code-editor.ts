@@ -303,6 +303,7 @@ export class CFCodeEditor extends BaseElement {
    * Mentionable items for @ completion.
    */
   declare mentionable?: CellHandle<MentionableArray> | null;
+
   declare mentioned?: CellHandle<MentionableArray>;
 
   /**
@@ -317,6 +318,7 @@ export class CFCodeEditor extends BaseElement {
    * URL from anywhere else is a link to a web page.
    */
   declare fabricHosts: string[];
+
   declare pattern: CellHandle<string>;
   declare wordWrap: boolean;
   declare lineNumbers: boolean;

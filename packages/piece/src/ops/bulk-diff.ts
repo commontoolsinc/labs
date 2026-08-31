@@ -57,6 +57,7 @@ export interface PlanDiff {
 
   /** Pieces the after-survey holds that the plan does not. */
   unplanned: readonly string[];
+
   counts: Readonly<Record<PieceDiffStatus, number>>;
 }
 

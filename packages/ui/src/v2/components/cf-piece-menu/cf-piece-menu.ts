@@ -54,6 +54,7 @@ interface MenuEntry {
 
   /** Stable hook for tests, exposed as the entry's `test-id`. */
   testId: string;
+
   panel: Panel;
 }
 
@@ -215,6 +216,7 @@ export interface PieceAction {
 
   /** Which side of the piece carries it. */
   source: "result" | "argument";
+
   handle: CellHandle;
 
   /**
@@ -869,6 +871,7 @@ export class CFPieceMenu extends BaseElement {
 
   /** Where the click landed, in client coordinates. */
   declare x: number;
+
   declare y: number;
 
   static override properties = {

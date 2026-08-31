@@ -14,6 +14,7 @@ import {
   type ScaleTime,
   scaleTime,
 } from "d3-scale";
+
 // @ts-types="@types/d3-array"
 import { extent } from "d3-array";
 import type {

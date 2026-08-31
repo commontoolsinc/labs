@@ -79,6 +79,7 @@ export type TrackedGraphState = {
   /** referrerKey → the miss keys it attributed (the reverse index the
    * re-walk clears by). */
   missesOf: Map<string, Set<string>>;
+
   entities: Map<QueryDocKey, EntitySnapshot>;
   memo: SchemaMemo;
   manager: EngineObjectManager;
@@ -118,6 +119,7 @@ export type SlowestQueryRoot = {
    * declares none. The hash rather than the schema itself: a board root's
    * schema runs to kilobytes, and the hash is how the registry names it. */
   schema?: string;
+
   elapsedMs: number;
 
   /** Engine documents read while visiting this root. */
@@ -431,6 +433,7 @@ export type QueryGraphReuseContext = {
  * that costs a cache miss, never a wrong hit.
  */
 let nextCanonicalSelectorId = 0;
+
 const canonicalSelectorIds = new WeakMap<SchemaPathSelector, number>();
 const canonicalSelectorId = (selector: SchemaPathSelector): number => {
   const interned = internPathSelector(selector);
@@ -473,26 +476,36 @@ export type QueryEvaluationCacheDiagnostics = {
   weight: number;
   /** Total serves: the sum of the three per-class hit counters. */
   hits: number;
+
   misses: number;
   rotations: number;
   /** Serves of a scope-pure entry (identical for every identity). */
   hitsPure: number;
+
   /** Serves of an absent-residue entry — the recording identity's own
    * re-ask included (its keys need no rewrite, but the entry is the
    * same class). */
   hitsAbsentResidue: number;
+
   /** Serves of a tainted entry to the identity it is keyed to. */
   hitsIdentity: number;
+
   /** Absent-residue shares refused because a residue doc is PRESENT
    * for the requester. A refusal is not a miss by itself: the call
    * then serves from the identity entry (an identity hit) or
    * evaluates in full (a miss). */
   residueRefusals: number;
-  /** Live entries by share class. Together with the hit split, this
-   * is the production measure of how often scoped reach actually
-   * forecloses cross-identity sharing. */
+
+  /** Live scope-pure entries. This count and the two below it are the live
+   * entries by share class; together with the hit split they are the
+   * production measure of how often scoped reach actually forecloses
+   * cross-identity sharing. */
   entriesPure: number;
+
+  /** Live absent-residue entries. */
   entriesAbsentResidue: number;
+
+  /** Live tainted entries, each keyed to one identity. */
   entriesTainted: number;
 };
 
@@ -540,6 +553,7 @@ export type QueryEvaluationCache = {
    * for the same space rotates the cache exactly as a seq advance does —
    * both entry points accept a caller-supplied engine. */
   engine: Engine.Engine | null;
+
   seq: number;
   entries: Map<
     string,
@@ -549,13 +563,25 @@ export type QueryEvaluationCache = {
    * parsed documents an entry keeps alive). The server enforces its
    * cross-space budget against this. */
   weight: number;
-  /** Per-class serve counters ({@link QueryEvaluationCacheDiagnostics}
-   * defines each class); diagnostics report their sum as `hits`. */
+
+  /** Serves of a scope-pure entry. This counter and the two below it are the
+   * per-class serve counters, which diagnostics report summed as `hits`;
+   * {@link QueryEvaluationCacheDiagnostics} defines each class. */
   hitsPure: number;
+
+  /** Serves of an absent-residue entry. */
   hitsAbsentResidue: number;
+
+  /** Serves of a tainted entry to the identity it is keyed to. */
   hitsIdentity: number;
+
+  /** Absent-residue shares refused because a residue doc is present. */
   residueRefusals: number;
+
+  /** Evaluations that found no usable entry. */
   misses: number;
+
+  /** Times the cache was rotated out for a newer engine seq. */
   rotations: number;
 };
 

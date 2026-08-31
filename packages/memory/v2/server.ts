@@ -239,12 +239,16 @@ export type SlowQuery = {
    * lock, so a large value is head-of-line blocking behind fan-out rather
    * than the commit's own cost. */
   lockWaitMs?: number;
+
   /** transact only: the commit's operation count. */
   operations?: number;
+
   /** transact only: the commit's confirmed read count. */
   readsConfirmed?: number;
+
   /** transact only: the commit's pending read count. */
   readsPending?: number;
+
   /** transact only: "ok", the response error's name (a rejected commit
    * that took this long is at least as interesting as an applied one), or
    * "threw" when evaluation raised instead of responding. */
@@ -1339,6 +1343,7 @@ export class Server {
    * query.ts for the sharing, purity, and seq-rotation rules), held for at
    * most QUERY_EVALUATION_CACHE_MAX_SPACES spaces in LRU order. */
   #queryEvaluationCaches = new Map<string, QueryEvaluationCache>();
+
   #engines = new Map<string, Promise<Engine.Engine>>();
   // The resolved-engine index for the SYNC cross-engine lease lookup
   // (server-execution v2 Phase 5; see openEngine / #liveCoHostedLeaseSpaceFor).
@@ -1426,6 +1431,7 @@ export class Server {
       operationCodecs?: OperationCodecRegistry;
       /** Engine-owned interval for operation checkpoints and bounded retention. */
       operationCheckpointInterval?: number;
+
       /**
        * Coalescing delay for the batched subscription fan-out, in
        * milliseconds. `"manual"` never arms the refresh timer: dirty spaces
@@ -1438,6 +1444,7 @@ export class Server {
        * dirty spaces held for the next explicit call.
        */
       subscriptionRefreshDelayMs?: number | "manual";
+
       /** Cross-space retained-entity budget for the query evaluation
        * caches (default QUERY_EVALUATION_CACHE_BUDGET). An entry's weight
        * is the entity count of the evaluation it retains — the proxy for
@@ -1446,6 +1453,7 @@ export class Server {
        * fits. A single evaluation heavier than the whole budget is not
        * retained at all. */
       queryEvaluationCacheBudget?: number;
+
       authorizeSessionOpen: (
         message: SessionOpenRequest,
         context: SessionOpenAuthContext,
@@ -2520,6 +2528,7 @@ export class Server {
      * `stream` field; stage-G-era rows fall back to a path-less link
      * at the sidecar id. */
     targetStreamLink?: StreamLinkRef;
+
     eventId: string;
     payload: unknown;
     actingPrincipal?: string;
@@ -2529,6 +2538,7 @@ export class Server {
      * Phase-3 floor carve-out): admits an ABSENT acting principal;
      * the entry stamps `firedAt = { session: "server" }`. */
     sessionlessSpaceScope?: boolean;
+
     capabilityRef: string;
 
     /** The delivering SpaceServer's service session — the commit's
