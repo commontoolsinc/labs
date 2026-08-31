@@ -28,11 +28,12 @@
  *   deno task measure-batch suite.json --out=./measurements/tonight
  *   deno task measure-batch suite.json --fabric-api-url=http://localhost:8040
  *   deno task measure-batch suite.json --expect-git-sha=<sha>
+ *   deno task measure-batch suite.json --allow-diverged
  */
 
 import { parseArgs } from "@std/cli/parse-args";
 import { ensureDir } from "@std/fs";
-import { join } from "@std/path";
+import { isAbsolute, join } from "@std/path";
 
 import type {
   HarnessChatEventEnvelope,
@@ -345,15 +346,18 @@ export type AncestryReading =
 /**
  * What the server said it was running, taken before the first task.
  *
- * This records rather than judges, with one exception: a batch told which
- * commit to expect refuses when the server disagrees. Nothing is inferred.
- * Running against a deliberately mismatched server is documented practice, so
- * an undeclared mismatch is a fact for the report, not grounds to refuse a
- * night's work.
+ * A known-diverged commit refuses unless the operator explicitly allows it.
+ * An unchecked ancestry remains a reading because not knowing differs from
+ * knowing the server is wrong.
  */
 export type PosturePreflight =
   | { kind: "read"; meta: ServerMeta; ancestry: AncestryReading }
-  | { kind: "refused"; reason: string; meta?: ServerMeta };
+  | {
+    kind: "refused";
+    reason: string;
+    meta?: ServerMeta;
+    ancestry?: AncestryReading;
+  };
 
 /**
  * Whether the index answered a search at all, taken before the first task.
@@ -368,6 +372,11 @@ export type PosturePreflight =
  */
 export type IndexPreflight =
   | { kind: "answered"; results: number; candidates?: number }
+  | { kind: "refused"; reason: string };
+
+/** Whether the console exposes the fields the batch reads before any task. */
+export type ConsolePreflight =
+  | { kind: "ready"; artifactRoot: string }
   | { kind: "refused"; reason: string };
 
 /**
@@ -479,13 +488,8 @@ const defaultGitRun = async (
 };
 
 /**
- * Reads what the server is running, and refuses only a commit the batch was
- * told to expect and did not find.
- *
- * The ancestry reading is recorded and never refused on. A server on a commit
- * off `main` is what a matched local toolshed looks like from here, and it is
- * also what a stale process from another worktree looks like — the report says
- * which commit and whether it is on the branch, and a reader decides.
+ * Reads what the server is running. An expected-commit mismatch always
+ * refuses; a known-diverged commit refuses unless explicitly allowed.
  */
 export const preflightPosture = async (
   fabricApiUrl: string,
@@ -495,6 +499,7 @@ export const preflightPosture = async (
   run: (
     args: readonly string[],
   ) => Promise<{ success: boolean; code: number }> = defaultGitRun,
+  allowDiverged = false,
 ): Promise<PosturePreflight> => {
   const meta = await readServerMeta(fabricApiUrl, fetchImpl);
   if ("error" in meta) return { kind: "refused", reason: meta.error };
@@ -508,11 +513,18 @@ export const preflightPosture = async (
       meta,
     };
   }
-  return {
-    kind: "read",
-    meta,
-    ancestry: await readAncestry(meta.gitSha, base, run),
-  };
+  const ancestry = await readAncestry(meta.gitSha, base, run);
+  if (ancestry.kind === "diverged" && !allowDiverged) {
+    return {
+      kind: "refused",
+      reason: `the fabric server reports ${
+        meta.gitSha ?? "no commit"
+      }, which is off ${base}; pass --allow-diverged only when that mismatch is intentional`,
+      meta,
+      ancestry,
+    };
+  }
+  return { kind: "read", meta, ancestry };
 };
 
 /**
@@ -791,6 +803,46 @@ export class ConsoleClient {
       `/api/status?sessionId=${encodeURIComponent(sessionId)}`,
     ) as { sessions?: readonly HarnessChatSessionStatus[] };
     return answer.sessions?.[0];
+  }
+
+  /** Checks the status response fields the batch reads before starting work. */
+  async preflightStatus(): Promise<ConsolePreflight> {
+    let answer: unknown;
+    try {
+      answer = await this.#json("/api/status");
+    } catch (error) {
+      return {
+        kind: "refused",
+        reason: `/api/status could not be read: ${describeError(error)}`,
+      };
+    }
+    if (typeof answer !== "object" || answer === null) {
+      return {
+        kind: "refused",
+        reason: "/api/status did not return a JSON object",
+      };
+    }
+    const { artifactRoot, sessions } = answer as Record<string, unknown>;
+    if (typeof artifactRoot !== "string") {
+      return {
+        kind: "refused",
+        reason: "/api/status is missing the top-level artifactRoot field",
+      };
+    }
+    if (!isAbsolute(artifactRoot)) {
+      return {
+        kind: "refused",
+        reason:
+          `/api/status returned a non-absolute artifactRoot: ${artifactRoot}`,
+      };
+    }
+    if (!Array.isArray(sessions)) {
+      return {
+        kind: "refused",
+        reason: "/api/status is missing the top-level sessions array",
+      };
+    }
+    return { kind: "ready", artifactRoot };
   }
 
   /** What the index holds, read through the console's own signed proxy. */
@@ -1073,6 +1125,7 @@ export interface BatchResult {
   indexUrl: string | null;
   startedAt: string;
   endedAt: string;
+  consolePreflight: ConsolePreflight;
   preflight: IndexPreflight;
   posture: PosturePreflight;
 
@@ -1124,6 +1177,107 @@ const readSkillRegistry = async (
   };
 };
 
+/** A root run whose first user message exactly matches one batch task. */
+interface RunCandidate {
+  runId: string;
+}
+
+/** Candidates found and in-scope artifacts the scan could not read. */
+interface RunCandidateScan {
+  candidates: readonly RunCandidate[];
+  directories: readonly string[];
+  unread: readonly string[];
+}
+
+/**
+ * Finds root runs created during this batch whose first user message matches
+ * `taskText`. Ambiguity is left for the caller to refuse rather than settled
+ * by directory order.
+ */
+const runCandidates = async (
+  artifactRoot: string,
+  taskText: string,
+  batchStartedAt: string,
+): Promise<RunCandidateScan> => {
+  const candidates: RunCandidate[] = [];
+  const directories: string[] = [];
+  const unread: string[] = [];
+  for await (const entry of Deno.readDir(artifactRoot)) {
+    if (!entry.isDirectory) continue;
+    directories.push(entry.name);
+    const runStatePath = join(artifactRoot, entry.name, "run-state.json");
+    let runState: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(await Deno.readTextFile(runStatePath));
+      if (
+        typeof parsed !== "object" || parsed === null || Array.isArray(parsed)
+      ) {
+        unread.push(`${entry.name}/run-state.json was not an object`);
+        continue;
+      }
+      runState = parsed as Record<string, unknown>;
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) continue;
+      unread.push(
+        `${entry.name}/run-state.json could not be read: ${
+          describeError(error)
+        }`,
+      );
+      continue;
+    }
+    const createdAt = typeof runState.createdAt === "string"
+      ? Date.parse(runState.createdAt)
+      : Number.NaN;
+    if (
+      runState.runId !== entry.name ||
+      !Number.isFinite(createdAt) ||
+      createdAt < Date.parse(batchStartedAt) ||
+      (runState.lineage as { role?: unknown } | undefined)?.role === "subagent"
+    ) {
+      continue;
+    }
+    const transcriptPath = join(
+      artifactRoot,
+      entry.name,
+      "transcript.json",
+    );
+    let transcript: unknown;
+    try {
+      transcript = JSON.parse(await Deno.readTextFile(transcriptPath));
+    } catch (error) {
+      unread.push(
+        `${entry.name}/transcript.json could not be read: ${
+          describeError(error)
+        }`,
+      );
+      continue;
+    }
+    if (!Array.isArray(transcript)) {
+      unread.push(`${entry.name}/transcript.json was not a message list`);
+      continue;
+    }
+    const firstUser = transcript.find((message) =>
+      typeof message === "object" && message !== null &&
+      (message as Record<string, unknown>).role === "user"
+    ) as Record<string, unknown> | undefined;
+    if (firstUser?.content !== taskText) continue;
+    candidates.push({ runId: entry.name });
+  }
+  return {
+    candidates: candidates.sort((left, right) =>
+      left.runId.localeCompare(right.runId)
+    ),
+    directories,
+    unread,
+  };
+};
+
+/** Fields the batch supplies to locate the run one task created. */
+export interface RunTaskOptions {
+  batchStartedAt: string;
+  artifactRoot: string;
+}
+
 /**
  * Where each pattern the batch composed came from, resolved one hop through
  * the index. Called once per distinct identifier, after the tasks have run.
@@ -1166,50 +1320,34 @@ export const runTask = async (
   client: ConsoleClient,
   task: MeasurementTask,
   log: (line: string) => void,
+  options: RunTaskOptions,
 ): Promise<TaskResult> => {
   log(`task ${task.id}: starting`);
   const started = await client.startTask(task.text);
   const outcome = await client.awaitTurn(started);
   log(`task ${task.id}: ${outcome.kind}`);
   const session = await client.session(started.sessionId);
-  const runId = session?.harnessRunId;
-  const artifactRoot = session?.artifactRoot;
-  const base: TaskResult = {
+  const artifactRoot = session?.artifactRoot ?? options.artifactRoot;
+  const base = {
     task,
     sessionId: started.sessionId,
     turnId: started.turnId,
     outcome,
-    ...(runId !== undefined ? { runId } : {}),
-    ...(artifactRoot !== undefined ? { artifactRoot } : {}),
+    artifactRoot,
     configuration: {
       ...(session?.model !== undefined ? { model: session.model } : {}),
       ...(session?.policy?.cfcEnforcementMode !== undefined
         ? { cfcEnforcementMode: session.policy.cfcEnforcementMode }
         : {}),
     },
-  };
-  if (runId === undefined || artifactRoot === undefined) {
-    return {
-      ...base,
-      configuration: {
-        ...base.configuration,
-        skillsUnread:
-          "the console named no run, so no skill registry could be read",
-      },
-      measurementUnread:
-        "the console named no run and artifact root for this session",
-    };
-  }
-  const members: string[] = [];
+  } satisfies Omit<TaskResult, "runId" | "measurement" | "measurementUnread">;
+  let scan: RunCandidateScan;
   try {
-    for await (const entry of Deno.readDir(artifactRoot)) {
-      if (
-        entry.isDirectory &&
-        (entry.name === runId || entry.name.startsWith(`${runId}.`))
-      ) {
-        members.push(entry.name);
-      }
-    }
+    scan = await runCandidates(
+      artifactRoot,
+      task.text,
+      options.batchStartedAt,
+    );
   } catch (error) {
     return {
       ...base,
@@ -1218,6 +1356,37 @@ export const runTask = async (
       }`,
     };
   }
+  if (scan.candidates.length !== 1 || scan.unread.length > 0) {
+    const candidates = scan.candidates;
+    let reason: string;
+    if (candidates.length > 1) {
+      reason = `the run lookup is ambiguous: ${
+        candidates.map((candidate) => candidate.runId).join(", ")
+      } all have this task as their first user message`;
+    } else if (scan.unread.length > 0) {
+      reason = candidates.length === 1
+        ? `the run lookup found ${
+          candidates[0].runId
+        } but could not rule out another match: ${scan.unread.join("; ")}`
+        : `the run lookup could not read ${scan.unread.join("; ")}`;
+    } else {
+      reason =
+        `no root run created after ${options.batchStartedAt} has this task as its first user message`;
+    }
+    return {
+      ...base,
+      configuration: {
+        ...base.configuration,
+        skillsUnread: "no run was selected, so no skill registry could be read",
+      },
+      measurementUnread: reason,
+    };
+  }
+  const runId = scan.candidates[0].runId;
+  const located = { ...base, runId };
+  const members = scan.directories.filter((name) =>
+    name === runId || name.startsWith(`${runId}.`)
+  );
   const registries = await Promise.all(
     members.map((member) => readSkillRegistry(join(artifactRoot, member))),
   );
@@ -1225,7 +1394,7 @@ export const runTask = async (
     registry.skillsRoot !== undefined
   );
   const configuration: SessionConfiguration = {
-    ...base.configuration,
+    ...located.configuration,
     ...(scanned[0] ?? {}),
     ...(scanned.length === 0
       ? { skillsUnread: registries[0]?.skillsUnread ?? "no run was read" }
@@ -1234,7 +1403,7 @@ export const runTask = async (
     runsInFamily: registries.length,
   };
   return {
-    ...base,
+    ...located,
     configuration,
     measurement: await measureRunFamily(artifactRoot, runId, members.sort()),
   };
@@ -1446,15 +1615,16 @@ const renderBlock = (
  */
 const renderPosture = (posture: PosturePreflight): string => {
   const meta = posture.meta;
-  const ancestry = posture.kind !== "read"
+  const reading = posture.ancestry;
+  const ancestry = reading === undefined
     ? "not reached"
-    : posture.ancestry.kind === "ancestor"
-    ? `on ${posture.ancestry.base}`
-    : posture.ancestry.kind === "diverged"
-    ? `NOT on ${posture.ancestry.base} — this server is not running the code on that branch`
-    : `NOT CHECKED — ${posture.ancestry.reason}`;
+    : reading.kind === "ancestor"
+    ? `on ${reading.base}`
+    : reading.kind === "diverged"
+    ? `NOT on ${reading.base} — this server is not running the code on that branch`
+    : `NOT CHECKED — ${reading.reason}`;
   const header = posture.kind === "refused"
-    ? `**The fabric server was not the one this batch was told to expect, and the batch refused to start.** ${posture.reason}\n\nNothing below ran.`
+    ? `**The fabric server did not satisfy the batch's commit contract, and the batch refused to start.** ${posture.reason}\n\nNothing below ran.`
     : "Read from the fabric server's own `/api/meta`. These are the **server's** dials, under its production-server preset; the console's line below is its own runtime's, under a remoteClient preset. The two are different runtimes and a difference between them is ordinarily the design, not a fault — they are recorded side by side and never differenced.";
   return `${header}\n\n- Server commit: ${
     meta?.gitSha ?? "NOT REPORTED"
@@ -1503,12 +1673,18 @@ const renderSupersededVisibility = (
 /** What the index answered the pre-flight search with. */
 const renderPreflight = (preflight: IndexPreflight): string =>
   preflight.kind === "refused"
-    ? `**The batch refused to start, so no task ran.** ${preflight.reason}\n\nNothing below ran. An index that refuses a query answers a run exactly as an empty index does, so a batch started into one produces evidence for a discovery problem that is an authorization problem.\n`
+    ? `**The batch refused to start, so no task ran.** ${preflight.reason}\n\nNothing below ran. A failed pre-flight is not measured through: doing so would spend a batch producing evidence for a different system than the report names.\n`
     : `The index answered a search before the first task: ${preflight.results} results${
       preflight.candidates === undefined
         ? ""
         : ` over ${preflight.candidates} candidates examined`
     }. So a run that found nothing below was answered and found nothing, rather than refused.\n`;
+
+/** What the console status contract answered before the first task. */
+const renderConsolePreflight = (preflight: ConsolePreflight): string =>
+  preflight.kind === "ready"
+    ? `The console reported an absolute artifact root before the first task: \`${preflight.artifactRoot}\`. Its \`sessions\` field was an array.\n`
+    : `**The console status contract was refused, so no task ran.** ${preflight.reason}\n`;
 
 /**
  * Which task imported which published pattern.
@@ -1636,6 +1812,9 @@ export const renderBatchReport = (batch: BatchResult): string => {
     lines.push(batch.suite.notes, "");
   }
   lines.push(
+    "## Did the console expose the measurement contract",
+    "",
+    renderConsolePreflight(batch.consolePreflight),
     "## What the fabric server reported it was running",
     "",
     renderPosture(batch.posture),
@@ -1721,9 +1900,11 @@ export const renderBatchReport = (batch: BatchResult): string => {
 export const main = async (
   args: readonly string[],
   log: (line: string) => void = console.log,
+  postureReader: typeof preflightPosture = preflightPosture,
 ): Promise<number> => {
   const flags = parseArgs([...args], {
     string: ["console", "out", "fabric-api-url", "base", "expect-git-sha"],
+    boolean: ["allow-diverged"],
     default: {
       console: DEFAULT_CONSOLE_URL,
       "fabric-api-url": Deno.env.get("CF_HARNESS_FABRIC_API_URL") ??
@@ -1733,7 +1914,9 @@ export const main = async (
   });
   const suitePath = flags._.map(String)[0];
   if (suitePath === undefined) {
-    log("usage: measure-batch <suite.json> [--console=URL] [--out=DIR]");
+    log(
+      "usage: measure-batch <suite.json> [--console=URL] [--out=DIR] [--allow-diverged]",
+    );
     return 2;
   }
   const suite = parseMeasurementSuite(
@@ -1741,15 +1924,22 @@ export const main = async (
   );
   const client = await ConsoleClient.open(flags.console);
   const startedAt = new Date().toISOString();
-  // Read what the fabric server is running, and refuse only a commit this
-  // batch was told to expect and did not find. Everything else about the
-  // server is recorded for the report rather than judged: its CFC block is its
-  // own preset's, not the console's, and differencing the two would refuse
-  // every correctly configured night.
-  const posture = await preflightPosture(
+  const consolePreflight = await client.preflightStatus();
+  if (consolePreflight.kind === "refused") {
+    log(
+      `the console status contract was refused, so no task ran: ${consolePreflight.reason}`,
+    );
+  }
+  // The server's CFC block is recorded rather than differenced against the
+  // console's because the two runtimes use different presets. A known commit
+  // divergence refuses unless the operator explicitly allows it.
+  const posture = await postureReader(
     flags["fabric-api-url"],
     flags.base,
     flags["expect-git-sha"],
+    undefined,
+    undefined,
+    flags["allow-diverged"],
   );
   if (posture.kind === "refused") {
     log(
@@ -1765,7 +1955,13 @@ export const main = async (
   // The index pre-flight is the unambiguous one: an index that does not answer
   // reads to a run exactly as an empty corpus does, so a batch that started
   // into one would spend the night producing evidence for the wrong problem.
-  const preflight = posture.kind === "refused"
+  const preflight = consolePreflight.kind === "refused"
+    ? {
+      kind: "refused" as const,
+      reason:
+        "the console status pre-flight refused first, so the index was not asked",
+    }
+    : posture.kind === "refused"
     ? {
       kind: "refused" as const,
       reason: "the commit pre-flight refused first, so the index was not asked",
@@ -1785,7 +1981,9 @@ export const main = async (
     )
     : await readSupersededVisibility(client, suite.supersededPatternIds ?? []);
   const results: TaskResult[] = [];
-  if (preflight.kind === "refused") {
+  if (consolePreflight.kind === "refused") {
+    // The named refusal was logged when the status was read.
+  } else if (preflight.kind === "refused") {
     log(`the index did not answer, so no task ran: ${preflight.reason}`);
   } else {
     log(
@@ -1793,7 +1991,12 @@ export const main = async (
     );
     log(`index before: ${renderIndexSnapshot(indexBefore)}`);
     for (const task of suite.tasks) {
-      results.push(await runTask(client, task, log));
+      results.push(
+        await runTask(client, task, log, {
+          batchStartedAt: startedAt,
+          artifactRoot: consolePreflight.artifactRoot,
+        }),
+      );
     }
   }
   const importedPatternIds = [
@@ -1821,6 +2024,7 @@ export const main = async (
     indexUrl: Deno.env.get("CF_HARNESS_PATTERN_INDEX_URL") ?? null,
     startedAt,
     endedAt: new Date().toISOString(),
+    consolePreflight,
     preflight,
     posture,
     importedPatternOrigins,
@@ -1848,6 +2052,7 @@ export const main = async (
   // A refused pre-flight is a distinct exit code from a batch whose tasks ran
   // and did not all complete: the first is a machine to fix before trying
   // again, the second is a result to read.
+  if (consolePreflight.kind === "refused") return 5;
   if (posture.kind === "refused") return 4;
   if (preflight.kind === "refused") return 3;
   return results.every((result) => result.outcome.kind === "turn_completed")

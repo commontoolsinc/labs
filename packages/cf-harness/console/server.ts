@@ -918,9 +918,10 @@ export class ConsoleServer {
       return Response.json(await this.#sessions());
     }
     if (request.method === "GET" && url.pathname === "/api/status") {
-      return Response.json(
-        this.#service.status(url.searchParams.get("sessionId") ?? undefined),
-      );
+      return Response.json({
+        artifactRoot: this.#config.artifactRoot,
+        ...this.#service.status(url.searchParams.get("sessionId") ?? undefined),
+      });
     }
     if (request.method === "GET" && url.pathname === "/api/events") {
       return this.#events(url);
