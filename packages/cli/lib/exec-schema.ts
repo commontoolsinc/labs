@@ -16,7 +16,6 @@ import {
 } from "./callable.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 import {
-  EVERY_FLAG_TAKES_A_VALUE,
   firstReadOption,
   projectionInSectionRefusal,
   READ_OPTION_NAMES,
@@ -250,6 +249,22 @@ const SCALAR_INPUT_FLAGS = [
   "json",
   "json-file",
 ] as const;
+
+/**
+ * Which words of a single-value verb's section are values.
+ *
+ * Three of the four flags above take whatever word stands next: the value IS
+ * the payload, and a payload or a path beginning with dashes is still a
+ * payload or a path. `--json` alone declines one, because bare it reads stdin
+ * and a flag-shaped word after it is refused rather than taken.
+ *
+ * That is where this and {@link sectionValueSpend} part company, and the
+ * parsers are what part: `--json-file` refuses a flag-shaped path at the field
+ * door and accepts one here. An oracle that reported the same rule at both
+ * doors would print a corrected line one of the two parsers rejects.
+ */
+const SCALAR_VALUE_SPEND: SpendsNextWord = (flag, next) =>
+  flag !== "json" || !next.startsWith("--");
 
 /**
  * `--help` was given an argument by a verb that declares no `help` field.
@@ -575,7 +590,7 @@ function parseNonObjectInput(
   // Written as a value it is the payload, and this verb's payload is one whole
   // word the caller chose: `--value --select` asks for the string "--select",
   // which is not a projection and not this door's to touch.
-  const projection = firstReadOption(args, EVERY_FLAG_TAKES_A_VALUE);
+  const projection = firstReadOption(args, SCALAR_VALUE_SPEND);
   if (projection !== undefined) {
     throw new Error(
       projectionInSectionRefusal(
@@ -583,7 +598,7 @@ function parseNonObjectInput(
         sectionPrefix,
         args,
         new Set(),
-        EVERY_FLAG_TAKES_A_VALUE,
+        SCALAR_VALUE_SPEND,
       ),
     );
   }

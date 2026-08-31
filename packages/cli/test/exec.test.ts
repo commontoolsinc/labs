@@ -595,6 +595,34 @@ describe("parseExecArgs", () => {
     ).toBe("--select");
   });
 
+  it("takes a flag-shaped word after `--value-file` and `--json-file` as the path", () => {
+    // The same rule, and the reason the four flags are checked one at a time:
+    // a path beginning with dashes is a path this verb accepts, so neither of
+    // these leaves the word standing for the projection scan to find.
+    const spec = makeSpec("handler", { type: "string" });
+    expect(parseExecArgs(spec, ["--value-file", "--select"]).inputFile)
+      .toStrictEqual({ format: "text", path: "--select" });
+    expect(parseExecArgs(spec, ["--json-file", "--select"]).inputFile)
+      .toStrictEqual({ format: "json", path: "--select" });
+  });
+
+  it("reads a read option after a bare `--json` as a read option", () => {
+    // `--json` is the one of the four that declines a flag-shaped word: bare
+    // it reads stdin, so the word after it is nobody's value and a read option
+    // written there is a projection inside the callable's section.
+    const spec = makeSpec("handler", { type: "string" });
+    expect(
+      refusalFrom(
+        spec,
+        ["--json", "--select", "topic.title"],
+        "cf call ... scalar",
+      ),
+    )
+      .toContain("write:    cf call ... scalar --json -- --select topic.title");
+    // And still spends a payload that is not flag-shaped.
+    expect(parseExecArgs(spec, ["--json", '"hi"']).input).toBe("hi");
+  });
+
   it("leaves a field's own value in the section, flag-shaped or not", () => {
     // `--title` declares a string, so the word after it is that string. A
     // correction re-reading it as a flag moves the title's value out of the

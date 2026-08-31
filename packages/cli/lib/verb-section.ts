@@ -89,9 +89,14 @@ function readOptionName(token: string): string | undefined {
 export type SpendsNextWord = (flag: string, next: string) => boolean;
 
 /**
- * The spend of a section whose every flag takes the word after it: the read
- * step's own three, and a callable taking a single value, whose four flags
- * each name where that one value comes from.
+ * The spend of a section whose every flag takes the word after it, which is
+ * the read step's own: `--filter`, `--select` and `--schema` each declare a
+ * required value, and a predicate or a schema beginning with dashes is still
+ * the value of the flag before it.
+ *
+ * A callable's section is not this, and takes its spend from whatever owns
+ * that callable's vocabulary — the fields a verb declares, or the fixed four
+ * a verb taking a single value accepts.
  */
 export const EVERY_FLAG_TAKES_A_VALUE: SpendsNextWord = () => true;
 
