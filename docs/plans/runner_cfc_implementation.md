@@ -367,10 +367,18 @@ therefore carries its own guard:
   map, such a write is recorded like one that names the `["cfc"]` path, and
   yields the same fail-closed reason. Dropping the member erases the map, and
   so does carrying a value a reader reports as absent — `cfc: null`, a record
-  with no `version`. The stored member decides, under the same weightless read
-  the meta guard uses, so what that leaves open is an erasure racing the guard.
-  Creating a document, replacing one that stores no map, and an envelope that
-  carries the stored map forward all pass through.
+  with no `version`. Creating a document, replacing one that stores no map, and
+  an envelope that carries the stored map forward all pass through.
+- That guard reads the stored member through the writing transaction, which
+  bounds it: a transaction whose view does not hold the document gets the same
+  "no map here" a document with no map gives, so a writer that has not synced
+  the document erases its label map and commits. No race is involved — the map
+  is present throughout, and the writer never looked. What the guard
+  establishes is that a root envelope write cannot erase a label map the
+  writing transaction has loaded. Closing the rest means forcing the document
+  into view before deciding, which turns every blind root write into a
+  read-modify-write, or making the commit boundary establish what the space
+  holds; both are open.
 - A document-root write that leaves SOME label map behind reaches the stored
   one with no record made, whether it mints a map where the document stored
   none or substitutes one for another. The `["cfc"]` guard keys on the

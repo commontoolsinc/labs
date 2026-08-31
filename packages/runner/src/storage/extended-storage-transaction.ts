@@ -1080,8 +1080,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // becoming a read-modify-write that loses the race against any advance of
   // the document it replaces. `internalVerifierRead` says what the read is:
   // the runtime resolving a label, the same mark `readStoredCfcMetadata`
-  // carries. What the missing precondition leaves open is an erasure racing
-  // the guard.
+  // carries.
+  //
+  // That read is transaction-local, and it bounds what this arm establishes. A
+  // transaction whose view does not hold the document answers the same "no map
+  // here" that a document with no map answers, so a writer that has not synced
+  // the document erases its label map and commits. There is no race in that:
+  // the map is present throughout, and the writer simply never looked. What
+  // the arm establishes is that a root envelope write cannot erase a label map
+  // THIS TRANSACTION HAS LOADED, which is narrower than the seam needs.
+  // Closing the rest means forcing the document into view before deciding —
+  // the read-modify-write this design declines — or making the commit boundary
+  // establish what the space holds. `cfc-privileged-system-write.test.ts` pins
+  // the bypass, so it fails when either lands.
   #noteRootEnvelopeWrite(
     address: IMemorySpaceAddress,
     value: FabricValue | undefined,

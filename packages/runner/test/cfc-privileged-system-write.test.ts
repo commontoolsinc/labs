@@ -4,6 +4,7 @@ import { describe, it } from "@std/testing/bdd";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
+import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
@@ -12,6 +13,8 @@ import {
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase(
   "runner-cfc-privileged-system-write",
@@ -664,6 +667,110 @@ describe("CFC privileged system write (S18)", () => {
     } finally {
       await runtime.dispose();
       await storageManager.close();
+    }
+  });
+
+  it("does not reach a writer whose transaction never loaded the document", async () => {
+    // The bound on the arm above, pinned rather than described. The stored
+    // half reads through the writing transaction, and a transaction whose
+    // view does not hold the document answers the same "no map here" a
+    // document with no map answers. So a writer that simply does not sync
+    // first erases the map and commits: no race, the map present throughout.
+    //
+    // What the arm establishes is therefore narrower than "a root envelope
+    // write cannot erase a stored label map" — it is that such a write cannot
+    // erase a label map THIS TRANSACTION HAS LOADED. Closing the rest means
+    // either forcing the document into view before deciding, which turns
+    // every blind root write into a read-modify-write, or making the commit
+    // boundary establish what the space holds. Both are open design choices,
+    // and this test fails when either lands, which is the point of it.
+    const server: MemoryV2Server.Server = await newSharedServer();
+    const space = signer.did();
+    let id: URI;
+    try {
+      {
+        const storage = EmulatedStorageManager.connectTo(server, {
+          as: signer,
+        });
+        const runtime = new Runtime({
+          apiUrl: new URL("https://example.com"),
+          storageManager: storage,
+          cfcEnforcementMode: "enforce-explicit",
+        });
+        try {
+          const seed = runtime.edit();
+          const cell = runtime.getCell(space, "s18-unloaded", undefined, seed);
+          id = cell.getAsNormalizedFullLink().id as URI;
+          writeSeedEnvelopeDoc(seed, space);
+          seed.writeOrThrow({
+            space,
+            id,
+            type: "application/json",
+            path: [],
+          }, { value: { note: "one" }, cfc: storedMetadata });
+          expect((await seed.commit()).ok).toBeDefined();
+          await storage.synced();
+        } finally {
+          await runtime.dispose();
+          await storage.close();
+        }
+      }
+
+      // A session that has never synced the document, writing the whole
+      // envelope with no `cfc`.
+      {
+        const storage = EmulatedStorageManager.connectTo(server, {
+          as: signer,
+        });
+        const runtime = new Runtime({
+          apiUrl: new URL("https://example.com"),
+          storageManager: storage,
+          cfcEnforcementMode: "enforce-explicit",
+        });
+        try {
+          const tx = runtime.edit();
+          tx.writeOrThrow({
+            space,
+            id: id!,
+            type: "application/json",
+            path: [],
+          }, { value: { note: "erased" } });
+          expect(tx.getCfcState().unprivilegedSystemWrites).toEqual([]);
+          expect((await tx.commit()).ok).toBeDefined();
+          await storage.synced();
+        } finally {
+          await runtime.dispose();
+          await storage.close();
+        }
+      }
+
+      // The stored label map is gone from the durable document.
+      {
+        const storage = EmulatedStorageManager.connectTo(server, {
+          as: signer,
+        });
+        const runtime = new Runtime({
+          apiUrl: new URL("https://example.com"),
+          storageManager: storage,
+        });
+        try {
+          const cell = runtime.getCell(space, "s18-unloaded", undefined);
+          await cell.sync();
+          const tx = runtime.edit();
+          expect(tx.readOrThrow({
+            space,
+            id: id!,
+            type: "application/json",
+            path: [],
+          })).toEqual({ value: { note: "erased" } });
+          await tx.commit();
+        } finally {
+          await runtime.dispose();
+          await storage.close();
+        }
+      }
+    } finally {
+      await server.close?.();
     }
   });
 });
