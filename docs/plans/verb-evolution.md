@@ -68,11 +68,12 @@ Nothing is wrong with that change — it adds an action and takes nothing
 away. It is refused because of how verbs are declared, not because of what
 the change does.
 
-**Some genuinely breaking changes pass.** Adding a newly required field to a
-verb's input passes the check, then fails every existing caller the moment
-they call. A straightforward defect — the one place the two rules above get
-applied the wrong way round — filed with its fix decided ([#5663]), and
-listed here because it shapes how much the gate can be trusted while open.
+Adding a newly required field to a verb's input is refused, and needs a
+default to pass — the rule an argument has, stated in the result comparison's
+direction ([#5663]). The default has to be one the field already carried:
+descending through a stream marker withdraws permission to introduce a default
+below it, so a field made required and given a default in the same update is
+refused on the second count.
 
 **A verb's output is not checked at all.** The shape records a verb's input
 and discards its output, so renaming a field of what a verb hands back
