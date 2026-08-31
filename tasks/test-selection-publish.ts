@@ -55,6 +55,55 @@ import { serializeManifest } from "./test-selection/manifest.ts";
 import { plan } from "./test-selection/plan.ts";
 import { LANE_BUDGET_SECONDS, LANES } from "./test-selection/policy.ts";
 
+/**
+ * Everything this reaches the world through. The default is the real
+ * store; a test supplies its own and exercises the whole publish without
+ * a network, which is the only way the path that actually runs in
+ * production gets tested at all.
+ */
+export interface StoreAccess {
+  list(prefix: string): Promise<string[]>;
+  read(objectName: string): Promise<StoredReport>;
+  readText(objectName: string): Promise<string>;
+  create(name: string, body: Uint8Array): Promise<void>;
+  rollupShards(day: string): Promise<string[] | undefined>;
+  token(): string | undefined;
+}
+
+/** The store as it really is. */
+export function liveStore(bucket: string): StoreAccess {
+  return {
+    list: (prefix) => listObjects({ bucket, prefix }),
+    read: (objectName) => readObject({ bucket, objectName }),
+    readText: async (objectName) => {
+      const response = await fetch(objectUrl(bucket, objectName));
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      // Transcoded on the way out, so this is already the JSON.
+      return await response.text();
+    },
+    create: async (name, body) => {
+      const token = writeToken();
+      if (token === undefined) throw new Error("no write credential");
+      await createObject({
+        bucket,
+        name,
+        body,
+        contentType: "application/json",
+        contentEncoding: "gzip",
+        token,
+      });
+    },
+    rollupShards: async (day) => {
+      try {
+        return await rollupShards({ bucket, day });
+      } catch {
+        return undefined;
+      }
+    },
+    token: writeToken,
+  };
+}
+
 /** How many objects are fetched at once. */
 const DEFAULT_CONCURRENCY = 24;
 
@@ -169,12 +218,11 @@ async function mapConcurrent<T, R>(
  * week or more ago, is that use; the four-hourly path that keeps the
  * manifest current never touches one.
  */
-async function rollupFor(day: string): Promise<string[] | undefined> {
-  try {
-    return await rollupShards({ bucket: storeBucket(), day });
-  } catch {
-    return undefined;
-  }
+function rollupFor(
+  store: StoreAccess,
+  day: string,
+): Promise<string[] | undefined> {
+  return store.rollupShards(day);
 }
 
 /**
@@ -184,8 +232,10 @@ async function rollupFor(day: string): Promise<string[] | undefined> {
  * the reporting person ahead of the day, so that area is listed once and
  * filtered.
  */
-async function listSubmissions(days: readonly string[]): Promise<string[]> {
-  const bucket = storeBucket();
+async function listSubmissions(
+  store: StoreAccess,
+  days: readonly string[],
+): Promise<string[]> {
   const wanted = new Set(days);
   const names: string[] = [];
   // A listing that fails is not an empty day. Folding what did list and
@@ -194,11 +244,10 @@ async function listSubmissions(days: readonly string[]): Promise<string[]> {
   // one every lane obeys. The run ends instead, and the previous manifest
   // stays newest.
   for (const day of days) {
-    const prefix = `${ciSubmissionsPrefix()}/v1/${day}/`;
-    names.push(...await listObjects({ bucket, prefix }));
+    names.push(...await store.list(`${ciSubmissionsPrefix()}/v1/${day}/`));
   }
   const local = `${storePrefix()}/submissions/local/`;
-  for (const name of await listObjects({ bucket, prefix: local })) {
+  for (const name of await store.list(local)) {
     const day = name.match(/\/v1\/(\d{4}\/\d{2}\/\d{2})\//)?.[1];
     if (day !== undefined && wanted.has(day)) names.push(name);
   }
@@ -248,14 +297,13 @@ type AggregateRead =
  * slowly — so an unreadable state is told apart from an absent one rather
  * than both becoming an empty one.
  */
-async function readAggregate(): Promise<AggregateRead> {
-  const bucket = storeBucket();
+async function readAggregate(store: StoreAccess): Promise<AggregateRead> {
   const prefix = statePrefix();
   let names: string[];
   try {
     // Trailing slash for the reason the manifest listing carries one: a
     // bare prefix matches a longer sibling too.
-    names = await listObjects({ bucket, prefix: `${prefix}/` });
+    names = await store.list(`${prefix}/`);
   } catch (error) {
     return { failed: `listing ${prefix} failed: ${error}` };
   }
@@ -264,11 +312,7 @@ async function readAggregate(): Promise<AggregateRead> {
   );
   if (newest === undefined) return { absent: true };
   try {
-    const url = objectUrl(bucket, newest);
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    // Transcoded on the way out, so this is already the JSON.
-    const state = parseAggregate(await response.text());
+    const state = parseAggregate(await store.readText(newest));
     return state === undefined
       ? { failed: `${newest} is not an aggregate this reader understands` }
       : { state };
@@ -293,7 +337,11 @@ function writeToken(): string | undefined {
     : undefined;
 }
 
-async function main(args: readonly string[]): Promise<number> {
+export async function publish(
+  args: readonly string[],
+  store: StoreAccess = liveStore(storeBucket()),
+  now: Date = new Date(),
+): Promise<number> {
   const options = parseArgs(args);
   if (options === undefined) {
     console.error(
@@ -303,13 +351,13 @@ async function main(args: readonly string[]): Promise<number> {
     return 2;
   }
 
-  const startedAt = new Date();
+  const startedAt = now;
   const today = startedAt.toISOString().slice(0, 10);
   let aggregate: AggregateState;
   if (options.bootstrap) {
     aggregate = emptyAggregate(today);
   } else {
-    const read = await readAggregate();
+    const read = await readAggregate(store);
     if ("failed" in read) {
       console.warn(`test selection: ${read.failed}`);
       console.warn(
@@ -329,7 +377,6 @@ async function main(args: readonly string[]): Promise<number> {
     aggregate = read.state;
   }
   const partitions = dayPartitions(startedAt, options.days);
-  const bucket = storeBucket();
   const resolver = await loadAliasResolver();
   const fold = new Fold(aggregate, resolver, today);
   const runs = new Set<string>();
@@ -351,7 +398,7 @@ async function main(args: readonly string[]): Promise<number> {
   if (options.bootstrap) {
     for (const day of partitions) {
       if (fold.knowsDay(day)) continue;
-      const shards = await rollupFor(day);
+      const shards = await rollupFor(store, day);
       if (shards === undefined) continue;
       try {
         // A day is folded whole or not at all: a shard that failed to
@@ -360,7 +407,7 @@ async function main(args: readonly string[]): Promise<number> {
         const reports = await mapConcurrent(
           shards,
           options.concurrency,
-          (objectName) => readObject({ bucket, objectName }),
+          (objectName) => store.read(objectName),
         );
         for (const report of reports) noteReport(report);
         fold.add(reports);
@@ -380,7 +427,7 @@ async function main(args: readonly string[]): Promise<number> {
   const open = partitions.filter((day) => !fold.knowsDay(day));
   let listed: string[];
   try {
-    listed = await listSubmissions(open);
+    listed = await listSubmissions(store, open);
   } catch (error) {
     console.warn(`test selection: listing the submissions failed: ${error}`);
     console.warn(
@@ -407,7 +454,7 @@ async function main(args: readonly string[]): Promise<number> {
         options.concurrency,
         // A read that fails is not an object with no records, so it is not
         // swallowed: the same partial-history argument as the listing.
-        (objectName) => readObject({ bucket, objectName }),
+        (objectName) => store.read(objectName),
       );
       for (const report of reports) noteReport(report);
       fold.add(reports);
@@ -476,7 +523,7 @@ async function main(args: readonly string[]): Promise<number> {
   }
   if (options.dryRun) return 0;
 
-  const token = writeToken();
+  const token = store.token();
   if (token === undefined) {
     console.warn(
       "test selection: no write credential, so nothing was created. The " +
@@ -484,25 +531,18 @@ async function main(args: readonly string[]): Promise<number> {
     );
     return 0;
   }
+  // The manifest first and the state after it. A run that died between
+  // the two leaves a manifest whose aggregate is a cycle behind, which
+  // the next run folds forward; the other order would leave a state
+  // claiming objects no manifest was built from.
   const id = ulid();
   const name = manifestObjectName(manifest.generatedAt, id);
-  const created = await createObject({
-    bucket,
-    name,
-    body: await manifestBody(manifest),
-    contentType: "application/json",
-    contentEncoding: "gzip",
-    token,
-  });
-  console.log(`test selection: ${name} ${created}`);
-  await createObject({
-    bucket,
-    name: stateObjectName(today, id),
-    body: await gzipText(JSON.stringify(folded.aggregate)),
-    contentType: "application/json",
-    contentEncoding: "gzip",
-    token,
-  });
+  await store.create(name, await manifestBody(manifest));
+  console.log(`test selection: created ${name}`);
+  await store.create(
+    stateObjectName(today, id),
+    await gzipText(JSON.stringify(folded.aggregate)),
+  );
   return 0;
 }
 
@@ -557,5 +597,5 @@ function summarize(
 export { dayOf, manifestPrefix, newestAtOrBefore, serializeManifest };
 
 if (import.meta.main) {
-  Deno.exit(await main(Deno.args));
+  Deno.exit(await publish(Deno.args));
 }

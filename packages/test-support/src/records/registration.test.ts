@@ -4,6 +4,7 @@ import { join } from "@std/path";
 
 import {
   asDefinition,
+  buildCapture,
   fileForName,
   NAME_MAP_PREFIX,
   NAME_MAP_SUFFIX,
@@ -251,6 +252,87 @@ describe("registration", () => {
       } finally {
         await Deno.remove(dir, { recursive: true });
       }
+    });
+  });
+
+  describe("buildCapture()", () => {
+    /** A registrar that records what it was handed, running nothing. */
+    function recorder() {
+      const seen: Deno.TestDefinition[] = [];
+      return { seen, registrar: (d: Deno.TestDefinition) => void seen.push(d) };
+    }
+
+    it("hands every definition on to the registrar it was given", () => {
+      const { seen, registrar } = recorder();
+      const built = buildCapture({ registrar });
+      built.registrar("a test", () => {});
+      built.registrar({ name: "another", sanitizeOps: false }, () => {});
+      expect(seen.map((d) => d.name)).toEqual(["a test", "another"]);
+      expect(seen[1]!.sanitizeOps).toBe(false);
+    });
+
+    it("registers a listed test as ignored rather than dropping it", () => {
+      // Dropped, the store watches the identity disappear; ignored, it
+      // learns the test was deliberately not run.
+      const { seen, registrar } = recorder();
+      const built = buildCapture({
+        registrar,
+        skips: { "packages/a/one.test.ts": ["skip me"] },
+      });
+      // The file comes from the registration stack, which here is this
+      // test file, so nothing matches and the skip does not apply.
+      built.registrar("skip me", () => {});
+      expect(seen[0]!.ignore).toBeFalsy();
+      expect(built.capture.skipped("packages/a/one.test.ts", "skip me")).toBe(
+        true,
+      );
+      expect(built.capture.skipped("packages/a/one.test.ts", "other")).toBe(
+        false,
+      );
+      expect(built.capture.skipped(undefined, "skip me")).toBe(false);
+    });
+
+    it("captures the file each registration came from", () => {
+      const { registrar } = recorder();
+      const built = buildCapture({ registrar });
+      built.registrar("named here", () => {});
+      // This test file registered it, so that is the file captured.
+      expect(built.capture.names.get("named here")).toMatch(
+        /registration\.test\.ts$/,
+      );
+    });
+
+    it("carries ignore and only through their own registrars", () => {
+      const { seen, registrar } = recorder();
+      const built = buildCapture({ registrar });
+      (built.registrar as unknown as {
+        ignore: (name: string, fn: () => void) => void;
+      }).ignore("ignored", () => {});
+      (built.registrar as unknown as {
+        only: (name: string, fn: () => void) => void;
+      }).only("only this", () => {});
+      expect(seen[0]!.ignore).toBe(true);
+      expect(seen[1]!.only).toBe(true);
+    });
+
+    it("writes the captured map into the spool it was given", async () => {
+      const spool = await Deno.makeTempDir();
+      try {
+        const { registrar } = recorder();
+        const built = buildCapture({ registrar, spool });
+        built.registrar("written out", () => {});
+        built.capture.flush();
+        const names = await readNameMaps(spool);
+        expect(names.get("written out")).toMatch(/registration\.test\.ts$/);
+      } finally {
+        await Deno.remove(spool, { recursive: true });
+      }
+    });
+
+    it("writes nothing when it captured nothing, or has nowhere", () => {
+      const { registrar } = recorder();
+      // No spool: flushing is a no-op rather than an error.
+      buildCapture({ registrar }).capture.flush();
     });
   });
 

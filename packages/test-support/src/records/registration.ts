@@ -290,6 +290,39 @@ export function installRegistrationCapture(
   // better source and nothing is wrapped.
   if (skips === undefined && !writableSpool(spool)) return undefined;
 
+  const built = buildCapture({
+    registrar: Deno.test,
+    ...(skips === undefined ? {} : { skips }),
+    ...(spool === undefined ? {} : { spool }),
+  });
+  Reflect.set(Deno, "test", built.registrar);
+  globalThis.addEventListener("unload", () => built.capture.flush());
+  installed = built.capture;
+  return built.capture;
+}
+
+/** What a capture is built from, and where its map goes. */
+export interface CaptureOptions {
+  /** The registrar the wrapper hands each definition on to. */
+  registrar: (definition: Deno.TestDefinition) => void;
+
+  /** The identities this invocation is not to run. */
+  skips?: SkipList;
+
+  /** Where `flush` writes the name map. Nothing is written without one. */
+  spool?: string;
+}
+
+/**
+ * The wrapper and the capture behind it, built against a registrar the
+ * caller supplies. `installRegistrationCapture` supplies `Deno.test`;
+ * anything else can supply its own and exercise the whole of this
+ * without replacing a global that cannot be put back.
+ */
+export function buildCapture(
+  options: CaptureOptions,
+): { capture: RegistrationCapture; registrar: (...args: unknown[]) => void } {
+  const { skips, spool } = options;
   const names = new Map<string, string>();
   let root: string | undefined;
   let rootResolved = false;
@@ -336,7 +369,7 @@ export function installRegistrationCapture(
     },
   };
 
-  const realTest = Deno.test;
+  const realTest = options.registrar;
   const register = (
     through: (definition: Deno.TestDefinition) => void,
     extra: Partial<Deno.TestDefinition>,
@@ -362,11 +395,7 @@ export function installRegistrationCapture(
   const capturingTest = register(realTest, {});
   Reflect.set(capturingTest, "ignore", register(realTest, { ignore: true }));
   Reflect.set(capturingTest, "only", register(realTest, { only: true }));
-  Reflect.set(Deno, "test", capturingTest);
-
-  globalThis.addEventListener("unload", () => capture.flush());
-  installed = capture;
-  return capture;
+  return { capture, registrar: capturingTest };
 }
 
 /**

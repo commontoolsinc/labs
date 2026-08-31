@@ -6,7 +6,17 @@ import {
   dayPartitions,
   parseArgs,
   partitionOf,
+  publish,
+  type StoreAccess,
 } from "./test-selection-publish.ts";
+import {
+  buildObjectBody,
+  gunzipToText,
+  parseManifest,
+  type RunContext,
+  type TestRecord,
+} from "@commonfabric/test-support/records";
+import { reportFromText } from "./test-selection/build.ts";
 
 const CI = (day: string, run: string) =>
   `labs/test-records/submissions/ci/v1/${day}/run-${run}-a.ndjson`;
@@ -103,5 +113,183 @@ describe("test-selection-publish", () => {
         .sort(byDayThenName);
       expect(ordered[0]).toBe(CI("2026/08/20", "1"));
     });
+  });
+});
+
+/** A store held in memory, answering the way the real one answers. */
+function fakeStore(objects: Record<string, string>) {
+  const created = new Map<string, Uint8Array>();
+  const store: StoreAccess = {
+    list: (prefix) =>
+      Promise.resolve(
+        [...Object.keys(objects), ...created.keys()]
+          .filter((name) => name.startsWith(prefix))
+          .sort(),
+      ),
+    read: (objectName) => {
+      const text = objects[objectName];
+      if (text === undefined) throw new Error(`no such object ${objectName}`);
+      return Promise.resolve(reportFromText(objectName, text));
+    },
+    readText: (objectName) => {
+      const stored = created.get(objectName);
+      if (stored !== undefined) return gunzipToText(stored);
+      const text = objects[objectName];
+      if (text === undefined) throw new Error(`no such object ${objectName}`);
+      return Promise.resolve(text);
+    },
+    create: (name, body) => {
+      created.set(name, body);
+      return Promise.resolve();
+    },
+    rollupShards: () => Promise.resolve(undefined),
+    token: () => "a token",
+  };
+  return { store, created };
+}
+
+const DAY = "2026/08/20";
+
+/** One object holding one run of one test, at one commit. */
+function object(
+  commit: string,
+  outcome: TestRecord["outcome"],
+  at: string,
+): string {
+  const context: RunContext = {
+    schema: 1,
+    line: "context",
+    reportId: `report-${commit}-${outcome}`,
+    repo: "commontoolsinc/labs",
+    commit,
+    dirty: false,
+    branch: "main",
+    env: "ci",
+    ci: {
+      workflowRunId: commit,
+      runAttempt: 1,
+      workflow: "deno.yml",
+      job: "Test (1/8)",
+      event: "push",
+    },
+    os: "linux",
+    arch: "x86_64",
+    denoVersion: "2.9.4",
+    startedAt: at,
+  };
+  const record: TestRecord = {
+    line: "record",
+    test: { k: "unit", s: "memory", n: "space > writes" },
+    outcome,
+    durationMs: 40,
+  };
+  return buildObjectBody(context, [record]);
+}
+
+/** The two runs a fresh store is seeded with: a failure, then its fix. */
+function seed(): Record<string, string> {
+  return {
+    [CI(DAY, "1")]: object("c1", "fail", "2026-08-20T01:00:00.000Z"),
+    [CI(DAY, "2")]: object("c2", "pass", "2026-08-20T02:00:00.000Z"),
+  };
+}
+
+describe("publish()", () => {
+  const NOW = new Date("2026-08-20T12:00:00.000Z");
+
+  it("refuses a first run that was not asked for", async () => {
+    // An absent aggregate is either a genuine first run or one that went
+    // missing, and an incremental run cannot tell the two apart.
+    const { store, created } = fakeStore(seed());
+    expect(await publish(["--days", "1"], store, NOW)).toBe(1);
+    expect(created.size).toBe(0);
+  });
+
+  it("writes a manifest and a state from a bootstrap", async () => {
+    const { store, created } = fakeStore(seed());
+    expect(await publish(["--bootstrap", "--days", "1"], store, NOW)).toBe(0);
+    const names = [...created.keys()];
+    const manifestName = names.find((name) => name.includes("/manifest-"));
+    expect(manifestName).toBeDefined();
+    expect(names.some((name) => name.includes("/state/"))).toBe(true);
+
+    const manifest = parseManifest(
+      await gunzipToText(created.get(manifestName!)!),
+    );
+    expect(manifest).toBeDefined();
+    expect(manifest!.entries.length).toBe(1);
+    // The failure at c1 that c2 went on to fix is a catch on main.
+    expect(manifest!.entries[0]!.inputs.mainCatches).toBe(1);
+  });
+
+  it("folds from the state it left rather than the objects again", async () => {
+    const { store, created } = fakeStore(seed());
+    await publish(["--bootstrap", "--days", "1"], store, NOW);
+    const first = created.size;
+    const readObjects: string[] = [];
+    const watched: StoreAccess = {
+      ...store,
+      read: (name) => {
+        readObjects.push(name);
+        return store.read(name);
+      },
+    };
+    expect(await publish(["--days", "1"], watched, NOW)).toBe(0);
+    expect(readObjects).toEqual([]);
+    expect(created.size).toBeGreaterThan(first);
+  });
+
+  it("refuses to publish when the state area cannot be listed", async () => {
+    const { store, created } = fakeStore(seed());
+    const broken: StoreAccess = {
+      ...store,
+      list: (prefix) =>
+        prefix.includes("/state")
+          ? Promise.reject(new Error("unreachable"))
+          : store.list(prefix),
+    };
+    expect(await publish(["--days", "1"], broken, NOW)).toBe(1);
+    expect(created.size).toBe(0);
+  });
+
+  it("refuses to publish from a window it could only partly read", async () => {
+    const { store, created } = fakeStore(seed());
+    await publish(["--bootstrap", "--days", "1"], store, NOW);
+    const after = created.size;
+    const broken: StoreAccess = {
+      ...store,
+      read: () => Promise.reject(new Error("that object is gone")),
+      list: (prefix) =>
+        prefix.includes("/state")
+          ? store.list(prefix)
+          : Promise.resolve([CI(DAY, "9")]),
+    };
+    expect(await publish(["--days", "1"], broken, NOW)).toBe(1);
+    expect(created.size).toBe(after);
+  });
+
+  it("creates nothing at all for a dry run", async () => {
+    const { store, created } = fakeStore(seed());
+    const code = await publish(
+      ["--bootstrap", "--days", "1", "--dry-run"],
+      store,
+      NOW,
+    );
+    expect(code).toBe(0);
+    expect(created.size).toBe(0);
+  });
+
+  it("creates nothing without a credential", async () => {
+    const { store, created } = fakeStore(seed());
+    const anonymous: StoreAccess = { ...store, token: () => undefined };
+    const code = await publish(["--bootstrap", "--days", "1"], anonymous, NOW);
+    expect(created.size).toBe(0);
+    expect(code).toBe(0);
+  });
+
+  it("reports a malformed command line rather than publishing", async () => {
+    const { store, created } = fakeStore(seed());
+    expect(await publish(["--nonsense"], store, NOW)).toBe(2);
+    expect(created.size).toBe(0);
   });
 });

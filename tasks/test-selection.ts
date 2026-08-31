@@ -48,6 +48,20 @@ test ran in a non-default configuration:
   ["integration","patterns","counter.test.ts","server-execution"]
 `;
 
+/**
+ * The lane a `--lane` argument names: a number, nothing when the flag is
+ * absent, and "invalid" for a flag that names no lane.
+ */
+export function laneArgument(
+  args: readonly string[],
+): number | undefined | "invalid" {
+  const at = args.indexOf("--lane");
+  if (at < 0) return undefined;
+  const lane = Number(args[at + 1]);
+  if (!Number.isInteger(lane) || lane < 1 || lane > LANES) return "invalid";
+  return lane;
+}
+
 function fail(message: string): never {
   console.error(message);
   Deno.exit(2);
@@ -58,7 +72,9 @@ function pad(text: string, width: number): string {
   return text.length >= width ? text : text + " ".repeat(width - text.length);
 }
 
-function printDials(): void {
+/** Every dial, as the lines `dials` prints. */
+export function dialLines(): string[] {
+  const lines: string[] = [];
   const width = Math.max(...DIALS.map((dial) => dial.name.length));
   for (const dial of DIALS) {
     const shown = Array.isArray(dial.value)
@@ -66,40 +82,48 @@ function printDials(): void {
       : dial.value === undefined
       ? "off"
       : String(dial.value);
-    console.log(
+    lines.push(
       `${pad(dial.name, width)}  ${shown} ${dial.unit} (${dial.setBy})`,
     );
-    console.log(`${" ".repeat(width)}  ${dial.why}`);
-    console.log("");
+    lines.push(`${" ".repeat(width)}  ${dial.why}`);
+    lines.push("");
   }
-  console.log(
+  lines.push(
     "setupCost, suiteOverhead and correction are measured too, and are " +
       "published\nin each manifest rather than kept here.",
   );
+  return lines;
 }
 
-async function printCoverage(manifest: Manifest | undefined): Promise<void> {
-  const root = repositoryRoot() ?? Deno.cwd();
-  const members = (await readWorkspaceMembers(join(root, "deno.jsonc")))
-    .map((member) => member.replace(/^\.\//, ""))
-    .filter((member) => member.startsWith("packages/"))
-    .sort();
+/** Each gated member and its baseline, as the lines `coverage` prints. */
+export function coverageLines(
+  manifest: Manifest | undefined,
+  members: readonly string[],
+): string[] {
   const width = Math.max(...members.map((member) => member.length));
   const baselines = new Map(
     (manifest?.coverageBaselines ?? []).map((base) => [base.member, base]),
   );
-  for (const member of members) {
+  return members.map((member) => {
     const excluded = EXCLUDED_FROM_COVERAGE_GATE.get(member);
     if (excluded !== undefined) {
-      console.log(`${pad(member, width)}  not gated: ${excluded}`);
-      continue;
+      return `${pad(member, width)}  not gated: ${excluded}`;
     }
     const baseline = baselines.get(member);
     const against = baseline === undefined
       ? "no baseline yet"
       : `${baseline.uncoveredLines} uncovered lines at ${baseline.commit}`;
-    console.log(`${pad(member, width)}  gated, against ${against}`);
-  }
+    return `${pad(member, width)}  gated, against ${against}`;
+  });
+}
+
+/** The workspace members the coverage gate has an opinion about. */
+async function gatedMembers(): Promise<string[]> {
+  const root = repositoryRoot() ?? Deno.cwd();
+  return (await readWorkspaceMembers(join(root, "deno.jsonc")))
+    .map((member) => member.replace(/^\.\//, ""))
+    .filter((member) => member.startsWith("packages/"))
+    .sort();
 }
 
 /** The identity a command-line argument names. */
@@ -218,23 +242,28 @@ function planFor(manifest: Manifest) {
   return plan({ manifest, mandatory: new Map(), capabilities: new Map() });
 }
 
-function printDryRun(manifest: Manifest, laneNumber: number | undefined): void {
+/** What `plan --dry-run` prints, as lines. */
+export function planLines(
+  manifest: Manifest,
+  laneNumber: number | undefined,
+): string[] {
+  const lines: string[] = [];
   const result = planFor(manifest);
   const lanes = laneNumber === undefined
     ? result.lanes
     : result.lanes.filter((lane) => lane.lane === laneNumber);
-  console.log(
+  lines.push(
     `manifest of ${manifest.generatedAt}, from ${manifest.runs} runs at ` +
       `${manifest.commit}`,
   );
-  console.log(
+  lines.push(
     `${manifest.entries.length} known identities, ` +
       `${manifest.withheld.length} withheld`,
   );
   for (const lane of lanes) {
-    console.log(laneLine(lane));
+    lines.push(laneLine(lane));
     if (lane.capabilities.length > 0) {
-      console.log(`    needs ${lane.capabilities.join(", ")}`);
+      lines.push(`    needs ${lane.capabilities.join(", ")}`);
     }
     const byReason = new Map<string, number>();
     for (const selection of lane.selections) {
@@ -244,22 +273,47 @@ function printDryRun(manifest: Manifest, laneNumber: number | undefined): void {
       );
     }
     for (const [reason, count] of [...byReason].sort()) {
-      console.log(`    ${count} by ${reason}`);
+      lines.push(`    ${count} by ${reason}`);
     }
   }
   if (result.overBudgetSeconds > 0) {
-    console.log(
+    lines.push(
       `the mandatory set alone overran by ` +
         `${result.overBudgetSeconds.toFixed(1)}s`,
     );
   }
   for (const entry of result.unschedulable) {
-    console.log(
+    lines.push(
       `unschedulable: ${testIdentityKey(entry.test)} costs ` +
         `${entry.cost.toFixed(1)}s, past a lane's whole budget`,
     );
   }
-  console.log(`${LANES} lanes, ${LANE_BUDGET_SECONDS}s of work each`);
+  lines.push(`${LANES} lanes, ${LANE_BUDGET_SECONDS}s of work each`);
+  return lines;
+}
+
+/**
+ * What the lanes would do with one test. Runs the same packing a lane
+ * runs, so the answer is the one the lanes would give rather than a guess
+ * from the manifest entry alone.
+ */
+export function verdictFor(
+  manifest: Manifest,
+  test: TestIdentity,
+): PlanVerdict {
+  const result = planFor(manifest);
+  const key = testIdentityKey(test);
+  const taken = result.lanes.flatMap((lane) => lane.selections).find((
+    selection,
+  ) => testIdentityKey(selection.entry.test) === key);
+  const verdict: PlanVerdict = { selected: taken !== undefined };
+  if (taken !== undefined) verdict.repeats = taken.repeats;
+  if (
+    result.unschedulable.some((entry) => testIdentityKey(entry.test) === key)
+  ) {
+    verdict.unschedulable = true;
+  }
+  return verdict;
 }
 
 /** The manifest the newest publisher run wrote, or nothing with a reason. */
@@ -280,11 +334,15 @@ async function main(args: readonly string[]): Promise<void> {
   }
   switch (mode) {
     case "dials":
-      printDials();
+      for (const line of dialLines()) console.log(line);
       return;
-    case "coverage":
-      await printCoverage(await newestManifest());
+    case "coverage": {
+      const manifest = await newestManifest();
+      for (const line of coverageLines(manifest, await gatedMembers())) {
+        console.log(line);
+      }
       return;
+    }
     case "explain": {
       const argument = args[1];
       if (argument === undefined) fail(USAGE);
@@ -301,23 +359,13 @@ async function main(args: readonly string[]): Promise<void> {
         test,
         manifest.generatedAt.slice(0, 10),
       );
-      // Run the same packing a lane runs, so the answer is the one the
-      // lanes would give rather than a guess from the entry alone.
-      const result = planFor(manifest);
-      const key = testIdentityKey(resolved);
-      const taken = result.lanes.flatMap((lane) => lane.selections).find((s) =>
-        testIdentityKey(s.entry.test) === key
-      );
-      const verdict: PlanVerdict = { selected: taken !== undefined };
-      if (taken !== undefined) verdict.repeats = taken.repeats;
-      if (
-        result.unschedulable.some((entry) =>
-          testIdentityKey(entry.test) === key
+      for (
+        const line of explainLines(
+          manifest,
+          resolved,
+          verdictFor(manifest, resolved),
         )
       ) {
-        verdict.unschedulable = true;
-      }
-      for (const line of explainLines(manifest, resolved, verdict)) {
         console.log(line);
       }
       return;
@@ -331,21 +379,15 @@ async function main(args: readonly string[]): Promise<void> {
             "yet.\nSee docs/plans/pull-request-test-selection.md, part two.",
         );
       }
-      const laneIndex = args.indexOf("--lane");
-      let laneNumber: number | undefined;
-      if (laneIndex >= 0) {
-        laneNumber = Number(args[laneIndex + 1]);
-        if (
-          !Number.isInteger(laneNumber) || laneNumber < 1 || laneNumber > LANES
-        ) {
-          // Silently filtering every lane would exit zero having printed
-          // nothing, which reads as "this lane runs no tests".
-          fail(`--lane takes a whole number from 1 to ${LANES}`);
-        }
+      const laneNumber = laneArgument(args);
+      // Silently filtering every lane would exit zero having printed
+      // nothing, which reads as "this lane runs no tests".
+      if (laneNumber === "invalid") {
+        fail(`--lane takes a whole number from 1 to ${LANES}`);
       }
       const manifest = await newestManifest();
       if (manifest === undefined) Deno.exit(1);
-      printDryRun(manifest, laneNumber);
+      for (const line of planLines(manifest, laneNumber)) console.log(line);
       return;
     }
     default:

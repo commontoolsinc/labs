@@ -5,7 +5,7 @@ import { testIdentityKey } from "@commonfabric/test-support/records";
 import { plan, type PlanInput, seededOrder, type Selection } from "./plan.ts";
 import type { Manifest, ManifestEntry } from "./manifest.ts";
 import { sampleEntry, sampleManifest } from "./testing.ts";
-import { LANES } from "./policy.ts";
+import { LANES, VALUE_FLOOR } from "./policy.ts";
 
 const NO_CAPABILITIES = new Map<string, readonly string[]>();
 
@@ -417,5 +417,94 @@ describe("plan", () => {
     it("handles a corpus of nothing", () => {
       expect(seededOrder("seed", 0)).toEqual([]);
     });
+  });
+});
+
+describe("an identity the manifest has never heard of", () => {
+  const KEY = '["unit","memory","brand new"]';
+  const WHERE = new Map([[KEY, {
+    suite: "workspace-unit",
+    unit: "packages/memory/test/new.test.ts",
+  }]]);
+
+  it("runs when the caller names it mandatory and says where it lives", () => {
+    const result = run(sampleManifest({ entries: entries(3) }), {
+      mandatory: new Map([[KEY, "changed" as const]]),
+      unknown: WHERE,
+    });
+    const taken = selected(result).find((s) =>
+      testIdentityKey(s.entry.test) === KEY
+    );
+    expect(taken).toBeDefined();
+    expect(taken!.reason).toBe("changed");
+    expect(taken!.repeats).toBe(1);
+    expect(taken!.entry.unit).toBe("packages/memory/test/new.test.ts");
+    // It has no history, so it stands in at the floor and costs nothing
+    // anybody measured.
+    expect(taken!.entry.score).toBe(VALUE_FLOOR);
+    expect(taken!.entry.cost).toBe(0);
+    expect(taken!.entry.inputs).toEqual({
+      catches: 0,
+      mainCatches: 0,
+      sources: 0,
+      churn: 0,
+    });
+  });
+
+  it("carries the configuration when the key names one", () => {
+    const key = '["unit","memory","brand new","server"]';
+    const result = run(sampleManifest({ entries: entries(3) }), {
+      mandatory: new Map([[key, "changed" as const]]),
+      unknown: new Map([[key, {
+        suite: "workspace-unit",
+        unit: "packages/memory/test/new.test.ts",
+      }]]),
+    });
+    const taken = selected(result).find((s) =>
+      testIdentityKey(s.entry.test) === key
+    );
+    expect(taken?.entry.test).toEqual({
+      k: "unit",
+      s: "memory",
+      n: "brand new",
+      v: "server",
+    });
+  });
+
+  it("is left out when nobody said where it lives", () => {
+    const result = run(sampleManifest({ entries: entries(3) }), {
+      mandatory: new Map([[KEY, "changed" as const]]),
+    });
+    expect(keysOf(result)).not.toContain(KEY);
+  });
+
+  it("is left out when the key is not a key at all", () => {
+    for (
+      const key of ["not json", "[]", '["unit","memory"]', '["unit",7,"n"]']
+    ) {
+      const result = run(sampleManifest({ entries: entries(3) }), {
+        mandatory: new Map([[key, "changed" as const]]),
+        unknown: new Map([[key, {
+          suite: "workspace-unit",
+          unit: "packages/memory/test/new.test.ts",
+        }]]),
+      });
+      expect(
+        selected(result).some((s) => testIdentityKey(s.entry.test) === key),
+      )
+        .toBe(false);
+    }
+  });
+
+  it("does not stand in for an identity the manifest does carry", () => {
+    const known = testIdentityKey({ k: "unit", s: "memory", n: "case 0" });
+    const result = run(sampleManifest({ entries: entries(3) }), {
+      mandatory: new Map([[known, "changed" as const]]),
+      unknown: new Map([[known, { suite: "elsewhere", unit: "elsewhere.ts" }]]),
+    });
+    const taken = selected(result).find((s) =>
+      testIdentityKey(s.entry.test) === known
+    );
+    expect(taken?.entry.unit).toBe("packages/memory/test/case-0.test.ts");
   });
 });
