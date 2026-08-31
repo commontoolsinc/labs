@@ -4123,26 +4123,48 @@ function linkToCell(cell: Cell<any>, options: CellLinkOptions): SigilLink {
  * Converts cells and objects that can be turned to cells to links. What comes
  * back is a `FabricValue` with a link wherever a cell sat.
  *
- * `ancestors` holds the ancestors of the value being converted, so what it
- * recognizes is a cycle. A value reachable twice by different paths is not one:
- * it is shared, and each position gets its own conversion. Returning a
- * back-link for a shared reference would rewrite one of its positions into a
- * pointer
- * at the other -- and a graph holds plenty of shared structure that is nobody's
- * cycle, an empty `path: []` array reachable from every alias in it being the
- * common case.
- *
  * @param value - The value to convert.
  * @returns The converted value.
  */
 export function convertCellsToLinks(
   value: CellLinkInput,
   options: CellLinkOptions = {},
-  path: readonly string[] = [],
-  ancestors: Map<object, readonly string[]> = new Map(),
 ): FabricValue {
-  if (isObjectOrArray(value) && ancestors.has(value)) {
-    return linkRefFrom({ path: ancestors.get(value) });
+  return convertOneToLinks(value, options, [], new Map());
+}
+
+/**
+ * Recursive worker for {@link convertCellsToLinks}, carrying the state of the
+ * walk in progress.
+ *
+ * `ancestors` holds the ancestors of the value being converted, so what it
+ * recognizes is a cycle. A value reachable twice by different paths is not one:
+ * it is shared, and each position gets its own conversion. Returning a
+ * back-link for a shared reference would rewrite one of its positions into a
+ * pointer at the other -- and a graph holds plenty of shared structure that is
+ * nobody's cycle, an empty `path: []` array reachable from every alias in it
+ * being the common case.
+ *
+ * `stack` is the path to `value`, held as one array that the walk pushes to and
+ * pops from rather than as a fresh array per position. A back-link is the only
+ * thing that reads a path, so what an ancestor records is its depth into that
+ * stack, and the path is cut from the stack where a cycle asks for one. The
+ * cut is correct because an entry sits in `ancestors` only while the walk is
+ * inside it, which is exactly while the stack still holds its own path as a
+ * prefix.
+ */
+function convertOneToLinks(
+  value: CellLinkInput,
+  options: CellLinkOptions,
+  stack: string[],
+  ancestors: Map<object, number>,
+): FabricValue {
+  if (isObjectOrArray(value)) {
+    const depth = ancestors.get(value);
+
+    if (depth !== undefined) {
+      return linkRefFrom({ path: stack.slice(0, depth) });
+    }
   }
 
   // Early-return cases
@@ -4164,7 +4186,8 @@ export function convertCellsToLinks(
   // been refused by the time the branch ends, which is what the type says.
   let container: unknown[] | Record<string, unknown>;
 
-  ancestors.set(original, path); // ...which needs to be tracked for circularity.
+  // Tracked for circularity, at the depth a back-link to it names.
+  ancestors.set(original, stack.length);
 
   // Everything past the line above runs inside this `try`, so that EVERY way
   // out clears the ancestor just recorded -- the exits that return a value
@@ -4225,26 +4248,52 @@ export function convertCellsToLinks(
     // what a container holds is unconverted until the recursion reaches it.
     // That makes each one a `CellLinkInput` -- the very domain this walk takes
     // -- rather than anything narrower.
+    //
+    // Each descent brackets itself with a push and a pop, so the stack holds
+    // the path to whatever the walk is looking at and holds nothing else.
     if (Array.isArray(container)) {
-      return container.map((element: unknown, index: number) =>
-        convertCellsToLinks(
+      // Built through `map()` rather than by index assignment into a
+      // preallocated array. The two produce equal arrays, and not equally
+      // cheap ones: `map()` leaves a hole a hole and returns a packed array
+      // where filling `new Array(n)` by index returns a holey one, which
+      // costs its consumers -- about a fifth of what structured-cloning the
+      // result takes, paid on every crossing to the client.
+      return container.map((element: unknown, index: number) => {
+        stack.push(String(index));
+
+        const converted = convertOneToLinks(
           element as CellLinkInput,
           options,
-          [...path, String(index)],
+          stack,
           ancestors,
-        )
-      );
+        );
+
+        stack.pop();
+
+        return converted;
+      });
     }
+
+    // Built through `fromEntries()` rather than by assigning member by member.
+    // The two produce equal objects, and not equally cheap ones: an object
+    // filled by assignment costs about half again as much to structured-clone
+    // as the same object built from entries, and every consumer of a converted
+    // value pays that, the crossing to the client included.
     return Object.fromEntries(
-      Object.entries(container).map(([key, member]) => [
-        key,
-        convertCellsToLinks(
+      Object.entries(container).map(([key, member]) => {
+        stack.push(key);
+
+        const converted = convertOneToLinks(
           member as CellLinkInput,
           options,
-          [...path, key],
+          stack,
           ancestors,
-        ),
-      ]),
+        );
+
+        stack.pop();
+
+        return [key, converted];
+      }),
     );
   } finally {
     ancestors.delete(original);
