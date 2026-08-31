@@ -38,6 +38,7 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isDeno } from "@commonfabric/utils/env";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
+import { getDirectTransactionReadActivities } from "./storage/transaction-inspection.ts";
 import type {
   ChangeGroup,
   CommitError,
@@ -863,6 +864,9 @@ function cellAsLink(value: object | ((...args: never[]) => unknown)): unknown {
  * ```
  */
 export class Runtime {
+  #tearingDownWrites = false;
+  readonly #writeTeardown = new AbortController();
+
   readonly id: string;
   readonly scheduler: Scheduler;
   readonly patternManager: PatternManager;
@@ -1877,6 +1881,11 @@ export class Runtime {
       // it cannot spin: every round awaits real promises, so a runtime that keeps
       // working keeps the barrier open rather than busy-looping.
       if (!closeStorage) await this.settled(Infinity);
+      // Kept-storage disposal first drains tracked writebacks above. From this
+      // point onward, no delayed reconciliation or retry may mint new work
+      // behind the teardown barriers below.
+      this.#tearingDownWrites = true;
+      this.#writeTeardown.abort();
       // Abort any pending (not-yet-started) queued jobs so they don't start
       // after storage is torn down.
       for (const queue of this.#queues.values()) {
@@ -1933,6 +1942,8 @@ export class Runtime {
       // Wait for any pending operations
       await this.scheduler.idle();
     } finally {
+      this.#tearingDownWrites = true;
+      this.#writeTeardown.abort();
       // Released whatever happened above. `storageManager.close()` can reject
       // — through a provider's `replica.close()` — and it is the one await
       // here that can. Every statement below is synchronous field-clearing
@@ -2466,6 +2477,17 @@ export class Runtime {
   ): Promise<
     { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
   > {
+    const teardownResult = (): {
+      ok?: undefined;
+      error: CommitError;
+    } => ({
+      error: {
+        name: "StorageTransactionAborted" as const,
+        message: "editWithRetry stopped because the runtime is disposing",
+        reason: new Error("runtime disposing"),
+      },
+    });
+    if (this.#tearingDownWrites) return Promise.resolve(teardownResult());
     const tx = this.edit();
     tx.tx.immediate = true;
     (tx.tx as { deferRunnerStartUntilCommit?: boolean })
@@ -2485,26 +2507,115 @@ export class Runtime {
         },
       });
     }
-    this.prepareTxForCommit(tx);
-    return tx.commit().then(async ({ error }) => {
-      if (error) {
-        if (maxRetries > 0 && isRetryableCommitRejection(error)) {
-          await this.awaitCommitRetryReadiness(error);
-          return this.editWithRetry<T>(fn, maxRetries - 1);
-        } else {
-          return { error };
-        }
+    const commitPrepared = (): Promise<
+      { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
+    > => {
+      if (this.#tearingDownWrites) {
+        tx.abort("editWithRetry stopped because the runtime is disposing");
+        return Promise.resolve(teardownResult());
       }
-      return { ok: result };
-    }).catch((error) => {
-      return {
-        error: {
-          name: "StorageTransactionAborted" as const,
-          message: `editWithRetry commit rejected: ${error}`,
-          reason: error,
-        },
-      };
+      this.prepareTxForCommit(tx);
+      return tx.commit().then(async ({ error }) => {
+        if (error) {
+          if (maxRetries > 0 && isRetryableCommitRejection(error)) {
+            await this.awaitCommitRetryReadiness(
+              error,
+              this.#writeTeardown.signal,
+            );
+            if (this.#tearingDownWrites) return teardownResult();
+            return this.editWithRetry<T>(fn, maxRetries - 1);
+          } else {
+            return { error };
+          }
+        }
+        return { ok: result };
+      }).catch((error) => {
+        return {
+          error: {
+            name: "StorageTransactionAborted" as const,
+            message: `editWithRetry commit rejected: ${error}`,
+            reason: error,
+          },
+        };
+      });
+    };
+
+    // Absence reconciliation, before the read set is exported: a read of a
+    // document this client never synced resolves as absent and would commit
+    // as a `seq: 0` confirmed read — the claim that no such document exists.
+    // Where one does exist, the engine's rejection of that claim is correct
+    // and `fn` re-runs here anyway, after a server round trip, the
+    // conflict's catch-up gate, and a rebuilt commit — once per LAYER of
+    // cold documents, since each re-run can follow the arrived layer's links
+    // into the next. Loading the whole cohort up front and re-running
+    // locally is the same convergence, minus the wire: each round consumes a
+    // retry from the same budget a rejection would.
+    //
+    // Two gates on the load. Budget: loading the documents without re-running
+    // would let the commit export their REAL seqs under a traversal that read
+    // them as absent — an accepted commit derived from an absence that was
+    // never there — so with no budget to re-run, the honest move is the
+    // unexamined claim itself, judged by the server as before. Synchrony: a
+    // transaction with nothing to examine commits on the same synchronous
+    // path as ever, which the commit-gated runner start depends on.
+    const reconciliation = maxRetries > 0
+      ? this.#loadUnexaminedAbsences(tx)
+      : 0;
+    if (typeof reconciliation === "number") return commitPrepared();
+    return reconciliation.then((present) => {
+      if (this.#tearingDownWrites) {
+        tx.abort("editWithRetry stopped because the runtime is disposing");
+        return teardownResult();
+      }
+      if (present > 0) {
+        tx.abort(
+          `editWithRetry re-run: ${present} document(s) read as absent ` +
+            "are present; the action re-runs against them",
+        );
+        return this.editWithRetry<T>(fn, maxRetries - 1);
+      }
+      return commitPrepared();
     });
+  }
+
+  /**
+   * Load every document `tx` read as absent that no involved replica has
+   * examined, resolving with how many exist after all — the signal that the
+   * transaction's reads ran against documents it did not hold. One call per
+   * space the transaction read from, each answered by that space's provider
+   * ({@link IStorageProvider.loadUnexaminedAbsences}); a provider without
+   * the capability contributes zero and keeps the server-judged path.
+   */
+  #loadUnexaminedAbsences(
+    tx: IExtendedStorageTransaction,
+  ): number | Promise<number> {
+    const reads = getDirectTransactionReadActivities(tx.tx);
+    if (!reads) return 0;
+    const spaces = new Set<MemorySpace>();
+    for (const read of reads) spaces.add(read.space);
+    // A synchronous answer is always zero — anything unexamined needs a
+    // pull — so a round with no cold reads never leaves the synchronous
+    // path, and only the spaces that owe a pull contribute a promise.
+    const pending: Promise<number>[] = [];
+    for (const space of spaces) {
+      const provider = this.storageManager.open(space);
+      if (provider.loadUnexaminedAbsences === undefined) continue;
+      try {
+        const answer = provider.loadUnexaminedAbsences(tx.tx);
+        if (typeof answer !== "number") {
+          // Reconciliation only front-runs the authoritative commit verdict.
+          // A provider that cannot perform the best-effort load leaves the
+          // transaction's original absence claim for the server to judge.
+          pending.push(answer.catch(() => 0));
+        }
+      } catch {
+        // Same fallback for providers that fail before returning a promise.
+      }
+    }
+    if (pending.length === 0) return 0;
+    return Promise.all(pending).then((counts) =>
+      counts.reduce((total, count) => total + count, 0)
+    );
   }
 
   /**
@@ -2534,16 +2645,40 @@ export class Runtime {
    * Every step is best-effort by design: this resolves rather than throws,
    * because the retry's commit — not this readiness — is what decides.
    */
-  async awaitCommitRetryReadiness(error: unknown): Promise<void> {
+  async awaitCommitRetryReadiness(
+    error: unknown,
+    teardownSignal?: AbortSignal,
+  ): Promise<void> {
+    const waitUnlessTeardown = async (
+      operation: PromiseLike<unknown>,
+    ): Promise<boolean> => {
+      if (teardownSignal === undefined) {
+        await operation;
+        return true;
+      }
+      if (teardownSignal.aborted) return false;
+      const aborted = Promise.withResolvers<boolean>();
+      const onAbort = () => aborted.resolve(false);
+      teardownSignal.addEventListener("abort", onAbort, { once: true });
+      try {
+        return await Promise.race([
+          Promise.resolve(operation).then(() => true),
+          aborted.promise,
+        ]);
+      } finally {
+        teardownSignal.removeEventListener("abort", onAbort);
+      }
+    };
     const readyToRetry = (error as { readyToRetry?: () => unknown })
       ?.readyToRetry;
     if (typeof readyToRetry === "function") {
       try {
-        await readyToRetry();
+        if (!await waitUnlessTeardown(Promise.resolve(readyToRetry()))) return;
       } catch {
         // Readiness aborted — the retry's commit decides.
       }
     }
+    if (teardownSignal?.aborted) return;
     const conflict = (error as {
       conflict?: { space?: MemorySpace; of?: string };
     })?.conflict;
@@ -2553,9 +2688,11 @@ export class Runtime {
       conflict.of !== "of:unknown"
     ) {
       try {
-        await this.storageManager.open(conflict.space).sync(
-          conflict.of as unknown as URI,
-          { path: [], schema: false },
+        await waitUnlessTeardown(
+          this.storageManager.open(conflict.space).sync(
+            conflict.of as unknown as URI,
+            { path: [], schema: false },
+          ),
         );
       } catch {
         // Pull failed — the retry's commit decides.

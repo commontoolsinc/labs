@@ -593,6 +593,27 @@ export interface IStorageProvider {
    */
   synced(): Promise<void>;
 
+  /**
+   * Load the documents `source` read as absent without this replica ever
+   * having examined them (no local record; session-scoped instances
+   * excluded, since a fresh session instance cannot exist server-side), and
+   * resolve with how many turned out to exist.
+   *
+   * An unexamined absence becomes a `seq: 0` confirmed read in the
+   * transaction's commit — the claim that no such document exists — which
+   * the server rejects whenever one does. `Runtime.editWithRetry` consults
+   * this before committing: a non-zero count means the transaction's reads
+   * ran against documents it did not hold, so the attempt is re-run locally
+   * against the now-loaded documents instead of being rejected on the wire.
+   * Returns `0` synchronously when the transaction holds no unexamined
+   * absences, so commit paths that are synchronous stay synchronous.
+   * Optional: a provider without it simply leaves that convergence to the
+   * server's rejection and the retry gate, exactly as before.
+   */
+  loadUnexaminedAbsences?(
+    source: IStorageTransaction | undefined,
+  ): number | Promise<number>;
+
   /** INBOUND settlement only (server-execution v2 stage F): outstanding
    * watch refreshes/pulls, EXCLUDING commit settlement AND update
    * processing — the serving loop's wave-settle barrier. Both exclusions
