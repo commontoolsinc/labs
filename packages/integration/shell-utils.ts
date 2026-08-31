@@ -299,12 +299,12 @@ export class ShellIntegration {
     await this.#disposePageRuntime();
   }
 
-  // Wait for the app state to match all properties
-  // provided here. Throws if timeout is reached.
+  // Wait for the shell's app state to hold this view, and this identity where
+  // one is given. Throws if the wait runs out.
   //
-  // If waiting for only `spaceName`, for example,
-  // the function returns successfully once state
-  // has a matching `spaceName`, ignoring all other properties.
+  // The view is matched whole, field for field: a state matches when its view
+  // holds the same fields this one holds. A view naming only a space is
+  // matched by the state of a space with no piece open.
   async waitForState(
     params: {
       view: AppView;

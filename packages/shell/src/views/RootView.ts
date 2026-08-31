@@ -2,6 +2,7 @@ import { type DID, type Identity, KeyStore } from "@commonfabric/identity";
 import { resolveSpaceDid, RuntimeInternals } from "@commonfabric/lib-shell";
 import {
   AppView,
+  isAppViewEqual,
   isViewingDefaultPatternView,
   navigate,
 } from "@commonfabric/navigation";
@@ -379,8 +380,8 @@ export class XRootView extends BaseView implements ShellApp {
   // and treats a space name that disagrees with a space DID as an error.
   protected override willUpdate(changedProperties: PropertyValues<this>): void {
     if (changedProperties.has("app")) {
-      const previous = changedProperties.get("app");
-      if (JSON.stringify(previous?.view) !== JSON.stringify(this.app?.view)) {
+      const previousView = changedProperties.get("app")?.view;
+      if (!previousView || !isAppViewEqual(previousView, this.app.view)) {
         if (!this.#preserveRuntimeErrorsForNextViewChange) {
           this._runtimeLoadErrors = [];
         }

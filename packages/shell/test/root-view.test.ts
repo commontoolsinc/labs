@@ -288,6 +288,46 @@ describe("XRootView", () => {
     }
   });
 
+  it("keeps runtime load errors across a view rebuilt in another key order", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const root = new XRootView();
+      const internals = root as unknown as {
+        _runtimeLoadErrors: readonly ErrorNotification[];
+        willUpdate(changed: Map<string, unknown>): void;
+      };
+      const error: ErrorNotification = {
+        type: NotificationType.ErrorReport,
+        message: "the piece failed to load",
+      };
+      const stateAt = (next: unknown) => ({
+        ...root.app,
+        view: next as typeof root.app.view,
+      });
+
+      // A route parsed from a URL names the space first; a navigation mapped
+      // from a space DID back onto the current space name rebuilds the view
+      // with the piece first. Both address the same piece, so an error that
+      // piece raised is still the error of the piece on screen.
+      root.app = stateAt({ pieceId: "piece-1", spaceName: "atlas" });
+      internals._runtimeLoadErrors = [error];
+      internals.willUpdate(
+        new Map([["app", stateAt({ spaceName: "atlas", pieceId: "piece-1" })]]),
+      );
+      expect(internals._runtimeLoadErrors).toEqual([error]);
+
+      // Another piece is another view, and its errors are not this one's.
+      root.app = stateAt({ spaceName: "atlas", pieceId: "piece-2" });
+      internals.willUpdate(
+        new Map([["app", stateAt({ spaceName: "atlas", pieceId: "piece-1" })]]),
+      );
+      expect(internals._runtimeLoadErrors).toEqual([]);
+    } finally {
+      restore();
+    }
+  });
+
   it("starts one lookup per name, whatever else changes in the app state", async () => {
     const restore = installBrowserGlobals();
     try {

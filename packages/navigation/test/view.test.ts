@@ -158,6 +158,42 @@ describe("view", () => {
     expect(isAppViewEqual(view, { builtin: "home" })).toBe(false);
   });
 
+  it("compares two views holding the same fields in a different order", () => {
+    // A route parsed from a URL names the space first; a navigation mapped
+    // from a space DID back onto the current space name rebuilds the view
+    // with the piece first.
+    expect(isAppViewEqual(
+      { spaceName: "space", pieceId: "fid1:abc" },
+      { pieceId: "fid1:abc", spaceName: "space" },
+    )).toBe(true);
+    expect(isAppViewEqual(
+      { spaceName: "space", pieceId: "fid1:abc" },
+      { pieceId: "fid1:abc", spaceName: "other" },
+    )).toBe(false);
+    expect(isAppViewEqual(
+      { spaceName: "space", pieceId: "fid1:abc" },
+      { spaceName: "space" },
+    )).toBe(false);
+  });
+
+  it("counts a field holding undefined as absent", () => {
+    // The shell rebuilds a navigated view field by field, carrying a key
+    // through whenever the view has it, so a key present with no value
+    // reaches this comparison.
+    expect(isAppViewEqual(
+      { spaceName: "space", pieceId: undefined },
+      { spaceName: "space" },
+    )).toBe(true);
+    expect(isAppViewEqual(
+      { spaceName: "space", pieceId: undefined, mode: undefined },
+      { spaceName: "space" },
+    )).toBe(true);
+    expect(isAppViewEqual(
+      { spaceName: "space", pieceId: undefined },
+      { spaceName: "space", pieceId: "fid1:abc" },
+    )).toBe(false);
+  });
+
   it("treats slug piece routes as non-default pattern views", () => {
     expect(isViewingDefaultPatternView({ spaceName: "space" })).toBe(true);
     expect(
