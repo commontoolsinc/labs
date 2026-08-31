@@ -1075,6 +1075,72 @@ describe("stage F serving loop", () => {
     expect(host.stats().activeSpaces).toBe(0);
   });
 
+  it("leaves a space unserved while a rival process holds its lease, and serves it once that lease is gone (serving-loop.md §2)", async () => {
+    const engine = await server.engineForSpace(space);
+    const rival = executionLeaseHolder("did:key:activation-rival");
+    expect(
+      acquireExecutionLease(engine, { space, holder: rival, ttlMs: 600_000 }),
+    ).toBe(true);
+
+    let built = 0;
+    onServingRuntime = () => {
+      built += 1;
+      return Promise.resolve();
+    };
+    host = newHost();
+    openClient();
+    const demand = clientRuntime.getCell<{ value: number }>(
+      space,
+      "rival-lease-demand",
+      undefined,
+    );
+    await demand.sync();
+    // The admission trigger's own precondition, checked rather than
+    // assumed: with a live client session an authored admission
+    // activates, so the notice below reaches the refusal.
+    expect(
+      server.hasLiveSessionsForSpace(space, {
+        excludePrincipal: serviceSigner.did(),
+      }),
+    ).toBe(true);
+    server.noteExecutorCommit({
+      space,
+      seq: Engine.serverSeq(engine),
+      class: "authored",
+      sessionId: "rival-lease-issuer",
+      writes: [{ id: "of:rival-lease-c1", scopeKey: "space" }],
+    });
+    // The notice entered the activation synchronously, and close()
+    // awaits every activation in flight — so this is the refusal
+    // landing, not a guess at when it lands.
+    await host.close();
+
+    // The refusal precedes the runtime factory: a second deriver builds
+    // nothing, registers nothing, and leaves the rival's row alone.
+    expect(built).toBe(0);
+    expect(host.stats().lease.held).toBe(0);
+    expect(host.spaceServer(space)).toBeUndefined();
+    expect(liveExecutionLeaseHolder(engine, space)).toBe(rival);
+
+    // The control: with the row released, the SAME trigger against the
+    // SAME live session serves the space — so the refusal above is the
+    // lease's doing, not a trigger that never fired.
+    releaseExecutionLease(engine, { space, holder: rival });
+    host = newHost();
+    server.noteExecutorCommit({
+      space,
+      seq: Engine.serverSeq(engine),
+      class: "authored",
+      sessionId: "rival-lease-issuer",
+      writes: [{ id: "of:rival-lease-c2", scopeKey: "space" }],
+    });
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "the activation once the rival's lease is gone",
+    );
+    expect(built).toBe(1);
+  });
+
   it("parks on a renew-blip mid-wave abort: reacquire succeeds, the aborted wave's space still parks and W does not move (serving-loop.md §2)", async () => {
     // The renew-blip interleave, end to end: (1) a wave opens (a seal
     // captures the CURRENT lease tenure); (2) the lease row vanishes
