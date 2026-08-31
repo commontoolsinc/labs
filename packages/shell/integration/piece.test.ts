@@ -94,16 +94,14 @@ async function waitForSpaceRootPattern(
     const rootView = document.querySelector("x-root-view");
     const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
       | {
-        _patterns?: {
+        _spaceRootPattern?: {
           value?: {
-            spaceRootPattern?: {
-              id(): string;
-            };
+            id(): string;
           };
         };
       }
       | null;
-    return !!appView?._patterns?.value?.spaceRootPattern?.id?.();
+    return !!appView?._spaceRootPattern?.value?.id?.();
   });
 }
 

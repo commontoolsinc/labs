@@ -936,7 +936,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: staleIdentity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(error).toBeUndefined();
 
