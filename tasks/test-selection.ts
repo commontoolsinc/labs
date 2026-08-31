@@ -127,10 +127,21 @@ export function parseIdentityArgument(text: string): TestIdentity | undefined {
 }
 
 /** What `explain` says about one identity, as lines. */
+/** What the packing decided about one identity. */
+export interface PlanVerdict {
+  selected: boolean;
+
+  /** How many times it would run, which a pass may have trimmed. */
+  repeats?: number;
+
+  /** Set when no lane can hold it, whatever the budget. */
+  unschedulable?: boolean;
+}
+
 export function explainLines(
   manifest: Manifest,
   test: TestIdentity,
-  selected = false,
+  verdict: PlanVerdict = { selected: false },
 ): string[] {
   const key = testIdentityKey(test);
   const entry = manifest.entries.find(
@@ -167,15 +178,25 @@ export function explainLines(
           "request cannot act on it"
         : "  withheld: it is too flaky to judge a change by",
     );
+  } else if (verdict.unschedulable) {
+    lines.push(
+      `  no lane can hold it: ${entry.cost.toFixed(1)}s is past the bound a ` +
+        "lane runs under, so it is reported rather than scheduled. Splitting " +
+        "it is the fix.",
+    );
   } else {
-    if (entry.repeats > 1) {
-      lines.push(`  run ${entry.repeats} times, and every one must pass`);
+    // The repeat count the packing settled on, which is what will run: a
+    // filling pass trims repeats to fit rather than dropping the test, so
+    // the manifest's own number is what it asked for and not what it got.
+    const repeats = verdict.repeats ?? entry.repeats;
+    if (repeats > 1) {
+      lines.push(`  run ${repeats} times, and every one must pass`);
     }
     // The question this mode exists to answer. Withheld and repeated are
     // facts about the entry; whether it is reached at all is a fact about
     // the packing, and only the packing knows it.
     lines.push(
-      selected
+      verdict.selected
         ? "  the current manifest selects it"
         : "  the current manifest does not reach it: the budget runs out " +
           "first, on tests worth more per second",
@@ -285,12 +306,21 @@ async function main(args: readonly string[]): Promise<void> {
       );
       // Run the same packing a lane runs, so the answer is the one the
       // lanes would give rather than a guess from the entry alone.
-      const plan = planFor(manifest);
+      const result = planFor(manifest);
       const key = testIdentityKey(resolved);
-      const selected = plan.lanes.some((lane) =>
-        lane.selections.some((s) => testIdentityKey(s.entry.test) === key)
+      const taken = result.lanes.flatMap((lane) => lane.selections).find((s) =>
+        testIdentityKey(s.entry.test) === key
       );
-      for (const line of explainLines(manifest, resolved, selected)) {
+      const verdict: PlanVerdict = { selected: taken !== undefined };
+      if (taken !== undefined) verdict.repeats = taken.repeats;
+      if (
+        result.unschedulable.some((entry) =>
+          testIdentityKey(entry.test) === key
+        )
+      ) {
+        verdict.unschedulable = true;
+      }
+      for (const line of explainLines(manifest, resolved, verdict)) {
         console.log(line);
       }
       return;

@@ -122,6 +122,13 @@ export function emptyState(): IdentityState {
   };
 }
 
+/**
+ * How long a commit stays reachable: how late a re-run of it may arrive
+ * and still be recognized as one. Past this a repeated commit is judged
+ * as though it were new, which errs toward calling its failure a catch.
+ */
+export const COMMIT_REACH_DAYS = 30;
+
 /** Days between two "yyyy-mm-dd" days, `later` minus `earlier`. */
 export function daysBetween(earlier: string, later: string): number {
   const from = Date.parse(`${earlier}T00:00:00Z`);
@@ -228,27 +235,51 @@ export interface FoldContext {
   /** Every outcome seen for one identity at one commit, with its day. */
   outcomesAtCommit: Map<string, { day: string; outcomes: Set<string> }>;
 
+  /**
+   * What the default branch said about one identity at one commit, with
+   * the day. A rerun of a commit can arrive long after the run it
+   * repeats, so this outlives the batch: without it, a later pass
+   * elsewhere would make that rerun look like the first failure at a
+   * commit the branch had already shown broken.
+   */
+  mainAtCommit: Map<string, { day: string; outcome: "pass" | "fail" }>;
+
+  /**
+   * The commit and source pairs a catch has already been credited to,
+   * against the day it was credited on, so the set can be aged like
+   * everything else here rather than growing with every catch ever made.
+   */
+  credited: Map<string, string>;
+
   /** Where and when each identity has been seen failing. */
   failures: Map<string, Array<{ day: string; source: string }>>;
-
-  /** The commit and source pairs a catch has already been credited to. */
-  credited: Set<string>;
 }
 
 /** A context holding nothing, for a fold with no history behind it. */
 export function emptyContext(): FoldContext {
   return {
     outcomesAtCommit: new Map(),
+    mainAtCommit: new Map(),
+    credited: new Map(),
     failures: new Map(),
-    credited: new Set(),
   };
 }
 
 /** A fold context as it travels between runs. */
 export interface StoredFoldContext {
   outcomesAtCommit: Array<[string, { day: string; outcomes: string[] }]>;
+  mainAtCommit: Array<[string, { day: string; outcome: "pass" | "fail" }]>;
+  credited: Array<[string, string]>;
   failures: Array<[string, Array<{ day: string; source: string }>]>;
-  credited: string[];
+}
+
+/** The outcomes a record may carry, for validating a stored context. */
+const OUTCOMES = new Set(["pass", "fail", "skip"]);
+
+/** Whether a value is a "yyyy-mm-dd" day this reader can measure from. */
+function isDay(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    Number.isFinite(Date.parse(`${value}T00:00:00Z`));
 }
 
 /** The context, flattened for the aggregate that carries it. */
@@ -257,8 +288,9 @@ export function serializeContext(context: FoldContext): StoredFoldContext {
     outcomesAtCommit: [...context.outcomesAtCommit].map((
       [at, seen],
     ) => [at, { day: seen.day, outcomes: [...seen.outcomes] }]),
-    failures: [...context.failures],
+    mainAtCommit: [...context.mainAtCommit],
     credited: [...context.credited],
+    failures: [...context.failures],
   };
 }
 
@@ -271,37 +303,52 @@ export function parseContext(value: unknown): FoldContext {
   const context = emptyContext();
   if (typeof value !== "object" || value === null) return context;
   const stored = value as Partial<StoredFoldContext>;
-  if (Array.isArray(stored.outcomesAtCommit)) {
-    for (const entry of stored.outcomesAtCommit) {
-      if (!Array.isArray(entry) || typeof entry[0] !== "string") continue;
-      const seen = entry[1];
-      if (typeof seen !== "object" || seen === null) continue;
-      if (typeof seen.day !== "string" || !Array.isArray(seen.outcomes)) {
-        continue;
-      }
-      context.outcomesAtCommit.set(entry[0], {
-        day: seen.day,
-        outcomes: new Set(seen.outcomes.filter((o) => typeof o === "string")),
-      });
-    }
+  const pairs = (raw: unknown): Array<[string, unknown]> =>
+    Array.isArray(raw)
+      ? raw.filter((entry): entry is [string, unknown] =>
+        Array.isArray(entry) && typeof entry[0] === "string"
+      )
+      : [];
+
+  for (const [at, seen] of pairs(stored.outcomesAtCommit)) {
+    if (typeof seen !== "object" || seen === null) continue;
+    const held = seen as { day?: unknown; outcomes?: unknown };
+    if (!isDay(held.day) || !Array.isArray(held.outcomes)) continue;
+    // An outcome this reader does not know would read as one more thing
+    // the identity did at that commit, and two of them is the test
+    // disagreeing with itself — which suppresses a real catch.
+    const outcomes = held.outcomes.filter((outcome): outcome is string =>
+      typeof outcome === "string" && OUTCOMES.has(outcome)
+    );
+    if (outcomes.length === 0) continue;
+    context.outcomesAtCommit.set(at, {
+      day: held.day,
+      outcomes: new Set(outcomes),
+    });
   }
-  if (Array.isArray(stored.failures)) {
-    for (const entry of stored.failures) {
-      if (!Array.isArray(entry) || typeof entry[0] !== "string") continue;
-      if (!Array.isArray(entry[1])) continue;
-      context.failures.set(
-        entry[0],
-        entry[1].filter((f) =>
-          typeof f === "object" && f !== null &&
-          typeof f.day === "string" && typeof f.source === "string"
-        ),
-      );
-    }
+  for (const [at, seen] of pairs(stored.mainAtCommit)) {
+    if (typeof seen !== "object" || seen === null) continue;
+    const held = seen as { day?: unknown; outcome?: unknown };
+    if (!isDay(held.day)) continue;
+    if (held.outcome !== "pass" && held.outcome !== "fail") continue;
+    context.mainAtCommit.set(at, { day: held.day, outcome: held.outcome });
   }
-  if (Array.isArray(stored.credited)) {
-    for (const key of stored.credited) {
-      if (typeof key === "string") context.credited.add(key);
-    }
+  for (const [attribution, day] of pairs(stored.credited)) {
+    // A day that cannot be read cannot be aged, and an entry that is
+    // never aged suppresses that catch for good.
+    if (isDay(day)) context.credited.set(attribution, day);
+  }
+  for (const [key, seen] of pairs(stored.failures)) {
+    if (!Array.isArray(seen)) continue;
+    const kept = seen.filter((failure): failure is {
+      day: string;
+      source: string;
+    } =>
+      typeof failure === "object" && failure !== null &&
+      isDay((failure as { day?: unknown }).day) &&
+      typeof (failure as { source?: unknown }).source === "string"
+    );
+    if (kept.length > 0) context.failures.set(key, kept);
   }
   return context;
 }
@@ -322,6 +369,16 @@ export function trimContext(context: FoldContext, today: string): void {
   }
   for (const [at, seen] of context.outcomesAtCommit) {
     if (stale(seen.day)) context.outcomesAtCommit.delete(at);
+  }
+  // A commit is re-run within days of the run it repeats, not months, so
+  // these age on the same window. Kept forever they would grow with the
+  // number of catches the repository has ever made.
+  const old = (day: string) => daysBetween(day, today) > COMMIT_REACH_DAYS;
+  for (const [at, seen] of context.mainAtCommit) {
+    if (old(seen.day)) context.mainAtCommit.delete(at);
+  }
+  for (const [attribution, day] of context.credited) {
+    if (old(day)) context.credited.delete(attribution);
   }
 }
 
@@ -477,7 +534,7 @@ export function foldObservations(
     }
     const attribution = `${key} ${observation.commit} ${observation.source}`;
     if (credited.has(attribution)) continue;
-    credited.add(attribution);
+    credited.set(attribution, day);
     creditCatch(state, observation.place, day, observation.source);
   }
 

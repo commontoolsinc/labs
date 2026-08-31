@@ -473,8 +473,11 @@ export class Fold {
     // objects whose reports interleave in time. The rules that decide
     // whether a failure is a catch look backwards and forwards along this
     // order, so it has to be the order the runs actually happened in.
+    // By the parsed instant rather than the text: these come from two
+    // producers, and one writing fractional seconds where the other does
+    // not makes the later run sort first, because "." precedes "Z".
     observations.sort((a, b) =>
-      a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0
+      Date.parse(a.startedAt) - Date.parse(b.startedAt)
     );
     this.#observations += observations.length;
     foldObservations(observations, {

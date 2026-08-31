@@ -5,13 +5,17 @@ import {
   churn,
   costSeconds,
   daysBetween,
+  emptyContext,
   emptyState,
   flakeRate,
   foldObservations,
   type Observation,
+  parseContext,
   percentile90,
   scoreInputs,
   sealDay,
+  serializeContext,
+  trimContext,
   trimWindows,
   value,
 } from "./score.ts";
@@ -46,6 +50,44 @@ function stateFrom(observations: readonly Observation[]) {
 }
 
 describe("score", () => {
+  describe("a stored fold context", () => {
+    it("round-trips what a run learned", () => {
+      const context = emptyContext();
+      context.mainAtCommit.set("k c1", { day: "2026-08-20", outcome: "fail" });
+      context.credited.set("k c1 branch", "2026-08-20");
+      const back = parseContext(serializeContext(context));
+      expect(back.mainAtCommit.get("k c1")?.outcome).toBe("fail");
+      expect(back.credited.get("k c1 branch")).toBe("2026-08-20");
+    });
+
+    it("drops what it cannot read rather than believing it", () => {
+      // An unknown outcome would read as one more thing the identity did
+      // at that commit, and two of them is the test disagreeing with
+      // itself, which suppresses a real catch. A credited entry with no
+      // readable day can never be aged out, so it suppresses one forever.
+      const back = parseContext({
+        outcomesAtCommit: [["k c1", { day: "2026-08-20", outcomes: ["wat"] }]],
+        mainAtCommit: [["k c1", { day: "nope", outcome: "fail" }]],
+        credited: [["k c1 branch", "not a day"]],
+        failures: [["k", [{ day: "2026-08-20", source: "branch" }]]],
+      });
+      expect(back.outcomesAtCommit.size).toBe(0);
+      expect(back.mainAtCommit.size).toBe(0);
+      expect(back.credited.size).toBe(0);
+      expect(back.failures.size).toBe(1);
+    });
+
+    it("ages out what the rules can no longer reach", () => {
+      const context = emptyContext();
+      context.mainAtCommit.set("k old", { day: "2026-01-01", outcome: "fail" });
+      context.mainAtCommit.set("k new", { day: "2026-08-20", outcome: "fail" });
+      context.credited.set("k old branch", "2026-01-01");
+      trimContext(context, "2026-08-20");
+      expect([...context.mainAtCommit.keys()]).toEqual(["k new"]);
+      expect(context.credited.size).toBe(0);
+    });
+  });
+
   describe("what counts as a catch", () => {
     it("counts a failure on a branch where main was green", () => {
       const state = stateFrom([
