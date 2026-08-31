@@ -59,10 +59,10 @@ label, report under that item's identity.
 
 An uploaded object is gzip-encoded NDJSON (`Content-Encoding: gzip`, so a
 plain HTTPS reader receives text): one context line, then one record line
-per test execution. A rollup object concatenates a day of such reports;
-in every object, a context line opens a report and each record line
-belongs to the report whose context most recently preceded it, which is
-how per-report provenance — the fork flag among it — survives
+per test execution. A rollup shard concatenates a share of a day's such
+reports; in every object, a context line opens a report and each record
+line belongs to the report whose context most recently preceded it, which
+is how per-report provenance — the fork flag among it — survives
 compaction.
 
 ```json
@@ -158,7 +158,8 @@ area, managed by the infra repository's `tofu/test-records` root:
 ```
 <repo>/test-records/submissions/ci/v1/<yyyy>/<mm>/<dd>/run-<runId>-<artifact>.ndjson
 <repo>/test-records/submissions/local/<username>/v1/<yyyy>/<mm>/<dd>/<reportId>-<slug>.ndjson
-<repo>/test-records/aggregated/ci/v1/<yyyy>/<mm>/<dd>.ndjson
+<repo>/test-records/aggregated/ci/v1/<yyyy>/<mm>/<dd>/0003-of-0017.ndjson
+<repo>/test-records/aggregated/ci/v1/<yyyy>/<mm>/<dd>/rollup.json
 ```
 
 The date partition comes from the run's start, so late-shipped orphans
@@ -183,11 +184,32 @@ rotated — and a daily
 janitor disables accounts after a month without pull-request activity
 and re-enables them on return. The **compactor**, when provisioned,
 holds create on `aggregated/` and rewrites each closed day of raw
-records — after a seven-day late-arrival lag — as one validated rollup
-that keeps each report's context line ahead of its records; a day with
+records — after a seven-day late-arrival lag — as validated rollup shards
+that keep each report's context line ahead of its records; a day with
 no records stays open, since a write-once rollup would permanently
 exclude late arrivals. Rollups are a read optimization, and
 full-fidelity readers list the raw area.
+
+A day is several shards. A busy day is over a gigabyte of NDJSON, against
+V8's maximum string length of about half that, and an object has to fit in
+a string at both ends: the compactor builds one, and a reader fetches one.
+Each shard is sized for a few tens of megabytes of text, so a day of tens
+of thousands of raw objects becomes tens of shards.
+
+Which shard a raw object's reports go into is a hash of the object's name
+taken modulo the shard count, so the partition is a property of each
+object rather than of the order the compactor read them in. A day is
+partitioned once. The count is in every shard's name, so a run that finds
+shards already in a day's folder reads the count off them and finishes
+that partition, writing the shards that are missing and leaving the rest
+alone; nothing an earlier run wrote is left unreferenced, and no record
+reaches two shards. What a partition does not fix is which raw objects it
+covers: an object arriving between two runs is in the rollup when its
+shard is one of the ones still to be written, and in the raw area only
+otherwise, the same as any arrival after a day is compacted. The
+`rollup.json` manifest names the day's shards and is written after all of
+them, so a day counts as compacted when its manifest exists, and a reader
+that finds no manifest reads the raw area for that day.
 
 ## CI movement
 
