@@ -1086,12 +1086,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     value: FabricValue | undefined,
   ): void {
-    if (
-      isObjectOrArray(value) &&
-      cfcMetadataPresent((value as { cfc?: unknown }).cfc)
-    ) {
-      return;
-    }
+    const carried = isObjectOrArray(value)
+      ? (value as { cfc?: unknown }).cfc
+      : undefined;
+    if (cfcMetadataPresent(carried)) return;
     const stored = this.tx.read({ ...address, path: ["cfc"] }, {
       meta: {
         ...ignoreReadForScheduling,
