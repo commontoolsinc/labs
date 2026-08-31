@@ -1,3 +1,4 @@
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import type { URI } from "@commonfabric/memory/interface";
 import type { NormalizedFullLink } from "../link-utils.ts";
@@ -7,7 +8,10 @@ import type {
 } from "../storage/interface.ts";
 import { internalVerifierRead } from "../storage/reactivity-log.ts";
 import { normalizeCellScope } from "../scope.ts";
-import { canonicalizeLogicalPath } from "./canonical.ts";
+import {
+  canonicalizeCfcMetadata,
+  canonicalizeLogicalPath,
+} from "./canonical.ts";
 import type { CfcMetadata } from "./types.ts";
 
 const INTERNAL_VERIFIER_META = {
@@ -85,6 +89,28 @@ const refuseUnknownMetadataVersion = (value: unknown): void => {
  */
 export const cfcMetadataPresent = (value: unknown): boolean =>
   isCfcMetadata(value) || isUnknownVersionEnvelope(value);
+
+/**
+ * Whether two values at the reserved metadata position present the same label
+ * map. Envelopes this build interprets are compared canonically, the way the
+ * persistence pass's idempotence skip compares them, so an envelope re-spelled
+ * with its entries in another order is the same map. One whose `version` this
+ * build does not interpret has no canonical form and is compared as it stands.
+ * Anything a reader reports as absent matches nothing, itself included.
+ */
+export const sameStoredCfcMetadata = (
+  left: unknown,
+  right: unknown,
+): boolean => {
+  if (isCfcMetadata(left) && isCfcMetadata(right)) {
+    return deepEqual(
+      canonicalizeCfcMetadata(left),
+      canonicalizeCfcMetadata(right),
+    );
+  }
+  return cfcMetadataPresent(left) && cfcMetadataPresent(right) &&
+    deepEqual(left, right);
+};
 
 export const readStoredCfcMetadata = (
   tx: IExtendedStorageTransaction,

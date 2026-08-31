@@ -361,19 +361,21 @@ therefore carries its own guard:
   runtime's privileged persistence scope is recorded, and the commit boundary
   turns each record into a fail-closed reason (audit S18).
 - A document-root (`path: []`) write replaces the envelope rather than merging
-  into it, so an envelope that carries no `cfc` record erases the stored label
-  map and leaves a labeled document reading as an unlabeled one. Made outside
-  the privileged persistence scope on a document that stores a map, such a
-  write is recorded like one that names the `["cfc"]` path, and yields the
-  same fail-closed reason. The stored member decides, under the same weightless
+  into it, so the envelope it carries decides what label map the document has
+  afterwards. Made outside the privileged persistence scope on a document that
+  stores a map, a write that does not leave that map as it found it is
+  recorded like one that names the `["cfc"]` path, and yields the same
+  fail-closed reason. Dropping the member erases the map; so does carrying a
+  value a reader reports as absent; so does carrying a well-formed map that is
+  not the stored one, an empty entry list included. The comparison is
+  canonical, so an envelope read out and written back is the map the document
+  already had and passes. The stored member decides, under the same weightless
   read the meta guard uses, so what that leaves open is an erasure racing the
-  guard. Creating a document, replacing one that stores no map, and an
-  envelope that carries the stored map forward all pass through.
-- A document-root write whose envelope carries a `cfc` record of its own
-  reaches the label map with no record made: the `["cfc"]` guard keys on the
-  address, and this write's address is the document. The meta guard covers
-  that shape for its own fields, so what stands open here is label-map
-  forgery through the document root.
+  guard.
+- A document-root write onto a document that stores NO label map can mint one,
+  because the guard above has nothing to protect there. That is the raw-seed
+  idiom the CFC tests are built on, and what stands open on this seam:
+  label-map forgery where the document carried no map to begin with.
 - A guard on a seam governs writes to it, not the runtime entry points that
   write it while doing their own work. The same reach that hands a handler
   the storage transaction hands it the runtime: `runtime.run` instantiates a
