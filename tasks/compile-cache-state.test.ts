@@ -109,14 +109,12 @@ Deno.test("classifyRunAgainstPredecessor fails open to unknown", async () => {
   );
 });
 
-//
-// The drift guard: COMPILE_CACHE_KEY_GLOBS mirrors the FIRST hashFiles(...)
-// argument list of every cc-* compile-cache key in the workflow. If this
-// fails, update the constant and the workflow together (and matcherForGlob
-// if a new glob shape appeared).
-//
-
 Deno.test("COMPILE_CACHE_KEY_GLOBS matches the cc-* cache keys in deno.yml", async () => {
+  // The drift guard: COMPILE_CACHE_KEY_GLOBS mirrors the FIRST hashFiles(...)
+  // argument list of every cc-* compile-cache key in the workflow. If this
+  // fails, update the constant and the workflow together (and matcherForGlob if
+  // a new glob shape appeared).
+
   const workflow = await Deno.readTextFile(
     new URL("../.github/workflows/deno.yml", import.meta.url),
   );

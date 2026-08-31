@@ -79,13 +79,15 @@ subtree — which it usually is not.
 So a rule here is a way to say more, at the moment it matters, to one agent. It
 is not a way to move something out of `AGENTS.md`. Anything an agent must not
 get wrong still needs a line in the root `AGENTS.md`, where every agent sees
-it. The "Automated gates" section there is that floor, and each rule in this
-directory expands on one of its lines.
+it. Each rule here expands on one of those lines: the "Automated gates"
+section holds the ones a check enforces, and the engineering-practice sections
+hold the ones only a reviewer will catch.
 
 ## The rules
 
 | Rule                     | Covers                                          |
 | ------------------------ | ----------------------------------------------- |
+| `source-code.md`         | every `.ts` and `.tsx` file                     |
 | `tests.md`               | test, bench, and integration files              |
 | `workspace-packages.md`  | `deno.jsonc`, at the root and in every package  |
 | `documentation.md`       | everything under `docs/`                        |

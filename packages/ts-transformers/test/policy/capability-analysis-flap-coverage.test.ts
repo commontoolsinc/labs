@@ -4,7 +4,7 @@ import ts from "typescript";
 
 import { analyzeFunctionCapabilities } from "../../src/policy/mod.ts";
 
-// These cases drive `analyzeFunctionCapabilities` through three branches that
+// These cases drive `analyzeFunctionCapabilities` through branches that
 // otherwise run only when a pattern happens to compile cold through the
 // transformer in CI. With a warm compile cache that compilation is skipped, so
 // the branches flip between covered and uncovered across identical CI runs. Each

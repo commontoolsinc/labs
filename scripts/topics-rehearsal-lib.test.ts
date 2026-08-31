@@ -36,7 +36,8 @@ describe("topics-rehearsal-lib", () => {
     //
     // A migration that retires a whole top-level field leaves no surviving
     // record for a key to be missing from, so absence is reported about the
-    // compared value itself.
+    // compared value itself — and where neither side carried a value, there
+    // is no retirement to report at all.
     //
 
     it("names the whole value when a retired scalar reads back absent", () => {

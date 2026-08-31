@@ -439,59 +439,62 @@ describe("ingest journal sink", () => {
     expect(res.status).toBe(400);
   });
 
-  // The one deliberate departure from blanket 401 equalization. It is
-  // reachable ONLY with a correct token, so it leaks nothing to a guesser —
-  // and it is what lets a beacon that was offline across a rotation know to
-  // re-pair instead of dropping its buffer or retrying a "broken server"
-  // forever.
   const REPAIR_BODY = { partition: "2026-07-01", records: [{ x: 1 }] };
 
-  it("processIngest: VALID token + disabled -> 403 re-pair, no write", async () => {
-    const { secret, r } = await savedReg({ id: "ing_dis" });
-    await saveRegistration(runtime, space, { ...r, enabled: false });
+  describe("the 403 re-pair departure", () => {
+    // The one deliberate departure from blanket 401 equalization. It is
+    // reachable ONLY with a correct token, so it leaks nothing to a guesser —
+    // and it is what lets a beacon that was offline across a rotation know to
+    // re-pair instead of dropping its buffer or retrying a "broken server"
+    // forever.
 
-    const res = await call("ing_dis", secret, REPAIR_BODY);
-    expect(res.status).toBe(403);
-    expect(JSON.stringify(res.body)).toContain("re-pair");
+    it("processIngest: VALID token + disabled -> 403 re-pair, no write", async () => {
+      const { secret, r } = await savedReg({ id: "ing_dis" });
+      await saveRegistration(runtime, space, { ...r, enabled: false });
 
-    const cell = journalCell(runtime, r, "2026-07-01");
-    await cell.sync();
-    expect(cell.get()).toBeUndefined();
-  });
+      const res = await call("ing_dis", secret, REPAIR_BODY);
+      expect(res.status).toBe(403);
+      expect(JSON.stringify(res.body)).toContain("re-pair");
 
-  it("processIngest: VALID token + revoked -> 403 re-pair", async () => {
-    const { secret, r } = await savedReg({ id: "ing_rev" });
-    await saveRegistration(runtime, space, {
-      ...r,
-      enabled: false,
-      revoked: { at: new Date().toISOString(), by: "did:key:zOwner" },
-    });
-    expect((await call("ing_rev", secret, REPAIR_BODY)).status).toBe(403);
-  });
-
-  it("processIngest: VALID token + past expiresAt -> 403, no write", async () => {
-    const { secret, r } = await savedReg({ id: "ing_exp" });
-    await saveRegistration(runtime, space, {
-      ...r,
-      expiresAt: new Date(Date.now() - 1000).toISOString(),
+      const cell = journalCell(runtime, r, "2026-07-01");
+      await cell.sync();
+      expect(cell.get()).toBeUndefined();
     });
 
-    const res = await call("ing_exp", secret, REPAIR_BODY);
-    expect(res.status).toBe(403);
+    it("processIngest: VALID token + revoked -> 403 re-pair", async () => {
+      const { secret, r } = await savedReg({ id: "ing_rev" });
+      await saveRegistration(runtime, space, {
+        ...r,
+        enabled: false,
+        revoked: { at: new Date().toISOString(), by: "did:key:zOwner" },
+      });
+      expect((await call("ing_rev", secret, REPAIR_BODY)).status).toBe(403);
+    });
 
-    const cell = journalCell(runtime, r, "2026-07-01");
-    await cell.sync();
-    expect(cell.get()).toBeUndefined();
-  });
+    it("processIngest: VALID token + past expiresAt -> 403, no write", async () => {
+      const { secret, r } = await savedReg({ id: "ing_exp" });
+      await saveRegistration(runtime, space, {
+        ...r,
+        expiresAt: new Date(Date.now() - 1000).toISOString(),
+      });
 
-  it("processIngest: VALID token + unparseable expiresAt -> 403 (fails closed)", async () => {
-    // A corrupted expiry must not silently become "no expiry": Date.parse
-    // yields NaN and every NaN comparison is false, so the naive check fails
-    // OPEN.
+      const res = await call("ing_exp", secret, REPAIR_BODY);
+      expect(res.status).toBe(403);
 
-    const { secret, r } = await savedReg({ id: "ing_nan" });
-    await saveRegistration(runtime, space, { ...r, expiresAt: "not-a-date" });
-    expect((await call("ing_nan", secret, REPAIR_BODY)).status).toBe(403);
+      const cell = journalCell(runtime, r, "2026-07-01");
+      await cell.sync();
+      expect(cell.get()).toBeUndefined();
+    });
+
+    it("processIngest: VALID token + unparseable expiresAt -> 403 (fails closed)", async () => {
+      // A corrupted expiry must not silently become "no expiry": Date.parse
+      // yields NaN and every NaN comparison is false, so the naive check fails
+      // OPEN.
+
+      const { secret, r } = await savedReg({ id: "ing_nan" });
+      await saveRegistration(runtime, space, { ...r, expiresAt: "not-a-date" });
+      expect((await call("ing_nan", secret, REPAIR_BODY)).status).toBe(403);
+    });
   });
 
   describe("request claims", () => {

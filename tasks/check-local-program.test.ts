@@ -117,12 +117,10 @@ Deno.test("namesResolverInCode reads past a comment marker inside a string", () 
   );
 });
 
-//
-// Likewise for a block-comment opener: taken literally it would swallow the
-// rest of the file.
-//
-
 Deno.test("namesResolverInCode reads past a block-comment marker inside a string", () => {
+  // Likewise for a block-comment opener: taken literally it would swallow the
+  // rest of the file.
+
   assert(
     namesResolverInCode(
       `const glob = "/*"; const r = new FileSystemProgramResolver(m);\nconst end = "*/";`,

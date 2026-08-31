@@ -1200,6 +1200,14 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
+    //
+    // Strict text integrity over child text
+    //
+    // Whether a text node's own integrity lets it render: matching and
+    // mismatched integrity, authorship derived from a represented profile,
+    // and the treatment of unsigned and literal text.
+    //
+
     await t.step(
       "strict text integrity renders child text with matching integrity",
       async () => {
@@ -1811,7 +1819,11 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     //
-    // Strict text integrity
+    // Strict text integrity over visible props
+    //
+    // The same integrity applied to the props a node renders rather than to
+    // its child text, and what becomes of the blocked state when children are
+    // reused, a sibling changes, or the policy is removed.
     //
 
     await t.step(
@@ -2676,6 +2688,15 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
+    //
+    // The default ceiling
+    //
+    // What a host-supplied root ceiling (spec §8.10.6, S16 phase D) admits
+    // and blocks on its own, and how an authored boundary narrows it. With no
+    // authored boundary in the tree, atoms render only when listed exactly,
+    // or when they are Caveat atoms of an allow-listed kind.
+    //
+
     const PROMPT_INFLUENCE_KIND =
       "https://commonfabric.org/cfc/concepts/prompt-influence";
     const influenceCaveatAtom = {
@@ -2720,15 +2741,6 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       props: {},
       children: [child as never],
     });
-
-    //
-    // The default ceiling
-    //
-    // What a host-supplied root ceiling (spec §8.10.6, S16 phase D) admits
-    // and blocks on its own, and how an authored boundary narrows it. With no
-    // authored boundary in the tree, atoms render only when listed exactly,
-    // or when they are Caveat atoms of an allow-listed kind.
-    //
 
     await t.step(
       "default ceiling blocks unlisted atoms with no authored boundary",

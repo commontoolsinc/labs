@@ -204,13 +204,12 @@ Deno.test("findProblems flags a Dockerfile without deno images", () => {
   assertEquals(findProblems(files).length, 1);
 });
 
-//
-// check.sh reads the bounds with shell arithmetic, which aborts on a bound
-// carrying anything beyond MAJOR.MINOR.PATCH. Comparing such a bound loosely
-// would report "aligned" for a range that makes check.sh fail for everyone.
-//
-
 Deno.test("findProblems flags a range bound that is not exact", () => {
+  // check.sh reads the bounds with shell arithmetic, which aborts on a bound
+  // carrying anything beyond MAJOR.MINOR.PATCH. Comparing such a bound
+  // loosely would report "aligned" for a range that makes check.sh fail for
+  // everyone.
+
   for (const bad of ["2.8.0.1", "2.8", "abc"]) {
     const withMin = findProblems({
       ...alignedFiles(),
