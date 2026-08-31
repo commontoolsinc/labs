@@ -120,6 +120,7 @@ import { CFC_ENFORCEMENT_REJECTION_PREFIX } from "./rejection.ts";
 import {
   clearSchemaRefusalTx,
   ignoreReadForCommit,
+  internalVerifierRead,
   isInternalVerifierRead,
   isLazyMaterializationTx,
   isUiInputBlindWriteTx,
@@ -915,18 +916,20 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
-  // Record a write to a document's ["cfc"] label-map path made outside the
-  // privileged scope. Such a write forges the metadata that drives CFC
-  // derivation for OTHER writes, bypassing the commit-boundary derivation +
-  // mint-gating (audit S18). prepareBoundaryCommit turns each recorded address
-  // into a fail-closed reason, so the violation surfaces uniformly with every
-  // other CFC reason (enforce rejects, observe diagnoses). Recording (and
-  // relevance marking) is deliberately unconditional on the enforcement mode,
-  // like every other CFC signal: setCfcEnforcementMode permits raising the
-  // mode mid-transaction (disabled/observe impose no floor), so a forgery in a
-  // disabled window must still be on record when a later escalation evaluates
-  // it. A transaction still `disabled` at commit never runs
-  // prepareBoundaryCommit, so the record stays inert there.
+  // Record a write that reaches a document's ["cfc"] label map from outside
+  // the privileged scope, whether by naming that path or by replacing the
+  // whole document envelope. Such a write forges or erases the metadata that
+  // drives CFC derivation for OTHER writes, bypassing the commit-boundary
+  // derivation + mint-gating (audit S18). prepareBoundaryCommit turns each
+  // recorded address into a fail-closed reason, so the violation surfaces
+  // uniformly with every other CFC reason (enforce rejects, observe
+  // diagnoses). Recording (and relevance marking) is deliberately
+  // unconditional on the enforcement mode, like every other CFC signal:
+  // setCfcEnforcementMode permits raising the mode mid-transaction
+  // (disabled/observe impose no floor), so a forgery in a disabled window must
+  // still be on record when a later escalation evaluates it. A transaction
+  // still `disabled` at commit never runs prepareBoundaryCommit, so the record
+  // stays inert there.
   #noteSystemWrite(
     address: IMemorySpaceAddress,
     value?: FabricValue,
@@ -1023,13 +1026,66 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           `is emitted as a patch and rejected by the memory server.`,
       );
     }
+    // A path-[] write replaces the whole document envelope, so it reaches the
+    // label map without naming it.
+    if (address.path.length === 0) {
+      this.#noteRootEnvelopeWrite(address, value);
+      return;
+    }
     // The ["cfc"] document field holds the persisted label map. A value-path
-    // write (path[0] is a user key) or a path-[] full-document write is not it.
+    // write (path[0] is a user key) is not it.
     if (address.path[0] !== "cfc") return;
     this.markCfcRelevant("unprivileged-cfc-metadata-write");
     this.#cfcState.unprivilegedSystemWrites.push(
       `${address.id}/${address.path.join("/")}`,
     );
+  }
+
+  // Record a path-[] whole-document write that drops the stored ["cfc"] label
+  // map. Such a write replaces every sibling of `value`, so an envelope with
+  // no `cfc` member erases the map and leaves a labeled document reading as an
+  // unlabeled one. That is the downgrade the ["cfc"]-path arm above catches,
+  // reached by omission rather than by overwrite, so it lands in the same
+  // record and yields the same fail-closed reason.
+  //
+  // The stored field decides, and the arm fires only when a map is there to
+  // erase: creating a document, and replacing one that carries no label map,
+  // pass through. Hydration passes through as well — an envelope delivered
+  // from storage carries the `cfc` it was stored with — and the runtime's own
+  // root writes (`cid:` schema documents) return at the privileged-scope check
+  // above before reaching here.
+  //
+  // The read carries no weight of its own, the way the meta seam's guard read
+  // above carries none. It goes through the inner transaction, so it stays out
+  // of the outer transaction's reactivity log and flow join; it names the
+  // ["cfc"] member rather than the document root, so it does not widen what
+  // the transaction counts as consumed; and `ignoreReadForCommit` keeps it out
+  // of the conflict set, so a blind root write stays blind rather than
+  // becoming a read-modify-write that loses the race against any advance of
+  // the document it replaces. `internalVerifierRead` says what the read is:
+  // the runtime resolving a label, the same mark `readStoredCfcMetadata`
+  // carries. What that leaves open is an erasure racing the guard, never a
+  // forgery — a write that names the ["cfc"] path is recorded from the write
+  // itself, with no read at all.
+  #noteRootEnvelopeWrite(
+    address: IMemorySpaceAddress,
+    value: FabricValue | undefined,
+  ): void {
+    if (
+      isObjectOrArray(value) && (value as { cfc?: unknown }).cfc !== undefined
+    ) {
+      return;
+    }
+    const stored = this.tx.read({ ...address, path: ["cfc"] }, {
+      meta: {
+        ...ignoreReadForScheduling,
+        ...ignoreReadForCommit,
+        ...internalVerifierRead,
+      },
+    });
+    if (stored.ok?.value === undefined) return;
+    this.markCfcRelevant("unprivileged-cfc-metadata-erasure");
+    this.#cfcState.unprivilegedSystemWrites.push(`${address.id}/cfc`);
   }
 
   // Capture the implementation identity active at this write into the per-tx
@@ -2078,12 +2134,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#assertWritable("recordMergeableOp");
     const address = toMemorySpaceAddress(link);
     // Same S18 chokepoint as write()/writeOrThrow(): a mergeable op IS a
-    // write. The ["cfc"]-path arm is structurally unreachable here (a
-    // NormalizedFullLink always yields a value-rooted storage path), but the
-    // reserved `grant:cfc:` documents are keyed by ID, and the mergeable
-    // path must not slip an unprivileged grant mutation past the gate. The
-    // meta-seam arm is unreachable for the same reason the ["cfc"] arm is,
-    // which is why no value reaches it from here.
+    // write. The label-map arms are structurally unreachable here (a
+    // NormalizedFullLink always yields a value-rooted storage path, so neither
+    // the ["cfc"] path nor the document root can arrive), but the reserved
+    // `grant:cfc:` documents are keyed by ID, and the mergeable path must not
+    // slip an unprivileged grant mutation past the gate. The meta-seam arm is
+    // unreachable for the same reason, which is why no value reaches it from
+    // here.
     this.#noteSystemWrite(address);
     // Record a mergeable intent only when the underlying transaction can also
     // poison it. Recording an intent that can never be poisoned would let a
@@ -2342,11 +2399,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // throw propagate past the commit, which is what every caller does
       // today). See `writeValuesOrThrow` partial-batch coverage in
       // `packages/runner/test/memory-v2-acl-mutation.test.ts`.
-      // The value reaches the chokepoint's meta-seam arm, which reads the
-      // envelope of a document-root write. A batch addresses its writes by
-      // link, and `toMemorySpaceAddress` prefixes "value", so no batch write
-      // is addressed at a document root; the value travels anyway, so the
-      // batch and single-write paths ask the chokepoint the same question.
+      // The value reaches the chokepoint's meta-seam and label-map arms,
+      // both of which read the envelope of a document-root write. A batch
+      // addresses its writes by link, and `toMemorySpaceAddress` prefixes
+      // "value", so no batch write is addressed at a document root; the value
+      // travels anyway, so the batch and single-write paths ask the
+      // chokepoint the same question.
       const noteSystemWrite = (
         address: IMemorySpaceAddress,
         value: FabricValue,

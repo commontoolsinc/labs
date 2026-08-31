@@ -302,7 +302,9 @@ describe("CFC privileged system write (S18)", () => {
     // (docs/plans/runner_cfc_implementation.md "Document Surface Rules").
     // The meta seam is gated across both addressing modes, this one included
     // (meta-seam-write-authorization.test.ts); label-map forgery through the
-    // document root is what this test still records as ungated.
+    // document root is what this test still records as ungated. An envelope
+    // that OMITS the `cfc` member is a different case and IS gated — see the
+    // erasure cases below.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -342,6 +344,265 @@ describe("CFC privileged system write (S18)", () => {
 
       const result = await tx.commit();
       expect(result.ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  //
+  // Root envelope writes and the stored label map
+  //
+  // A path-[] whole-document write replaces every sibling of `value`, the
+  // ["cfc"] label map included. An envelope that omits `cfc` therefore erases
+  // the stored map, and the document that carried confidentiality reads
+  // afterwards as carrying none. That is the S18 downgrade spelled as an
+  // omission rather than as an overwrite, so it is recorded as the same class
+  // of unprivileged label-map write. The cases below cover the erasure, the
+  // shapes that erase nothing, and the runtime's own exempt persistence.
+  //
+
+  const storedMetadata = {
+    version: 1,
+    schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+    labelMap: {
+      version: 1,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["secret"] },
+      }],
+    },
+  };
+
+  const seedLabeledDocument = async (
+    runtime: Runtime,
+    name: string,
+  ): Promise<{
+    space: ReturnType<typeof signer.did>;
+    id: URI;
+    type: "application/json";
+    path: string[];
+  }> => {
+    const seed = runtime.edit();
+    const target = runtime.getCell(signer.did(), name, undefined, seed);
+    const address = {
+      space: signer.did(),
+      id: target.getAsNormalizedFullLink().id as URI,
+      type: "application/json" as const,
+      path: [] as string[],
+    };
+    // The commit boundary validates a metadata `schemaHash` like any other
+    // schema reference, so the seed names the backed seed document and
+    // installs it in the same transaction.
+    writeSeedEnvelopeDoc(seed, signer.did());
+    seed.writeOrThrow(address, { value: { note: "one" }, cfc: storedMetadata });
+    const seedResult = await seed.commit();
+    expect(seedResult.ok).toBeDefined();
+    return address;
+  };
+
+  it("rejects a root envelope write that erases a stored label map", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const address = await seedLabeledDocument(runtime, "s18-root-erase");
+
+      const tx = runtime.edit();
+      tx.writeOrThrow(address, { value: { note: "two" } });
+      expect(tx.getCfcState().unprivilegedSystemWrites).toEqual([
+        `${address.id}/cfc`,
+      ]);
+
+      const result = await tx.commit();
+      expect(result.error).toBeDefined();
+      expect(String((result.error as Error).message).toLowerCase()).toContain(
+        "cfc",
+      );
+
+      // The stored label map survives the refused commit.
+      const after = runtime.edit();
+      expect(after.readOrThrow({ ...address, path: ["cfc"] })).toEqual(
+        storedMetadata,
+      );
+      await after.commit();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not gate a root envelope write on a document with no stored label map", async () => {
+    // Creating a document, and replacing one that never carried a label map,
+    // erase nothing — the ordinary seeding shape stays ungated.
+
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const tx = runtime.edit();
+      const target = runtime.getCell(
+        signer.did(),
+        "s18-root-unlabeled",
+        undefined,
+        tx,
+      );
+      const address = {
+        space: signer.did(),
+        id: target.getAsNormalizedFullLink().id as URI,
+        type: "application/json" as const,
+        path: [] as string[],
+      };
+      tx.writeOrThrow(address, { value: { note: "one" } });
+      tx.writeOrThrow(address, { value: { note: "two" } });
+      expect(tx.getCfcState().unprivilegedSystemWrites.length).toBe(0);
+
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not gate a root envelope write that carries the stored label map forward", async () => {
+    // Spreading the read envelope, the way ACLManager does, keeps `cfc` in
+    // place. That write is not an erasure and stays ungated.
+
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const address = await seedLabeledDocument(runtime, "s18-root-preserve");
+
+      const tx = runtime.edit();
+      const envelope = tx.readOrThrow(address) as Record<string, unknown>;
+      tx.writeOrThrow(address, { ...envelope, value: { note: "two" } });
+      expect(tx.getCfcState().unprivilegedSystemWrites.length).toBe(0);
+
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("diagnoses a label-map erasure in observe mode", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "observe",
+    });
+    try {
+      const address = await seedLabeledDocument(runtime, "s18-root-observe");
+
+      const tx = runtime.edit();
+      tx.writeOrThrow(address, { value: { note: "two" } });
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+      expect(
+        tx.getCfcState().diagnostics.some((d) =>
+          d.toLowerCase().includes("unprivileged") && d.includes("cfc")
+        ),
+      ).toBe(true);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("records a label-map erasure made while disabled so a mid-tx escalation rejects", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "disabled",
+    });
+    try {
+      const address = await seedLabeledDocument(runtime, "s18-root-escalate");
+
+      const tx = runtime.edit();
+      tx.writeOrThrow(address, { value: { note: "two" } });
+      expect(tx.getCfcState().unprivilegedSystemWrites.length).toBe(1);
+
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const result = await tx.commit();
+      expect(result.error).toBeDefined();
+      expect(String((result.error as Error).message).toLowerCase()).toContain(
+        "cfc",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("permits the runtime's own privileged root write over a labeled document", async () => {
+    // The privileged scope is exempt, so the runtime's own persistence still
+    // replaces an envelope wholesale without tripping the erasure arm.
+
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const guarded = internSchema(
+        {
+          type: "object",
+          properties: {
+            secret: { type: "string", ifc: { confidentiality: ["base"] } },
+          },
+          required: ["secret"],
+        } satisfies JSONSchema,
+        true,
+      );
+      const first = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "s18-root-privileged",
+        guarded.schema,
+        first,
+      );
+      cell.set({ secret: "one" });
+      first.prepareCfc();
+      expect((await first.commit()).ok).toBeDefined();
+
+      // The label persistence stored a map; a second labeled write reruns the
+      // whole privileged persistence pass over the same document.
+      const second = runtime.edit();
+      const again = runtime.getCell(
+        signer.did(),
+        "s18-root-privileged",
+        guarded.schema,
+        second,
+      );
+      again.set({ secret: "two" });
+      second.prepareCfc();
+      expect((await second.commit()).ok).toBeDefined();
+
+      const after = runtime.edit();
+      expect(
+        after.readOrThrow({
+          space: signer.did(),
+          id: again.getAsNormalizedFullLink().id as URI,
+          type: "application/json",
+          path: ["cfc"],
+        }),
+      ).toBeDefined();
+      await after.commit();
     } finally {
       await runtime.dispose();
       await storageManager.close();

@@ -360,7 +360,16 @@ therefore carries its own guard:
 - A write addressed at a document's `["cfc"]` label map from outside the
   runtime's privileged persistence scope is recorded, and the commit boundary
   turns each record into a fail-closed reason (audit S18).
-- A document-root (`path: []`) write whose envelope carries a `cfc` record
+- A document-root (`path: []`) write replaces the envelope rather than merging
+  into it, so an envelope that carries no `cfc` record erases the stored label
+  map and leaves a labeled document reading as an unlabeled one. Made outside
+  the privileged persistence scope on a document that stores a map, such a
+  write is recorded like one that names the `["cfc"]` path, and yields the
+  same fail-closed reason. The stored member decides, under the same weightless
+  read the meta guard uses, so what that leaves open is an erasure racing the
+  guard. Creating a document, replacing one that stores no map, and an
+  envelope that carries the stored map forward all pass through.
+- A document-root write whose envelope carries a `cfc` record of its own
   reaches the label map with no record made: the `["cfc"]` guard keys on the
   address, and this write's address is the document. The meta guard covers
   that shape for its own fields, so what stands open here is label-map
@@ -382,6 +391,9 @@ Storage rules:
   the same document as `value` and `source`
 - untrusted value-surface reads and materialized values must not expose the
   reserved `cfc` sibling
+- code that replaces a document wholesale carries the stored envelope forward
+  — read it and spread it, the way `ACLManager` does — rather than building
+  a fresh `{ value }`, which drops every reserved sibling the document held
 - no `application/label+json` bridge or coarse-summary compatibility path is
   carried forward
 
