@@ -15,6 +15,7 @@ import {
   type ProxyStream,
   setProdUptimeConnectivityForTest,
   setProdUptimeDnsResolverForTest,
+  setProdUptimeElapsedMsForTest,
   setProdUptimeHttpClientFactoryForTest,
   setProdUptimeProxyStreamOpenerForTest,
 } from "./prod-uptime.ts";
@@ -157,17 +158,34 @@ function stub(
   };
 }
 
-async function withLatency(ms: number): Promise<TileView> {
-  const realNow = Date.now;
-  let calls = 0;
-  Date.now = () => calls++ < 3 ? 0 : ms;
+async function withLatency(
+  targetName: string,
+  ms: number,
+): Promise<TileView> {
+  const restoreElapsedMs = setProdUptimeElapsedMsForTest((name) =>
+    name === targetName ? ms : 0
+  );
   const restore = stub();
   try {
     return await prodUptime.collect(ctx());
   } finally {
-    Date.now = realNow;
     restore();
+    restoreElapsedMs();
   }
+}
+
+function assertTargetDetail(
+  view: TileView,
+  targetName: string,
+  detail: string,
+): void {
+  const extra = view.extra ?? "";
+  const nameEnd = extra.indexOf(`>${targetName}</span><span `);
+  assert(nameEnd >= 0);
+  const detailAt = extra.indexOf(`>${detail}</span>`, nameEnd);
+  assert(detailAt >= 0);
+  const nextRow = extra.indexOf('class="dot ', nameEnd + targetName.length + 1);
+  assert(nextRow < 0 || detailAt < nextRow);
 }
 
 Deno.test("prod uptime: waits for public connectivity before checking hosts", async () => {
@@ -260,9 +278,9 @@ Deno.test("prod uptime: common.tools warns only above 2500 ms", async () => {
       [2501, "warn", "2501 ms"],
     ] as const
   ) {
-    const realNow = Date.now;
-    let calls = 0;
-    Date.now = () => calls++ === 0 ? 0 : latency;
+    const restoreElapsedMs = setProdUptimeElapsedMsForTest((name) =>
+      name === "common.tools" ? latency : 0
+    );
     const restoreConnectivity = setProdUptimeConnectivityForTest(false);
     const restore = stub();
     try {
@@ -277,10 +295,17 @@ Deno.test("prod uptime: common.tools warns only above 2500 ms", async () => {
         (view.extra ?? "").includes(`HTTP 200 · ${latency} ms`),
         status !== "good",
       );
+      if (status !== "good") {
+        assertTargetDetail(
+          view,
+          "common.tools",
+          `HTTP 200 · ${latency} ms`,
+        );
+      }
     } finally {
-      Date.now = realNow;
       restore();
       restoreConnectivity();
+      restoreElapsedMs();
     }
   }
 });
@@ -456,25 +481,25 @@ Deno.test("prod uptime: one host down is named rather than counted", async () =>
 });
 
 Deno.test("prod uptime: latency is orange above 500 ms and red above 1000 ms", async () => {
-  const prompt = await withLatency(500);
+  const prompt = await withLatency("rapids", 500);
   assertEquals(prompt.status, "good");
   assertEquals(prompt.value, "8/8 hosts up");
-  assertStringIncludes(prompt.extra ?? "", "500 ms");
+  assertTargetDetail(prompt, "rapids", "500 ms");
 
-  const slow = await withLatency(501);
+  const slow = await withLatency("rapids", 501);
   assertEquals(slow.status, "warn");
   assertEquals(slow.value, "501 ms");
-  assertStringIncludes(slow.extra ?? "", "501 ms");
+  assertTargetDetail(slow, "rapids", "501 ms");
 
-  const edge = await withLatency(1000);
+  const edge = await withLatency("rapids", 1000);
   assertEquals(edge.status, "warn");
   assertEquals(edge.value, "1000 ms");
-  assertStringIncludes(edge.extra ?? "", "1000 ms");
+  assertTargetDetail(edge, "rapids", "1000 ms");
 
-  const bad = await withLatency(1001);
+  const bad = await withLatency("rapids", 1001);
   assertEquals(bad.status, "bad");
   assertEquals(bad.value, "1001 ms");
-  assertStringIncludes(bad.extra ?? "", "1001 ms");
+  assertTargetDetail(bad, "rapids", "1001 ms");
 });
 
 Deno.test("prod uptime: a missing hostname names that host as down", async () => {

@@ -61,6 +61,7 @@ type ResolveDns = (
   query: string,
   recordType: "A" | "AAAA",
 ) => Promise<readonly string[]>;
+type ElapsedMs = (targetName: string, startedAt: number) => number;
 
 /** The part of a TCP connection the SOCKS5 exchange below uses. */
 export interface ProxyStream {
@@ -107,6 +108,7 @@ let createHttpClient: CreateHttpClient = Deno.createHttpClient;
 let resolveDns: ResolveDns = (query, recordType) =>
   Deno.resolveDns(query, recordType);
 let openProxyStream: OpenProxyStream = Deno.connect;
+let elapsedMs: ElapsedMs = (_targetName, startedAt) => Date.now() - startedAt;
 const reachedAt = new Map<string, number>();
 let connectivityConfirmed = false;
 let siteFailures = 0;
@@ -142,6 +144,16 @@ export function setProdUptimeDnsResolverForTest(
   resolveDns = resolver;
   return () => {
     resolveDns = previous;
+  };
+}
+
+export function setProdUptimeElapsedMsForTest(
+  measure: ElapsedMs,
+): () => void {
+  const previous = elapsedMs;
+  elapsedMs = measure;
+  return () => {
+    elapsedMs = previous;
   };
 }
 
@@ -425,7 +437,7 @@ async function checkHttp(
       connectivityConfirmed = true;
       siteFailures = 0;
     }
-    const ms = Date.now() - t0;
+    const ms = elapsedMs(target.name, t0);
     try {
       await res.body?.cancel();
     } catch {
