@@ -630,10 +630,10 @@ mechanism is a skip list rather than a selection list.
 
 ### Every invocation unit, and the identities inside it
 
-There are eight kinds of invocation unit across the topology, and only one
-of them holds more than one identity today. That one holds almost everything:
-the workspace and runner unit shards alone carry 15,997 of the reference
-build's 17,999 executions.
+There are eight kinds of invocation unit across the topology, and two of
+them hold more than one identity. The `deno test` file is the one that
+holds almost everything: the workspace and runner unit shards alone carry
+15,997 of the reference build's 17,999 executions.
 
 | Invocation unit | Suites | Identities inside it | Reaching one of them |
 | --- | --- | --- | --- |
@@ -752,12 +752,11 @@ runner that could not be handed a subset could say so and the packer could
 charge it for everything whenever anything in it was picked. Both halves
 of that stop being needed.
 
-Nothing is left to declare. Every invocation unit in the topology either
-holds one identity, in which case skipping it is declining to invoke it
-and no runner has to support anything, or it is a `deno test` file, in
-which case the skip list reaches inside it. There is no third case, so an
-enum with two values is describing a distinction the topology no longer
-contains.
+Nothing is left to declare. A `deno test` file has the skip list reaching
+inside it; every other invocation unit is invoked or not invoked whole,
+whether it holds one identity or several, and declining to invoke one asks
+nothing of its runner. So an enum with two values is describing a
+distinction the topology no longer contains.
 
 Nothing is left to charge, either. `whole` was a coarse way of saying that
 running one thing costs you its neighbours, and
@@ -822,8 +821,8 @@ being imposed.
 
 - The per-package coverage gate runs a package's whole measured set, so
   its invocations carry no skip list.
-- Suites that are not `deno test` need no mechanism. Every one of their
-  invocation units holds a single identity, so skipping it is declining to
+- Suites that are not `deno test` need no mechanism. Their invocation
+  units are invoked or not invoked whole, so skipping one is declining to
   invoke it.
 - Both halves of the drift guard are unchanged: the tree half still claims
   files, the store half still claims identities.
