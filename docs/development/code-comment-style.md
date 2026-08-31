@@ -274,8 +274,8 @@ Directly under an opening bracket there is nothing above to separate from, and
 `deno fmt` removes a blank line there in any case. A frame in that position is
 also the first content of the block, which is where a comment about the whole
 block goes, so the two shapes are indistinguishable to a reader: put the
-region's first marker after the block's shared setup instead, or let the block
-comment do the work.
+region's first marker after the block's shared setup instead, or let the
+whole-block comment do the work.
 
 **A region has an end, and writing the marker is choosing it.** A marker opens
 a region that runs to the next marker at the same level, or to the end of the
