@@ -4088,6 +4088,25 @@ Deno.test("formatCfHarnessTranscriptEvent formats assistant tool calls and tool 
         role: "assistant",
         content: "",
         toolCalls: [{
+          id: "call-skills-1",
+          type: "function",
+          function: {
+            name: "search_skills",
+            arguments:
+              '{"query":"react native","owner":"vercel-labs","limit":3}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: search_skills(query="react native" owner="vercel-labs" limit=3)\n',
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
           id: "call-1",
           type: "function",
           function: { name: "bash", arguments: '{"command":"ls"}' },
@@ -6611,6 +6630,18 @@ Deno.test("parseCfHarnessCliArgs rejects a skills registry URL that does not par
       ),
     Error,
     "--skills-registry-url must be a valid URL",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an empty skills registry flag", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--skills-registry-url", "   "],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--skills-registry-url requires a non-empty value",
   );
 });
 

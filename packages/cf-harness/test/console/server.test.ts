@@ -307,6 +307,25 @@ describe("console/server", () => {
       });
     });
 
+    it("rejects a skills.sh discovery registry that is not a URL", () => {
+      expect(() =>
+        resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            "console-test",
+            "--session-db",
+            "none",
+            "--skills-registry-url",
+            "not a url",
+          ],
+          {},
+          "/console",
+        )
+      ).toThrow("--skills-registry-url must be a valid URL");
+    });
+
     it("reads the named prompt and disables child composition guidance", async () => {
       const directory = await Deno.makeTempDir({
         prefix: "cf-harness-console-prompt-",

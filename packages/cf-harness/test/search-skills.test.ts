@@ -89,7 +89,10 @@ const createEngine = (configured = true): CfHarnessEngine =>
 
 describe("search-skills", () => {
   it("returns sanitized metadata and the rejected entry count", async () => {
-    const result = await createEngine().invokeBuiltinTool("search_skills", {
+    const engine = createEngine();
+    expect(engine.skillsShSearchAvailable).toBe(true);
+    expect(engine.skillsShSearchClientFactory).toBeDefined();
+    const result = await engine.invokeBuiltinTool("search_skills", {
       query: "react native",
     });
     const output = result.output as SearchSkillsToolSuccessOutput;
@@ -122,6 +125,34 @@ describe("search-skills", () => {
 
     expect(output.status).toBe("error");
     expect(output.message).toContain("--skills-registry-url");
+  });
+
+  it("reports a client-construction failure without throwing it", async () => {
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: `search-skills-test-${crypto.randomUUID()}`,
+      cfcEnforcementMode: "disabled",
+      skillsShSearchClientFactory: () =>
+        Promise.reject(new Error("registry offline")),
+    });
+    const result = await engine.invokeBuiltinTool("search_skills", {
+      query: "react native",
+    });
+    const output = result.output as SearchSkillsToolErrorOutput;
+
+    expect(output.status).toBe("error");
+    expect(output.message).toContain("registry unavailable");
+    expect(output.message).toContain("registry offline");
+  });
+
+  it("reports a refused search as a tool error", async () => {
+    const result = await createEngine().invokeBuiltinTool("search_skills", {
+      query: "x",
+    });
+    const output = result.output as SearchSkillsToolErrorOutput;
+
+    expect(output.status).toBe("error");
+    expect(output.message).toContain("at least two characters");
   });
 
   it("declares the telemetry and content boundaries to the model", () => {
