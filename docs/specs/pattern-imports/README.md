@@ -158,9 +158,9 @@ separate fields:
   preserves a path inside that repository rather than only a basename.
   Absolute paths from the author's machine are never persisted.
 - `source.origin` is the optional update provenance carried by the piece. Today
-  it is backed by a raw `patternSource` string. The specialized updater can
-  reconcile same-toolshed system-pattern paths. The raw field alone is not
-  durable per-piece consent to future updates. The general lifecycle replaces
+  it is backed by a raw `patternSource` string, and opening a piece resolves a
+  `system:` ref or a fabric URL it holds. The raw field alone is not durable
+  per-piece consent to future updates. The general lifecycle replaces
   that legacy representation with structured origin and revision state for
   every piece, including a space root. General source URLs include external
   `https://` URLs and fabric-internal `cf:` URLs, including the host-qualified

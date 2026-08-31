@@ -1035,6 +1035,11 @@ type RunnerRunOptions = {
   // instance) run supply resolves a nested piece's demanded instances
   // through the OUTER piece a client watches (server-execution v2 Phase 7).
   parentPieceRootId?: string;
+  // The source origin a piece brought into being by this run records with its
+  // creation revision. A run that finds the piece already there leaves both
+  // alone: what a piece records after it exists is decided by a source
+  // transition, never by another run of it.
+  sourceOrigin?: string;
 };
 
 // Placeholder standing in for an argument slot whose stored value routes
@@ -4658,11 +4663,23 @@ export class Runner {
       `providedTx=${Boolean(providedTx)}`,
     ]);
 
+    // A creation revision belongs to the run that creates the piece. A run of
+    // one that is already there changes neither its source state nor its
+    // origin: that is a source transition's to decide, and a run reaching a
+    // piece whose pattern moved underneath it is an ordinary in-place swap.
+    const creatingPiece = options.sourceOrigin !== undefined &&
+      getPatternIdentityRef(resultCell.withTx(tx)) === undefined;
     const { needsStart, pattern } = this.setupInternal(
       tx,
       patternOrModule,
       argument,
       resultCell,
+      creatingPiece
+        ? {
+          initializePieceSourceHistory: true,
+          initialPieceSourceOrigin: options.sourceOrigin,
+        }
+        : {},
     );
 
     let installedCancel: Cancel | undefined;

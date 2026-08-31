@@ -242,8 +242,9 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     // lunch class by registration. Pins:
     // pattern-replication-sibling-race.test.ts steps 7-10 (heal,
     // module-wake, registration-time check, dependency-frame park) +
-    // executor-cross-space late-carriage + wish-sidecar-closure-kick, all
-    // watched RED at bare main d569f3722; new mutations N1/N2/N3/N3b/N4
+    // executor-cross-space late-carriage + the wish-side kick's own pins,
+    // all watched RED at bare main d569f3722 (those last retired with the
+    // process-global sidecar cache they covered); new mutations N1/N2/N3/N3b/N4
     // each independently isolated; the existing kill matrix re-verified
     // cell-for-cell (K1's kill rebound to step 1's zero-failure-lines
     // assertion — the heal would otherwise mask its END-STATE, the F1

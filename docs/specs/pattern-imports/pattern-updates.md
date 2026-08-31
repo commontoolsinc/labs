@@ -18,17 +18,19 @@ pinned and do not adopt the live update behavior specified for piece origins.
 
 ## Status
 
-Implemented. A piece follows its origin when a user opens it — one mechanism
-for every piece, with no path of its own for any kind of piece — and a
-`system:` origin resolves to the patterns route of whichever host serves the
-piece's space. Resolving an external `https://` endpoint at open time is
-specified by the lifecycle and not built, so a piece that records one keeps
-what it runs. The downloaded source and its import closure must compile to the
-identity that route advertises before the persisted pointer can change. What
-the piece runs is then replaced by what that origin says, without comparing the
-two contracts: the check that makes a system-pattern release safe to adopt is
-the release gate below, which is exactly why this exemption is confined to
-origins this deployment serves.
+Implemented. A piece follows its origin when it is opened — one mechanism for
+every piece, with no path of its own for any kind of piece — and a `system:`
+origin resolves to the patterns route of whichever host serves the piece's
+space. A user opening a piece is what opens most of them; the runtime opens the
+surfaces it instantiates for itself, which record the `system:` ref they were
+made from and are followed the same way. Resolving an external `https://`
+endpoint at open time is specified by the lifecycle and not built, so a piece
+that records one keeps what it runs. The downloaded source and its import
+closure must compile to the identity that route advertises before the persisted
+pointer can change. What the piece runs is then replaced by what that origin
+says, without comparing the two contracts: the check that makes a system-pattern
+release safe to adopt is the release gate below, which is exactly why this
+exemption is confined to origins this deployment serves.
 
 No kind of piece has a path of its own, and nothing follows an origin on behalf
 of a piece nobody opened: a serving tenure owes a space the existence of its
@@ -38,7 +40,7 @@ during that implementation are archived at
 
 ## Last Updated
 
-2026-08-25
+2026-08-27
 
 ## Motivation
 
@@ -106,12 +108,11 @@ the *destination* cell's annotations, and replication does not copy the
 *source's* (`packages/runner/src/compilation-cache/cell-cache.ts`). An
 `updatesAt` written in a publisher's space
 would not appear on a consumer's replicated copy. The **piece** is the reliable
-carrier: explicit source provenance travels with it. For an unstamped non-root
-piece, its verified source-doc closure supplies the authored entry path — but
-only a path under the patterns route is admitted, since a module's name equals
-its route only for a program compiled over HTTP. The runtime persists the
-`system:` ref that path denotes, and only after the matching `?identity` route
-succeeds.
+carrier: explicit source provenance travels with it. An unstamped piece follows
+nothing, and nothing reconstructs an origin for it from the names of the modules
+it happens to run — a module's name equals its route only for a program compiled
+over HTTP, and an author controls it either way. Provenance is claimed, by
+whoever instantiates the piece, at the moment they do.
 
 ## The model
 
@@ -120,13 +121,16 @@ Two decisions carry the whole design:
 1. **A piece that follows a source records that source in a `patternSource`
    string.** (`patternSource`, *not* `source`: the latter is the doc-level
    producer annotation the server-primary work uses.) Roots stamp it at
-   creation, from the configured system source for their space kind. A piece
-   that records nothing follows nothing, whatever it is and wherever its
-   modules happen to be named: being a root is not provenance, and neither is a
-   filename that looks like a route.
+   creation, from the configured system source for their space kind. So does
+   every other piece the runtime brings into being from a pattern this
+   deployment serves: the wish builtin's profile and suggestion surfaces are
+   the ones that exist today, and they record the `system:` ref naming the file
+   they were made from. A piece that records nothing follows nothing, whatever
+   it is and wherever its modules happen to be named: being a root is not
+   provenance, and neither is a filename that looks like a route.
 2. **Following = resolve `patternSource` → current identity; if it differs from
    the persisted `patternIdentity.identity`, adopt the source it names.** This
-   runs when a user OPENS the piece, before it starts, so it never runs source
+   runs when the piece is OPENED, before it starts, so it never runs source
    its own origin has already replaced. A piece that is already running has its
    new pattern re-instantiated in place by the existing `patternIdentity`
    watcher; one that is not running has the new pattern staged over its
@@ -439,14 +443,18 @@ itself is the `?identity` validator; a source module's validator is the SHA-256
 of its exact response bytes. Clients therefore retain unchanged bytes but must
 conditionally revalidate them before every update attempt.
 
-**Runtime side (when a user opens the piece).** Resolve the piece without
-starting it, run this loop, re-resolve the cell after any metadata transaction,
-and only then start it:
+**Runtime side (when the piece is opened).** Resolve the piece without starting
+it, run this loop, re-resolve the cell after any metadata transaction, and only
+then start it:
 
 1. `url` = the patterns route the piece's stored `patternSource` ref expands
    to. A piece that records nothing follows nothing, and so does one whose
    source is not a `system:` ref. A rooted path from before the scheme existed
-   is first re-stamped as the ref naming the same file. `host` =
+   is first re-stamped as the ref naming the same file. A surface the runtime
+   instantiates for itself supplies the ref it was made from, so one that
+   records none records it here and is followed from then on like any other
+   piece; one that records another origin keeps what it records, because that
+   is its owner's choice and not the runtime's. `host` =
    `mappedHostFor(space) ?? apiUrl`; the ref is host-relative, so the request is
    same-origin by construction.
 2. `currentId` = a revalidating `GET {host}{url}?identity` for this attempt
@@ -474,7 +482,10 @@ and only then start it:
    rejects it, the transaction fails, and the piece stays as it was.
 6. Start the piece. A piece compiled moments ago from the source it was created
    with is started directly: following that origin again would only fetch what
-   it was just built from.
+   it was just built from. A surface the runtime is instantiating for the first
+   time reaches this loop with no piece to follow yet, so steps 2 and 4 resolve
+   its supplied ref outright, and the run that brings the piece into being
+   records that ref with its creation revision.
 
 ## End-to-end identity check
 
@@ -553,8 +564,8 @@ binary populates from baked build metadata; the updater does not consult it.
    representative golden replay enabled its rollout with the other system
    roots. Broader version-to-version CI coverage remains release discipline,
    not a deployment-time semantic check.
-3. **One path for every piece.** Following an origin runs when a user opens a
-   piece, whatever kind of piece it is and whatever kind of origin it records,
+3. **One path for every piece.** Following an origin runs when a piece is
+   opened, whatever kind of piece it is and whatever kind of origin it records,
    with source history as specified in
    [`../piece-source-lifecycle.md`](../piece-source-lifecycle.md).
    Migrating a piece's data onto a candidate whose contract differs from the
