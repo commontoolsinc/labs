@@ -150,7 +150,7 @@ async function ingestLeafJUnit(
         kind: "unit",
         scope,
         filePrefix: prefix,
-        fileByName: await readNameMaps(spoolDir),
+        fileByName: await readNameMaps(spoolDir, { within: prefix }),
       })
     ) {
       fragment.append(record);

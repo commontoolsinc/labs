@@ -244,6 +244,68 @@ export function emptyContext(): FoldContext {
   };
 }
 
+/** A fold context as it travels between runs. */
+export interface StoredFoldContext {
+  outcomesAtCommit: Array<[string, { day: string; outcomes: string[] }]>;
+  failures: Array<[string, Array<{ day: string; source: string }>]>;
+  credited: string[];
+}
+
+/** The context, flattened for the aggregate that carries it. */
+export function serializeContext(context: FoldContext): StoredFoldContext {
+  return {
+    outcomesAtCommit: [...context.outcomesAtCommit].map((
+      [at, seen],
+    ) => [at, { day: seen.day, outcomes: [...seen.outcomes] }]),
+    failures: [...context.failures],
+    credited: [...context.credited],
+  };
+}
+
+/**
+ * The context a previous run left. Anything malformed yields an empty
+ * one: a context is an optimization over re-reading, and losing it costs
+ * the two cross-run rules their reach rather than any stored fact.
+ */
+export function parseContext(value: unknown): FoldContext {
+  const context = emptyContext();
+  if (typeof value !== "object" || value === null) return context;
+  const stored = value as Partial<StoredFoldContext>;
+  if (Array.isArray(stored.outcomesAtCommit)) {
+    for (const entry of stored.outcomesAtCommit) {
+      if (!Array.isArray(entry) || typeof entry[0] !== "string") continue;
+      const seen = entry[1];
+      if (typeof seen !== "object" || seen === null) continue;
+      if (typeof seen.day !== "string" || !Array.isArray(seen.outcomes)) {
+        continue;
+      }
+      context.outcomesAtCommit.set(entry[0], {
+        day: seen.day,
+        outcomes: new Set(seen.outcomes.filter((o) => typeof o === "string")),
+      });
+    }
+  }
+  if (Array.isArray(stored.failures)) {
+    for (const entry of stored.failures) {
+      if (!Array.isArray(entry) || typeof entry[0] !== "string") continue;
+      if (!Array.isArray(entry[1])) continue;
+      context.failures.set(
+        entry[0],
+        entry[1].filter((f) =>
+          typeof f === "object" && f !== null &&
+          typeof f.day === "string" && typeof f.source === "string"
+        ),
+      );
+    }
+  }
+  if (Array.isArray(stored.credited)) {
+    for (const key of stored.credited) {
+      if (typeof key === "string") context.credited.add(key);
+    }
+  }
+  return context;
+}
+
 /**
  * Drops what the two rules can no longer reach. Both look back at most
  * `CATCH_BREADTH_WINDOW_DAYS`, so anything older than that cannot change

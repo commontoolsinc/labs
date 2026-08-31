@@ -206,6 +206,30 @@ describe("registration", () => {
       }
     });
 
+    it("judges ambiguity within the scope it was given", async () => {
+      // Every package of a workspace run writes into one spool. A name
+      // two of them share is unambiguous inside either, so scoping the
+      // read is what keeps both their files rather than dropping both.
+      const dir = await Deno.makeTempDir();
+      try {
+        await writeNameMap(dir, "01", {
+          shared: "packages/a/one.test.ts",
+        });
+        await writeNameMap(dir, "02", {
+          shared: "packages/b/two.test.ts",
+        });
+        expect((await readNameMaps(dir)).get("shared")).toBeUndefined();
+        expect(
+          (await readNameMaps(dir, { within: "packages/a" })).get("shared"),
+        ).toBe("packages/a/one.test.ts");
+        expect(
+          (await readNameMaps(dir, { within: "packages/b/" })).get("shared"),
+        ).toBe("packages/b/two.test.ts");
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
     it("returns an empty map for a spool that is not there", async () => {
       expect((await readNameMaps("/nonexistent-spool")).size).toBe(0);
     });

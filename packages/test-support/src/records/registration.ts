@@ -159,10 +159,20 @@ export function fileForName(
  * are one identity, and which file it came from is not a question the
  * spool can answer. Reading is best-effort, since a name map is metadata
  * and its absence costs only the file field.
+ *
+ * Every package of a workspace run writes into one spool, so a caller
+ * ingesting one package's report passes `within` — the path its files sit
+ * under. Names outside it are dropped before the ambiguity is judged
+ * rather than after, or a name two packages happen to share would cost
+ * both of them a file each had unambiguously.
  */
 export async function readNameMaps(
   dir: string,
+  options: { within?: string } = {},
 ): Promise<Map<string, string>> {
+  const within = options.within === undefined
+    ? undefined
+    : `${options.within.replace(/\/$/, "")}/`;
   const names = new Map<string, string>();
   const ambiguous = new Set<string>();
   let entries: string[] = [];
@@ -189,6 +199,7 @@ export async function readNameMaps(
     if (typeof parsed !== "object" || parsed === null) continue;
     for (const [name, file] of Object.entries(parsed)) {
       if (typeof file !== "string" || file.length === 0) continue;
+      if (within !== undefined && !file.startsWith(within)) continue;
       const known = names.get(name);
       if (known === undefined) {
         names.set(name, file);

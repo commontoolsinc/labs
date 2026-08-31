@@ -24,12 +24,16 @@ import {
   emptySamples,
   emptyState,
   flakeRate,
+  type FoldContext,
   foldObservations,
   type IdentityState,
   type Observation,
+  parseContext,
   sampleDuration,
   scoreInputs,
   sealDay,
+  serializeContext,
+  type StoredFoldContext,
   trimContext,
   trimWindows,
   value,
@@ -65,6 +69,15 @@ export interface AggregateState {
   folded: string[];
 
   /**
+   * What the two backward-looking rules saw in the runs already folded.
+   * Both reach across objects — whether an identity disagreed with itself
+   * at a commit, and how many sources a failure spans — and a commit's
+   * runs can arrive in two different publisher runs, so the context has
+   * to survive between them or those rules silently stop reaching.
+   */
+  context?: StoredFoldContext;
+
+  /**
    * Days folded from a rollup rather than from their raw objects,
    * "yyyy/mm/dd". A rollup carries a day's reports whole, so its raw
    * objects are not in `folded` and a later run over a wide window would
@@ -81,6 +94,7 @@ export function emptyAggregate(day: string): AggregateState {
     schema: MANIFEST_SCHEMA_VERSION,
     day,
     folded: [],
+    context: serializeContext(emptyContext()),
     compactedDays: [],
     states: {},
   };
@@ -112,6 +126,9 @@ export function parseAggregate(text: string): AggregateState | undefined {
   }
   // An aggregate written before rollups were read carries no list, and
   // an empty one is the truthful reading of it: nothing was compacted.
+  // The context is an optimization rather than a stored fact, so an
+  // aggregate written without one, or with a malformed one, simply starts
+  // the two cross-run rules from nothing.
   const compactedDays = state.compactedDays ?? [];
   if (!Array.isArray(compactedDays)) return undefined;
   for (const day of compactedDays) {
@@ -121,6 +138,7 @@ export function parseAggregate(text: string): AggregateState | undefined {
     schema: MANIFEST_SCHEMA_VERSION,
     day: state.day,
     folded: state.folded as string[],
+    context: serializeContext(parseContext(state.context)),
     compactedDays: compactedDays as string[],
     states: state.states as Record<string, IdentityState>,
   };
@@ -363,7 +381,7 @@ export function buildManifest(input: BuildInput): Manifest {
 /** A fold in progress, which the caller feeds reports to in time order. */
 export class Fold {
   readonly #states: Map<string, IdentityState>;
-  readonly #context = emptyContext();
+  readonly #context: FoldContext;
   readonly #surfaces = new Map<string, Surface>();
   readonly #samples = new Map<string, Map<string, DaySamples>>();
   readonly #folded: string[];
@@ -383,6 +401,7 @@ export class Fold {
         [key, state],
       ) => [key, { ...emptyState(), ...state }]),
     );
+    this.#context = parseContext(aggregate.context);
     this.#folded = [...aggregate.folded];
     // The array is what is persisted; membership is asked once per listed
     // object per run, and the list grows without bound, so the question
@@ -488,6 +507,7 @@ export class Fold {
         schema: MANIFEST_SCHEMA_VERSION,
         day: this.#today,
         folded: this.#folded,
+        context: serializeContext(this.#context),
         compactedDays: this.#compactedDays,
         states: Object.fromEntries(this.#states),
       },

@@ -4,6 +4,7 @@ import {
   AliasResolver,
   buildObjectBody,
   type RunContext,
+  testIdentityKey,
   type TestRecord,
 } from "@commonfabric/test-support/records";
 
@@ -23,6 +24,7 @@ import {
   reportFromText,
 } from "./build.ts";
 import { parseManifest, serializeManifest } from "./manifest.ts";
+import { flakeRate } from "./score.ts";
 import { FLAKE_EXCLUSION_RATE, MAX_REPEATS } from "./policy.ts";
 
 const NO_ALIASES = new AliasResolver([]);
@@ -71,6 +73,7 @@ function stored(
   return reportFromText(objectName, buildObjectBody(runContext, records));
 }
 
+const KEY = testIdentityKey({ k: "unit", s: "memory", n: "space > writes" });
 const CI_NAME = "labs/test-records/submissions/ci/v1/2026/08/20/run-1-a.ndjson";
 const LOCAL_NAME =
   "labs/test-records/submissions/local/ianh/v1/2026/08/20/01K3-branch.ndjson";
@@ -293,6 +296,33 @@ describe("build", () => {
       delete older.compactedDays;
       const parsed = parseAggregate(JSON.stringify(older));
       expect(parsed?.compactedDays).toEqual([]);
+    });
+
+    it("carries what the cross-run rules saw into the next run", () => {
+      // A commit's runs can arrive in two publisher runs. Without the
+      // context, the second would not see that the identity had already
+      // passed at that commit, and would read the failure as a catch
+      // rather than as the test disagreeing with itself.
+      const first = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      first.add([stored(CI_NAME, context({ commit: "c1" }), [record()])]);
+      const saved = parseAggregate(JSON.stringify(first.finish().aggregate))!;
+      expect(saved.context!.outcomesAtCommit.length).toBeGreaterThan(0);
+
+      const second = new Fold(saved, NO_ALIASES, "2026-08-20");
+      second.add([
+        stored(
+          `${CI_NAME}2`,
+          context({ commit: "c1", startedAt: "2026-08-20T01:00:00.000Z" }),
+          [record({ outcome: "fail" })],
+        ),
+      ]);
+      const state = second.finish().states.get(KEY)!;
+      expect(state.mainCatches).toBe(0);
+      expect(flakeRate(state, "2026-08-20")).toBe(1);
     });
 
     it("does not fold an object it has already folded", () => {
