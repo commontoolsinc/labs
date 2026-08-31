@@ -68,6 +68,7 @@ import {
   type CfcGrantWriteInput,
   type CfcLabelMetadataObservation,
   type CfcLabelMetadataProtectionMode,
+  cfcMetadataPresent,
   type CfcPolicyEvaluationMode,
   type CfcPrefixProvenanceSummary,
   CfcRefusalDetail,
@@ -1042,18 +1043,26 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   // Record a path-[] whole-document write that drops the stored ["cfc"] label
-  // map. Such a write replaces every sibling of `value`, so an envelope with
-  // no `cfc` member erases the map and leaves a labeled document reading as an
-  // unlabeled one. That is the downgrade the ["cfc"]-path arm above catches,
-  // reached by omission rather than by overwrite, so it lands in the same
-  // record and yields the same fail-closed reason.
+  // map. Such a write replaces every sibling of `value`, so an envelope that
+  // leaves the document without a label map erases the one it held, and a
+  // labeled document reads afterwards as an unlabeled one. That is the
+  // downgrade the ["cfc"]-path arm above catches, reached by omission rather
+  // than by overwrite, so it lands in the same record and yields the same
+  // fail-closed reason.
   //
-  // The stored field decides, and the arm fires only when a map is there to
-  // erase: creating a document, and replacing one that carries no label map,
-  // pass through. Hydration passes through as well — an envelope delivered
-  // from storage carries the `cfc` it was stored with — and the runtime's own
-  // root writes (`cid:` schema documents) return at the privileged-scope check
-  // above before reaching here.
+  // Both halves ask `cfcMetadataPresent`, the reader's own account of what
+  // presents a label map, so the arm fires on the change a reader would see
+  // rather than on the presence of a key. An envelope carrying `cfc: null`, or
+  // any other value the reader reports as absent, erases the map as surely as
+  // one carrying no `cfc` at all. A stored value the reader reports as absent
+  // is not a map to erase.
+  //
+  // The arm fires only when a map is there to erase: creating a document, and
+  // replacing one that carries no label map, pass through. Hydration passes
+  // through as well — an envelope delivered from storage carries the `cfc` it
+  // was stored with — and the runtime's own root writes (`cid:` schema
+  // documents) return at the privileged-scope check above before reaching
+  // here.
   //
   // The read carries no weight of its own, the way the meta seam's guard read
   // above carries none. It goes through the inner transaction, so it stays out
@@ -1072,7 +1081,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     value: FabricValue | undefined,
   ): void {
     if (
-      isObjectOrArray(value) && (value as { cfc?: unknown }).cfc !== undefined
+      isObjectOrArray(value) &&
+      cfcMetadataPresent((value as { cfc?: unknown }).cfc)
     ) {
       return;
     }
@@ -1083,7 +1093,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         ...internalVerifierRead,
       },
     });
-    if (stored.ok?.value === undefined) return;
+    if (!cfcMetadataPresent(stored.ok?.value)) return;
     this.markCfcRelevant("unprivileged-cfc-metadata-erasure");
     this.#cfcState.unprivilegedSystemWrites.push(`${address.id}/cfc`);
   }

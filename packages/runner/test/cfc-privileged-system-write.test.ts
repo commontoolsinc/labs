@@ -497,6 +497,63 @@ describe("CFC privileged system write (S18)", () => {
     }
   });
 
+  it("rejects a root envelope whose cfc member a reader reports as absent", async () => {
+    // Carrying the key is not carrying the map. `cfc: null` — and every other
+    // value `readStoredCfcMetadata` reports as absent — leaves the document
+    // reading as an unlabeled one, so it erases the stored map exactly as an
+    // envelope with no `cfc` member does.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      for (
+        const [name, malformed] of [
+          ["s18-root-null", null],
+          ["s18-root-scalar", "not-an-envelope"],
+          ["s18-root-versionless", { labelMap: { version: 1, entries: [] } }],
+        ] as const
+      ) {
+        const address = await seedLabeledDocument(runtime, name);
+        const tx = runtime.edit();
+        tx.writeOrThrow(address, { value: { note: "two" }, cfc: malformed });
+        expect(tx.getCfcState().unprivilegedSystemWrites).toEqual([
+          `${address.id}/cfc`,
+        ]);
+        expect((await tx.commit()).error).toBeDefined();
+      }
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not gate a root envelope carrying a label map this build cannot read", async () => {
+    // An envelope whose `version` this build does not interpret is not an
+    // erasure: the reader throws on it and every consumer fails closed, so the
+    // document it leaves behind is not an unlabeled one.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const address = await seedLabeledDocument(runtime, "s18-root-future");
+      const tx = runtime.edit();
+      tx.writeOrThrow(address, {
+        value: { note: "two" },
+        cfc: { ...storedMetadata, version: 99 },
+      });
+      expect(tx.getCfcState().unprivilegedSystemWrites.length).toBe(0);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("diagnoses a label-map erasure in observe mode", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
