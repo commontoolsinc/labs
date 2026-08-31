@@ -210,6 +210,25 @@ describe("score-retrieval", () => {
       }
     });
 
+    it("returns a usage error naming each nonnumeric quality threshold", async () => {
+      for (
+        const name of ["min-hit-at-5", "max-dirty-negatives"] as const
+      ) {
+        const errors: string[] = [];
+        const code = await main(
+          [`--${name}=not-a-number`],
+          readEnv({}),
+          () => {},
+          (line) => errors.push(line),
+        );
+
+        expect(code).toBe(2);
+        expect(errors).toEqual([
+          `--${name} must be a finite number: not-a-number`,
+        ]);
+      }
+    });
+
     it("throws before contacting the index when `CF_IDENTITY` is absent", async () => {
       const fixture = await createFixture(QUERY_SET);
       try {

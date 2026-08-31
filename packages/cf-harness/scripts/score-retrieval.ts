@@ -157,8 +157,22 @@ export const main = async (
     new URL("./pattern-index-retrieval-queries.json", import.meta.url).pathname,
   );
   const outPath = flag(args, "out", "");
-  const minHitAt5 = Number(flag(args, "min-hit-at-5", "0"));
-  const maxDirtyNegatives = Number(flag(args, "max-dirty-negatives", "99"));
+  const minHitAt5Text = flag(args, "min-hit-at-5", "0");
+  const minHitAt5 = Number(minHitAt5Text);
+  if (!Number.isFinite(minHitAt5)) {
+    logError(
+      `--min-hit-at-5 must be a finite number: ${minHitAt5Text}`,
+    );
+    return 2;
+  }
+  const maxDirtyNegativesText = flag(args, "max-dirty-negatives", "99");
+  const maxDirtyNegatives = Number(maxDirtyNegativesText);
+  if (!Number.isFinite(maxDirtyNegatives)) {
+    logError(
+      `--max-dirty-negatives must be a finite number: ${maxDirtyNegativesText}`,
+    );
+    return 2;
+  }
 
   const set: QuerySet = JSON.parse(await Deno.readTextFile(setPath));
   const identity = await Identity.fromPkcs8(
