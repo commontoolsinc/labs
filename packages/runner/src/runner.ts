@@ -1,5 +1,9 @@
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
+  combineSchemaForLink,
+  resolveSchemaRefsCanonical,
+} from "./traverse.ts";
+import {
   fabricFromNativeValue,
   FabricInstance,
   type FabricValue,
@@ -8,6 +12,7 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { hashOf, hashStringOf } from "@commonfabric/data-model/value-hash";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -37,6 +42,7 @@ import {
   isPattern,
   isStreamValue,
   type JSONSchema,
+  type JSONSchemaObj,
   JSONValue,
   type Module,
   NAME,
@@ -52,7 +58,12 @@ import {
   useCancelGroup,
   useDeferredCancelOwnership,
 } from "./cancel.ts";
-import { type Cell, createCell, isCell } from "./cell.ts";
+import {
+  type Cell,
+  createCell,
+  isCell,
+  markCellDocumentSynced,
+} from "./cell.ts";
 import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
@@ -245,6 +256,91 @@ type StartAttempt = {
   // the pipeline promise exists.
   settled?: Promise<boolean>;
 };
+
+// One root of the argument link-target scan: an argument document plus the
+// schema declaring what the resumed runs read from it. A root without a
+// schema is scanned in full.
+type ArgumentLinkRoot = {
+  cell: Cell<any>;
+  schema?: JSONSchema;
+};
+
+// The child schema a declared read sees at `key`, mirroring `childSchema` in
+// schema-view.ts: `schemaAtPath` decides which children exist from the
+// schema's `type`, so a schema that declares `properties` or `items` and omits
+// `type` narrows to `false` — no child selected — while an eager read reaches
+// those children anyway. Read the subschema directly there, so the pre-sync
+// covers what the reader covers. A subschema of `false` turns the child down
+// rather than describing one, and stays refused.
+function narrowChildSchema(schema: JSONSchema, key: string): JSONSchema {
+  let narrowed: JSONSchema;
+  try {
+    narrowed = ContextualFlowControl.schemaAtPath(
+      schema,
+      [key],
+      undefined,
+      true,
+      false,
+    );
+  } catch {
+    // A declaration that cannot resolve is one that ran out: scan rather
+    // than skip.
+    return true;
+  }
+  if (narrowed !== false || !isObjectOrArray(schema)) return narrowed;
+  const properties = schema.properties;
+  if (isObjectOrArray(properties) && Object.hasOwn(properties, key)) {
+    return (properties as Record<string, JSONSchema>)[key];
+  }
+  if (isArrayIndexPropertyName(key) && schema.items !== undefined) {
+    return schema.items as JSONSchema;
+  }
+  return narrowed;
+}
+
+// Whether a declared schema hands the run a reference rather than a value to
+// read through: `asCell` on the schema itself, or a union or reference that
+// resolves to one. A union counts when ANY arm carries the marker, because
+// that is the arm the reader takes — `preferAsCellBranch` in schema-view.ts
+// picks the `asCell` branch and hands back a cell handle, so `Cell<T> |
+// undefined` is a handle rather than something read through. The depth bound
+// terminates a declaration that refers to itself, which resolves to itself
+// however many times it is followed.
+function isReferenceOnlySchema(
+  schema: JSONSchema | undefined,
+  depth: number = 4,
+): boolean {
+  if (depth <= 0 || !isObjectOrArray(schema)) return false;
+  if (schema.asCell !== undefined) return true;
+  // `unknown` is the deliberate request for reference semantics — a value
+  // compared by identity rather than read through, opaque at this hop and
+  // every deeper one (docs/specs/link-schema-precedence.md). The board's
+  // `mentions` and crossref rows are declared this way.
+  if (
+    schema.type === "unknown" ||
+    (Array.isArray(schema.type) && schema.type.includes("unknown"))
+  ) {
+    return true;
+  }
+  if ("$ref" in schema) {
+    return isReferenceOnlySchema(
+      resolveSchemaRefsCanonical(schema as JSONSchemaObj),
+      depth - 1,
+    );
+  }
+  // Both keywords together describe one set of alternatives the run may
+  // take, so they combine rather than one shadowing the other — the same
+  // reading `schemaAtPath` gives them when it narrows through a union.
+  const anyOf = schema.anyOf as readonly JSONSchema[] | undefined;
+  const oneOf = schema.oneOf as readonly JSONSchema[] | undefined;
+  const arms = anyOf !== undefined && oneOf !== undefined
+    ? [...anyOf, ...oneOf]
+    : anyOf ?? oneOf;
+  if (arms !== undefined && arms.length > 0) {
+    return arms.some((arm) => isReferenceOnlySchema(arm, depth - 1));
+  }
+  return false;
+}
 
 // The debug-name builders reuse the action's already-computed
 // `schedulerActionInstanceKey` as their uniquifying suffix instead of hashing
@@ -5052,8 +5148,10 @@ export class Runner {
     const argumentCell = this.runtime.getCellFromLink(argumentLink);
     await argumentCell.sync();
     const argumentValue = argumentCell.getRawUntyped();
-    await this.#syncArgumentLinkTargets(
-      [argumentCell],
+    // No declared schema here: the setup path scans the stored argument in
+    // full, the undeclared-root form of the method below.
+    await this.syncArgumentLinkTargets(
+      [{ cell: argumentCell }],
       "setupArgumentLinkTargetSync",
       [argumentValue],
     );
@@ -5132,8 +5230,10 @@ export class Runner {
     const cells: Cell<any>[] = [];
     // Argument documents (node inputs + the pattern's own argument meta doc)
     // whose VALUES may hold links to documents nothing in this tree owns —
-    // scanned after the main sync wave (see below).
-    const argumentCells: Cell<any>[] = [];
+    // scanned after the main sync wave (see below). Each root carries the
+    // schema declaring what the resumed runs read from it, which is what
+    // bounds that scan; a root without one is scanned in full.
+    const argumentRoots: ArgumentLinkRoot[] = [];
 
     // Sync all the inputs and outputs of the pattern nodes. Bindings are
     // unwrapped (bound to the argument/result documents) first, so named-cell
@@ -5190,16 +5290,23 @@ export class Runner {
           continue;
         }
 
-        // TODO(seefeld): This ignores schemas provided by modules, so it might
-        // still fetch a lot.
         [...inputs, ...outputs].forEach((link) => {
           cells.push(this.runtime.getCellFromLink(link));
         });
+        // Each input link carries the schema its binding declared, which is
+        // the read surface the node's first run holds to — the bound the
+        // link-target scan follows.
         inputs.forEach((link) => {
-          argumentCells.push(this.runtime.getCellFromLink(link));
+          argumentRoots.push({
+            cell: this.runtime.getCellFromLink(link),
+            schema: link.schema,
+          });
         });
       }
-      argumentCells.push(this.runtime.getCellFromLink(argumentMetaLink));
+      argumentRoots.push({
+        cell: this.runtime.getCellFromLink(argumentMetaLink),
+        schema: pattern.argumentSchema,
+      });
     }
 
     // Sync the owned (derived internal) cells of this pattern and every nested
@@ -5260,13 +5367,10 @@ export class Runner {
     // basis at seq 0 — a guaranteed ConflictError against the durable server
     // state (the home-rehydration reload-churn regression; v1's populate
     // pass subscribed such targets in aborted transactions before any
-    // commit). Two levels deep — argument value → container doc → target doc
-    // is the measured chain (defaultProfile → container → per-user profile
-    // doc); deeper or wider walks were measured to add loads without
-    // removing further conflicts. Deduped, values only, schema-less doc
-    // syncs; an unloadable target is skipped rather than failing the resume.
-    await this.#syncArgumentLinkTargets(
-      argumentCells,
+    // commit). Each root's declared schema bounds its scan — see the method
+    // for the exact rules and the fallback where a declaration runs out.
+    await this.syncArgumentLinkTargets(
+      argumentRoots,
       "resumeArgumentLinkTargetSync",
     );
 
@@ -5274,27 +5378,81 @@ export class Runner {
   }
 
   /**
-   * Load two levels of documents linked from stored arguments. This covers the
-   * measured defaultProfile container chain without loading an unbounded graph.
+   * Pre-sync the documents linked from stored arguments that a resumed
+   * pattern's first runs read through.
+   *
+   * Collection walks value and schema in lockstep, so what is warmed is what
+   * the declaration says a run can reach. A property a `properties`-bearing
+   * schema does not select is invisible to the run and is not walked.
+   *
+   * A link is crossed the way a read crosses it, through
+   * `combineSchemaForLink`: a shaped reader carries its own schema into the
+   * target and the link cannot widen it, while a permissive reader adopts
+   * what the link declares. Following the runtime's own rule is what keeps
+   * this walk and the reader in agreement, including under the rollback
+   * posture that rule answers to.
+   *
+   * A value the run holds rather than reads through is synced and not
+   * walked: `asCell` names a handle, and `unknown` asks for reference
+   * semantics — compared by identity, opaque at this hop and every deeper
+   * one.
+   *
+   * Where a declaration runs out — a `true` schema, an object schema with no
+   * `properties`, a link that declares nothing — the walk falls back to
+   * scanning the raw value, which covers the measured defaultProfile
+   * container chain and any read the transformer could not see. Either form
+   * reaches two link hops, the bound the undeclared walk has always had.
+   * Deduped per document for syncing and per subtree for walking; values
+   * only, and an unloadable target is skipped rather than failing the
+   * resume.
    */
-  async #syncArgumentLinkTargets(
-    argumentCells: Cell<any>[],
+  private async syncArgumentLinkTargets(
+    roots: readonly ArgumentLinkRoot[],
     timingLabel: "resumeArgumentLinkTargetSync" | "setupArgumentLinkTargetSync",
     initialValues?: readonly (FabricValue | undefined)[],
   ): Promise<void> {
-    const seenTargets = new Set<string>();
-    let frontier: Cell<any>[] = argumentCells;
-    for (let depth = 0; depth < 2 && frontier.length > 0; depth++) {
-      const targets: Cell<any>[] = [];
+    // How many further documents a walk may step INTO from a synced target.
+    // Two keeps the reach the defaultProfile regression fixed. A declaration
+    // could in principle be followed as far as it goes, but deployed schemas
+    // declare reference GRAPHS (a topic's mentions reach topics whose
+    // mentions reach topics), and a deeper budget measured on the topics
+    // board collected more than the undeclared walk it replaced. Raising it
+    // is evidence-driven tuning, not headroom.
+    const LINK_HOPS = 2;
+    // Syncing is document-granular and walking is subtree-granular, so they
+    // dedupe separately: one sync per document, one walk per (document, path,
+    // declared/undeclared) subtree. A reference visit (`asCell`, no walk)
+    // therefore never blocks a later read-through visit from walking the same
+    // document, and two links into different paths of one document each get
+    // their own descent.
+    const syncedDocs = new Set<string>();
+    const walkedSubtrees = new Set<string>();
+    type PendingTarget = {
+      cell: Cell<any>;
+      schema: JSONSchema;
+      hopsLeft: number;
+    };
+    // A root without a declaration enters as the permissive reader it is:
+    // `true` crosses links by adopting what they declare, so an undeclared
+    // root is typed by the first link it follows rather than scanned blind.
+    let frontier: PendingTarget[] = roots.map((root) => ({
+      cell: root.cell,
+      schema: root.schema ?? true,
+      hopsLeft: LINK_HOPS,
+    }));
+    let wave = 0;
+    while (frontier.length > 0) {
+      const targets: PendingTarget[] = [];
       const targetPromises: Promise<any>[] = [];
-      const collectLinkTargets = (value: any, base: Cell<any>) => {
-        const link = parseLink(value, base);
-        if (link) {
-          const key = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
-          if (seenTargets.has(key)) return;
-          seenTargets.add(key);
-          const target = this.runtime.getCellFromLink(link);
-          targets.push(target);
+      const enqueue = (
+        link: NormalizedFullLink,
+        schema: JSONSchema,
+        hopsLeft: number,
+      ) => {
+        const docKey = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
+        const target = this.runtime.getCellFromLink(link);
+        if (!syncedDocs.has(docKey)) {
+          syncedDocs.add(docKey);
           const targetSyncStart = performance.now();
           targetPromises.push(
             Promise.resolve(target.sync())
@@ -5312,21 +5470,87 @@ export class Runner {
                 )
               ),
           );
-        } else if (isObjectOrArray(value)) {
-          // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, and
-          // `for..in` sees none of its state, so a link inside a
+        } else {
+          // The walk awaits the sibling handle's document sync before
+          // advancing to the next wave.
+          markCellDocumentSynced(target);
+        }
+        if (hopsLeft <= 0) return;
+        // The key names the subtree a walk would descend: the document, the
+        // path within it, and the schema the descent follows. All three are
+        // needed — two links can reach one document at different paths, and
+        // two bindings can read one path under disjoint declarations, and
+        // each of those is a walk this one cannot stand in for. `path` is
+        // encoded injectively, since joining segments lets `["a/b"]` and
+        // `["a", "b"]` collide.
+        const walkKey = `${docKey}\0${JSON.stringify(link.path)}\0${
+          hashStringOf(schema)
+        }`;
+        if (walkedSubtrees.has(walkKey)) return;
+        walkedSubtrees.add(walkKey);
+        targets.push({ cell: target, schema, hopsLeft });
+      };
+      const collect = (
+        value: any,
+        base: Cell<any>,
+        schema: JSONSchema,
+        hopsLeft: number,
+      ) => {
+        if (schema === false) return;
+        // A `true` schema is where the declaration ran out; scan from here in
+        // the undeclared form with the remaining overall budget.
+        const declared = schema !== true;
+        const link = parseLink(value, base);
+        if (link) {
+          // Cross the link the way a read crosses it. `combineSchemaForLink`
+          // is the runtime's own rule and follows the same
+          // `readerSchemaPrecedence` posture, so the pre-sync covers what the
+          // reader will reach under whichever posture is in force: a shaped
+          // reader keeps its own schema and the link cannot widen it, while a
+          // permissive one adopts what the link declares rather than falling
+          // back to scanning everything behind it.
+          const crossed = combineSchemaForLink(schema, link.schema ?? true);
+          // Nothing is selected past this point, so no first run reads it.
+          if (crossed === false) return;
+          // A handle is held rather than read through — sync the document it
+          // names, and stop.
+          const opaque = isReferenceOnlySchema(crossed);
+          enqueue(
+            link,
+            crossed,
+            opaque ? 0 : Math.min(hopsLeft - 1, LINK_HOPS),
+          );
+          return;
+        }
+        if (!isObjectOrArray(value)) return;
+        if (!declared) {
+          // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`,
+          // and `for..in` sees none of its state, so a link inside a
           // `FabricInstance` held in a raw argument value is never pre-synced
           // — a cold target can then enter the commit basis, the exact
           // failure this walk exists to prevent.
-          for (const key in value) collectLinkTargets(value[key], base);
+          for (const key in value) {
+            // The undeclared scan keeps the remaining share of the overall
+            // two-hop budget; the clamp states that transition explicitly.
+            collect(value[key], base, true, Math.min(hopsLeft, LINK_HOPS));
+          }
+          return;
+        }
+        // Structural descent: narrow the declared schema one segment at a
+        // time. `defaultMissingProperty: false` makes an unselected property
+        // invisible, matching what the run can see; `defaultEmptyProperties:
+        // true` makes an unstructured object read fall back to the
+        // undeclared scan above, since such a read is unbounded.
+        for (const key in value) {
+          collect(value[key], base, narrowChildSchema(schema, key), hopsLeft);
         }
       };
-      for (const [index, cell] of frontier.entries()) {
+      for (const [index, entry] of frontier.entries()) {
         try {
-          const value = depth === 0 && initialValues !== undefined
+          const value = wave === 0 && initialValues !== undefined
             ? initialValues[index]
-            : cell.getRawUntyped();
-          collectLinkTargets(value, cell);
+            : entry.cell.getRawUntyped();
+          collect(value, entry.cell, entry.schema, entry.hopsLeft);
         } catch (error) {
           // A shape the raw read cannot resolve contributes nothing rather
           // than breaking the resume; log so a skipped target is diagnosable.
@@ -5338,6 +5562,7 @@ export class Runner {
       }
       await Promise.all(targetPromises);
       frontier = targets;
+      wave++;
     }
   }
 
