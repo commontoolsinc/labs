@@ -14,6 +14,7 @@ import {
   type SessionSyncUpsert,
 } from "@commonfabric/memory/v2";
 import type { IStorageProvider } from "../src/storage/interface.ts";
+import { Runtime } from "../src/runtime.ts";
 import {
   ScriptedSessionTransport,
   type ScriptedTransportMessage,
@@ -104,6 +105,82 @@ class WatchAddRemoveTransport extends ScriptedSessionTransport {
   }
 }
 
+// The first full watch-set update fails without changing server state. The
+// runner must issue it again: watchRemoveSync has already removed the probe id
+// from the session's local watch intent, so the second request carries the
+// corrected complete set and acknowledges cleanup.
+class FailFirstWatchRemovalTransport extends ScriptedSessionTransport {
+  watchRemovalAttempts = 0;
+
+  constructor() {
+    super({
+      name: "watch-removal-retry",
+      sessionId: "session:watch-removal-retry",
+      space,
+    });
+  }
+
+  protected override handle(message: ScriptedTransportMessage): void {
+    switch (message.type) {
+      case "session.watch.add": {
+        const roots =
+          message.watches?.flatMap((watch) =>
+            watch.query?.roots?.map((root) => root.id as URI) ?? []
+          ) ?? [];
+        this.respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            serverSeq: 1,
+            sync: {
+              type: "sync",
+              fromSeq: 0,
+              toSeq: 1,
+              upserts: [],
+              removes: roots.map((id) => ({
+                branch: "",
+                id,
+                scope: "space" as const,
+              })),
+            } satisfies SessionSync,
+          },
+        });
+        return;
+      }
+      case "session.watch.set":
+        this.watchRemovalAttempts++;
+        if (this.watchRemovalAttempts === 1) {
+          this.respond({
+            type: "response",
+            requestId: message.requestId!,
+            error: {
+              name: "ConnectionError",
+              message: "synthetic first removal failure",
+            },
+          });
+          return;
+        }
+        this.respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            serverSeq: 1,
+            sync: {
+              type: "sync",
+              fromSeq: 1,
+              toSeq: 1,
+              upserts: [],
+              removes: [],
+            } satisfies SessionSync,
+          },
+        });
+        return;
+      default:
+        throw new Error(`Unhandled scripted message: ${message.type}`);
+    }
+  }
+}
+
 Deno.test("memory v2 runner applies removes carried in a watch refresh batch", async () => {
   const docA = `of:watch-remove-keep-${crypto.randomUUID()}` as URI;
   const docB = `of:watch-remove-drop-${crypto.randomUUID()}` as URI;
@@ -126,6 +203,40 @@ Deno.test("memory v2 runner applies removes carried in a watch refresh batch", a
     assertEquals(getObjectValue(provider, docA), { label: docA });
     assertEquals(provider.get(docB), undefined);
   } finally {
+    await storageManager.close();
+  }
+});
+
+Deno.test("absence reconciliation retries a failed temporary watch removal", async () => {
+  const transport = new FailFirstWatchRemovalTransport();
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    memoryHost: new URL("memory://runner-v2-watch-removal-retry"),
+  }, sessionFactory);
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const provider = storageManager.open(space);
+  const tx = runtime.edit();
+  tx.read({
+    space,
+    id: `of:watch-removal-retry-${crypto.randomUUID()}`,
+    type: "application/json",
+    scope: "space",
+    path: [],
+  }, { trackReadWithoutLoad: true });
+
+  try {
+    if (provider.loadUnexaminedAbsences === undefined) {
+      throw new Error("absence reconciliation capability unavailable");
+    }
+    assertEquals(await provider.loadUnexaminedAbsences(tx.tx), 0);
+    assertEquals(transport.watchRemovalAttempts, 2);
+  } finally {
+    tx.abort("inspection only");
+    await runtime.dispose();
     await storageManager.close();
   }
 });

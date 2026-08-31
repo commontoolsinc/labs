@@ -4793,30 +4793,44 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
   /** Remove graph watches whose caller needed only a one-shot absence probe. */
   async #removeWatchIds(watchIds: readonly string[]): Promise<void> {
     if (watchIds.length === 0) return;
-    try {
-      const { session } = await this.#activeSessionHandle();
-      const { view, precedingSyncs, sync } = await session.watchRemoveSync(
-        watchIds,
-      );
-      if (this.#closed) {
-        view.close();
-        return;
-      }
-      this.#watchView = view;
+    let lastError: unknown;
+    // A failed watchRemoveSync has already removed these ids from the
+    // SpaceSession's reconnect intent. Reissuing it therefore sends the full
+    // corrected watch set; Client.request waits for an in-progress reconnect,
+    // so one retry also repairs the resumed-session ambiguity where the server
+    // may still hold the old watches.
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        for (const precedingSync of precedingSyncs) {
-          this.applySessionSync(precedingSync, "integrate");
+        const { session } = await this.#activeSessionHandle();
+        const { view, precedingSyncs, sync } = await session.watchRemoveSync(
+          watchIds,
+        );
+        if (this.#closed) {
+          view.close();
+          return;
         }
-        this.applySessionSync(sync, "integrate");
+        this.#watchView = view;
+        try {
+          for (const precedingSync of precedingSyncs) {
+            this.applySessionSync(precedingSync, "integrate");
+          }
+          this.applySessionSync(sync, "integrate");
+        } catch (error) {
+          view.close();
+          throw error;
+        }
+        this.#consumeWatchView(view);
+        return;
       } catch (error) {
-        view.close();
-        throw error;
+        lastError = error;
+        if (this.#closed) return;
       }
-      this.#consumeWatchView(view);
-    } catch {
-      // Best effort. SpaceSession removes these ids from reconnect intent
-      // before issuing the request; if the session itself is gone, its server
-      // watches disappear with it.
+    }
+    if (!this.#closed) {
+      console.warn(
+        "failed to remove temporary graph watches after retry",
+        lastError,
+      );
     }
   }
 
