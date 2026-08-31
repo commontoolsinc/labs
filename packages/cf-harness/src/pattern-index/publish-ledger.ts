@@ -110,9 +110,10 @@ export const createPatternIndexPublicationLedger = (
     supersede: boolean,
   ): void => {
     publishedByKey.set(key, request.patternId);
-    // A superseded entry the render gate already hid keeps the gate's
-    // reason: what a person reads later should say what was found, and being
-    // displaced is the less informative of the two facts.
+    // A render-gate reason is more informative than displacement and stays on
+    // a superseded entry. The generic automatic-recording reason is replaced:
+    // supersession specifically explains why an earlier iteration is not the
+    // retained candidate.
     const automaticReason =
       PATTERN_DISCOVERABILITY_REASONS["recorded-automatically"];
     const body = supersede
