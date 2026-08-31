@@ -404,8 +404,12 @@ If a multi-user pattern has admins, moderators, managers, or protected writes:
 5. Name one reviewed handler in the roster's write contract, and send every
    roster change to it as an event.
 6. Keep any per-user switch that reveals the admin controls in `PerUser<T>`,
-   and give it no integrity at all.
-7. Make a role name a profile cell drawn from the pattern's own list of
+   and give it no integrity at all. It decides what is on screen. It never
+   decides who may write.
+7. Check the acting viewer's own role inside the handler, with an empty roster
+   as the only opening. Without that check the switch becomes the
+   authorization, and any viewer grants themselves admin.
+8. Make a role name a profile cell drawn from the pattern's own list of
    people, pinned with `resolveAsCell()`. An event says which row; it never
    supplies the identity.
 
@@ -471,6 +475,17 @@ const currentUserIsAdmin = (
 ): boolean =>
   subjectHasAdminRole(adminRegistryEntries(registry), profile);
 
+// Who may change the roster. An empty roster is open, which is what lets the
+// first admin exist; after that only an admin may grant one. The per-user
+// switch is not part of this answer — it decides whether the controls are on
+// screen, and a viewer sets it for themselves.
+const actorMayChangeAdmins = (
+  registry: AdminRegistryCell,
+  actor: ProfileCell,
+): boolean =>
+  adminRegistryEntries(registry).length === 0 ||
+  currentUserIsAdmin(registry, actor);
+
 // The one place the roster is written. Every other part of the pattern reaches
 // it by sending an event, so a write from an unreviewed action here, or from
 // another pattern holding the registry cell under this schema, is refused by
@@ -481,9 +496,24 @@ const commitChatAdminChange = handler<
     registry: AdminRegistryCell;
     managerMode: AdminManagerModeCell;
     participants: Writable<ChatParticipant[]>;
+    viewerProfile: ProfileCell;
+    viewerName: string;
   }
->((event, { registry, managerMode, participants }) => {
+>((
+  event,
+  { registry, managerMode, participants, viewerProfile, viewerName },
+) => {
   if (managerMode.get() !== true) return;
+  // Gate on the viewer's resolved name, not on the profile being falsy: an
+  // unset optional cell input reads back as a present-but-empty handle, so a
+  // falsy test on it never fires.
+  if ((viewerName ?? "").trim() === "") return;
+  // Pin the terminal cell. A bound alias stored or compared as it stands is
+  // "whoever the reader resolves", which is a different person in every
+  // runtime.
+  const actor = viewerProfile.resolveAsCell();
+  if (actor.get() === undefined) return;
+  if (!actorMayChangeAdmins(registry, actor)) return;
   // The event says which row to grant to. The identity comes from the row,
   // never from the event, so a role can only name someone the pattern already
   // lists.
@@ -491,11 +521,7 @@ const commitChatAdminChange = handler<
     (participant) => participant.name === event.name,
   );
   if (row < 0) return;
-  // Pin the terminal cell. Storing the bound alias stores "whoever the reader
-  // resolves", which is a different person in every runtime.
   const subject = participants.key(row).key("profile").resolveAsCell();
-  // An unset optional cell reads back as a present-but-empty handle, so it is
-  // truthy. Requiring a value is the check the empty handle cannot pass.
   const displayName = subject.get()?.name;
   if (!displayName) return;
   const admins: ChatAdminRole[] = adminRegistryEntries(registry);

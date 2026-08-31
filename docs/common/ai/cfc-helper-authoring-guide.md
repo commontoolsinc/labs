@@ -255,9 +255,14 @@ witness atom for the floor, and deciding a roster change means reading the
 roster, so a floor on one atom over roles carrying another can never be met.
 
 The registry value around the list is written out here rather than reused from
-`AdminRegistryValue`, which types its `admins` as a plain array of roles and so
-has nowhere to carry the floor, the mint, or the write binding. Every pattern
-that floors a registry declares its own for the same reason.
+`AdminRegistryValue`. The floor, the mint and the write binding sit on the list
+type, which is where the schema records them, and `AdminRegistryValue<Role>`
+fixes that field as `readonly Role[]`: the element type is yours to choose, and
+the array around it is not, so there is no `Role` that puts a contract on the
+list. A registry also tends to want fields the shared value does not have, such
+as a bootstrap role and an `everyoneIsAdmin` flag that carries a write binding
+of its own. Every pattern that floors a registry declares its own for those two
+reasons.
 
 ```ts
 // Shown at module scope.
@@ -481,10 +486,13 @@ surface path.
 
 For admin helpers, cover:
 
-- empty registry defaults
-- active and inactive manager credentials
+- empty registry defaults, and the bootstrap grant an empty roster allows
+- a viewer holding no role refused, and an admin granting one accepted
+- the per-user mode switch changing what is on screen and nothing else
+- a roster write from outside the handler named in the write binding refused
 - subject lookup for the local subject shape
-- disabled or hidden local admin actions when manager integrity is absent
+- a second roster change after the first, which is the one a floor naming two
+  atoms drops
 
 For prompt-injection helpers, cover:
 
