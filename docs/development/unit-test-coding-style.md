@@ -270,9 +270,11 @@ Three nearby shapes are not this one:
   description above it is not worth writing.
 
   Two things stop that. Where a file marks its regions in a series and this
-  marker is one of the series, it stays; a file with one way of showing its
-  regions beats a file that demotes eleven markers and leaves the twelfth
-  reading as an omission. And where the marker closes the region above it,
+  marker is one of the series, it stays. The series is what says where each
+  region begins and ends, so a marker missing from the middle of one leaves
+  the region above it looking wider than it is. The text can say no more
+  than the block does and the marker still earns its place, because what it
+  carries is the boundary. And where the marker closes the region above it,
   removing it reopens that region, so it is replaced rather than removed —
   by a marker titling what follows, or by wrapping the region above in a
   `describe()` that ends it.

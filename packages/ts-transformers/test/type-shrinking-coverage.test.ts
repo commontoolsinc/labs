@@ -180,11 +180,12 @@ function createContext(sourceFile: ts.SourceFile): {
 }
 
 //
-// Shrinking and wrapping the shapes that match
+// Shrinking and wrapping: the paths that resolve, and the ones that do not
 //
-// The arms where a path resolves: array items and their unions, nested
+// The arms where a path resolves — array items and their unions, nested
 // leaves, identity paths across members, and the cell capabilities carried
-// through them.
+// through them — beside the diagnostics and the untouched nodes that a path
+// failing to resolve produces.
 //
 
 Deno.test("applyShrinkAndWrap shrinks Array<T> reference items to accessed fields", () => {
@@ -983,10 +984,11 @@ Deno.test("applyShrinkAndWrap applies cell capabilities through parenthesized li
 });
 
 //
-// The unchanged and no-match arms
+// Node shapes taken one at a time
 //
-// Each identity-path node shape where nothing matches, with the remaining
-// array-element and default clusters.
+// Each shape the walk can meet — arrays and their aliases, parenthesized and
+// wrapper references, unions, and the defaults applied through them —
+// whether or not a path matches inside it.
 //
 
 Deno.test("applyShrinkAndWrap keeps Array<T> unchanged for an unresolved identity item path", () => {

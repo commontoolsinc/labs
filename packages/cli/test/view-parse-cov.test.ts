@@ -683,15 +683,6 @@ Deno.test("parse: a computed-callee call is labeled by its first source line", (
 });
 
 //
-// safe() catch path (lines 1725-1727)
-//
-// safe() swallows exceptions in metadata extraction. Hard to force a throw from
-// well-formed input; instead, confirm the surrounding metadata still appears
-// for a normal node (the try path), and rely on malformed schema input below to
-// drive readSchemaProps over odd shapes without throwing.
-//
-
-//
 // importMeta: default name + namespace import (lines 1740, 1743)
 //
 
