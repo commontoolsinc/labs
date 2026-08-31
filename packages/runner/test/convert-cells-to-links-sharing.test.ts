@@ -76,6 +76,7 @@ describe("convert-cells-to-links-sharing", () => {
   it("returns a back-link naming the ancestor's own path, not the root's", () => {
     // The root case above cannot tell a path that was computed from one that
     // was assumed, its answer being the empty path either way.
+
     const inner: Record<string, FabricConvertibleValue> = { depth: 2 };
     const cyclic = { outer: { inner }, sibling: "untouched" };
 
@@ -112,6 +113,7 @@ describe("convert-cells-to-links-sharing", () => {
     // What this pins is that walking out of a subtree leaves the path as it
     // was found. A walk that carried the first branch's segments into the
     // second would name `left` somewhere under `right`.
+
     const left: Record<string, FabricConvertibleValue> = { side: "left" };
     const right: Record<string, FabricConvertibleValue> = { side: "right" };
 
@@ -136,6 +138,7 @@ describe("convert-cells-to-links-sharing", () => {
     // descended through behind would carry `items` into the path taken for a
     // cycle in the following member, where the object branch's sibling case
     // cannot reach.
+
     const inner: Record<string, FabricConvertibleValue> = { kind: "inner" };
     const cyclic = { items: ["x"], inner };
 
@@ -150,10 +153,31 @@ describe("convert-cells-to-links-sharing", () => {
     });
   });
 
+  it("returns a back-link at its own path after a conversion that threw", () => {
+    // Each call walks with state of its own. A conversion that throws part
+    // way leaves none of it behind for the next one, whose back-link paths
+    // are taken from where its own walk has reached.
+
+    expect(() => convertCellsToLinks({ bad: () => {} } as never)).toThrow();
+
+    const cyclic: Record<string, FabricConvertibleValue> = { kind: "after" };
+
+    cyclic.loop = cyclic;
+
+    const result = convertCellsToLinks({ outer: cyclic }) as {
+      outer: Record<string, unknown>;
+    };
+
+    expect(result.outer.loop).toEqual({
+      "/": { "link@1": { path: ["outer"] } },
+    });
+  });
+
   it("returns a back-link at its own depth after a deeper subtree was walked", () => {
     // The deep branch is walked first and must be fully unwound before the
     // shallow cycle's path is taken, so this fails where the first one does
     // not.
+
     const shallow: Record<string, FabricConvertibleValue> = { kind: "shallow" };
     const deep = { a: { b: { c: { d: "bottom" } } } };
 

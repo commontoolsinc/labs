@@ -52,6 +52,7 @@ describe("convert-cells-to-links-arrays", () => {
   it("returns an explicit `undefined` member as a member, not a hole", () => {
     // The other side of the distinction. Without this, a conversion that
     // turned every `undefined` into a hole would satisfy the tests above.
+
     const dense: unknown[] = [1, undefined, 3];
     const result = convertCellsToLinks(dense as never) as unknown[];
 
