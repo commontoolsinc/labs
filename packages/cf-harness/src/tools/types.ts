@@ -74,6 +74,12 @@ export interface HarnessToolContext {
   patternIndexPublishEnabled?: boolean;
 
   /**
+   * Whether a successful authored pattern is offered to search immediately.
+   * Absent or `false` records it without making it discoverable.
+   */
+  patternIndexPublishDiscoverable?: boolean;
+
+  /**
    * Where a pattern this run authored is held until the session ends. The
    * ledger publishes once per capability rather than once per successful run
    * — see `pattern-index/publish-ledger.ts`. Absent when the run has no

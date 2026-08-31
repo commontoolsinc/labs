@@ -138,8 +138,9 @@ describe("data-uri-codec", () => {
     // Canonical sameness
     //
     // The other direction, and the reason distinctness is not the whole
-    // property: equal values mint one URI. Every `NaN` payload collapses to
-    // the same identifier, and a repeated value mints deterministically.
+    // property: equal values mint one URI. Key order and a UTF-16 sort do not
+    // show through, every `NaN` payload collapses to the same identifier, and
+    // a repeated value mints deterministically.
     //
 
     it("mints the same URI regardless of key insertion order", () => {

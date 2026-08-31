@@ -2,8 +2,8 @@
  * Full DOM interaction tests (input events, Cell two-way binding, timing
  * strategy integration, validation UI) require Lit's rendering pipeline and
  * shadow DOM, which are not available in Deno's headless test runner. These
- * cover property defaults, validation patterns, Cell property acceptance, and
- * basic configuration; a browser-based harness carries the rest.
+ * cover property defaults, validation patterns, Cell property acceptance,
+ * host ARIA semantics, and basic configuration; a browser-based harness carries the rest.
  */
 
 import { describe, it } from "@std/testing/bdd";

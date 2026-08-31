@@ -172,6 +172,7 @@ export const publishRequestFor = (
   // not written to answer one request, so its own description is the honest
   // stand-in: it is the same claim, in the same words the index ranks on.
   directQuery: entry.metadata.description,
+  discoverable: true,
   ...(entry.argumentSchema !== undefined
     ? { argumentSchema: entry.argumentSchema as never }
     : {}),

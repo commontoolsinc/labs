@@ -179,15 +179,17 @@ export const namedPieceUrl = (
 
 /**
  * Puts `cell` in the space's piece list unless the list already holds it.
- * The registry's addPiece handler appends unconditionally, so membership is
- * asked first — by piece id over the registered list — rather than by
- * re-adding and hoping.
+ * Establishes the space root first because the registry belongs to it. The
+ * registry's addPiece handler appends unconditionally, so membership is asked
+ * first — by piece id over the registered list — rather than by re-adding and
+ * hoping.
  */
 const ensureRegistered = async (
   pieces: PiecesController,
   cell: Parameters<PiecesController["add"]>[0][number],
   targetId: string,
 ): Promise<void> => {
+  await pieces.ensureDefaultPattern();
   const registered = await pieces.getRegisteredPieces();
   if (registered.some((piece) => piece.id === targetId)) {
     return;

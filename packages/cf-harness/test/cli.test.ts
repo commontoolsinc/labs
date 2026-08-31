@@ -6648,6 +6648,36 @@ Deno.test("parseCfHarnessCliArgs reads the pattern index publish opt-out from th
   });
 });
 
+Deno.test("parseCfHarnessCliArgs reads deliberate discoverable publishing from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_PATTERN_INDEX_URL: "https://index.example/api",
+        CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE: "1",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.patternIndex, {
+    baseUrl: "https://index.example/api",
+    publishDiscoverable: true,
+  });
+});
+
 Deno.test("parseCfHarnessCliArgs rejects --allow-tool record_feedback without a pattern index", async () => {
   await assertRejects(
     () =>

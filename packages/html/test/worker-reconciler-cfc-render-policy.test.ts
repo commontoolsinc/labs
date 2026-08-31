@@ -1822,8 +1822,8 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     // Strict text integrity over visible props
     //
     // The same integrity applied to the props a node renders rather than to
-    // its child text, and what becomes of the blocked state when children are
-    // reused, a sibling changes, or the policy is removed.
+    // its child text, and what becomes of the blocked state as children and
+    // policy change around it.
     //
 
     await t.step(

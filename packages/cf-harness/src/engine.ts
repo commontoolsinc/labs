@@ -745,13 +745,21 @@ export class CfHarnessEngine {
 
   /**
    * Whether a pattern this run authored and ran is published back to the
-   * index. A run that can reach an index publishes to it unless the operator
+   * index. A run that can reach an index records to it unless the operator
    * said otherwise, so an injected factory with no connection config — a test
    * harness, a delegating parent — publishes like a configured one.
    */
   get patternIndexPublishEnabled(): boolean {
     return this.patternIndexAvailable &&
       this.config.patternIndex?.publish !== false;
+  }
+
+  /**
+   * Whether a successful authored pattern is offered to search immediately.
+   * The default publication records it without making it discoverable.
+   */
+  get patternIndexPublishDiscoverable(): boolean {
+    return this.config.patternIndex?.publishDiscoverable === true;
   }
 
   /**
@@ -1768,6 +1776,7 @@ export class CfHarnessEngine {
         ? {
           getPatternIndexClient: this.#patternIndexClientFactory,
           patternIndexPublishEnabled: this.patternIndexPublishEnabled,
+          patternIndexPublishDiscoverable: this.patternIndexPublishDiscoverable,
           patternIndexPublications: this.patternIndexPublications,
         }
         : {}),

@@ -2240,9 +2240,9 @@ Deno.test("memory v2 stacked commits: whenApplied resolves at the parked accept'
 // materialized view (and therefore the change notification) reflects the
 // own overlay, not the foreign value, until the marker promotes the parked
 // accept. `unappliedForeignSeqFloor` reports the shadowed seqs so the
-// serving loop's W advance can exclude them, and — flag ON — the
-// promotion fires the shadow-flip notification the moment the foreign
-// value becomes visible.
+// serving loop's W advance can exclude them, and — flag ON — the shadow
+// flip fires the moment the foreign value becomes visible, whether that is
+// the parked accept promoting or the shadowing write being dropped.
 //
 
 const shadowFloorOf = (harness: Harness): number | undefined =>
@@ -3250,11 +3250,12 @@ Deno.test("memory v2 stacked commits: old-server hold releases once every omitte
 });
 
 //
-// Cascading a dropped dependency
+// Cascading a local rejection
 //
-// A dropped write dooms what depends on it. These pin how far the cascade
-// reaches, what each victim reports, and what a late verdict may no longer
-// change.
+// A doomed in-flight dependant is rejected locally rather than waiting for a
+// server verdict — whether its dependency was dropped or the replica holding
+// it was reset. These pin how far the cascade reaches, what each victim
+// reports, and what a late verdict may no longer change.
 //
 
 Deno.test("memory v2 stacked commits: dropped dependency locally rejects the in-flight dependant before its server verdict", async () => {

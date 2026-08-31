@@ -24,8 +24,9 @@ function providerFailure(statusCode: number): APICallError {
 //
 // The routes ask the AI SDK for a single attempt, so these shapes do not
 // reach the classifier from them. They are what the classifier sees if a call
-// site ever asks for retries again, and the status has to survive the wrapping
-// either way.
+// site ever asks for retries again, and the status has to survive however it
+// is wrapped — including a cause graph that loops back on itself, which must
+// not trap the search.
 //
 
 Deno.test("a status survives a retry wrapper", () => {
@@ -53,8 +54,8 @@ Deno.test("a cycle among causes does not trap the search", () => {
 //
 // Where a status comes from
 //
-// The SDK raising over the request, the service's own error types, and the
-// fallback for an error that names no origin at all.
+// A status comes from the SDK raising over the request, from the service's
+// own error types, or from the fallback for an error that names no origin.
 //
 
 Deno.test("a request the SDK would not send is the caller's mistake", () => {
