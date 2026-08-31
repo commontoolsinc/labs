@@ -265,7 +265,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
   };
 
   //
-  // Build-order item 1: the `policyState` guard kind.
+  // Build-order item 1: the `policyState` guard kind
   //
 
   describe("policyState guard validation (boot, fail closed)", () => {
@@ -488,7 +488,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
   });
 
   //
-  // Build-order item 2: grant records + reserved-path storage discipline.
+  // Build-order item 2: grant records + reserved-path storage discipline
   //
 
   describe("grant document addressing", () => {
@@ -783,7 +783,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
   });
 
   //
-  // Resolution wired into the egress gate (build-order items 1+3).
+  // Resolution wired into the egress gate (build-order items 1+3)
   //
 
   describe("grant resolution at the sink egress gate", () => {

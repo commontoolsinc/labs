@@ -142,8 +142,8 @@ Deno.test("a local @db/sqlite build reports rather than binding another file", a
 //
 // Reading column origins
 //
-// That the symbols bind at all, and what the bound library reports for a
-// query, once the picking rule above has chosen a file.
+// These cover that the symbols bind at all, and what the bound library
+// reports for a query once the picking rule above has chosen a file.
 //
 
 function seed(path: string): void {
