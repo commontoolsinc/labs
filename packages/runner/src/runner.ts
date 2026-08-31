@@ -343,6 +343,32 @@ function isReferenceOnlySchema(
   return false;
 }
 
+/**
+ * The form a resume pre-sync's cell wave syncs a cell in.
+ *
+ * A cell whose link carries a trivially-permissive schema (`true`/`{}`) is
+ * synced as the DOCUMENT it names, not as a declaration: such a schema is
+ * the absence of a bound, and a sync honoring one walks the target's whole
+ * reachable graph — on a populated space, thousands of documents to resume
+ * one piece. The pre-sync's job is locality: the values instantiation reads
+ * must be local so their reads do not enter the commit basis cold, and the
+ * doc itself provides that. A shaped or undeclared cell keeps its own sync —
+ * the deep reach belongs to the argument link-target wave, which follows
+ * declared schemas.
+ *
+ * Exported for its test: current authoring stamps declared schemas on every
+ * link it writes, so a wave carrying a trivially-permissive link is vintage
+ * data — deployed pieces wired by older writers — which a test cannot author
+ * through the current stack.
+ */
+export function documentBoundedResumeCell(cell: Cell<any>): Cell<any> {
+  const link = cell.getAsNormalizedFullLink();
+  return link.schema !== undefined &&
+      ContextualFlowControl.isTrueSchema(link.schema)
+    ? cell.asSchema(false)
+    : cell;
+}
+
 // The debug-name builders reuse the action's already-computed
 // `schedulerActionInstanceKey` as their uniquifying suffix instead of hashing
 // the same links a second time (one hashOf per action creation, not two). The
@@ -5357,7 +5383,8 @@ export class Runner {
     // Per-cell spans: `n` in the timing stats is the number of cells this
     // resume pre-synced, total/max its round-trip cost (spans overlap, so the
     // wall cost is bounded by the enclosing syncCellsForRunningPattern span).
-    await Promise.all(cells.map((c) => {
+    await Promise.all(cells.map((cell) => {
+      const c = documentBoundedResumeCell(cell);
       const cellSyncStart = performance.now();
       return Promise.resolve(c.sync()).finally(() =>
         logger.time(cellSyncStart, "start", "resumeCellSync")

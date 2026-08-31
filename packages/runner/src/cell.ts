@@ -3273,8 +3273,27 @@ export class CellImpl<T extends FabricValue>
   ): void {
     if (!this.tx) throw new Error("Transaction required for setMetaRaw");
     // No await for the sync, just kicking this off, so we have the data to
-    // retry on conflict.
-    if (!this.#synced) this.sync();
+    // retry on conflict. A cell carrying a trivially-permissive schema
+    // (`true`/`{}`) kicks a DOCUMENT sync: a conflict retry needs the doc it
+    // rewrites local, such a schema is the absence of a bound, and a sync
+    // honoring one loads the cell's entire reachable graph — thousands of
+    // documents on a populated space — to protect one meta write. Setup's
+    // derived-cell materialization reaches this with exactly those cells.
+    // A shaped schema keeps its own sync: its closure is a bounded
+    // declaration something reads through — a pattern's local `$ref`
+    // resolution rides it — and marking the cell synced without loading it
+    // starves that read.
+    if (!this.#synced) {
+      if (
+        this.#link.schema !== undefined &&
+        ContextualFlowControl.isTrueSchema(this.#link.schema)
+      ) {
+        this.#synced = true;
+        this.asSchema(false).sync();
+      } else {
+        this.sync();
+      }
+    }
     const metaAddr = {
       space: this.#link.space,
       id: this.#link.id,
