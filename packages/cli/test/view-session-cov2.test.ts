@@ -60,6 +60,7 @@ Deno.test("session: Enter on a reference whose line is in no node reports nothin
   // that line falls outside every structure node's range, both findTargetIndex
   // (no offset) and nodeAtLine (no containing node) fail, so resolveTargetNode
   // returns null and Enter reports there is nothing to open.
+
   // Real card with real targets, but the structure tree is trimmed to just the
   // subject node — placed so the use site sits below its range, outside every
   // node — so following the use reference resolves to no node.

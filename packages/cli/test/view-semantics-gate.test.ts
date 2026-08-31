@@ -217,6 +217,10 @@ Deno.test("diff semantics: no in-workspace root file means no service (not a fai
   assertEquals(sem, undefined);
 });
 
+//
+// lazyProgram: the shared build, cache and latch
+//
+
 Deno.test("lazyProgram: caches a success and latches a failed build", () => {
   // lazyProgram is the shared build/cache/latch both factories use. The
   // configured host never makes it fail, so its failure isolation is exercised
@@ -274,6 +278,10 @@ Deno.test("makeHost: a repeated read of the same file is served from the cache",
     Deno.removeSync(dir, { recursive: true });
   }
 });
+
+//
+// Signed numeric definitions
+//
 
 Deno.test("signed numeric definitions reject positions that do not name a supported key", () => {
   const fileName = "/signed-numeric.ts";
