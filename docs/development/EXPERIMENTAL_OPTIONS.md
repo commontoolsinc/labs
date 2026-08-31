@@ -50,7 +50,7 @@ was last checked against the code.
 | [`messageCompressionV1`](#messagecompressionv1)                             | `setMessageCompressionConfig()` (negotiated per connection)                                                                                     | on                                                                                   | PR #6474                                             | retire the rollback switch after the binary WebSocket envelope has field-soaked                                                                                                                                                   | implemented, on by default                                                      |
 | [`ownWriteEcho`](#ownwriteecho)                                             | `setOwnWriteEchoConfig()` (server-side only, not negotiated)                                                                                    | on                                                                                   | Robin McCollum (CT-1965)                              | remove the switch once the echo has field-soaked                                                                                                                                                                                  | implemented, on by default                                                      |
 | [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off                                                                                  | Ben Follington (#4937; shell toggle #4974)            | graduate to always-on after live measurement, or remove if superseded                                                                                                                                                             | implemented behind the flag, off by default, not yet measured over real latency |
-| [`schemaWalkMemo`](#schemawalkmemo)                                         | memory `Server` option `experimentalSchemaWalkMemo` (server-side only; not env-wired)                                                          | off                                                                                  | Gideon Wald (revision-keyed schema memo plan)         | graduate to always-on after the estuary measurement, then delete the option                                                                                                                                                       | implemented behind the flag, off by default                                     |
+| [`schemaWalkMemo`](#schemawalkmemo)                                         | memory `Server` option `experimentalSchemaWalkMemo` (server-side only; not env-wired)                                                          | off                                                                                  | Gideon Wald (#6464)                                   | extend to the schema-typed traversal, remeasure on estuary, then graduate only if beneficial                                                                                                                                      | generic traversal implemented; dominant typed path not yet covered              |
 | [`cfcRenderCeiling`](#cfcrenderceiling)                                     | `commonfabric.cfcRenderCeiling()` in the browser (localStorage)                                                                                 | off                                                                                  | Bernhard Seefeld (#4550)                              | graduate once exchange resolution lands                                                                                                                                                                                           | implemented, off by default, dogfood only                                       |
 | [`INGEST_SELF_SERVE_ENABLED`](#ingest_self_serve_enabled) | `INGEST_SELF_SERVE_ENABLED` env on toolshed | off | Alex Komoroske (self-serve ingest channels) | graduate on once named-space keys stop deriving from a public passphrase | implemented, off by default |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning)                                 | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache`                                                             | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts                          | Ian Hickson                                           | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked                                                                                                                                      | implemented, on by default for FUSE-T, soak-validated                           |
@@ -1062,20 +1062,23 @@ the per-epic implementation notes).
   (`boolean | { maxEntries?: number }`) in
   [`packages/memory/v2/server.ts`](../../packages/memory/v2/server.ts).
   Server-side only; not env-wired yet and invisible on the wire.
-- **Added by.** Gideon Wald, for the revision-keyed schema memo plan
-  (#6464).
+- **Added by.** Gideon Wald (#6464).
 - **Purpose.** Serves per-document schema-walk subtrees across evaluations
   from a per-space, revision-keyed memo, so the first evaluation after a
   commit — and any evaluation of a query shape the whole-evaluation cache
   has not seen — re-traverses only what changed instead of the whole
   corpus. Off, every evaluation the whole-evaluation cache misses walks the
   full reach.
-- **Current default and planned end state.** Off by default while the
-  plan's measurement stage runs. Intended to graduate to always-on.
-- **Status on 2026-08-28.** Implemented behind the flag, off by default.
-- **Path to removal.** Enable on estuary, compare the evaluation-cache and
-  memo diagnostics against the plan's baseline, then flip the default and
-  delete the option.
+- **Current default and planned end state.** Off by default. Extend the memo
+  seam to the schema-typed/extension traversal, then graduate only if a fresh
+  measurement shows a material benefit.
+- **Status on 2026-08-31.** The generic graph traversal is implemented behind
+  the flag. Study 3 found the dominant board query takes the schema-typed path,
+  which bypasses this memo and consequently records no cross-traversal hits.
+- **Path to removal.** Cover the schema-typed/extension traversal without
+  changing its semantics, rerun the estuary measurement, and either flip the
+  default and delete the option or remove the experiment if it remains
+  ineffective.
 
 ---
 

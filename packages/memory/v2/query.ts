@@ -153,6 +153,8 @@ const walkStatsDelta = (
   dagTraversals: after.dagTraversals - before.dagTraversals,
   getDocAtPathCalls: after.getDocAtPathCalls - before.getDocAtPathCalls,
   schemaMemoHits: after.schemaMemoHits - before.schemaMemoHits,
+  crossTraversalMemoHits: after.crossTraversalMemoHits -
+    before.crossTraversalMemoHits,
 });
 
 /**
@@ -808,7 +810,7 @@ export type TrackGraphOptions = {
   evaluationCache?: QueryEvaluationCache;
 
   /** Serve/record per-document schema-walk subtrees through this store
-   * (docs/plans/revision-keyed-schema-memo.md). Same eligibility as the
+   * (PR #6464). Same eligibility as the
    * evaluation cache: current-seq reads only, and the lease-holder
    * exemption class bypasses. A store whose engine is not this
    * evaluation's engine is cleared first — revisions identify state only
@@ -1518,6 +1520,7 @@ export const trackGraph = (
     });
     cache.weight += weight - (previous?.weight ?? 0);
   }
+  session?.detachTracker();
   return {
     serverSeq: Engine.serverSeq(engine),
     state,

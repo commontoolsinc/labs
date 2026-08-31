@@ -340,6 +340,81 @@ describe("v2 schema walk memo", () => {
     expect(store.evictions).toBeGreaterThan(0);
   });
 
+  it("keeps a recently served closure ahead of unrelated cold entries", async () => {
+    const space = "did:key:z6Mk-walk-memo-closure-lru";
+    const engine = await openEngine({
+      url: new URL("memory:///walk-memo-closure-lru"),
+    });
+    const coldIds = Array.from(
+      { length: 4 },
+      (_, index) => `of:doc:cold-${index}`,
+    );
+    seed(engine, space, 1, [
+      { op: "set", id: "of:doc:hot-c", value: { value: { leaf: 3 } } },
+      {
+        op: "set",
+        id: "of:doc:hot-b",
+        value: { value: { next: link(space, "of:doc:hot-c") } },
+      },
+      {
+        op: "set",
+        id: "of:doc:hot-a",
+        value: { value: { next: link(space, "of:doc:hot-b") } },
+      },
+      ...coldIds.map((id) => ({
+        op: "set",
+        id,
+        value: { value: { leaf: id } },
+      })),
+      {
+        op: "set",
+        id: "of:doc:pressure",
+        value: { value: { leaf: "new" } },
+      },
+    ]);
+    const identity = { principal: "did:key:z6Mk-wm-p1", sessionId: "wm-s1" };
+    const store = createSchemaWalkMemoStore();
+    trackGraph(space, engine, QUERY_FOR("of:doc:hot-a"), undefined, {
+      ...identity,
+      schemaWalkMemo: store,
+    });
+    const hotIds = ["of:doc:hot-a", "of:doc:hot-b", "of:doc:hot-c"];
+    const hotKeys = [...store.entries.keys()].filter((key) =>
+      hotIds.some((id) => key.includes(`|${id}|`))
+    );
+    expect(hotKeys.length).toBeGreaterThan(1);
+    for (const id of coldIds) {
+      trackGraph(space, engine, QUERY_FOR(id), undefined, {
+        ...identity,
+        schemaWalkMemo: store,
+      });
+    }
+    store.maxEntries = store.entries.size;
+
+    const warm = trackGraph(
+      space,
+      engine,
+      QUERY_FOR("of:doc:hot-a"),
+      undefined,
+      { ...identity, schemaWalkMemo: store },
+    );
+    expect(warm.stats.crossTraversalMemoHits).toBeGreaterThan(0);
+    trackGraph(space, engine, QUERY_FOR("of:doc:pressure"), undefined, {
+      ...identity,
+      schemaWalkMemo: store,
+    });
+
+    expect(hotKeys.every((key) => store.entries.has(key))).toBe(true);
+    const stillWarm = trackGraph(
+      space,
+      engine,
+      QUERY_FOR("of:doc:hot-a"),
+      undefined,
+      { ...identity, schemaWalkMemo: store },
+    );
+    expect(stillWarm.stats.dagTraversals).toBe(0);
+  });
+
   it("delivers through a memo-served watch", async () => {
     const space = "did:key:z6Mk-walk-memo-delivery";
     const server = new Server({
@@ -891,7 +966,7 @@ describe("v2 schema walk memo", () => {
           value: { value: {} },
           // deno-lint-ignore no-explicit-any
         }) as any;
-      return { session, store, doc };
+      return { session, store, tracker, doc };
     };
 
     it("stores nothing for a computation cut short by a value cycle", async () => {
@@ -940,6 +1015,18 @@ describe("v2 schema walk memo", () => {
       session.exit(doc("of:doc:x"), true, { ok: null });
       expect(store.entries.size).toBe(0);
       expect(recorded).toEqual(["space/space/of:doc:absent"]);
+    });
+
+    it("detaches capture before a tracker becomes live state", async () => {
+      const { session, store, tracker, doc } = await openSession("detach");
+      session.enter(doc("of:doc:x"), true);
+      session.detachTracker();
+      tracker.add(
+        "space/space/of:doc:outside",
+        { path: [], schema: true },
+      );
+      session.exit(doc("of:doc:x"), true, { ok: null });
+      expect([...store.entries.values()][0].registrations).toEqual([]);
     });
 
     it("keys a frame to its identity when it consumed an unrecorded subtree", async () => {

@@ -21,13 +21,13 @@ import * as Engine from "./engine.ts";
 
 /**
  * A cross-evaluation, per-document memo of schema-walk computation
- * (docs/plans/revision-keyed-schema-memo.md), the memory-side
+ * (PR #6464), the memory-side
  * implementation of the runner's {@link CrossTraversalSchemaMemo} seam.
  *
  * Entries are keyed by (branch, scope instance, id, document REVISION,
  * schema), so validity is by key construction: a commit to a document
  * strands every entry recorded at its previous revision, and no
- * invalidation machinery exists — retention is insertion-order LRU under
+ * invalidation machinery exists — retention is access-order LRU under
  * `maxEntries`. An entry carries the traversal result for its (document,
  * schema) subtree plus a manifest of the traversal's DIRECT effects — the
  * registrations and misses its own document's walk produced, and the
@@ -190,6 +190,10 @@ export class CapturingSchemaTracker extends MapSetStringToPathSelectors {
     this.#session = session;
   }
 
+  unbind(session: SchemaWalkMemoSession): void {
+    if (this.#session === session) this.#session = undefined;
+  }
+
   public override add(key: string, value: SchemaPathSelector) {
     this.#session?.captureRegistration(key, value);
     super.add(key, value);
@@ -281,6 +285,12 @@ export class SchemaWalkMemoSession implements CrossTraversalSchemaMemo {
     this.#tracker = options.tracker;
     this.#currentSeq = Engine.serverSeq(options.engine);
     options.tracker.bind(this);
+  }
+
+  /** Release the evaluation-only capture graph before its tracker becomes
+   * long-lived watch state. */
+  detachTracker(): void {
+    this.#tracker.unbind(this);
   }
 
   /** Tee the walk's miss recorder: capture for the open frame, then
@@ -473,8 +483,16 @@ export class SchemaWalkMemoSession implements CrossTraversalSchemaMemo {
     return true;
   }
 
+  #touch(key: string, entry: SchemaWalkMemoEntry): void {
+    this.#store.entries.delete(key);
+    this.#store.entries.set(key, entry);
+  }
+
   #replay(key: string, entry: SchemaWalkMemoEntry): void {
-    if (this.#replayed.has(key)) return;
+    if (this.#replayed.has(key)) {
+      this.#touch(key, entry);
+      return;
+    }
     this.#replayed.add(key);
     for (const registration of entry.registrations) {
       this.#tracker.addWithoutCapture(
@@ -509,6 +527,10 @@ export class SchemaWalkMemoSession implements CrossTraversalSchemaMemo {
       const child = this.#store.entries.get(childKey);
       if (child !== undefined) this.#replay(childKey, child);
     }
+    // A root hit consumes its whole manifest closure. Promote children
+    // before their parent so the root remains the youngest entry while
+    // every dependency it needs stays ahead of unrelated cold entries.
+    this.#touch(key, entry);
   }
 
   #recordChild(
@@ -567,9 +589,6 @@ export class SchemaWalkMemoSession implements CrossTraversalSchemaMemo {
     }
     this.#replay(found.key, found.entry);
     this.#store.hits++;
-    // Recency: a served entry moves to the young end of the LRU order.
-    this.#store.entries.delete(found.key);
-    this.#store.entries.set(found.key, found.entry);
     const frame = this.#frames.at(-1);
     if (frame !== undefined) {
       this.#recordChild(
