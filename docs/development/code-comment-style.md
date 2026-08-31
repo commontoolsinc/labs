@@ -529,6 +529,61 @@ export type FryerState =
 Object types, tuple types, array literals, and class and interface bodies all
 keep their blank lines, so the rule holds in full there.
 
+### The blank line below
+
+A documented declaration takes a blank line after it as well. The rule above
+separates a doc comment from what precedes it; this one bounds what it covers.
+
+Without that blank line a doc comment reads as a header over everything down to
+the next one, and whatever sits under the declaration it was written for looks
+documented when it is not:
+
+```ts
+// Shown as alternative snippets.
+
+// Wrong: `humidity` reads as covered by the comment above `temperature`.
+
+interface Reading {
+  /** Fryer temperature, in Kelvin. */
+  readonly temperature: number;
+  readonly humidity: number;
+}
+```
+
+```ts
+// Shown as alternative snippets.
+
+// Right: the blank line ends the doc comment's reach.
+
+interface Reading {
+  /** Fryer temperature, in Kelvin. */
+  readonly temperature: number;
+
+  readonly humidity: number;
+}
+```
+
+Anything following takes the blank line, not only another declaration. A
+statement under a documented local is the same shape and gets the same
+treatment.
+
+The exemptions mirror the ones above. A declaration with nothing after it in
+its file or bracketed block takes no blank line: the closing bracket, or the
+end of the file, is the separator, exactly as the opening bracket is on the
+other side. And the two constructs `deno fmt` will not keep a blank line in are
+exempt here for the reason they are exempt there — the formatter strips one
+after a documented parameter or union arm just as it strips one before.
+
+The rule reaches documented declarations only. Two adjacent members carrying no
+doc comment between them leave no comment's scope in doubt, and stay as they
+are.
+
+For this rule an overload set is one declaration. Its signatures and the
+implementation carrying the code are a single thing to a caller and a single
+thing to the doc comment above them, so no blank line falls between them; the
+one that closes the set goes after the implementation. `deno fmt` keeps a blank
+line between two signatures, so this is a convention no gate will raise.
+
 ### What gets one
 
 - Every file, as a header, except for the kinds listed under
