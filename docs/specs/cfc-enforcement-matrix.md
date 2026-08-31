@@ -220,10 +220,11 @@ The strict-only delta is:
   instead of the join and are outside the check, as is the pure-link-structure
   shape channel; grown existence atoms (SC-4) are historical and deliberately
   never measured — only the current join is; `Space` is the only principal
-  form residency admits, because `PersonalSpace`, `User`, and the bare
-  DID-string spelling all gate by equality against one acting reader, making
-  their audience a person rather than the container and so narrower than the
-  set of principals a space grants reader roles to; and the ungrantable
+  form residency admits, because `User` and the bare DID-string spelling gate
+  by equality against one acting reader, making their audience narrower than
+  the set of principals a space grants reader roles to, while
+  `PersonalSpace(<owner>)` names a space whose clause the measurement cannot
+  build from a target address (SC-39); and the ungrantable
   read-failed marker sits outside every ceiling, the residency clause
   included, so a poisoned measurement never proves fit. The reserved policy
   namespaces are outside the check too: the durable policy manifests
@@ -247,6 +248,21 @@ The strict-only delta is:
   transaction with recorded reasons CFC-relevant (`prepare-reasons`), so a
   reasoned tx whose reads never tripped an eager relevance mark cannot slip the
   ladder ([extended-storage-transaction.ts](../../packages/runner/src/storage/extended-storage-transaction.ts)).
+
+  One of the forms residency excludes is readable in the DECLARED half of the
+  ceiling, in one direction. A `PersonalSpace(owner)` LABEL clause answers a
+  declared ceiling naming that owner, because §3.6.2's role order makes an
+  owner a reader and §3.6.4 makes that principal the space's sole owner, and
+  the fit test asks only that everyone the ceiling admits is entitled to the
+  data. The reverse does not hold: a store DECLARING the atom is not read by
+  that person alone, because adding a member converts the space and §3.6.5
+  rewrites no labels, so a stamped clause outlives the conversion. `Space` gains nothing either way, for the reason residency lets
+  it in — its readers are derived through verified `HasRole` exchange, and
+  residency already joins the target's own space onto every ceiling, so
+  covering it here would admit that data space-wide. The kernel owns the
+  reading, so it holds at the egress, display, observation, and
+  declared-monotonicity gates too. Recorded in
+  [`cfc-spec-changes.md`](./cfc-spec-changes.md) SC-39.
 
   The raw meta seam is outside the check at EVERY rung, so a meta path
   raises neither a strict reject nor a persist-and-flag diagnostic. The

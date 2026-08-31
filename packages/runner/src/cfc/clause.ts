@@ -1,8 +1,10 @@
 import { CFC_ATOM_TYPE, type CfcAtom } from "@commonfabric/api/cfc";
+import { isDID } from "@commonfabric/identity";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { atomEntails } from "./atom-pattern.ts";
+import { isCfcFieldCommitment } from "./label-representation.ts";
 import { uniqueCfcAtoms } from "./observation.ts";
 
 /**
@@ -79,6 +81,76 @@ export const clausesEqual = (
 ): boolean => deepEqual(normalizeClause(left), normalizeClause(right));
 
 /**
+ * A `PersonalSpace(owner)` label alternative, restated as the one principal
+ * every reading of the atom puts inside its audience: its owner.
+ *
+ * The atom is a SPACE principal, not a person. §15.2 and §4.1.2 both call it
+ * a convenience form for a per-user space principal, and §4.9.4 generates its
+ * reader fact by a §4.9.3 point query against that space's own ACL record,
+ * calling it one of "the two `Space(...)` atoms". §3.6.4 does give a personal
+ * space fixed membership, but only while it stays personal: its own sharing
+ * bullet has adding a member CONVERT the space into a shared one, and §3.6.5
+ * rewrites no labels when that happens. A `PersonalSpace(P)` clause stamped
+ * beforehand therefore goes on naming a space that has stopped being
+ * personal, which is what defeats reading its audience as one person.
+ *
+ * What holds regardless is the role hierarchy. §3.6.2 states `owner ⊃ writer
+ * ⊃ reader` — "owners are implicitly writers; writers are implicitly readers"
+ * — and §3.6.4 makes the named principal the space's sole owner, so the owner
+ * is one of its readers by the role order rather than by any particular ACL
+ * configuration. A ceiling whose audience is that owner is therefore inside
+ * the label's audience however the membership has since changed, which is
+ * what the fit test asks. This is a fact about space membership, not a
+ * spelling equivalence, and it runs on the LABEL side only. In a ceiling the
+ * same rewrite would claim a store declaring the atom is read by that person
+ * ALONE — the reverse containment, which nothing establishes.
+ *
+ * Only the canonical two-field shape participates, and only when its `owner`
+ * is a DID — the type §15.2 gives the field, tested with the identity
+ * package's `isDID` rather than a `did:` prefix, so a truncated or
+ * method-only string gets no reading — or the §4.6.4.1 `{digestOf}`
+ * commitment the cross-space seam persists that field as. A record carrying
+ * further fields, or an `owner` that is neither, is not the atom it resembles
+ * and gets no reading either. `isDID` refuses a third colon, so a
+ * method-specific id containing one is refused too; that is over-refusal,
+ * which is the direction a well-formedness gate should fail in.
+ *
+ * Both fields are checked as OWN properties, which the sibling recognizers
+ * here do not bother with because they only gate a comparison. This one
+ * builds an atom out of the field it reads, so a value arriving from a
+ * prototype would end up inside the manufactured `User`. Label atoms come
+ * from `JSON.parse` and from module source, neither of which produces one,
+ * so this is closing a shape the input cannot currently take rather than a
+ * live hole.
+ *
+ * The well-formedness test reaches the plaintext form only. A commitment is a
+ * digest of whatever the field held, and the transform that produces one
+ * commits every classified field without inspecting it, so a malformed owner
+ * digests exactly as a DID does and this predicate cannot tell them apart.
+ * The committed form of a malformed owner is therefore admitted where its
+ * plaintext twin is refused. What it can be admitted AGAINST is the bound:
+ * the ceiling has to name that same malformed subject, in plaintext or under
+ * the same digest, and §15.2 types `User.subject` as a DID too — so reaching
+ * it takes a store whose declared policy is already malformed in the matching
+ * way. Closing the gap properly means validating at the commit seam or
+ * carrying the field's type into the marker, neither of which belongs in a
+ * fit predicate.
+ */
+const personalSpaceOwnerAsReader = (atom: CfcAtom): CfcAtom => {
+  if (!isObjectNotArray(atom)) return atom;
+  const record = atom as Record<string, CfcAtom>;
+  if (
+    !Object.hasOwn(record, "type") || !Object.hasOwn(record, "owner") ||
+    Object.keys(record).length !== 2 ||
+    record.type !== CFC_ATOM_TYPE.PersonalSpace ||
+    !(isDID(record.owner) || isCfcFieldCommitment(record.owner))
+  ) {
+    return atom;
+  }
+  return { type: CFC_ATOM_TYPE.User, subject: record.owner };
+};
+
+/**
  * Clause subsumption — the ceiling-fit kernel (spec §8.10.3):
  * a ceiling clause `c` subsumes a label clause `l` when every alternative of
  * `c` appears among `l`'s alternatives (`alts(c) ⊆ alts(l)`) — then any
@@ -102,6 +174,26 @@ export const clausesEqual = (
  * for disjunctions iff EVERY alternative of `c` entails SOME alternative of
  * `l` — so the subset check becomes an entailment-witness check, reducing to
  * the previous deepEqual membership on order-free families.
+ *
+ * One case is added to that relation, on the LABEL side only: a
+ * `PersonalSpace(owner)` alternative also answers a ceiling alternative
+ * naming that owner, because the owner is always among their own space's
+ * readers (`personalSpaceOwnerAsReader` above). Each comparison tries the
+ * atoms as written first, so a clause carrying no such alternative costs
+ * exactly what it did before.
+ *
+ * §8.12.1 states `atomLe` as structural equality plus the `Expires` order,
+ * so this is a deviation from that text. It preserves the semantic criterion
+ * the same section gives for the relation — satisfying the more restrictive
+ * side implies satisfying the other — which is what makes it safe; the spec
+ * edit it owes is recorded as SC-39.
+ *
+ * Clause IDENTITY is left untouched: `clausesEqual`, `normalizeClause`, and
+ * `cfcCanonicalClauseDigest` still tell the two atoms apart, so a
+ * mutually-subsuming pair can carry different digests. That direction is
+ * fail-closed everywhere it shows — a §8.12.7 route-2b exemption naming one
+ * does not exempt the other, and a ceiling meet keeps both alternatives
+ * rather than collapsing them.
  */
 export const clauseSubsumes = (
   ceilingClause: CfcConfClause,
@@ -110,9 +202,13 @@ export const clauseSubsumes = (
   const ceilingAlternatives = clauseAlternatives(ceilingClause);
   if (ceilingAlternatives.length === 0) return false;
   const labelAlternatives = clauseAlternatives(labelClause);
-  return ceilingAlternatives.every((ceilingAtom) =>
-    labelAlternatives.some((labelAtom) => atomEntails(ceilingAtom, labelAtom))
-  );
+  return ceilingAlternatives.every((ceilingAtom) => {
+    return labelAlternatives.some((labelAtom) => {
+      if (atomEntails(ceilingAtom, labelAtom)) return true;
+      const owner = personalSpaceOwnerAsReader(labelAtom);
+      return owner !== labelAtom && atomEntails(ceilingAtom, owner);
+    });
+  });
 };
 
 // Atom types forbidden as alternatives of an AUTHORED OR-clause (spec §3.1.8):

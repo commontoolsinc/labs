@@ -8,6 +8,7 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import { stampExternalIngest } from "../src/cfc/external-ingest.ts";
 import {
   cfcCanonicalClauseDigest,
+  type CfcConfClause,
   type CfcDeclaredMonotonicityMode,
   collectDeclaredMonotonicityViolations,
 } from "../src/cfc/mod.ts";
@@ -1644,6 +1645,75 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
       expect(
         violations.filter((v) => v.includes("integrity violation")),
       ).toHaveLength(1);
+    });
+  });
+
+  describe("a personal space's owner (the §8.10.3 witness relation)", () => {
+    // The gate's witness is `clauseSubsumes(proposed, stored)`, the same
+    // §8.10.3 kernel the ceiling gates use, so the personal-space reading
+    // reaches here too — proposed sits in the CEILING position and stored in
+    // the LABEL position. Pinned because a change to that kernel changes
+    // what this gate calls monotone.
+
+    const OWNER = "did:key:zMonoOwner";
+    const userAtom = {
+      type: "https://commonfabric.org/cfc/atom/User",
+      subject: OWNER,
+    };
+    const personalSpaceAtom = {
+      type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+      owner: OWNER,
+    };
+    const confidentialityViolations = (
+      stored: CfcConfClause,
+      proposed: CfcConfClause,
+    ): string[] =>
+      collectDeclaredMonotonicityViolations({
+        space: signer.did(),
+        docId: "of:spelling-doc",
+        storedEntries: [{
+          path: ["out"],
+          origin: "declared",
+          label: { confidentiality: [stored] },
+        }],
+        proposedEntries: [{
+          path: ["out"],
+          origin: "declared",
+          label: { confidentiality: [proposed] },
+        }],
+      }).filter((v) => v.includes("confidentiality violation"));
+
+    it("narrowing a declared personal space to its owner is monotone", () => {
+      // The owner is one of the space's readers, so naming the owner alone
+      // is the tightening direction.
+      expect(confidentialityViolations(personalSpaceAtom, userAtom))
+        .toEqual([]);
+    });
+
+    it("widening a declared owner to their personal space is a violation", () => {
+      // The direction the gate exists to catch: a declared policy naming one
+      // person re-minted as an atom whose audience is the space's readers.
+      expect(confidentialityViolations(userAtom, personalSpaceAtom))
+        .toHaveLength(1);
+    });
+
+    it("re-spelling a declared owner as a space principal is a violation", () => {
+      const spaceAtom = {
+        type: "https://commonfabric.org/cfc/atom/Space",
+        id: OWNER,
+      };
+      expect(confidentialityViolations(userAtom, spaceAtom)).toHaveLength(1);
+      expect(confidentialityViolations(personalSpaceAtom, spaceAtom))
+        .toHaveLength(1);
+    });
+
+    it("a different owner is a violation", () => {
+      const otherUser = {
+        type: "https://commonfabric.org/cfc/atom/User",
+        subject: "did:key:zMonoOther",
+      };
+      expect(confidentialityViolations(personalSpaceAtom, otherUser))
+        .toHaveLength(1);
     });
   });
 

@@ -6561,11 +6561,13 @@ export const prepareBoundaryCommit = (
       // stamp below persists the full join, leaving the egress and display
       // gates the unchanged label.
       //
-      // `Space` is the only form admitted here. `PersonalSpace` and the bare
-      // DID-string spelling gate by equality against one acting reader
-      // (`label-field-classification.ts` classes their subject fields with
-      // `User.subject`), so they name a person rather than the container and
-      // reach a narrower audience than the space's readers.
+      // `Space` is the only form admitted here, for two reasons. The bare
+      // DID-string spelling gates by equality against one acting reader, so
+      // it reaches a narrower audience than the space's readers.
+      // `PersonalSpace(<owner>)` names a space rather than a person (SC-39),
+      // and what keeps it out is that this clause is built from the target's
+      // address alone: nothing in an address names a space's owner or marks
+      // the space as personal, so the atom cannot be constructed here.
       const residencyCeiling: readonly CfcConfClause[] = [cfcAtom.space(space)];
       const declaredPolicyEntries = flowConfidentiality.length > 0
         ? persistedLabelEntries.filter((entry) =>

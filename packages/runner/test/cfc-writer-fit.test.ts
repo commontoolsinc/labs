@@ -63,6 +63,29 @@ const ownSpacePrincipal = {
   id: signer.did(),
 };
 
+// A second person, who is neither this space's DID nor its acting signer.
+const OTHER_PRINCIPAL = "did:key:zOtherPerson";
+
+// The three spellings of one principal (§15.2): the identity atom, the
+// personal-space atom naming its owner, and the legacy bare DID string.
+const userPrincipal = (subject: string) => ({
+  type: "https://commonfabric.org/cfc/atom/User",
+  subject,
+});
+const personalSpacePrincipal = (owner: string) => ({
+  type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+  owner,
+});
+
+// A target schema whose store policy is exactly `confidentiality`.
+const declaring = (
+  ...confidentiality: readonly FabricValue[]
+): JSONSchema => ({
+  type: "object",
+  properties: { copied: { type: "string" } },
+  ifc: { confidentiality: [...confidentiality] },
+} as JSONSchema);
+
 // Seed a source doc whose `secret` field carries `confidentiality`, so a
 // transaction reading it takes those clauses into the per-tx flow join.
 const seedSecretSource = async (
@@ -559,6 +582,145 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       await runtime.dispose();
       await storageManager.close();
     }
+  });
+
+  describe("a personal space's owner is one of its readers", () => {
+    // §8.10.3 fit kernel: a `PersonalSpace(P)` LABEL fits a store declaring
+    // `User(P)`, because §3.6.4 makes P an owner and so a reader of that
+    // space. The reverse does not hold — §3.6.5 gives a member added later
+    // access to all data in the space with no label rewriting, so a store
+    // declaring the atom is not read by P alone.
+
+    it("admits a personal-space clause into a store declaring that owner", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-owner-source", [
+          personalSpacePrincipal(OTHER_PRINCIPAL),
+        ]);
+        const { tx, targetId, result } = await deriveIntoTarget(
+          runtime,
+          "wf-owner-source",
+          "wf-owner-derived",
+          "enforce-strict",
+          declaring(userPrincipal(OTHER_PRINCIPAL)),
+        );
+        expect(result.error?.message).toBeUndefined();
+        expect(writerFitDiagnostics(tx)).toEqual([]);
+
+        // A write admission, not a relabeling: the derived stamp still
+        // carries the atom the flow measured, so the egress and display
+        // gates read the unchanged label.
+        const flowEntry = replicaEntries(storageManager, targetId)
+          .find((e) => e.origin === "derived");
+        expect(flowEntry!.label.confidentiality).toContainEqual(
+          personalSpacePrincipal(OTHER_PRINCIPAL),
+        );
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("admits a clause carrying the personal space as one alternative", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-owner-alt-source", [{
+          anyOf: [personalSpacePrincipal(OTHER_PRINCIPAL), "internal"],
+        }]);
+        const { result } = await deriveIntoTarget(
+          runtime,
+          "wf-owner-alt-source",
+          "wf-owner-alt-derived",
+          "enforce-strict",
+          declaring(userPrincipal(OTHER_PRINCIPAL)),
+        );
+        expect(result.error?.message).toBeUndefined();
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("rejects a User clause into a store declaring that person's personal space", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        // The direction §3.6.5 denies: the store's audience is the space's
+        // readers, which a later membership change widens without touching
+        // any label.
+        await seedSecretSource(runtime, "wf-owner-ceiling-source", [
+          userPrincipal(OTHER_PRINCIPAL),
+        ]);
+        const { result } = await deriveIntoTarget(
+          runtime,
+          "wf-owner-ceiling-source",
+          "wf-owner-ceiling-derived",
+          "enforce-strict",
+          declaring(personalSpacePrincipal(OTHER_PRINCIPAL)),
+        );
+        expect(result.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(result.error?.message).toContain(OTHER_PRINCIPAL);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("rejects a personal space the declared owner does not name", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        // The neighbouring case: the same rule, one DID apart.
+        await seedSecretSource(runtime, "wf-owner-mismatch-source", [
+          personalSpacePrincipal(OTHER_PRINCIPAL),
+        ]);
+        const { result } = await deriveIntoTarget(
+          runtime,
+          "wf-owner-mismatch-source",
+          "wf-owner-mismatch-derived",
+          "enforce-strict",
+          declaring(userPrincipal(signer.did())),
+        );
+        expect(result.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(result.error?.message).toContain(OTHER_PRINCIPAL);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("rejects a User clause naming the acting principal into an undeclared store", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        // No self exemption. The acting principal signs this transaction and
+        // its DID is this space's, so residency contributes `Space(<that
+        // DID>)` — and the store is still public, which is what refuses the
+        // write. A person writing their own secret to a world-readable store
+        // is the disclosure the ceiling exists to catch.
+        await seedSecretSource(runtime, "wf-owner-self-source", [
+          userPrincipal(signer.did()),
+        ]);
+        const { result } = await deriveIntoTarget(
+          runtime,
+          "wf-owner-self-source",
+          "wf-owner-self-derived",
+        );
+        expect(result.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(result.error?.message).toContain(signer.did());
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
   });
 
   describe("meta-seam exemption", () => {
