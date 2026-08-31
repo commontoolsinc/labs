@@ -272,6 +272,7 @@ Deno.test("the CLI entry point runs the task as a process", async () => {
   // Run the task as its own process so the `import.meta.main` entry point is
   // exercised end to end. Lockfile isolation keeps the real deno.lock
   // untouched, and all inputs and outputs live under temporary directories.
+
   const dir = await Deno.makeTempDir({ prefix: "combine-lcov-cli-" });
   try {
     const inputDir = path.join(dir, "in");

@@ -884,6 +884,7 @@ describe("stage A: OFF-arm serialized forms carry no scopeKey", () => {
   // address, reactivity-log address, replica state, or replica document carries
   // a `scopeKey` own-property. Adopted from the review's probe
   // (`zz-review-off-notification-probe`).
+
   let offManager: ReturnType<typeof StorageManager.emulate>;
   let offRuntime: Runtime;
 

@@ -1101,6 +1101,7 @@ Deno.test("pattern coverage records a piece authored without coverage and resume
   // exist. The resume then falls back to cold recovery — a recompile from the
   // stored source closure — which is the only place the instrumentation can
   // come from.
+
   const signer = await Identity.fromPassphrase(
     "cold-recovery pattern coverage",
   );

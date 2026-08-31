@@ -104,6 +104,7 @@ Deno.test("main reports the duplicate and returns 1", async () => {
   // main() reads deno.lock from the root it is given, so a temp tree with a
   // duplicated lockfile drives the reporting path the passing repo never does:
   // the message, the per-copy listing, and the non-zero exit.
+
   const root = await Deno.makeTempDir({ prefix: "check-single-copy-deps-" });
   try {
     const lock = singleCopyLock();

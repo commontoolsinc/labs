@@ -10,6 +10,7 @@ Deno.test("compileMain resolves references and strips withheld globals", async (
   // TypeScript tree: a target that references a second file, and a withheld
   // `declare var` that must not survive into the output while its interface
   // does.
+
   const dir = await Deno.makeTempDir();
   try {
     await Deno.writeTextFile(
