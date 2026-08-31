@@ -82,6 +82,7 @@
     "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",
     "run-recorded": "./tasks/run-recorded.ts",
     "test-records-key": "./tasks/test-records-key.ts",
+    "test-records-compact": "./tasks/test-records-compact.ts",
     "build-binaries": "./tasks/build-binaries.ts",
     "install-hooks": "./scripts/install-git-hooks.sh",
     "install-cf": "./scripts/install-cf.sh",

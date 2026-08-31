@@ -76,10 +76,21 @@ export type { ServiceAccountKey } from "./gcp-auth.ts";
 export {
   createObject,
   gunzipToText,
+  gzipChunks,
   gzipText,
   STORE_WRITE_SCOPE,
 } from "./store.ts";
 export type { CreateObjectOptions, CreateObjectResult } from "./store.ts";
-export { listObjects, parseReportGroups, readObject } from "./store-reader.ts";
-export type { StoredReport, StoredReportGroup } from "./store-reader.ts";
+export {
+  listObjects,
+  listObjectSizes,
+  objectUrl,
+  parseReportGroups,
+  readObject,
+} from "./store-reader.ts";
+export type {
+  ListedObject,
+  StoredReport,
+  StoredReportGroup,
+} from "./store-reader.ts";
 export { recordsSpooledBy } from "./testing.ts";

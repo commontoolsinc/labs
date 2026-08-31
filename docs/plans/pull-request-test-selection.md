@@ -1049,10 +1049,14 @@ nothing downstream of the store has to know this happened.
 
 **Nothing has compacted a day yet.** The `aggregated/` area is empty and
 the compactor principal is not provisioned. Compaction collapses a day of
-raw records into one object, which is the difference between reading
-11,000 objects for a historical day and reading one. The compactor is
-already designed and implemented; provisioning it is a small infra change
-and this plan recommends doing it, but does not depend on it.
+raw records into a manifest and a few tens of shards, which is the
+difference between reading 15,000 objects for a historical day and reading
+a manifest and seventeen shards. A day is a manifest and shards rather than a single object: a
+day of records is over a gigabyte of NDJSON, against a maximum string
+length of about half that, and an object has to fit in a string both to be
+written and to be read. The compactor is implemented and handles days at
+that size; provisioning it is a small infra change and this plan
+recommends doing it, but does not depend on it.
 
 ## Scoring
 
@@ -1903,11 +1907,13 @@ The job:
 4. Reports, in the job summary, the projected per-lane times, the spread
    between them, what fell off the budget, and anything unschedulable.
 
-A cold start cannot read 250,000 objects in one job. The
-bootstrap is a manual dispatch with `--bootstrap --days 60` and high
-concurrency, run once; after that the incremental path keeps up. If the
-compactor is provisioned first, the bootstrap reads 53 rollup objects and
-seven days of raw records instead, which is a much better starting
+A cold start cannot read a window's worth of raw objects in one job; at
+the volume the store now takes, sixty days of them is hundreds of
+thousands. The bootstrap is a manual dispatch with `--bootstrap --days 60`
+and high concurrency, run once; after that the incremental path keeps up.
+If the compactor is provisioned first, the bootstrap reads a manifest and
+its shards for each closed day — some hundreds of objects across the
+window — and seven days of raw records, which is a much better starting
 position, is the reason to do it in that order, and is what makes any
 horizon longer than this one affordable later.
 
@@ -2885,8 +2891,8 @@ account with `objectCreator` on `labs/test-selection/`, a Workload
 Identity provider pinned to `.github/workflows/test-selection.yml` on
 `main`, and a lifecycle rule deleting objects there after 30 days. That is
 the same pattern, and the same security argument, as the relay already
-uses. It also wants the compactor provisioned, which is already designed
-and implemented and only needs its principal. That is an infra-repository
+uses. It also wants the compactor provisioned, which is implemented and only
+needs its principal. That is an infra-repository
 change under `tofu/test-records`, and it must land and be applied before
 anything here can publish. That is a predecessor rather than a reason to
 split this work, and it is the only hard ordering outside this repository.

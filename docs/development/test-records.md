@@ -248,8 +248,10 @@ validating reader; `deno task` scripts built on it:
   families, and the over-sixty-seconds list (`--gate` turns that list into
   the ratchet's exit status).
 - `tasks/test-records-compact.ts` — rewrites each closed day of raw
-  records as one rollup under `aggregated/`; `--plan` shows what it would
-  do without credentials.
+  records as a manifest and a few tens of rollup shards under
+  `aggregated/`, sized so that a shard is a string a reader can hold;
+  `--plan` reads the listing alone and shows what it would do without
+  credentials.
 - `packages/dashboard/test-records-history.ts` — the dashboard's collector:
   cached per-identity daily series shaped for `trend.ts`.
 

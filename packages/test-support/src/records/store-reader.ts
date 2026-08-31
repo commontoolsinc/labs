@@ -15,21 +15,28 @@ import {
 
 const STORAGE = "https://storage.googleapis.com/storage/v1";
 
-/** Lists every object name under a prefix, paginating as needed. */
-export async function listObjects(options: {
-  bucket: string;
-  prefix: string;
-  fetch?: typeof fetch;
-}): Promise<string[]> {
+/** One object in a listing: its name and the bytes the store holds. */
+export interface ListedObject {
+  name: string;
+
+  /** Stored size, which for a gzip-encoded object is the compressed size. */
+  size: number;
+}
+
+/** Every item under a prefix, in name order, paginating as needed. */
+async function listItems(
+  options: { bucket: string; prefix: string; fetch?: typeof fetch },
+  fields: string,
+): Promise<{ name: string; size?: string }[]> {
   const doFetch = options.fetch ?? fetch;
-  const names: string[] = [];
+  const items: { name: string; size?: string }[] = [];
   let pageToken: string | undefined;
   do {
     const url = new URL(
       `${STORAGE}/b/${encodeURIComponent(options.bucket)}/o`,
     );
     url.searchParams.set("prefix", options.prefix);
-    url.searchParams.set("fields", "items(name),nextPageToken");
+    url.searchParams.set("fields", `items(${fields}),nextPageToken`);
     url.searchParams.set("maxResults", "1000");
     if (pageToken !== undefined) url.searchParams.set("pageToken", pageToken);
     const res = await doFetch(url);
@@ -39,15 +46,53 @@ export async function listObjects(options: {
       );
     }
     const page = await res.json() as {
-      items?: { name?: string }[];
+      items?: { name?: string; size?: string }[];
       nextPageToken?: string;
     };
     for (const item of page.items ?? []) {
-      if (typeof item.name === "string") names.push(item.name);
+      if (typeof item.name !== "string") continue;
+      items.push(
+        item.size === undefined
+          ? { name: item.name }
+          : { name: item.name, size: item.size },
+      );
     }
     pageToken = page.nextPageToken;
   } while (pageToken !== undefined);
-  return names.sort();
+  return items.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+}
+
+/** Lists every object name under a prefix. */
+export async function listObjects(options: {
+  bucket: string;
+  prefix: string;
+  fetch?: typeof fetch;
+}): Promise<string[]> {
+  return (await listItems(options, "name")).map((item) => item.name);
+}
+
+/**
+ * Lists every object under a prefix with its stored size. The size lets a
+ * consumer size up a prefix — how much a whole partition would come to,
+ * how to divide it — without fetching anything. A listing that names an
+ * object without sizing it has not answered the question asked, and
+ * standing in a zero would read to such a consumer as an empty object, so
+ * it throws instead.
+ */
+export async function listObjectSizes(options: {
+  bucket: string;
+  prefix: string;
+  fetch?: typeof fetch;
+}): Promise<ListedObject[]> {
+  return (await listItems(options, "name,size")).map((item) => {
+    const size = Number(item.size);
+    if (!Number.isFinite(size)) {
+      throw new Error(
+        `listing ${options.prefix} gave no size for ${item.name}`,
+      );
+    }
+    return { name: item.name, size };
+  });
 }
 
 /** One report inside an object: a context line and the records under it. */
@@ -100,6 +145,13 @@ export function parseReportGroups(text: string): StoredReportGroup[] {
   return groups;
 }
 
+/** The read URL of one object; the whole dataset is readable by anyone. */
+export function objectUrl(bucket: string, objectName: string): string {
+  return `https://storage.googleapis.com/${encodeURIComponent(bucket)}/${
+    objectName.split("/").map(encodeURIComponent).join("/")
+  }`;
+}
+
 /** Fetches and validates one object. */
 export async function readObject(options: {
   bucket: string;
@@ -107,10 +159,7 @@ export async function readObject(options: {
   fetch?: typeof fetch;
 }): Promise<StoredReport> {
   const doFetch = options.fetch ?? fetch;
-  const url = `https://storage.googleapis.com/${
-    encodeURIComponent(options.bucket)
-  }/${options.objectName.split("/").map(encodeURIComponent).join("/")}`;
-  const res = await doFetch(url);
+  const res = await doFetch(objectUrl(options.bucket, options.objectName));
   if (!res.ok) {
     throw new Error(
       `reading ${options.objectName} failed: HTTP ${res.status}`,

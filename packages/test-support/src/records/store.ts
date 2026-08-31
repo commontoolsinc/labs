@@ -6,12 +6,26 @@
  * read, list, overwrite, or delete.
  */
 
-/** Gzips text with the web-standard stream; repo lint forbids node: imports. */
-export async function gzipText(text: string): Promise<Uint8Array> {
-  const stream = new Blob([text]).stream().pipeThrough(
-    new CompressionStream("gzip"),
-  );
+/**
+ * Gzips a sequence of text chunks into one member, with the web-standard
+ * streams; repo lint forbids node: imports. The chunks are pulled one at a
+ * time and compressed as they arrive, so the caller never holds the whole
+ * text: what is held is one chunk plus the compressed result. A source that
+ * reads its chunks from the network can therefore build an object far
+ * larger than V8's maximum string length.
+ */
+export async function gzipChunks(
+  chunks: AsyncIterable<string> | Iterable<string>,
+): Promise<Uint8Array> {
+  const stream = ReadableStream.from(chunks)
+    .pipeThrough(new TextEncoderStream())
+    .pipeThrough(new CompressionStream("gzip"));
   return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+/** Gzips one string; the single-chunk case of `gzipChunks`. */
+export function gzipText(text: string): Promise<Uint8Array> {
+  return gzipChunks([text]);
 }
 
 /** Gunzips bytes back to text; the reader side of `gzipText`. */
