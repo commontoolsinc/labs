@@ -382,6 +382,59 @@ describe("editWithRetry absence reconciliation", () => {
     }
   });
 
+  it("cancels a retry readiness wait when kept-storage disposal begins", async () => {
+    const server = newSharedServer();
+    const sm = EmulatedStorageManager.connectTo(server, { as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+    });
+    const readiness = Promise.withResolvers<void>();
+    const waiting = Promise.withResolvers<void>();
+    let editing: ReturnType<Runtime["editWithRetry"]> | undefined;
+    let disposed = false;
+    try {
+      editing = runtime.editWithRetry((tx) => {
+        tx.commit = (() =>
+          Promise.resolve({
+            error: {
+              name: "ConflictError",
+              message: "synthetic conflict with a stuck catch-up gate",
+              readyToRetry: () => {
+                waiting.resolve();
+                return readiness.promise;
+              },
+            },
+          })) as typeof tx.commit;
+      });
+      await waiting.promise;
+
+      await runtime.dispose({ closeStorage: false });
+      disposed = true;
+
+      const timeout = Symbol("retry readiness timeout");
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const outcome = await Promise.race([
+        editing,
+        new Promise<typeof timeout>((resolve) => {
+          timer = setTimeout(() => resolve(timeout), 250);
+        }),
+      ]);
+      if (timer !== undefined) clearTimeout(timer);
+      expect(outcome).not.toBe(timeout);
+      if (outcome !== timeout) {
+        expect(outcome.error?.name).toBe("StorageTransactionAborted");
+        expect(outcome.error?.message).toContain("runtime is disposing");
+      }
+    } finally {
+      readiness.resolve();
+      await editing?.catch(() => undefined);
+      if (!disposed) await runtime.dispose({ closeStorage: false });
+      await sm.close();
+      await server.close();
+    }
+  });
+
   it("does not resume a reconciled edit after runtime disposal", async () => {
     const server = newSharedServer();
     const sm = EmulatedStorageManager.connectTo(server, { as: signer });

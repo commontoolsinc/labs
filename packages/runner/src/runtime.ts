@@ -865,6 +865,7 @@ function cellAsLink(value: object | ((...args: never[]) => unknown)): unknown {
  */
 export class Runtime {
   #tearingDownWrites = false;
+  readonly #writeTeardown = new AbortController();
 
   readonly id: string;
   readonly scheduler: Scheduler;
@@ -1884,6 +1885,7 @@ export class Runtime {
       // point onward, no delayed reconciliation or retry may mint new work
       // behind the teardown barriers below.
       this.#tearingDownWrites = true;
+      this.#writeTeardown.abort();
       // Abort any pending (not-yet-started) queued jobs so they don't start
       // after storage is torn down.
       for (const queue of this.#queues.values()) {
@@ -1941,6 +1943,7 @@ export class Runtime {
       await this.scheduler.idle();
     } finally {
       this.#tearingDownWrites = true;
+      this.#writeTeardown.abort();
       // Released whatever happened above. `storageManager.close()` can reject
       // — through a provider's `replica.close()` — and it is the one await
       // here that can. Every statement below is synchronous field-clearing
@@ -2515,7 +2518,10 @@ export class Runtime {
       return tx.commit().then(async ({ error }) => {
         if (error) {
           if (maxRetries > 0 && isRetryableCommitRejection(error)) {
-            await this.awaitCommitRetryReadiness(error);
+            await this.awaitCommitRetryReadiness(
+              error,
+              this.#writeTeardown.signal,
+            );
             if (this.#tearingDownWrites) return teardownResult();
             return this.editWithRetry<T>(fn, maxRetries - 1);
           } else {
@@ -2639,16 +2645,40 @@ export class Runtime {
    * Every step is best-effort by design: this resolves rather than throws,
    * because the retry's commit — not this readiness — is what decides.
    */
-  async awaitCommitRetryReadiness(error: unknown): Promise<void> {
+  async awaitCommitRetryReadiness(
+    error: unknown,
+    teardownSignal?: AbortSignal,
+  ): Promise<void> {
+    const waitUnlessTeardown = async (
+      operation: PromiseLike<unknown>,
+    ): Promise<boolean> => {
+      if (teardownSignal === undefined) {
+        await operation;
+        return true;
+      }
+      if (teardownSignal.aborted) return false;
+      const aborted = Promise.withResolvers<boolean>();
+      const onAbort = () => aborted.resolve(false);
+      teardownSignal.addEventListener("abort", onAbort, { once: true });
+      try {
+        return await Promise.race([
+          Promise.resolve(operation).then(() => true),
+          aborted.promise,
+        ]);
+      } finally {
+        teardownSignal.removeEventListener("abort", onAbort);
+      }
+    };
     const readyToRetry = (error as { readyToRetry?: () => unknown })
       ?.readyToRetry;
     if (typeof readyToRetry === "function") {
       try {
-        await readyToRetry();
+        if (!await waitUnlessTeardown(Promise.resolve(readyToRetry()))) return;
       } catch {
         // Readiness aborted — the retry's commit decides.
       }
     }
+    if (teardownSignal?.aborted) return;
     const conflict = (error as {
       conflict?: { space?: MemorySpace; of?: string };
     })?.conflict;
@@ -2658,9 +2688,11 @@ export class Runtime {
       conflict.of !== "of:unknown"
     ) {
       try {
-        await this.storageManager.open(conflict.space).sync(
-          conflict.of as unknown as URI,
-          { path: [], schema: false },
+        await waitUnlessTeardown(
+          this.storageManager.open(conflict.space).sync(
+            conflict.of as unknown as URI,
+            { path: [], schema: false },
+          ),
         );
       } catch {
         // Pull failed — the retry's commit decides.
