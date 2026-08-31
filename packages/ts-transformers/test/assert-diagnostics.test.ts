@@ -481,8 +481,7 @@ export default pattern((state: State) => {
 //
 // The stage sees the AST before type-checking has rejected anything, so it has
 // to survive a callback it cannot read and leave the call alone rather than
-// emit a broken body. Some of these sources are deliberately ill-typed, the stage running
-// before type-checking has rejected them.
+// emit a broken body. Some of these sources are deliberately ill-typed.
 //
 
 Deno.test("assert leaves a callback it was not given inline alone", async () => {

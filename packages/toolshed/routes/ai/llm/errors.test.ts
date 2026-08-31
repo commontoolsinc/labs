@@ -22,6 +22,8 @@ function providerFailure(statusCode: number): APICallError {
 }
 
 //
+// Wrapped and chained causes
+//
 // The routes ask the AI SDK for a single attempt, so these shapes do not
 // reach the classifier from them. They are what the classifier sees if a call
 // site ever asks for retries again, and the status has to survive however it

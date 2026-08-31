@@ -212,8 +212,8 @@ Deno.test("metadataAttributeValue drops values that have no attribute form", () 
 //
 // Metadata into runtime context
 //
-// A request may carry non-string metadata, and every value it can carry has
-// to reach the spans, not just the string ones.
+// A request may carry metadata of any type, or none, and every value it can
+// carry has to reach the spans, not just the string ones.
 //
 
 Deno.test("runtimeContextFromMetadata carries every value that has an attribute form", () => {
