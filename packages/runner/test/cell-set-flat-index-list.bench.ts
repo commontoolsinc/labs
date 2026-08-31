@@ -421,14 +421,19 @@ for (const N of SIZES) {
   });
 }
 
-// 4. UPDATE: three writer profiles for "one item changed", distinguished
-//    because they have wildly different write footprints:
-//      a. REGENERATE from scratch (what a derivation/lift recompute does):
-//         fresh objects carry no doc identity → every element re-minted.
-//      b. READ-MODIFY-WRITE (the idiomatic handler edit): objects returned
-//         by get() carry their doc identity → only the changed element and
-//         the parent write.
-//      c. TARGETED key(i).set: bypasses the array diff entirely.
+//
+// 4. UPDATE: three writer profiles for "one item changed"
+//
+// They are distinguished because they have wildly different write footprints:
+//
+//   a. REGENERATE from scratch (what a derivation/lift recompute does):
+//      fresh objects carry no doc identity → every element re-minted.
+//   b. READ-MODIFY-WRITE (the idiomatic handler edit): objects returned
+//      by get() carry their doc identity → only the changed element and
+//      the parent write.
+//   c. TARGETED key(i).set: bypasses the array diff entirely.
+//
+
 async function updateRegenerate(
   N: number,
   b?: Deno.BenchContext,

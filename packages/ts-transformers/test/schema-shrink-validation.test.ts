@@ -712,7 +712,8 @@ Deno.test("Schema Shrink Validation", async (t) => {
   //
   // Type-arg form against inline form
   //
-  // Type-arg form vs inline form: schemas must be identical
+  // The two spellings of a signature — a type argument, or an annotated
+  // callback parameter — must produce identical schemas.
   //
 
   await t.step(
@@ -2030,7 +2031,8 @@ Deno.test("Schema Shrink Validation", async (t) => {
   // Validating array item reads
   //
   // Reading an item property the element type does not have is an error,
-  // whether or not the array is readonly.
+  // whether or not the array is readonly, and whether the read stands alone
+  // or sits beside a read of the array root.
   //
 
   await t.step(

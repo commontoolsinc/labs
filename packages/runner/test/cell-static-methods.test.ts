@@ -1073,13 +1073,8 @@ describe("Cell Static Methods", () => {
     //
     // Date normalization on `set()`
     //
-    // The `Cell.of(new Date(...))` cases (top-level and nested) are absent.
-    // Unlike `set()`, the `Cell.of` initial-value path doesn't normalize native
-    // values (see the TODO in `createWithDefault` in `cell.ts`), so the raw
-    // `Date` reaches encode and throws under the strict codec. `get()`
-    // *appears* to convert (read-side projection), but the committed form is
-    // still raw. Add `... (Cell.of)` cases once that path normalizes its
-    // initial value the way `set()` does.
+    // A native `Date` written through `set()` normalizes to a
+    // `FabricEpochNsec`, at the top level and nested inside a record.
     //
 
     it("normalizes a top-level Date to FabricEpochNsec (set)", async () => {

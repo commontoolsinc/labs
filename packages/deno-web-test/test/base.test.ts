@@ -83,10 +83,10 @@ Deno.test("a run the kernel killed names the signal", function () {
 });
 
 //
-// What the harness keeps out of a run's streams
+// Filtering a run's streams
 //
-// Download noise before the harness boundary goes; what a test itself wrote
-// stays, control sequences included.
+// Download noise before the harness boundary goes, and what a test itself
+// wrote stays, control sequences included.
 //
 
 Deno.test("dependency downloads before the harness boundary are removed", function () {
