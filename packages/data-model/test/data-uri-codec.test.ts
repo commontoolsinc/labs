@@ -96,29 +96,6 @@ describe("data-uri-codec", () => {
       }
     });
 
-    it("mints the same URI regardless of key insertion order", () => {
-      // The standard encoding canonicalizes key order, so the minted id is a
-      // function of content alone.
-
-      const inOrder = { alpha: 1, beta: [2, 3], gamma: { delta: 4 } };
-      const scrambled = { gamma: { delta: 4 }, beta: [2, 3], alpha: 1 };
-      expect(dataUriFromValue(scrambled)).toBe(dataUriFromValue(inOrder));
-    });
-
-    it("mints the same URI for keys that a UTF-16 sort would order differently", () => {
-      // Canonical order is UTF-8 byte order, which differs from the order a
-      // plain JavaScript string comparison gives whenever a key carries a
-      // surrogate pair.
-
-      const oneWay = { "￿": 1, "\u{10000}": 2 };
-      const other = { "\u{10000}": 2, "￿": 1 };
-      expect(dataUriFromValue(other)).toBe(dataUriFromValue(oneWay));
-      expect(Object.keys(valueFromDataUri(dataUriFromValue(other)))).toEqual([
-        "￿",
-        "\u{10000}",
-      ]);
-    });
-
     it("round-trips an `undefined` value", () => {
       expect(valueFromDataUri(dataUriFromValue(undefined))).toBeUndefined();
     });
@@ -164,6 +141,29 @@ describe("data-uri-codec", () => {
     // property: equal values mint one URI. Every `NaN` payload collapses to
     // the same identifier, and a repeated value mints deterministically.
     //
+
+    it("mints the same URI regardless of key insertion order", () => {
+      // The standard encoding canonicalizes key order, so the minted id is a
+      // function of content alone.
+
+      const inOrder = { alpha: 1, beta: [2, 3], gamma: { delta: 4 } };
+      const scrambled = { gamma: { delta: 4 }, beta: [2, 3], alpha: 1 };
+      expect(dataUriFromValue(scrambled)).toBe(dataUriFromValue(inOrder));
+    });
+
+    it("mints the same URI for keys that a UTF-16 sort would order differently", () => {
+      // Canonical order is UTF-8 byte order, which differs from the order a
+      // plain JavaScript string comparison gives whenever a key carries a
+      // surrogate pair.
+
+      const oneWay = { "￿": 1, "\u{10000}": 2 };
+      const other = { "\u{10000}": 2, "￿": 1 };
+      expect(dataUriFromValue(other)).toBe(dataUriFromValue(oneWay));
+      expect(Object.keys(valueFromDataUri(dataUriFromValue(other)))).toEqual([
+        "￿",
+        "\u{10000}",
+      ]);
+    });
 
     it("mints one URI for every `NaN`, whatever its payload", () => {
       // Arithmetic only ever yields one `NaN` bit pattern, so `NaN` and `0 / 0`
