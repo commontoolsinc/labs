@@ -151,6 +151,7 @@ function assertIncrementalMatches(
 Deno.test("createHighlighter: an edit inside a multi-line template matches a full parse", () => {
   // The template literal spans several lines; an edit on a later line of it
   // re-highlights from the statement boundary and matches a full parse.
+
   const base = "const t = `line one\nline two\nline three`;\nconst x = 1;\n";
   assertIncrementalMatches(base, base.replace("line two", "line TWO"));
 });
@@ -176,6 +177,7 @@ Deno.test("createHighlighter: editing a statement whose line opens inside an ear
   // `const b` statement. Editing `const b` makes safeStartLine walk back from
   // line 1 to line 0 (the line the comment opened on), since line 1's start is
   // inside the still-open comment.
+
   const base = "const a = 1; /* c\nomment tail */ const b = 2;\nconst c = 3;\n";
   assertIncrementalMatches(base, base.replace("const b = 2", "const b = 22"));
 });
@@ -189,6 +191,7 @@ Deno.test("createHighlighter: an edit near a JSDoc comment stays one whole comme
   // Editing the statement *above* widens the rebuild range down across that
   // function, so collectTokensInRange visits and skips the JSDoc nodes rather
   // than tokenising them as code.
+
   const base = [
     "const head = 1;",
     "",
@@ -288,6 +291,7 @@ Deno.test("parse: a synthetic name in property-access position is a cfHelper", (
   // `obj.__cfHandler_1` — the synthetic name is the `.name` of a property
   // access, not a callee and not a builder, so the property-access synthetic
   // branch classifies it as cfHelper.
+
   const doc = parseDocument("const r = registry.__cfHandler_1;\n", "m.ts");
   assert(
     classesOf(doc, "__cfHandler_1").has("cfHelper"),
@@ -297,6 +301,7 @@ Deno.test("parse: a synthetic name in property-access position is a cfHelper", (
 
 Deno.test("parse: a builder reached via property access is a builderCall", () => {
   // `x.pattern(…)` — property-access callee whose name is a builder.
+
   const doc = parseDocument("const z = obj.lift(fn);\n", "m.ts");
   assert(
     classesOf(doc, "lift").has("builderCall"),
@@ -307,6 +312,7 @@ Deno.test("parse: a builder reached via property access is a builderCall", () =>
 Deno.test("parse: a synthetic identifier used as a type name is a cfHelper", () => {
   // `__cfHelpers.JSONSchema` in type position — isTypePosition true and the
   // name is synthetic, so the type-position synthetic branch fires.
+
   const doc = parseDocument(
     "let v: __cfHelpers.JSONSchema = x;\n",
     "m.ts",
@@ -344,6 +350,7 @@ Deno.test("parse: type parameters, typeof queries and heritage clauses are type 
 Deno.test("parse: a generic type parameter declaration name is a typeName", () => {
   // The declared `T` in `gen<T>` has a TypeParameter parent — not a TypeNode —
   // so isTypePosition resolves it through the type-parameter branch.
+
   const doc = parseDocument("function gen<T>(x) { return x; }\n", "m.ts");
   assert(classesOf(doc, "T").has("typeName"), "type parameter declaration");
 });
@@ -354,6 +361,7 @@ Deno.test("parse: a generic type parameter declaration name is a typeName", () =
 
 Deno.test("parse: comments are merged into the structure tree in source order", () => {
   // Several comments at the same nesting level batch and merge via mergeByStart.
+
   const src = [
     "// first note",
     "const a = 1;",
@@ -395,6 +403,7 @@ Deno.test("parse: a named binding registers a definition", () => {
   // registerDefinition is only called when desc.name is set, but the early `if
   // (!desc.name) return` is reached when called for a name. A named binding
   // exercises the body; the guard line itself runs every call.
+
   const doc = parseDocument("const namedThing = 1;\n", "m.ts");
   assert(doc.definitions.has("namedThing"), "named binding is in the index");
   const def = doc.definitions.get("namedThing")![0];
@@ -518,6 +527,7 @@ Deno.test("parse: labeled statements and jump statements are reachable nodes", (
 Deno.test("parse: an unusual statement still becomes a reachable statement node", () => {
   // A `with` statement is not specially handled, so it falls through to the
   // generic in-statement-list branch.
+
   const doc = parseDocument("with (obj) { doThing(); }\n", "m.ts");
   const node = findNode(
     doc,
@@ -583,6 +593,7 @@ Deno.test("parse: a binding whose initializer is a plain object is an object nod
 
 Deno.test("parse: a bare arrow-function expression statement is a closure node", () => {
   // An expression statement whose expression is an arrow function.
+
   const doc = parseDocument("(x) => x + 1;\n", "m.ts");
   const node = findNode(doc, (n) => n.kind === "closure");
   assert(node, `expected a closure node, got ${labels(doc).join(" | ")}`);
@@ -660,6 +671,7 @@ Deno.test("parse: every control-flow shape gets its distinct label", () => {
 Deno.test("parse: a computed-callee call is labeled by its first source line", () => {
   // `(obj["m"])(…)` — the callee is neither a plain identifier nor a property
   // access, so calleeName falls back to nodeFirstLine.
+
   const doc = parseDocument(`const r = (table["run"])(1);\n`, "m.ts");
   const node = findNode(doc, (n) => n.name === "r");
   assert(node, "the binding is a node");
@@ -938,6 +950,7 @@ Deno.test("parse: describeInitializer reports closure for a function initializer
 Deno.test("parse: a non-reactive call binding records describeInitializer text", () => {
   // `const out = compute(x);` is a non-reactive call, so bindingDesc keeps it a
   // variable and variableMeta -> describeInitializer runs over the call.
+
   const doc = parseDocument("const out = compute(x, y);\n", "m.ts");
   const node = findNode(doc, (n) => n.name === "out");
   assert(node, "the binding is a node");

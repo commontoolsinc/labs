@@ -367,6 +367,7 @@ describe("cell-handle", () => {
       // `toSigilLink()` is for a caller that has recognized the handle, and
       // `toJSON()` for the protocol that reaches one without recognizing it.
       // They are two names, not two answers.
+
       const runtime = {
         [$conn]: () => ({
           request: () => Promise.resolve({}),
@@ -733,6 +734,7 @@ describe("cell-handle", () => {
     // `$alias` records are Pattern-binding vocabulary, only meaningful inside
     // Pattern objects the client never interprets. In data they are inert plain
     // values: hydration must not turn them into CellHandles (PR #4895).
+
     const makeRuntime = () =>
       ({
         [$conn]: () => ({
@@ -824,6 +826,7 @@ describe("cell-handle", () => {
     it("does not re-notify on an unchanged NaN value", () => {
       // Value equality is `Object.is`-based: `NaN` equals itself, so a
       // delivery repeating a NaN-bearing value is not a change.
+
       const cell = new CellHandle<number>(makeRuntime(), ref);
       const calls: Array<number | undefined> = [];
       cell.subscribe((value) => {
@@ -853,6 +856,7 @@ describe("cell-handle", () => {
       // Two `FabricBytes` over different bytes are different values, and their
       // state is private -- so a walk over enumerable own properties sees `{}`
       // on both sides and would call them equal.
+
       const cell = new CellHandle<FabricBytes>(makeRuntime(), ref);
       const calls: Array<unknown> = [];
       cell.subscribe((value) => {
@@ -871,6 +875,7 @@ describe("cell-handle", () => {
       // an instance out of a cell is this refusal rather than a lossy arrival.
       // It is `applyValue()`'s, and it runs first, which is why the comparison
       // after it needs no arm of its own.
+
       const cell = new CellHandle<unknown>(makeRuntime(), ref);
       cell.subscribe(() => {});
       const link = new FabricLink(
@@ -886,6 +891,7 @@ describe("cell-handle", () => {
       // A handle holds its state privately, so a walk over enumerable own
       // properties reads `{}` off it -- equal to any other key-less object,
       // `{}` included, which would drop the update and tell no subscriber.
+
       const cell = new CellHandle<{ a: unknown }>(makeRuntime(), ref);
       const calls: Array<unknown> = [];
       cell.subscribe((value) => {
@@ -906,6 +912,7 @@ describe("cell-handle", () => {
     it("notifies on a 0 -> -0 change", () => {
       // `0` and `-0` are distinct stored values (the content hash
       // distinguishes them); the update must not be dropped.
+
       const cell = new CellHandle<number>(makeRuntime(), ref);
       const calls: Array<number | undefined> = [];
       cell.subscribe((value) => {
@@ -2344,6 +2351,7 @@ describe("cell-handle", () => {
       // A leaf: stopping at it is the whole job, and it must be stopped at
       // before the record branch, which would rebuild it from enumerable own
       // properties it does not have and yield `{}`.
+
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
 
       expect(CellHandle.deserialize(makeHandle(), bytes)).toBe(bytes);
@@ -2358,6 +2366,7 @@ describe("cell-handle", () => {
       // A container, reached by its codec contents rather than by property
       // name, so a sigil link can sit inside one where this walk cannot see
       // it. Nothing delivers one today; this is the tripwire.
+
       const link = new FabricLink(
         Object.freeze({ id: "of:fid1:hydration-refusal", path: [] }),
       );
@@ -2404,6 +2413,7 @@ describe("cell-handle", () => {
     it("returns one nested in a record as itself", () => {
       // The branch this has to precede is the record one, so the nested
       // position is the case that pins the ordering rather than the check.
+
       const nsec = new FabricEpochNsec(1n);
 
       const wire = CellHandle.serialize({ a: { b: nsec } }) as {
@@ -2426,6 +2436,7 @@ describe("cell-handle", () => {
       // the worker sent, and its record branch rebuilds from enumerable own
       // properties a fabric class does not have -- so without the same
       // ordering the value the connection just carried whole arrives as `{}`.
+
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
       const handle = new CellHandle(makeRuntime(), makeRef());
 
@@ -2454,6 +2465,7 @@ describe("cell-handle", () => {
       // by property name, so a cell can sit inside one where these walks
       // cannot see it -- passing one through would send a handle unconverted,
       // or hand back a link where a handle belongs. Death before confusion.
+
       const link = new FabricLink(
         Object.freeze({ id: "of:fid1:instance-refusal", path: [] }),
       );
@@ -2471,6 +2483,7 @@ describe("cell-handle", () => {
     it("returns a `bigint` and a `symbol` as themselves", () => {
       // Both are `FabricValue` arms that the connection used to refuse
       // outright, for want of anywhere to put them.
+
       const marker = Symbol.for("a-marker");
 
       expect(CellHandle.serialize(7n)).toBe(7n);
@@ -2484,6 +2497,7 @@ describe("cell-handle", () => {
       // so it survives a connection that carries the class. Pinned to the
       // whole message, situation string included, which is what says the
       // refusal goes through the shared helper every other site uses.
+
       expect(() =>
         CellHandle.serialize(FabricError.fromNativeError(new Error("boom")))
       ).toThrow(
@@ -2501,6 +2515,7 @@ describe("cell-handle", () => {
       // dropped entirely. Carrying a _present_ `undefined` is one of the
       // properties a `FabricValue` has and a `JSONValue` does not, which makes
       // it the half of this fixture most worth actually asserting.
+
       expect(CellHandle.serialize({ a: 1, b: [true, null], c: undefined }))
         .toStrictEqual({ a: 1, b: [true, null], c: undefined });
     });
@@ -2544,6 +2559,7 @@ describe("cell-handle", () => {
       // synchronously out of `request()`, before there is a promise for any
       // `.catch()` to attach to. What each path *carries* is pinned
       // separately, below.
+
       const sends: number[] = [];
       const cell = new CellHandle<unknown>(encodingRuntime(sends), ref);
 
@@ -2567,6 +2583,7 @@ describe("cell-handle", () => {
       // who tightened `#applyLocalAndSend()` to serialize-then-send-then-apply
       // would be changing what a subscriber sees, not just where a throw comes
       // from.
+
       const cell = new CellHandle<unknown>(encodingRuntime(), ref);
       const seen: unknown[] = [];
       cell.subscribe((value) => {
@@ -2589,6 +2606,7 @@ describe("cell-handle", () => {
       // A push is optimistic while its mergeable write is in flight, but a
       // refused or unencodable request restores the authoritative base. The
       // strict form exposes that refusal to its caller.
+
       const cell = new CellHandle<unknown[]>(encodingRuntime(), ref);
       cell[$onCellUpdate]([1]);
       const seen: unknown[] = [];
@@ -2671,6 +2689,7 @@ describe("cell-handle", () => {
       // Not an object, so the `FabricSpecialObject` branch never sees it. It
       // is a `FabricValue` arm all the same, and the encoding carries one as
       // itself rather than as the `1` its text would suggest.
+
       const requests: Array<{ value?: unknown }> = [];
       const cell = new CellHandle<unknown>(runtimeCapturing(requests), ref);
 

@@ -209,6 +209,7 @@ describe("piece schema compatibility", () => {
     // The derived component is replace-on-overwrite, not a ratchet, so this
     // comparison has no opinion either way. A pattern whose writes stop
     // satisfying its own floor fails at the write, where its tests are.
+
     expect(() =>
       assertPatternSchemasBackwardCompatible(
         pattern(flooredList(floorAndMint), { type: "object" }),
@@ -223,6 +224,7 @@ describe("piece schema compatibility", () => {
     // The two sides differ by a mint, which is dropped, so what is left to
     // compare is the claim itself. Comparing two schemas that are equal all
     // the way down would settle before reaching it.
+
     const claimWith = (mint: boolean): JSONSchema => ({
       type: "object",
       properties: {
@@ -247,6 +249,7 @@ describe("piece schema compatibility", () => {
     // Same binding path, same uiContract, and a content hash and file spelling
     // the runtime re-derives rather than holds fixed. That is a recompile of
     // one authorization, so it is accepted.
+
     expect(() =>
       assertPatternSchemasBackwardCompatible(
         pattern(
@@ -265,6 +268,7 @@ describe("piece schema compatibility", () => {
     // `literalDidSubjectsForPrincipalClaim` walks arrays and object values, so
     // an atom nested inside another structure still authorizes the write.
     // Losing it has to read as a change here rather than slip through.
+
     const ownerNode = (withEvidence: boolean): JSONSchema => ({
       type: "object",
       properties: {
@@ -299,6 +303,7 @@ describe("piece schema compatibility", () => {
     // A malformed mint carries no represents-principal atom, so there is
     // nothing for the owner check to match and nothing for this comparison to
     // hold. It reduces the same as a node that mints nothing at all.
+
     const ownerNode = (withMint: boolean): JSONSchema =>
       JSON.parse(
         `{"type":"object","properties":{"bio":{"type":"string","ifc":{` +
@@ -318,6 +323,7 @@ describe("piece schema compatibility", () => {
     // Only `represents-principal` evidence feeds the owner check. An atom
     // beside it is a label nothing consults, so losing it leaves the write
     // authorized exactly as before and is not a contract change.
+
     const ownerNode = (extra: boolean): JSONSchema => ({
       type: "object",
       properties: {
@@ -348,6 +354,7 @@ describe("piece schema compatibility", () => {
     // The reduction leaves nothing behind on one side and finds an already
     // empty extension on the other. Both say the same thing, so they compare
     // equal rather than reading as a change.
+
     expect(() =>
       assertPatternSchemasBackwardCompatible(
         pattern(flooredList({ addIntegrity: ["group-chat-admin"] }), {
@@ -363,6 +370,7 @@ describe("piece schema compatibility", () => {
     // atom the runtime matches against the owner before authorizing a write.
     // Losing it there refuses writes that used to be accepted, so the mint is
     // part of the contract on such a node rather than a derived label.
+
     const ownerNode = (mint: boolean): JSONSchema => ({
       type: "object",
       properties: {
@@ -1502,6 +1510,7 @@ describe("piece schema compatibility", () => {
   it("treats `FabricPrimitive` types as subtypes of object (one-way)", () => {
     // A "FabricBytes" source widens safely into an "object" target; the
     // reverse narrows and must be flagged. Same-type stays compatible.
+
     expect(() =>
       assertSchemaSubset({ type: "FabricBytes" }, { type: "object" })
     ).not.toThrow();
@@ -2488,6 +2497,7 @@ describe("piece schema compatibility", () => {
     // update rewrites stored data verbatim -- so any such value would
     // survive the update only to be rejected by every subsequent read.
     // See the note in `schemaSubsetIssue`.
+
     const brand = "@commonfabric/FabricSpecialObject";
     const oldBytes: JSONSchema = {
       type: "object",
@@ -2517,6 +2527,7 @@ describe("piece schema compatibility", () => {
       // subtypes of "object", members are present via `in`, and the brand
       // is exempt for instances). Nothing is stranded, so no allowance is
       // involved -- this holds through the ordinary subset machinery.
+
       expect(() =>
         assertPatternSchemasBackwardCompatible(
           pattern(true, withField(oldBytes)),
@@ -2570,6 +2581,7 @@ describe("verb event closed-world transitions", () => {
   // so open→closed surfaces silent loss as rule 1's typed rejection
   // (accepted-and-STRIPPED was never contract, decided 2026-08-03), and
   // closed→open must stay free for `never`-derived closure cleanup.
+
   const verbPattern = (event: JSONSchema, viaRef = true): Pattern => {
     const argument: JSONSchema = viaRef
       ? {
@@ -2718,6 +2730,7 @@ describe("listing marks are annotation-class", () => {
   // updates. Classified before the generator emits them — the checker
   // equality-compares unknown keywords, so an unclassified mark would be
   // refused in both directions: the C3 append-only lesson.
+
   const verbArgument = (marks: Record<string, unknown>): Pattern =>
     pattern(
       {
@@ -2750,6 +2763,7 @@ describe("listing marks are annotation-class", () => {
   it("still refuses a genuinely unknown keyword (control)", () => {
     // The pin proves classification, not a checker that stopped looking:
     // an unclassified key on the same node is refused exactly as before.
+
     expect(() =>
       assertPatternSchemasBackwardCompatible(
         unmarked,

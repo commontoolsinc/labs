@@ -1463,6 +1463,7 @@ describe("opening a space root", () => {
   it("rolls the home root forward when its source moves", async () => {
     // A home space (session space == the identity DID) follows its origin like
     // any other piece. Same in-place semantics: no new piece minted.
+
     await setupHome();
     const piece = await controller.ensureDefaultPattern();
     const rootLinkBefore = JSON.stringify(piece.getCell().getAsLink());
@@ -1576,6 +1577,7 @@ describe("opening a space root", () => {
     // { "$stream": true } markers for handler nodes the old program never
     // had. A handler-less roll target (every other test here) cannot see
     // this; home.tsx is handler-rich.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -1619,6 +1621,7 @@ describe("opening a space root", () => {
     // TODO(hixie): migrate the root's data onto the candidate instead. As it
     // stands the root silently stops following its own origin, and nobody is
     // told.
+
     const SOURCE_INCOMPATIBLE = [
       "import { pattern } from 'commonfabric';",
       "export default pattern<{ mustHave: string }>(({ mustHave }) => ({",
@@ -1650,6 +1653,7 @@ describe("opening a space root", () => {
     // cold-starts the piece — and Runner.startCore's initial instantiation
     // does not run the setup phase, so the incoming pattern's
     // { "$stream": true } markers were never materialized on the reused doc.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -1697,6 +1701,7 @@ describe("opening a space root", () => {
     // entries or stream markers for that pattern. On the next boot the
     // identity compares current, so no further swap fires — the doc must be
     // healed at cold start itself.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -1744,6 +1749,7 @@ describe("opening a space root", () => {
     // orchestration test. The runnability backstop must roll the root forward
     // to the current official identity and materialize it, including a live
     // handler stream.
+
     await setupHome();
     expect(runtime.cfcEnforcementMode).not.toBe("disabled");
 
@@ -2004,6 +2010,7 @@ describe("opening a space root", () => {
     // reflect ordering/policy/provenance faults, not "the pinned pattern is
     // wrong", so the backstop must NOT repoint the root. The bare-prefix
     // predicate this replaces would have wrongly rolled forward here.
+
     const { root, oldRef, officialId } = await pinOldRequiredHome();
     const restore = patchRunSynced((opts) =>
       opts?.expectedPatternIdentity?.identity === oldRef.identity
@@ -2041,6 +2048,7 @@ describe("opening a space root", () => {
     // named `/cfc-schema-migration-incompatible` — a bare `includes(token)`
     // would misclassify it as recoverable and repoint the root. It must stay
     // fail-closed.
+
     const { root, oldRef, officialId } = await pinOldRequiredHome();
     const restore = patchRunSynced((opts) =>
       opts?.expectedPatternIdentity?.identity === oldRef.identity
@@ -2081,6 +2089,7 @@ describe("opening a space root", () => {
     // root to a THIRD (loadable) identity, then reject with the migration
     // signal so the roll-forward proceeds to the swap — where the precondition
     // must see the changed identity and abort.
+
     const { root, oldRef, officialId } = await pinOldRequiredHome();
 
     // A distinct, loadable identity for the "concurrent heal" to install.
@@ -2157,6 +2166,7 @@ describe("opening a space root", () => {
     // migrate the reused doc, the operator gets ONE error that names WHY —
     // the pinned pattern's migration failure and the official's — instead of
     // reverse-engineering scattered logs.
+
     const { oldRef, officialId } = await pinOldRequiredHome();
     const restore = patchRunSynced((opts) =>
       // Reject BOTH the same-identity repair AND the official materialize.
@@ -2246,6 +2256,7 @@ describe("opening a space root", () => {
     // migration; the heal MUST NOT short-circuit on the shared identity — it
     // must roll forward to the official `default` entry. A gate that compared
     // identity alone treated this as already-official and left it unhealable.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -2321,6 +2332,7 @@ describe("opening a space root", () => {
     // The roll-forward's compile of the official source is a failure surface
     // too: if the toolshed serves un-compilable source, the operator gets one
     // clear "could not be compiled" error, not a raw compiler stack.
+
     const { oldRef } = await pinOldRequiredHome();
     stub.setSource("this is not valid typescript @@@ export default");
     const restore = patchRunSynced((opts) =>
@@ -2344,6 +2356,7 @@ describe("opening a space root", () => {
   it("surfaces a clear error when the official pattern yields no entry identity", async () => {
     // Defensive branch: compile succeeds but the artifact has no entry ref.
     // The heal must not proceed with an undefined identity — clear error.
+
     const { oldRef } = await pinOldRequiredHome();
     const pm = runtime.patternManager as unknown as {
       getArtifactEntryRef: (p: unknown) => unknown;
@@ -2373,6 +2386,7 @@ describe("opening a space root", () => {
     // Defensive branch: the swap transaction itself fails to commit (a storage
     // fault, not the precondition abort). The underlying error is chained and
     // the pinned identity is left untouched.
+
     const { oldRef } = await pinOldRequiredHome();
     const realEdit = runtime.editWithRetry.bind(runtime);
     (runtime as unknown as {
@@ -2417,6 +2431,7 @@ describe("opening a space root", () => {
     // just passes, since the stored argument satisfies both schemas. A
     // commit-layer failure is what reliably exercises the fail-closed path
     // without also asserting the argument contract.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -2482,6 +2497,7 @@ describe("opening a space root", () => {
     // Cold start of a doc in the already-swapped state whose (current)
     // identity cannot be loaded: the repair's own load sees the same
     // outcome, and each guard must surface the ORIGINAL start error.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -2541,6 +2557,7 @@ describe("opening a space root", () => {
     // A root whose patternIdentity meta is present but malformed: start
     // fails, and the repair cannot even name a pattern to load — the
     // ref-undefined guard must surface the original start failure.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -2570,6 +2587,7 @@ describe("opening a space root", () => {
     // that cannot load is a dead space regardless of kind. The displaced
     // ref is recorded for non-home too — it is the recovery pointer if
     // the replaced root was a custom program.
+
     await setup();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -2614,6 +2632,7 @@ describe("opening a space root", () => {
     // A thrown probe is a failed CHECK, not evidence of a dead root — a
     // transient storage/backend failure must not authorize replacing an
     // ambiguous sourceless root. Fail closed, mutate nothing.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -2649,6 +2668,7 @@ describe("opening a space root", () => {
     // unsupported" rather than "artifact dead" and authorizes nothing. The
     // root that cannot start therefore surfaces its failure rather than being
     // replaced.
+
     await setupHome({ cfcEnforcementMode: "disabled" });
     await controller.recreateDefaultPattern({
       customProgram: {

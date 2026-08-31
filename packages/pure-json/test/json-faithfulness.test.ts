@@ -28,6 +28,7 @@ describe("json-faithfulness", () => {
     it("returns an empty list for JSON-faithful shapes", () => {
       // The whitelist: null, booleans, strings, finite numbers other than -0,
       // dense arrays of accepted values, plain objects of accepted values.
+
       const schema = {
         type: "object",
         properties: {
@@ -67,6 +68,7 @@ describe("json-faithfulness", () => {
     it("reports a `bigint`", () => {
       // JSON.stringify throws on a bigint; caught here so the failure names the
       // value rather than surfacing as an opaque serialization error.
+
       const found = findJsonUnfaithfulValues({ default: 42n });
       expect(found).toEqual([{
         pointer: "/default",
@@ -77,6 +79,7 @@ describe("json-faithfulness", () => {
     it("reports `undefined` -- dropped, not a bad number", () => {
       // A blacklist of bad numbers would miss this: `{ default: undefined }`
       // serializes to `{}`, silently losing the default.
+
       const found = findJsonUnfaithfulValues({ default: undefined });
       expect(found).toHaveLength(1);
       expect(found[0]!.pointer).toBe("/default");
@@ -90,6 +93,7 @@ describe("json-faithfulness", () => {
 
     it("reports a sparse array hole (becomes `null`)", () => {
       // A hole is exactly what is under test.
+
       // deno-lint-ignore no-sparse-arrays
       const holed = [1, , 3];
       const found = findJsonUnfaithfulValues({ default: holed });
@@ -112,6 +116,7 @@ describe("json-faithfulness", () => {
     it("reports a non-index property on an array", () => {
       // `JSON.stringify` serializes an array's indices only; an extra own
       // property is dropped. The indices themselves stay faithful.
+
       const withExtra = Object.assign([1, 2], { foo: 3 });
       const found = findJsonUnfaithfulValues({ default: withExtra });
       expect(found).toHaveLength(1);
@@ -122,6 +127,7 @@ describe("json-faithfulness", () => {
     it("reports a _non-enumerable_ non-index property on an array", () => {
       // `JSON.stringify` drops it just the same, so an enumerable-only walk
       // would certify a value that JSON demonstrably mangles.
+
       const withHidden: unknown[] = [1, 2];
       Object.defineProperty(withHidden, "foo", { value: 3, enumerable: false });
 
@@ -135,6 +141,7 @@ describe("json-faithfulness", () => {
     it("does not report an array's own `length` as a dropped property", () => {
       // `length` is a non-index own name on every array, so walking own
       // property names rather than enumerable keys must not start flagging it.
+
       expect(findJsonUnfaithfulValues({ default: [1, 2, 3] })).toHaveLength(0);
     });
 
@@ -142,6 +149,7 @@ describe("json-faithfulness", () => {
       // Such an index is a real element -- `JSON.stringify` emits it -- so
       // it is not an offender even though it is invisible to an
       // enumerable-only walk.
+
       const arr: unknown[] = [1, 2, 3];
       Object.defineProperty(arr, "0", { value: 9, enumerable: false });
 
@@ -152,6 +160,7 @@ describe("json-faithfulness", () => {
     it("reports a `toJSON()` hook, even non-enumerable", () => {
       // `toJSON` replaces the value before JSON sees its contents, so the walk
       // cannot certify what would be sent.
+
       expect(findJsonUnfaithfulValues({ a: 1, toJSON: () => 5 })).toHaveLength(
         1,
       );
@@ -170,6 +179,7 @@ describe("json-faithfulness", () => {
     it("reports a non-plain object (a class instance)", () => {
       // A class instance keeps its data in private fields, so `JSON.stringify`
       // finds nothing to emit. Any class instance is rejected.
+
       class Holder {
         #data = 5;
         get() {
@@ -184,6 +194,7 @@ describe("json-faithfulness", () => {
     it("reports a cycle, but not a shared reference", () => {
       // A shared subtree at sibling positions is fine -- JSON.stringify
       // duplicates it. Only an actual cycle throws, so only that is reported.
+
       const shared = { k: 1 };
       expect(findJsonUnfaithfulValues({ a: shared, b: shared })).toEqual([]);
 
@@ -207,6 +218,7 @@ describe("json-faithfulness", () => {
     it("escapes `~` and `/` in pointer tokens", () => {
       // RFC 6901: `~` -> `~0`, `/` -> `~1`. A property named `a/b` must not
       // read as two path steps.
+
       const found = findJsonUnfaithfulValues({ "a/b~c": NaN });
       expect(found[0]!.pointer).toBe("/a~1b~0c");
     });

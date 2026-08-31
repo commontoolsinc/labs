@@ -191,6 +191,7 @@ describe("runtime-processor", () => {
       // createSession({ spaceName }) derives a home-space DID distinct from the
       // acting principal; the session-authorized workspace is a verified member,
       // so its own Space(...) label resolves rather than over-blocking.
+
       const { runtime, storageManager } = createRuntime();
       const sessionSpace = "did:key:z6MkSessionWorkspaceDistinct";
       try {
@@ -234,6 +235,7 @@ describe("runtime-processor", () => {
       // §4.9.3 membership lookup: the helper wires a runtime-backed provider that
       // reads each space's ACL doc. A space whose declared ACL grants the acting
       // user READ resolves; one that does not (no ACL / residency only) blocks.
+
       const { runtime, storageManager } = createRuntime();
       const grantedSpace = "did:key:z6MkGrantedSpaceForRenderTest";
       const deniedSpace = "did:key:z6MkDeniedSpaceForRenderTest";
@@ -630,6 +632,7 @@ describe("runtime-processor", () => {
       // `typeof` is not what says which: it renders an array and `null` alike,
       // as `object`, and those are two of the three kinds that get here. The
       // message exists to explain the refusal, so it names the value.
+
       const space = "did:key:z6Mk-runtime-processor-create" as const;
       const processor = { getSpaceCtx: () => ({}) };
       const refusalFor = async (argument: unknown) => {
@@ -664,6 +667,7 @@ describe("runtime-processor", () => {
       // carries a `FabricBytes` whole, so one reaches this guard as itself
       // rather than as the `{}` a shape-blind copy would leave -- and a piece's
       // entire input is not one value, whatever that value is.
+
       const space = "did:key:z6Mk-runtime-processor-create" as const;
       const processor = { getSpaceCtx: () => ({}) };
 
@@ -698,6 +702,7 @@ describe("runtime-processor", () => {
     it("admits a record that holds a fabric class instance", async () => {
       // The other side of the same line, and the case that has to keep
       // working: the guard asks what the argument *is*, not what it holds.
+
       const space = "did:key:z6Mk-runtime-processor-create" as const;
       const created: unknown[] = [];
       const processor = {
@@ -965,6 +970,7 @@ describe("runtime-processor", () => {
       // the bare routing form; the pageId intake must resolve both to the SAME
       // entity. Without normalization, "of:fid1:H" parses as a hash whose tag
       // is "of:fid1" and silently addresses the nonexistent of:of:fid1:H.
+
       const received: string[] = [];
       const processor = {
         getSpaceCtx: homeSpaceCtx,
@@ -1348,6 +1354,7 @@ describe("runtime-processor", () => {
         // wrong. Each value here is one raw structured clone refuses outright,
         // or one it accepts only by stripping it to something that misdescribes
         // it.
+
         const cyclic: Record<string, unknown> = { n: 1 };
         cyclic.self = cyclic;
         const values: unknown[] = [
@@ -1374,6 +1381,7 @@ describe("runtime-processor", () => {
         // The whole point of encoding rather than naming: the receiver hands
         // these to `console.log()`, and a devtools inspector shows more of a
         // live value than of a name for one.
+
         const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
         const arrived = acrossTheWire({ payload: bytes }) as Record<
           string,
@@ -1424,6 +1432,7 @@ describe("runtime-processor", () => {
       it("returns a query result as its ref together with its data", async () => {
         // Both halves matter: the ref says what the proxy stands for, and the
         // data is what a reader logged it to see.
+
         const { cell, done } = await withCell();
         try {
           const result = toConsoleDebugValue(cell.get()) as Record<
@@ -1441,6 +1450,7 @@ describe("runtime-processor", () => {
       it("returns a query result that holds itself as a cycle", async () => {
         // A query result is a fresh proxy per read, so the rendering has to be
         // stable across the reads for the cycle to be seen as one at all.
+
         const { cell, done } = await withCell();
         try {
           const result = toConsoleDebugValue(cell.get()) as Record<
@@ -1457,6 +1467,7 @@ describe("runtime-processor", () => {
         // The ref and the readable keys all survive one key that does not: a
         // debug dump of a value that is misbehaving is exactly the dump that
         // must still arrive.
+
         const { cell, done } = await withCell();
         try {
           const hostile = new Proxy(cell.get() as Record<string, unknown>, {
@@ -1481,6 +1492,7 @@ describe("runtime-processor", () => {
         // The rendering a proxy is held under is the finished one, so a proxy
         // that fails before its keys can be read reports that failure wherever
         // it appears rather than a half-built record at its later positions.
+
         const { cell, done } = await withCell();
         try {
           const keysThrow = new Proxy(cell.get() as Record<string, unknown>, {
@@ -1549,6 +1561,7 @@ describe("runtime-processor", () => {
       it("returns a `FabricInstance` as its codec's encoding", () => {
         // The conversion descends an instance rather than carrying it, since
         // its contents are not reachable by property name.
+
         const result = toConsoleDebugValue(
           FabricError.fromNativeError(new Error("boom")),
         ) as Record<string, Record<string, unknown>>;
@@ -1569,6 +1582,7 @@ describe("runtime-processor", () => {
         // encode refuses. Producing one takes deliberate effort, so it is not
         // worth a second walk of every console argument to find early; it is
         // left to fail where the encoding is actually done.
+
         const forged = Object.create(FabricBytes.prototype);
         expect(isValidFabricValue(toConsoleDebugValue(forged))).toBe(true);
         expect(() => realmFromFabricValue(toConsoleDebugValue(forged)))
@@ -1578,6 +1592,7 @@ describe("runtime-processor", () => {
       it("returns a unique symbol as its marker", () => {
         // Unlike an interned one, this has no encoding: the description is all
         // that can be said about it on the far side.
+
         expect(toConsoleDebugValue(Symbol("x")))
           .toEqual({ "/uniqueSymbol": "x" });
       });
@@ -1588,6 +1603,7 @@ describe("runtime-processor", () => {
         // Shared, not circular: neither position is inside the other. Reporting
         // the second as a cycle would misdescribe the data the dump exists to
         // show.
+
         const shared = { n: 1 };
         expect(toConsoleDebugValue({ x: shared, y: shared }))
           .toEqual({ x: { n: 1 }, y: { n: 1 } });
@@ -1689,6 +1705,7 @@ describe("runtime-processor", () => {
         // The limit sits above what the old walk reached, because the rendering
         // spends levels of its own on an instance's tag and a query result's
         // ref. Plain data is legible past where it used to stop.
+
         const deep = { l1: { l2: { l3: { l4: { l5: { l6: "leaf" } } } } } };
         expect(toConsoleDebugValue(deep)).toEqual(deep);
       });
@@ -2035,6 +2052,7 @@ describe("runtime-processor", () => {
       // and never starts the pattern directly. A metadata shortcut in front of
       // the controller would skip that repair, and with the flag unset (every
       // default deployment) nothing else heals an aged home root.
+
       const defaultPatternRef: CellRef = {
         id: "of:default-pattern-result" as CellRef["id"],
         space: "did:key:test-home" as CellRef["space"],
@@ -4010,6 +4028,7 @@ describe("runtime-processor", () => {
       // own properties, so the record branch would rebuild one as `{}`. A
       // primitive is atomic and holds no link, so passing it through is the
       // whole answer.
+
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
 
       expect(mapCellRefsToSigilLinks(bytes)).toBe(bytes);
@@ -4026,6 +4045,7 @@ describe("runtime-processor", () => {
       // A tripwire, not a limitation to route around: an instance's codec
       // contents can hold a link that this walk cannot reach, so refusing beats
       // the `{}` the record branch would otherwise produce.
+
       const error = FabricError.fromNativeError(new Error("boom"));
       const message =
         "Cannot yet handle `FabricError` (a `FabricInstance`) when mapping " +
@@ -4041,6 +4061,7 @@ describe("runtime-processor", () => {
   describe("RuntimeProcessor.getLoggerCounts", () => {
     // The handler reads process-global logger state, so each case raises its own
     // flag and clears it again rather than leaving one for the next.
+
     function withFlag(
       metadata: Record<string, unknown>,
       body: () => void,
@@ -4056,6 +4077,7 @@ describe("runtime-processor", () => {
 
     it("carries a raised flag's metadata through to the response", () => {
       // No `this` is read, so the handler runs against a bare receiver.
+
       const processor = {} as unknown as RuntimeProcessor;
 
       withFlag({ a: 1 }, () => {
@@ -4079,6 +4101,7 @@ describe("runtime-processor", () => {
     it("refuses to answer at all when a flag holds unsendable metadata", () => {
       // The assertion is wired into the handler, not merely available beside it:
       // a `Date` raised anywhere in the process stops this read.
+
       const processor = {} as unknown as RuntimeProcessor;
 
       withFlag({ when: new Date(0) }, () => {
@@ -4096,6 +4119,7 @@ describe("runtime-processor", () => {
     it("accepts metadata that vets, and a flag raised without any", () => {
       // A `Logger` takes `Record<string, unknown>` and constrains it no further,
       // so what it holds is established here or not at all.
+
       const flags = {
         runner: {
           "action invalid input": {
@@ -4115,6 +4139,7 @@ describe("runtime-processor", () => {
       // `FabricValue`s being one itself -- so a flag named one of them cannot
       // cross, and saying so is the point rather than a limitation to route
       // around.
+
       const flags = { runner: { constructor: { "id:1": { a: 1 } } } };
 
       expect(() => assertFabricLoggerFlags(flags)).toThrow(
@@ -4125,6 +4150,7 @@ describe("runtime-processor", () => {
     it("throws, rendering what it refused", () => {
       // A `Date` clones perfectly well and is not a `FabricValue`, so it is the
       // shape that would otherwise cross as something the far side cannot read.
+
       const flags = {
         runner: {
           "action invalid input": { "action:bad": { when: new Date(0) } },
@@ -4144,6 +4170,7 @@ describe("runtime-processor", () => {
       // The disposition itself, asserted: dropping the metadata would leave the
       // payload reporting a flag whose contents had silently gone, which is the
       // loss "Death before confusion!" rules out.
+
       const flags = {
         runner: { sample: { "id:1": { fn: () => 0 } } },
       };
@@ -4880,6 +4907,7 @@ describe("runtime-processor", () => {
         // commit durability — rather than runtime.idle() (reactive quiescence
         // only). A fake exposing ONLY idleWithPendingCommits pins the wiring: a
         // regression to runtime.idle() throws here.
+
         const handleIdle = (RuntimeProcessor.prototype as any).handleIdle;
         let calls = 0;
         const fake = {
@@ -5257,6 +5285,7 @@ describe("runtime-processor", () => {
     // Base the fake on the real prototype so handleNotification's delegation to
     // handleVDomEvent / handleVDomBatchApplied resolves, while vdomMounts is a
     // stub that records what the reconciler is asked to do.
+
     function fakeProcessor() {
       const events: Array<{ handlerId: number; event: unknown }> = [];
       const acks: number[] = [];
@@ -5320,6 +5349,7 @@ describe("runtime-processor", () => {
     // `getPatternSources` reads two things: which patterns the graph is running,
     // and each one's program. Everything else on the runtime is beside the point
     // here, so the processor is those two answers and nothing more.
+
     const processorOver = (
       programs: Record<string, unknown>,
     ): RuntimeProcessor =>
