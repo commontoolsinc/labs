@@ -660,6 +660,13 @@ Deno.test("memory v2 increment rejects the root path", () => {
   assert(threw, "increment at the root must throw");
 });
 
+//
+// Paths through array indices
+//
+// What an index path does when it resolves, and what it does when the index
+// names nothing.
+//
+
 Deno.test("memory v2 increment updates a numeric array element by index", () => {
   // Both `increment` and `remove-by-value` read the current value by walking
   // the path through array indices as well as object keys. Incrementing a
