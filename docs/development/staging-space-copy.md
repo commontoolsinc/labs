@@ -107,9 +107,16 @@ directory mode the file is:
 
 The doubling is real and every existing store depends on it. Single-file mode
 (`DB_PATH`) composes the same two functions to a different shape: one directory
-beside the database file rather than a nested pair, carrying the doubling in its
-name instead (`<stem>..engine-v3/`), and holding filenames that keep their
+beside the database file rather than a nested pair, and the doubling lands in
+that directory's name. `DB_PATH=/data/cf.sqlite` puts the per-space files in
+`/data/cf..engine-v3/` — two dots — holding filenames that keep their
 percent-encoding rather than reading as literal DIDs.
+
+Reading either function on its own gives a different answer than the server
+gets. The server is constructed with the root the first one returns
+(`packages/toolshed/routes/storage/memory.ts` passes it as `store`), so the
+second composes on `<stem>.engine-v3/` rather than on `DB_PATH`, which is where
+the second dot comes from. Check the composition, not the parts.
 
 Do not compose either path from memory. **List the store directory on the host
 and put your file beside the space files already there** — the neighbors are
@@ -129,11 +136,15 @@ catches is one you do not debug on a shared host.
 sqlite3 <store>/engine-v3/engine-v3/<did>.sqlite "VACUUM INTO '/tmp/<did>.sqlite'"
 sha256sum /tmp/<did>.sqlite
 ```
-Two notes: 
-- \<store\> is currently /data/memory on estuary.
-- estuary does not have enough free space in /tmp (as of 2026/08/31) to host
-  new snapshots, so put them into the same /data/memory directory for now and
-  clean them up as you go.
+
+Two notes, both specific to estuary:
+
+- `<store>` is currently `/data/memory` there.
+- `/tmp` does not have room for a new snapshot (as of 2026-08-31), so put them
+  into that same `/data/memory` directory for now and clean them up as you go.
+  Substitute that path for `/tmp` everywhere above — the `VACUUM INTO` target,
+  the checksum, and the source of the copy down. The `/tmp` in step 3 is your
+  own machine's and stays as it is.
 
 **2. Rehearse it locally first**, following
 [`space-clone-rehearsal.md`](space-clone-rehearsal.md): clone, serve, run
