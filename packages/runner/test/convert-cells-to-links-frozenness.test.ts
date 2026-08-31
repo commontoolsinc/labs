@@ -4,10 +4,11 @@
  * handed rather than one it controls, and this file pins what it may and may
  * not change about the answer: nothing about which values are refused, nothing
  * about what a converted value holds, and nothing about the input itself. What
- * comes back is a fresh container, mutable, whichever way the input went in.
+ * comes back is a fresh container, deeply frozen, whichever way the input went
+ * in.
  */
 
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
@@ -15,8 +16,15 @@ import {
   FabricBytes,
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { type CellLinkInput, convertCellsToLinks } from "../src/cell.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 /** The subject: a record with a nested array and a nested record. */
 type Subject = {
@@ -55,6 +63,25 @@ function reachableObjects(
 }
 
 describe("convert-cells-to-links-frozenness", () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime.dispose();
+    await storageManager.close();
+  });
+
   it("returns the same value for a frozen input as for an unfrozen one", () => {
     const unfrozen = convertCellsToLinks(makeSubject());
     const frozen = convertCellsToLinks(deepFreeze(makeSubject()));
@@ -62,20 +89,51 @@ describe("convert-cells-to-links-frozenness", () => {
     expect(frozen).toEqual(unfrozen);
   });
 
-  it("returns a container the caller may still write into, given a frozen input", () => {
+  it("returns a deeply frozen container, given a frozen input", () => {
     const result = convertCellsToLinks(deepFreeze(makeSubject())) as Subject;
 
-    expect(Object.isFrozen(result)).toBe(false);
-    expect(Object.isFrozen(result.list)).toBe(false);
-    expect(Object.isFrozen(result.inner)).toBe(false);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.list)).toBe(true);
+    expect(Object.isFrozen(result.inner)).toBe(true);
   });
 
-  it("returns a container the caller may still write into, given an unfrozen input", () => {
+  it("returns a deeply frozen container, given an unfrozen input", () => {
     const result = convertCellsToLinks(makeSubject()) as Subject;
 
-    expect(Object.isFrozen(result)).toBe(false);
-    expect(Object.isFrozen(result.list)).toBe(false);
-    expect(Object.isFrozen(result.inner)).toBe(false);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.list)).toBe(true);
+    expect(Object.isFrozen(result.inner)).toBe(true);
+  });
+
+  it("returns a frozen link where a cell sat", () => {
+    // The link a cell becomes is minted by the walk rather than rebuilt by it,
+    // so it takes its freeze in `linkToCell()` and not from either container
+    // arm. Its payload is nested, which is why the check reaches past the
+    // outer object.
+    const cell = runtime.getCell(space, "frozen-link", undefined, tx);
+    cell.set({ n: 1 });
+
+    const result = convertCellsToLinks({ ref: cell }) as { ref: object };
+    const payload = Object.values(Object.values(result.ref)[0] as object)[0];
+
+    expect(Object.isFrozen(result.ref)).toBe(true);
+    expect(Object.isFrozen(payload)).toBe(true);
+    expect(Object.isFrozen((payload as { path: unknown[] }).path)).toBe(true);
+  });
+
+  it("returns a frozen back-link where a cycle was", () => {
+    // A cycle's back-link is the walk's other minted value, and it carries a
+    // `path` array of its own.
+    const cyclic: Record<string, unknown> = { inner: {} };
+    (cyclic.inner as Record<string, unknown>).back = cyclic;
+
+    const result = convertCellsToLinks(cyclic) as { inner: { back: object } };
+    const back = result.inner.back;
+    const payload = Object.values(Object.values(back)[0] as object)[0];
+
+    expect(Object.isFrozen(back)).toBe(true);
+    expect(Object.isFrozen(payload)).toBe(true);
+    expect(Object.isFrozen((payload as { path: unknown[] }).path)).toBe(true);
   });
 
   it("returns containers that are none of the input's, given an unfrozen input", () => {
