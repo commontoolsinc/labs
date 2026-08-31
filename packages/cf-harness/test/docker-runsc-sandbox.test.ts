@@ -877,6 +877,54 @@ Deno.test("DockerRunscSandboxRuntime refuses an enforcing invocation whose input
   );
 });
 
+Deno.test("DockerRunscSandboxRuntime refuses shell-unsafe runtime arguments before starting the container", async () => {
+  // Moby's runtime wrapper strips the backslash before runsc parses the two
+  // occurrences, so runsc receives an empty final value even though the raw
+  // runtime argument list appears to register `/expected`.
+  const cfcInvocationContextDir = await Deno.makeTempDir();
+  try {
+    const cfcInvocationContext = await enforcingInvocationContext();
+    const [create, start, wait, remove] = dockerLifecycleResults();
+    const runner = new FakeProcessRunner([
+      create!,
+      dockerInfoResult([
+        "--cfc-invocation-context-dir=/expected",
+        "\\--cfc-invocation-context-dir=",
+      ]),
+      start!,
+      wait!,
+      remove!,
+    ]);
+    const runtime = new DockerRunscSandboxRuntime(
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        cfcInvocationContextDir,
+      }),
+      runner,
+    );
+
+    const result = await runtime.run({
+      argv: ["/bin/echo", "hello"],
+      cfcInvocationContext,
+    });
+
+    assertEquals(result.exitCode, 125);
+    assertMatch(result.stderr, /runtime argument at index 1/);
+    assertMatch(result.stderr, /unsafe characters: \["\\\\"\]/);
+    assertEquals(runner.requests.map((request) => request.args[0]), [
+      "create",
+      "info",
+      "rm",
+    ]);
+    assertEquals(
+      runtime.describe().cfc?.invocationContextTransportReadiness,
+      "unsafe-runtime-arguments",
+    );
+  } finally {
+    await Deno.remove(cfcInvocationContextDir, { recursive: true });
+  }
+});
+
 Deno.test("DockerRunscSandboxRuntime refuses when only the result transport is registered", async () => {
   const cfcInvocationContext = await enforcingInvocationContext();
   const runner = new FakeProcessRunner([
@@ -1361,6 +1409,64 @@ Deno.test("cfcTransportReadinessFromDockerRuntimes reports a registered absolute
       result: { status: "registered", registeredPath: "/host/results" },
     },
   );
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes accepts every allowlisted runtime argument character", () => {
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes([
+        "--cfc-invocation-context-dir=/AZaz09._/=:,-",
+      ]),
+      cfcInvocationContextDir: "/host/invocations",
+    })["invocation-context"],
+    {
+      status: "registered",
+      registeredPath: "/AZaz09._/=:,-",
+    },
+  );
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes reports shell-active characters as unsafe runtime arguments", () => {
+  const shellActiveCharacters = [
+    "\\",
+    '"',
+    "'",
+    " ",
+    "\t",
+    "\n",
+    "$",
+    "`",
+    ";",
+    "&",
+    "|",
+    "<",
+    ">",
+    "(",
+    ")",
+    "*",
+    "?",
+    "[",
+    "]",
+  ];
+  for (const character of shellActiveCharacters) {
+    assertEquals(
+      cfcTransportReadinessFromDockerRuntimes({
+        runtimeName: "runsc-cfc",
+        runtimes: dockerRuntimes([
+          "--cfc-invocation-context-dir=/host/invocations",
+          `--another-argument=${character}`,
+        ]),
+        cfcInvocationContextDir: "/host/invocations",
+      })["invocation-context"],
+      {
+        status: "unsafe-runtime-arguments",
+        argumentIndex: 1,
+        unsafeCharacters: [character],
+      },
+      `expected ${JSON.stringify(character)} to be unsafe`,
+    );
+  }
 });
 
 Deno.test("cfcTransportReadinessFromDockerRuntimes registers a directory that is not the configured one", () => {

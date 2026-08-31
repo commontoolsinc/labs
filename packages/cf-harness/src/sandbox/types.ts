@@ -101,27 +101,28 @@ export type CfcSidecarTransportKind = "invocation-context" | "result";
 /**
  * One transport's reading.
  *
- * `unregistered` is the only status that refuses, and it is the only one that
- * is a statement about the world: no valid absolute value is registered for
- * the flag — absent, empty, or relative, and runsc refuses a non-absolute one
- * — so nothing reads the harness's directory. That holds under any filesystem
- * topology, against any daemon, however the arguments were parsed, and
- * whenever the registration was last reloaded, because **it compares no
- * paths**. Every attack on this check has been an attack on a comparison; this
- * status makes none.
+ * `unregistered` says no valid absolute value occurs for the flag — absent,
+ * empty, or relative, and runsc refuses a non-absolute one — so nothing reads
+ * the harness's directory. It refuses under enforcement.
+ *
+ * `unsafe-runtime-arguments` says the runtime argument list contains a
+ * character outside the conservative allowlist the readiness check trusts.
+ * Moby shell-parses that list before runsc sees it, so its raw meaning cannot
+ * be affirmed. It carries the first offending argument and its unsafe
+ * characters, and refuses under enforcement without collapsing into
+ * `unregistered`.
  *
  * `registered` says a valid absolute directory is registered, and carries
  * which one. It is deliberately not a claim that the directory is the one the
  * harness writes to, and not a claim that the transport works. Comparing the
  * two spellings cannot establish either: Docker resolves bind paths on the
  * daemon's host, symlinks and case-insensitive projections make two spellings
- * one directory, `runtimes` is SIGHUP-reloadable, and Docker generates a shell
- * wrapper for runtime arguments so what runsc parses is not the array
- * `docker info` reports. The registered path travels with the status instead,
- * so an operator can see that it differs without this check pretending that
- * seeing it differ is knowing it differs. Affirming the transport needs an
- * end-to-end proof — a sentinel written by the harness and read back from
- * inside the sandbox — which this reading is not.
+ * one directory, and `runtimes` is SIGHUP-reloadable. The registered path
+ * travels with the status instead, so an operator can see that it differs
+ * without this check pretending that seeing it differ is knowing it differs.
+ * Affirming the transport needs an end-to-end proof — a sentinel written by
+ * the harness and read back from inside the sandbox — which this reading is
+ * not.
  *
  * `indeterminate` is the absence of any reading. Folding it into `unregistered`
  * refuses a host whose registration could not be read; folding it into
@@ -134,6 +135,11 @@ export type CfcSidecarTransportKind = "invocation-context" | "result";
 export type CfcSidecarTransportReading =
   | { status: "registered"; registeredPath: string }
   | { status: "unregistered" }
+  | {
+    status: "unsafe-runtime-arguments";
+    argumentIndex: number;
+    unsafeCharacters: readonly string[];
+  }
   | { status: "indeterminate"; reason: string };
 
 export type CfcTransportReadiness = {

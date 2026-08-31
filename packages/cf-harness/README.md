@@ -1696,14 +1696,25 @@ are registered independently, so a host can have a working result transport —
 sidecars arrive, output mediation succeeds — while every input label goes into a
 directory nothing reads. Under an `enforce-*` mode `cf-harness` therefore reads
 the runtime's registered arguments from `docker info` before starting a
-container, and refuses the invocation when they do not name the directory it
-writes to, because that half fails open: nothing downstream notices a sandbox
-that started untainted. Only a positive reading refuses. A registration that
-could not be read at all is reported as `indeterminate` and the run proceeds, so
-an unreachable Docker daemon cannot pass for evidence of a misconfiguration. The
-CFC policy snapshot carries that reading as
-`cfc.invocationContextTransportReadiness` — `registered`, `unregistered`,
-`indeterminate`, or `unverified` before any enforcing invocation has probed.
+container, and refuses the invocation when no valid absolute invocation-context
+directory is registered, because that half fails open: nothing downstream
+notices a sandbox that started untainted. `unregistered` is the only status that
+states a fact about the world: no valid absolute directory is registered.
+`registered` means only that something absolute is registered, never that the
+transport works; the snapshot reports both paths without comparing them because
+path text cannot establish that the daemon and harness resolve two names to the
+same directory. Moby shell-parses the registered argument strings before runsc
+sees them, so `cf-harness` trusts a registration only when every argument
+consists of characters in `[A-Za-z0-9._/=:,-]`. Any other character produces the
+distinct `unsafe-runtime-arguments` decline-to-affirm and refuses an enforcing
+invocation; a legitimate directory containing an excluded character must be
+renamed. A registration that could not be read at all is reported as
+`indeterminate` and the run proceeds, so an unreachable Docker daemon cannot
+pass for evidence of a misconfiguration. The CFC policy snapshot carries that
+reading as `cfc.invocationContextTransportReadiness` — `registered`,
+`unregistered`, `unsafe-runtime-arguments`, `indeterminate`, or `unverified`
+before any enforcing invocation has probed.
+
 When a trusted prompt-slot binding is present, `cf-harness` also derives
 confidentiality-only prompt influence labels for model-authored invocation
 inputs such as shell commands, structured file-tool arguments, and stdin

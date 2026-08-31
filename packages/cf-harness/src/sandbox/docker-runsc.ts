@@ -390,6 +390,30 @@ const readRuntimeArgs = (
   return args as readonly string[];
 };
 
+const SAFE_RUNTIME_ARGUMENT_CHARACTER = /^[A-Za-z0-9._/=:,-]$/;
+
+/**
+ * Returns the first runtime argument containing characters outside the
+ * conservative shell-stable allowlist, and each distinct unsafe character.
+ */
+const unsafeRuntimeArgument = (
+  args: readonly string[],
+): { argumentIndex: number; unsafeCharacters: string[] } | undefined => {
+  for (const [argumentIndex, argument] of args.entries()) {
+    const unsafeCharacters = [
+      ...new Set(
+        [...argument].filter((character) =>
+          !SAFE_RUNTIME_ARGUMENT_CHARACTER.test(character)
+        ),
+      ),
+    ];
+    if (unsafeCharacters.length > 0) {
+      return { argumentIndex, unsafeCharacters };
+    }
+  }
+  return undefined;
+};
+
 /**
  * One reading, applied to every configured transport. An unreadable runtime
  * table is a fact about the reading, not about either directory, so it must
@@ -469,6 +493,18 @@ export const cfcTransportReadinessFromDockerRuntimes = (options: {
     return allIndeterminate(
       `docker info reported non-string runtime arguments for '${options.runtimeName}'`,
     );
+  }
+
+  const unsafeArgument = unsafeRuntimeArgument(args);
+  if (unsafeArgument !== undefined) {
+    const readings: Record<string, CfcSidecarTransportReading> = {};
+    for (const [kind] of configured) {
+      readings[kind] = {
+        status: "unsafe-runtime-arguments",
+        ...unsafeArgument,
+      };
+    }
+    return readings as CfcTransportReadiness;
   }
 
   const readings: Record<string, CfcSidecarTransportReading> = {};
@@ -1093,10 +1129,10 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
    * it actually affects, instead of leaving it to be inferred from an output
    * mediation denial that has a different cause.
    *
-   * Only a positive reading of the runtime's registered arguments refuses. A
-   * host whose registration could not be read is `indeterminate` and runs, so
-   * that an unreadable `docker info` cannot masquerade as evidence of a
-   * misconfiguration.
+   * An absent registration and a shell-unsafe argument list refuse for
+   * distinct reasons. A host whose registration could not be read is
+   * `indeterminate` and runs, so that an unreadable `docker info` cannot
+   * masquerade as evidence of a misconfiguration.
    */
   async #refuseUnreadCfcInvocationContext(
     context: HarnessCfcInvocationContext,
@@ -1128,7 +1164,24 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       );
     }
     await this.probeCfcTransportReadiness();
-    if (this.#invocationContextReading()?.status !== "unregistered") {
+    const reading = this.#invocationContextReading();
+    // Moby places `runtimeArgs` in a generated shell wrapper, so the shell
+    // parses these strings before runsc parses its flags and their meaning can
+    // diverge between this check and runsc. The check deliberately trusts only
+    // a conservative allowlist (CT-2137). A legitimate directory containing a
+    // space or another excluded character is therefore refused; renaming that
+    // directory to use allowlisted characters is the remedy.
+    if (reading?.status === "unsafe-runtime-arguments") {
+      return refuse(
+        `the '${this.#runtimeName}' docker runtime argument at index ` +
+          `${reading.argumentIndex} contains unsafe characters: ` +
+          `${
+            JSON.stringify(reading.unsafeCharacters)
+          }; refusing to trust its ` +
+          `shell-parsed CFC transport registration`,
+      );
+    }
+    if (reading?.status !== "unregistered") {
       return undefined;
     }
     return refuse(
