@@ -1272,40 +1272,71 @@ describe("piece source reconciliation", () => {
         .toEqual([]);
     });
 
-    it("runs an artifact this space already holds without fetching source", async () => {
-      // The identity route settles what the origin names; a space that already
-      // holds the artifact for it needs no source at all. The source route
-      // refuses every request, so reaching it would fail this outright.
+    it("leaves the space holding the source behind what it answers with", async () => {
+      // What a supplied open owes its caller is not a pattern object: it is
+      // this space holding the source closure behind it, which the creation
+      // revision retains and a later cross-space child replicates out of. An
+      // identity this runtime already holds in memory is held under that
+      // identity alone, with no space attached, so answering from there would
+      // hand back a pattern whose closure this space never received.
       const v1Identity = await identityFor(source("v1"));
-      const requested: string[] = [];
-      const piece = emptyPiece((input) => {
-        const url = new URL(
-          input instanceof Request
-            ? input.url
-            : input instanceof URL
-            ? input.href
-            : input,
-        );
-        requested.push(url.pathname + url.search);
-        return url.searchParams.has("identity")
-          ? Promise.resolve(new Response(v1Identity))
-          : Promise.reject(new Error("this source must not be fetched"));
-      });
-      // Compiled the way the route's own file compiles: the entry export the
-      // origin names, which is what a held artifact is looked up under.
-      await runtime.patternManager.compilePattern({
-        main: PARENT_PATH,
-        files: [
-          { name: PARENT_PATH, contents: parentSource },
-          { name: SOURCE_PATH, contents: source("v1") },
-        ],
-      }, { space: signer.did() });
+      const piece = emptyPiece(
+        servingFetch(() => v1Identity, () => source("v1")),
+      );
+      // Live in this runtime's index, and compiled into another space, so the
+      // only way this space ends up with the closure is by getting it here.
+      const elsewhere = await Identity.fromPassphrase("another space");
+      await runtime.patternManager.compilePattern(
+        parentProgram(source("v1")),
+        { space: elsewhere.did() },
+      );
 
       const pattern = await open(piece);
 
       expect(runtime.patternManager.getArtifactEntryRef(pattern!)?.identity)
         .toBe(v1Identity);
-      expect(requested).toEqual([`${PARENT_PATH}?identity=`]);
+      await runtime.patternManager.flushCompileCacheWrites();
+      expect(
+        await runtime.patternManager.getPatternSourceProgramByIdentity(
+          v1Identity,
+          signer.did(),
+        ),
+        "the space the surface is being created in must hold its source",
+      ).toBeDefined();
+    });
+
+    it("leaves every space it opens a surface in holding that source", async () => {
+      // One runtime serving many spaces is the case a process-global cache
+      // could not answer: it compiles once, and every space after the first is
+      // served a pattern whose closure was never persisted there. Opening per
+      // surface piece has no first space — each one compiles into the space
+      // its own piece lives in.
+      const v1Identity = await identityFor(source("v1"));
+      createRuntime(servingFetch(() => v1Identity, () => source("v1")));
+      const spaces = [
+        signer.did(),
+        (await Identity.fromPassphrase("second served space")).did(),
+      ];
+
+      for (const space of spaces) {
+        const piece = runtime.getCell<{ marker?: string }>(
+          space,
+          `supplied-${crypto.randomUUID()}`,
+        );
+        expect(await runtime.sourceReconciler.open(piece, PARENT_SOURCE))
+          .toBeDefined();
+      }
+
+      await runtime.patternManager.flushCompileCacheWrites();
+      for (const space of spaces) {
+        expect(
+          await runtime.patternManager.getPatternSourceProgramByIdentity(
+            v1Identity,
+            space,
+          ),
+          `${space} was served the surface without being given its source`,
+        ).toBeDefined();
+      }
     });
 
     it("supplies nothing when the origin's source cannot be resolved", async () => {

@@ -60,7 +60,8 @@ with (1) as the structural backstop. Pins red-first at bare main
 d569f3722 (`pattern-replication-sibling-race.test.ts` steps 7–10 — heal,
 module-wake, registration-check, dependency-frame park; the
 executor-cross-space late-carriage pin — a parked §2b delegation rides
-the heal through the accept gate; the wish-sidecar-closure-kick pins);
+the heal through the accept gate; the wish-side kick's own pins, retired
+with the process-global sidecar cache they covered);
 new mutations N1/N2/N3/N3b/N4 pairwise isolated; the existing kill
 matrix re-verified cell-for-cell, with K1's kill REBOUND to step 1's
 zero-failure-lines assertion (the heal masks its end-state by design —
