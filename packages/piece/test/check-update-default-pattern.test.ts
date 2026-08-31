@@ -2203,6 +2203,7 @@ describe("opening a space root", () => {
     // clear "already the pinned entry" error instead of looping. The
     // symbol-differs sibling below proves the gate does NOT short-circuit when
     // only the identity matches.
+
     // Disable the updater so startup reaches the cold-start repair path.
     await setupHome();
     await controller.recreateDefaultPattern({

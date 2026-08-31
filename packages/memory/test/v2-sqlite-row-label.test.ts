@@ -790,8 +790,6 @@ Deno.test("an unsupported spec version fails closed", () => {
 //
 
 Deno.test("endorsedBy mints claimed-endorsed-by", () => {
-  // endorsedBy variant mints the endorsed claim kind.
-
   const schema = table(
     { reviewer: "text" },
     (f) => ({
@@ -900,7 +898,6 @@ const DUAL_PRINCIPAL_OWNER: RowLabelSpec = {
 
 Deno.test("a dual-op confidentiality node in a wire spec is rejected (ambiguous, fail closed)", () => {
   // The probe from the report: {principal, dbOwner}.
-
   const reason = validateRowLabelSpec(DUAL_PRINCIPAL_OWNER, ["from"]);
   assert(typeof reason === "string", "a dual-op node must not validate");
   assert(reason.includes("ambiguous"), `unexpected reason: ${reason}`);

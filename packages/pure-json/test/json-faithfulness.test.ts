@@ -93,7 +93,6 @@ describe("json-faithfulness", () => {
 
     it("reports a sparse array hole (becomes `null`)", () => {
       // A hole is exactly what is under test.
-
       // deno-lint-ignore no-sparse-arrays
       const holed = [1, , 3];
       const found = findJsonUnfaithfulValues({ default: holed });

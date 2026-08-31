@@ -348,7 +348,6 @@ Deno.test("unknownAcceptedMetrics names an accepted group nothing measured", () 
 Deno.test("baseline override parser reads only a marker starting a line", () => {
   // A description explaining the mechanism carries no acceptance, and is not a
   // malformed one either.
-
   const prose =
     "Rebasing changes what an ACCEPT_COVERAGE_DEBT: total means, so it " +
     "accepts a rise instead.";
