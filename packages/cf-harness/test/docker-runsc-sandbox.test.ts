@@ -884,15 +884,13 @@ Deno.test("DockerRunscSandboxRuntime refuses shell-unsafe runtime arguments befo
   const cfcInvocationContextDir = await Deno.makeTempDir();
   try {
     const cfcInvocationContext = await enforcingInvocationContext();
-    const [create, start, wait, remove] = dockerLifecycleResults();
+    const [create, , , remove] = dockerLifecycleResults();
     const runner = new FakeProcessRunner([
       create!,
       dockerInfoResult([
         "--cfc-invocation-context-dir=/expected",
         "\\--cfc-invocation-context-dir=",
       ]),
-      start!,
-      wait!,
       remove!,
     ]);
     const runtime = new DockerRunscSandboxRuntime(
