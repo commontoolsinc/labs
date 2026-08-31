@@ -11,6 +11,7 @@ import { recordFeedbackTool } from "./record-feedback.ts";
 import { runPatternTool } from "./run-pattern.ts";
 import { runSkillScriptTool } from "./run-skill-script.ts";
 import { searchPatternsTool } from "./search-patterns.ts";
+import { searchSkillsTool } from "./search-skills.ts";
 import { webFetchTool } from "./web-fetch.ts";
 import { viewImageTool } from "./view-image.ts";
 import { writeFileTool } from "./write-file.ts";
@@ -32,6 +33,7 @@ export const BUILTIN_TOOLS = [
   describeHandleTool,
   searchPatternsTool,
   recordFeedbackTool,
+  searchSkillsTool,
 ] as const;
 
 export const BUILTIN_TOOL_REGISTRY = new Map<

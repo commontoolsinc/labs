@@ -900,6 +900,11 @@ const PATTERN_INDEX_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
   ["search_patterns", "record_feedback"] as const,
 );
 
+/** The metadata-only tool gated on configured skills.sh discovery. */
+const SKILLS_SH_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+  ["search_skills"] as const,
+);
+
 /**
  * The tools that exist only over a skill registry, gated on the same terms.
  * A run given no skills root scans no registry, so `read_skill_resource`
@@ -915,6 +920,7 @@ const SKILL_REGISTRY_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
 interface HarnessToolBackingAvailability {
   fabricSessionAvailable: boolean;
   patternIndexAvailable: boolean;
+  skillsShSearchAvailable: boolean;
   skillRegistryAvailable: boolean;
 }
 
@@ -925,6 +931,7 @@ const withheldToolIds = (
   new Set([
     ...(availability.fabricSessionAvailable ? [] : FABRIC_SESSION_TOOL_IDS),
     ...(availability.patternIndexAvailable ? [] : PATTERN_INDEX_TOOL_IDS),
+    ...(availability.skillsShSearchAvailable ? [] : SKILLS_SH_TOOL_IDS),
     ...(availability.skillRegistryAvailable ? [] : SKILL_REGISTRY_TOOL_IDS),
   ]);
 
@@ -2378,12 +2385,13 @@ export class CfHarnessPromptLoop {
       ? "all-builtins"
       : "restricted";
     // The gated tools join the tool surface exactly when the run can back
-    // them; see FABRIC_SESSION_TOOL_IDS and PATTERN_INDEX_TOOL_IDS.
+    // them; see the backing-specific tool-id sets above.
     const availability = this.#toolBackingAvailability();
     const requestedToolIds = options.allowedToolIds ?? [
       ...DEFAULT_PROMPT_LOOP_TOOL_IDS,
       ...(availability.fabricSessionAvailable ? FABRIC_SESSION_TOOL_IDS : []),
       ...(availability.patternIndexAvailable ? PATTERN_INDEX_TOOL_IDS : []),
+      ...(availability.skillsShSearchAvailable ? SKILLS_SH_TOOL_IDS : []),
     ];
     const withheld = withheldToolIds(availability);
     this.#allowedToolIds = new Set(
@@ -2420,6 +2428,7 @@ export class CfHarnessPromptLoop {
     return {
       fabricSessionAvailable: this.engine.fabricSessionAvailable,
       patternIndexAvailable: this.engine.patternIndexAvailable,
+      skillsShSearchAvailable: this.engine.skillsShSearchAvailable,
       // A configured skills root is what a run scans into the registry the
       // skill tools read, so its presence is the tools' backing — a run that
       // has yet to scan still knows it will, and one that never will offers

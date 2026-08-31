@@ -20,6 +20,7 @@ import type { HarnessHandleTable } from "../contracts/handle-table.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
 import type { PatternIndexClient } from "../pattern-index/client.ts";
 import type { PatternIndexPublicationLedger } from "../pattern-index/publish-ledger.ts";
+import type { SkillsShSearchClient } from "../skills-sh/search-client.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
 import type { ProcessRunner } from "../sandbox/process-runner.ts";
@@ -64,6 +65,13 @@ export interface HarnessToolContext {
    * `run_pattern`'s `patternId` argument unusable.
    */
   getPatternIndexClient?: () => Promise<PatternIndexClient>;
+
+  /**
+   * The run's skills.sh discovery client, lazy and cached by the engine.
+   * Undefined when no remote skill registry is configured, which also keeps
+   * `search_skills` out of the tool surface.
+   */
+  getSkillsShSearchClient?: () => Promise<SkillsShSearchClient>;
 
   /**
    * Whether a pattern the model authored and ran successfully is published

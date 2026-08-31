@@ -2096,6 +2096,7 @@ Deno.test("runCfHarnessCli prints machine-readable capabilities", async () => {
   assertEquals(capabilities.parentToolIds.includes("run_pattern"), true);
   assertEquals(capabilities.parentToolIds.includes("browser"), false);
   assertEquals(capabilities.builtinToolIds.includes("run_pattern"), true);
+  assertEquals(capabilities.builtinToolIds.includes("search_skills"), true);
   assertEquals(capabilities.features.runPattern, true);
   assertEquals(capabilities.builtinToolIds.includes("browser"), true);
   assertEquals(capabilities.subagentProfiles.includes("web_search"), true);
@@ -6502,6 +6503,62 @@ Deno.test("parseCfHarnessCliArgs parses --pattern-index-url alongside the fabric
     throw new Error("expected config result");
   }
   assertEquals(parsed.patternIndex, { baseUrl: "https://index.example/api" });
+});
+
+Deno.test("parseCfHarnessCliArgs parses --skills-registry-url", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--skills-registry-url",
+      "https://registry.example",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.skillsSh, { baseUrl: "https://registry.example" });
+});
+
+Deno.test("parseCfHarnessCliArgs reads the skills registry URL from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_SKILLS_REGISTRY_URL: "https://registry.example" },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.skillsSh, { baseUrl: "https://registry.example" });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a skills registry URL that does not parse", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--skills-registry-url", "not a url"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--skills-registry-url must be a valid URL",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects --allow-tool search_skills without a skills registry", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--allow-tool", "search_skills"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "missing --skills-registry-url",
+  );
 });
 
 Deno.test("parseCfHarnessCliArgs reads the pattern index URL from the environment", async () => {

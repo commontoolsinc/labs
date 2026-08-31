@@ -77,6 +77,9 @@ A read-only tool over the registry, shaped on `search_patterns` and holding
 the same boundary that tool's own header states: *a model needs to know what
 something is for, and never what it says.*
 
+Stage 1 registers this metadata-only tool on the configured parent surface, as
+CT-2106 requires; a run with no public skill registry does not offer it.
+
 **Reuses.** `PatternIndexClient`'s shape for a typed client over a remote
 index (`packages/cf-harness/src/pattern-index/client.ts`); `HarnessFetch` from
 `contracts/http-fetch.ts` so the egress is substitutable and testable;
@@ -107,14 +110,17 @@ it above.
 **The ranking signal is not imported.** See below; this is load-bearing enough
 to have its own section.
 
-**Egress.** Discovery reaches the public internet, so it belongs to a child
-with network reach and no secrets, along the decomposition CT-2078 proved:
-the acquirer has web reach and no task data, the user has task data and no
-acquisition surface. `WEB_FETCH_SUBAGENT_PROFILE_CONFIG` is the existing
-shape. The residual channel is real and unclosed: **a search query can encode
-anything the searcher knows**, so a parent that has read a secret and then
-chooses what to search for is a channel by construction. CT-2068 names this;
-this plan does not solve it, and the mirror below is what eventually does.
+**Egress.** Stage 1 discovery runs on the configured parent surface and returns
+metadata only. Stage 3 moves discovery and acquisition together into a
+dedicated child with web reach and no secrets, using
+`WEB_FETCH_SUBAGENT_PROFILE_CONFIG` as its constrained shape rather than adding
+registry search to the existing hostile-web-text profile. The decomposition is
+the one CT-2078 proved: the acquirer has web reach and no task data, the user
+has task data and no acquisition surface. The residual channel is real and
+unclosed: **a search query can encode anything the searcher knows**, so a parent
+that has read a secret and then chooses what to search for is a channel by
+construction. CT-2068 names this; this plan does not solve it, and the mirror
+below is what eventually does.
 
 ## Part 2 — Handle-load: the text never reaches the chooser
 
@@ -161,6 +167,13 @@ A skills.sh id alone is **not** a pinned address. Resolving one into a pinned
 address — reading the source repository, choosing a commit — is a discovery-side
 step whose output is an address, and the acquiring child fetches only the
 address, never the id.
+
+That resolution is host-side machinery rather than a model-facing tool. It
+reads the source repository's default branch through the GitHub API, records
+the full commit SHA at the branch head and the resolution time, and returns
+`{id, owner, repo, slug, commitSha, resolvedAt}`. The registry's served hash is
+never the pin and is not stored in this address; if retained elsewhere, it is
+named only as an unverified change detector.
 
 **Gate on the parse, never on the status.** `https://www.skills.sh/.well-known/agent-skills/index.json`
 returns the site's HTML 404 page with **status 200**. A client that tested
@@ -317,28 +330,21 @@ there.
 
 ## Staging
 
-1. **`search_skills`, read-only, not registered.** The client, the
-   sanitization, the shape refusals, and tests against recorded fixtures. No
-   tool-registry entry, so nothing can call it yet. A first cut of this exists:
-   `packages/cf-harness/src/skills-sh/search-client.ts`, its fixture-driven
-   tests, and `deno task probe-skills-sh` for the hand-run call against the
-   live registry. Running it against live data immediately paid for the
-   refusal counter — a legitimate listing with several thousand reported
-   installs uses `::` in its slug, which one character class shared across all
-   three identifier segments drops silently. The counter is what made the
-   silence visible, and the fix was a character set per segment rather than a
-   looser one for all of them.
-2. **Address resolution.** Turning a discovery hit into a pinned address, or
-   refusing. This is where the honest answer is often "no pinned address
-   exists for this hit", and that refusal is the feature.
-3. **Verified acquisition.** The `.well-known` digest path and the commit-SHA
-   path, both fail-closed, with the single-file payload whitelist and its
-   refusal. Write into a cell, return a handle.
+1. **Registered metadata discovery.** The `search_skills` parent tool, the
+   sanitization, the shape refusals, and tests against recorded fixtures. It is
+   present only when a public skill registry is configured and surfaces the
+   refusal counter; it cannot fetch, read, or load skill content.
+2. **Address resolution.** Host-side conversion of a discovery hit into the
+   source repository's full default-branch commit SHA, or refusal. The output
+   is an immutable pinned address for a later acquisition step, never the
+   registry's unverified hash.
+3. **Isolated verified acquisition.** Move discovery into a dedicated
+   no-secrets child alongside the `.well-known` digest path and commit-SHA
+   acquisition path, both fail-closed, with the single-file payload whitelist
+   and its refusal. Write into a cell, return a handle, and prove with an
+   adversarial canary that skill text never reached the parent's context.
 4. **The provenance mark**, minted split-mint style on the acquiring write.
-5. **Register `search_skills`** and wire the end-to-end path, with an
-   adversarial run: a skill whose text attempts to make the child exfiltrate,
-   and a canary proving the payload never reached the parent's context.
-6. **The mirror.** The registry's terms explicitly encourage it —
+5. **The mirror.** The registry's terms explicitly encourage it —
    *"caching results on your own infrastructure, is encouraged and not
    restricted"* — and CT-2068 already names a mirror as the destination and
    "trusted not to log" as the interim. A mirror removes third-party egress

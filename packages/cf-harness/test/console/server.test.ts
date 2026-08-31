@@ -4,6 +4,7 @@ import { join, resolve, toFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import {
+  consoleChatPolicy,
   ConsoleServer,
   createConsoleInteractiveServiceOptions,
   resolveConsoleConfig,
@@ -248,6 +249,64 @@ describe("console/server", () => {
     });
 
   describe("console prompt configuration", () => {
+    it("threads configured skills.sh discovery into the run and policy", () => {
+      const resolved = resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+          "--skills-registry-url",
+          "https://registry.example",
+        ],
+        {},
+        "/console",
+      );
+      const serviceOptions = createConsoleInteractiveServiceOptions(
+        resolved,
+        {
+          modelProvider: "openai-compatible-gateway",
+          modelAuthSource: "none",
+          gatewayAuthMode: "none",
+        },
+        () => {},
+      );
+
+      expect(resolved.skillsSh).toEqual({
+        baseUrl: "https://registry.example",
+      });
+      expect(serviceOptions.basePromptLoopOptions?.skillsSh).toEqual({
+        baseUrl: "https://registry.example",
+      });
+      expect(consoleChatPolicy(false, true).allowedToolIds).toContain(
+        "search_skills",
+      );
+      expect(consoleChatPolicy(false, false).allowedToolIds).not.toContain(
+        "search_skills",
+      );
+    });
+
+    it("reads the skills.sh discovery registry from the environment", () => {
+      const resolved = resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+        ],
+        { CF_HARNESS_SKILLS_REGISTRY_URL: "https://registry.example" },
+        "/console",
+      );
+
+      expect(resolved.skillsSh).toEqual({
+        baseUrl: "https://registry.example",
+      });
+    });
+
     it("reads the named prompt and disables child composition guidance", async () => {
       const directory = await Deno.makeTempDir({
         prefix: "cf-harness-console-prompt-",

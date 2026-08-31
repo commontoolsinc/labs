@@ -332,3 +332,11 @@ Deno.test("resolveHarnessConfig carries a pattern index the run does not publish
     publish: false,
   });
 });
+
+Deno.test("resolveHarnessConfig carries a skills.sh discovery registry", () => {
+  const config = resolveHarnessConfig({
+    skillsSh: { baseUrl: "https://registry.example/" },
+    skillScriptExecutionTarget: "sandbox",
+  });
+  assertEquals(config.skillsSh, { baseUrl: "https://registry.example/" });
+});

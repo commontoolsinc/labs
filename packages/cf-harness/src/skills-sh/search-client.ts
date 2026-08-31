@@ -2,10 +2,9 @@
  * A read-only client over the public skills.sh search route: what a candidate
  * skill is called and where it lives, and never a byte of what it says.
  *
- * This is the discovery half of `docs/plans/external-skill-acquisition.md`,
- * and it is deliberately not registered as a tool. Nothing here fetches,
- * materializes, or returns skill text; a hit is an identifier that a later,
- * pinned acquisition step resolves.
+ * This is the discovery half of `docs/plans/external-skill-acquisition.md`.
+ * Nothing here fetches, materializes, or returns skill text; a hit is an
+ * identifier that a later, pinned acquisition step resolves.
  *
  * Two properties are the point, and both are tested:
  *
@@ -58,8 +57,8 @@ const SOURCE_PATTERN = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
 const OWNER_PATTERN = /^[A-Za-z0-9-]{1,39}$/;
 
 /**
- * One candidate. There is no field for skill text, and the absence is the
- * boundary this client keeps rather than an omission to fill in later.
+ * One candidate. The hit type has no field for skill text and that absence is
+ * the boundary.
  */
 export interface SkillsShSearchHit {
   /** Registry identifier, `{owner}/{repo}/{slug}`. Not a content address. */
@@ -318,3 +317,41 @@ export class SkillsShSearchClient {
     return { hits, rejected };
   }
 }
+
+/** Builds the skills.sh search client used by a run. */
+export type HarnessSkillsShSearchClientFactory = () => Promise<
+  SkillsShSearchClient
+>;
+
+/** Creates a client factory over one configured registry origin. */
+export const createHarnessSkillsShSearchClientFactory = (
+  baseUrl: string,
+  fetch?: HarnessFetch,
+): HarnessSkillsShSearchClientFactory =>
+() =>
+  Promise.resolve(
+    new SkillsShSearchClient({
+      origin: baseUrl,
+      ...(fetch !== undefined ? { fetch } : {}),
+    }),
+  );
+
+/**
+ * Caches a healthy client for one run. A rejected construction is forgotten
+ * so the next call may retry it.
+ */
+export const cacheHarnessSkillsShSearchClientFactory = (
+  factory: HarnessSkillsShSearchClientFactory,
+): HarnessSkillsShSearchClientFactory => {
+  let client: Promise<SkillsShSearchClient> | undefined;
+  return () => {
+    if (client === undefined) {
+      const attempt = Promise.resolve().then(factory).catch((error) => {
+        if (client === attempt) client = undefined;
+        throw error;
+      });
+      client = attempt;
+    }
+    return client;
+  };
+};

@@ -86,6 +86,11 @@ import {
   createPatternIndexPublicationLedger,
   type PatternIndexPublicationLedger,
 } from "./pattern-index/publish-ledger.ts";
+import {
+  cacheHarnessSkillsShSearchClientFactory,
+  createHarnessSkillsShSearchClientFactory,
+  type HarnessSkillsShSearchClientFactory,
+} from "./skills-sh/search-client.ts";
 import type { HandleValueResolutionContext } from "./tools/handle-values.ts";
 import type { HarnessWellKnownGrant } from "./contracts/well-known-grants.ts";
 import {
@@ -165,6 +170,10 @@ import type {
   SearchPatternsToolInput,
   SearchPatternsToolOutput,
 } from "./tools/search-patterns.ts";
+import type {
+  SearchSkillsToolInput,
+  SearchSkillsToolOutput,
+} from "./tools/search-skills.ts";
 import {
   type ViewImageToolInput,
   type ViewImageToolOutput,
@@ -194,6 +203,7 @@ export interface BuiltinToolInputMap {
   describe_handle: DescribeHandleToolInput;
   search_patterns: SearchPatternsToolInput;
   record_feedback: RecordFeedbackToolInput;
+  search_skills: SearchSkillsToolInput;
 }
 
 export interface BuiltinToolOutputMap {
@@ -212,6 +222,7 @@ export interface BuiltinToolOutputMap {
   describe_handle: DescribeHandleToolOutput;
   search_patterns: SearchPatternsToolOutput;
   record_feedback: RecordFeedbackToolOutput;
+  search_skills: SearchSkillsToolOutput;
 }
 
 interface ToolOutputWithId {
@@ -251,6 +262,13 @@ export interface CreateHarnessEngineOptions
    * `run_pattern` refuses a `patternId`.
    */
   patternIndexClientFactory?: HarnessPatternIndexClientFactory;
+
+  /**
+   * Injection seam for skills.sh discovery. When absent, a factory is built
+   * from `skillsSh` in the resolved config; when both are absent,
+   * `search_skills` stays out of the tool surface.
+   */
+  skillsShSearchClientFactory?: HarnessSkillsShSearchClientFactory;
 
   /**
    * What this run was asked to do, in the words it was asked in — the CLI
@@ -396,6 +414,7 @@ export class CfHarnessEngine {
   readonly #now: () => string;
   readonly #fabricSessionFactory?: HarnessFabricSessionFactory;
   readonly #patternIndexClientFactory?: HarnessPatternIndexClientFactory;
+  readonly #skillsShSearchClientFactory?: HarnessSkillsShSearchClientFactory;
   #patternIndexPublications?: PatternIndexPublicationLedger;
   readonly #taskText?: string;
   readonly #inputCells: readonly HarnessInputCellSpec[];
@@ -551,6 +570,16 @@ export class CfHarnessEngine {
     this.#patternIndexClientFactory = patternIndexClientFactory === undefined
       ? undefined
       : cacheHarnessPatternIndexClientFactory(patternIndexClientFactory);
+    const skillsShSearchClientFactory = options.skillsShSearchClientFactory ??
+      (this.config.skillsSh !== undefined
+        ? createHarnessSkillsShSearchClientFactory(
+          this.config.skillsSh.baseUrl,
+        )
+        : undefined);
+    this.#skillsShSearchClientFactory =
+      skillsShSearchClientFactory === undefined
+        ? undefined
+        : cacheHarnessSkillsShSearchClientFactory(skillsShSearchClientFactory);
     this.#taskText = options.taskText;
     this.#inputCells = options.inputCells ?? [];
     this.#spaceDbPath = options.spaceDbPath;
@@ -797,6 +826,18 @@ export class CfHarnessEngine {
     | HarnessPatternIndexClientFactory
     | undefined {
     return this.#patternIndexClientFactory;
+  }
+
+  /** Whether this run can search the configured skills.sh registry. */
+  get skillsShSearchAvailable(): boolean {
+    return this.#skillsShSearchClientFactory !== undefined;
+  }
+
+  /** The run's cached skills.sh search-client factory, when configured. */
+  get skillsShSearchClientFactory():
+    | HarnessSkillsShSearchClientFactory
+    | undefined {
+    return this.#skillsShSearchClientFactory;
   }
 
   bindRunModel(model: string): HarnessRunState {
@@ -1779,6 +1820,9 @@ export class CfHarnessEngine {
           patternIndexPublishDiscoverable: this.patternIndexPublishDiscoverable,
           patternIndexPublications: this.patternIndexPublications,
         }
+        : {}),
+      ...(this.#skillsShSearchClientFactory !== undefined
+        ? { getSkillsShSearchClient: this.#skillsShSearchClientFactory }
         : {}),
       ...(this.#taskText !== undefined ? { taskText: this.#taskText } : {}),
       sandbox: this.sandbox,
