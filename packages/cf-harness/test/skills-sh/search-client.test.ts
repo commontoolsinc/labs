@@ -12,6 +12,8 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  cacheHarnessSkillsShSearchClientFactory,
+  createHarnessSkillsShSearchClientFactory,
   sanitizeRegistryString,
   SKILLS_SH_MAX_FIELD_CHARS,
   SkillsShSearchClient,
@@ -86,6 +88,46 @@ const refusalOf = async (
 };
 
 describe("skills.sh search client", () => {
+  describe("run client factory", () => {
+    it("uses the supplied transport and caches one healthy client", async () => {
+      const urls: string[] = [];
+      const cached = cacheHarnessSkillsShSearchClientFactory(
+        createHarnessSkillsShSearchClientFactory(
+          "https://registry.example",
+          (input) => {
+            urls.push(String(input));
+            return Promise.resolve(jsonResponse({ skills: [] }));
+          },
+        ),
+      );
+
+      const first = cached();
+      const second = cached();
+      expect(second).toBe(first);
+      await (await first).search({ query: "react native" });
+      expect(urls).toEqual([
+        "https://registry.example/api/search?q=react+native&limit=20",
+      ]);
+    });
+
+    it("forgets a rejected construction so a later call can recover", async () => {
+      let calls = 0;
+      const recovered = new SkillsShSearchClient({
+        origin: "https://registry.example",
+        fetch: () => Promise.resolve(jsonResponse({ skills: [] })),
+      });
+      const cached = cacheHarnessSkillsShSearchClientFactory(() => {
+        calls += 1;
+        if (calls === 1) throw new Error("construction failed");
+        return Promise.resolve(recovered);
+      });
+
+      await expect(cached()).rejects.toThrow("construction failed");
+      expect(await cached()).toBe(recovered);
+      expect(calls).toBe(2);
+    });
+  });
+
   describe("sanitizeRegistryString", () => {
     it("removes escape sequences, control codepoints, and bidirectional marks", () => {
       const hostile =

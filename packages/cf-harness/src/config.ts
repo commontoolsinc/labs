@@ -80,6 +80,16 @@ export interface HarnessPatternIndexConfig {
    */
   publishDiscoverable?: boolean;
 }
+
+/**
+ * Connection settings for skills.sh metadata discovery. When present, the run
+ * offers `search_skills`; when absent, the tool is unavailable.
+ */
+export interface HarnessSkillsShConfig {
+  /** Registry origin serving the public `/api/search` route. */
+  baseUrl: string;
+}
+
 export type HarnessModelProviderId =
   | "openai-compatible-gateway"
   | "openai-codex";
@@ -114,6 +124,7 @@ interface HarnessCommonConfig {
   cfcEnforcementModeSource: HarnessCfcEnforcementModeSource;
   fabricSession?: HarnessFabricSessionConfig;
   patternIndex?: HarnessPatternIndexConfig;
+  skillsSh?: HarnessSkillsShConfig;
   sandbox?: DockerRunscSandboxConfig;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -168,6 +179,7 @@ export interface ResolveHarnessConfigOptions {
   cfcEnforcementModeOverride?: string | CfcEnforcementMode;
   fabricSession?: HarnessFabricSessionConfig;
   patternIndex?: HarnessPatternIndexConfig;
+  skillsSh?: HarnessSkillsShConfig;
   sandbox?: DockerRunscSandboxConfig;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -354,6 +366,7 @@ export const resolveHarnessConfig = (
     ...(options.patternIndex !== undefined
       ? { patternIndex: options.patternIndex }
       : {}),
+    ...(options.skillsSh !== undefined ? { skillsSh: options.skillsSh } : {}),
   };
   if (modelProvider === "openai-codex") {
     return {

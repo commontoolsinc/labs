@@ -15,7 +15,8 @@ export type BuiltinToolId =
   | "assign_slug"
   | "describe_handle"
   | "search_patterns"
-  | "record_feedback";
+  | "record_feedback"
+  | "search_skills";
 
 export const DEFAULT_PARENT_TOOL_IDS = [
   "bash",

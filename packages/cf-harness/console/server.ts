@@ -59,6 +59,7 @@ import type {
   HarnessFabricSessionConfig,
   HarnessModelProviderId,
   HarnessPatternIndexConfig,
+  HarnessSkillsShConfig,
 } from "../src/config.ts";
 import type { CfcPosture } from "@commonfabric/runner";
 import {
@@ -309,6 +310,7 @@ interface ConsoleConfig {
   model: string;
   fabricSession: HarnessFabricSessionConfig;
   patternIndex?: HarnessPatternIndexConfig;
+  skillsSh?: HarnessSkillsShConfig;
   sessionDbPath?: string;
 
   /**
@@ -401,6 +403,7 @@ export const resolveConsoleConfig = (
       "fabric-identity",
       "fabric-space",
       "pattern-index-url",
+      "skills-registry-url",
       "session-db",
       "space-db",
       "max-model-turns",
@@ -525,6 +528,8 @@ export const resolveConsoleConfig = (
 
   const patternIndexUrl = flag("pattern-index-url") ??
     nonEmpty(env.CF_HARNESS_PATTERN_INDEX_URL);
+  const skillsRegistryUrl = flag("skills-registry-url") ??
+    nonEmpty(env.CF_HARNESS_SKILLS_REGISTRY_URL);
   const sessionDb = flag("session-db") ??
     nonEmpty(env.CF_HARNESS_CONSOLE_SESSION_DB) ??
     join(dataDir, "sessions.sqlite");
@@ -556,6 +561,16 @@ export const resolveConsoleConfig = (
         },
       }
       : {}),
+    ...(skillsRegistryUrl !== undefined
+      ? {
+        skillsSh: {
+          baseUrl: requiredUrl(
+            skillsRegistryUrl,
+            "--skills-registry-url",
+          ),
+        },
+      }
+      : {}),
     // `none` turns the durable store off and keeps sessions in memory, which
     // is what a throwaway run wants and what a machine without the SQLite
     // native library can still do.
@@ -581,12 +596,14 @@ export const resolveConsoleConfig = (
  */
 export const consoleChatPolicy = (
   patternIndexConfigured: boolean,
+  skillsShConfigured: boolean,
 ): HarnessChatPolicy => ({
   ...DEFAULT_HARNESS_CHAT_POLICY,
   allowedToolIds: [
     ...DEFAULT_HARNESS_CHAT_POLICY.allowedToolIds,
     ...FABRIC_TOOL_IDS,
     ...(patternIndexConfigured ? PATTERN_INDEX_TOOL_IDS : []),
+    ...(skillsShConfigured ? ["search_skills" as const] : []),
   ],
   allowedSubagentProfiles: [
     ...DEFAULT_HARNESS_CHAT_POLICY.allowedSubagentProfiles,
@@ -1104,7 +1121,10 @@ export class ConsoleServer {
         workspace: { hostPath: this.#config.workspacePath },
         model: this.#config.model,
         artifactRoot: this.#config.artifactRoot,
-        policy: consoleChatPolicy(this.#config.patternIndex !== undefined),
+        policy: consoleChatPolicy(
+          this.#config.patternIndex !== undefined,
+          this.#config.skillsSh !== undefined,
+        ),
       });
       if (!session.ok) {
         return chatErrorResponse(session);
@@ -1348,6 +1368,7 @@ export const createConsoleInteractiveServiceOptions = (
     ...(config.patternIndex !== undefined
       ? { patternIndex: config.patternIndex }
       : {}),
+    ...(config.skillsSh !== undefined ? { skillsSh: config.skillsSh } : {}),
     ...(config.maxModelTurns !== undefined
       ? { maxModelTurns: config.maxModelTurns }
       : {}),
@@ -1419,6 +1440,9 @@ export const startConsoleServer = async (
       console.log(`  fabric:     ${config.fabricSession.apiUrl}`);
       console.log(
         `  index:      ${config.patternIndex?.baseUrl ?? "(not configured)"}`,
+      );
+      console.log(
+        `  skills:     ${config.skillsSh?.baseUrl ?? "(not configured)"}`,
       );
       console.log(
         `  cfc:        ${

@@ -44,6 +44,10 @@ cookie when it loads. Do not put it behind a public address.
   this server unattended and counting what they did with the index is
   [the measurement protocol](../docs/pattern-index-measurement.md), whose runner
   reaches this server over the same routes the page does.
+- **A public skill registry URL**, optionally. With one set, the parent session
+  offers metadata-only `search_skills`; without one, the tool is absent. Its
+  registry-reported install counts are unauthenticated and unverifiable, not a
+  trust signal, and the tool cannot fetch, read, or load skill content.
 
 ## Running it
 
@@ -52,6 +56,7 @@ export CF_HARNESS_FABRIC_API_URL=http://localhost:8000
 export CF_HARNESS_FABRIC_IDENTITY="$HOME/.cf/my-key.pkcs8"
 export CF_HARNESS_FABRIC_SPACE=my-space
 export CF_HARNESS_PATTERN_INDEX_URL=https://index.example/   # optional
+export CF_HARNESS_SKILLS_REGISTRY_URL=https://www.skills.sh/  # optional
 
 deno task --cwd packages/cf-harness console
 open http://127.0.0.1:8100
@@ -69,20 +74,21 @@ the one-shot build on its own.
 
 Every environment variable has a flag, and the flag wins:
 
-| Flag                  | Environment                          | Default                               |
-| --------------------- | ------------------------------------ | ------------------------------------- |
-| `--port`              | `CF_HARNESS_CONSOLE_PORT`            | `8100`                                |
-| `--fabric-api-url`    | `CF_HARNESS_FABRIC_API_URL`          | `http://localhost:8000`               |
-| `--fabric-identity`   | `CF_HARNESS_FABRIC_IDENTITY`         | required                              |
-| `--fabric-space`      | `CF_HARNESS_FABRIC_SPACE`            | required, a name                      |
-| `--pattern-index-url` | `CF_HARNESS_PATTERN_INDEX_URL`       | unset                                 |
-| `--model`             | `CF_HARNESS_MODEL`                   | the CLI's default model               |
-| `--workspace`         | `CF_HARNESS_CONSOLE_WORKSPACE`       | `.cf-harness-console/workspace`       |
-| `--artifact-root`     | `CF_HARNESS_ARTIFACT_ROOT`           | `.cf-harness-console/runs`            |
-| `--session-db`        | `CF_HARNESS_CONSOLE_SESSION_DB`      | `.cf-harness-console/sessions.sqlite` |
-| `--space-db`          | `CF_HARNESS_SPACE_DB`                | the space's own database, discovered  |
-| `--max-model-turns`   | `CF_HARNESS_CONSOLE_MAX_MODEL_TURNS` | the prompt loop's default             |
-| `--skills-root`       | `CF_HARNESS_CONSOLE_SKILLS_ROOT`     | the repository's `skills/` tree       |
+| Flag                    | Environment                          | Default                               |
+| ----------------------- | ------------------------------------ | ------------------------------------- |
+| `--port`                | `CF_HARNESS_CONSOLE_PORT`            | `8100`                                |
+| `--fabric-api-url`      | `CF_HARNESS_FABRIC_API_URL`          | `http://localhost:8000`               |
+| `--fabric-identity`     | `CF_HARNESS_FABRIC_IDENTITY`         | required                              |
+| `--fabric-space`        | `CF_HARNESS_FABRIC_SPACE`            | required, a name                      |
+| `--pattern-index-url`   | `CF_HARNESS_PATTERN_INDEX_URL`       | unset                                 |
+| `--skills-registry-url` | `CF_HARNESS_SKILLS_REGISTRY_URL`     | unset                                 |
+| `--model`               | `CF_HARNESS_MODEL`                   | the CLI's default model               |
+| `--workspace`           | `CF_HARNESS_CONSOLE_WORKSPACE`       | `.cf-harness-console/workspace`       |
+| `--artifact-root`       | `CF_HARNESS_ARTIFACT_ROOT`           | `.cf-harness-console/runs`            |
+| `--session-db`          | `CF_HARNESS_CONSOLE_SESSION_DB`      | `.cf-harness-console/sessions.sqlite` |
+| `--space-db`            | `CF_HARNESS_SPACE_DB`                | the space's own database, discovered  |
+| `--max-model-turns`     | `CF_HARNESS_CONSOLE_MAX_MODEL_TURNS` | the prompt loop's default             |
+| `--skills-root`         | `CF_HARNESS_CONSOLE_SKILLS_ROOT`     | the repository's `skills/` tree       |
 
 Every turn scans the skills root and records the registry on its run before the
 first model call, so `read_skill_resource` can answer and a delegated
@@ -408,13 +414,14 @@ Three panes:
 
 `CreateHarnessPromptLoopOptions` extends the engine's options, which extend the
 config resolver's, and the interactive chat service spreads its
-`basePromptLoopOptions` into every turn. So `fabricSession` and `patternIndex`
-set once at startup hold for the whole session, and the engine builds each
-lazily-cached client factory from them.
+`basePromptLoopOptions` into every turn. So `fabricSession`, `patternIndex`, and
+`skillsSh` set once at startup hold for the whole session, and the engine builds
+each lazily-cached client factory from them.
 
 Configuration alone is not enough: the default chat policy's tool surface does
-not include `run_pattern`, `assign_slug`, `search_patterns`, or
-`record_feedback`. The server names them in the policy it starts each session
+not include `run_pattern`, `assign_slug`, `search_patterns`, `record_feedback`,
+or `search_skills`. The server names them in the policy it starts each session
 with, and the prompt loop withholds each again if its backing is absent — so a
-missing index means the two index tools are simply not offered, rather than
-offered and failing.
+missing index means the two index tools are simply not offered, and a missing
+public skill registry means `search_skills` is not offered, rather than either
+surface being offered and failing.

@@ -126,6 +126,11 @@ What works today:
     reports each one's declared shapes and import specifier, never its source)
   - `record_feedback` (under the same pattern-index gate; votes a pattern up or
     down so the index learns which ones were worth offering)
+  - `search_skills` (present only on the parent surface when the run configures
+    the public registry with `--skills-registry-url`; returns sanitized
+    identifiers, names, sources, registry-reported install counts, and the
+    number of refused hits, never skill text. Install counts are unauthenticated
+    and unverifiable telemetry, not a trust signal)
 - composing published patterns: source the model authors may
   `import Sub from "cf:pattern:<patternId>"`, and `run_pattern` fetches and
   compiles each named pattern into the space before compiling the source that
@@ -292,8 +297,10 @@ From [packages/cf-harness](.):
   answers with, along with a count of the entries the client refused. It is the
   one thing here that calls the live registry, which is why it is a script you
   run rather than a test that runs itself; the committed tests use a captured
-  response. It prints no skill text, and the client behind it is not registered
-  as a tool, so no model can reach it. The discovery half of
+  response. It uses the same guarded client as the parent-only `search_skills`
+  tool and prints no skill text. Configure that tool with
+  `--skills-registry-url` or `CF_HARNESS_SKILLS_REGISTRY_URL`; without either,
+  the tool is absent. The discovery half of
   [`../../docs/plans/external-skill-acquisition.md`](../../docs/plans/external-skill-acquisition.md)
   is what it exists to exercise.
 

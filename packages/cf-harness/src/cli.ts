@@ -16,6 +16,7 @@ import {
   type HarnessGatewayAuthMode,
   type HarnessModelProviderId,
   type HarnessPatternIndexConfig,
+  type HarnessSkillsShConfig,
   isHarnessModelProviderId,
   parseCfcEnforcementMode,
   parseHarnessGatewayAuthMode,
@@ -87,6 +88,9 @@ import {
 } from "./prompt-loop.ts";
 import { loadHarnessSkillContext } from "./skills/registry.ts";
 import { persistHarnessRunSkillRegistry } from "./skills/run-registry.ts";
+import {
+  createHarnessSkillsShSearchClientFactory,
+} from "./skills-sh/search-client.ts";
 import {
   parseAllowedSkillScriptSpec,
   uniqueAllowedSkillScripts,
@@ -170,6 +174,7 @@ const CLI_STRING_FLAGS = [
   "compact-threshold",
   "prompt-cache-mode",
   "skills-root",
+  "skills-registry-url",
   "skill",
   "skill-script-execution-target",
   "gateway-base-url",
@@ -270,6 +275,7 @@ export interface CfHarnessCliConfig {
   fabricMount?: string;
   fabricSession?: HarnessFabricSessionConfig;
   patternIndex?: HarnessPatternIndexConfig;
+  skillsSh?: HarnessSkillsShConfig;
   hostMounts: readonly CfHarnessHostMountConfig[];
 }
 
@@ -488,9 +494,10 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback);
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback | search_skills);
                                 run_pattern and assign_slug additionally require the three --fabric-* session flags,
-                                and search_patterns and record_feedback require --pattern-index-url
+                                search_patterns and record_feedback require --pattern-index-url,
+                                and search_skills requires --skills-registry-url
   --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
@@ -502,6 +509,7 @@ Options:
   --resume-run <path>           Resume from a run root or run-state.json path
   --system-prompt <text>        Optional system prompt
   --skills-root <path>          Skill root containing <name>/SKILL.md
+  --skills-registry-url <url>  Registry origin for metadata-only search_skills discovery
   --skill <name>                Preload a skill for this run (repeatable)
   --skill-script-execution-target <target>
                                 Execute skill scripts in sandbox or host (default: sandbox)
@@ -572,6 +580,7 @@ Environment:
   CF_HARNESS_COMPACT_THRESHOLD  Default value for --compact-threshold
   CF_HARNESS_PROMPT_CACHE_MODE  Default value for --prompt-cache-mode
   CF_HARNESS_HOME               Local cf-harness credential/config directory
+  CF_HARNESS_SKILLS_REGISTRY_URL Default value for --skills-registry-url
   CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
   CF_HARNESS_FABRIC_API_URL     Default value for --fabric-api-url
   CF_HARNESS_FABRIC_IDENTITY    Default value for --fabric-identity
@@ -641,6 +650,7 @@ const CLI_PARENT_TOOL_IDS = [
   "assign_slug",
   "search_patterns",
   "record_feedback",
+  "search_skills",
 ] as const satisfies readonly BuiltinToolId[];
 
 const uniqueStrings = <T extends string>(
@@ -1372,6 +1382,9 @@ export const parseCfHarnessCliArgs = async (
         "CF_HARNESS_COMPACT_THRESHOLD",
       ),
       CF_HARNESS_HOME: Deno.env.get("CF_HARNESS_HOME"),
+      CF_HARNESS_SKILLS_REGISTRY_URL: Deno.env.get(
+        "CF_HARNESS_SKILLS_REGISTRY_URL",
+      ),
       HOME: Deno.env.get("HOME"),
       CF_HARNESS_CFC_ENFORCEMENT_MODE: Deno.env.get(
         "CF_HARNESS_CFC_ENFORCEMENT_MODE",
@@ -1731,6 +1744,23 @@ export const parseCfHarnessCliArgs = async (
       ...(publishDiscoverable ? { publishDiscoverable: true } : {}),
     };
   }
+  const rawSkillsRegistryUrl = typeof args["skills-registry-url"] === "string"
+    ? args["skills-registry-url"].trim()
+    : nonEmptyEnvValue(env.CF_HARNESS_SKILLS_REGISTRY_URL);
+  if (rawSkillsRegistryUrl === "") {
+    throw new Error("--skills-registry-url requires a non-empty value");
+  }
+  let skillsSh: HarnessSkillsShConfig | undefined;
+  if (rawSkillsRegistryUrl !== undefined) {
+    try {
+      new URL(rawSkillsRegistryUrl);
+    } catch {
+      throw new Error(
+        `--skills-registry-url must be a valid URL: ${rawSkillsRegistryUrl}`,
+      );
+    }
+    skillsSh = { baseUrl: rawSkillsRegistryUrl };
+  }
   // An allowlisted fabric-session tool with no session to run it against is
   // a configuration contradiction, surfaced here rather than as a tool that
   // is silently absent from the run.
@@ -1748,6 +1778,14 @@ export const parseCfHarnessCliArgs = async (
   if (indexTool !== undefined && patternIndex === undefined) {
     throw new Error(
       `--allow-tool ${indexTool} requires a pattern index; missing --pattern-index-url`,
+    );
+  }
+  if (
+    allowedToolIds?.includes("search_skills") === true &&
+    skillsSh === undefined
+  ) {
+    throw new Error(
+      "--allow-tool search_skills requires a skills registry; missing --skills-registry-url",
     );
   }
   const apiKey = env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY;
@@ -1818,6 +1856,7 @@ export const parseCfHarnessCliArgs = async (
     ...(fabricMount !== undefined ? { fabricMount } : {}),
     ...(fabricSession !== undefined ? { fabricSession } : {}),
     ...(patternIndex !== undefined ? { patternIndex } : {}),
+    ...(skillsSh !== undefined ? { skillsSh } : {}),
     hostMounts,
   };
 };
@@ -2408,6 +2447,21 @@ const summarizeToolCallArguments = (
           ? `text=${JSON.stringify(parsed.text)}`
           : undefined;
         const joined = [tags, text].filter((value): value is string =>
+          value !== undefined
+        ).join(" ");
+        return joined === "" ? undefined : joined;
+      }
+      case "search_skills": {
+        const query = typeof parsed.query === "string"
+          ? `query=${JSON.stringify(parsed.query)}`
+          : undefined;
+        const owner = typeof parsed.owner === "string"
+          ? `owner=${JSON.stringify(parsed.owner)}`
+          : undefined;
+        const limit = typeof parsed.limit === "number"
+          ? `limit=${parsed.limit}`
+          : undefined;
+        const joined = [query, owner, limit].filter((value): value is string =>
           value !== undefined
         ).join(" ");
         return joined === "" ? undefined : joined;
@@ -3066,6 +3120,13 @@ export const runCfHarnessCli = async (
       }
       : undefined;
     const additionalMounts = createAdditionalMountConfigs(parsed);
+    const skillsShSearchClientFactory = parsed.skillsSh !== undefined &&
+        deps.fetchFn !== undefined
+      ? createHarnessSkillsShSearchClientFactory(
+        parsed.skillsSh.baseUrl,
+        deps.fetchFn,
+      )
+      : undefined;
     const prepareSkillContextMessages = async (
       engine: CfHarnessEngine,
     ): Promise<string[]> => {
@@ -3219,6 +3280,10 @@ export const runCfHarnessCli = async (
           : {}),
         ...(parsed.patternIndex !== undefined
           ? { patternIndex: parsed.patternIndex }
+          : {}),
+        ...(parsed.skillsSh !== undefined ? { skillsSh: parsed.skillsSh } : {}),
+        ...(skillsShSearchClientFactory !== undefined
+          ? { skillsShSearchClientFactory }
           : {}),
         // What the run was asked to do, in the operator's words. A pattern
         // the run publishes carries it as the request it answers.
@@ -3398,6 +3463,10 @@ export const runCfHarnessCli = async (
           : {}),
         ...(parsed.patternIndex !== undefined
           ? { patternIndex: parsed.patternIndex }
+          : {}),
+        ...(parsed.skillsSh !== undefined ? { skillsSh: parsed.skillsSh } : {}),
+        ...(skillsShSearchClientFactory !== undefined
+          ? { skillsShSearchClientFactory }
           : {}),
         // What the run was asked to do, in the operator's words. A pattern
         // the run publishes carries it as the request it answers.

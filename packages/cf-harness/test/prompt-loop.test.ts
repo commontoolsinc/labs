@@ -2215,6 +2215,78 @@ Deno.test("CfHarnessPromptLoop drops the pattern-index tools from an explicit al
   );
 });
 
+Deno.test("CfHarnessPromptLoop advertises search_skills in the default tool surface when configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "skills-sh-default-surface",
+      model: "gpt-5.4",
+      skillsSh: { baseUrl: "https://registry.example" },
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assert(
+    chatViewOfRequest(request).tools.includes("search_skills"),
+  );
+});
+
+Deno.test("CfHarnessPromptLoop advertises search_skills from an explicit allowlist when configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "search_skills"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "skills-sh-allowed-surface",
+      model: "gpt-5.4",
+      skillsSh: { baseUrl: "https://registry.example" },
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools,
+    ["read_file", "search_skills"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop drops search_skills from an explicit allowlist when no registry is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "search_skills"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "skills-sh-absent",
+      model: "gpt-5.4",
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file"],
+  );
+});
+
 Deno.test("CfHarnessPromptLoop withholds the pattern-index tools from the pattern-author profile when no index is configured", async () => {
   await using fixture = await createPatternSkillsFixture();
   const fetchCalls: RequestInit[] = [];

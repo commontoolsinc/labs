@@ -2096,6 +2096,7 @@ Deno.test("runCfHarnessCli prints machine-readable capabilities", async () => {
   assertEquals(capabilities.parentToolIds.includes("run_pattern"), true);
   assertEquals(capabilities.parentToolIds.includes("browser"), false);
   assertEquals(capabilities.builtinToolIds.includes("run_pattern"), true);
+  assertEquals(capabilities.builtinToolIds.includes("search_skills"), true);
   assertEquals(capabilities.features.runPattern, true);
   assertEquals(capabilities.builtinToolIds.includes("browser"), true);
   assertEquals(capabilities.subagentProfiles.includes("web_search"), true);
@@ -4087,6 +4088,25 @@ Deno.test("formatCfHarnessTranscriptEvent formats assistant tool calls and tool 
         role: "assistant",
         content: "",
         toolCalls: [{
+          id: "call-skills-1",
+          type: "function",
+          function: {
+            name: "search_skills",
+            arguments:
+              '{"query":"react native","owner":"vercel-labs","limit":3}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: search_skills(query="react native" owner="vercel-labs" limit=3)\n',
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
           id: "call-1",
           type: "function",
           function: { name: "bash", arguments: '{"command":"ls"}' },
@@ -5174,6 +5194,71 @@ Deno.test("runCfHarnessCli threads sandbox-image into engine sandbox config", as
     engine?.sandbox.describe().cfc?.image,
     "registry.example/cf:deno2",
   );
+});
+
+Deno.test("runCfHarnessCli routes skills.sh discovery through its injected fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  let defaultFetchCalls = 0;
+  const injectedUrls: string[] = [];
+  let toolStatus: string | undefined;
+  globalThis.fetch = (() => {
+    defaultFetchCalls += 1;
+    return Promise.resolve(Response.json({ skills: [] }));
+  }) as typeof globalThis.fetch;
+
+  let exitCode: number;
+  try {
+    exitCode = await runCfHarnessCli(
+      [
+        "--model-provider",
+        "openai-compatible-gateway",
+        "--gateway-auth-mode",
+        "none",
+        "--cfc-enforcement-mode",
+        "disabled",
+        "--workspace",
+        "/tmp/project",
+        "--skills-registry-url",
+        "https://registry.example",
+        "--prompt",
+        "Find a skill",
+      ],
+      {
+        env: {},
+        fetchFn: (input) => {
+          injectedUrls.push(String(input));
+          return Promise.resolve(Response.json({ skills: [] }));
+        },
+        createPromptLoop: (options) => {
+          if (options.engine === undefined) {
+            throw new Error("expected CLI-created engine");
+          }
+          const engine = options.engine;
+          return {
+            runPrompt: async () => {
+              const result = await engine.invokeBuiltinTool(
+                "search_skills",
+                { query: "react native" },
+              );
+              toolStatus = (result.output as { status?: string }).status;
+              return completedCliResult("run-skills-sh-fetch");
+            },
+            runTranscript: () =>
+              Promise.reject(new Error("unexpected resume path")),
+          };
+        },
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assertEquals(exitCode, 0);
+  assertEquals(defaultFetchCalls, 0);
+  assertEquals(injectedUrls, [
+    "https://registry.example/api/search?q=react+native&limit=20",
+  ]);
+  assertEquals(toolStatus, "ok");
 });
 
 Deno.test("parseCfHarnessCliArgs selects openai-codex without an API key", async () => {
@@ -6502,6 +6587,74 @@ Deno.test("parseCfHarnessCliArgs parses --pattern-index-url alongside the fabric
     throw new Error("expected config result");
   }
   assertEquals(parsed.patternIndex, { baseUrl: "https://index.example/api" });
+});
+
+Deno.test("parseCfHarnessCliArgs parses --skills-registry-url", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--skills-registry-url",
+      "https://registry.example",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.skillsSh, { baseUrl: "https://registry.example" });
+});
+
+Deno.test("parseCfHarnessCliArgs reads the skills registry URL from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_SKILLS_REGISTRY_URL: "https://registry.example" },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.skillsSh, { baseUrl: "https://registry.example" });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a skills registry URL that does not parse", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--skills-registry-url", "not a url"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--skills-registry-url must be a valid URL",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an empty skills registry flag", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--skills-registry-url", "   "],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--skills-registry-url requires a non-empty value",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects --allow-tool search_skills without a skills registry", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--allow-tool", "search_skills"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "missing --skills-registry-url",
+  );
 });
 
 Deno.test("parseCfHarnessCliArgs reads the pattern index URL from the environment", async () => {
