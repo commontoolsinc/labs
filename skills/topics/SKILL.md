@@ -23,12 +23,21 @@ Run from the Labs repository root so `cf` uses that checkout:
 export CF_API_URL='https://estuary.saga-castor.ts.net'
 export CF_SPACE='topics-dev-476ea34f'
 export TOPICS_BOARD='/of:fid1:jtdD-DSmuGrLGSt_6sJ3DS_7jmerrkKTEnW3fZV9e34'
-export CF_IDENTITY='<exact path to the key your human user uses>'
+export CF_IDENTITY="${CF_IDENTITY:-$HOME/.config/commonfabric/identity.key}"
+test -r "$CF_IDENTITY" || {
+  printf 'Topics identity key is not readable: %s\n' "$CF_IDENTITY" >&2
+  exit 1
+}
 ```
 
-Use the same Estuary identity key as your human user. Do not mint an agent key,
-guess a key path, use another human's key, or use the publicly derivable
-`implicit trust` identity. If the exact path is not already explicit, ask.
+An already-set `CF_IDENTITY` is the explicit override. Otherwise use the team's
+stable per-user default at `~/.config/commonfabric/identity.key`; the path is
+common while its contents belong to that teammate. Use the same Estuary identity
+key as your human user. If the readability check fails, stop and ask the human
+to provision that default or export the correct path. Do not search for keys,
+mint an agent key, use another human's key, or use the publicly derivable
+`implicit trust` identity. Never print or inspect key material; use
+`cf id did "$CF_IDENTITY"` when the public DID is needed for verification.
 
 Every authored-content mutation carries `agentName` in the same event. Use one
 stable agent name, without decorating titles, labels, bodies, or comments with a
