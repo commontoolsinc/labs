@@ -910,6 +910,28 @@ describe("opening a space root", () => {
     ]);
   });
 
+  it("preserves a passive failure when the running fallback finds no root", async () => {
+    await setup();
+    const passiveFailure = new Error("passive registry open failed");
+    const original = controller.getDefaultPattern.bind(controller);
+    controller.getDefaultPattern =
+      ((open = true) =>
+        typeof open === "object"
+          ? Promise.reject(passiveFailure)
+          : Promise.resolve(undefined)) as typeof controller.getDefaultPattern;
+
+    let failure: unknown;
+    try {
+      await controller.getPieceRegistry();
+    } catch (error) {
+      failure = error;
+    } finally {
+      controller.getDefaultPattern = original;
+    }
+
+    expect(failure).toBe(passiveFailure);
+  });
+
   it("heals a stale root whose registry export is already persisted", async () => {
     await setup();
     const piece = await controller.ensureDefaultPattern();
