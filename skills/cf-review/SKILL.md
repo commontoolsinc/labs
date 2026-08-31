@@ -211,6 +211,15 @@ is allowed. Two doc comments in a row are the loudest tell — only the nearer o
 survives into rendered documentation. See
 `docs/development/code-comment-style.md`, "Where one goes".
 
+**A documented declaration with nothing blank after it** is that same defect
+read downward, and it is quieter, because the comment is still next to the thing
+it was written for. The comment reaches on past it, so the members added under
+it look documented when they are not — which is exactly the shape a diff
+appending one member to a run of them puts in front of you. See the same
+document, "The blank line below". An overload set counts as one declaration
+here, so the blank line falls after the implementation and not between the
+signatures.
+
 **A missing or misplaced file header** is that same defect one level up, and is
 equally a thing a diff shows you. A file header is a doc comment at the very
 top, above the first `import` and the first `export`; a new file carrying none,

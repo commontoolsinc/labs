@@ -19,7 +19,8 @@ All paths are relative to the repo root.
   Principles is the part a reviewer will hold a new abstraction to.
 - `docs/development/code-comment-style.md` — how a comment is written, `//` and
   JSDoc alike. A comment describes the system as it stands, and nothing comes
-  between a doc comment and the declaration it documents.
+  between a doc comment and the declaration it documents. Blank lines bound that
+  pairing on both sides: one above the comment, one below the declaration.
 
 Everything below this line is read-when-it-applies. Reach for it by what you are
 doing, not by reading the list through.
