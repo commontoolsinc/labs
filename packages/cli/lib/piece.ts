@@ -3417,6 +3417,14 @@ export async function executePieceCallable(
   });
 }
 
+/**
+ * Points the target piece's `targetPath` at the value `sourcePath` names on
+ * the source piece, so the target reads the source rather than holding a copy
+ * of what it said.
+ *
+ * Both endpoints are read back first, and the link is refused when either the
+ * piece or the path is missing; `options.allowNonExisting` links anyway.
+ */
 export async function linkPieces(
   config: SpaceConfig,
   sourcePieceId: string,
@@ -3429,21 +3437,30 @@ export async function linkPieces(
     sourceScope?: PieceConfig["pieceScope"];
     targetScope?: PieceConfig["pieceScope"];
   },
+  deps: PieceResolutionDeps = {},
 ): Promise<void> {
   const pieces = await timeCliPhase(
     "linkPieces.loadPieces",
-    () => loadPieces(config),
+    () => (deps.loadPieces ?? loadPieces)(config),
   );
   const resolvedSourcePieceId = await timeCliPhase(
     "linkPieces.resolveSource",
     () =>
-      resolveLinkEndpointAddress(pieces, sourcePieceId, undefined, {
-        allowMissingSlugFallback: true,
-      }),
+      resolveLinkEndpointAddress(
+        pieces,
+        sourcePieceId,
+        deps.resolvePieceAddress,
+        { allowMissingSlugFallback: true },
+      ),
   );
   const resolvedTargetPieceId = await timeCliPhase(
     "linkPieces.resolveTarget",
-    () => resolveLinkEndpointAddress(pieces, targetPieceId),
+    () =>
+      resolveLinkEndpointAddress(
+        pieces,
+        targetPieceId,
+        deps.resolvePieceAddress,
+      ),
   );
 
   // Validate that source and target pieces/paths exist by reading them
@@ -4006,8 +4023,15 @@ async function inspectSlugTargetCell(
   };
 }
 
-export async function getPieceView(config: PieceConfig): Promise<unknown> {
-  const data = (await inspectPiece(config)) as any;
+/**
+ * Returns the view a piece publishes — the `[UI]` node on its result cell —
+ * or `undefined` where the piece publishes none.
+ */
+export async function getPieceView(
+  config: PieceConfig,
+  deps: PieceOperationDependencies = {},
+): Promise<unknown> {
+  const data = (await inspectPiece(config, deps)) as any;
   return data.result?.[UI] as VNode;
 }
 
@@ -4413,14 +4437,23 @@ export async function getCellValue(
   }
 }
 
+/**
+ * Writes `value` at `path` on a piece's result cell, or on its arguments cell
+ * under `options.input`, and receipts the space the write landed in.
+ */
 export async function setCellValue(
   config: PieceConfig,
   path: (string | number)[],
   value: unknown,
   options?: { input?: boolean },
+  deps: PieceResolutionDeps = {},
 ): Promise<void> {
-  const pieces = await loadPieces(config);
-  const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
+    config,
+    pieces,
+    deps.resolvePieceAddress,
+  );
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
@@ -4442,10 +4475,11 @@ export async function callPieceHandler<T = any>(
   config: PieceConfig,
   handlerName: string,
   args: T,
+  deps: PieceCallableDependencies = {},
 ): Promise<void> {
   const resolved = await timeCliPhase(
     "callPieceHandler.resolve",
-    () => resolvePieceCallable(config, handlerName),
+    () => resolvePieceCallable(config, handlerName, deps),
   );
   if (resolved.callableKind !== "handler") {
     throw new Error(`Callable "${handlerName}" is not a handler`);
@@ -4493,9 +4527,16 @@ export async function stepPiece(
 /**
  * Removes a piece from the space.
  */
-export async function removePiece(config: PieceConfig): Promise<void> {
-  const pieces = await loadPieces(config);
-  const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
+export async function removePiece(
+  config: PieceConfig,
+  deps: PieceResolutionDeps = {},
+): Promise<void> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
+    config,
+    pieces,
+    deps.resolvePieceAddress,
+  );
   const removed = await pieces.remove(resolvedConfig.piece);
 
   if (!removed) {
