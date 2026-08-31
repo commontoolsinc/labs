@@ -315,6 +315,7 @@ describe("PatternIndexClient", () => {
         files: [{ name: "/main.tsx", contents: "export default 1;" }],
       },
       resultSchema: { type: "object" },
+      discoverable: true,
     });
     expect(requests[0].url).toBe("https://index.test/api/publishPattern");
     expect(JSON.parse(requests[0].body)).toEqual({
@@ -329,6 +330,7 @@ describe("PatternIndexClient", () => {
         hashtags: ["math"],
       },
       schemas: { resultSchema: { type: "object" } },
+      discoverable: true,
     });
     expect(response.patternId).toBe("pat-2");
     expect(response.created).toBe(true);

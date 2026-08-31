@@ -286,6 +286,25 @@ Deno.test("resolveHarnessConfig carries a pattern index alongside a fabric sessi
   assertEquals(config.patternIndex, { baseUrl: "https://index.example/" });
 });
 
+Deno.test("resolveHarnessConfig carries deliberate discoverable publishing", () => {
+  const config = resolveHarnessConfig({
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+    },
+    patternIndex: {
+      baseUrl: "https://index.example/",
+      publishDiscoverable: true,
+    },
+    skillScriptExecutionTarget: "sandbox",
+  });
+  assertEquals(config.patternIndex, {
+    baseUrl: "https://index.example/",
+    publishDiscoverable: true,
+  });
+});
+
 Deno.test("resolveHarnessConfig rejects a pattern index with no fabric session", () => {
   assertThrows(
     () =>

@@ -581,6 +581,8 @@ Environment:
   CF_HARNESS_FABRIC_CFC_POSTURE Default value for --fabric-cfc-posture
   CF_HARNESS_PATTERN_INDEX_URL  Default value for --pattern-index-url
   CF_HARNESS_PATTERN_INDEX_PUBLISH 0 applies --no-pattern-index-publish
+  CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE 1 offers successful authored
+                                patterns to search immediately (default: recorded only)
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
   CF_HARNESS_SANDBOX_DOCKER_RUNTIME Default value for --sandbox-docker-runtime
   ${CFC_RESULT_DIR_ENV} Fallback for --cfc-result-dir
@@ -1393,6 +1395,9 @@ export const parseCfHarnessCliArgs = async (
       CF_HARNESS_PATTERN_INDEX_PUBLISH: Deno.env.get(
         "CF_HARNESS_PATTERN_INDEX_PUBLISH",
       ),
+      CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE: Deno.env.get(
+        "CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE",
+      ),
       CF_HARNESS_SANDBOX_IMAGE: Deno.env.get("CF_HARNESS_SANDBOX_IMAGE"),
       CF_HARNESS_SANDBOX_DOCKER_RUNTIME: Deno.env.get(
         "CF_HARNESS_SANDBOX_DOCKER_RUNTIME",
@@ -1717,9 +1722,13 @@ export const parseCfHarnessCliArgs = async (
     // an unset or unrecognized value leaves a run publishing.
     const publish = args["no-pattern-index-publish"] !== true &&
       nonEmptyEnvValue(env.CF_HARNESS_PATTERN_INDEX_PUBLISH) !== "0";
+    const publishDiscoverable = nonEmptyEnvValue(
+      env.CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE,
+    ) === "1";
     patternIndex = {
       baseUrl: rawPatternIndexUrl,
       ...(publish ? {} : { publish: false }),
+      ...(publishDiscoverable ? { publishDiscoverable: true } : {}),
     };
   }
   // An allowlisted fabric-session tool with no session to run it against is

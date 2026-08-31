@@ -162,7 +162,8 @@ export interface RunPatternToolSuccessOutput {
 }
 
 /**
- * What the render gate decided about this run's contribution to the index.
+ * What became of this run's contribution to the index after publication
+ * policy and the render gate were applied.
  *
  * Every field is pinned to a fixed set — the two unions and a boolean, with
  * `message` drawn from `PATTERN_PUBLICATION_MESSAGES` and never composed. See
@@ -303,13 +304,13 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
       description: {
         type: "string",
         description:
-          'One line saying what the pattern you are running does, e.g. "Totals an invoice\'s line items and applies a discount". Source you wrote is published to the pattern index when it runs, so fill this in and others — including you, later — can find it. A run without one publishes nothing.',
+          'One line saying what the pattern you are running does, e.g. "Totals an invoice\'s line items and applies a discount". Source you wrote is recorded in the pattern index when it runs, so fill this in for later evaluation and discovery. A run without one publishes nothing.',
       },
       hashtags: {
         type: "array",
         items: { type: "string" },
         description:
-          'Tags the published pattern is found under, e.g. ["invoice", "arithmetic"]. Use the words someone searching for this capability would type.',
+          'Tags the recorded pattern will be found under if it earns discoverability, e.g. ["invoice", "arithmetic"]. Use the words someone searching for this capability would type.',
       },
       inputs: {
         type: "object",
@@ -356,6 +357,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
               enum: [
                 "ui-rendered",
                 "no-ui",
+                "recorded-automatically",
                 "ui-default-tostring",
                 "ui-rendered-empty",
                 "probe-failed",
@@ -1605,12 +1607,11 @@ export const runPatternTool: HarnessToolDefinition<
       return signal?.aborted === true ? "cancelled" : outcome;
     };
     // Source the model wrote and successfully ran is contributed back to the
-    // index, so the next run that needs this capability can find it instead
-    // of writing it again — CAN, because recording and being offered to
-    // search are separate here. Everything that ran is recorded; the render
-    // gate below decides discoverability, and the session's ledger gives one
-    // discoverable entry per capability. A run naming a `patternId` records
-    // nothing: it ran what the index already holds.
+    // index. Recording and being offered to search are separate: the default
+    // records the run, while deliberate corpus seeding may request immediate
+    // discoverability. A render-gate failure always withholds discovery with
+    // its own reason. A run naming a `patternId` records nothing: it ran what
+    // the index already holds.
     const description = input.description?.trim();
     let publication: RunPatternPublicationReport | undefined;
     let probeThrown: string | undefined;
@@ -1653,16 +1654,22 @@ export const runPatternTool: HarnessToolDefinition<
             `the pattern ran and created piece ${piece.id}, which is not undone; it was not contributed to the pattern index`,
           );
         }
+        const publicationVerdict = verdict.status === "recorded" ||
+            context.patternIndexPublishDiscoverable === true
+          ? verdict
+          : {
+            ...verdict,
+            status: "recorded" as const,
+            reason: "recorded-automatically" as const,
+          };
         publication = {
-          status: verdict.status,
-          reason: verdict.reason,
-          message: PATTERN_PUBLICATION_MESSAGES[verdict.reason],
-          syntheticInputsComplete: verdict.syntheticInputsComplete,
+          status: publicationVerdict.status,
+          reason: publicationVerdict.reason,
+          message: PATTERN_PUBLICATION_MESSAGES[publicationVerdict.reason],
+          syntheticInputsComplete: publicationVerdict.syntheticInputsComplete,
         };
-        // The rendered DOM is kept only for a verdict someone may have to
-        // adjudicate — why an entry is not offered to search. A pass has
-        // What a probe THREW, and never what it rendered: the rendered DOM
-        // is read, classified and discarded. The artifact root is readable
+        // What a probe THREW, and never what it rendered: the rendered DOM is
+        // read, classified and discarded. The artifact root is readable
         // through `bash` (CT-2117), so the only defensible amount of rendered
         // content to put there is none; thrown text stays because it is the
         // class that root already holds and cannot be recovered any other way.
@@ -1688,14 +1695,16 @@ export const runPatternTool: HarnessToolDefinition<
             resultSchema: pattern.resultSchema,
             dependencies: patternIndexDependencies(program.files),
             // Recording and surfacing are separate. Everything that ran is
-            // recorded; the gate decides only whether search offers it.
-            ...(verdict.status === "recorded"
+            // recorded; only an explicit seed configuration asks search to
+            // offer a passing render immediately.
+            ...(publicationVerdict.status === "recorded"
               ? {
                 nonDiscoverable: {
-                  reason: PATTERN_DISCOVERABILITY_REASONS[verdict.reason],
+                  reason:
+                    PATTERN_DISCOVERABILITY_REASONS[publicationVerdict.reason],
                 },
               }
-              : {}),
+              : { discoverable: true }),
           };
           publications.stage(request);
         }
