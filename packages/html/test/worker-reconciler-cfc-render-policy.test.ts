@@ -2688,6 +2688,15 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
+    //
+    // The default ceiling
+    //
+    // What a host-supplied root ceiling (spec §8.10.6, S16 phase D) admits
+    // and blocks on its own, and how an authored boundary narrows it. With no
+    // authored boundary in the tree, atoms render only when listed exactly,
+    // or when they are Caveat atoms of an allow-listed kind.
+    //
+
     const PROMPT_INFLUENCE_KIND =
       "https://commonfabric.org/cfc/concepts/prompt-influence";
     const influenceCaveatAtom = {
@@ -2732,15 +2741,6 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       props: {},
       children: [child as never],
     });
-
-    //
-    // The default ceiling
-    //
-    // What a host-supplied root ceiling (spec §8.10.6, S16 phase D) admits
-    // and blocks on its own, and how an authored boundary narrows it. With no
-    // authored boundary in the tree, atoms render only when listed exactly,
-    // or when they are Caveat atoms of an allow-listed kind.
-    //
 
     await t.step(
       "default ceiling blocks unlisted atoms with no authored boundary",
