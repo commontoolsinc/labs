@@ -76,6 +76,32 @@ the rules therein. These include:
 
 ## Engineering principles and coding style
 
+### Writing Code
+
+Before writing or changing code anywhere in this tree, read
+`docs/development/DEVELOPMENT.md` and `docs/development/code-comment-style.md`.
+That obligation does not depend on which part of the tree you are working in, on
+how small the change is, or on whether you would call the work "development".
+
+The `writing-code` skill at `skills/writing-code/SKILL.md` is the map: which
+document governs the thing you are about to touch, what to run before pushing,
+and — the part a green run tells you nothing about — the conventions no gate
+enforces, which are therefore left to a reviewer to find by reading. `skills/`
+is the canonical authored source; Codex discovers the repo-local mirror through
+`.agents/skills/`, and Claude through `.claude/skills/`.
+
+### Reviewing Code
+
+Reviewing a changeset — including reviewing your own before you push — goes
+through the `cf-review` skill at `skills/cf-review/SKILL.md`. It holds code to
+the same documents `writing-code` hands the author, so that a convention
+enforced in review is one its author was told about. A general-purpose review
+command supplied by your agent harness knows nothing about this repository and
+is not a substitute for it.
+
+`docs/development/pr-review-comments.md` covers reading and answering the review
+comments a pull request collects.
+
 ### Avoid timeouts, retry loops, and sleeps
 
 Timeouts cause flakiness because they put an upper bound on success: anything
