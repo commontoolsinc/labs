@@ -1,8 +1,8 @@
 /**
  * Importing through the package barrel keeps `defaultHarnessFetch` reachable
- * from the public entry point that consumers use, alongside the gateway
- * client that falls back to it, and what that default forwards to the global
- * fetch.
+ * from the public entry point that consumers use, alongside the gateway client
+ * that falls back to it. What that default forwards to the global fetch is
+ * pinned here too.
  */
 
 import { assertEquals, assertStrictEquals } from "@std/assert";

@@ -115,7 +115,8 @@ Deno.test("importsAlias matches @ts-types with single quotes and spaces", () => 
 // What an alias reaches, and what it does not
 //
 // Subpaths and slash-terminated forms, against the near misses: a longer
-// sibling, a bare identifier, a substring of another specifier.
+// sibling, a bare identifier, a substring of another specifier — and the
+// deliberate over-match, where an occurrence inside a comment counts.
 //
 
 Deno.test("importsAlias matches a subpath import of a bare alias", () => {
@@ -230,10 +231,10 @@ Deno.test("parseWorkspaceMembers returns empty when there is no workspace array"
 });
 
 //
-// Running against this repository
+// The entry point, and the git fallback
 //
-// The entry point over the real tree, and the git helper it leans on when
-// that tree is not a checkout at all.
+// The entry point over the real tree, and what the git helper answers when
+// the `git` binary is not there to run.
 //
 
 Deno.test("runs as a command-line program against the repository", async () => {
