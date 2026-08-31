@@ -217,11 +217,11 @@ what remains to guard is that the piece mount is absent.
 stdout corrupts the JSON an agent parses, so it went to stderr with a test
 pinning it. 6b removed the notice and that test with it.
 
-*And whether `--quiet` silences it.* The CLI's convention is that `--quiet`
+*And whether `--quiet` silenced it.* The CLI's convention is that `--quiet`
 suppresses hints but not warnings, and a deprecation notice can be read as
-either. Deciding it when the notice is written costs a sentence; deciding it
-after a script depends on the answer costs a behavior change. The plan does not
-prejudge which — only that D1 does not ship without an answer.
+either. The question was to be settled when the notice was written rather than
+after a script depended on the answer; 6b removed the notice, so it is settled
+by there being nothing left to silence.
 
 **The merges want characterization tests before the decision.** For each pair,
 what each command does today, captured, so the merge can be judged against
