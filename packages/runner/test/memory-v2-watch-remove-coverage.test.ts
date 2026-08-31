@@ -111,15 +111,19 @@ class WatchAddRemoveTransport extends ScriptedSessionTransport {
 // corrected complete set and acknowledges cleanup.
 class FailFirstWatchRemovalTransport extends ScriptedSessionTransport {
   watchRemovalAttempts = 0;
+  onWatchAdded?: () => void;
   readonly #failuresBeforeSuccess: number;
+  readonly #precedingId?: URI;
+  #serverSeq = 1;
 
-  constructor(failuresBeforeSuccess = 1) {
+  constructor(failuresBeforeSuccess = 1, precedingId?: URI) {
     super({
       name: "watch-removal-retry",
       sessionId: "session:watch-removal-retry",
       space,
     });
     this.#failuresBeforeSuccess = failuresBeforeSuccess;
+    this.#precedingId = precedingId;
   }
 
   protected override handle(message: ScriptedTransportMessage): void {
@@ -129,15 +133,16 @@ class FailFirstWatchRemovalTransport extends ScriptedSessionTransport {
           message.watches?.flatMap((watch) =>
             watch.query?.roots?.map((root) => root.id as URI) ?? []
           ) ?? [];
+        this.onWatchAdded?.();
         this.respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
-            serverSeq: 1,
+            serverSeq: this.#serverSeq,
             sync: {
               type: "sync",
               fromSeq: 0,
-              toSeq: 1,
+              toSeq: this.#serverSeq,
               upserts: [],
               removes: roots.map((id) => ({
                 branch: "",
@@ -162,15 +167,30 @@ class FailFirstWatchRemovalTransport extends ScriptedSessionTransport {
           });
           return;
         }
+        if (this.#precedingId !== undefined) {
+          const fromSeq = this.#serverSeq;
+          this.#serverSeq++;
+          this.emitSync({
+            type: "sync",
+            fromSeq,
+            toSeq: this.#serverSeq,
+            upserts: [
+              doc(this.#precedingId, this.#serverSeq, {
+                value: { label: "preceding cleanup sync" },
+              }),
+            ],
+            removes: [],
+          });
+        }
         this.respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
-            serverSeq: 1,
+            serverSeq: this.#serverSeq,
             sync: {
               type: "sync",
-              fromSeq: 1,
-              toSeq: 1,
+              fromSeq: this.#serverSeq,
+              toSeq: this.#serverSeq,
               upserts: [],
               removes: [],
             } satisfies SessionSync,
@@ -237,6 +257,123 @@ Deno.test("absence reconciliation retries a failed temporary watch removal", asy
     assertEquals(await provider.loadUnexaminedAbsences(tx.tx), 0);
     assertEquals(transport.watchRemovalAttempts, 2);
   } finally {
+    tx.abort("inspection only");
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("absence cleanup integrates syncs that precede its watch mutation", async () => {
+  const precedingId =
+    `of:watch-removal-preceding-${crypto.randomUUID()}` as URI;
+  const transport = new FailFirstWatchRemovalTransport(0, precedingId);
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    memoryHost: new URL("memory://runner-v2-watch-removal-preceding"),
+  }, sessionFactory);
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const provider = storageManager.open(space) as TestProvider;
+  const tx = runtime.edit();
+  tx.read({
+    space,
+    id: `of:watch-removal-preceding-probe-${crypto.randomUUID()}`,
+    type: "application/json",
+    scope: "space",
+    path: [],
+  }, { trackReadWithoutLoad: true });
+
+  try {
+    assertEquals(await provider.loadUnexaminedAbsences!(tx.tx), 0);
+    assertEquals(getObjectValue(provider, precedingId), {
+      label: "preceding cleanup sync",
+    });
+  } finally {
+    tx.abort("inspection only");
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("absence cleanup closes a returned view when the replica closes concurrently", async () => {
+  const transport = new FailFirstWatchRemovalTransport(0);
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    memoryHost: new URL("memory://runner-v2-watch-removal-close-race"),
+  }, sessionFactory);
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const provider = storageManager.open(space);
+  let closing: Promise<void> | undefined;
+  transport.onWatchAdded = () => {
+    const session = sessionFactory.session!;
+    const original = session.watchRemoveSync.bind(session);
+    session.watchRemoveSync = async (watchIds) => {
+      const result = await original(watchIds);
+      closing = (provider.replica as unknown as { close(): Promise<void> })
+        .close();
+      return result;
+    };
+    transport.onWatchAdded = undefined;
+  };
+  const tx = runtime.edit();
+  tx.read({
+    space,
+    id: `of:watch-removal-close-race-${crypto.randomUUID()}`,
+    type: "application/json",
+    scope: "space",
+    path: [],
+  }, { trackReadWithoutLoad: true });
+
+  try {
+    assertEquals(await provider.loadUnexaminedAbsences!(tx.tx), 0);
+    await closing;
+  } finally {
+    tx.abort("inspection only");
+    await closing;
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("absence reconciliation cleans up after an unexpected probe exception", async () => {
+  const transport = new FailFirstWatchRemovalTransport(0);
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    memoryHost: new URL("memory://runner-v2-watch-probe-exception"),
+  }, sessionFactory);
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const provider = storageManager.open(space);
+  const replica = provider.replica as unknown as {
+    refreshWatchSet(...args: unknown[]): Promise<unknown>;
+  };
+  const originalRefresh = replica.refreshWatchSet.bind(replica);
+  replica.refreshWatchSet = () =>
+    Promise.reject(new Error("synthetic unexpected probe exception"));
+  const tx = runtime.edit();
+  tx.read({
+    space,
+    id: `of:watch-probe-exception-${crypto.randomUUID()}`,
+    type: "application/json",
+    scope: "space",
+    path: [],
+  }, { trackReadWithoutLoad: true });
+
+  try {
+    assertEquals(await provider.loadUnexaminedAbsences!(tx.tx), 0);
+    assertEquals(transport.watchRemovalAttempts, 1);
+  } finally {
+    replica.refreshWatchSet = originalRefresh;
     tx.abort("inspection only");
     await runtime.dispose();
     await storageManager.close();

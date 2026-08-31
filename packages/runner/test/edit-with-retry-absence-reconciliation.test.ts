@@ -435,6 +435,51 @@ describe("editWithRetry absence reconciliation", () => {
     }
   });
 
+  it("stops retry readiness before and between waits when teardown is signaled", async () => {
+    const server = newSharedServer();
+    const sm = EmulatedStorageManager.connectTo(server, { as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+    });
+    try {
+      const alreadyAborted = new AbortController();
+      alreadyAborted.abort();
+      let firstGateConsulted = false;
+      await runtime.awaitCommitRetryReadiness({
+        readyToRetry: () => {
+          firstGateConsulted = true;
+          return Promise.resolve();
+        },
+      }, alreadyAborted.signal);
+      expect(firstGateConsulted).toBe(true);
+
+      // Model teardown landing after the catch-up gate has settled but before
+      // the conflict-document pull begins. The helper removes its listener as
+      // it leaves the first wait; making that removal observe the teardown
+      // deterministically exercises the same inter-phase race without timing.
+      let abortedBetweenWaits = false;
+      const interveningSignal = {
+        get aborted() {
+          return abortedBetweenWaits;
+        },
+        addEventListener() {},
+        removeEventListener() {
+          abortedBetweenWaits = true;
+        },
+      } as unknown as AbortSignal;
+      await runtime.awaitCommitRetryReadiness({
+        readyToRetry: () => Promise.resolve(),
+        conflict: { space, of: "of:must-not-be-pulled" },
+      }, interveningSignal);
+      expect(abortedBetweenWaits).toBe(true);
+    } finally {
+      await runtime.dispose();
+      await sm.close();
+      await server.close();
+    }
+  });
+
   it("does not resume a reconciled edit after runtime disposal", async () => {
     const server = newSharedServer();
     const sm = EmulatedStorageManager.connectTo(server, { as: signer });
