@@ -18,12 +18,12 @@
  *
  * Which shard an object belongs to is a hash of its name, so the partition
  * is a property of the object rather than of the order objects were read
- * in. A run that dies part way is completed by the next run, which writes
- * the shards that are missing and leaves the rest alone. The shard count
- * is in every shard's name, so shards from two runs that sized a day
- * differently are separate objects rather than the same object with two
- * meanings. The manifest is written last, and a day counts as compacted
- * when it exists.
+ * in. How many shards there are is fixed by an object created before any
+ * of them, so a day is partitioned once however many runs reach it, and a
+ * run that dies part way is completed by the next one, which writes the
+ * shards that are missing and leaves the rest alone. The count is in every
+ * shard's name as well, so a shard says which partition it belongs to. The
+ * manifest is written last, and a day counts as compacted when it exists.
  *
  * Reader-side validation lives here: every line of every raw object goes
  * through the schema validators, and only what validated reaches a shard.
@@ -134,25 +134,55 @@ export interface RollupManifest {
 
 const SHARD_NAME = /^(\d{4,})-of-(\d{4,})\.ndjson$/;
 
+/** The object fixing how many shards a day is divided into. */
+export function rollupPartitionName(day: string): string {
+  return `${rollupPrefix(day)}partition.json`;
+}
+
 /**
- * The partitions a day's folder already holds shards of, read off their
- * names. A day is partitioned once: a run that finds shards there finishes
- * the partition that wrote them rather than starting a second one, so its
- * shard names agree with theirs and nothing an earlier run wrote is left
- * unreferenced. More than one partition means a folder no run should add
- * to.
+ * How many shards a day is divided into. This is created before any shard
+ * of the day, under the same precondition every write here uses, so a day
+ * is partitioned once however many runs reach it: the create that loses
+ * reads the count that won and works to that one. A run that finds a day
+ * part way through finishes it in the partition claimed for it, whatever
+ * the day would be sized at now, so no run leaves shards of a partition
+ * nothing names.
  */
-export function startedShardCounts(
+export interface RollupPartition {
+  schema: typeof RECORD_SCHEMA_VERSION;
+
+  /** The day partitioned, as "yyyy/mm/dd". */
+  day: string;
+
+  count: number;
+}
+
+/**
+ * Parses a partition, returning undefined for anything that is not one of
+ * this schema version for the day asked about.
+ */
+export function parseRollupPartition(
+  text: string,
   day: string,
-  present: readonly string[],
-): number[] {
-  const counts = new Set<number>();
-  for (const name of present) {
-    if (!name.startsWith(rollupPrefix(day))) continue;
-    const parts = SHARD_NAME.exec(name.slice(rollupPrefix(day).length));
-    if (parts !== null) counts.add(Number(parts[2]));
+): RollupPartition | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return undefined;
   }
-  return [...counts].sort((a, b) => a - b);
+  if (typeof value !== "object" || value === null) return undefined;
+  const partition = value as Record<string, unknown>;
+  if (partition.schema !== RECORD_SCHEMA_VERSION) return undefined;
+  if (partition.day !== day) return undefined;
+  if (!Number.isInteger(partition.count) || (partition.count as number) < 1) {
+    return undefined;
+  }
+  return {
+    schema: RECORD_SCHEMA_VERSION,
+    day,
+    count: partition.count as number,
+  };
 }
 
 /**
@@ -176,7 +206,12 @@ export function parseRollupManifest(
   const manifest = value as Record<string, unknown>;
   if (manifest.schema !== RECORD_SCHEMA_VERSION) return undefined;
   if (manifest.day !== day) return undefined;
-  if (!Array.isArray(manifest.shards)) return undefined;
+  // A manifest names the day, and a day with no shards is one no manifest
+  // is written for; taking an empty one would read as a day whose records
+  // are all accounted for by nothing.
+  if (!Array.isArray(manifest.shards) || manifest.shards.length === 0) {
+    return undefined;
+  }
   const shards: string[] = [];
   const seen = new Set<string>();
   let count: number | undefined;
@@ -326,6 +361,12 @@ export async function compactDays(options: CompactOptions): Promise<void> {
     if (options.fetchImpl !== undefined) readOptions.fetch = options.fetchImpl;
     return readObject(readOptions);
   };
+  const readText = async (name: string): Promise<string | undefined> => {
+    const res = await (options.fetchImpl ?? fetch)(objectUrl(bucket, name));
+    // Read and discard so the connection is reusable.
+    const text = await res.text();
+    return res.ok ? text : undefined;
+  };
   const create = (
     name: string,
     body: Uint8Array,
@@ -348,6 +389,29 @@ export async function compactDays(options: CompactOptions): Promise<void> {
     return createObject(createOptions);
   };
 
+  /** The partition claimed for a day, claiming this run's if none is. */
+  const partitionOf = async (
+    day: string,
+    count: number,
+  ): Promise<number | undefined> => {
+    const name = rollupPartitionName(day);
+    const claim: RollupPartition = {
+      schema: RECORD_SCHEMA_VERSION,
+      day,
+      count,
+    };
+    const written = await create(
+      name,
+      ENCODER.encode(JSON.stringify(claim)),
+      "application/json",
+    );
+    if (written === "created") return count;
+    const text = await readText(name);
+    return text === undefined
+      ? undefined
+      : parseRollupPartition(text, day)?.count;
+  };
+
   for (const day of closedDays(options.days, options.now)) {
     const present = await list(rollupPrefix(day));
     if (present.some((object) => object.name === rollupManifestName(day))) {
@@ -366,25 +430,33 @@ export async function compactDays(options: CompactOptions): Promise<void> {
       );
       continue;
     }
-    // A day already part way through a partition is finished in that
-    // partition, whatever it would be sized at now.
-    const started = startedShardCounts(
-      day,
-      present.map((object) => object.name),
-    );
-    if (started.length > 1) {
+    const partitionName = rollupPartitionName(day);
+    const partitioned = present.some((object) => object.name === partitionName);
+    const claimed = partitioned
+      ? parseRollupPartition(await readText(partitionName) ?? "", day)?.count
+      : undefined;
+    if (partitioned && claimed === undefined) {
       console.error(
-        `${day}: the folder holds shards of ${started.length} partitions ` +
-          `(${started.join(", ")}); leaving the day open`,
+        `${day}: ${partitionName} is not a partition of this day; ` +
+          "leaving the day open",
       );
       continue;
     }
-    const count = started[0] ?? shardCount(stored);
     if (plan) {
       console.log(
         `would compact ${day}: ${raw.length} object(s), ` +
-          `${(stored / 1e6).toFixed(1)} MB -> ${count} shard(s) under ` +
-          rollupPrefix(day),
+          `${(stored / 1e6).toFixed(1)} MB -> ` +
+          `${claimed ?? shardCount(stored)} shard(s) under ` +
+          rollupPrefix(day) +
+          (partitioned ? ", resuming the partition claimed for it" : ""),
+      );
+      continue;
+    }
+    const count = claimed ?? await partitionOf(day, shardCount(stored));
+    if (count === undefined) {
+      console.error(
+        `${day}: another run claimed a partition this one cannot read; ` +
+          "leaving the day open",
       );
       continue;
     }

@@ -7,7 +7,9 @@ import {
   COMPACTION_LAG_DAYS,
   parseCompactArgs,
   parseRollupManifest,
+  parseRollupPartition,
   rollupManifestName,
+  rollupPartitionName,
   rollupPrefix,
   rollupShardName,
   rollupShards,
@@ -118,7 +120,12 @@ function storeFetch(store: Store): typeof fetch {
       );
       const name = head.match(/"name":"([^"]+)"/)?.[1] ?? "unnamed";
       store.created[name] = payloadOf(body);
-      store.objects[name] = "";
+      // The JSON objects are stored as written, so a later run against the
+      // same store reads back what an earlier one put there; a shard's
+      // body is gzipped and no run reads one.
+      store.objects[name] = name.endsWith(".json")
+        ? new TextDecoder().decode(store.created[name]!)
+        : "";
       return Promise.resolve(new Response("{}", { status: 200 }));
     }
     if (url.includes("/storage/v1/")) {
@@ -252,6 +259,15 @@ describe("test-records-compact", () => {
         .toEqual(["0000-of-0003.ndjson", "0002-of-0003.ndjson"]);
     });
 
+    it("rejects a manifest naming no shard", () => {
+      // A day with no shards gets no manifest, so an empty one would say a
+      // day's records are all accounted for by nothing.
+      expect(parseRollupManifest(
+        JSON.stringify({ schema: 1, day: DAY, shards: [] }),
+        DAY,
+      )).toBeUndefined();
+    });
+
     it("rejects anything else", () => {
       expect(parseRollupManifest("not json", DAY)).toBeUndefined();
       expect(parseRollupManifest(good, "2026/08/12")).toBeUndefined();
@@ -269,6 +285,29 @@ describe("test-records-compact", () => {
         }),
         DAY,
       )).toBeUndefined();
+    });
+  });
+
+  describe("parseRollupPartition()", () => {
+    it("accepts a partition of the day asked about", () => {
+      expect(
+        parseRollupPartition(
+          JSON.stringify({ schema: 1, day: DAY, count: 17 }),
+          DAY,
+        )?.count,
+      ).toBe(17);
+    });
+
+    it("rejects anything else", () => {
+      const partition = (fields: Record<string, unknown>) =>
+        parseRollupPartition(JSON.stringify(fields), DAY);
+      expect(parseRollupPartition("not json", DAY)).toBeUndefined();
+      expect(partition({ schema: 2, day: DAY, count: 1 })).toBeUndefined();
+      expect(partition({ schema: 1, day: "2026/08/12", count: 1 }))
+        .toBeUndefined();
+      expect(partition({ schema: 1, day: DAY, count: 0 })).toBeUndefined();
+      expect(partition({ schema: 1, day: DAY, count: 1.5 })).toBeUndefined();
+      expect(partition({ schema: 1, day: DAY })).toBeUndefined();
     });
   });
 
@@ -313,6 +352,7 @@ describe("test-records-compact", () => {
       // is the layout docs/specs/test-records.md documents.
       expect(Object.keys(store.created).sort()).toEqual([
         "labs/test-records/aggregated/ci/v1/2026/08/11/0000-of-0001.ndjson",
+        "labs/test-records/aggregated/ci/v1/2026/08/11/partition.json",
         "labs/test-records/aggregated/ci/v1/2026/08/11/rollup.json",
       ]);
       expect(await compactedNames(store)).toEqual([
@@ -357,8 +397,10 @@ describe("test-records-compact", () => {
       });
       expect(Object.keys(store.created).sort()).toEqual([
         "labs/test-records/aggregated/ci/v1/2026/08/10/0000-of-0001.ndjson",
+        "labs/test-records/aggregated/ci/v1/2026/08/10/partition.json",
         "labs/test-records/aggregated/ci/v1/2026/08/10/rollup.json",
         "labs/test-records/aggregated/ci/v1/2026/08/11/0000-of-0001.ndjson",
+        "labs/test-records/aggregated/ci/v1/2026/08/11/partition.json",
         "labs/test-records/aggregated/ci/v1/2026/08/11/rollup.json",
       ]);
     });
@@ -418,7 +460,7 @@ describe("test-records-compact", () => {
 
       // A run that died after two shards, and then enough raw objects
       // arriving to size the day differently. The partition the first run
-      // started is the one the second finishes, so the shards it wrote are
+      // claimed is the one the second finishes, so the shards it wrote are
       // named by the manifest rather than left behind by a second
       // partition alongside them.
       const store = storeOf(
@@ -426,6 +468,8 @@ describe("test-records-compact", () => {
         [...bodies, ...casesOn(DAY, 40)],
         SHARD_TARGET_BYTES / 8,
       );
+      store.objects[rollupPartitionName(DAY)] = whole
+        .objects[rollupPartitionName(DAY)]!;
       for (const name of written.slice(0, 2)) store.objects[name] = "";
       await compactDays({ ...OPTIONS, fetchImpl: storeFetch(store) });
 
@@ -436,32 +480,52 @@ describe("test-records-compact", () => {
         .toBe(true);
     });
 
-    it("counts a shard another run already created as present", async () => {
+    it("names a shard another run created in the manifest", async () => {
       const store = storeOf(DAY, [buildObjectBody(contextOn(DAY), [RECORD])]);
       const inner = storeFetch(store);
-      // Every create loses the race, as a second run reaching the same
-      // shard names at the same moment would.
+      const shard = `${rollupPrefix(DAY)}0000-of-0001.ndjson`;
+      // The shard's create loses its race and the manifest's does not, as
+      // a run reaching a shard a concurrent run had just written would
+      // find.
       const raced = ((input: URL | RequestInfo, init?: RequestInit) => {
-        if (init?.method === "POST") {
+        const head = init?.method === "POST"
+          ? new TextDecoder("utf-8", { fatal: false })
+            .decode((init.body as Uint8Array).subarray(0, 512))
+          : "";
+        if (head.includes(`"name":"${shard}"`)) {
           return Promise.resolve(new Response("taken", { status: 412 }));
         }
         return inner(input, init);
       }) as typeof fetch;
-      const lines: string[] = [];
-      const log = console.log;
-      console.log = (line: string) => void lines.push(line);
-      try {
-        await compactDays({ ...OPTIONS, fetchImpl: raced });
-      } finally {
-        console.log = log;
-      }
-      expect(lines).toEqual([`${DAY}: another run's manifest got there first`]);
+      await compactDays({ ...OPTIONS, fetchImpl: raced });
+      expect(createdShards(store)).toEqual([]);
+      expect(createdManifest(store, DAY)?.shards)
+        .toEqual(["0000-of-0001.ndjson"]);
     });
 
-    it("leaves a day holding two partitions open", async () => {
+    it("takes the partition of the run that claimed it first", async () => {
+      // This run would size the day at five shards, and finds one claimed
+      // at two, so two is what it writes.
+      const store = storeOf(DAY, casesOn(DAY, 40), SHARD_TARGET_BYTES / 8);
+      store.objects[rollupPartitionName(DAY)] = JSON.stringify({
+        schema: 1,
+        day: DAY,
+        count: 2,
+      });
+      await compactDays({ ...OPTIONS, fetchImpl: storeFetch(store) });
+      expect(
+        createdShards(store).map((name) =>
+          name.slice(rollupPrefix(DAY).length)
+        ),
+      ).toEqual(["0000-of-0002.ndjson", "0001-of-0002.ndjson"]);
+      expect(await compactedNames(store)).toEqual(
+        casesOn(DAY, 40).map((_, index) => `case ${index}`).sort(),
+      );
+    });
+
+    it("leaves a day whose partition cannot be read open", async () => {
       const store = storeOf(DAY, [buildObjectBody(contextOn(DAY), [RECORD])]);
-      store.objects[`${rollupPrefix(DAY)}0000-of-0002.ndjson`] = "";
-      store.objects[`${rollupPrefix(DAY)}0000-of-0003.ndjson`] = "";
+      store.objects[rollupPartitionName(DAY)] = "not a partition";
       await compactDays({ ...OPTIONS, fetchImpl: storeFetch(store) });
       expect(Object.keys(store.created)).toEqual([]);
     });
@@ -475,7 +539,11 @@ describe("test-records-compact", () => {
     it("leaves a day with no records open", async () => {
       const store = storeOf(DAY, [buildObjectBody(contextOn(DAY), [])]);
       await compactDays({ ...OPTIONS, fetchImpl: storeFetch(store) });
-      expect(Object.keys(store.created)).toEqual([]);
+      // The partition is claimed before the day is read, so it stays; what
+      // says the day is not compacted is that no shard and no manifest
+      // followed it.
+      expect(createdShards(store)).toEqual([]);
+      expect(store.created[rollupManifestName(DAY)]).toBeUndefined();
     });
 
     it("writes nothing in plan mode, and reads no object body", async () => {

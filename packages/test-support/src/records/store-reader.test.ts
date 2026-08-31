@@ -62,6 +62,21 @@ describe("store-reader", () => {
       expect(urls[1]).toContain("pageToken=t2");
     });
 
+    it("skips a listing item that names no object", async () => {
+      const names = await listObjects({
+        bucket: "cf-ci-metadata",
+        prefix: "labs/test-records/",
+        fetch: (() =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({ items: [{ name: "a" }, {}, { name: "b" }] }),
+              { status: 200 },
+            ),
+          )) as typeof fetch,
+      });
+      expect(names).toEqual(["a", "b"]);
+    });
+
     it("throws for an error status", async () => {
       await expect(listObjects({
         bucket: "b",

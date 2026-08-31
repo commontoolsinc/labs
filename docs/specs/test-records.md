@@ -158,6 +158,7 @@ area, managed by the infra repository's `tofu/test-records` root:
 ```
 <repo>/test-records/submissions/ci/v1/<yyyy>/<mm>/<dd>/run-<runId>-<artifact>.ndjson
 <repo>/test-records/submissions/local/<username>/v1/<yyyy>/<mm>/<dd>/<reportId>-<slug>.ndjson
+<repo>/test-records/aggregated/ci/v1/<yyyy>/<mm>/<dd>/partition.json
 <repo>/test-records/aggregated/ci/v1/<yyyy>/<mm>/<dd>/0003-of-0017.ndjson
 <repo>/test-records/aggregated/ci/v1/<yyyy>/<mm>/<dd>/rollup.json
 ```
@@ -198,18 +199,22 @@ of thousands of raw objects becomes tens of shards.
 
 Which shard a raw object's reports go into is a hash of the object's name
 taken modulo the shard count, so the partition is a property of each
-object rather than of the order the compactor read them in. A day is
-partitioned once. The count is in every shard's name, so a run that finds
-shards already in a day's folder reads the count off them and finishes
-that partition, writing the shards that are missing and leaving the rest
-alone; nothing an earlier run wrote is left unreferenced, and no record
-reaches two shards. What a partition does not fix is which raw objects it
-covers: an object arriving between two runs is in the rollup when its
-shard is one of the ones still to be written, and in the raw area only
-otherwise, the same as any arrival after a day is compacted. The
-`rollup.json` manifest names the day's shards and is written after all of
-them, so a day counts as compacted when its manifest exists, and a reader
-that finds no manifest reads the raw area for that day.
+object rather than of the order the compactor read them in. How many
+shards there are is fixed by `partition.json`, written before any shard of
+the day under the same create-only precondition as everything else here,
+so a day is partitioned once however many runs reach it: the write that
+loses reads the count that won and works to that one. A run that finds a
+day part way through finishes it in the partition claimed for it, writing
+the shards that are missing and leaving the rest alone, so no run leaves
+shards of a partition nothing names and no record reaches two shards. The
+count is in every shard's name as well, so a shard says which partition it
+belongs to. What a partition does not fix is which raw objects it covers:
+an object arriving between two runs is in the rollup when its shard is one
+of the ones still to be written, and in the raw area only otherwise, the
+same as any arrival after a day is compacted. The `rollup.json` manifest
+names the day's shards and is written after all of them, so a day counts
+as compacted when its manifest exists, and a reader that finds no manifest
+reads the raw area for that day.
 
 ## CI movement
 
