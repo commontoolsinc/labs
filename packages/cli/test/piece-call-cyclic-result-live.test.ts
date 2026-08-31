@@ -343,10 +343,9 @@ describe("cf piece call on a piece that points back at its container", () => {
   });
 
   //
-  // The other half of "a caller's own shape wins"
+  // A selection that asks for an address and keeps a circle
   //
-  // The pair below is the other half of "a caller's own shape wins": a
-  // selection that asks for an ADDRESS at one position and keeps the circle at
+  // The pair here asks for an ADDRESS at one position and keeps the circle at
   // another. The address is the caller's whole answer where they asked for it,
   // and a bound that closed the object over the declared fields instead would
   // answer `{}` there — contents where an address was asked for, which reads as
@@ -471,9 +470,9 @@ describe("cf piece call on a piece that points back at its container", () => {
   //
   // The `--filter` pair
   //
-  // The `--filter` pair, and the same contrast: a predicate hands back the
-  // elements themselves, so it can only keep a circle, never narrow past one.
-  // What decides between the two is the projection written beside it.
+  // A predicate hands back the elements themselves, so it can only keep a
+  // circle, never narrow past one. What decides between the two is the
+  // projection written beside it.
   //
 
   it("returns the elements a `--filter` keeps where the projection beside it renders", async () => {
@@ -535,8 +534,9 @@ describe("cf piece call on a piece that points back at its container", () => {
   //
   // When the result will not render, and what that costs
   //
-  // What the command does when the result will not render, and that it
-  // does not pay to produce what it will not use.
+  // A result the command cannot render is refused with the committed write
+  // named, and the declaration behind that bound is reached for only where
+  // the refusal needs it.
   //
 
   it("refuses legibly, naming the committed write, where the declaration bounds nothing", async () => {
@@ -617,7 +617,7 @@ describe("cf piece call on a piece that points back at its container", () => {
   //
   // Miscellaneous cases
   //
-  // Cases that belong to none of the pairs above.
+  // Cases that belong to none of the groups above.
   //
 
   it("returns that position alone for a `--select` naming the closing position", async () => {

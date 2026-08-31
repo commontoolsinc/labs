@@ -714,10 +714,11 @@ Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () =
 Deno.test("a configured presence URL reaches every shell bundle CI builds", async () => {
   // Both shells CI builds take their co-presence endpoint from a repository
   // variable, and an unset variable is a supported state that builds a working
-  // shell. Every check the wiring performs therefore sits inside an `if [ -n
-  // "$PRESENCE_URL" ]` that a repository without the variable never enters, so
-  // those checks cannot report on the wiring itself: remove the wiring and the
-  // same runs stay green. The properties a configured value depends on are
+  // shell. Every check the wiring performs therefore sits inside an
+  // `if [ -n "$PRESENCE_URL" ]` that a repository without the variable never
+  // enters, so those checks cannot report on the wiring itself: remove the
+  // wiring and the same runs stay green. The properties a configured value
+  // depends on are
   // checked here instead, against the workflow text, where repository
   // configuration does not get to decide whether the check runs.
 
