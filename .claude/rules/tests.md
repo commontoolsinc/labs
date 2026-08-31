@@ -45,7 +45,7 @@ authority, and a new test file is a reason to open it rather than to copy a
 neighbor. Not every file in the tree follows it, so what sits beside you in
 the same directory is not evidence of what to write.
 
-The five rules its readers most often get wrong by defaulting to the
+The eight rules its readers most often get wrong by defaulting to the
 surrounding code:
 
 - BDD only — `describe()` / `it()` / `beforeEach()` from `@std/testing/bdd`,
@@ -68,10 +68,14 @@ surrounding code:
   `describe()` of their own, or says one thing per case and belongs in each.
   Wrapping a run renames every test in it; bridge the rename per
   `docs/development/test-records.md`.
-- A section marker covers the region up to the next marker or the end of the
-  block, so writing one means choosing where it ends and putting a marker
-  there. Its title is a claim about everything in that region, and the region
-  holds the helpers and fixtures sitting in it as well as the blocks. Moving
+- A section marker is a `//` frame: an opening `//` line, a noun-phrase title,
+  optionally a blank `//` line and a description, and a closing `//` line, set
+  off by a blank line below it and above it where there is anything above.
+- A section marker covers the region up to the next marker at the same level,
+  or the end of the block, so writing one means choosing where it ends and
+  putting a marker there. Its title is a claim about everything in that
+  region, and the region holds the helpers and fixtures sitting in it as well
+  as the blocks, so shared setup goes above the file's first marker. Moving
   or deleting a comment takes away whatever boundary it was providing for the
   region above it. None of this is checked mechanically; a file that reads
   better than the rule wins.

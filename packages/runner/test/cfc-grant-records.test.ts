@@ -112,6 +112,157 @@ const aliceShareFact = (audience: CfcAtom = userBob) => ({
 });
 
 describe("CFC grant records (§8.12.7 route 2a)", () => {
+  // The shared harness every region below draws on: a labeled cell, a
+  // policyState-guarded sink rule, a Runtime, and the grant writer and reader.
+
+  const SECRET_SCHEMA = internSchema(
+    {
+      type: "object",
+      properties: {
+        secret: { type: "string", ifc: { confidentiality: ["never-fits"] } },
+      },
+      required: ["secret"],
+    } satisfies JSONSchema,
+    true,
+  );
+
+  const seedLabeledCell = async (
+    runtime: Runtime,
+    id: string,
+    label: IFCLabel,
+  ): Promise<void> => {
+    const seed = runtime.edit();
+    const target = runtime.getCell(signer.did(), id, undefined, seed);
+    const targetId = target.getAsNormalizedFullLink().id;
+    seed.writeOrThrow({
+      space: signer.did(),
+      scope: "space",
+      id: targetId,
+      path: [],
+    }, {
+      value: { secret: "rosebud" },
+      cfc: {
+        version: 1,
+        schemaHash: SECRET_SCHEMA.taggedHashString,
+        labelMap: { version: 1, entries: [{ path: ["secret"], label }] },
+      },
+    });
+    seed.writeOrThrow({
+      space: signer.did(),
+      scope: "space",
+      id: `cid:${SECRET_SCHEMA.taggedHashString}`,
+      path: [],
+    }, { value: SECRET_SCHEMA.schema });
+    expect((await seed.commit()).ok).toBeDefined();
+  };
+
+  // The §13.4.4 rule at the network egress boundary: the acting owner's
+  // User(...) clause gains the grant's audience as an alternative.
+  const sinkShareRule: ExchangeRule = shareRule({
+    preCondition: {
+      policyState: [{
+        kind: "ShareGrant",
+        owner: { var: "$owner" },
+        resource: PHOTO_REF,
+        audience: { type: CFC_ATOM_TYPE.User, subject: { var: "$recipient" } },
+      }],
+      boundary: [{
+        type: CFC_ATOM_TYPE.BoundaryContext,
+        key: "sinkClass",
+        value: "network",
+      }],
+    },
+  });
+
+  const withRuntime = async (
+    opts: {
+      policyEvaluation?: "off" | "observe" | "enforce";
+      enforcement?: "enforce-explicit" | "observe" | "disabled";
+      flowLabels?: "off" | "observe" | "persist";
+      storageManager?: ReturnType<typeof StorageManager.emulate>;
+    },
+    body: (
+      runtime: Runtime,
+      storageManager: ReturnType<typeof StorageManager.emulate>,
+    ) => void | Promise<void>,
+  ): Promise<void> => {
+    const storageManager = opts.storageManager ??
+      StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: opts.enforcement ?? "enforce-explicit",
+      cfcFlowLabels: opts.flowLabels ?? "off",
+      cfcSinkMaxConfidentiality: { fetchJson: [userBob] },
+      cfcPolicyRecords: [{ id: "share-policy", rules: [sinkShareRule] }],
+      cfcPolicyEvaluation: opts.policyEvaluation ?? "enforce",
+    });
+    try {
+      await body(runtime, storageManager);
+    } finally {
+      await runtime.dispose();
+      if (opts.storageManager === undefined) {
+        await storageManager.close();
+      }
+    }
+  };
+
+  const writeGrant = async (
+    runtime: Runtime,
+    overrides: Record<string, unknown> = {},
+  ): Promise<{ space: string; id: string }> => {
+    const tx = runtime.edit();
+    // The trusted policy-writer authors under a builtin identity — the same
+    // way the llm/compile-cache builtins author their runtime-evidence
+    // writes (codex P1 on #4627).
+    tx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "cfc-grant-writer",
+    });
+    const written = tx.writeCfcGrant({
+      kind: "ShareGrant",
+      owner: signer.did(),
+      resource: PHOTO_REF,
+      audience: [userBob],
+      grantedAt: 1000,
+      ...overrides,
+    });
+    const result = await tx.commit();
+    expect(result.ok).toBeDefined();
+    return written;
+  };
+
+  const readThenSink = (
+    runtime: Runtime,
+    id: string,
+    { abort = true }: { abort?: boolean } = {},
+  ) => {
+    const tx = runtime.edit();
+    const cell = runtime.getCell(signer.did(), id, SECRET_SCHEMA.schema, tx);
+    expect(cell.key("secret").get()).toBe("rosebud");
+    enqueueSinkRequestPostCommitEffect(
+      tx,
+      "fetchJson",
+      "fetchJson:grant-records-test",
+      createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
+      "fetchJson-start",
+      () => {},
+    );
+    tx.prepareCfc();
+    const state = tx.getCfcState();
+    const reasons = state.prepare.status === "invalidated"
+      ? [...state.prepare.reasons]
+      : [];
+    const result = {
+      tx,
+      reasons,
+      diagnostics: [...state.diagnostics],
+      prepare: state.prepare,
+    };
+    if (abort) tx.abort();
+    return result;
+  };
+
   //
   // Build-order item 1: the `policyState` guard kind.
   //
@@ -405,161 +556,6 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       expect(facts[1]).toMatchObject({ audience: userCarol, owner: ALICE });
     });
   });
-
-  //
-  // Shared harness
-  //
-  // A labeled cell, a policyState-guarded sink rule, a Runtime, and the grant
-  // writer and reader the regions below share.
-  //
-
-  const SECRET_SCHEMA = internSchema(
-    {
-      type: "object",
-      properties: {
-        secret: { type: "string", ifc: { confidentiality: ["never-fits"] } },
-      },
-      required: ["secret"],
-    } satisfies JSONSchema,
-    true,
-  );
-
-  const seedLabeledCell = async (
-    runtime: Runtime,
-    id: string,
-    label: IFCLabel,
-  ): Promise<void> => {
-    const seed = runtime.edit();
-    const target = runtime.getCell(signer.did(), id, undefined, seed);
-    const targetId = target.getAsNormalizedFullLink().id;
-    seed.writeOrThrow({
-      space: signer.did(),
-      scope: "space",
-      id: targetId,
-      path: [],
-    }, {
-      value: { secret: "rosebud" },
-      cfc: {
-        version: 1,
-        schemaHash: SECRET_SCHEMA.taggedHashString,
-        labelMap: { version: 1, entries: [{ path: ["secret"], label }] },
-      },
-    });
-    seed.writeOrThrow({
-      space: signer.did(),
-      scope: "space",
-      id: `cid:${SECRET_SCHEMA.taggedHashString}`,
-      path: [],
-    }, { value: SECRET_SCHEMA.schema });
-    expect((await seed.commit()).ok).toBeDefined();
-  };
-
-  // The §13.4.4 rule at the network egress boundary: the acting owner's
-  // User(...) clause gains the grant's audience as an alternative.
-  const sinkShareRule: ExchangeRule = shareRule({
-    preCondition: {
-      policyState: [{
-        kind: "ShareGrant",
-        owner: { var: "$owner" },
-        resource: PHOTO_REF,
-        audience: { type: CFC_ATOM_TYPE.User, subject: { var: "$recipient" } },
-      }],
-      boundary: [{
-        type: CFC_ATOM_TYPE.BoundaryContext,
-        key: "sinkClass",
-        value: "network",
-      }],
-    },
-  });
-
-  const withRuntime = async (
-    opts: {
-      policyEvaluation?: "off" | "observe" | "enforce";
-      enforcement?: "enforce-explicit" | "observe" | "disabled";
-      flowLabels?: "off" | "observe" | "persist";
-      storageManager?: ReturnType<typeof StorageManager.emulate>;
-    },
-    body: (
-      runtime: Runtime,
-      storageManager: ReturnType<typeof StorageManager.emulate>,
-    ) => void | Promise<void>,
-  ): Promise<void> => {
-    const storageManager = opts.storageManager ??
-      StorageManager.emulate({ as: signer });
-    const runtime = new Runtime({
-      apiUrl: new URL("https://example.com"),
-      storageManager,
-      cfcEnforcementMode: opts.enforcement ?? "enforce-explicit",
-      cfcFlowLabels: opts.flowLabels ?? "off",
-      cfcSinkMaxConfidentiality: { fetchJson: [userBob] },
-      cfcPolicyRecords: [{ id: "share-policy", rules: [sinkShareRule] }],
-      cfcPolicyEvaluation: opts.policyEvaluation ?? "enforce",
-    });
-    try {
-      await body(runtime, storageManager);
-    } finally {
-      await runtime.dispose();
-      if (opts.storageManager === undefined) {
-        await storageManager.close();
-      }
-    }
-  };
-
-  const writeGrant = async (
-    runtime: Runtime,
-    overrides: Record<string, unknown> = {},
-  ): Promise<{ space: string; id: string }> => {
-    const tx = runtime.edit();
-    // The trusted policy-writer authors under a builtin identity — the same
-    // way the llm/compile-cache builtins author their runtime-evidence
-    // writes (codex P1 on #4627).
-    tx.setCfcImplementationIdentity({
-      kind: "builtin",
-      builtinId: "cfc-grant-writer",
-    });
-    const written = tx.writeCfcGrant({
-      kind: "ShareGrant",
-      owner: signer.did(),
-      resource: PHOTO_REF,
-      audience: [userBob],
-      grantedAt: 1000,
-      ...overrides,
-    });
-    const result = await tx.commit();
-    expect(result.ok).toBeDefined();
-    return written;
-  };
-
-  const readThenSink = (
-    runtime: Runtime,
-    id: string,
-    { abort = true }: { abort?: boolean } = {},
-  ) => {
-    const tx = runtime.edit();
-    const cell = runtime.getCell(signer.did(), id, SECRET_SCHEMA.schema, tx);
-    expect(cell.key("secret").get()).toBe("rosebud");
-    enqueueSinkRequestPostCommitEffect(
-      tx,
-      "fetchJson",
-      "fetchJson:grant-records-test",
-      createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
-      "fetchJson-start",
-      () => {},
-    );
-    tx.prepareCfc();
-    const state = tx.getCfcState();
-    const reasons = state.prepare.status === "invalidated"
-      ? [...state.prepare.reasons]
-      : [];
-    const result = {
-      tx,
-      reasons,
-      diagnostics: [...state.diagnostics],
-      prepare: state.prepare,
-    };
-    if (abort) tx.abort();
-    return result;
-  };
 
   describe("sanctioned grant writer (trusted policy-writer path)", () => {
     it("writes a grant document at the derived id, committable in enforce mode", async () => {
