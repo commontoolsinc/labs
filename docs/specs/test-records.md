@@ -171,10 +171,10 @@ which cannot read, list, overwrite, or delete; nothing already stored can
 be modified by any append credential. An incompatible schema writes under
 `v2/` and readers migrate at their own pace.
 
-Three writer principals exist. The **relay** — the only CI principal —
-holds create on `submissions/ci/` through a Workload Identity provider
-pinned to one workflow file on the default branch, with the impersonation
-binding keyed to that exact workflow ref. **People** hold per-person
+Four writer principals exist. The **relay** — the only one that writes
+what CI produced — holds create on `submissions/ci/` through a Workload
+Identity provider pinned to one workflow file on the default branch, with
+the impersonation binding keyed to that exact workflow ref. **People** hold per-person
 service accounts (`test-records-gh-<username>`, the login lowercased)
 with create on their own `submissions/local/<username>/` folders, minted
 by a dispatch-gated workflow and delivered sealed to a
@@ -183,8 +183,9 @@ previous keys before the new one exists — a person holds one live key,
 never two, and re-requesting is how a lost or compromised key is
 rotated — and a daily
 janitor disables accounts after a month without pull-request activity
-and re-enables them on return. The **compactor**, when provisioned,
-holds create on `aggregated/` and rewrites each closed day of raw
+and re-enables them on return. The **compactor** holds create on
+`aggregated/` through a provider pinned to its own daily workflow file,
+the relay's arrangement again, and rewrites each closed day of raw
 records — after a seven-day late-arrival lag — as validated rollup shards
 that keep each report's context line ahead of its records; a day with
 no records stays open, since a write-once rollup would permanently

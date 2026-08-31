@@ -16,6 +16,7 @@ import {
   SHARD_TARGET_BYTES,
   shardCount,
   shardOf,
+  writeToken,
 } from "./test-records-compact.ts";
 import {
   buildObjectBody,
@@ -634,6 +635,28 @@ describe("test-records-compact", () => {
       await compactDays({ ...OPTIONS, plan: true, fetchImpl: watched });
       expect(Object.keys(store.created)).toEqual([]);
       expect(reads).toEqual([]);
+    });
+  });
+
+  describe("writeToken()", () => {
+    it("reads the federated token the workflow supplies", () => {
+      expect(
+        writeToken((name) =>
+          name === "TEST_RECORDS_GCS_TOKEN" ? "token-1" : undefined
+        ),
+      ).toBe("token-1");
+    });
+
+    it("has no token to offer anywhere else", () => {
+      // The compactor's identity exists as no key, so there is nothing to
+      // fall back to and a run outside the workflow must say so rather
+      // than reach the store with a credential meant for something else.
+      expect(writeToken(() => undefined)).toBeUndefined();
+      expect(
+        writeToken((name) =>
+          name === "TEST_RECORDS_GCS_TOKEN" ? "" : "other-value"
+        ),
+      ).toBeUndefined();
     });
   });
 

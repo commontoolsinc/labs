@@ -1,0 +1,92 @@
+# Rewrites each closed day of raw test records as a handful of rollup
+# shards under the dataset's aggregated/ area, so a full-history reader
+# fetches a few objects per day instead of every object written that day.
+# Its Google Cloud identity comes from a Workload Identity Federation
+# provider pinned to exactly this workflow file on main, so no other
+# workflow, ref, or repository can mint it, and no key for it exists
+# anywhere (infra: tofu/test-records). Compaction is a read optimization:
+# the raw area stays the full-fidelity record, nothing gates on a rollup,
+# and a failed run is completed by the next one.
+
+name: Test Records Compaction
+
+on:
+  schedule:
+    # Daily. The compactor only touches days that closed a week ago, so
+    # the hour carries no meaning beyond staying off the top of it.
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: How far back to look, in days (at least 7; default 14)
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+
+# A second run would write shards the first is already writing. They
+# would collide rather than corrupt — every name is deterministic and the
+# credential cannot overwrite — but the work would be wasted. The running
+# one is left alone rather than cancelled, because what it has already
+# written stands.
+concurrency:
+  group: test-records-compaction
+  cancel-in-progress: false
+
+jobs:
+  compact:
+    name: "Compact Test Records"
+    # The provider variable gates the job. Where test records are not
+    # provisioned there is no identity to assume and nothing to compact.
+    if: vars.TEST_RECORDS_COMPACTOR_WIF_PROVIDER != ''
+    runs-on: ubuntu-latest
+    steps:
+      # Every third-party action in this credentialed workflow is pinned
+      # to an immutable commit, so a moved tag cannot alter the one
+      # privileged write path.
+      - name: 📥 Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+        with:
+          cache: false
+
+      - name: 🔑 Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: commontools-core
+          workload_identity_provider: ${{ vars.TEST_RECORDS_COMPACTOR_WIF_PROVIDER }}
+          service_account: ${{ vars.TEST_RECORDS_COMPACTOR_SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: false
+
+      # The dispatch input reaches the shell through the environment
+      # rather than through expansion into the script. An expansion is
+      # substituted before the shell parses the line, so a crafted value
+      # would run as part of this step — which is the step holding the
+      # access token. The window is quoted, then checked against the one
+      # shape it may take before it becomes an argument.
+      - name: 📊 Compact closed days
+        env:
+          TEST_RECORDS_GCS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          TEST_RECORDS_BUCKET: ${{ vars.TEST_RECORDS_BUCKET }}
+          TEST_RECORDS_PREFIX: ${{ vars.TEST_RECORDS_PREFIX }}
+          COMPACT_DAYS: ${{ inputs.days }}
+        run: |
+          set -euo pipefail
+          if [ -n "${COMPACT_DAYS}" ]; then
+            case "${COMPACT_DAYS}" in
+              ''|*[!0-9]*)
+                echo "days must be a whole number of days" >&2
+                exit 1
+                ;;
+            esac
+            deno run --allow-read --allow-env --allow-net \
+              tasks/test-records-compact.ts --days "${COMPACT_DAYS}"
+          else
+            deno run --allow-read --allow-env --allow-net \
+              tasks/test-records-compact.ts
+          fi
