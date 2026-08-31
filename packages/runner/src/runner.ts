@@ -232,6 +232,7 @@ type InternalCellDescriptor = {
    * re-materialize the cell under its new id rather than reuse the old link.
    */
   kind?: EntityKind;
+
   link: SigilLink;
 };
 
@@ -963,10 +964,12 @@ export interface PieceSourceRevision {
 
   /** Link retaining the exact content-addressed source closure. */
   source: SigilLink;
+
   origin?: string;
 
   /** The legacy origin string, when normalizing it changed its value. */
   recordedOrigin?: string;
+
   operation: PieceSourceRevisionOperation;
   selectedRevisionId?: string;
 }
@@ -1037,6 +1040,7 @@ export interface PieceSourceTransition {
 
   /** The active origin after the transition. Null means detached. */
   origin: string | null;
+
   expected: PieceSourceSnapshot;
   selectedRevisionId?: string;
 }
@@ -1714,6 +1718,7 @@ export class Runner {
   ): { identity: string; symbol: string } | undefined {
     return this.sessionPatternPointers.get(this.getDocKey(resultCell));
   }
+
   // SESSION-side pattern-swap channel for RUNNING pieces, the third stamp
   // stand-in: a re-derived child (a lift returning a pattern) used to reach
   // its running piece's swap machinery THROUGH the durable stamp — setup

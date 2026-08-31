@@ -713,6 +713,7 @@ export interface ProductionServerPresetParams extends CoreParams {
    * `apiUrl` carries MEMORY_URL.
    */
   patternApiUrl?: URL;
+
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   telemetry?: RuntimeTelemetry;
@@ -745,12 +746,14 @@ export interface RemoteClientPresetParams extends CoreParams {
    * in `coreOptions`.
    */
   cfcEnforcementMode?: CfcEnforcementMode;
+
   cfcFlowLabels?: CfcFlowLabelsMode;
 }
 
 export interface PatternTestPresetParams extends CoreParams {
   /** Mock fetch honoring test-declared `fetchMocks` (CT-1768). */
   fetch?: RuntimeFetch;
+
   errorHandlers?: ErrorHandler[];
   navigateCallback?: NavigateCallback;
   moduleByteCache?: ModuleByteCache;
@@ -771,6 +774,7 @@ export interface BrowserWorkerPresetParams extends CoreParams {
 
   /** Host-controlled rollout dials, from `InitializationData`. */
   cfcEnforcementMode?: CfcEnforcementMode;
+
   cfcFlowLabels?: CfcFlowLabelsMode;
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
   telemetry?: RuntimeTelemetry;
@@ -786,6 +790,7 @@ export interface BrowserWorkerPresetParams extends CoreParams {
 export interface UnitTestPresetParams extends Omit<CoreParams, "experimental"> {
   /** Optional here (unlike the first-party presets): unit tests default to no flags. */
   experimental?: ExperimentalOptions;
+
   fetch?: RuntimeFetch;
   errorHandlers?: ErrorHandler[];
   moduleByteCache?: ModuleByteCache;

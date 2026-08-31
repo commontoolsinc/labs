@@ -708,6 +708,7 @@ const cascadeDestination = () => {
 
   /** The confirmed read seq the NEXT seal reports (the entry's floor). */
   let nextFloor = 40;
+
   const confirmedSeqs = new Map<string, number>();
   const verdicts = new Map<number, Promise<unknown>>();
   const replica = {
@@ -833,6 +834,7 @@ const cascadeDestination = () => {
       value.entries![index].consequenced = true;
     }, [["value", "entries", String(index), "consequenced"]]);
   };
+
   const markDropped = (index: number, markSeq = 42 + index) => {
     confirmedSeqs.set(W21_SIDECAR, markSeq);
     scripted.deliver(SPACE, W21_SIDECAR, (value) => {

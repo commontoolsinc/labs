@@ -890,6 +890,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   get scopeKeyIdentity(): ScopeKeyIdentity | undefined {
     return this.#scopeKeyIdentity;
   }
+
   set scopeKeyIdentity(identity: ScopeKeyIdentity | undefined) {
     if (identity === undefined) return;
     const current = this.#scopeKeyIdentity;

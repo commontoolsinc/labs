@@ -10,6 +10,7 @@ import type { Action, ReactivityLog, SpaceScopeAndURI } from "./types.ts";
 export interface MaterializerIndexState {
   /** Identity entity keys resolve scoped addresses against (keys.ts). */
   readonly scopeKeyIdentity: () => ScopeKeyIdentity;
+
   readonly materializersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly effects: ReadonlySet<Action>;
   getMaterializerWriteEnvelopes(

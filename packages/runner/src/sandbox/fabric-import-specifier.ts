@@ -12,6 +12,7 @@ export interface FabricRef {
 
   /** Space name or DID; absent = the compiling space. */
   space?: string;
+
   ref:
     | { kind: "slug"; slug: string }
     | { kind: "uri"; scheme: EntityUriScheme | "pattern"; hash: string };

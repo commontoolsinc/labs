@@ -61,6 +61,7 @@ type FetchInputs = {
 
   /** fetchJson only. */
   schema?: JSONSchema;
+
   options?: FetchRequestOptions;
 };
 
@@ -325,6 +326,7 @@ function fetchBuiltin(kind: FetchKind) {
      * read as the ending of the second.
      */
     let currentStaging: symbol | undefined = undefined;
+
     let abortController: AbortController | undefined = undefined;
 
     // This is called when the pattern containing this node is being stopped.

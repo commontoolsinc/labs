@@ -76,6 +76,7 @@ export type TraverseFixture = {
 
   /** Full fact values keyed by `space|scope|id|type`. */
   docs: Record<string, FabricValue>;
+
   invocations: TraverseFixtureInvocation[];
 };
 
@@ -97,6 +98,7 @@ export class TraverseCaptureRecorder {
    * `test/traverse-replay/profile.ts` drives this member directly.
    */
   private invocations: TraverseFixtureInvocation[] = [];
+
   #selectors: SchemaPathSelector[] = [];
   #selectorIndex = new Map<string, number>();
   #links: NormalizedFullLink[] = [];

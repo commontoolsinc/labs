@@ -70,11 +70,13 @@ export type QueuedEventAppend = {
 
   /** The durable client-minted event id (event-identity). */
   eventId: string;
+
   payload?: FabricValue;
 
   /** The one client-minted firedAt component (events.md §1): orders
    * this session's own appends and steers nothing. */
   clientSeq: number;
+
   runtimeInjectedEventKeys?: string[];
 
   /** See StreamEventEntry.rendererTrusted (fan-out stage B). */
@@ -202,10 +204,12 @@ export class EventAppendQueue {
   /** OW27 pacing: the per-stream token buckets (keyed by sidecar doc id
    * — one per stream), or undefined when pacing is disabled. */
   readonly #pacing: EventAppendPacing | undefined;
+
   readonly #buckets = new Map<string, { tokens: number; refilledAt: number }>();
 
   /** DIAGNOSTIC (tests): sends held by pacing so far. */
   #pacedHolds = 0;
+
   #loaded: Promise<void>;
 
   /** The tail of the save chain — `persisted` awaits it (tests, and
@@ -224,6 +228,7 @@ export class EventAppendQueue {
      * across other commits, and a session-replacement resubmit needs a
      * fresh one anyway. */
     nextLocalSeq: () => number;
+
     store?: EventAppendQueueStore;
     onRefused?: (append: QueuedEventAppend, reason: string) => void;
 

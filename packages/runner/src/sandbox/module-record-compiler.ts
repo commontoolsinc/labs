@@ -56,10 +56,11 @@ export function dataFileSpecifier(path: string): string {
 }
 
 /**
- * Memo of the two pure derivations {@link buildRecordsFromCompiled} extracts
- * from a module's compiled body: its direct export surface (names + `export *`
- * target specifiers) and its runtime `require()` specifiers. **Keyed by the
- * compiled body itself** — both derivations are pure functions of that body.
+ * Memo of one of the two pure derivations {@link buildRecordsFromCompiled}
+ * extracts from a module's compiled body: its direct export surface (names +
+ * `export *` target specifiers). Its partner is `importParseCache` below.
+ * **Keyed by the compiled body itself** — both derivations are pure functions
+ * of that body.
  *
  * At piece boot every system pattern loaded by identity rebuilds its record
  * graph from the SAME shared module closure, so `buildRecordsFromCompiled` runs
@@ -75,7 +76,7 @@ export function dataFileSpecifier(path: string): string {
  * body's parse for another; the body fully determines the parse, so a body key
  * is exact and cross-contamination is impossible.
  *
- * The two maps are process-global and unbounded by design: one small
+ * Both maps are process-global and unbounded by design: one small
  * record-surface entry (export names + import specifiers) per distinct compiled
  * body, retained for the process lifetime and keyed by the body string. Distinct
  * bodies are bounded by the pattern universe a worker serves; a long-lived
@@ -89,6 +90,12 @@ const exportParseCache = new Map<
   string,
   { exportNames: readonly string[]; starTargetSpecs: readonly string[] }
 >();
+
+/**
+ * Memo of the other derivation: the module body's runtime `require()`
+ * specifiers. Same key, same lifetime, and same reasoning as
+ * `exportParseCache` above.
+ */
 const importParseCache = new Map<string, readonly string[]>();
 
 function parseCompiledExports(
@@ -383,6 +390,7 @@ export interface CompileSourcesOptions {
    * `cf:runtime/<specifier>`; the caller must register a matching record.
    */
   runtimeModules?: Record<string, string[]>;
+
   runtimeFingerprint?: string;
 
   /**
@@ -1026,6 +1034,7 @@ export interface CachedCompiledModule {
    * which parses and writes the surface back for later warm loads.
    */
   exportNames?: readonly string[];
+
   starTargetSpecs?: readonly string[];
   importSpecs?: readonly string[];
 

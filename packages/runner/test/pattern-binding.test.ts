@@ -723,6 +723,7 @@ describe("pattern-binding", () => {
         { derivedInternalCells: [{ partialCause: "a" }] },
       ) as T;
     };
+
     const alias = () => ({ $alias: { partialCause: "a", path: [] } });
 
     it("returns a binding with nothing to rebind by identity", () => {

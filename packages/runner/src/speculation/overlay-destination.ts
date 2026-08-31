@@ -285,6 +285,7 @@ export class SpeculationOverlayDestination
    * already terminal has no job — the authoritative consequences exist
    * (speculation.md §4 step 2) — and is not registered. */
   readonly #terminalIntents = new Set<string>();
+
   static readonly #MAX_TERMINAL_INTENTS = 4096;
 
   /** The client cascade THREAD (stage C W2.1): cascade child eventId →
@@ -311,6 +312,7 @@ export class SpeculationOverlayDestination
 
   /** DIAGNOSTIC counters (tests). */
   #arrivalSweeps = 0;
+
   #lateEchoDrops = 0;
 
   /** Stage C W2.1: cascade-child echoes retired because an ANCESTOR
@@ -319,6 +321,7 @@ export class SpeculationOverlayDestination
    * wrote had yet moved past their read basis in the replica — the
    * flicker witness (see `retireIntent`). */
   #cascadeEchoRetirements = 0;
+
   #cascadeEchoRetirementsUnarrived = 0;
 
   /** F6 telemetry (combined review 2026-08-19): the silent-strand
@@ -329,6 +332,7 @@ export class SpeculationOverlayDestination
    * posture, with nothing else to see. Zero in every expected
    * workload; nonzero is the signal to look. */
   #cascadeThreadEvictions = 0;
+
   #cascadeWalkDepthCaps = 0;
 
   /** space -> last observed watermark (for registration-time sweeps). */
@@ -369,6 +373,7 @@ export class SpeculationOverlayDestination
   /** DIAGNOSTIC counters (tests; the `commonfabric.*` surface reads the
    * logger keys — `speculation-overlay/intent-*`). */
   #intentCheckCount = 0;
+
   #intentCheckVisits = 0;
   #intentCheckMaxVisits = 0;
   #intentListenerInstalls = 0;
@@ -395,6 +400,7 @@ export class SpeculationOverlayDestination
   /** Resolvers parked by `waitForIntentQuiescence`, flushed by the same
    * untrack step that empties the outstanding-intent set (and by close). */
   #intentQuiescenceWaiters: Array<() => void> = [];
+
   #closed = false;
 
   constructor(runtime: Runtime) {
@@ -431,6 +437,7 @@ export class SpeculationOverlayDestination
    * neutralized start's authored commit usually LOSES its create-only
    * race to the serving side and vanishes whole. */
   #eventEchoSeals = 0;
+
   get eventEchoSealCount(): number {
     return this.#eventEchoSeals;
   }
@@ -1620,6 +1627,7 @@ export class SpeculationOverlayDestination
     /** The mark frame's seq (the sidecar's confirmed seq at this check);
      * 0 = unknown → the witness does not count. */
     let markSeq: number | undefined;
+
     for (const entry of [...entries.values()]) {
       const own = entry.eventId === eventId;
       if (!own && !this.#cascadeReaches(entry, eventId)) continue;

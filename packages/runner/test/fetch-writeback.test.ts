@@ -46,6 +46,7 @@ const space = signer.did();
 
 /** The inputs every case in this file writes back against. */
 const INPUTS = { url: "http://mock-test-server.local/api/writeback" };
+
 const INPUT_HASH = computeInputHashFromValue(INPUTS);
 
 /**

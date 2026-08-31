@@ -388,6 +388,7 @@ export type ImplementationIdentity =
 
     /** Export/`__cfReg` symbol of the registered factory, when module-scope. */
     symbol?: string;
+
     sourceFile?: string;
     bindingPath?: string[];
     codeHash?: string;
@@ -507,6 +508,7 @@ export type PreparedDigestInput = {
    * shape; docs/specs/cfc-write-prefix-provenance.md §6).
    */
   readonly writeAttemptLog: readonly OrderedWriteAttempt[];
+
   readonly dereferenceTraces: readonly CfcDereferenceTrace[];
   readonly triggerReads: readonly CfcAddress[];
   readonly writePolicyInputs: readonly WritePolicyInput[];
@@ -515,6 +517,7 @@ export type PreparedDigestInput = {
 
   /** Update-authority aliases consulted by writeAuthorizedBy verification. */
   readonly moduleDelegations?: readonly ModuleDelegationSnapshotEntry[];
+
   // Digest of the policy snapshot the boundary decisions evaluated under
   // (Epic B5): anything that can change a boundary decision must be in the
   // digest, so a decision made under one rule set cannot be committed under
@@ -545,6 +548,7 @@ export type PostCommitSideEffect = {
    * authoritative intent arrives with, and the effects channel converges
    * on it instead of re-enacting (T2.Q7). Absent everywhere else. */
   nonce?: string;
+
   flush(tx: unknown): void | Promise<void>;
   /**
    * Called instead of {@link flush} when the work this effect stands for will

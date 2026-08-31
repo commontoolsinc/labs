@@ -259,6 +259,7 @@ type WishContext = {
 
   /** The wish node's cause, keying the durable one-shot #now capture cell. */
   nowCause?: Cell<any>[];
+
   usedHomeSpace?: boolean;
 };
 
@@ -1540,6 +1541,7 @@ function releaseSharedHashtagResolver(runtime: Runtime, key: string): void {
 type SidecarSurface = {
   /** The `system:` origin the surface's piece records. */
   readonly origin: string;
+
   /** The file the origin names. Labels errors. */
   readonly name: string;
 };

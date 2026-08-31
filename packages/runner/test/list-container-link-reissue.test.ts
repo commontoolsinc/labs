@@ -116,6 +116,7 @@ type ReconcileRecord = {
 
   /** Whether this reconcile called `sendResult`, the container link's only writer. */
   issuedLink: boolean;
+
   outcome: string;
 };
 

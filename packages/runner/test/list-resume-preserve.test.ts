@@ -75,6 +75,7 @@ class ResumeBatchGate {
 
   /** Resolves once a per-element document has been held back. */
   readonly elementsHeld: Promise<void>;
+
   constructor() {
     let resolveTop!: () => void;
     let resolveElements!: () => void;

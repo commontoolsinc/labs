@@ -12,6 +12,7 @@
  * lives here on its own.
  */
 import { expect } from "@std/expect";
+
 import {
   createSchedulerTestRuntime,
   disposeSchedulerTestRuntime,

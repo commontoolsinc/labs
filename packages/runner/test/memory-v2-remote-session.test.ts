@@ -294,6 +294,7 @@ class RecordingWebSocket extends EventTarget {
       RecordingWebSocket.#waiters.push({ count, resolve })
     );
   }
+
   send(_payload: EncodedMemoryMessage): void {}
   close(): void {}
 }

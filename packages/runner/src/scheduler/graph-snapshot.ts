@@ -16,6 +16,7 @@ import type { Action, ReactivityLog } from "./types.ts";
 export interface SchedulerGraphSnapshotState {
   /** Identity entity keys resolve scoped addresses against (keys.ts). */
   readonly scopeKeyIdentity: () => ScopeKeyIdentity;
+
   readonly effects: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;
   readonly pending: ReadonlySet<Action>;

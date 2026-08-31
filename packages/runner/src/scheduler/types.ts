@@ -34,6 +34,7 @@ export type TelemetryAnnotations = {
     materializerWriteEnvelopes: NormalizedFullLink[];
     directOutputs: NormalizedFullLink[];
   };
+
   schedulerObservationIdentity?: SchedulerObservationIdentity;
 };
 
@@ -114,6 +115,7 @@ export type ReactivityLog = {
 
   /** Reads that should not invalidate on child writes unless they add a new key */
   shallowReads: IMemorySpaceAddress[];
+
   writes: IMemorySpaceAddress[];
 };
 
@@ -128,6 +130,7 @@ export type EventPreflightTraceContext = SchedulerEventPreflightStats & {
  * `entityKey` — see `keys.ts` for the identity-threading contract.
  */
 export type SpaceScopeAndURI = `${MemorySpace}/${ScopeKey}/${URI}`;
+
 export type SpaceScopeURIAndType =
   `${MemorySpace}/${ScopeKey}/${URI}/${MediaType}`;
 
@@ -139,6 +142,7 @@ export type SettleIterationStats = {
 
   /** Action IDs in the work set (truncated to top entries) */
   actions: { id: string; type: "effect" | "computation" }[];
+
   durationMs: number;
 };
 
@@ -260,6 +264,7 @@ export type ServedEventFailureOutcome =
      * drain re-delivers it; the deferral threshold hardens a permanently
      * unresolvable argument into the visible §5 DROP notice. */
     kind: "deferred";
+
     cause: "handler-not-run";
     message: string;
   }
@@ -299,6 +304,7 @@ export type ServedEventDispatch = {
    * `streamEntry`-less served copy); absent on the drain's copies and
    * everywhere client-side. */
   lt1?: { emitterTx: IExtendedStorageTransaction };
+
   /** The outcome is discriminated so an arrival-barrier follower can never
    * inherit the failing head's checkpoint or typed failure evidence. */
   onFailure?: (outcome: ServedEventFailureOutcome) => void;
@@ -353,6 +359,7 @@ export type QueuedEvent = {
 
   /** The transaction whose handler sent this event, when transactional. */
   readonly originTx?: IExtendedStorageTransaction;
+
   eventLink: NormalizedFullLink;
   action: Action;
   handler: EventHandler;
@@ -391,6 +398,7 @@ export type QueuedEvent = {
    * previously-unresolved name, and a resolved name never becomes pending again).
    */
   retry: boolean;
+
   onCommit?: (tx: IExtendedStorageTransaction) => void;
 
   /**
@@ -407,6 +415,7 @@ export type QueuedEvent = {
    * callback: the mark rode the tx. Absent on every client-side event.
    */
   served?: ServedEventDispatch;
+
   notBefore?: number;
 
   /**

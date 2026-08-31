@@ -27,6 +27,7 @@ import { testSessionOpenAuthFactory } from "./memory-v2-test-utils.ts";
  * like any ordinary stored document.
  */
 const e2eSigner = await Identity.fromPassphrase("computed-id-e2e");
+
 const e2eSpace = e2eSigner.did();
 
 describe("computed-cell id end-to-end (default-on instantiation)", () => {

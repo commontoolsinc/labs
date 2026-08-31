@@ -17,6 +17,7 @@
  *   than terminal and so never puts it on the error channel at all.
  */
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import {

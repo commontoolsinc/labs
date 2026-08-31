@@ -98,6 +98,7 @@ export class EffectsChannel {
    * nonce at a time; a failed ack retries on the next sink delivery
    * (the entry is still unacked there). */
   readonly #acking = new Set<string>();
+
   #warnedNoNavigate = false;
   #closed = false;
 

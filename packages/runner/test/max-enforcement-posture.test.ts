@@ -16,6 +16,7 @@
  *   rather than reading as a healthy, quietly empty piece.
  */
 import { describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import { CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model-schema";

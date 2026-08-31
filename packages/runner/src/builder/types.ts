@@ -238,6 +238,7 @@ declare module "@commonfabric/api" {
      * identity (see docs/specs/content-addressed-action-identity.md).
      */
     $implRef?: { identity: string; symbol: string };
+
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;
@@ -377,6 +378,7 @@ export type Frame = {
    * Only meaningful on handler frames.
    */
   eventTime?: number;
+
   unsafe_binding?: UnsafeBinding;
 
   /**

@@ -108,11 +108,13 @@ export type CfcGrant = CfcGrantIdentity & {
 
   /** Principal-like atoms (§3.1.8-validated) the release extends to. */
   readonly audience: readonly unknown[];
+
   readonly grantedAt: number;
   readonly expiresAt?: number;
 
   /** §6 intent attribution once the intent substrate exists. */
   readonly sourceIntentId?: string;
+
   readonly revoked?: { readonly at: number; readonly by: string };
 
   /**
@@ -142,6 +144,7 @@ export type CfcGrantWriteInput = {
 
   /** Defaults to the runner clock at write time. */
   readonly grantedAt?: number;
+
   readonly expiresAt?: number;
   readonly sourceIntentId?: string;
   readonly revoked?: { readonly at: number; readonly by: string };

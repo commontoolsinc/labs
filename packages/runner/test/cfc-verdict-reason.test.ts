@@ -8,6 +8,7 @@
  * write, which is the failure OW50 exists to surface rather than reproduce.
  */
 import { describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import {
   CFC_VERDICT_REASON,

@@ -107,6 +107,7 @@ export type ReplayLatencySample = {
 
   /** Counter deltas for this single invocation. */
   schemaCalls: number;
+
   anyOfBranches: number;
   dagCalls: number;
   pointerCalls: number;

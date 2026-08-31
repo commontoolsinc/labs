@@ -17,6 +17,7 @@ export interface SessionFactory {
    *  by lower-level replica tests omit this because they intentionally model
    *  only the messages under test. */
   readonly supportsAclBootstrap?: boolean;
+
   create(
     space: MemorySpace,
     signer?: Signer,

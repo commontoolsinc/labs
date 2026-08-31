@@ -3365,6 +3365,7 @@ export type CfcPrefixProvenanceWrite = {
    * consumers can recover the exact segments via parsePointer.
    */
   path: string;
+
   boundSource: CfcPrefixBoundSource;
 
   /** Gated reads within this write's D4 prefix (post-S7-exemption). */

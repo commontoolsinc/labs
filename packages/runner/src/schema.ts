@@ -1402,6 +1402,7 @@ class TransformObjectCreator
    * drives this member directly.
    */
   private tx: IExtendedStorageTransaction;
+
   #synced: boolean;
   #baseLink: NormalizedFullLink;
   #cfcLabelView: CfcLabelView | undefined;

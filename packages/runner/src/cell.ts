@@ -544,6 +544,7 @@ declare module "@commonfabric/api" {
       options: RawCellReadOptions & { frozen: false },
     ): FabricValue;
     getRawUntyped(options?: RawCellReadOptions): FabricValue;
+
     setRaw(value: (NoInfer<T> & FabricValue) | undefined): void;
 
     /**
@@ -574,6 +575,7 @@ declare module "@commonfabric/api" {
      * rewriting that value.
      */
     applyCfcSchemaToExistingValue(): void;
+
     setSchema(newSchema: JSONSchema): void;
     connect(node: NodeRef): void;
     export(): {
@@ -617,6 +619,7 @@ declare module "@commonfabric/api" {
      * consults it.
      */
     toJSON(): SigilLink | null;
+
     runtime: Runtime;
     tx: IExtendedStorageTransaction | undefined;
     schema?: JSONSchema;

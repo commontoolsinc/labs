@@ -454,6 +454,7 @@ type PendingCommitRead = {
    * {@link PendingRead.basisSeq} (memory/v2.ts).
    */
   basisSeq: number;
+
   nonRecursive?: boolean;
 };
 
@@ -621,6 +622,7 @@ export interface Options {
    * stateful operation.
    */
   spaceHostMap?: Record<string, string>;
+
   id?: string;
   settings?: IRemoteStorageProviderSettings;
 
@@ -890,6 +892,7 @@ export class StorageManager implements IStorageManager {
 
   /** Phase 5: the serving manager's home space (Options.servingHomeSpace). */
   #servingHomeSpace?: MemorySpace;
+
   #spaceIdentities = new Map<MemorySpace, Signer>();
 
   /** Genesis ACL owners registered beside a space identity (OW31): the
@@ -2202,6 +2205,7 @@ type ProviderOptions = {
    * differentials resolve scoped change addresses against.
    */
   scopeKeyIdentity: () => ScopeKeyIdentity;
+
   routeState: ProviderRouteState;
   createSession: (
     routeGeneration: number,
@@ -2685,6 +2689,7 @@ type InFlightCommit = {
    * carry the same `localSeq` field, so they contribute here too).
    */
   readonly dependencies: ReadonlySet<number>;
+
   readonly operations: NativeCommitOperation[];
   readonly source?: IStorageTransaction;
   readonly commit: ClientCommit;
@@ -2751,6 +2756,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
    * own-identity address with a map lookup, never a per-read
    * `resolveScopeKey`. A scope the identity cannot resolve keys by NAME. */
   #ownInstanceKeys: Map<string, string> | undefined;
+
   readonly #createSession: () => Promise<{
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
@@ -2776,6 +2782,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
    *  Cleared when the owed remount is consumed — or immediately, when there
    *  is no memoized mount to replace. */
   #aclChangedSinceMount = false;
+
   readonly #docs = new Map<string, DocumentRecord>();
   readonly #syncTasks = new Map<string, SyncTask>();
   readonly #commitPromises = new Set<Promise<unknown>>();
@@ -2860,12 +2867,14 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
    * duplicate-as-delivered classification; its entries are the client's
    * offline event queue. */
   #eventAppendQueue?: EventAppendQueue;
+
   #eventAppendQueueStore?: EventAppendQueueStore;
   #eventAppendPacing?: EventAppendPacing | false;
 
   /** Phase 5's producer-side foreign-scoped-read refusal (see
    * ProviderOptions.refuseForeignScopedReads). */
   #refuseForeignScopedReads = false;
+
   #closed = false;
   readonly #closeSignal = Promise.withResolvers<void>();
   #getTelemetry: () => TelemetrySink | undefined;

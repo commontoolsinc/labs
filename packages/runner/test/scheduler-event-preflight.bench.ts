@@ -28,6 +28,7 @@ import {
  * - Even tiny menu handlers still paid for broad upstream graph traversal.
  */
 const BROAD_FANOUT = 512;
+
 const QUEUED_EVENT_ROUNDS = 30;
 const EVENTS_PER_ROUND = 7;
 const DEEP_READ_COUNT = 660;

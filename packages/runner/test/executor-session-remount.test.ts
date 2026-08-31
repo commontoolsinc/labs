@@ -262,6 +262,7 @@ describe("the session remount (profile-starvation fifth face)", () => {
    * issued, and a revoked session refuses it exactly as it refuses any
    * other. */
   let probeCounter = 0;
+
   const mintProbeId = (runtime: Runtime, space: MemorySpace): URI => {
     probeCounter += 1;
     return runtime.getCell<string>(
