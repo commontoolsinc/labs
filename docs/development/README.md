@@ -69,6 +69,10 @@ mapped in [`../README.md`](../README.md).
   deploy where, and the contract the bastion's deploy wrapper enforces on what
   they pass it. Read this before editing a deploy step, because that wrapper
   lives in the infra repository rather than this one
+- [`staging-space-copy.md`](staging-space-copy.md) — how a *space* reaches a
+  host: snapshotting one space's store and serving the copy from rapids, what
+  installing it commits you to, and the questions a local clone answers more
+  cheaply
 - [`CI_PERFORMANCE.md`](CI_PERFORMANCE.md) — how continuous-integration wall
   time is tracked, and when to start or stop work on splitting and
   rebalancing jobs

@@ -9,6 +9,11 @@ generated cells are excluded from the fingerprint, what was deliberately not
 built) is in [`../plans/space-clone-rehearsal.md`](../plans/space-clone-rehearsal.md).
 This document is the operating procedure.
 
+A clone runs on your own machine. When the question is about the deployment
+rather than the store — the shell bundle, the sharded server, concurrent human
+traffic — the copy goes on the staging host instead, and that procedure is
+[`staging-space-copy.md`](staging-space-copy.md).
+
 ## When a rehearsal is required
 
 Required when updating a **populated** space and any of:
@@ -293,6 +298,8 @@ These are all failures that actually happened, not hypotheticals:
   cleaner on a clone than in production.
 - **A clone tests the store and the runtime, not the deployment.** CDN and shell
   versions, and concurrent human traffic, are all absent.
+  [`staging-space-copy.md`](staging-space-copy.md) is what covers that gap, at
+  the price of a copy of real content on a shared host.
 
 ## Before going live
 
