@@ -4166,7 +4166,7 @@ function convertOneToLinks(
   // been refused by the time the branch ends, which is what the type says.
   let container: unknown[] | Record<string, unknown>;
 
-  // ...which needs to be tracked for circularity.
+  // Tracked for circularity, at the depth a back-link to it names.
   ancestors.set(original, stack.length);
 
   // Everything past the line above runs inside this `try`, so that EVERY way
