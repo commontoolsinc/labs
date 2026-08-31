@@ -8,8 +8,8 @@
  * someone runs it by hand, and no run of the repository reports on it. `wish`
  * was in that state, reachable only from `all`, while test/wish.test.ts
  * described the session-backed read as covered by the integration lane. These
- * hold the table to reaching every step from both directions, and hold the
- * recorded step names to matching the functions that run them.
+ * hold the table to reaching every step from both directions, and hold each
+ * recorded step name to naming a function the script actually defines.
  *
  * What they read is the text of the table and of the matrix, so they see which
  * steps are dispatched and nothing about what a step does once it runs. They
@@ -135,6 +135,7 @@ function ciSections(workflow: string): string[] {
 const { arms, malformed } = parseDispatchTable(SCRIPT);
 const bySection = new Map(arms.map((arm) => [arm.section, arm.steps]));
 const everyStep = [...new Set(arms.flatMap((arm) => arm.steps))].sort();
+const defined = new Set(definedFunctions(SCRIPT));
 
 describe("integration-sections", () => {
   it("pairs every recorded step name with the function that runs it", () => {
@@ -143,9 +144,18 @@ describe("integration-sections", () => {
 
   it("dispatches every step runner the script defines", () => {
     const dispatched = new Set(everyStep.map(stepFunction));
-    const orphans = definedFunctions(SCRIPT)
-      .filter((fn) => !dispatched.has(fn));
+    const orphans = [...defined].filter((fn) => !dispatched.has(fn));
     expect(orphans).toEqual([]);
+  });
+
+  it("defines a runner for every step it dispatches", () => {
+    // The other direction. Deleting a runner and leaving its call behind is
+    // valid shell that the pairing check reads as well-formed, because the
+    // pairing is between two names; `bash -n` accepts it too, and the script
+    // reaches `command not found` only once CI has a server up.
+    const missing = everyStep.filter((step) => !defined.has(stepFunction(step)))
+      .map(stepFunction);
+    expect(missing).toEqual([]);
   });
 
   it("runs every step under `all`", () => {
