@@ -66,6 +66,23 @@ export interface StoreAccess {
   read(objectName: string): Promise<StoredReport>;
   readText(objectName: string): Promise<string>;
   create(name: string, body: Uint8Array): Promise<void>;
+
+  /**
+   * The objects a day's rollup was written as, when the day has a
+   * complete one. A day is compacted into shards sized so that a reader
+   * can hold what one decompresses to, and the day's manifest — written
+   * after every shard it names — is what says the rollup is finished and
+   * which shards it holds. Reading those replaces reading the day's
+   * thousands of raw objects.
+   *
+   * Only a bootstrap reads them. A rollup is written by the one principal
+   * here whose credential exists as key material, so it carries weaker
+   * provenance than the raw records it summarizes, and the record spec
+   * asks a consumer that feeds decisions to treat it as a cache of a day
+   * rather than the record of it. Seeding catch counts once, from days
+   * closed a week or more ago, is that use; the four-hourly path that
+   * keeps the manifest current never touches one.
+   */
   rollupShards(day: string): Promise<string[] | undefined>;
   token(): string | undefined;
 }
@@ -200,29 +217,6 @@ async function mapConcurrent<T, R>(
   );
   await Promise.all(workers);
   return results;
-}
-
-/**
- * The objects a day's rollup was written as, when the day has a complete
- * one. A day is compacted into shards sized so that a reader can hold
- * what one decompresses to, and the day's manifest — written after every
- * shard it names — is what says the rollup is finished and which shards
- * it holds. Reading those replaces reading the day's thousands of raw
- * objects.
- *
- * Only a bootstrap reads them. A rollup is written by the one principal
- * here whose credential exists as key material, so it carries weaker
- * provenance than the raw records it summarizes, and the record spec asks
- * a consumer that feeds decisions to treat it as a cache of a day rather
- * than the record of it. Seeding catch counts once, from days closed a
- * week or more ago, is that use; the four-hourly path that keeps the
- * manifest current never touches one.
- */
-function rollupFor(
-  store: StoreAccess,
-  day: string,
-): Promise<string[] | undefined> {
-  return store.rollupShards(day);
 }
 
 /**
@@ -398,7 +392,7 @@ export async function publish(
   if (options.bootstrap) {
     for (const day of partitions) {
       if (fold.knowsDay(day)) continue;
-      const shards = await rollupFor(store, day);
+      const shards = await store.rollupShards(day);
       if (shards === undefined) continue;
       try {
         // A day is folded whole or not at all: a shard that failed to

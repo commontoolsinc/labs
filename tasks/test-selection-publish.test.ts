@@ -17,6 +17,7 @@ import {
   type TestRecord,
 } from "@commonfabric/test-support/records";
 import { reportFromText } from "./test-selection/build.ts";
+import { join } from "@std/path";
 
 const CI = (day: string, run: string) =>
   `labs/test-records/submissions/ci/v1/${day}/run-${run}-a.ndjson`;
@@ -117,7 +118,10 @@ describe("test-selection-publish", () => {
 });
 
 /** A store held in memory, answering the way the real one answers. */
-function fakeStore(objects: Record<string, string>) {
+function fakeStore(
+  objects: Record<string, string>,
+  rollups: Record<string, string[]> = {},
+) {
   const created = new Map<string, Uint8Array>();
   const store: StoreAccess = {
     list: (prefix) =>
@@ -142,7 +146,7 @@ function fakeStore(objects: Record<string, string>) {
       created.set(name, body);
       return Promise.resolve();
     },
-    rollupShards: () => Promise.resolve(undefined),
+    rollupShards: (day) => Promise.resolve(rollups[day]),
     token: () => "a token",
   };
   return { store, created };
@@ -291,5 +295,144 @@ describe("publish()", () => {
     const { store, created } = fakeStore(seed());
     expect(await publish(["--nonsense"], store, NOW)).toBe(2);
     expect(created.size).toBe(0);
+  });
+});
+
+describe("publish() --out", () => {
+  const NOW = new Date("2026-08-20T12:00:00.000Z");
+
+  it("writes the manifest and the state it would have created", async () => {
+    const out = await Deno.makeTempDir();
+    try {
+      const { store, created } = fakeStore(seed());
+      const code = await publish(
+        ["--bootstrap", "--days", "1", "--dry-run", "--out", out],
+        store,
+        NOW,
+      );
+      expect(code).toBe(0);
+      // A dry run creates nothing in the store, and the directory is how
+      // the run's answer is looked at instead.
+      expect(created.size).toBe(0);
+
+      const manifest = parseManifest(
+        await Deno.readTextFile(join(out, "manifest.json")),
+      );
+      expect(manifest?.entries.length).toBe(1);
+
+      const state = JSON.parse(
+        await Deno.readTextFile(join(out, "state.json")),
+      );
+      expect(Object.keys(state.states).length).toBe(1);
+      expect(state.day).toBe("2026-08-20");
+    } finally {
+      await Deno.remove(out, { recursive: true });
+    }
+  });
+
+  it("makes the directory when it does not exist yet", async () => {
+    const parent = await Deno.makeTempDir();
+    try {
+      const out = join(parent, "a", "b");
+      const { store } = fakeStore(seed());
+      expect(
+        await publish(
+          ["--bootstrap", "--days", "1", "--dry-run", "--out", out],
+          store,
+          NOW,
+        ),
+      ).toBe(0);
+      expect((await Deno.stat(join(out, "manifest.json"))).isFile).toBe(true);
+    } finally {
+      await Deno.remove(parent, { recursive: true });
+    }
+  });
+});
+
+const ROLLUP = `labs/test-records/aggregated/v1/${DAY}/shard-0.ndjson`;
+
+describe("publish() over a day that has been compacted", () => {
+  const NOW = new Date("2026-08-20T12:00:00.000Z");
+
+  it("folds a bootstrap day from its rollup instead of its objects", async () => {
+    const read: string[] = [];
+    const { store } = fakeStore({
+      ...seed(),
+      [ROLLUP]: object("c3", "fail", "2026-08-20T03:00:00.000Z"),
+    }, { [DAY]: [ROLLUP] });
+    const watched: StoreAccess = {
+      ...store,
+      read: (name) => {
+        read.push(name);
+        return store.read(name);
+      },
+    };
+    expect(await publish(["--bootstrap", "--days", "1"], watched, NOW)).toBe(0);
+    expect(read).toEqual([ROLLUP]);
+  });
+
+  it("does not read the rollup on an incremental run", async () => {
+    const { store } = fakeStore({
+      ...seed(),
+      [ROLLUP]: object("c3", "fail", "2026-08-20T03:00:00.000Z"),
+    }, { [DAY]: [ROLLUP] });
+    await publish(["--bootstrap", "--days", "1"], store, NOW);
+    const asked: string[] = [];
+    const watched: StoreAccess = {
+      ...store,
+      rollupShards: (day) => {
+        asked.push(day);
+        return store.rollupShards(day);
+      },
+    };
+    expect(await publish(["--days", "1"], watched, NOW)).toBe(0);
+    expect(asked).toEqual([]);
+  });
+
+  it("leaves a day open when a shard of its rollup will not read", async () => {
+    // Folded half, the day would be marked compacted and the rest of it
+    // would be hidden from every later run.
+    const objects = {
+      ...seed(),
+      [ROLLUP]: object("c3", "fail", "2026-08-20T03:00:00.000Z"),
+    };
+    const { store, created } = fakeStore(objects, {
+      [DAY]: [ROLLUP, `labs/test-records/aggregated/v1/${DAY}/shard-1.ndjson`],
+    });
+    const read: string[] = [];
+    const broken: StoreAccess = {
+      ...store,
+      read: (name) => {
+        read.push(name);
+        return name.endsWith("shard-1.ndjson")
+          ? Promise.reject(new Error("that shard is gone"))
+          : store.read(name);
+      },
+    };
+    expect(await publish(["--bootstrap", "--days", "1"], broken, NOW)).toBe(0);
+    // The run carried on and folded the day's raw objects instead.
+    expect(read).toContain(CI(DAY, "1"));
+    expect(read).toContain(CI(DAY, "2"));
+    expect(created.size).toBeGreaterThan(0);
+  });
+});
+
+describe("publish() over an aggregate it cannot make sense of", () => {
+  const NOW = new Date("2026-08-20T12:00:00.000Z");
+
+  it("refuses rather than starting again from nothing", async () => {
+    const { store, created } = fakeStore(seed());
+    await publish(["--bootstrap", "--days", "1"], store, NOW);
+    const state = [...created.keys()].find((name) => name.includes("/state/"))!;
+    const after = created.size;
+    const broken: StoreAccess = {
+      ...store,
+      readText: (name) =>
+        name === state
+          ? Promise.resolve('{"schema":1,"nonsense":true}')
+          : store.readText(name),
+    };
+    expect(await publish(["--days", "1"], broken, NOW)).toBe(1);
+    expect(created.size).toBe(after);
   });
 });
