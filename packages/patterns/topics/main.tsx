@@ -285,8 +285,9 @@ const crossrefTable = lift(
 
 /**
  * One row of the board's mention index: the display name the editor's
- * autocomplete lists, the title it matches on, and the topic itself held as
- * a reference.
+ * autocomplete lists and matches on, the title for readers that select it
+ * (the editors do not — their schema reads `[NAME]` and `piece` alone),
+ * and the topic itself held as a reference.
  *
  * The two strings are COPIES, and the copies are the design rather than a
  * shortcut. The autocomplete needs every row's strings just to open, so a
@@ -466,8 +467,8 @@ export interface TopicsOutput {
 export const submitProfileTopic = handler<void, {
   topics: Writable<TopicDemand[] | Default<[]>>;
 
-  /** Declared at the child's own demand — the two strings its editor lists
-   * and matches on — so the board's index rows and a plain list of pieces
+  /** Declared at the child's own demand — the two strings a universe
+   * entry carries — so the board's index rows and a plain list of pieces
    * both satisfy it. */
   mentionable: Writable<TopicMentionable[] | Default<[]>>;
 

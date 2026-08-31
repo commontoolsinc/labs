@@ -730,7 +730,9 @@ export class CFCodeEditor extends BaseElement {
    * persisted against that path would later name whatever had moved into the
    * slot. `_resolvePieceIds` follows the indirection; until it has, this
    * returns null and the caller mints a wiki-link instead — the older form,
-   * but one whose id comes from the same resolution.
+   * but one whose id comes from the same resolution. An index row cannot
+   * reach either fallback: the completion surfaces withhold it until it is
+   * resolved, so a row arriving here always finds its piece in the cache.
    */
   private _createRefEntry(index: number): string | null {
     const destination = this._resolvedPieceCells.get(index);

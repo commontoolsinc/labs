@@ -9,7 +9,7 @@ export interface Mentionable {
    * Optional, and its absence changes what an entry IS. Without one, the
    * entry is the piece itself, listed directly. With one, the entry is a
    * derived row standing for `piece` — the editor lists and matches on the
-   * row's own strings and resolves `piece` when a completion is picked, so
+   * row's own name and resolves `piece` when a completion is picked, so
    * what a mention stores is the piece and never the row.
    *
    * The VALUE at this position never carries a usable handle: an `asCell`

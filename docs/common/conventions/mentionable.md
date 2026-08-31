@@ -48,6 +48,23 @@ Mentionables are one deliberate way to make an unregistered child discoverable.
 They do not provide a complete piece listing and cannot expose an orphan. See
 [Finding Pieces](../concepts/piece-discovery.md).
 
+### Index rows, and the reserved `piece` key
+
+A `mentionable` list may hold the pieces themselves — the examples above —
+or derived INDEX ROWS standing for them: entries shaped `{ [NAME], piece }`,
+where the strings are the row's own copies and `piece` holds the actual
+piece as a reference. A board-sized producer reaches for rows so that every
+reader of the universe loads one document instead of every listed piece;
+the Topics board's `mentionable` is the worked example
+(`TopicMentionableRow` in `packages/patterns/topics/main.tsx`).
+
+`piece` is therefore a RESERVED key on this contract: an entry carrying one
+IS a row, and the editors store what `piece` names — never the entry — as
+the mention's destination. A producer must not publish an unrelated
+property named `piece` on its mentionable entries; doing so silently
+redirects every mention of that entry. How consumers resolve rows is in
+[`mentionable-internals.md`](../../../packages/ui/docs/mentionable-internals.md).
+
 ## Wishing for Mentionables
 
 Patterns can discover mentionables in the current space using `wish()`:

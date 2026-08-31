@@ -332,7 +332,9 @@ export interface TopicCrossrefRow {
 
 /**
  * What the body editor's `@`-mention autocomplete needs of a mention
- * universe entry: the display name it lists, and the title it matches on.
+ * universe entry: the display name it lists and matches on, and the title
+ * — the persisted scalar other readers of the universe select, though the
+ * editor's own schema does not.
  *
  * `[NAME]` is not decoration here. `cf-code-editor` declares its entries as
  * `Mentionable`, whose schema carries `required: [NAME]`
