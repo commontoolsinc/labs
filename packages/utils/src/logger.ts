@@ -497,6 +497,7 @@ let _emitTimingMeasures = false;
  * silently continuing to grow or silently dropping.
  */
 let _timingMeasureCap = 200_000;
+
 let _timingMeasuresEmitted = 0;
 let _timingMeasureCapReported = false;
 
