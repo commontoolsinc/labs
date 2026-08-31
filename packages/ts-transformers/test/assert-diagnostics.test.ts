@@ -421,6 +421,63 @@ Deno.test("assert records a body that returns early", async () => {
   assertEquals(assertCaptureLabels(root), ["a.get()", "b.get()"]);
 });
 
+Deno.test("assert reads the receiver of a recorded method call", async () => {
+  const root = await transformed(
+    `import { assert, computed, pattern } from "commonfabric";
+
+interface Event {
+  type: string;
+  details: string;
+  unused: number;
+}
+
+interface State {
+  events: Event[];
+}
+
+export default pattern((state: State) => {
+  const asserted = assert(() => {
+    const last = state.events.at(-1);
+    return last?.type === "word" && last.details.includes("AT");
+  });
+  const computedCheck = computed(() => {
+    const last = state.events.at(-1);
+    return last?.type === "word" && last.details.includes("AT");
+  });
+  return { asserted, computedCheck };
+});`,
+  );
+
+  const eventFields = {
+    type: "object",
+    properties: {
+      type: { type: "string" },
+      details: { type: "string" },
+    },
+    required: ["type", "details"],
+  };
+  const readSchema = {
+    type: "object",
+    properties: {
+      state: {
+        type: "object",
+        properties: {
+          events: { type: "array", items: eventFields },
+        },
+        required: ["events"],
+      },
+    },
+    required: ["state"],
+  };
+
+  // The recording sits between `last.details` and the `.includes` that reads
+  // it. An analysis that stopped at the recording would drop `details` from
+  // the schema, and the body would be served an event without it.
+  assertEquals(liftInputSchemas(root), [readSchema, readSchema]);
+});
+
+//
+// What the stage leaves alone
 //
 // The stage sees the AST before type-checking has rejected anything, so it has
 // to survive a callback it cannot read and leave the call alone rather than
@@ -508,59 +565,4 @@ export default pattern(() => {
   // Recording the receiver of `?.` would need the chain rebuilt around the
   // recording call; the operand itself is recorded instead.
   assertEquals(assertCaptureLabels(root), ["maybe.get()?.includes(1)"]);
-});
-
-Deno.test("assert reads the receiver of a recorded method call", async () => {
-  const root = await transformed(
-    `import { assert, computed, pattern } from "commonfabric";
-
-interface Event {
-  type: string;
-  details: string;
-  unused: number;
-}
-
-interface State {
-  events: Event[];
-}
-
-export default pattern((state: State) => {
-  const asserted = assert(() => {
-    const last = state.events.at(-1);
-    return last?.type === "word" && last.details.includes("AT");
-  });
-  const computedCheck = computed(() => {
-    const last = state.events.at(-1);
-    return last?.type === "word" && last.details.includes("AT");
-  });
-  return { asserted, computedCheck };
-});`,
-  );
-
-  const eventFields = {
-    type: "object",
-    properties: {
-      type: { type: "string" },
-      details: { type: "string" },
-    },
-    required: ["type", "details"],
-  };
-  const readSchema = {
-    type: "object",
-    properties: {
-      state: {
-        type: "object",
-        properties: {
-          events: { type: "array", items: eventFields },
-        },
-        required: ["events"],
-      },
-    },
-    required: ["state"],
-  };
-
-  // The recording sits between `last.details` and the `.includes` that reads
-  // it. An analysis that stopped at the recording would drop `details` from
-  // the schema, and the body would be served an event without it.
-  assertEquals(liftInputSchemas(root), [readSchema, readSchema]);
 });
