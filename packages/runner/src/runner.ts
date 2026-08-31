@@ -5352,7 +5352,22 @@ export class Runner {
     // Per-cell spans: `n` in the timing stats is the number of cells this
     // resume pre-synced, total/max its round-trip cost (spans overlap, so the
     // wall cost is bounded by the enclosing syncCellsForRunningPattern span).
-    await Promise.all(cells.map((c) => {
+    //
+    // A cell whose link carries a trivially-permissive schema (`true`/`{}`)
+    // is synced as the DOCUMENT it names, not as a declaration: such a
+    // schema is the absence of a bound, and a sync honoring one walks the
+    // target's whole reachable graph — on a populated space, thousands of
+    // documents to resume one piece. The pre-sync's job is locality: the
+    // values instantiation reads must be local so their reads do not enter
+    // the commit basis cold, and the doc itself provides that. The deep
+    // reach belongs to the argument link-target wave below, which follows
+    // declared schemas.
+    await Promise.all(cells.map((cell) => {
+      const link = cell.getAsNormalizedFullLink();
+      const c = link.schema !== undefined &&
+          ContextualFlowControl.isTrueSchema(link.schema)
+        ? cell.asSchema(false)
+        : cell;
       const cellSyncStart = performance.now();
       return Promise.resolve(c.sync()).finally(() =>
         logger.time(cellSyncStart, "start", "resumeCellSync")
