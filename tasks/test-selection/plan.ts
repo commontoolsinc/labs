@@ -23,7 +23,11 @@ import {
   LANES,
   VALUE_FLOOR,
 } from "./policy.ts";
-import type { Manifest, ManifestEntry } from "./manifest.ts";
+import type {
+  Manifest,
+  ManifestEntry,
+  UnschedulableEntry,
+} from "./manifest.ts";
 
 /** Why one identity is in the run. */
 export type SelectionReason =
@@ -74,7 +78,7 @@ export interface Plan {
    * scheduling it would only time the lane out. It is reported instead,
    * and the sixty-second rule is where such a test gets split.
    */
-  unschedulable: ManifestEntry[];
+  unschedulable: UnschedulableEntry[];
 }
 
 /** What the packer needs beyond the manifest. */
@@ -283,15 +287,18 @@ export function plan(input: PlanInput): Plan {
   // in any lane, so it is reported rather than placed in one that would
   // then be killed at its bound. Its suite's correction is applied first,
   // because that is what the time will actually be.
-  const unschedulable: ManifestEntry[] = [];
+  const unschedulable: UnschedulableEntry[] = [];
   const beyondBound = new Set<string>();
   for (const entry of manifest.entries) {
     // What an empty lane would pay for it: its own corrected time plus
     // every overhead and setup that lane would open. Charging only the
     // test's own time would schedule an identity whose suite, unit, and
     // capabilities together put the lane past the bound it is killed at.
-    if (loneCost(manifest, input, entry) <= bound) continue;
-    unschedulable.push(entry);
+    const cost = loneCost(manifest, input, entry);
+    if (cost <= bound) continue;
+    // That whole figure is what is reported, so whoever reads it is told
+    // the number the bound was compared against.
+    unschedulable.push({ test: entry.test, suite: entry.suite, cost });
     beyondBound.add(testIdentityKey(entry.test));
   }
 

@@ -284,10 +284,19 @@ export interface StoredFoldContext {
 /** The outcomes a record may carry, for validating a stored context. */
 const OUTCOMES = new Set(["pass", "fail", "skip"]);
 
-/** Whether a value is a "yyyy-mm-dd" day this reader can measure from. */
+/**
+ * Whether a value is a "yyyy-mm-dd" day this reader can measure from.
+ * The parse alone is not enough: a date the calendar does not have rolls
+ * into the next month, so "2026-02-31" parses as March 3rd and would be
+ * aged from three days later than it claims. What round-trips is a day.
+ */
 function isDay(value: unknown): value is string {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
-    Number.isFinite(Date.parse(`${value}T00:00:00Z`));
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const at = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(at.getTime()) &&
+    at.toISOString().slice(0, 10) === value;
 }
 
 /** The context, flattened for the aggregate that carries it. */

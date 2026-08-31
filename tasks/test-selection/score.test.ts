@@ -77,6 +77,38 @@ describe("score", () => {
       expect(back.failures.size).toBe(1);
     });
 
+    it("rejects a day the calendar does not have", () => {
+      // "2026-02-31" parses, rolling forward into March. Believed, it
+      // would be aged from three days later than it claims, so a stored
+      // entry outlives the window it was meant to be dropped from.
+      const back = parseContext({
+        outcomesAtCommit: [],
+        mainAtCommit: [
+          ["k a", { day: "2026-02-31", outcome: "fail" }],
+          ["k b", { day: "2026-02-30", outcome: "fail" }],
+          ["k c", { day: "2025-02-29", outcome: "fail" }],
+          ["k d", { day: "2026-02-28", outcome: "fail" }],
+        ],
+        credited: [],
+        failures: [],
+      });
+      expect([...back.mainAtCommit.keys()]).toEqual(["k d"]);
+    });
+
+    it("keeps the last day of a month, and a real leap day", () => {
+      const back = parseContext({
+        outcomesAtCommit: [],
+        mainAtCommit: [
+          ["k a", { day: "2026-01-31", outcome: "fail" }],
+          ["k b", { day: "2024-02-29", outcome: "fail" }],
+          ["k c", { day: "2026-12-31", outcome: "fail" }],
+        ],
+        credited: [],
+        failures: [],
+      });
+      expect(back.mainAtCommit.size).toBe(3);
+    });
+
     it("ages out what the rules can no longer reach", () => {
       const context = emptyContext();
       context.mainAtCommit.set("k old", { day: "2026-01-01", outcome: "fail" });

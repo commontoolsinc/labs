@@ -160,6 +160,14 @@ export interface PlanVerdict {
 
   /** Set when no lane can hold it, whatever the budget. */
   unschedulable?: boolean;
+
+  /**
+   * What a lane running nothing else would pay for it: its corrected own
+   * time plus every overhead and setup that lane would open. This is the
+   * figure the hard bound is compared against, so it is the one to report
+   * when the answer is that no lane can hold it.
+   */
+  loneSeconds?: number;
 }
 
 export function explainLines(
@@ -203,8 +211,9 @@ export function explainLines(
         : "  withheld: it is too flaky to judge a change by",
     );
   } else if (verdict.unschedulable) {
+    const seconds = verdict.loneSeconds ?? entry.cost;
     lines.push(
-      `  no lane can hold it: ${entry.cost.toFixed(1)}s is past the bound a ` +
+      `  no lane can hold it: ${seconds.toFixed(1)}s is past the bound a ` +
         "lane runs under, so it is reported rather than scheduled. Splitting " +
         "it is the fix.",
     );
@@ -308,10 +317,12 @@ export function verdictFor(
   ) => testIdentityKey(selection.entry.test) === key);
   const verdict: PlanVerdict = { selected: taken !== undefined };
   if (taken !== undefined) verdict.repeats = taken.repeats;
-  if (
-    result.unschedulable.some((entry) => testIdentityKey(entry.test) === key)
-  ) {
+  const refused = result.unschedulable.find((entry) =>
+    testIdentityKey(entry.test) === key
+  );
+  if (refused !== undefined) {
     verdict.unschedulable = true;
+    verdict.loneSeconds = refused.cost;
   }
   return verdict;
 }

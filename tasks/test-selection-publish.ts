@@ -488,13 +488,10 @@ export async function publish(
     mandatory: new Map(),
     capabilities: new Map(),
   });
-  // What the packer refused, from the packer, rather than recomputed from
-  // a raw cost that leaves out every overhead the lane would have paid.
-  manifest.unschedulable = reference.unschedulable.map((entry) => ({
-    test: entry.test,
-    suite: entry.suite,
-    cost: entry.cost,
-  }));
+  // What the packer refused, from the packer, carrying the cost the bound
+  // was compared against rather than a raw one that leaves out every
+  // overhead the lane would have paid.
+  manifest.unschedulable = reference.unschedulable;
   manifest.lanes = reference.lanes.map((lane) => ({
     lane: lane.lane,
     projectedSeconds: Math.round(lane.projectedSeconds * 10) / 10,

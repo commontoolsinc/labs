@@ -257,6 +257,31 @@ describe("verdictFor()", () => {
     expect(verdict.unschedulable).toBeUndefined();
   });
 
+  it("carries the cost the bound was compared against", () => {
+    const manifest = sampleManifest({
+      entries: [sampleEntry({ k: "unit", s: "memory", n: "heavy" }, {
+        cost: 200,
+        suite: "pattern-integration",
+      })],
+      calibration: {
+        setupCost: {},
+        suites: { "pattern-integration": { overhead: 400, correction: 1 } },
+        unitOverhead: {},
+        prologue: 0,
+      },
+    });
+    const test = { k: "unit", s: "memory", n: "heavy" };
+    const verdict = verdictFor(manifest, test);
+    expect(verdict.unschedulable).toBe(true);
+    expect(verdict.loneSeconds).toBeCloseTo(600, 5);
+    // What `explain` prints is that figure, not the entry's own 200: a
+    // reader told "200s is past the bound" would go looking for a bound
+    // below 200 that does not exist.
+    const said = explainLines(manifest, test, verdict).join("\n");
+    expect(said).toContain("600.0s is past the bound");
+    expect(said).not.toContain("200.0s is past the bound");
+  });
+
   it("reports a test no lane could hold as unschedulable, not selected", () => {
     const verdict = verdictFor(manifestOf(entry("enormous", 100_000)), {
       k: "unit",

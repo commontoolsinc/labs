@@ -338,6 +338,34 @@ describe("plan", () => {
       expect(result.unschedulable.length).toBe(1);
     });
 
+    it("reports the cost the bound was compared against", () => {
+      // 200 seconds of test, a suite that costs 50 to open and doubles
+      // what runs inside it, a unit that costs 10, and a capability whose
+      // setup costs 60. What a lane pays is 520, and that is the number
+      // to report: reporting the entry's own 200 would say a test inside
+      // a 300-second bound is past it.
+      const manifest = sampleManifest({
+        entries: entries(1, () => ({
+          cost: 200,
+          suite: "pattern-integration",
+          unit: "packages/patterns/one.test.ts",
+        })),
+        calibration: {
+          setupCost: { toolshed: 60 },
+          suites: { "pattern-integration": { overhead: 50, correction: 2 } },
+          unitOverhead: { "packages/patterns/one.test.ts": 10 },
+          prologue: 0,
+        },
+      });
+      const result = run(manifest, {
+        boundSeconds: 300,
+        capabilities: new Map([["pattern-integration", ["toolshed"]]]),
+      });
+      expect(result.unschedulable.length).toBe(1);
+      expect(result.unschedulable[0]!.cost).toBeCloseTo(520, 5);
+      expect(result.unschedulable[0]!.suite).toBe("pattern-integration");
+    });
+
     it("does not force one in even when the change touches it", () => {
       const manifest = sampleManifest({
         entries: entries(1, () => ({ cost: 400 })),
