@@ -146,6 +146,20 @@ clearing. **New session** goes back to an empty page and the list. A session
 that cannot take another turn — closed, or left with a transcript that did not
 survive a restart — says so in the feed when the follow-up is refused.
 
+### Status route
+
+`GET /api/status` returns the console's absolute `artifactRoot` and a `sessions`
+array. Each session status carries its lifecycle, timestamps, model, workspace,
+capabilities, policy, and, once a run has started, its own `artifactRoot`. A
+`sessionId` query narrows that array to the matching live session. Clients that
+need a run's artifacts use the session's root when it is present and the
+top-level root as the console-wide fallback.
+
+Like every `/api` route, status requires the per-process token cookie obtained
+by loading the console page. The top-level fields are present even before the
+console has any sessions, so an unattended client can check the route contract
+before starting a model turn.
+
 ## CFC
 
 This surface exists partly to show CFC working, so the fabric session's runtime

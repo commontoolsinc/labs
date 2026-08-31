@@ -471,6 +471,20 @@ describe("console/server", () => {
     });
   });
 
+  describe("GET /api/status", () => {
+    it("answers with the configured artifact root before a task is started", async () => {
+      const response = await server.handle(
+        getRequest("/api/status", { cookie }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        artifactRoot: config().artifactRoot,
+        sessions: [],
+      });
+    });
+  });
+
   describe("POST /api/task", () => {
     it("starts a follow-up turn in the session the request names", async () => {
       const started = await startTask({ text: "track my books" });

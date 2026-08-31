@@ -123,16 +123,29 @@ defaults to `CF_HARNESS_FABRIC_API_URL`, then to `http://localhost:8000`. Point
 it at the same server the console was started against, or the report describes a
 machine the runs never touched. Add `--expect-git-sha=<sha>` to refuse the batch
 unless that server reports the commit you meant to measure, and `--base` to ask
-ancestry against a branch other than `main`.
+ancestry against a branch other than `main`. A commit known to be off that base
+also refuses by default. `--allow-diverged` is the explicit opt-out for a batch
+that intentionally measures such a server; a commit that cannot be checked
+remains a non-fatal `unchecked` reading.
 
 The runner loads the console page to pick up the token cookie every `/api` route
-is gated on, reads the index, and then runs each task in its own session. It
-waits on the console's own `turn_completed`, `turn_failed` or `turn_canceled`
-event, read off the server-sent event stream, and on nothing else. There is no
-timeout: a turn that hangs is a batch that hangs, which an operator can see and
-release with a `POST /api/cancel`, rather than a bound that turns a slow run
-into a failed one. It writes `report.md` and `report.json` under `--out`, and
-exits non-zero if any task ended other than completed.
+is gated on. Before reading the index or starting a paid model turn, it requires
+`/api/status` to carry an absolute top-level `artifactRoot` and a `sessions`
+array. It then reads the index and runs each task in its own session. It waits
+on the console's own `turn_completed`, `turn_failed` or `turn_canceled` event,
+read off the server-sent event stream, and on nothing else. There is no timeout:
+a turn that hangs is a batch that hangs, which an operator can see and release
+with a `POST /api/cancel`, rather than a bound that turns a slow run into a
+failed one.
+
+After a turn settles, the runner locates its root run under the session's
+`artifactRoot`, falling back to the console-wide root. A candidate must have
+been created after the batch began and its transcript's first user message must
+exactly equal the suite task. No match is recorded as not measured. More than
+one match is an ambiguity, also recorded as not measured with every candidate
+run identifier; directory order never chooses a run silently. The runner writes
+`report.md` and `report.json` under `--out`, and exits non-zero if any task
+ended other than completed.
 
 Measuring runs that are already on disk needs no console:
 
@@ -362,13 +375,14 @@ asks the local repository whether that commit is on `main`, and records
 `ancestor`, `diverged`, or `unchecked` — a commit this clone does not hold is
 `unchecked`, which is not the same reading as one known to be off the branch.
 
-Two rules about that recording, both load-bearing.
+Two rules about that reading, both load-bearing.
 
-**It records, it does not refuse.** Running against a deliberately mismatched
-server is documented practice, so a `diverged` reading is a fact for the reader
-rather than grounds to refuse a night's work. The one refusal is an expectation
-the batch was given explicitly: `--expect-git-sha=<sha>` refuses when the server
-reports a different commit.
+**Knowing a commit is wrong differs from not knowing.** A `diverged` reading
+refuses before the first task unless the operator passes `--allow-diverged` to
+record an intentional mismatch. An `unchecked` reading stays non-fatal: a clone
+that does not hold the commit, or a git command that could not answer, has not
+shown the server to be off the branch. An explicit `--expect-git-sha=<sha>` is
+stricter still and refuses whenever the server reports a different commit.
 
 **The server's CFC block is never differenced against the console's.** They
 describe different runtimes. `cfcFlowLabels` is core-default off and the
@@ -401,7 +415,8 @@ wrong from the inside — that is the whole difficulty. The rules that follow fr
 it are the ones this document keeps repeating: an unread reading is recorded as
 unread and never as a zero; two readings that could differ are printed side by
 side rather than differenced; a refusal is a refusal rather than a warning; and
-a check refuses only on something it was told, never on something it inferred.
+a known-diverged server refuses unless the operator explicitly allows that
+mismatch, while an unread ancestry remains non-fatal.
 
 ## Changing this
 
