@@ -5,6 +5,7 @@
  * only, never the address behind a token.
  */
 import { describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import {
   ADDRESS_HANDLE_TOKEN_PREFIX,

@@ -5,6 +5,7 @@
  * never the address behind a token.
  */
 import { describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import type { MemorySpace } from "@commonfabric/runner";
 import {

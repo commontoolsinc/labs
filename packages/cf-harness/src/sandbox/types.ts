@@ -206,6 +206,7 @@ export interface SandboxRuntime {
    * the description to carry a reading awaits this first.
    */
   probeCfcTransportReadiness?(): Promise<CfcTransportReadiness>;
+
   resolvePath(path: string, cwd?: string): string;
   isPathWithinWorkspace(path: string): boolean;
   isPathWithinAllowedRoots(path: string): boolean;

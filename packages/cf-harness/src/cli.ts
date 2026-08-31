@@ -363,6 +363,7 @@ export interface RunCfHarnessCliDependencies {
 
   /** Trusted, fixed binding supplied only by the dedicated local Loom host. */
   loomLocalHostBinding?: LoomLocalHostBinding;
+
   fetchFn?: HarnessFetch;
   structuredHostFailures?: boolean;
 
@@ -371,6 +372,7 @@ export interface RunCfHarnessCliDependencies {
    * Resolved from the process when absent.
    */
   provenance?: HarnessProvenance;
+
   io?: CfHarnessCliIO;
   readTextFile?: (path: string) => Promise<string>;
   writeTextFile?: (path: string, text: string) => Promise<void>;

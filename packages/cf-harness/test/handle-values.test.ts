@@ -5,6 +5,7 @@
  * nothing readable, and the rule that no message ever renders the referent.
  */
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";

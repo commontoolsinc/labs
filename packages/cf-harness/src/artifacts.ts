@@ -88,6 +88,7 @@ export interface HarnessArtifactStore {
    * source file's bytes instead of snapshotting.
    */
   readonly imageAttachmentSnapshotDir?: string;
+
   persistRunState(state: HarnessRunState): Promise<string>;
   persistTranscript(
     transcript: readonly HarnessTranscriptMessage[],
@@ -110,6 +111,7 @@ export interface HarnessArtifactStore {
   persistCellLabels?(
     labels: HarnessCellLabels,
   ): Promise<string>;
+
   persistRunReport(
     report: HarnessRunReport,
   ): Promise<string>;

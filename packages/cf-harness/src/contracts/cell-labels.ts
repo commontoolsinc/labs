@@ -60,6 +60,7 @@ export type HarnessCellLabelOrigin =
 export interface HarnessCellLabelEntry {
   /** The path inside the document, empty for the document itself. */
   path: readonly string[];
+
   confidentiality: readonly HarnessCfcAtom[];
   integrity: readonly HarnessCfcAtom[];
 
@@ -148,6 +149,7 @@ export type HarnessCellLabelTruncationReason = "node-budget-exhausted";
 export interface HarnessCellLabelUnreadPath {
   /** The path inside the document, as an entry at it would be written. */
   path: readonly string[];
+
   reason: HarnessCellLabelUnreadReason;
 }
 
@@ -244,6 +246,7 @@ export interface HarnessCellLabels {
   space?: {
     /** The space as the run was configured with it: a name, or a DID. */
     configured: string;
+
     did?: string;
 
     /** The database file read, for a reader that wants to open it too. */

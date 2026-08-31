@@ -69,6 +69,7 @@ export class ConsoleIndexView extends LitElement {
   declare patterns: readonly PatternIndexListedPattern[];
   /** The weight the index scores each event type at, as it reported them. */
   declare eventTypes: Readonly<Record<string, number>>;
+
   declare patternsError: string | undefined;
   declare open: OpenPattern | undefined;
   declare events: readonly PatternIndexEvent[];
@@ -76,6 +77,7 @@ export class ConsoleIndexView extends LitElement {
   declare eventFilter: string;
   /** The identifier the last copy button copied, so the page can say so. */
   declare copied: string | undefined;
+
   declare searchRequest: string | undefined;
   declare searchResults: readonly PatternIndexSearchResult[] | undefined;
   declare searchError: string | undefined;
@@ -85,6 +87,7 @@ export class ConsoleIndexView extends LitElement {
 
   /** Which read of a pattern's detail is current; only the newest may show. */
   #detailReads = 0;
+
   #refreshes = 0;
   /** Which search is current, for the same reason. */
   #searches = 0;

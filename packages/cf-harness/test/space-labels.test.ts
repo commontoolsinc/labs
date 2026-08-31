@@ -56,6 +56,7 @@ const NEVER_WRITTEN = entity("neverWritten");
  * the only proof this reader has of which space its ids belong to.
  */
 const OWN_DID = "did:key:z6MkfrQ3tCDZgvJcLwPTvxNsFR8RgTsHTa5JzmnW9pQrUvNq";
+
 const FOREIGN_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 
 /**
@@ -244,6 +245,7 @@ const SHALLOW: LinkWalkBounds = {
   maxDepth: 1,
   maxNodes: Number.POSITIVE_INFINITY,
 };
+
 const SPENT: LinkWalkBounds = { maxDepth: 64, maxNodes: 2 };
 
 /** The documents written as plain JSON rather than through the codec. */

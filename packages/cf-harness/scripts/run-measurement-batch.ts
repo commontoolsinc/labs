@@ -259,6 +259,7 @@ export const parseMeasurementSuite = (input: unknown): MeasurementSuite => {
 export interface SseFrame {
   /** The `event:` name, or `undefined` for a comment frame. */
   event?: string;
+
   data: string;
   id?: number;
 }
@@ -545,6 +546,7 @@ export type ImportedPatternOrigin =
     kind: "seeded-via-alias";
     /** Seeded patterns this one depends on. */
     through: readonly string[];
+
     /**
      * Superseded seeds it depends on. Kept apart from `through` because an
      * alias of a superseded copy inherits the fact that the committed source
@@ -1084,15 +1086,18 @@ export interface SessionConfiguration {
   cfcEnforcementMode?: string;
 
   /**
-   * The skills tree the run scanned, and how many skills the scan found, read
-   * from the run's own `skill-registry.json`. The console exposes the root
-   * over no route, and a turn whose run carries no registry authors patterns
-   * without the authoring guides — a misconfiguration that changes what the
-   * runs do for a reason unrelated to the index, and that is invisible in
-   * every other artifact.
+   * The skills tree the run scanned, read from the run's own
+   * `skill-registry.json`. The console exposes the root over no route, and a
+   * turn whose run carries no registry authors patterns without the authoring
+   * guides — a misconfiguration that changes what the runs do for a reason
+   * unrelated to the index, and that is invisible in every other artifact.
    */
   skillsRoot?: string;
+
+  /** How many skills that scan found, from the same registry. */
   skillsFound?: number;
+
+  /** Why the registry could not be read, when it could not be. */
   skillsUnread?: string;
 
   /**
@@ -1102,6 +1107,7 @@ export interface SessionConfiguration {
    * would report it as healthy.
    */
   runsWithoutSkillRegistry?: number;
+
   runsInFamily?: number;
 }
 
@@ -1140,6 +1146,7 @@ export interface BatchResult {
    * simply absent from it.
    */
   supersededVisibility?: Readonly<Record<string, boolean | undefined>>;
+
   indexBefore: IndexSnapshot;
   indexAfter: IndexSnapshot;
   results: readonly TaskResult[];

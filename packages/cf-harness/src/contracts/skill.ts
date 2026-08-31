@@ -197,15 +197,22 @@ export interface HarnessSkillActivation {
   runId: string;
 
   /**
-   * The registry paths behind a directory-backed skill. Absent for a
-   * `skill-handle` activation, whose text came from a cell rather than a
-   * registry directory — {@link HarnessSkillActivation.handleToken} carries
-   * its provenance instead.
+   * The registry path of a directory-backed skill. This and the three paths
+   * below it are absent for a `skill-handle` activation, whose text came from
+   * a cell rather than a registry directory — {@link
+   * HarnessSkillActivation.handleToken} carries its provenance instead.
    */
   skillPath?: string;
+
+  /** The registry directory that path sits in. */
   skillDir?: string;
+
+  /** The same path, as the sandbox sees it. */
   sandboxSkillPath?: string;
+
+  /** The same directory, as the sandbox sees it. */
   sandboxSkillDir?: string;
+
   digest: string;
   activatedAt: string;
   cfcPromptRole: HarnessSkillCfcPromptRole;

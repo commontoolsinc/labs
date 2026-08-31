@@ -360,6 +360,7 @@ export interface SpaceLabelReader {
    * lying deeper in the value than the walk descends.
    */
   read(address: CellAddress): StoredCellLabels & { linked: LinkedCell[] };
+
   close(): void;
 }
 

@@ -46,6 +46,7 @@ export interface HarnessToolActivity {
 
   /** Absent when the call named a tool the run offers no descriptor for. */
   effectClass?: HarnessToolEffectClass;
+
   cfcEnforcementMode: CfcEnforcementMode;
   policyDecision: HarnessToolPolicyDecision;
   executionStatus: HarnessToolExecutionStatus;
@@ -107,6 +108,7 @@ export interface HarnessRunReport {
 
   /** Requested effort; provider clients reject routes that cannot apply it. */
   reasoningEffort?: string;
+
   promptCacheMode?: "implicit" | "explicit";
   cacheAffinity?: "run" | "custom";
   modelProvider?: HarnessModelProviderId;
@@ -120,11 +122,13 @@ export interface HarnessRunReport {
 
   /** Direct usage plus usage reported by completed descendant runs. */
   totalUsage?: HarnessModelUsage;
+
   modelUsage?: HarnessModelTurnUsage[];
   cfcEnforcementMode: CfcEnforcementMode;
 
   /** The fabric session's resolved CFC posture, when the run had a session. */
   fabricSessionCfc?: HarnessFabricSessionCfcPosture;
+
   createdAt?: string;
   updatedAt?: string;
   endedAt?: string;

@@ -32,15 +32,20 @@ export interface ConsoleRunSummary {
   model?: string;
   /** The last thing a person said in this run, which is what it was asked. */
   title?: string;
+
   toolCallCount: number;
   /** The run that delegated this one, for a `delegate_task` child. */
   parentRunId?: string;
+
   /** The tool call in the parent that started this run. */
   parentToolCallId?: string;
+
   /** How many delegations deep this run sits; absent for a parent run. */
   depth?: number;
+
   /** What the run failed at, and its detail, when it recorded a failure. */
   failure?: { kind: string; detail: string };
+
   /** Every piece address `assign_slug` handed back, in the order named. */
   pieceUrls: readonly string[];
 }
@@ -55,13 +60,17 @@ export interface ConsolePatternAttempt {
   toolCallId: string;
   /** Present when the call submitted source; absent when it named an index pattern. */
   source?: string;
+
   /** Present when the call ran an indexed pattern rather than fresh source. */
   patternId?: string;
+
   /** The `inputs` the call wired in, by name, as the model addressed them. */
   inputNames: readonly string[];
+
   status: string;
   /** The compiler's diagnostic, for a call the compiler refused. */
   message?: string;
+
   /** The piece the call created, when it created one. */
   pieceId?: string;
 }
@@ -71,10 +80,12 @@ export interface ConsolePatternSearch {
   toolCallId: string;
   /** What was searched for: the call's free text, its tags, or both. */
   query?: string;
+
   hits: readonly {
     patternId?: string;
     /** The hit's own description, which is all the index titles it by. */
     description?: string;
+
     /** The index's ranking signal for the hit, when it keeps one. */
     score?: number;
   }[];
@@ -86,6 +97,7 @@ export interface ConsolePatternFeedback {
   patternId?: string;
   /** The verdict the call cast: `up` or `down`. */
   verdict?: string;
+
   note?: string;
 }
 

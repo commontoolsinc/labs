@@ -38,8 +38,10 @@ export interface LabelledCapability {
   need: string;
   /** Entries a session could use for `need` without rewriting behaviour. */
   answers: readonly string[];
+
   /** Entries with the right subject and the wrong behaviour. */
   partial: readonly string[];
+
   evidence: string;
 }
 
@@ -85,6 +87,7 @@ export interface QueryScore {
   register: string;
   /** 1-based rank of the first answering entry, or `undefined` for none. */
   firstAnswerRank?: number;
+
   answersInTop5: number;
   answersInTop10: number;
   partialsInTop5: number;
@@ -105,12 +108,16 @@ export interface Aggregate {
   queries: number;
   /** Queries whose first answering entry reached rank 5 or better. */
   hitAt5: number;
+
   /** Queries whose first answering entry reached rank 10 or better. */
   hitAt10: number;
+
   /** Mean over queries of 1/rank of the first answering entry, 0 for none. */
   meanReciprocalRank: number;
+
   /** Mean over queries of answering entries in the top 5, divided by 5. */
   precisionAt5: number;
+
   /** Mean over queries of the share of answering entries reaching the top 5. */
   recallAt5: number;
 }

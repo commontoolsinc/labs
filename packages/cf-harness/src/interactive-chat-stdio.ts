@@ -61,6 +61,7 @@ export interface RunHarnessInteractiveChatStdioOptions {
 
   /** Single authenticated owner for an owner-bound service process. */
   credentialOwner?: HarnessCredentialOwnerRef;
+
   createPromptLoop?: HarnessInteractivePromptLoopFactory;
   createService?: (
     onEvent: (event: HarnessChatEventEnvelope) => void | Promise<void>,
@@ -81,6 +82,7 @@ export interface HarnessInteractiveChatStdioCliOptions {
    * learning a second mount vocabulary.
    */
   hostMountSpecs?: readonly string[];
+
   maxModelTurns?: number;
   help: boolean;
 }

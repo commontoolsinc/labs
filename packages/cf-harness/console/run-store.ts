@@ -89,6 +89,7 @@ export interface ConsoleRunDetail {
   lens: ConsoleRunLens;
   /** The run as a timeline, which is what the step scrubber reads. */
   steps: readonly ConsoleStep[];
+
   /**
    * Every handle the run introduced, resolved against its own table first and
    * against its neighbours' tables after — a token minted in an earlier turn
@@ -104,8 +105,10 @@ export interface ConsoleRunDetail {
    * and means nobody asked under a run whose space could not be read.
    */
   cellLabels: ConsoleCellLabelsSummary;
+
   /** The artifacts this run wrote, by name, for the raw pane to fetch. */
   artifactNames: readonly string[];
+
   /** The files under `tool-outputs/`, newest call last. */
   toolOutputNames: readonly string[];
 }

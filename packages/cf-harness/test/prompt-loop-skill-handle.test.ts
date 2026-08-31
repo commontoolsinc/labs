@@ -7,6 +7,7 @@
  * rather than by registry name.
  */
 import { describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";

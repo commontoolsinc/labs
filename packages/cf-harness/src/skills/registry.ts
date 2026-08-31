@@ -68,6 +68,7 @@ export interface LoadHarnessSkillContextFromTextOptions {
 
   /** The parent-held token the text was materialized through. */
   handleToken: string;
+
   runId: string;
   activatedAt?: string;
 }

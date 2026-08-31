@@ -58,6 +58,7 @@ export interface LoomRunManifest {
 
   /** Opaque digest identifying the canonical host-owned credential home. */
   harnessHomeIdentity?: string;
+
   workspace?: LoomRunManifestWorkspace;
   promptSlot?: PromptSlotBinding;
   cfc?: LoomRunManifestCfc;
