@@ -611,6 +611,11 @@ latter's for its fabric session from `--fabric-cfc-enforcement-mode`
 (raise-only: `enforce-explicit` or `enforce-strict`) and
 `--fabric-cfc-flow-labels`, with `CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE` and
 `CF_HARNESS_FABRIC_CFC_FLOW_LABELS` as their environment defaults.
+`remoteClient` takes a host-controlled `cfcWriteFloor` on top of those two,
+which `PiecesController.initialize` forwards and the pattern multi-runtime
+harness routes on to each worker runtime, per session or for the whole
+harness. That dial is how a caller reaches the floor's `observe` rung, which
+the named bundle below sets only to `enforce`.
 
 One named bundle sits beside the per-dial rollout: every preset's `CoreParams`
 accepts `cfcPosture: "max-enforcement"`, which spreads
