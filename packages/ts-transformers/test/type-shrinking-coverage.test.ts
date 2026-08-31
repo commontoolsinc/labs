@@ -13,7 +13,7 @@ import {
 import { collect, parseModule } from "./transformed-ast.ts";
 
 //
-// Structural inspection of printed type nodes.
+// Structural inspection of printed type nodes
 //
 // `printTypeNode` renders a `ts.TypeNode` to text. Asserting on that text with
 // `assertStringIncludes` is weak: it matches on formatting and cannot tell a
@@ -79,7 +79,7 @@ function hasQualifiedRef(node: ts.Node, left: string, right: string): boolean {
 }
 
 //
-// Harness (mirrors test/type-shrinking.test.ts so cases stay comparable).
+// Harness (mirrors test/type-shrinking.test.ts so cases stay comparable)
 //
 
 function createProgram(source: string): {

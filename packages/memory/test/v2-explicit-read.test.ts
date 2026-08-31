@@ -603,6 +603,7 @@ Deno.test("stage A: a lease holder names two instances of one (branch, id, scope
   // the service instance and a demander's instance of one doc). The wire
   // collapse guard stays for everyone else: a NON-holder's wire carries scope
   // names only, so its ambiguous read set is still refused loudly.
+
   const server = newServer("memory://explicit-read-two-instances");
   setServerExecutionConfig(true);
   try {

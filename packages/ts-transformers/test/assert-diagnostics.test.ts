@@ -476,6 +476,43 @@ export default pattern((state: State) => {
   assertEquals(liftInputSchemas(root), [readSchema, readSchema]);
 });
 
+Deno.test("assert leaves an operator it does not record alone", async () => {
+  const root = await transformed(patternSource(`
+  const check = assert(() => (a.get(), b.get() === 2));
+  return { check };`));
+
+  // A comma yields its right operand; neither side is an operand of a
+  // comparison, so there is nothing to record. The body is still a record.
+  assertEquals(assertCaptures(root), []);
+  assertEquals(recordSource(root), "(a.get(), b.get() === 2)");
+});
+
+Deno.test("assert leaves a namespace receiver alone when nothing else records", async () => {
+  const root = await transformed(patternSource(`
+  const check = assert(() => Object.is(1, 1));
+  return { check };`));
+
+  // Both arguments are literals, so the receiver is reached for — but
+  // `Object` is a namespace, and its value would say nothing.
+  assertEquals(assertCaptures(root), []);
+  assertEquals(recordSource(root), "Object.is(1, 1)");
+});
+
+Deno.test("assert leaves an optional-call receiver alone", async () => {
+  const root = await transformed(
+    `import { assert, cell, pattern } from "commonfabric";
+export default pattern(() => {
+  const maybe = cell<number[] | undefined>(undefined);
+  const check = assert(() => maybe.get()?.includes(1) ?? false);
+  return { check };
+});`,
+  );
+
+  // Recording the receiver of `?.` would need the chain rebuilt around the
+  // recording call; the operand itself is recorded instead.
+  assertEquals(assertCaptureLabels(root), ["maybe.get()?.includes(1)"]);
+});
+
 //
 // What the stage leaves alone
 //
@@ -528,41 +565,4 @@ Deno.test("assert leaves a body with no return alone", async () => {
 
   assertEquals(assertCaptures(root), []);
   assertEquals(recordSource(root), undefined);
-});
-
-Deno.test("assert leaves an operator it does not record alone", async () => {
-  const root = await transformed(patternSource(`
-  const check = assert(() => (a.get(), b.get() === 2));
-  return { check };`));
-
-  // A comma yields its right operand; neither side is an operand of a
-  // comparison, so there is nothing to record. The body is still a record.
-  assertEquals(assertCaptures(root), []);
-  assertEquals(recordSource(root), "(a.get(), b.get() === 2)");
-});
-
-Deno.test("assert leaves a namespace receiver alone when nothing else records", async () => {
-  const root = await transformed(patternSource(`
-  const check = assert(() => Object.is(1, 1));
-  return { check };`));
-
-  // Both arguments are literals, so the receiver is reached for — but
-  // `Object` is a namespace, and its value would say nothing.
-  assertEquals(assertCaptures(root), []);
-  assertEquals(recordSource(root), "Object.is(1, 1)");
-});
-
-Deno.test("assert leaves an optional-call receiver alone", async () => {
-  const root = await transformed(
-    `import { assert, cell, pattern } from "commonfabric";
-export default pattern(() => {
-  const maybe = cell<number[] | undefined>(undefined);
-  const check = assert(() => maybe.get()?.includes(1) ?? false);
-  return { check };
-});`,
-  );
-
-  // Recording the receiver of `?.` would need the chain rebuilt around the
-  // recording call; the operand itself is recorded instead.
-  assertEquals(assertCaptureLabels(root), ["maybe.get()?.includes(1)"]);
 });

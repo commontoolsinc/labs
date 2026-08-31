@@ -33,7 +33,7 @@ function nameOffsetOf(doc: Document, name: string): number {
 }
 
 //
-// createSemantics: build success path that the !program guard backstops
+// createSemantics: build's own isolation, which the !program guard backstops
 //
 
 Deno.test("semantics: a healthy build returns a Program (the !program guard is a backstop)", () => {
@@ -148,7 +148,7 @@ const x = 1;`;
 });
 
 //
-// createDiffSemantics: build success path the failure guards backstop
+// createDiffSemantics: where the failure guards are backstops
 //
 
 const FILE_TEXT = `export function double(n: number): number {

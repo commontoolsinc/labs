@@ -765,8 +765,8 @@ describe("cf-code-editor cursor stability", () => {
   //
   // Race conditions, timing edges, and awkward updates
   //
-  // Awkward in both senses: content the editor must render intact, and an
-  // update that changes nothing.
+  // Awkward covers content the editor must render intact, an update that
+  // changes nothing, and an echo that comes back altered.
   //
 
   it("ADVERSARIAL: Cell update at exact debounce boundary should not corrupt state", async () => {

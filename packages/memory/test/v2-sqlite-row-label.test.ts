@@ -57,6 +57,20 @@ function emailSpec(): RowLabelSpec {
   return schema.rowLabel as RowLabelSpec;
 }
 
+function expectError(
+  spec: RowLabelSpec,
+  row: Record<string, unknown>,
+  ctx: { dbOwner?: string },
+  needle: string,
+) {
+  const res = evaluateRowLabel(spec, row, ctx);
+  assert("error" in res, `expected {error} for ${JSON.stringify(row)}`);
+  assert(
+    res.error.includes(needle),
+    `error "${res.error}" should mention "${needle}"`,
+  );
+}
+
 //
 // Builder -> AST
 //
@@ -599,20 +613,6 @@ Deno.test("constant() injects a literal atom; intersect() meets integrity atom s
 // Each returns {error}, never a partial label.
 //
 
-function expectError(
-  spec: RowLabelSpec,
-  row: Record<string, unknown>,
-  ctx: { dbOwner?: string },
-  needle: string,
-) {
-  const res = evaluateRowLabel(spec, row, ctx);
-  assert("error" in res, `expected {error} for ${JSON.stringify(row)}`);
-  assert(
-    res.error.includes(needle),
-    `error "${res.error}" should mention "${needle}"`,
-  );
-}
-
 Deno.test("a referenced field absent from the row fails closed", () => {
   expectError(
     emailSpec(),
@@ -681,8 +681,8 @@ Deno.test("dbOwner() with no owner in ctx fails closed", () => {
 // evaluateRowLabel — OR-clause evaluation (Epic E1)
 //
 // An anyOf node evaluates to one structural OR-clause rather than to flattened
-// atoms, and a conjunction smuggled in as an alternative fails closed instead
-// of widening into one.
+// atoms, a conjunction smuggled in as an alternative fails closed instead of
+// widening into one, and an all() of any()-clauses composes into proper CNF.
 //
 
 Deno.test("an anyOf node evaluates to a structural OR-clause (Epic E1)", () => {
