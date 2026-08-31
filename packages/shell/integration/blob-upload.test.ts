@@ -27,9 +27,9 @@ describe("shell blob upload", () => {
     await waitForCondition(shell.page(), () => {
       const rootView = document.querySelector("x-root-view");
       const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
-        | { _patterns?: { value?: { spaceRootPattern?: unknown } } }
+        | { _spaceRootPattern?: { value?: unknown } }
         | null;
-      return Boolean(appView?._patterns?.value?.spaceRootPattern);
+      return Boolean(appView?._spaceRootPattern?.value);
     });
 
     const result = await shell.page().evaluate(async () => {

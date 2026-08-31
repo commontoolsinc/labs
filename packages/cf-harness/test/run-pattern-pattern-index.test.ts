@@ -546,6 +546,7 @@ describe("run-pattern over the pattern index", () => {
         patternId: "pat-doubler",
         inputs: { n: 1 },
       });
+      await index.settled("recordEvent", 1);
       const events = index.calls.filter((call) => call.fn === "recordEvent");
       expect(events.map((event) => event.body.eventType)).toContain(
         "instantiated",

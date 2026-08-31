@@ -53,11 +53,9 @@ export interface AgentAuthoredEvent {
    * identity key. Fabric authenticates the write with that key; this says
    * which agent acted under it.
    *
-   * Required, and required from the start of a caller's life rather than
-   * eventually: acceptance can widen later but not narrow, so a verb that
-   * tolerates an unsigned call can never stop tolerating one without a break.
-   * Taking it here means the arrival of execution provenance can relax this
-   * to optional compatibly, which is the direction that costs nothing. */
+   * Required so every authored-content call carries structured attribution.
+   * Authenticated execution provenance can supersede the field by relaxing it
+   * to optional without breaking existing callers. */
   agentName: string;
 }
 
@@ -78,9 +76,7 @@ export interface AddLinkEvent extends AgentAuthoredEvent {
    * viewer's session. */
   url: string;
 
-  /** Display label. Optional, and a blank one falls back to the URL — the
-   * handler has always done that, and requiring the field only kept callers
-   * from relying on it. */
+  /** Display label. Optional, and a blank one falls back to the URL. */
   label?: string;
 }
 
@@ -96,8 +92,7 @@ export interface SetTitleEvent {
   title: string;
 
   /** The agent making this mutation, stored as structured attribution beside
-   * the write time. Required: this verb postdates the unsigned-caller era,
-   * so it carries no legacy fallback. */
+   * the write time. Required so every successful rename is attributed. */
   agentName: string;
 }
 
@@ -113,15 +108,12 @@ export interface MentionEvent {
   /** The piece to reference — the piece itself, not an address. Identity here
    * is the cell, so this is what a caller passes and what gets stored.
    *
-   * Declared through the ONE field every topic has rather than `unknown`, and
-   * the narrowness is what makes a non-reference CHEAP TO CATCH — not what
-   * catches it. An `asCell` payload is wrapped whole without validating what
-   * is behind it, so naming a property refuses nothing at the boundary: an
-   * address sent as text, which an inline CLI call argument produces by being
-   * parsed as plain JSON, arrives here as readily as a piece does. What the
-   * named property buys is a one-field read that tells the two apart —
-   * `topic.get()` is `undefined` for a value that is not a reference and an
-   * object for any piece — and `mention` spends it before storing anything.
+   * Declared through the one field every Topic has rather than `unknown`. The
+   * cell declaration marks this as a reference position, so the CLI resolves a
+   * canonical `/of:...` value from an inline JSON event into the live piece
+   * link. It also bounds the validation read: `topic.get()` is `undefined` for
+   * a value that is not a reference and an object for any piece, and `mention`
+   * checks it before storing anything.
    *
    * `title` is also the most this can safely name: this schema reaches every
    * topic in `mentionable`, so a property without a default would be demanded
@@ -169,9 +161,8 @@ export interface SetBodyResult {
    * whitespace-sensitive Markdown survived the round trip. */
   body: string;
 
-  /** Attribution written for this save. Both are absent when the caller sent
-   * no `agentName`: an unattributed save leaves the previous attribution
-   * standing rather than overwriting it. */
+  /** Attribution written for this save. A successful call includes both
+   * fields because `setBody` requires `agentName`. */
   bodyUpdatedBy?: TopicAuthor;
   bodyUpdatedAt?: number;
 }
@@ -192,13 +183,9 @@ export interface TopicComment {
    * array elements have stable entity identity; future editing addresses
    * elements by reference (`equals()`), not by a synthetic key.
    *
-   * Every comment written from now on carries one, because `addComment`
-   * requires a signature. Still OPTIONAL, and that is not a hedge: a comment
-   * stored by the unsigned path has no author, and a stored record type has to
-   * accept what is already stored. Requiring it here does not make old comments
-   * signed — it makes a deployed piece holding one impossible to update at all,
-   * which `deno task pattern-vintage` refuses rather than discovers in
-   * production. */
+   * Optional because durable Topics may contain a comment without structured
+   * authorship. Current `addComment` calls require `agentName` and always write
+   * this snapshot. */
   author?: TopicAuthor;
   body: string | Default<"">;
   sentAt: number | Default<0>;
@@ -236,8 +223,8 @@ export interface TopicInput {
 
   /** The board's own topics list — the mention universe the body editor
    * autocompletes over. A reference to the tracker's array, wired at creation
-   * like `myName` (and backfillable as a one-time link-bind on pieces created
-   * before it existed). Absent, the editor simply offers no completions. */
+   * and backfillable as a one-time link-bind. Absent, the editor simply offers
+   * no completions. */
   mentionable?: Writable<TopicMentionable[] | Default<[]>>;
 
   /** Where this topic's `[Label][key]` mentions point, keyed by the token that
@@ -464,28 +451,17 @@ export interface TopicPiece extends TopicSummary {
 
   /** Replace the living document whole — read it, revise it, write it back
    * complete; the body is one value with whole-value conflict semantics.
-   * Returns the persisted body and any attribution written. */
+   * Requires `agentName` and returns the persisted body with its attribution. */
   setBody: Stream<SetBodyEvent, SetBodyResult>;
 
   /** Reference another piece from this topic — the payload is the piece
-   * itself, stored as a reference. The browser equivalent is picking a
-   * completion in the body editor, which writes the same map.
-   *
-   * Required, like the verbs beside them. They were optional because a topic
-   * deployed before they existed carries neither, and a required property a
-   * piece cannot produce refuses its update — but an optional verb is its own
-   * defect: it pushes a maybe to every call site whose obvious spelling,
-   * `piece.verb?.send(...)`, skips in silence rather than failing. This change
-   * is already a rehearsed break that rewrites every topic, so the generation
-   * that lacked them does not survive it, and the reason for the optionality
-   * goes with it. */
+   * itself, stored as a reference. Takes no `agentName` and returns no value;
+   * Fabric retains the authenticated principal behind the edge. */
   mention: Stream<MentionEvent>;
 
   /** Stop referencing a piece: removes every `mention`-made entry naming it.
    * References made in the prose are retracted by editing the prose, not by
-   * this. Required on the projection for the same reason as `mention`, and
-   * the pair has to move together: a caller that can make a reference and
-   * only maybe retract it is the worse half of both contracts. */
+   * this. Takes no `agentName` and returns no value. */
   unmention: Stream<UnmentionEvent>;
 }
 
@@ -497,11 +473,12 @@ export interface TopicPiece extends TopicSummary {
  *
  * Durable conclusions get folded up into the body — revise it whole with
  * `setBody`; the thread holds the deliberation as append-only, point-in-time
- * `addComment` records. Sign every mutation with `agentName`: Fabric records
- * the human principal behind the key; the name says which agent acted under
- * it. The session-draft cells and `submit*` streams below belong to the
- * rendered page, not the headless contract — they read state only this
- * session holds.
+ * `addComment` records. Sign every authored-content mutation with `agentName`:
+ * Fabric records the human principal behind the key; the name says which
+ * agent acted under it. Reference-only `mention` and `unmention` calls carry
+ * no content signature. The session-draft cells and `submit*` streams below
+ * belong to the rendered page, not the headless contract — they read state
+ * only this session holds.
  */
 export interface TopicOutput extends TopicPiece {
   [UI]: VNode;
@@ -533,15 +510,9 @@ export interface TopicOutput extends TopicPiece {
    */
   referencesDraft: PerSession<Writable<TopicMentionRefMap>>;
 
-  /** Rename the topic. Lives on the direct interface rather than the shared
-   * `TopicPiece` projection, and the placement is the contract: a holder's
-   * required demands are write-once, so a required verb added to the
-   * projection every board embeds refuses those boards' updates unless an
-   * acknowledged break rewrites them. That is what `mention` above costs, and
-   * it is worth paying only for a verb the projection has to carry. A rename
-   * is a direct-address mutation with no place on the projection at all, so
-   * it never faces the question. Requires `agentName` and returns the
-   * persisted title with the attribution written. */
+  /** Rename the topic. Requires `agentName` and returns the persisted title
+   * with its attribution. This direct-address verb stays outside the board's
+   * narrow `TopicPiece` demand. */
   setTitle: Stream<SetTitleEvent, SetTitleResult>;
 
   /** Attribution of the last rename; unset until the first `setTitle`.
@@ -692,10 +663,10 @@ const LINK_KIND_ITEMS = [
 ];
 
 /** The one place a comment record is built and appended. The contract verb
- * and the browser composer both ride it, so the trim rule, the legacy-name
- * mirror, and the write-time stamp cannot drift between them. Callers guard
- * emptiness on their own terms first — the verb rejects, the composer
- * silently declines. Mergeable append: concurrent comments all land. */
+ * and the browser composer both ride it, so the trim rule, structured author,
+ * and write-time stamp cannot drift between them. Callers guard emptiness on
+ * their own terms first — the verb rejects, the composer silently declines.
+ * Mergeable append: concurrent comments all land. */
 export const appendComment = (
   comments: Writable<TopicComment[] | Default<[]>>,
   body: string,
@@ -1082,10 +1053,6 @@ export default pattern<TopicInput, TopicOutput>(
           rejectMutation("setBody", "agentName must be non-blank");
         const persisted = text ?? "";
         body.set(persisted);
-        // Every edit stamps. The unsigned path used to write the body and
-        // leave these alone, which left the PREVIOUS author's name sitting on
-        // content they did not write — a misattribution the verb reported as
-        // success.
         const bodyUpdatedAtValue = Date.now();
         bodyUpdatedBy.set(author);
         bodyUpdatedAt.set(bodyUpdatedAtValue);
@@ -1100,8 +1067,6 @@ export default pattern<TopicInput, TopicOutput>(
     const setTitle = action<SetTitleEvent, SetTitleResult>(
       ({ title: text, agentName }) => {
         const trimmed = (text ?? "").trim();
-        // No legacy fallback and no omission tolerance: this verb postdates
-        // the unsigned-caller era, so attribution is simply required.
         const author = topicAuthorFromAgent(agentName ?? "") ??
           rejectMutation("setTitle", "agentName must be non-blank");
         if (!trimmed) rejectMutation("setTitle", "title must be non-empty");

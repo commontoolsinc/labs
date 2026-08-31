@@ -13,7 +13,6 @@ import { CellHandle, PageHandle, VNode } from "@commonfabric/runtime-client";
 
 type SubPages = {
   sidebarUI?: VNode;
-  fabUI?: VNode;
 };
 
 export type LoadError = {
@@ -25,7 +24,6 @@ const SubPagesSchema = {
   type: "object",
   properties: {
     sidebarUI: { $ref: "#/$defs/vdomNode" },
-    fabUI: { $ref: "#/$defs/vdomNode" },
   },
   $defs: {
     ...rendererVDOMSchema.$defs,
@@ -139,9 +137,6 @@ export class XBodyView extends BaseView {
   @property({ attribute: false })
   accessor activePattern: PageHandle | undefined = undefined;
 
-  @property({ attribute: false })
-  accessor spaceRootPattern: PageHandle | undefined = undefined;
-
   @property()
   accessor showShellPieceListView = false;
 
@@ -158,29 +153,20 @@ export class XBodyView extends BaseView {
   accessor embedded = false;
 
   #subPages = new Task(this, {
-    task: async ([activePattern, spaceRootPattern, embedded]) => {
+    task: async ([activePattern, embedded]) => {
       if (embedded) {
         return {
           sidebarUI: undefined,
-          fabUI: undefined,
         };
       }
-      const [sidebarUI, fabUI] = await Promise.all([
-        getSubPageCell(
-          activePattern?.cell() as CellHandle<SubPages> | undefined,
-          "sidebarUI",
-        ),
-        getSubPageCell(
-          spaceRootPattern?.cell() as CellHandle<SubPages> | undefined,
-          "fabUI",
-        ),
-      ]);
+      const sidebarUI = await getSidebarCell(
+        activePattern?.cell() as CellHandle<SubPages> | undefined,
+      );
       return {
         sidebarUI,
-        fabUI,
       };
     },
-    args: () => [this.activePattern, this.spaceRootPattern, this.embedded],
+    args: () => [this.activePattern, this.embedded],
   });
 
   override render() {
@@ -216,7 +202,6 @@ export class XBodyView extends BaseView {
     const sidebar = this.embedded
       ? undefined
       : this.#subPages?.value?.sidebarUI;
-    const fab = this.embedded ? undefined : this.#subPages?.value?.fabUI;
     const runtimeError = this.runtimeError
       ? html`
         <cf-alert class="runtime-error" status="error">
@@ -243,10 +228,6 @@ export class XBodyView extends BaseView {
           ${mainContent} ${sidebar
             ? html`
               <cf-render slot="sidebar" .cell="${sidebar}"></cf-render>
-            `
-            : null} ${fab
-            ? html`
-              <cf-render slot="fab" .cell="${fab}"></cf-render>
             `
             : null}
         </x-omni-layout>
@@ -277,9 +258,8 @@ function loadErrorMessage(error: unknown): string {
 
 globalThis.customElements.define("x-body-view", XBodyView);
 
-async function getSubPageCell(
+async function getSidebarCell(
   cell: CellHandle<SubPages> | undefined,
-  key: "fabUI" | "sidebarUI",
 ): Promise<CellHandle<VNode> | undefined> {
   if (!cell) return undefined;
   const typedCell = cell.asSchema<SubPages>(SubPagesSchema);
@@ -291,7 +271,7 @@ async function getSubPageCell(
       return;
     }
   }
-  if (key in value && value[key]) {
-    return typedCell.key(key).asSchema<VNode>(rendererVDOMSchema);
+  if (value.sidebarUI) {
+    return typedCell.key("sidebarUI").asSchema<VNode>(rendererVDOMSchema);
   }
 }

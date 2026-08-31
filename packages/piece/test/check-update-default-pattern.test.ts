@@ -26,6 +26,7 @@ import {
   reconcilePieceSource,
 } from "../src/ops/piece-origin.ts";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
+import { getLogger } from "@commonfabric/utils/logger";
 
 // The routes those refs resolve to. A system pattern is still SERVED at, and
 // its modules still NAMED by, the route path; the `system:` ref is what a
@@ -882,6 +883,121 @@ describe("opening a space root", () => {
       await identityForSource(SOURCE_V2),
     );
     expect(getPatternIdentityRef(healed)?.symbol).toBe("default");
+  });
+
+  it("preserves both failures when passive and running registry opens fail", async () => {
+    await setup();
+    const passiveFailure = new Error("passive registry open failed");
+    const runningFailure = new Error("running registry open failed");
+    const original = controller.getDefaultPattern.bind(controller);
+    controller.getDefaultPattern = ((open = true) =>
+      Promise.reject(
+        typeof open === "object" ? passiveFailure : runningFailure,
+      )) as typeof controller.getDefaultPattern;
+
+    let failure: unknown;
+    try {
+      await controller.getPieceRegistry();
+    } catch (error) {
+      failure = error;
+    } finally {
+      controller.getDefaultPattern = original;
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([
+      passiveFailure,
+      runningFailure,
+    ]);
+  });
+
+  it("records a passive failure when the running registry fallback succeeds", async () => {
+    await setup();
+    await controller.ensureDefaultPattern();
+    const passiveFailure = new Error("passive registry open failed");
+    const original = controller.getDefaultPattern.bind(controller);
+    controller.getDefaultPattern =
+      ((open = true) =>
+        typeof open === "object"
+          ? Promise.reject(passiveFailure)
+          : original(open)) as typeof controller.getDefaultPattern;
+    const logger = getLogger("piece.update");
+    const warningsBefore =
+      logger.countsByKey["passive-registry-open-failed"]?.warn ?? 0;
+
+    try {
+      expect(await controller.getPieceRegistry()).toBeDefined();
+    } finally {
+      controller.getDefaultPattern = original;
+    }
+
+    expect(
+      logger.countsByKey["passive-registry-open-failed"]?.warn ?? 0,
+    ).toBe(warningsBefore + 1);
+  });
+
+  it("preserves a passive failure when the running fallback finds no root", async () => {
+    await setup();
+    const passiveFailure = new Error("passive registry open failed");
+    const original = controller.getDefaultPattern.bind(controller);
+    controller.getDefaultPattern =
+      ((open = true) =>
+        typeof open === "object"
+          ? Promise.reject(passiveFailure)
+          : Promise.resolve(undefined)) as typeof controller.getDefaultPattern;
+
+    let failure: unknown;
+    try {
+      await controller.getPieceRegistry();
+    } catch (error) {
+      failure = error;
+    } finally {
+      controller.getDefaultPattern = original;
+    }
+
+    expect(failure).toBe(passiveFailure);
+  });
+
+  it("heals a stale root whose registry export is already persisted", async () => {
+    await setup();
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+
+    // The registry path serves a persisted export without running the root.
+    // A root that has ALREADY exported one therefore takes that path — so
+    // the healing has to happen there too, not only on the arm that runs.
+    // `pieceListSchema` defaults an absent export to `[]`, so an export
+    // persisted as empty is exactly the case that reads as present.
+    const { error: seeded } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).asSchema({
+        type: "object",
+        properties: { pieceRegistry: { type: "array" } },
+      }).key("pieceRegistry").set([]);
+    });
+    expect(seeded).toBeUndefined();
+
+    const staleIdentity = await identityForSource(
+      patternSource("unloadable-root-with-persisted-registry"),
+    );
+    await controller.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: staleIdentity,
+        symbol: "default",
+      }, rawMetaWriteAuthorization);
+    });
+    expect(error).toBeUndefined();
+
+    stub.setSource(SOURCE_V2);
+
+    const registry = await controller.getPieceRegistry();
+    await runtime.idle();
+
+    expect(registry).toBeDefined();
+    const healed = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(healed)?.identity).toBe(
+      await identityForSource(SOURCE_V2),
+    );
   });
 
   it("returns the started replacement when the rescue's retry succeeds", async () => {
