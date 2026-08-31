@@ -114,11 +114,14 @@ export class SkillsShSearchError extends Error {
 // difference between deleting an injected sequence and rendering it. These
 // four cover the families that carry a payload: operating-system commands,
 // the device-control group, control sequences, and the two-character escapes.
+// The payload-carrying families also terminate at end of input: a sequence
+// the input ends before terminating still carries its payload, and requiring
+// the terminator would hand that payload back as visible text.
 const ESCAPE_SEQUENCES: readonly RegExp[] = [
   // deno-lint-ignore no-control-regex
-  /\x1b][\s\S]*?(?:\x07|\x1b\\)/g,
+  /\x1b][\s\S]*?(?:\x07|\x1b\\|$)/g,
   // deno-lint-ignore no-control-regex
-  /\x1b[P^_][\s\S]*?\x1b\\/g,
+  /\x1b[P^_][\s\S]*?(?:\x1b\\|$)/g,
   // deno-lint-ignore no-control-regex
   /\x1b[[][\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g,
   // deno-lint-ignore no-control-regex
@@ -244,8 +247,20 @@ export class SkillsShSearchClient {
       );
     }
 
+    // Clamping a malformed limit would send the malformation on: NaN and 2.5
+    // survive Math.min/Math.max, reach the query string, and then compare
+    // against hit counts. A malformed limit is refused, not smoothed over.
+    if (
+      request.limit !== undefined &&
+      (!Number.isInteger(request.limit) || request.limit < 1)
+    ) {
+      throw new SkillsShSearchError(
+        "invalid_query",
+        "skills.sh search limit must be a positive integer",
+      );
+    }
     const limit = Math.min(
-      Math.max(request.limit ?? SKILLS_SH_MAX_RESULTS, 1),
+      request.limit ?? SKILLS_SH_MAX_RESULTS,
       SKILLS_SH_MAX_RESULTS,
     );
     const params = new URLSearchParams({ q: query, limit: String(limit) });

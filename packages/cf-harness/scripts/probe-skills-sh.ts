@@ -23,13 +23,16 @@ import {
 
 const parseArguments = (
   argv: readonly string[],
-): { query: string; owner?: string } => {
+): { query: string; owner?: string } | { usageError: string } => {
   const words: string[] = [];
   let owner: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     if (argv[index] === "--owner") {
       index += 1;
       owner = argv[index];
+      // A flag whose value is missing must refuse, not silently drop the
+      // filter and broaden the search.
+      if (owner === undefined) return { usageError: "--owner needs a value" };
       continue;
     }
     words.push(argv[index]);
@@ -38,13 +41,15 @@ const parseArguments = (
 };
 
 const main = async (): Promise<number> => {
-  const { query, owner } = parseArguments(Deno.args);
-  if (query.trim().length < 2) {
+  const parsed = parseArguments(Deno.args);
+  if ("usageError" in parsed || parsed.query.trim().length < 2) {
+    if ("usageError" in parsed) console.error(parsed.usageError);
     console.error(
       'usage: deno task probe-skills-sh [--owner <owner>] "<query>"',
     );
     return 2;
   }
+  const { query, owner } = parsed;
 
   const client = new SkillsShSearchClient();
   let result;

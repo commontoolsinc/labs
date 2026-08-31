@@ -101,6 +101,15 @@ describe("skills.sh search client", () => {
       const cleaned = sanitizeRegistryString("a".repeat(5_000));
       expect(cleaned.length).toBe(SKILLS_SH_MAX_FIELD_CHARS);
     });
+
+    it("strips an escape sequence the input ends before terminating", () => {
+      // An unterminated sequence carries its payload to end of input; a
+      // matcher that requires the terminator leaves that payload behind as
+      // visible text, which is rendering the injection rather than deleting
+      // it.
+      expect(sanitizeRegistryString("react\u001b]0;LEAK")).toBe("react");
+      expect(sanitizeRegistryString("react\u001bP+qLEAK")).toBe("react");
+    });
   });
 
   describe("search", () => {
@@ -254,6 +263,17 @@ describe("skills.sh search client", () => {
       const { client, urls } = clientAnswering(jsonResponse({ skills: [] }));
       const refusal = await refusalOf(client.search({ query: " a " }));
       expect(refusal.code).toBe("invalid_query");
+      expect(urls).toEqual([]);
+    });
+
+    it("refuses a limit that is not a positive integer, before any request", async () => {
+      const { client, urls } = clientAnswering(jsonResponse({ skills: [] }));
+      for (const limit of [2.5, Number.NaN, 0, -1, Number.POSITIVE_INFINITY]) {
+        const refusal = await refusalOf(
+          client.search({ query: "react native", limit }),
+        );
+        expect(refusal.code).toBe("invalid_query");
+      }
       expect(urls).toEqual([]);
     });
 
