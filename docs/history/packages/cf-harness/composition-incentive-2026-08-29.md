@@ -19,10 +19,11 @@ Instructed explicitly to import it, the same session does it first time.
 
 ## The result
 
-The experiment result below compares 26 `run_pattern` calls in the four-session
-`V0-new` control with 30 calls in the four-session `V2` batch. Composition moved
-from a measured zero to **three distinct tasks wiring five distinct atoms, all
-three reaching `ok`**.
+The experiment result below compares 26 total `run_pattern` calls in the
+four-session `V0-new` control with 30 total calls in the four-session `V2`
+batch. Of the 30 `V2` calls, 26 carried source and 15 of those composed.
+Composition moved from a measured zero to **three distinct tasks wiring five
+distinct atoms, all three reaching `ok`**.
 
 | | control (`V0-new`) | `V2` |
 |---|---|---|
