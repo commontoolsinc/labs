@@ -303,11 +303,8 @@ describe("Phase 2 speculation overlay", () => {
 
     // Retirement (speculation.md §4): the covering watermark retires
     // every entry; the STORE value renders through the same path.
-    await waitUntil(
-      () => overlay!.entryCount(space) === 0,
-      "overlay retirement after settle",
-      30_000,
-    );
+    await overlay!.waitForSpaceQuiescence(space);
+    expect(overlay!.entryCount(space)).toBe(0);
     await waitUntil(
       () => clientResult.key("total").get() === 56,
       "the authoritative value to render",
@@ -2467,12 +2464,10 @@ describe("Phase 2 speculation overlay", () => {
     // promotes off the pending stack. NO further watermark event.
     ackedSeq = 5;
     pendingLocalSeqs.splice(0, pendingLocalSeqs.length, 30);
+    const quiescence = destination.waitForSpaceQuiescence(space);
     replica.speculationAckObserver?.();
-    await waitUntil(
-      () => destination.entryCount(space) === 0,
-      "the verdict-raced entry to retire on the ack wake",
-      5_000,
-    );
+    await quiescence;
+    expect(destination.entryCount(space)).toBe(0);
     destination.close();
   });
 

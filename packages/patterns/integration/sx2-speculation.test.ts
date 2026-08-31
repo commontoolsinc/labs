@@ -115,6 +115,15 @@ describe("sx2 speculation (Phase 2 gates)", () => {
     // PR's Flags.
     const resultCell = cc.getResult(piece.getCell());
     await resultCell.pull();
+    const overlay = runtime.speculationOverlay;
+
+    // Creation itself can leave speculative derivation entries live until
+    // the serving side's authoritative values arrive. Starting the measured
+    // edit on those process-local layers makes the authored commit read a
+    // speculative basis and correctly fail admission. Wait on the entries'
+    // settlement events so this test begins its edit from the store-backed
+    // state it means to measure.
+    await overlay?.waitForSpaceQuiescence(space);
 
     // The ECHO: the authored edit's local render does not gate on the
     // serving round trip. The result sink observes the value through
@@ -180,14 +189,7 @@ describe("sx2 speculation (Phase 2 gates)", () => {
     await waitForSettled(runtime, space, watermarkBefore + 1, {
       timeoutMs: 30_000,
     });
-    const overlay = runtime.speculationOverlay;
-    const drainDeadline = Date.now() + 20_000;
-    while (
-      overlay !== undefined && overlay.entryCount(space) > 0 &&
-      Date.now() < drainDeadline
-    ) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
+    await overlay?.waitForSpaceQuiescence(space);
     assertEquals(
       overlay === undefined ? 0 : overlay.entryCount(space),
       0,
