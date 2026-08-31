@@ -146,10 +146,12 @@ class GatedStorageManager extends EmulatedStorageManager {
    * throw seam: the host may rotate runtime tenures, and the seam must
    * hold across every tenure of the pass under test. */
   static loadParkFailDocId: string | undefined;
+
   /** The armed doc's address, reported as pending while armed. */
   static loadParkFailAddress:
     | { space: MemorySpace; scope: "space"; id: string }
     | undefined;
+
   /** How many head-event load parks the seam has failed — a pin's
    * evidence that the park was REACHED, not merely armed. */
   static loadParkFailHits = 0;
@@ -424,6 +426,7 @@ describe("Phase 3 events-down (serving side)", () => {
    * — the C8d raced-cascade test reads sealed state through them and
    * closes the settle gate. */
   let servingRuntime: Runtime | undefined;
+
   let servingManager: GatedStorageManager | undefined;
   let rejectWaveCommitWhen: ((batch: WaveSpaceCommit) => boolean) | undefined;
   let rejectWaveCommitWith:
@@ -3055,6 +3058,7 @@ describe("Phase 3 events-down (serving side)", () => {
       ).all() as Array<{ consequence_of: string }>).filter((row) =>
         row.consequence_of.includes(eventId)
       ).length;
+
     return {
       engine,
       serving,

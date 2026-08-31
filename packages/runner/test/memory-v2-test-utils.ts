@@ -207,6 +207,7 @@ export abstract class ScriptedSessionTransport
   protected decode(payload: string): ScriptedTransportMessage {
     return decodeMemoryBoundary(payload) as unknown as ScriptedTransportMessage;
   }
+
   protected encode(message: unknown): string {
     return encodeMemoryBoundary(message as FabricValue);
   }

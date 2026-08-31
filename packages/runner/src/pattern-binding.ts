@@ -734,6 +734,7 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
       return converted;
     } else return binding;
   }
+
   return convert(binding, options?.targetSchema) as T;
 }
 

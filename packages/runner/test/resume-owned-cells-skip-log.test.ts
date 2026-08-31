@@ -147,6 +147,7 @@ type SkipCase = {
    * stored root whose argument meta link is already written.
    */
   seedFirst: boolean;
+
   level: "debug" | "warn";
   message: string;
   node: string;

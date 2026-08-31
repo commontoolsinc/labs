@@ -40,6 +40,7 @@ export type ReadObservationShape = "value" | "shape" | "followRef";
  */
 export const LABEL_METADATA_OBSERVATION: LabelMetadataObservationClass =
   "labelMetadata";
+
 export type { LabelMetadataObservationClass };
 
 /**

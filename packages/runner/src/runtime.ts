@@ -497,6 +497,7 @@ export interface RuntimeOptions {
    * one. Fixed for the runtime's lifetime.
    */
   spaceHostMap?: Record<string, string>;
+
   storageManager: IStorageManager;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
@@ -708,6 +709,7 @@ export interface CfcRuntimeStats {
    * (`flowLabelWorkExists`) vs answered from the transaction's memoized
    * negative verdict. Measurement only. */
   flowLabelProbesComputed: number;
+
   flowLabelProbeMemoHits: number;
   cfcPreparedTx: number;
   cfcPrepareRejects: number;
@@ -880,6 +882,7 @@ export class Runtime {
 
   /** See `RuntimeOptions.onPatternInstantiated`. */
   readonly onPatternInstantiated?: PatternInstantiationObserver;
+
   readonly cfcFlowLabels: CfcFlowLabelsMode;
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
@@ -895,6 +898,7 @@ export class Runtime {
 
   /** Frozen deployment trust config; undefined = no trust configured. */
   readonly cfcTrustConfig: CfcTrustConfig | undefined;
+
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
 
@@ -903,6 +907,7 @@ export class Runtime {
 
   /** Optional pattern statement-coverage collector; see RuntimeOptions. */
   readonly patternCoverage?: PatternCoverageCollector;
+
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
   // The runtime's trust revision — `<runtime id>` with the trust-config
   // digest folded in when one is configured. The ONE composition site for
@@ -917,6 +922,7 @@ export class Runtime {
 
   /** Resolved committed-write backpressure policy (all fields present). */
   readonly commitBackpressure: CommitBackpressurePolicy;
+
   readonly apiUrl: URL;
   readonly spaceHostMap?: Record<string, string>;
 
@@ -929,6 +935,7 @@ export class Runtime {
 
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
+
   // The transaction seal destination (server-execution v2, serving-loop.md
   // §3d): installed only on a serving runtime under
   // EXPERIMENTAL_SERVER_EXECUTION, by the wave machinery around each wave.
@@ -968,6 +975,7 @@ export class Runtime {
    * NOTE-a: R1.dispose after R2's construction must not drop R2's
    * subscriptions). */
   #installedSpaceOpenObserver: ((space: MemorySpace) => void) | undefined;
+
   // Whether THIS runtime explicitly set the serverExecution flag at
   // construction (the only case its dispose participates in the
   // process-global ambient lifecycle — see the constructor's propagation
@@ -985,6 +993,7 @@ export class Runtime {
    * SpaceServer's own runtime. Gates the Phase-2 speculation-overlay
    * default (a serving runtime never speculates). */
   readonly servingPosture: boolean;
+
   readonly userIdentityDID: DID;
 
   /**
@@ -1002,6 +1011,7 @@ export class Runtime {
 
   /** Cache of resolved PatternFactory.inSpace("name") space DIDs. */
   readonly #spaceNameToDid = new Map<string, MemorySpace>();
+
   #defaultFrame?: Frame;
   #queues = new Map<string, AsyncSemaphoreQueue>();
   #writeDebugContext = new WriteDebugContextStorage<string>();
@@ -3455,6 +3465,7 @@ export class Runtime {
   get serverGitSha(): string | null {
     return this.#serverGitSha;
   }
+
   #serverGitSha: string | null = null;
   #healthCheckGeneration = 0;
 

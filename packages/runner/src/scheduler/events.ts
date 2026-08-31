@@ -763,6 +763,7 @@ export interface SchedulerEventExecutionState {
     deps: ReactivityLog,
     actor: ScopeKeyIdentity,
   ) => Action[];
+
   readonly setEventPassDemandRefresh: (
     refresh: ((demand: Set<Action>) => void) | undefined,
   ) => void;
@@ -817,6 +818,7 @@ export function preflightQueuedEventDependencies(state: {
     deps: ReactivityLog,
     actor: ScopeKeyIdentity,
   ) => Action[];
+
   readonly collectPendingLoadParkKeys: (
     event: QueuedEvent,
     deps: ReactivityLog,

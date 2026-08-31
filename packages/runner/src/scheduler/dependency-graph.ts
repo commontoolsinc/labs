@@ -15,6 +15,7 @@ import type {
 export interface DependencyGraphState {
   /** Identity entity keys resolve scoped addresses against (keys.ts). */
   readonly scopeKeyIdentity: () => ScopeKeyIdentity;
+
   readonly triggerIndex: TriggerIndexState;
   readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;

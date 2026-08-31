@@ -87,6 +87,7 @@ export type RuleFiring = {
 
   /** Index of the rewritten clause in the label AT FIRING TIME. */
   readonly clauseIndex: number;
+
   readonly kind: "add" | "drop";
 
   /** Alternatives added by an `add` firing. */
@@ -167,6 +168,7 @@ export type ExchangeEvalContext = {
 
   /** Trust closure for concept-valued integrity guards (B3). */
   readonly trustResolver?: TrustResolver;
+
   readonly actingPrincipal?: string;
 
   /**

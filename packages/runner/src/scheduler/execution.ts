@@ -151,6 +151,7 @@ export type SchedulerSettleResult = {
 
   /** Actions deferred by convergence backoff in this settle pass. */
   backoffActions: readonly Action[];
+
   backoffUntil?: number;
 
   /** Iterations that actually ran work (excludes the final settled check). */
@@ -161,12 +162,14 @@ export type SchedulerSettleResult = {
 
   /** Number of actions in the final non-empty settle work set. */
   workSetSize: number;
+
   settleStats?: SettleStats;
 };
 
 export interface SchedulerSettleLoopState {
   /** Identity entity keys resolve scoped addresses against (keys.ts). */
   readonly scopeKeyIdentity: () => ScopeKeyIdentity;
+
   readonly getCollectSettleStats: () => boolean;
   readonly effects: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;
@@ -188,6 +191,7 @@ export interface SchedulerSettleLoopState {
 
   /** Refresh transient demand such as a head event's current invalid closure. */
   readonly refreshPassScopedDemand?: (demand: Set<Action>) => void;
+
   readonly getActionId: (action: Action) => string;
   readonly isThrottled: (action: Action) => boolean;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
@@ -277,6 +281,7 @@ export function planBudgetBackoff(state: {
 
   /** Transient demand roots, such as a head event's preflight closure. */
   readonly passScopedDemand?: ReadonlySet<Action>;
+
   readonly nodes: NodeRegistry;
   readonly pending: ReadonlySet<Action>;
   readonly isLiveAction: (action: Action) => boolean;

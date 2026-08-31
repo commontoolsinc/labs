@@ -108,6 +108,7 @@ describe("stage F serving loop", () => {
   let servingFetch:
     | ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>)
     | undefined;
+
   // serving-loop.md §3e: the pattern-update posture flips server-side.
   const newHost = (
     policy?: ConstructorParameters<typeof ExecutorHost>[0]["policy"],

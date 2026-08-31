@@ -24,6 +24,7 @@ export class SpeculationLineage {
 
     /** Wake the scheduler (parked cross-space events become ready). */
     queueExecution: () => void;
+
     onError: (error: unknown) => void;
   };
 
@@ -34,6 +35,7 @@ export class SpeculationLineage {
 
       /** Wake the scheduler (parked cross-space events become ready). */
       queueExecution: () => void;
+
       onError: (error: unknown) => void;
     },
   ) {

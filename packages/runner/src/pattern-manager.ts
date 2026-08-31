@@ -62,6 +62,7 @@ import type { MemorySpace, Runtime, ServerRunInfo } from "./runtime.ts";
  * and threaded to the writeback stamps, where it applies only to writes
  * FOREIGN to the serving manager's home space. */
 export type WritebackDelegation = NonNullable<ServerRunInfo["delegated"]>;
+
 import {
   isFabricImportSpecifier,
   parseFabricRef,
@@ -651,6 +652,7 @@ export class PatternManager {
       `to=${record.toSpace}`,
     ]);
   }
+
   // Maps each storage slot written during this PatternManager session to its
   // complete module set. One slot can hold only one closure shape at a time.
   private persistedCompileCacheClosures = new Map<string, string>();

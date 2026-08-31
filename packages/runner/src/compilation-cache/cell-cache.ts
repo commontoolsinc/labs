@@ -139,6 +139,7 @@ export interface CompiledDoc extends ModuleDocBase {
    * Absent on documents written before the field existed (→ parse fallback).
    */
   readonly exportNames?: readonly string[];
+
   readonly starTargetSpecs?: readonly string[];
   readonly importSpecs?: readonly string[];
   readonly policyManifests?: readonly unknown[];

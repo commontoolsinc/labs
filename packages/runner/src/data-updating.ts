@@ -319,6 +319,7 @@ const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
  * reject the missing cell".
  */
 const _toleratesMissingCache = new WeakMap<object, boolean>();
+
 function schemaToleratesMissing(schema: JSONSchema | undefined): boolean {
   if (schema === undefined) return true;
   if (!isObjectOrArray(schema)) return true;

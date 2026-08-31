@@ -323,6 +323,7 @@ export class Engine extends EventTarget {
    * this member directly.
    */
   private sesRuntime: SESRuntime | undefined;
+
   #nextEvalId = 0;
 
   /**
@@ -330,6 +331,7 @@ export class Engine extends EventTarget {
    * this member directly.
    */
   private readonly executableRegistry = new ExecutableRegistry();
+
   readonly #consoleShim = createSafeConsoleGlobal(new Console(this));
   readonly #patternCoverageByGraph = new WeakMap<
     CompiledModuleGraph,

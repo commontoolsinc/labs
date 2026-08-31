@@ -244,6 +244,7 @@ const symbolicSchemaAtPathPart = (
  * for a default it no longer describes.
  */
 const defaultSchemaTags = new WeakMap<object, string>();
+
 let nextDefaultSchemaTag = 0;
 
 const defaultSchemaTag = (schema: JSONSchema): string | undefined => {

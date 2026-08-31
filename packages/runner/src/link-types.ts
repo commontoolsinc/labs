@@ -64,6 +64,7 @@ export function parseScopedIdSegment(idSegment: string): {
 export type ScopeCapAtDepth = {
   /** Number of leading `path` segments the declaring schema addresses. */
   depth: number;
+
   scope: SchemaScope;
 };
 

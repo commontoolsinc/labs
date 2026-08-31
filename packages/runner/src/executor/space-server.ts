@@ -75,6 +75,7 @@ const EVENT_DEFERRAL_REARM_MS = 250;
  * creation path, while the cost of NO bound is a wedged tenure that
  * keeps its lease. */
 const DEFAULT_ROOT_ENSURE_DEADLINE_MS = 30_000;
+
 import {
   markRuntimeInjectedEventKeys,
   sanitizeRuntimeInjectedEventKeys,
@@ -225,6 +226,7 @@ export type SpaceServerPolicy = {
 
   /** serving-loop.md §1's IDLE_PARK_MS. */
   idleParkMs?: number;
+
   renewIntervalMs?: number;
 
   /** OW54's owner-ratified cumulative confirmed failed-state budget. */
@@ -254,6 +256,7 @@ export type SpaceServerPolicy = {
    * a bounded rate instead of once per admission. A successfully
    * committed wave clears the streak. */
   failureParkBackoffBaseMs?: number;
+
   failureParkBackoffMaxMs?: number;
 };
 
@@ -293,6 +296,7 @@ export type SpaceServerOptions = {
    * DEFERRED by the same ruling — this is a whole-instance switch,
    * never a policy about which spaces deserve roots. */
   ensureSpaceRoots?: boolean;
+
   policy?: SpaceServerPolicy;
   onParked?: (reason: string) => void;
 
@@ -458,6 +462,7 @@ export class SpaceServer implements TransactionSealDestination {
    * quiescence transition — armed only by CONTENT-carrying wave
    * commits, never by its own bookkeeping-only commit. */
   #coverageHead = 0;
+
   #watermark = 0;
 
   /** S1 (RULED 2026-08-19): this loop's own committed wave seqs still
@@ -477,6 +482,7 @@ export class SpaceServer implements TransactionSealDestination {
    * healthy space the prune-at-advance keeps the set near-empty and
    * the bound is never reached. */
   readonly #ownWaveSeqs = new Set<number>();
+
   static readonly #MAX_OWN_WAVE_SEQS = 4096;
 
   /** S1's once-per-quiescence-transition latch: armed when a wave with
@@ -487,6 +493,7 @@ export class SpaceServer implements TransactionSealDestination {
    * #coverageHead comment's commit-storm class stays structurally
    * unreachable. */
   #settleAdvanceOwed = false;
+
   #active = false;
   #loopRunning = false;
   #parkRequested = false;
@@ -556,6 +563,7 @@ export class SpaceServer implements TransactionSealDestination {
    * changed (or a session opened) and the grace elapsed; consumed by the
    * next #waitForInput. */
   #pendingDemandWake = false;
+
   // MINOR-1: a monotonic demand-note generation, bumped on every
   // `noteDemandChanged` (watch OR push-growth). A pass snapshots it at its
   // row read; if a note lands AFTER that snapshot but while the pass is
@@ -650,6 +658,7 @@ export class SpaceServer implements TransactionSealDestination {
    * drained seqs, insertion-ordered, pruned at a bound that far
    * exceeds any realistic in-process reorder window. */
   readonly #drainedLateWindow = new Set<number>();
+
   // (d′): `#demandSinks` (the per-key demand WALK effects,
   // `demand-walk:<space>/<root>`) is DELETED — demand is the tracked-ids
   // closure and its writers are standing demand roots (design §2.7).
@@ -759,6 +768,7 @@ export class SpaceServer implements TransactionSealDestination {
   /** Lease-local mirrors of durable OW54 processing checkpoints. A mirror is
    * installed only from stored state or after a wave confirms its write. */
   readonly #deliveryCheckpoints = new Map<string, DeliveryDeferral>();
+
   readonly #pendingDeliveryCheckpointWrites = new Map<string, {
     sidecarId: string;
     index: number;
@@ -784,10 +794,12 @@ export class SpaceServer implements TransactionSealDestination {
   /** Input frontier at which a processing-state write failed. Only a newer
    * admitted input may serve as the generic storage/input wake. */
   readonly #deliveryWriteBlockedAt = new Map<string, number>();
+
   /** Failed boundary associated with a checkpoint write that did not commit.
    * This is wake correlation only, never an age/checkpoint authority: a retry
    * re-observes the failure and starts from durable state. */
   readonly #uncommittedDeliveryFailureEpochs = new Map<string, string>();
+
   readonly #deliveryLoadRecoveries = new Map<string, string>();
 
   /** The deferral backstop timer (see EVENT_DEFERRAL_REARM_MS): armed
@@ -4103,6 +4115,7 @@ export class SpaceServer implements TransactionSealDestination {
    * is a lookup instead of a full key scan per action run (with the
    * closure as keys the scan would be O(closure) twice per pass). */
   readonly #keysByRootId = new Map<string, Set<string>>();
+
   readonly #keysByResolvedRoot = new Map<string, Set<string>>();
 
   #indexDemandKey(key: string, id: string): void {

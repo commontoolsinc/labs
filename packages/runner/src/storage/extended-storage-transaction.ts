@@ -157,6 +157,7 @@ type CfcInstrumentationHooks = {
    * answered from the memoized negative verdict (`memo`). Measurement
    * only. */
   onFlowLabelProbe?(outcome: "computed" | "memo"): void;
+
   onPreparedTx?(): void;
   /**
    * CFC prepare refused this transaction. `reasons` are the PLAIN reason
@@ -171,6 +172,7 @@ type CfcInstrumentationHooks = {
     refusals: readonly CfcRefusalDetail[];
     terminal: boolean;
   }): void;
+
   onDigestInvalidation?(reason: string): void;
   onOutboxFlush?(effect: PostCommitSideEffect): void;
   onSinkDedupHit?(key: string): void;

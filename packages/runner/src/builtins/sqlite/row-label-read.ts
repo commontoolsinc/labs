@@ -42,6 +42,7 @@ export interface RowLabelReadArgs {
   /** Per-result-column TRUE origins (`res.columns`); undefined when the
    *  server captured none. */
   columns: readonly ResultColumn[] | undefined;
+
   rows: readonly unknown[];
 
   /** The db's owner (db ref), resolving the rule's `dbOwner()` term. */

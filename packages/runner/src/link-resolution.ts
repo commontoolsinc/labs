@@ -39,6 +39,7 @@ export type LastNode = "value" | "writeRedirect" | "top";
  * has any links between the top and the value at `link.path`.
  */
 declare const resolvedFullLinkBrand: unique symbol;
+
 export type ResolvedFullLink = NormalizedFullLink & {
   // type-script only marker, doesn't appear in actual data
   [resolvedFullLinkBrand]: true;
@@ -66,6 +67,7 @@ type LinkHop = {
    * subject is the link as stored.
    */
   storedSchema?: JSONSchema;
+
   link: NormalizedFullLink;
   source: NormalizedFullLink;
   kind: "value" | "write-redirect";

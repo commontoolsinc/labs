@@ -398,6 +398,7 @@ function narrowAndCombineSelectorForLink(
 const EMPTY_PROPERTIES_MARKER: JSONSchema = Object.freeze(
   { $comment: "emptyProperties" },
 );
+
 const MISSING_PROPERTY_MARKER: JSONSchema = Object.freeze(
   { $comment: "missingProperty" },
 );
@@ -622,10 +623,12 @@ function combinatorRestSchema(
 type PreparedAnyOfBranch = {
   /** Original option was the `false` schema: counted, never matched. */
   optionIsFalse: boolean;
+
   merged: JSONSchema;
 
   /** Prefilter verdict known statically (boolean merged / unresolved $ref). */
   constant: boolean | undefined;
+
   hasAsCell: boolean;
 
   /** Normalized type list of the resolved merged schema, if constrained. */
@@ -793,6 +796,7 @@ export function traverseDiagnosticsEnabled(): boolean {
  * arrival.
  */
 let _resolvedRefCache = new WeakMap<JSONSchemaObj, JSONSchema | null>();
+
 // Successful resolutions embed registry content; the registry clear (last
 // lease out) swaps the cache so an epoch's successes do not outlive it.
 onSchemaRegistryClear(() => {
@@ -1268,6 +1272,7 @@ export type TraversalContext = {
    * server's query path supplies the querying session's.
    */
   scopeKeyIdentity: ScopeKeyIdentity;
+
   includeMeta: boolean;
   metaDocsVisited: Set<string>;
 

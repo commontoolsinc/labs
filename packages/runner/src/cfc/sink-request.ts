@@ -138,6 +138,7 @@ export function enqueueSinkRequestPostCommitEffect(
      * its cells pending forever (the stage-G round-2 headline). The
      * CFC policy-input `effectId` stays unscoped either way. */
     idempotencyKey?: string;
+
     /** Called once, with an error naming the refusal, when the transaction
      * staging this request is abandoned — no further attempt at it is
      * coming, so the request will never be sent. */

@@ -289,6 +289,7 @@ export type ServingLoopStats = {
        * lands (NIT-1: these growth fields are optional, present only on a
        * promoted entry). */
       class: "value-only" | "structural-growth";
+
       eventAppend: boolean;
 
       /** ms from admission to the structural-growth LANDING (the derived
@@ -329,8 +330,10 @@ export type ServingLoopStats = {
      * quiescence advance, so W4 can split advance-only waves out of
      * the per-input settle timings. */
     series: Array<{ space: string; from: number; to: number; at: number }>;
+
     dropped: number;
   };
+
   events: {
     appended: number;
     processed: number;
@@ -427,6 +430,7 @@ export type ServingLoopStats = {
      * that grows without `processed` settling names a handler whose
      * argument never resolves. */
     handlerNotRunDeferrals: number;
+
     /** The pre-dispatch LOAD-PARK deferrals (verification-coverage.md's
      * OW45 residue member, fixed 2026-08-26): a served event's dispatch
      * preflight parked on an in-flight replica load its closure reads
@@ -449,10 +453,13 @@ export type ServingLoopStats = {
      * followers remain work counted by `loadParkDeferrals` only. */
     loadParkFailures: number;
 
-    /** Durable pending delivery checkpoints, split by whether confirmed
-     * failed-state time is currently accruing. */
+    /** Durable pending delivery checkpoints currently active, all states. */
     deliveryDeferralsActive: number;
+
+    /** How many of those are failed, and so accruing failed-state time. */
     deliveryFailuresActive: number;
+
+    /** The greatest failed-state time any one active checkpoint has accrued. */
     maxAccumulatedDeliveryFailureMs: number;
 
     /** Durable terminal covers, counted only after the carrying wave commits. */
@@ -464,6 +471,7 @@ export type ServingLoopStats = {
         "commit-finalization": number;
       };
     };
+
     needsAttentionSealFailures: number;
     deliveryCheckpointWriteFailures: number;
     explicitRetries: number;

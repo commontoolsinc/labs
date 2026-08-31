@@ -251,6 +251,7 @@ class CountingLoopbackSessionFactory implements SessionFactory {
 
   /** Commits sent for the ACL document, across all sessions. */
   aclCommits = 0;
+
   #aclDocId: string;
 
   readonly #server: MemoryV2Server.Server;
@@ -409,6 +410,7 @@ class SessionErrorSessionFactory implements SessionFactory {
 
   /** transact() calls made after `arm()`. */
   commits = 0;
+
   #armed = false;
 
   readonly #server: MemoryV2Server.Server;

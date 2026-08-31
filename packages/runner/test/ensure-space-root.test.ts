@@ -49,6 +49,7 @@ describe("space-root ensure core", () => {
   /** The served patterns route, in-process: pathname → TSX. Mutable so a
    * test can age the served source under a persisted root. */
   let files: Map<string, string>;
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 

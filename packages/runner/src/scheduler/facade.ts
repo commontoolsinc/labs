@@ -1083,6 +1083,7 @@ export class Scheduler {
    * `stats.demand` accumulators (these reset with the runtime on a
    * reactivation, so they are a per-tenure source, not the total). */
   readonly demandRootCounters = { enters: 0, leaves: 0, notCurrentRearms: 0 };
+
   #demandedWriterHookInstalled = false;
 
   #installDemandedWriterHook(): void {
@@ -2973,6 +2974,7 @@ export class Scheduler {
        * durable entry UNCONSEQUENCED for a later drain (events.md §5);
        * only meaningful for a served event. */
       servedKind?: "dropped" | "deferred";
+
       servedOutcome?: ServedEventFailureOutcome;
     } = {},
   ): void {

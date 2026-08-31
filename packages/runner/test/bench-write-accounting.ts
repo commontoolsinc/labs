@@ -63,6 +63,7 @@ export function jsonBytes(value: unknown): number {
 interface PathNode {
   /** True when an attestation named this exact path. */
   written: boolean;
+
   value: unknown;
   children: Map<string, PathNode>;
 }

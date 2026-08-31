@@ -133,6 +133,7 @@ type ScriptedOutcome =
 
     /** See {@link RejectionError.retryAfterSeq}. */
     retryAfterSeq?: number;
+
     remoteInterleave?: RemoteCommit;
     responseGate?: Promise<void>;
     onReceipt?: () => void;

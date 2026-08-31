@@ -51,6 +51,7 @@ class Gate {
    * the per-element result documents). The test awaits this instead of polling.
    */
   readonly firstHeld: Promise<void>;
+
   readonly #match: RegExp;
 
   constructor(match: RegExp) {

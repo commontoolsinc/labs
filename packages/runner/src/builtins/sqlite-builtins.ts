@@ -800,6 +800,7 @@ export function sqliteQuery(
   /** Hashes whose RPC this node instance currently has in flight — the
    * in-process half of the memo decision above. */
   const inFlightIssues = new Set<string>();
+
   /**
    * The query this node staged on its most recent run, if that run staged one.
    * A token rather than the request's hash: two stagings of the same statement
@@ -807,6 +808,7 @@ export function sqliteQuery(
    * ending of the second.
    */
   let currentStaging: symbol | undefined;
+
   const space = parentCell.space;
 
   const action: Action = (tx: IExtendedStorageTransaction) => {

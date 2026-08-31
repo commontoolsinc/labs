@@ -931,6 +931,7 @@ export interface IWriteOptions {
    * from absent. A root-path delete retracts the document.
    */
   delete?: boolean;
+
   /**
    * Marks the write as one the runtime makes on a document's meta seam. See
    * {@link RAW_META_WRITE}: the write chokepoint accepts a write that reaches
@@ -1097,6 +1098,7 @@ export interface IStorageTransaction {
    * transactions.
    */
   setReadOnly?(reason?: string): void;
+
   clearReadOnly?(): void;
   isReadOnly?(): boolean;
 
@@ -1129,6 +1131,7 @@ export interface IStorageTransaction {
     space: MemorySpace,
     precondition: CommitPrecondition,
   ): void;
+
   getCommitPreconditions?(
     space: MemorySpace,
   ): readonly CommitPrecondition[] | undefined;
@@ -1561,6 +1564,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * a caller writing documents itself.
    */
   stageSchemaDocClosure(space: MemorySpace, rootHash: string): void;
+
   tx: IStorageTransaction;
 
   /**
@@ -1624,6 +1628,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
     space: MemorySpace,
     precondition: CommitPrecondition,
   ): void;
+
   getCommitPreconditions?(
     space: MemorySpace,
   ): readonly CommitPrecondition[] | undefined;
@@ -1728,6 +1733,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * threading metadata through intermediate APIs.
    */
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T;
+
   markCfcRelevant(reason?: string): void;
   invalidateCfc(reason: string): void;
 
@@ -1751,6 +1757,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * after the transaction it was made against has finished.
    */
   markLazyMaterialize(enabled?: boolean): void;
+
   isLazyMaterialize(): boolean;
 
   /**
@@ -1786,6 +1793,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * of the run the same way either way.
    */
   noteSchemaRefusal(refusal: unknown): void;
+
   takeSchemaRefusal(): unknown;
 
   /**
@@ -2345,6 +2353,7 @@ export interface INotFoundError extends IStorageError {
 
   /** Path to the non-existent key, or `[]` if the document doesn't exist. */
   readonly path: readonly MemoryAddressPathComponent[];
+
   from(space: MemorySpace): INotFoundError;
 }
 
@@ -2495,6 +2504,7 @@ export type EventAppendRequest = {
   /** Client-minted append order within this session; allocated by the
    * queue when absent. */
   clientSeq?: number;
+
   runtimeInjectedEventKeys?: string[];
 
   /** The runtime's attestation that the sent event was renderer-trusted

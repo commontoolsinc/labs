@@ -115,6 +115,7 @@ const PER_USER_PATTERN = [
 const PER_USER_PATTERN_HANDLER_ONLY = PER_USER_PATTERN
   .replace("'echo:' + draftText(draftCell)", "'echo:const'")
   .replace("'saved-echo:' + draftText(savedCell)", "'saved-echo:const'");
+
 if (PER_USER_PATTERN_HANDLER_ONLY === PER_USER_PATTERN) {
   throw new Error("handler-only pattern did not derive from the base");
 }

@@ -18,6 +18,7 @@ import type { Action, ReactivityLog, SpaceScopeAndURI } from "./types.ts";
 export interface TriggerIndexState {
   /** Identity entity keys resolve scoped addresses against (keys.ts). */
   readonly scopeKeyIdentity: () => ScopeKeyIdentity;
+
   readonly triggers: Map<
     SpaceScopeAndURI,
     Map<Action, SortedAndCompactPaths>
