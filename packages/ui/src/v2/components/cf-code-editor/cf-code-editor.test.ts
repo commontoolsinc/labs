@@ -186,6 +186,7 @@ describe("CFCodeEditor reference-map housekeeping", () => {
     it("returns the map's keys and the document's together", () => {
       // A key pasted into the text is spoken for even before the map has it,
       // and minting over it would point two mentions at one entry.
+
       const { self } = editorThis(`[A][${OTHER}]`, { [KEY]: {} });
       expect(call("_takenRefKeys", self)).toEqual(new Set([KEY, OTHER]));
     });
@@ -202,6 +203,7 @@ describe("CFCodeEditor reference-map housekeeping", () => {
     it("keeps a key it never saw at load", () => {
       // Another editor added it while this one was open; this editor has no
       // reason to believe it was ever in its document.
+
       const t = editorThis("no tokens left", { [KEY]: {} });
       call("_collectUnreferencedRefEntries", t.self);
       expect(t.deleted).toEqual([]);
@@ -217,6 +219,7 @@ describe("CFCodeEditor reference-map housekeeping", () => {
     it("collects nothing against a document that has not loaded", () => {
       // An empty document names nothing, which is not the same as a document
       // that names nothing — reading it as the latter empties the map.
+
       const t = editorThis("", { [KEY]: {} });
       (t.self._refKeysAtLoad as Set<string>).add(KEY);
       call("_collectUnreferencedRefEntries", t.self);
@@ -227,6 +230,7 @@ describe("CFCodeEditor reference-map housekeeping", () => {
       // The deletion that made the entry collectable is still in the
       // debounce; losing it after the entry is gone leaves a token with no
       // destination in the durable document.
+
       const t = editorThis("no tokens left", { [KEY]: {} });
       (t.self._refKeysAtLoad as Set<string>).add(KEY);
       call("_collectUnreferencedRefEntries", t.self);
@@ -310,6 +314,7 @@ describe("CFCodeEditor pasted-mention decision", () => {
     // name a piece. Preventing the paste and then declining swallowed it.
     // The space is a DID on purpose: a named space is refused one check
     // earlier, so this would not reach the branch under test.
+
     const result = paste(
       pasteThis(),
       `https://fabric.example/${SPACE}/my-note`,

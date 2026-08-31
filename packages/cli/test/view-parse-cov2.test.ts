@@ -1,8 +1,8 @@
 /**
- * Second-round coverage tests for `lib/view/languages/typescript/parse.ts`, extending
- * `view-parse.test.ts` and `view-parse-cov.test.ts`. The dead and duplicate
- * branches these originally documented were removed or folded away at the
- * source; the tests here exercise the reachable behavior around them:
+ * Second-round coverage tests for `lib/view/languages/typescript/parse.ts`,
+ * extending `view-parse.test.ts` and `view-parse-cov.test.ts`. The dead and
+ * duplicate branches these originally documented were removed or folded away at
+ * the source; the tests here exercise the reachable behavior around them:
  * identifier classification, type-position resolution (qualified names,
  * `typeof`, heritage types), comment merging, definition registration, control
  * labels, and metadata extraction on malformed input, plus `safe`'s
@@ -49,6 +49,7 @@ Deno.test("qualified name in a type annotation resolves as a type name", () => {
   // `a.b.c.D` in type position climbs the qualified-name chain in
   // isTypePosition and resolves via ts.isTypeNode on the TypeReference, so the
   // final identifier `D` is a typeName, not a plain reference.
+
   const doc = parseDocument("let x: a.b.c.D = null as never;");
   const classes = classesOf(doc, "D");
   assert(
@@ -65,6 +66,7 @@ Deno.test("typeof in a type annotation resolves the operand as a type name", () 
   // `typeof foo` as a type produces a TypeQueryNode parent for `foo`. Because a
   // TypeQueryNode is itself a TypeNode, isTypePosition returns at the
   // ts.isTypeNode check before the more-specific TypeQuery branch.
+
   const doc = parseDocument("const foo = 1;\nlet y: typeof foo = foo;");
   // The `foo` inside the type query is a typeName; the value `foo` references
   // remain non-type classes, so both classifications appear for the token.
@@ -82,7 +84,9 @@ Deno.test("typeof in a type annotation resolves the operand as a type name", () 
 Deno.test("class heritage type resolves as a type name", () => {
   // `extends Base<number>` produces an ExpressionWithTypeArguments whose
   // expression is `Base`. That node is also a TypeNode, so `Base` resolves as a
-  // typeName at line 914, never reaching the ExpressionWithTypeArguments branch.
+  // typeName at line 914, never reaching the ExpressionWithTypeArguments
+  // branch.
+
   const doc = parseDocument("class A extends Base<number> {}");
   const classes = classesOf(doc, "Base");
   assert(
@@ -216,6 +220,7 @@ Deno.test("metadata extraction survives malformed but parseable input", () => {
   // These all parse (via TypeScript error recovery) into nodes with valid
   // ranges, so the metadata extractors run their bodies without throwing and
   // the safe() catch is never taken.
+
   const cases = [
     "type Bad = ;",
     "interface Q extends { }",
@@ -248,6 +253,7 @@ Deno.test("import metadata is extracted without error", () => {
 Deno.test("a raw arrow initializer becomes a closure node, not a variable", () => {
   // bindingDesc routes the arrow to a closure before variableMeta /
   // describeInitializer would run, so describeInitializer never sees an arrow.
+
   const doc = parseDocument("const handler = () => 1;");
   const node = findNode(doc, (n) => n.name === "handler");
   assert(node, "expected a node bound to `handler`");
@@ -257,6 +263,7 @@ Deno.test("a raw arrow initializer becomes a closure node, not a variable", () =
 Deno.test("a parenthesised arrow initializer also becomes a closure node", () => {
   // peelExpr strips the parentheses before the arrow check, so this too is a
   // closure and bypasses describeInitializer.
+
   const doc = parseDocument("const wrapped = (() => 2);");
   const node = findNode(doc, (n) => n.name === "wrapped");
   assert(node, "expected a node bound to `wrapped`");
@@ -266,6 +273,7 @@ Deno.test("a parenthesised arrow initializer also becomes a closure node", () =>
 Deno.test("describeInitializer reports non-closure initializers", () => {
   // The reachable describeInitializer outputs: the no-initializer case and the
   // nodeFirstLine fall-through. These run for the variable-kind nodes below.
+
   const doc = parseDocument(
     "let pending;\nconst result = computeValue();\nconst total = a + b;",
   );
@@ -305,7 +313,7 @@ Deno.test("incremental highlighter updates a line that adds a closure", () => {
 });
 
 //
-// safe(): the throwing path, through the test-only handle
+// safe(): both arms, reached through the test-only handle
 //
 
 Deno.test("safe(): a throwing extractor degrades to undefined", () => {
@@ -313,6 +321,7 @@ Deno.test("safe(): a throwing extractor degrades to undefined", () => {
   // feeds them a node that throws, so the catch is exercised directly through
   // the test-only handle: a throwing extractor degrades to undefined, a
   // succeeding one returns its value.
+
   assertEquals(
     _internal.safe(() => {
       throw new Error("boom");

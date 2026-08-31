@@ -38,6 +38,7 @@ describe("objects", () => {
 
       it("accepts a key whose value is `undefined`", () => {
         // A present key holding `undefined` is still an enumerable string key.
+
         expect(isInertPlainObject({ a: undefined }))
           .toBe(true);
       });
@@ -45,6 +46,7 @@ describe("objects", () => {
       it("accepts an index-shaped string key", () => {
         // Unlike an array, an object has no notion of an index key; `"0"` is
         // just a string name here.
+
         expect(isInertPlainObject({ 0: "a", 1: "b" }))
           .toBe(true);
       });
@@ -76,6 +78,7 @@ describe("objects", () => {
       it("rejects a registry-interned symbol-keyed property", () => {
         // Such a symbol is a valid fabric *value*, but still not a property
         // *name*.
+
         const obj = { a: 1 } as Record<string | symbol, unknown>;
         obj[Symbol.for("s")] = 2;
         expect(isInertPlainObject(obj)).toBe(false);
@@ -95,6 +98,7 @@ describe("objects", () => {
 
       it("rejects a non-enumerable string key whose value is `undefined`", () => {
         // The key's presence is what disqualifies it, not what it holds.
+
         const obj = { a: 1 };
         Object.defineProperty(obj, "hidden", {
           value: undefined,
@@ -140,6 +144,7 @@ describe("objects", () => {
 
       it("rejects a frozen object with a getter", () => {
         // Freezing does not make an accessor inert: reads still execute it.
+
         const obj = { a: 1 };
         Object.defineProperty(obj, "g", { get: () => 2, enumerable: true });
         expect(isInertPlainObject(Object.freeze(obj)))
@@ -185,6 +190,7 @@ describe("objects", () => {
         // would mean carrying a distinction that stops existing at the first
         // storage boundary. `shallowCleanPlainObject()` is how a caller says
         // it means to shed one.
+
         const obj = Object.create(null) as Record<string, unknown>;
         obj.a = 1;
         expect(isInertPlainObject(obj)).toBe(false);
@@ -215,6 +221,7 @@ describe("objects", () => {
     it("sees through a `Proxy` to its target's shape", () => {
       // `Object.getPrototypeOf` and the key traps forward to the target, so a
       // pass-through proxy over a plain object is judged on the target.
+
       expect(
         isInertPlainObject(new Proxy({ a: 1 }, {})),
       ).toBe(true);
@@ -231,6 +238,7 @@ describe("objects", () => {
       // then returns `undefined` for. Inertness cannot be established, so the
       // answer is `false`; only a trap that throws on its own account takes
       // this check off its "answers rather than throws" contract.
+
       const ghosted = new Proxy({ a: 1 }, {
         ownKeys: () => ["a", "ghost"],
         getOwnPropertyDescriptor: (target, key) =>
@@ -268,6 +276,7 @@ describe("objects", () => {
     it("agrees with `constructorOfObject()` on the same object", () => {
       // The two are one question asked from two places, so an object's answer
       // must not depend on which of them was asked.
+
       for (
         const value of [{}, [], new Map(), new Date(), Object.create(null)]
       ) {
@@ -294,6 +303,7 @@ describe("objects", () => {
     it("returns the class of an instance whose prototype was replaced", () => {
       // The prototype is the whole of the answer, so re-pointing it re-points
       // the answer -- which is the property, not a wrinkle in it.
+
       const value = Object.setPrototypeOf({}, Map.prototype);
       expect(constructorOfObject(value)).toBe(Map);
     });
@@ -303,6 +313,7 @@ describe("objects", () => {
       // that happens to share a name with the thing that decides a class, and a
       // caller dispatching on the answer would otherwise let a plain record pass
       // for whatever it named.
+
       for (
         const [label, forged] of [
           ["`Error`", Error],

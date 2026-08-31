@@ -191,6 +191,7 @@ Deno.test("applyShrinkAndWrap shrinks Array<T> reference items to accessed field
   // Array element node building via type-driven shrinking (Array<T> reference).
   // Lines ~1185-1202, 1194-1199: TypeReference to `Array` resolved through the
   // checker, element shrunk, array node rebuilt.
+
   const { sourceFile, checker } = createProgram(`
     type Item = { id: string; title: string; unused: number };
     type Input = Array<Item>;
@@ -226,6 +227,7 @@ Deno.test("applyShrinkAndWrap collapses length-only Array<T> reads to unknown[]"
   // length-only access on an Array<T> reference emits unknown[] (array-root
   // only path). Exercises the `allNonItem` array branch in the node-driven
   // path.
+
   const { sourceFile, checker } = createProgram(`
     type Item = { id: string; title: string };
     type Input = Array<Item>;
@@ -252,6 +254,7 @@ Deno.test("applyShrinkAndWrap shrinks each member of a source-authored union", (
   // Union of object shapes: shrink each non-nullish member; nullish member
   // preserved. Exercises the union branch in buildShrunkTypeNodeFromTypeNode
   // (lines ~1278-1301) via a source-authored union node.
+
   const { sourceFile, checker } = createProgram(`
     type Input =
       | { shared: string; onlyA: number }
@@ -282,6 +285,7 @@ Deno.test("applyShrinkAndWrap collapses a shrunk union to its single non-nullish
   // Union `T | undefined` where only one member holds the accessed property.
   // After shrinking the non-nullish member, a single member remains and the
   // union collapses to that member (line ~1299-1301 `all.length === 1`).
+
   const { sourceFile, checker } = createProgram(`
     type Input = { keep: string; drop: number };
   `);
@@ -317,6 +321,7 @@ Deno.test("applyShrinkAndWrap re-appends undefined when type-driven shrinking a 
   // Type-driven union nullish re-wrapping (buildShrunkTypeNodeFromType,
   // ~856-895) and line 888 (`nullishMembers.length === 0` short-circuit not
   // taken). Drive with a synthetic base node to force the type-driven path.
+
   const { sourceFile, checker } = createProgram(`
     type Payload = { keep: string; drop: number };
     type Input = Payload | undefined;
@@ -353,6 +358,7 @@ Deno.test("applyShrinkAndWrap keeps nested primitive leaves intact under type-dr
   // Nested primitive leaf on a type-driven shrink: `text.length` keeps the
   // string leaf intact instead of shrinking `text` to `{ length }` (lines
   // ~934-962 primitive-scalar branch through the type-driven path).
+
   const { sourceFile, checker } = createProgram(`
     type Input = { text: string; other: number };
   `);
@@ -386,6 +392,7 @@ Deno.test("applyShrinkAndWrap represents index-signature access as an optional m
   // is not a named property resolves through the index signature and the
   // emitted member is optional (lines ~913-936: `isOptional = true`,
   // `984-989`).
+
   const { sourceFile, checker } = createProgram(`
     type Input = { [key: string]: { name: string; unused: number } };
   `);
@@ -417,6 +424,7 @@ Deno.test("applyShrinkAndWrap resolves an interface reference and drops unaccess
   // isUnchangedShrink: a TypeReference whose members are all accessed with no
   // nested change is kept as the original reference to preserve $ref/$defs
   // (lines ~1453-1474 return `node`).
+
   const { sourceFile, checker } = createProgram(`
     interface Point { x: number; y: number; z: number; }
     type Input = Point;
@@ -449,6 +457,7 @@ Deno.test("applyShrinkAndWrap merges inherited interface members and honors over
   // inherited members that are merged and de-duplicated (mergeResolvedMembers,
   // ~1416-1442; resolveMembersFromDeclaration heritage branch ~1388-1414). An
   // overriding property in the derived interface wins.
+
   const { sourceFile, checker } = createProgram(`
     interface Base { shared: string; baseOnly: number; }
     interface Derived extends Base { shared: string; derivedOnly: boolean; }
@@ -479,6 +488,7 @@ Deno.test("applyShrinkAndWrap reports unknown-type-access for unknown base with 
   // Diagnostics: unknown base type with property access reports
   // schema:unknown-type-access (lines ~1876-1893). Driven through
   // applyShrinkAndWrap with a context + fnNode so validateShrinkCoverage runs.
+
   const { sourceFile, checker } = createProgram(`
     type Input = unknown;
   `);
@@ -514,6 +524,7 @@ Deno.test("applyShrinkAndWrap reports path-not-in-type for a missing property", 
   // Diagnostics: concrete type but an accessed path is absent reports
   // schema:path-not-in-type (lines ~1938-1954, and the missing filter
   // 1939-1941).
+
   const { sourceFile, checker } = createProgram(`
     type Input = { present: string };
   `);
@@ -547,6 +558,7 @@ Deno.test("applyShrinkAndWrap reports path-not-in-type for a missing property", 
 Deno.test("applyShrinkAndWrap reports unknown-typed property access", () => {
   // Diagnostics: concrete type with a property typed `unknown` reports
   // schema:unknown-type-access (case 2, lines ~1900-1935).
+
   const { sourceFile, checker } = createProgram(`
     type Input = { amounts: unknown };
   `);
@@ -581,6 +593,7 @@ Deno.test("applyShrinkAndWrap skips validation for a never base type", () => {
   // Diagnostics: `never` base type skips validation entirely (lines
   // ~1857-1862). A `never`-typed parameter with reads must produce no
   // diagnostics.
+
   const { sourceFile, checker } = createProgram(`
     type Input = never;
   `);
@@ -611,6 +624,7 @@ Deno.test("applyShrinkAndWrap reports unknown-type-access for an unknown wildcar
   // Diagnostics: wildcard param typed `unknown` passed to an opaque function
   // reports the wildcard-specific unknown-type-access branch (lines
   // ~1733-1750).
+
   const { sourceFile, checker } = createProgram(`
     type Input = unknown;
   `);
@@ -644,6 +658,7 @@ Deno.test("applyShrinkAndWrap validates array item paths against the element typ
   // Validation over an array base: item-level paths validate against the
   // element type. A missing item property reports through the array-element
   // recursion (lines ~1795-1833, getArrayElementTypeNode paths ~1656-1709).
+
   const { sourceFile, checker } = createProgram(`
     interface Row { id: string; }
     type Input = Row[];
@@ -679,6 +694,7 @@ Deno.test("applyShrinkAndWrap applies defaults-only fallback across the base typ
   // gets applied to the fallback shape when the direct node application misses.
   // Also exercises applyCapabilityDefaultsToTypeNode fallback (~2919-2945) and
   // buildDefaultsOnlyFallbackPaths leaf expansion (~2954-2956, 3001-3026).
+
   const { sourceFile, checker } = createProgram(`
     type Input = { title: string; count: number };
     type TitleDefault = "Untitled";
@@ -712,6 +728,7 @@ Deno.test("applyShrinkAndWrap applies defaults-only fallback across the base typ
 Deno.test("applyCapabilityDefaultsToTypeNode applies a default through a tuple index", () => {
   // applyCapabilityDefaultsToTypeNode: default applied directly through a tuple
   // index (applySingleDefaultToTypeNode tuple branch ~2825-2850).
+
   const { sourceFile, checker } = createProgram(`
     type Input = [{ name?: string }, number];
     type NameDefault = "Anon";
@@ -742,6 +759,7 @@ Deno.test("applyCapabilityDefaultsToTypeNode applies a default through a tuple i
 Deno.test("applyCapabilityDefaultsToTypeNode ignores an out-of-range tuple index", () => {
   // applyCapabilityDefaultsToTypeNode: out-of-range tuple index leaves the node
   // unchanged (tuple guard ~2827-2831). No __cfHelpers.Default wrapper appears.
+
   const { sourceFile, checker } = createProgram(`
     type Input = [{ name?: string }];
     type NameDefault = "Anon";
@@ -769,6 +787,7 @@ Deno.test("applyShrinkAndWrap replaces identity-only union roots per member", ()
   // Identity-only root on a union base: each union member is replaced with the
   // identity-only shape; nullish members are rebuilt as-is
   // (createIdentityOnlyRootTypeNode union branch ~2367-2400).
+
   const { sourceFile, checker } = createProgram(`
     type Input = { a: string } | { b: number } | undefined;
   `);
@@ -805,6 +824,7 @@ Deno.test("applyShrinkAndWrap replaces identity-only union roots per member", ()
 Deno.test("applyShrinkAndWrap rebuilds an identity-only nullish root as undefined", () => {
   // Identity-only root that is nullish (`undefined`): rebuilt via
   // createIdentityOnlyNullishTypeNode (lines ~2357-2365, 2311-2331).
+
   const { sourceFile, checker } = createProgram(`
     type Input = undefined;
   `);
@@ -831,6 +851,7 @@ Deno.test("applyShrinkAndWrap descends identity item paths through Array<T> refe
   // Identity paths descending through an array item interface reference
   // resolved via the checker (applyIdentityOnlyPathsToTypeNode Array<T> ref
   // branch ~2557-2583) using an Array<T> reference (not `T[]`).
+
   const { sourceFile, checker } = createProgram(`
     declare namespace __cfHelpers {
       export type OpaqueCell<T> = { readonly opaque?: T };
@@ -863,6 +884,7 @@ Deno.test("applyShrinkAndWrap applies identity paths across union members", () =
   // Identity paths through a union base node (applyIdentityOnlyPathsToTypeNode
   // union branch ~2728-2752): each union member is visited and changed members
   // force a rebuilt union.
+
   const { sourceFile, checker } = createProgram(`
     declare namespace __cfHelpers {
       export type OpaqueCell<T> = { readonly opaque?: T };
@@ -901,6 +923,7 @@ Deno.test("applyShrinkAndWrap keeps an interface reference when no identity path
   // child path) so the `!changed` early return keeps the reference
   // (applyIdentityOnlyPathsToTypeNode reference branch ~2669-2725, unchanged
   // return ~2721-2723).
+
   const { sourceFile, checker } = createProgram(`
     interface Outer { inner: { keep: string }; other: string; }
     type Input = Outer;
@@ -930,6 +953,7 @@ Deno.test("applyShrinkAndWrap applies cell capabilities through parenthesized li
   // applyCellCapabilityPathsToTypeNode through a parenthesized type node
   // (~2181-2193) plus per-property cell capability selection where read+write
   // paths on the same leaf select `writable`.
+
   const { sourceFile, checker } = createProgram(`
     declare namespace __cfHelpers {
       export type Writable<T> = { readonly value?: T };
@@ -969,6 +993,7 @@ Deno.test("applyShrinkAndWrap keeps Array<T> unchanged for an unresolved identit
   // Identity item path on an Array<T> reference that names no member leaves the
   // whole array reference unchanged (Array<T> ref `updated === inner`
   // ~2574-2576).
+
   const { sourceFile, checker } = createProgram(`
     interface Item { keep: string; }
     type Input = Array<Item>;
@@ -996,6 +1021,7 @@ Deno.test("applyShrinkAndWrap keeps a readonly array unchanged for an unresolved
   // Identity item path on a readonly array that names no member leaves the
   // readonly-array node unchanged (readonly-array `updated === elementType`
   // ~2546-2548).
+
   const { sourceFile, checker } = createProgram(`
     interface Item { keep: string; }
     type Input = readonly Item[];
@@ -1029,6 +1055,7 @@ Deno.test("applyShrinkAndWrap rebuilds a parenthesized identity root when a leaf
   // Identity path through a parenthesized literal that DOES change a leaf: the
   // parenthesized wrapper is rebuilt around the updated inner
   // (createIdentityOnly paren branch ~2485-2498, change arm).
+
   const { sourceFile, checker } = createProgram(`
     declare namespace __cfHelpers {
       export type OpaqueCell<T> = { readonly opaque?: T };
@@ -1061,6 +1088,7 @@ Deno.test("applyShrinkAndWrap descends identity paths through a Cell-like wrappe
   // Identity path through a Cell-like wrapper reference descends into the inner
   // type argument (applyIdentityOnlyPathsToTypeNode cell-ref branch
   // ~2642-2667).
+
   const { sourceFile, checker } = createProgram(`
     declare namespace __cfHelpers {
       export type OpaqueCell<T> = { readonly opaque?: T };
@@ -1098,6 +1126,7 @@ Deno.test("applyShrinkAndWrap recognizes an array type-alias reference as array-
   // array detection (buildShrunkTypeNodeFromTypeNode ~1086-1096, 1185-1202).
   // The alias reference is recognized as array-shaped and preserved as a
   // reference so schema generation keeps its $ref.
+
   const { sourceFile, checker } = createProgram(`
     interface Row { id: string; title: string; unused: number; }
     type Rows = Row[];
@@ -1126,6 +1155,7 @@ Deno.test("applyShrinkAndWrap shrinks array-like type literals with numeric inde
   // Array-like TypeLiteral (numeric index + length) drives the
   // getArrayLikeTypeLiteralElementType path (~557-577) and element shrinking of
   // a literal element node (~565-567). Item field access shrinks the element.
+
   const { sourceFile, checker } = createProgram(`
     type Input = {
       length: number;
@@ -1158,6 +1188,7 @@ Deno.test("applyShrinkAndWrap resolves a union-only property during type-driven 
   // findPropertySymbol resolves a property that lives only on one union
   // constituent (findPropertySymbol union recursion ~684-689) during
   // type-driven shrinking of a union base node.
+
   const { sourceFile, checker } = createProgram(`
     type Input = { common: string } & ({ onlyHere: number } | { alt: boolean });
   `);
@@ -1189,6 +1220,7 @@ Deno.test("applyShrinkAndWrap drops an unresolved deep child during type-driven 
   // (buildShrunkTypeNodeFromType `!shrunkChild && !hasDirectAccess` continue,
   // ~978-989 region). Access a valid head plus an invalid deep path on the same
   // property.
+
   const { sourceFile, checker } = createProgram(`
     type Input = { data: { present: string }; other: number };
   `);
@@ -1218,6 +1250,7 @@ Deno.test("applyShrinkAndWrap drops an unresolved deep child during type-driven 
 Deno.test("applyCapabilityDefaultsToTypeNode applies a default through a union member", () => {
   // applyCapabilityDefaultsToTypeNode applies a default through a union member
   // (applySingleDefaultToTypeNode union branch ~2852-2870).
+
   const { sourceFile, checker } = createProgram(`
     type Input = { a?: string } | { b?: number };
     type ADefault = "x";
@@ -1247,6 +1280,7 @@ Deno.test("applyShrinkAndWrap expands nested defaults-only fallback leaves", () 
   // fallback path builder expands the child's leaves so the default lands
   // (buildDefaultsOnlyFallbackPaths nested-head expansion ~2954-2956,
   // 3009-3026).
+
   const { sourceFile, checker } = createProgram(`
     type Input = { group: { title: string; note: string }; count: number };
     type TitleDefault = "Untitled";
@@ -1283,6 +1317,7 @@ Deno.test("applyShrinkAndWrap replaces an identity-only root that has no resolva
   // Identity-only root whose resolved semantic type is undefined falls back to
   // the replacement type node (createIdentityOnlyRootTypeNode `!resolvedType`
   // branch ~2345-2354) — driven by a synthetic node with no base type.
+
   const { sourceFile, checker } = createProgram(`type Marker = string;`);
   // A synthetic reference to a name that resolves to nothing under noLib.
   const syntheticNode = ts.factory.createTypeReferenceNode("Unresolvable");
@@ -1309,6 +1344,7 @@ Deno.test("applyShrinkAndWrap selects writable capability for read-and-write cel
   // Cell-capability application over a plain object literal member whose value
   // is a cell wrapper (applyCellCapabilityPathsToTypeNode literal member branch
   // ~2199-2264): a read+write access selects the `writable` capability.
+
   const { sourceFile, checker } = createProgram(`
     declare namespace __cfHelpers {
       export type Writable<T> = { readonly value?: T };
@@ -1349,6 +1385,7 @@ Deno.test("applyShrinkAndWrap accepts item paths present on a nullable array uni
   // no diagnostic, exercising getArrayElementTypeNode's union branch
   // (~1643-1657): the nullish member is skipped and the array member yields the
   // element type.
+
   const { sourceFile, checker } = createProgram(`
     interface Row { id: string; }
     type Input = Row[] | undefined;
@@ -1383,6 +1420,7 @@ Deno.test("applyShrinkAndWrap collapses a one-member union node to the shrunk me
   // member (buildShrunkTypeNodeFromTypeNode union `all.length === 1`
   // ~1298-1301). A one-element union node with one accessed property drives the
   // collapse.
+
   const { sourceFile, checker } = createProgram(`
     type Input = { keep: string; drop: number };
   `);
@@ -1414,6 +1452,7 @@ Deno.test("applyShrinkAndWrap collapses a one-member union node to the shrunk me
 Deno.test("applyShrinkAndWrap leaves an all-nullish union node unchanged", () => {
   // A union node with only nullish members is returned unchanged
   // (buildShrunkTypeNodeFromTypeNode `nonNullish.length === 0` ~1278).
+
   const { sourceFile, checker } = createProgram(`type Input = string;`);
   const nullOnly = ts.factory.createUnionTypeNode([
     ts.factory.createKeywordTypeNode(ts.SyntaxKind.UndefinedKeyword),
@@ -1451,6 +1490,7 @@ Deno.test("applyCapabilityDefaultsToTypeNode ignores a tuple default whose neste
   // A valid tuple index whose nested default path does not resolve leaves the
   // tuple unchanged (applySingleDefaultToTypeNode tuple `!updatedChild.applied`
   // arm ~2841-2843).
+
   const { sourceFile, checker } = createProgram(`
     type Input = [{ present?: string }];
     type D = "x";

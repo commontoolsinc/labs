@@ -78,6 +78,7 @@ describe("declaredResultProjection", () => {
     // document also names `Item`, and that one does not recurse. A private
     // pointer parser resolving every reference against the outer root read
     // the wrong definition and silently derived nothing.
+
     const declared: JSONSchema = {
       type: "object",
       properties: {
@@ -118,6 +119,7 @@ describe("declaredResultProjection", () => {
     // scope closes the circle, so the nested leaf derives its contents while
     // the outer `parent` still cuts — a spelling-keyed cycle set would render
     // the finite leaf as an address.
+
     const declared: JSONSchema = {
       type: "object",
       properties: { item: { $ref: "#/$defs/Item" } },
@@ -162,6 +164,7 @@ describe("declaredResultProjection", () => {
     // `properties` alone would close the position and drop them — an answer
     // narrower than the verb declared, over a bound that is only supposed to
     // remove the circle.
+
     const declared: JSONSchema = {
       type: "object",
       properties: { item: { $ref: "#/$defs/Item" } },
@@ -224,6 +227,7 @@ describe("declaredResultProjection", () => {
       // Closing that position would hand back less than the verb states it
       // returns, which is the one thing a bound over a committed handling must
       // not do.
+
       expect(
         declaredResultProjection({
           type: "object",
@@ -261,6 +265,7 @@ describe("declaredResultProjection", () => {
       // it is the bound. Written closed it would drop the keys the index
       // signature declares; written open they read as they always did, and the
       // narrowing below still stands.
+
       expect(
         declaredResultProjection({
           type: "object",
@@ -300,6 +305,7 @@ describe("declaredResultProjection", () => {
       // A declaration writing `additionalProperties: false` closed the
       // position itself, so the shape bound is stating what the author already
       // stated rather than narrowing anything.
+
       expect(
         declaredResultProjection({
           type: "object",
@@ -330,6 +336,7 @@ describe("declaredResultProjection", () => {
       // `additionalProperties: false` and is the second, so the shape bound
       // has something to hold the position to and `{}` is what comes back —
       // which is a bound, and bounds a circle sitting at that position.
+
       expect(
         declaredResultProjection({
           type: "object",
@@ -365,6 +372,7 @@ describe("declaredResultProjection", () => {
       // The contrast is the whole reason the stronger bound exists, and the
       // default is the weaker one: a declaration that re-enters nowhere bounds
       // nothing on its own, so a result that renders is never narrowed.
+
       expect(declaredResultProjection(ROW)).toBeUndefined();
       expect(declaredResultProjection(ROW, "recursion")).toBeUndefined();
     });
@@ -373,6 +381,7 @@ describe("declaredResultProjection", () => {
       // The stronger bound adds to the weaker one rather than replacing it:
       // `parent` is where the declared type re-enters, and it renders its
       // address under both.
+
       expect(declaredResultProjection(declarationBeside({}), "shape")?.schema)
         .toEqual({
           type: "object",
@@ -388,6 +397,7 @@ describe("declaredResultProjection", () => {
       // bound where none was found. `{ type: "object", properties: {} }` is
       // what an empty interface lowers to: it names no fields and closes
       // nothing, which accepts whatever is stored.
+
       expect(declaredResultProjection({ type: "object" }, "shape"))
         .toBeUndefined();
       expect(declaredResultProjection({}, "shape")).toBeUndefined();
@@ -416,6 +426,7 @@ describe("declaredResultProjection", () => {
       // the position is left wide under this bound too — the same answer
       // `allOf` gets, and for the same reason. Only re-entry turns a union
       // into an address.
+
       expect(
         declaredResultProjection({
           type: "object",
@@ -525,6 +536,7 @@ describe("declaredResultProjection", () => {
     // `anyOf`/`oneOf` are a choice of shape, and a projection states one shape
     // per position. An address answers every branch at once, since it names the
     // position rather than describing what sits at it.
+
     expect(derivedSchemaBeside({
       origin: { anyOf: [{ $ref: "#/$defs/Item" }, { type: "null" }] },
     })).toEqual({
@@ -542,6 +554,7 @@ describe("declaredResultProjection", () => {
     // The derivation cannot state two shapes at one position, so it leaves the
     // position as wide as it was declared; a readback that then still closes a
     // circle refuses legibly, naming the position it closes at.
+
     expect(derivedSchemaBeside({
       origin: {
         allOf: [
@@ -587,6 +600,7 @@ describe("declaredResultProjection", () => {
     it("returns `true` at a position whose `$ref` walks past a name the declaration does not have", () => {
       // `$defs/Item` has no `title` of its own — the title sits under
       // `properties` — so the walk runs out of document with a segment left.
+
       expect(
         derivedSchemaBeside({ origin: { $ref: "#/$defs/Item/title/type" } }),
       ).toEqual(unbounded);
