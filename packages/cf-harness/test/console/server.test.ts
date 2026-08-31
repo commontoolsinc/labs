@@ -73,6 +73,7 @@ const artifactLoop = (
       loopOptions.artifactRoot,
       loopOptions.runId,
       transcript,
+      options.transcript.length,
     );
     const finalAssistantText =
       transcript.findLast((message) => message.role === "assistant")?.content ??
@@ -155,12 +156,27 @@ const writeTurnTranscript = async (
   artifactRoot: string,
   turnId: string,
   transcript: readonly HarnessTranscriptMessage[],
+  firstGeneratedIndex = 0,
 ): Promise<void> => {
   const runRoot = join(artifactRoot, turnId);
   await Deno.mkdir(runRoot, { recursive: true });
   await Deno.writeTextFile(
     join(runRoot, "transcript.json"),
     JSON.stringify(transcript),
+  );
+  await Deno.writeTextFile(
+    join(runRoot, "run-report.json"),
+    JSON.stringify({
+      finalAssistantText: transcript.slice(firstGeneratedIndex).findLast(
+        (message) => message.role === "assistant",
+      )?.content ?? "",
+      timeline: transcript.map((message, transcriptIndex) => ({
+        kind: "transcript_message",
+        transcriptIndex,
+        role: message.role,
+        ...(transcriptIndex >= firstGeneratedIndex ? { modelTurn: 1 } : {}),
+      })),
+    }),
   );
 };
 

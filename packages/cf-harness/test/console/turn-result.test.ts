@@ -14,12 +14,27 @@ const writeTranscript = async (
   artifactRoot: string,
   turnId: string,
   transcript: readonly HarnessTranscriptMessage[],
+  firstGeneratedIndex = 1,
 ): Promise<void> => {
   const runRoot = join(artifactRoot, turnId);
   await Deno.mkdir(runRoot, { recursive: true });
   await Deno.writeTextFile(
     join(runRoot, "transcript.json"),
     JSON.stringify(transcript),
+  );
+  await Deno.writeTextFile(
+    join(runRoot, "run-report.json"),
+    JSON.stringify({
+      finalAssistantText: transcript.slice(firstGeneratedIndex).findLast(
+        (message) => message.role === "assistant",
+      )?.content ?? "",
+      timeline: transcript.map((message, transcriptIndex) => ({
+        kind: "transcript_message",
+        transcriptIndex,
+        role: message.role,
+        ...(transcriptIndex >= firstGeneratedIndex ? { modelTurn: 1 } : {}),
+      })),
+    }),
   );
 };
 
@@ -89,6 +104,47 @@ describe("console/turn-result", () => {
         pieces: [],
         spaceName: "console-test",
         finalText: "The total is 42.",
+      });
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  });
+
+  it("excludes pieces and assistant text inherited from earlier turns", async () => {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-console-result-",
+    });
+    try {
+      await writeTranscript(artifactRoot, "follow-up-turn", [
+        { role: "user", content: "build a reading list" },
+        {
+          role: "tool",
+          toolCallId: "old-call",
+          toolName: "assign_slug",
+          content: JSON.stringify({
+            status: "ok",
+            slug: "old-piece",
+            url: "http://localhost:8000/console-test/old-piece",
+          }),
+        },
+        { role: "assistant", content: "The old piece is ready." },
+        { role: "user", content: "calculate the total instead" },
+        {
+          role: "tool",
+          toolCallId: "new-call",
+          toolName: "run_pattern",
+          content: JSON.stringify({ status: "ok" }),
+        },
+      ], 4);
+
+      await expect(readConsoleTurnResult({
+        artifactRoot,
+        turnId: "follow-up-turn",
+        spaceName: "console-test",
+      })).resolves.toEqual({
+        pieces: [],
+        spaceName: "console-test",
+        finalText: "",
       });
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });

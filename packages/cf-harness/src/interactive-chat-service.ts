@@ -682,6 +682,14 @@ export class HarnessInteractiveChatService {
 
   constructor(options: CreateHarnessInteractiveChatServiceOptions = {}) {
     this.#basePromptLoopOptions = options.basePromptLoopOptions ?? {};
+    if (
+      options.runIdForTurn !== undefined &&
+      this.#basePromptLoopOptions.engine !== undefined
+    ) {
+      throw new Error(
+        "turn run-id mapping cannot be combined with an injected engine",
+      );
+    }
     this.#runIdForTurn = options.runIdForTurn;
     if (options.systemPrompt !== undefined) {
       this.#systemPrompt = options.systemPrompt;
