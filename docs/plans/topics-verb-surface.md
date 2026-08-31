@@ -74,27 +74,24 @@ a default is the only one of them a board can grant itself.
 
 | stage | carries | state |
 | --- | --- | --- |
-| A | compatible updates: verb and event prose, the describe layer, `setTitle`, a compact `addTopic` result | landed in source |
+| A | compatible updates: verb and event prose, the describe layer, `setTitle`, a compact `addTopic` result | landed and deployed |
 | B | one rehearsed break, four items batched | landed and deployed |
 | C | items gated on platform work | designed for, not started |
 
 ### Stage A
 
-Landed. Every item passed the update gate as an ordinary deploy. `setTitle`
-went onto the topic's own output rather than the shared projection, which is
-the pattern every new verb follows until Stage B lands.
-
-Stage A is not yet deployed to the team board: no deployed topic carries a
-`setTitle` stream.
+Landed and deployed. Every item passed the update gate as an ordinary deploy.
+`setTitle` went onto the topic's own output rather than the shared projection,
+which is the pattern every new verb follows.
 
 ### Stage B
 
 Four items, batched into a single rehearsed migration rather than paying the
 rehearsal four times:
 
-All four landed together in #6143 and are deployed: the Estuary board and
-every one of its 125 topics run these patterns. They merged together or not at
-all, which is what batching a single rehearsed migration means.
+All four landed together in #6143 and are deployed: the Estuary board and every
+Topic on it run these patterns. They merged together or not at all, which is
+what batching a single rehearsed migration means.
 
 The migration itself is recorded in
 [`../history/topics-board-migration-2026-08-28.md`](../history/topics-board-migration-2026-08-28.md).
@@ -106,9 +103,10 @@ side's demand moved rather than of this board.
 
 1. **Narrow the board's `topics` demand and the topic's `mentionable`
    demand** to the fields above.
-2. **Require `agentName` on every verb**, retiring the unsigned legacy path and
-   with it the misattribution where an unsigned body edit leaves the previous
-   author's name on content they did not write.
+2. **Require `agentName` on every authored-content verb**, eliminating the
+   unsigned path and with it the misattribution where an unsigned body edit
+   leaves the previous author's name on content they did not write. The
+   reference-only `mention` and `unmention` calls carry no content attribution.
 3. **Retire `myName`, `setMyName`, `createdByName`, `authorName`** and their
    mirrors in results.
 4. **Open the `kind` value domains** on links and authors, which are closed

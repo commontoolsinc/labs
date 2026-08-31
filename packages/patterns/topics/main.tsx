@@ -53,48 +53,18 @@ export type {
 } from "./topic.tsx";
 
 /**
- * What the board USES of a stored topic — its demand, not the topic's truth.
+ * What the board uses of a stored topic — its demand, not the topic's complete
+ * contract.
  *
- * Written by the consumer, which is the point: a holder writes down what it
- * reads or writes and the verbs it calls, never what the other pattern IS
- * ([designing verbs so they can change](../../../docs/plans/verb-evolution.md),
- * "a holder demands only what it uses"). This board calls NO topic verb, so
- * its demand names none — and once it names none, adding a verb to a topic
- * stops touching the board's shape at all.
+ * A holder names only the fields it reads and verbs it calls; see
+ * [designing verbs so they can change](../../../docs/plans/verb-evolution.md).
+ * This board calls no Topic verb, so the demand names none. Callers take a
+ * Topic's address from `index` and reach its verbs on the Topic itself.
  *
- * That is what keeps a verb NON-OPTIONAL. The alternative, and the reason
- * this type exists, is that a verb reachable through the board's projection
- * has to be declared optional there — a stream cannot carry a default, so
- * optional is the only form an older generation tolerates — and every
- * consumer then pays a maybe at the call site, whose obvious spelling
- * (`piece.verb?.send(...)`) skips in silence.
- *
- * The membership, measured rather than guessed. Seven fields the board
- * READS: the card list renders `title`, `body`, `commentCount`, `createdBy`
- * and `lastActivityAt`; `index` publishes `title`,
- * `createdAt`, `createdBy`, `commentCount`, `lastActivityAt` — the same
- * array declared through a narrower row schema, which is why a field it
- * names has to be demanded here to resolve at all; `crossrefTable` joins on
- * `mentions`; `cardsByActivity` sorts on `lastActivityAt`; `topicCount`
- * reads only a length.
- *
- * Eight members, then, because `[NAME]` is demanded for a reason none of
- * those readers show: the board hands this same array on as each topic's
- * mention universe, so the name has to survive the demand to reach the
- * editor. Counting only what the board reads is what nearly dropped it.
- * No verbs.
- *
- * `createdByName` is deliberately NOT among them, though the card once read
- * it. It is `topicAuthorLabel`'s fallback for a topic written before
- * structured authorship, and every one of the deployed board's 113 topics
- * carries a structured `createdBy.name`, so the fallback is reached by none
- * of them. Demanding it would write a field this plan retires into the one
- * schema that cannot drop it later.
- *
- * Every field carries a default, and that is load-bearing rather than
- * stylistic: a demanded path an older topic cannot produce makes the WHOLE
- * array unreadable, while a default materializes in its place and the read
- * succeeds. Measured, not inferred.
+ * The eight fields cover the card, compact index, activity sort, reference
+ * pivot, and mention autocomplete. Seven carry defaults so a missing path does
+ * not make the whole array unreadable. `createdAt` is the exception: the Topic
+ * pattern defaults its input and publishes that path unconditionally.
  */
 export interface TopicDemand extends TopicSummary {
   /** The display name, which the board publishes onward as each topic's
@@ -134,10 +104,8 @@ export interface AddTopicEvent {
 
 export interface AddTopicResult {
   /** The topic this call created — the piece itself, not a manufactured
-   * identifier. It reaches the caller as a link to the child, which the CLI
-   * renders as an address (`cf call --show-links`). A caller therefore
-   * addresses the new topic straight from the create, instead of filing it and
-   * then searching the board's index for the topic it just made.
+   * identifier. `cf call` can project the child link with a `$link` marker;
+   * the returned canonical reference composes directly into the next command.
    *
    * Declared through the index's row schema rather than the full `TopicPiece`,
    * and the narrowness is the contract: the declared schema bounds the default
@@ -159,12 +127,9 @@ export interface TopicIndexRow {
   title: string;
   createdAt: number;
 
-  /** Who filed the topic. A topic written without structured authorship
-   * materializes the declared default — the inert legacy sentinel
-   * `{ kind: "person", name: "" }` — so a blank name here means "unsigned",
-   * and there is nothing further to consult: the display-name mirror this
-   * once pointed at is retired, and `topicAuthorLabel` renders the sentinel
-   * as `someone`. */
+  /** Who filed the topic. A record without structured authorship materializes
+   * the inert `{ kind: "person", name: "" }` default, which
+   * `topicAuthorLabel()` renders as `someone`. */
   createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
 
   /** Coalesced to 0 for a cold or older topic whose derived path is absent,
@@ -351,12 +316,14 @@ const cardsByActivity = lift(
  * for the team; PR workflows stay in GitHub and arrive here as links.
  *
  * Headless use: survey the whole board with one bounded read of `index` — a
- * row IS its topic, so a row's own address (`--select index[].@`) is what
- * that topic's reads and verbs take as the piece. File with `addTopic`,
- * title and optional initial body in one call, then work on the topic
- * directly: the body is its living document, the thread its append-only
- * deliberation. Sign every mutation with `agentName` — Fabric records the
- * human principal behind the key; the name says which agent acted under it.
+ * row is its Topic, so select the row's own address alongside `title` and use
+ * that canonical address as the piece for the Topic's reads and verbs.
+ * File with `addTopic`, title and optional initial body in one call, then work
+ * on the Topic directly: the body is its living document, the thread its
+ * append-only deliberation. Sign every authored-content mutation with
+ * `agentName`; Fabric records the human principal behind the key, and the name
+ * says which agent acted under it. Reference-only `mention` and `unmention`
+ * calls carry no content signature.
  */
 export interface TopicsOutput {
   [NAME]: string;
