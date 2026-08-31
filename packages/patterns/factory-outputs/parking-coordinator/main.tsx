@@ -1,8 +1,10 @@
 import {
   action,
   type AddIntegrity,
+  type Cell,
   computed,
   Default,
+  equals,
   handler,
   NAME,
   pattern,
@@ -16,8 +18,10 @@ import {
   type WriteAuthorizedBy,
 } from "commonfabric";
 import {
+  activeAdminRoleForSubject,
   adminRegistryEntries,
   type EmptyAdminRegistryValue,
+  subjectHasAdminRole,
 } from "../../cfc/admin/mod.ts";
 import {
   formatVehicle,
@@ -53,6 +57,12 @@ export interface Person {
   defaultSpot: string;
   priorityRank: number;
   vehicles?: Vehicle[];
+  /**
+   * The Fabric identity that claimed this row, once someone has. A person with
+   * no profile is a name on a roster: they can hold a parking spot, and they
+   * cannot hold a parking-admin role, because nothing identifies them.
+   */
+  profile?: ParkingProfileCell;
 }
 
 export type RequestStatus = "pending" | "allocated" | "denied" | "cancelled";
@@ -68,8 +78,30 @@ export interface SpotRequest {
 
 export const PARKING_ADMIN_INTEGRITY = "parking-admin" as const;
 
-export interface ParkingAdminSubject {
-  personName: string;
+export interface ParkingProfile {
+  readonly name?: string;
+}
+
+/**
+ * The identity a role binds to: the viewer's live `#profile` cell. A role
+ * names the cell, not what the cell currently says, so it survives a person
+ * being renamed and cannot be inherited by a later person who takes the same
+ * name.
+ */
+export type ParkingProfileCell = Cell<ParkingProfile>;
+export type ParkingAdminSubject = ParkingProfileCell;
+
+/**
+ * Either form the viewer's identity arrives in. Handler state holds the cell.
+ * Inside `computed()` a captured profile cell is observed as its current
+ * object value instead, and `equals` matches that value back to the cell, so a
+ * render-time check takes either and gets the same answer.
+ */
+export type ParkingProfileRef = ParkingAdminSubject | ParkingProfile;
+
+export interface ParkingViewerClaim {
+  readonly name?: string;
+  readonly profile?: ParkingProfileCell;
 }
 
 export interface ParkingAdminRoleAssignment {
@@ -118,11 +150,13 @@ export type ParkingAdminRegistryValue =
 export type ParkingAdminRegistryCell = Writable<ParkingAdminRegistryValue>;
 
 /**
- * Per-user switch that reveals the admin-management controls. Any viewer can
- * turn it on for themselves, so it carries no integrity: a self-granted value
- * that claimed one would endorse every protected write that consulted it.
- * Authority to change the roster comes from the roster itself, through
- * `actorMayChangeParkingAdmins`.
+ * Per-user switch that reveals the admin-management controls. Turning it on
+ * grants nothing: every roster change is checked against the viewer's own
+ * parking-admin role, so only an admin can make one — except while the roster
+ * holds no role at all, which is the bootstrap that lets the first admin
+ * exist. The switch carries no integrity, because a viewer sets it for
+ * themselves, and a self-granted value that claimed integrity would endorse
+ * every protected write that consulted it.
  */
 export type ParkingAdminManagerModeCell = Writable<boolean>;
 
@@ -173,6 +207,13 @@ export interface ParkingCoordinatorInput {
   people?: PerSpace<PeopleCell>;
   requests?: PerSpace<RequestsCell>;
   adminRegistry?: PerSpace<ParkingAdminRegistryCell>;
+  /**
+   * Stands a particular viewer up in place of the `#profile` wish, for a test
+   * or a composing pattern that already holds one. A claim always carries a
+   * name: the name is what says the claim is real, because a cell-typed field
+   * cannot say so (see `hasViewerClaim` below).
+   */
+  viewer?: ParkingViewerClaim;
 }
 
 export interface ParkingCoordinatorOutput {
@@ -189,6 +230,7 @@ export interface ParkingCoordinatorOutput {
   currentPersonIsAdmin: boolean;
   currentUserCanManageAdmins: boolean;
   enableAdminManager: Stream<void>;
+  claimPerson: Stream<{ name: string }>;
   togglePersonAdmin: Stream<ParkingAdminChangeEvent>;
   toggleAdminMode: Stream<void>;
   submitRequest: Stream<{ personName: string; date: string }>;
@@ -301,112 +343,90 @@ const resetModelOnMakeChange = handler<
   model.set("");
 });
 
-const parkingAdminSubject = (personName: string): ParkingAdminSubject => ({
-  personName,
-});
-
 const parkingAdminRolesValue = (
   registry: ParkingAdminRegistryCell,
 ): ParkingAdminRole[] => adminRegistryEntries<ParkingAdminRole>(registry);
 
-const parkingAdminRoleForPerson = (
+/**
+ * The role a profile holds, found by comparing the profile cells themselves.
+ * `activeAdminRoleForSubject` is the shared CFC lookup, and comparing by cell
+ * is what makes the answer independent of whatever name the profile carries.
+ */
+const parkingAdminRoleForProfile = (
   registry: ParkingAdminRegistryCell,
-  personName: string | undefined,
-): ParkingAdminRole | undefined => {
-  const trimmedName = (personName ?? "").trim();
-  return trimmedName === ""
-    ? undefined
-    : parkingAdminRolesValue(registry).find((role) =>
-      role.subject.personName === trimmedName
-    );
-};
-
-const personIsParkingAdmin = (
-  registry: ParkingAdminRegistryCell,
-  personName: string | undefined,
-): boolean => parkingAdminRoleForPerson(registry, personName) !== undefined;
-
-// Demo-only identity model: the selected person name stands in for the actor.
-// Do not copy this for production authorization; use a stable user/profile cell.
-const currentActorName = (
-  selectedPersonName: Writable<string>,
-  people: PeopleCell,
-): string => selectedPersonName.get() || (people.get() ?? [])[0]?.name || "";
-
-const currentParkingAdminRole = (
-  registry: ParkingAdminRegistryCell,
-  selectedPersonName: Writable<string>,
-  people: PeopleCell,
+  profile: ParkingProfileRef | undefined,
 ): ParkingAdminRole | undefined =>
-  parkingAdminRoleForPerson(
-    registry,
-    currentActorName(selectedPersonName, people),
-  );
+  activeAdminRoleForSubject(parkingAdminRolesValue(registry), profile);
 
-const peopleIncludeName = (people: PeopleCell, personName: string): boolean =>
-  (people.get() ?? []).some((person) => person.name === personName);
+const profileIsParkingAdmin = (
+  registry: ParkingAdminRegistryCell,
+  profile: ParkingProfileRef | undefined,
+): boolean => subjectHasAdminRole(parkingAdminRolesValue(registry), profile);
 
-// The roster confers parking-admin authority, so only someone who already holds
-// it may change it. An empty roster is the bootstrap case: the first grant is
-// open, and from then on the roster gates itself.
+/** The person row a profile has claimed, if it has claimed one. */
+const personForProfile = (
+  people: PeopleCell,
+  profile: ParkingProfileRef | undefined,
+): Person | undefined =>
+  profile === undefined
+    ? undefined
+    : (people.get() ?? []).find((person) =>
+      person.profile !== undefined && equals(person.profile, profile)
+    );
+
+// The roster confers parking-admin authority, so only someone who already
+// holds it may change it. An empty roster is the bootstrap case: the first
+// grant is open, and from then on the roster gates itself.
 const actorMayChangeParkingAdmins = (
   registry: ParkingAdminRegistryCell,
-  actorName: string,
+  profile: ParkingProfileRef | undefined,
 ): boolean =>
-  parkingAdminRolesValue(registry).length === 0 ||
-  personIsParkingAdmin(registry, actorName);
+  profile !== undefined &&
+  (parkingAdminRolesValue(registry).length === 0 ||
+    profileIsParkingAdmin(registry, profile));
+
+/**
+ * The render-time form of the same question. A cell-typed field is truthy even
+ * when nothing resolved, so the name string is what says there is a viewer to
+ * authorize at all.
+ */
+const viewerMayChangeParkingAdmins = (
+  registry: ParkingAdminRegistryCell,
+  profile: ParkingProfileRef | undefined,
+  viewerName: string,
+): boolean =>
+  (viewerName ?? "").trim() !== "" &&
+  actorMayChangeParkingAdmins(registry, profile);
 
 const currentUserCanManageParkingAdmins = (
   managerMode: ParkingAdminManagerModeCell,
   registry: ParkingAdminRegistryCell,
-  selectedPersonName: Writable<string>,
-  people: PeopleCell,
+  profile: ParkingProfileRef | undefined,
+  viewerName: string,
 ): boolean =>
   managerMode.get() === true &&
-  actorMayChangeParkingAdmins(
-    registry,
-    currentActorName(selectedPersonName, people),
-  );
+  viewerMayChangeParkingAdmins(registry, profile, viewerName);
 
-/** Grant the named person a role, or drop the role they already hold. */
+/** Grant a profile a role, or drop the role it already holds. */
 const toggleParkingAdminRole = (
   roles: ParkingAdminRole[],
-  personName: string,
+  profile: ParkingAdminSubject,
+  displayName: string,
 ): ParkingAdminRole[] => {
-  const withoutPerson = roles.filter((role) =>
-    role.subject.personName !== personName
-  );
-  return withoutPerson.length !== roles.length ? withoutPerson : [
-    ...withoutPerson,
-    {
-      subject: parkingAdminSubject(personName),
-      displayName: personName,
-    } as ParkingAdminRole,
+  const withoutProfile = roles.filter((role) => !equals(role.subject, profile));
+  return withoutProfile.length !== roles.length ? withoutProfile : [
+    ...withoutProfile,
+    { subject: profile, displayName } as ParkingAdminRole,
   ];
 };
 
-/** Move an existing role onto a renamed person, keeping the same authority. */
-const renameParkingAdminRole = (
-  roles: ParkingAdminRole[],
-  personName: string,
-  newName: string,
-): ParkingAdminRole[] =>
-  roles.map((role) =>
-    role.subject.personName === personName
-      ? {
-        subject: parkingAdminSubject(newName),
-        displayName: newName,
-      } as ParkingAdminRole
-      : role
-  );
-
-type ParkingAdminChangeKind = "toggle" | "rename" | "remove";
+type ParkingAdminChangeKind = "toggle" | "remove";
 
 export interface ParkingAdminChangeEvent {
-  /** Person whose role changes; for a rename, the name they had before. */
-  name: string;
-  /** The name they now go by. Only read for a rename. */
-  newName?: string;
+  /** The identity whose role changes. */
+  profile?: ParkingAdminSubject;
+  /** Name to record on a granted role, for display where the cell is offline. */
+  displayName?: string;
 }
 
 interface ParkingAdminChangeState {
@@ -414,7 +434,8 @@ interface ParkingAdminChangeState {
   adminRegistry: ParkingAdminRegistryCell;
   managerMode: ParkingAdminManagerModeCell;
   people: PeopleCell;
-  selectedPersonName: Writable<string>;
+  viewerProfile: ParkingAdminSubject | undefined;
+  viewerName: string;
 }
 
 /**
@@ -429,56 +450,104 @@ interface ParkingAdminChangeState {
  * only binding is the one below, against this pattern's own cells. A handler
  * that carries a `uiContract` can afford to be exported, because the event
  * itself has to come from the reviewed surface; this one is driven by
- * `editPerson` and `removePerson` as well as by the button, so it has no event
- * requirement to lean on.
+ * `removePerson` as well as by the button, so it has no event requirement to
+ * lean on.
  *
- * `rename` and `remove` follow a change the people list already made, so they
- * arrive as events from `editPerson` and `removePerson` instead of writing the
- * roster there.
- *
- * What none of this reaches is who the acting person is: that is a name read
- * out of `people`, per the demo identity model above, so a caller that supplies
- * `people` supplies the answer. A pattern wanting real authority here needs a
- * stable user identity first.
+ * The acting identity is the viewer's own profile cell, bound as state rather
+ * than carried on the event, so a caller cannot name someone else as the
+ * actor. `remove` follows a person leaving the people list and only ever drops
+ * a role, so it asks nothing of the actor beyond the manager switch.
  */
 const commitParkingAdminChange = handler<
   ParkingAdminChangeEvent,
   ParkingAdminChangeState
->((event, { kind, adminRegistry, managerMode, people, selectedPersonName }) => {
-  const personName = (event?.name ?? "").trim();
-  const newName = (event?.newName ?? "").trim();
-  if (managerMode.get() !== true || personName === "") return;
-
-  if (kind === "toggle") {
-    // A role is a grant to a person on the roster of people. Granting one to a
-    // name nobody answers to would fill the roster with a role no actor can
-    // hold, and the bootstrap that opens the first grant would never reopen.
-    if (!peopleIncludeName(people, personName)) return;
-    if (
-      !actorMayChangeParkingAdmins(
-        adminRegistry,
-        currentActorName(selectedPersonName, people),
-      )
-    ) return;
-  } else {
-    // `rename` and `remove` arrive after the people list already changed, so
-    // the acting person cannot be identified against it any more. Neither
-    // grants authority — each keeps a role from pointing at someone who is no
-    // longer there — and `editPerson` and `removePerson` refuse the change
-    // outright when the acting user may not move a role, which is the check
-    // that decides who may do this.
-    if (!personIsParkingAdmin(adminRegistry, personName)) return;
-    if (kind === "rename" && (newName === "" || newName === personName)) return;
-  }
+>((
+  event,
+  { kind, adminRegistry, managerMode, people, viewerProfile, viewerName },
+) => {
+  const target = event?.profile;
+  if (managerMode.get() !== true || !target) return;
 
   const roles = parkingAdminRolesValue(adminRegistry);
-  const nextRoles = kind === "toggle"
-    ? toggleParkingAdminRole(roles, personName)
-    : kind === "rename"
-    ? renameParkingAdminRole(roles, personName, newName)
-    : roles.filter((role) => role.subject.personName !== personName);
+  let nextRoles: ParkingAdminRole[];
+
+  if (kind === "toggle") {
+    // A role is a grant to someone on the roster of people, reached through
+    // the row they claimed. Granting one to an identity nobody here answers to
+    // would fill the roster with authority no actor can hold, and the
+    // bootstrap that opens the first grant would never reopen.
+    const person = personForProfile(people, target);
+    if (person === undefined) return;
+    // Store the row's OWN profile cell rather than whatever the event carried:
+    // the row's is the identity the claim pinned, and the event is only how
+    // the caller pointed at it.
+    const subject = person.profile;
+    if (subject === undefined) return;
+    // The acting identity has to be a real one, and the name alone does not
+    // say so: an empty cell handle is truthy, and while the roster is empty
+    // `actorMayChangeParkingAdmins` says yes to whatever it is handed, so the
+    // bootstrap grant would go through for an actor who resolved to nothing.
+    // Resolving the cell and requiring a value is the same check the claim
+    // makes, and it is the one an empty handle cannot pass.
+    if ((viewerName ?? "").trim() === "" || !viewerProfile) return;
+    const actor = viewerProfile.resolveAsCell();
+    if (actor.get() === undefined) return;
+    if (!actorMayChangeParkingAdmins(adminRegistry, actor)) return;
+    nextRoles = toggleParkingAdminRole(
+      roles,
+      subject,
+      (event?.displayName ?? person.name).trim() || person.name,
+    );
+  } else {
+    if (!profileIsParkingAdmin(adminRegistry, target)) return;
+    nextRoles = roles.filter((role) => !equals(role.subject, target));
+  }
 
   adminRegistry.key("admins").set(nextRoles as ParkingAdminList);
+});
+
+/**
+ * Binding a person row to the viewer's own identity. Until someone claims a
+ * row, that row is a name on a roster and can hold no role, because nothing
+ * says who it is. The identity comes from bound state rather than the event,
+ * so a caller cannot claim a row on someone else's behalf, and a viewer holds
+ * at most one row.
+ */
+const claimParkingPerson = handler<
+  { name: string },
+  {
+    people: PeopleCell;
+    viewerProfile: ParkingAdminSubject | undefined;
+    viewerName: string;
+  }
+>((event, { people, viewerProfile, viewerName }) => {
+  const name = (event?.name ?? "").trim();
+  // Gate on the viewer's NAME, not on the profile being falsy: an unset
+  // optional cell input reads as a present-but-empty handle, so a falsy test
+  // on it never fires and a viewer with no resolved profile would claim a row
+  // with an empty identity.
+  if (name === "" || (viewerName ?? "").trim() === "" || !viewerProfile) return;
+  // Store the terminal cell, never the bound alias: the binding reaches the
+  // profile through per-viewer state, so storing it as-is stores "whoever the
+  // READER resolves", which is a different person in every runtime.
+  const identity = viewerProfile.resolveAsCell();
+  // And it must read as present before it may be stored, because the empty
+  // handle above is truthy.
+  if (identity.get() === undefined) return;
+  if (personForProfile(people, identity) !== undefined) return;
+  const current = people.get() ?? [];
+  const target = current.find((person) => person.name === name);
+  if (target === undefined) return;
+  // A claimed row is not up for grabs. Overwriting one would point it at a
+  // second identity and strand the first: the role bound to the identity that
+  // held the row stays in the roster while no row carries it any more, which
+  // is authority nobody can exercise and nobody can drop.
+  if (target.profile !== undefined) return;
+  people.set(
+    current.map((person) =>
+      person.name === name ? { ...person, profile: identity } : person
+    ),
+  );
 });
 
 const commuteIcon = (mode: CommuteMode): string => {
@@ -552,11 +621,28 @@ export const DEFAULT_SPOTS: ParkingSpot[] = [
 // ============================================================
 
 export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
-  ({ spots, people, requests, adminRegistry }) => {
+  ({ spots, people, requests, adminRegistry, viewer }) => {
     // Each optional cell input materializes seeded from its type's `Default<>`
     // when the caller wires nothing; a parent that owns the cells (e.g.
     // lot-with-coordinator-demo) shares them by passing them in.
     const adminManagerMode = new Writable.perUser(false);
+
+    const profileWish = wish<ParkingProfile>({ query: "#profile" });
+    const profileNameWish = wish<string>({ query: "#profileName" });
+    // Which of the two identity sources this viewer is on. The predicate gates
+    // on the claim's NAME STRING and never on its profile cell: an absent
+    // cell-typed field lowers to an `asCell` lift and reads back as a
+    // present-but-empty handle, so a presence test on the cell is true even
+    // when nothing claimed anything, and every viewer would park on the empty
+    // claim instead of the wish. Strings are honestly "" when unset.
+    const hasViewerClaim = computed(() => (viewer?.name ?? "").trim() !== "");
+    // The identity every authorization answer in this pattern is about.
+    const actingProfile = hasViewerClaim ? viewer?.profile : profileWish.result;
+    // "" until an identity resolves, which is the honest signal that there is
+    // nobody to authorize yet.
+    const actingName = computed(() =>
+      (viewer?.name ?? profileNameWish.result ?? "").trim()
+    );
 
     const nowTimestamp = wish<number>({ query: "#now" });
     const todayStr = computed(() => {
@@ -655,19 +741,17 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     });
 
     // Every roster write goes through the one reviewed handler the roster's
-    // `writeAuthorizedBy` contract names.
+    // `writeAuthorizedBy` contract names. The acting identity is bound here,
+    // from the viewer's own profile, so no event can name a different actor.
     const adminChangeState = {
       adminRegistry,
       managerMode: adminManagerMode,
       people,
-      selectedPersonName,
+      viewerProfile: actingProfile,
+      viewerName: actingName,
     };
     const togglePersonAdmin = commitParkingAdminChange({
       kind: "toggle",
-      ...adminChangeState,
-    });
-    const renamePersonAdmin = commitParkingAdminChange({
-      kind: "rename",
       ...adminChangeState,
     });
     const removePersonAdmin = commitParkingAdminChange({
@@ -675,9 +759,15 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       ...adminChangeState,
     });
 
+    const claimPerson = claimParkingPerson({
+      people,
+      viewerProfile: actingProfile,
+      viewerName: actingName,
+    });
+
     const toggleAdminMode = action(() => {
       if (
-        !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+        !parkingAdminRoleForProfile(adminRegistry, actingProfile)
       ) {
         adminMode.set(false);
         return;
@@ -865,21 +955,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         trimName !== originalName && current.some((p) => p.name === trimName)
       ) return;
 
-      // A role names its holder, so renaming an admin moves their authority to
-      // the new name. Refuse the whole edit when the acting user may not move
-      // it: renaming anyway would leave the role pointing at a person who no
-      // longer exists, and nobody could reach the roster to repair it.
-      if (
-        trimName !== originalName &&
-        personIsParkingAdmin(adminRegistry, originalName) &&
-        !currentUserCanManageParkingAdmins(
-          adminManagerMode,
-          adminRegistry,
-          selectedPersonName,
-          people,
-        )
-      ) return;
-
       people.set(current.map((p) => {
         if (p.name !== originalName) return p;
 
@@ -910,31 +985,32 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
             r.personName === originalName ? { ...r, personName: trimName } : r
           ),
         );
-        renamePersonAdmin.send({ name: originalName, newName: trimName });
       }
 
       editingPersonName.set(null);
     });
 
     const removePerson = action<{ name: string }>(({ name }) => {
+      const leaving = (people.get() ?? []).find((p) => p.name === name);
       // Removing an admin drops their role with them. Refuse the whole removal
-      // when the acting user may not drop it, rather than leave a role for a
-      // person who is gone — which a later person of the same name would
-      // inherit, and which no actor could hold in the meantime.
+      // when the acting user may not drop it, rather than leave the roster
+      // holding authority for someone who is no longer on the list.
       if (
-        personIsParkingAdmin(adminRegistry, name) &&
+        profileIsParkingAdmin(adminRegistry, leaving?.profile) &&
         !currentUserCanManageParkingAdmins(
           adminManagerMode,
           adminRegistry,
-          selectedPersonName,
-          people,
+          actingProfile,
+          actingName,
         )
       ) {
         removePersonConfirmTarget.set(null);
         return;
       }
       people.set(people.get().filter((p) => p.name !== name));
-      removePersonAdmin.send({ name });
+      if (leaving?.profile !== undefined) {
+        removePersonAdmin.send({ profile: leaving.profile });
+      }
       if (selectedPersonName.get() === name) {
         const remaining = people.get();
         selectedPersonName.set(remaining[0]?.name ?? "");
@@ -984,7 +1060,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       { spotNumber: string; label: string; notes: string }
     >((event) => {
       if (
-        !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+        !parkingAdminRoleForProfile(adminRegistry, actingProfile)
       ) {
         return;
       }
@@ -1026,7 +1102,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       }
     >((event) => {
       if (
-        !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+        !parkingAdminRoleForProfile(adminRegistry, actingProfile)
       ) {
         return;
       }
@@ -1074,7 +1150,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     const removeSpot = action<{ spotNumber: string }>(
       ({ spotNumber: spotNumArg3 }) => {
         if (
-          !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+          !parkingAdminRoleForProfile(adminRegistry, actingProfile)
         ) {
           return;
         }
@@ -1091,7 +1167,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       { spotNumber: string; date: string; personName: string }
     >(({ spotNumber, date, personName }) => {
       if (
-        !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+        !parkingAdminRoleForProfile(adminRegistry, actingProfile)
       ) {
         return;
       }
@@ -1387,13 +1463,29 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     );
 
     const currentPersonIsAdmin = computed(() =>
-      currentParkingAdminRole(adminRegistry, selectedPersonName, people) !==
+      parkingAdminRoleForProfile(adminRegistry, actingProfile) !==
         undefined
     );
 
     const adminModeEnabled = computed(() =>
       adminMode.get() ? currentPersonIsAdmin : false
     );
+
+    /**
+     * Whether a viewer has resolved at all. The name is the only signal this
+     * can ask: a cell-typed field is truthy whether or not anything resolved,
+     * and neither `!== undefined` nor a field read off it distinguishes an
+     * empty handle from a real profile at render time — the second was tried
+     * and left the offer permanently withheld in a browser, where the profile
+     * resolves without reading back that way.
+     *
+     * So the two halves of an identity can disagree here, and the surface can
+     * offer a claim that `claimParkingPerson` then refuses. The handler is the
+     * authority: it resolves the cell and requires it to carry a value, which
+     * is the check that cannot be fooled. Offering and refusing is the same
+     * shape the lunch poll settled on for the same reason.
+     */
+    const hasActingIdentity = computed(() => actingName !== "");
 
     const adminManagerModeEnabled = computed(() =>
       adminManagerMode.get() === true
@@ -1402,8 +1494,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       currentUserCanManageParkingAdmins(
         adminManagerMode,
         adminRegistry,
-        selectedPersonName,
-        people,
+        actingProfile,
+        actingName,
       )
     );
     const canBootstrapPeople = computed(() =>
@@ -1413,12 +1505,22 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       adminModeEnabled === true || canBootstrapPeople === true
     );
 
+    // A viewer may claim one row, so once they hold one the other rows stop
+    // offering it.
+    const viewerHasClaimedRow = computed(() =>
+      personForProfile(people, actingProfile) !== undefined
+    );
+
     const adminAccessRows = computed(() =>
       (people.get() ?? []).map((person) => ({
         name: person.name,
         email: person.email,
-        isAdmin: personIsParkingAdmin(adminRegistry, person.name),
+        profile: person.profile,
+        claimed: person.profile !== undefined,
+        isAdmin: profileIsParkingAdmin(adminRegistry, person.profile),
         canManageAdmins: currentUserCanManageAdmins === true,
+        claimDisabled: hasActingIdentity !== true ||
+          viewerHasClaimedRow === true,
       }))
     );
 
@@ -1851,6 +1953,23 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     </cf-button>
                   </cf-hstack>
 
+                  {
+                    /* A role binds to an identity, so a viewer with no profile
+                      has nothing to claim a row with and nothing to be granted.
+                      The wish renders its own create-or-pick surface. */
+                  }
+                  {hasActingIdentity
+                    ? null
+                    : (
+                      <cf-vstack gap="1" id="parking-admin-profile-setup">
+                        <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
+                          Pick the identity you want to bring to this lot before
+                          claiming your row.
+                        </span>
+                        {profileWish[UI]}
+                      </cf-vstack>
+                    )}
+
                   {noPeople
                     ? (
                       <span style="font-size: 0.875rem; color: var(--cf-colors-gray-500);">
@@ -1864,6 +1983,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     const rowEmail = row.email;
                     const rowIsAdmin = row.isAdmin;
                     const rowCanManageAdmins = row.canManageAdmins;
+                    const rowProfile = row.profile;
+                    const rowClaimed = row.claimed;
+                    const rowClaimDisabled = row.claimDisabled;
                     return (
                       <cf-hstack
                         data-parking-admin-row={rowName}
@@ -1885,17 +2007,32 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                             {rowEmail}
                           </span>
                         </cf-vstack>
-                        <cf-button
-                          data-parking-admin-toggle={rowName}
-                          size="sm"
-                          disabled={!rowCanManageAdmins}
-                          onClick={() =>
-                            togglePersonAdmin.send({
-                              name: rowName,
-                            })}
-                        >
-                          {rowIsAdmin ? "Remove admin" : "Make admin"}
-                        </cf-button>
+                        <cf-hstack gap="2" align="center">
+                          {rowClaimed ? null : (
+                            <cf-button
+                              data-parking-admin-claim={rowName}
+                              size="sm"
+                              variant="secondary"
+                              disabled={rowClaimDisabled}
+                              onClick={() =>
+                                claimPerson.send({ name: rowName })}
+                            >
+                              This is me
+                            </cf-button>
+                          )}
+                          <cf-button
+                            data-parking-admin-toggle={rowName}
+                            size="sm"
+                            disabled={!rowCanManageAdmins || !rowClaimed}
+                            onClick={() =>
+                              togglePersonAdmin.send({
+                                profile: rowProfile,
+                                displayName: rowName,
+                              })}
+                          >
+                            {rowIsAdmin ? "Remove admin" : "Make admin"}
+                          </cf-button>
+                        </cf-hstack>
                       </cf-hstack>
                     );
                   })}
@@ -3061,6 +3198,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
       // Exposed actions
       enableAdminManager,
+      claimPerson,
       togglePersonAdmin,
       toggleAdminMode,
       submitRequest,
