@@ -94,6 +94,7 @@ const request = (
     main: "/main.tsx",
     files: [{ name: "/main.tsx", contents: `// ${patternId}` }],
   },
+  discoverable: true,
   ...overrides,
 });
 
@@ -153,7 +154,7 @@ describe("pattern index publication ledger", () => {
       expect(sent.map((call) => call.body.discoverable)).toEqual([
         false,
         false,
-        undefined,
+        true,
       ]);
       expect(sent[0].body.discoverabilityReason).toContain("superseded");
     });
@@ -189,8 +190,8 @@ describe("pattern index publication ledger", () => {
       await ledger.flush();
 
       expect(publishes(calls).map((call) => call.body.discoverable)).toEqual([
-        undefined,
-        undefined,
+        true,
+        true,
       ]);
     });
 
@@ -234,7 +235,7 @@ describe("pattern index publication ledger", () => {
       ]);
       // A dependency is not superseded — something composes it, so it is a
       // part of this session's output in its own right.
-      expect(sent[0].body.discoverable).toBeUndefined();
+      expect(sent[0].body.discoverable).toBe(true);
     });
 
     it("names a dependency-published entry as the lineage of its next iteration", async () => {

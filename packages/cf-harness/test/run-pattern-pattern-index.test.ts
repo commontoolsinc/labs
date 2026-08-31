@@ -385,6 +385,7 @@ describe("run-pattern over the pattern index", () => {
     index?: IndexStub,
     options: {
       publish?: false;
+      publishDiscoverable?: true;
       taskText?: string;
       startFailure?: string;
       pieces?: PiecesController;
@@ -403,20 +404,27 @@ describe("run-pattern over the pattern index", () => {
           ...(options.instantiations === undefined
             ? {}
             : { instantiations: options.instantiations }),
+          identity: signer,
         }),
       ...(options.taskText === undefined ? {} : { taskText: options.taskText }),
       // Opting out is connection configuration rather than an injection
       // seam, so a run that does not publish is built from a config that
       // says so — the session config beside it is what a pattern index is
       // admitted with.
-      ...(options.publish === false
+      ...(options.publish === false || options.publishDiscoverable === true
         ? {
           fabricSession: {
             apiUrl: "https://toolshed.test/",
             identityKeyPath: "/keys/agent.pkcs8",
             space: "run-pattern-index",
           },
-          patternIndex: { baseUrl: "https://index.test", publish: false },
+          patternIndex: {
+            baseUrl: "https://index.test",
+            ...(options.publish === false ? { publish: false } : {}),
+            ...(options.publishDiscoverable === true
+              ? { publishDiscoverable: true }
+              : {}),
+          },
         }
         : {}),
       ...(index === undefined ? {} : {
@@ -434,8 +442,8 @@ describe("run-pattern over the pattern index", () => {
   /**
    * Runs the tool and then sends what the session staged for the index, which
    * is what the prompt loop does when a session ends. A publication is held
-   * until then so a session that iterates offers search one entry per
-   * capability rather than one per successful run.
+   * until then so a session that iterates retains one candidate per capability
+   * rather than one per successful run.
    */
   const runAndFlush = async (
     engine: CfHarnessEngine,
@@ -727,6 +735,22 @@ describe("run-pattern over the pattern index", () => {
         },
       });
       expect(publish?.body.dependencies).toEqual([]);
+      expect(publish?.body.discoverable).toBe(false);
+      expect(publish?.body.discoverabilityReason).toBe(
+        "recorded automatically; discoverability is earned by evidence",
+      );
+    });
+
+    it("publishes discoverably only when the run deliberately opts in", async () => {
+      const index = stubIndex({}, { publish: { created: true } });
+      await runAndFlush(
+        createEngine(index, { publishDiscoverable: true }),
+        publishInput,
+      );
+
+      const publish = index.calls.find((call) => call.fn === "publishPattern");
+      expect(publish?.body.discoverable).toBe(true);
+      expect(publish?.body.discoverabilityReason).toBeUndefined();
     });
 
     it("publishes under the compiled pattern's content-addressed identity", async () => {

@@ -225,7 +225,7 @@ export type HarnessSubagentReturnContractAuthority = "caller" | "profile";
  *
  * The success branch is a RUNNING pattern's result cell and nothing else: a
  * reference, a line of prose about what it computes, and the hashtags it was
- * published to the index under. There is no field for source, in any
+ * recorded in the index under. There is no field for source, in any
  * encoding, because a parent has no use for source it should not be
  * compiling — the child ran the pattern, and reuse travels through the index,
  * where a searcher finds an atom by its hashtags and composes it by its
@@ -256,7 +256,7 @@ export const PATTERN_AUTHOR_RETURN_SCHEMA: JSONSchema = {
           type: "array",
           items: { type: "string" },
           description:
-            "The hashtags the pattern was published to the index under, so a later search finds it by the same words. Omitted by a run with no pattern index, which publishes nothing.",
+            "The hashtags the pattern was recorded in the index under: the words a later search finds it by if evidence earns discoverability. Omitted by a run with no pattern index, which publishes nothing.",
         },
       },
       required: ["ok", "resultRef", "describes"],

@@ -478,6 +478,7 @@ describe("publish-render-gate", () => {
     it("says of every verdict that the pattern is still recorded", () => {
       for (
         const reason of [
+          "recorded-automatically",
           "ui-default-tostring",
           "ui-rendered-empty",
           "probe-failed",

@@ -315,6 +315,7 @@ describe("PatternIndexClient", () => {
         files: [{ name: "/main.tsx", contents: "export default 1;" }],
       },
       resultSchema: { type: "object" },
+      discoverable: true,
     });
     expect(requests[0].url).toBe("https://index.test/api/publishPattern");
     expect(JSON.parse(requests[0].body)).toEqual({
@@ -329,9 +330,30 @@ describe("PatternIndexClient", () => {
         hashtags: ["math"],
       },
       schemas: { resultSchema: { type: "object" } },
+      discoverable: true,
     });
     expect(response.patternId).toBe("pat-2");
     expect(response.created).toBe(true);
+  });
+
+  it("omits discoverability when a publication leaves it unspecified", async () => {
+    const { client, requests } = createClient([
+      jsonResponse({ patternId: "pat-2", created: true }),
+    ]);
+    await client.publishPattern({
+      patternId: "pat-2",
+      description: "Doubles a number",
+      directQuery: "double a number",
+      hashtags: ["math"],
+      program: {
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: "export default 1;" }],
+      },
+    });
+
+    const body = JSON.parse(requests[0].body);
+    expect(Object.hasOwn(body, "discoverable")).toBe(false);
+    expect(Object.hasOwn(body, "discoverabilityReason")).toBe(false);
   });
 
   it("throws a typed error carrying the status and the index's message", async () => {

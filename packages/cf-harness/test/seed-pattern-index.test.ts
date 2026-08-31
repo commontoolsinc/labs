@@ -950,11 +950,8 @@ describe("seed-pattern-index", () => {
       expect(request.program.main).toBe("/primitives/counter.tsx");
     });
 
-    it("sets no field that would withhold an atom from discovery", () => {
-      // The seed sets no discoverability field: an omitted one is discoverable,
-      // and these atoms are the curated tier.
-
-      expect("nonDiscoverable" in publishRequestFor(entry)).toBe(false);
+    it("publishes the curated atom discoverably", () => {
+      expect(publishRequestFor(entry).discoverable).toBe(true);
     });
 
     it("answers no dependencies for an atom that imports no published pattern", () => {
