@@ -178,6 +178,45 @@ const omnibot = Chatbot({
 
 This pattern is useful when a sub-pattern needs to accept additional configuration (e.g. extra chatbot tools, extra fields) from its caller while also defining its own base set internally.
 
+## An Input the Sub-Pattern Writes Takes a Cell
+
+An argument is a link, not a copy. The sub-pattern's input names the very cell
+you passed, and every write the sub-pattern makes lands in it. Pass a
+`computed()` and the cell being handed over is that derivation's own output
+cell, which the runtime rewrites from scratch on each run. The sub-pattern's
+writes go into it, and the next run of the derivation replaces them with the
+derived value again. Nothing reports this. The write succeeds, and the loss
+arrives later, whenever something the derivation reads happens to change.
+
+A derived argument therefore suits an input the sub-pattern only reads — the
+`allTools` merge above is one — and not an input it writes.
+
+```tsx
+// Shown inside a pattern body.
+// BROKEN: DonutTray writes `glazes`, so a re-run of this derivation discards
+// whatever it has written.
+const glazes = computed(() => [{ name: flavorOfTheDay, sold: 0 }]);
+const tray = DonutTray({ glazes });
+```
+
+An input that needs a starting value and is written afterwards takes a cell of
+its own, with the starting value written into it by a handler:
+
+```tsx
+// Shown inside a pattern body.
+// WORKS: `glazes` is its own cell. `stockTray` is a handler, bound here, that
+// writes the starting value into it.
+const glazes = Writable.of<{ name: string; sold: number }[]>([]);
+const tray = DonutTray({ glazes });
+const stock = stockTray({ glazes, flavorOfTheDay });
+```
+
+A pattern test seeds a pattern the same way, and has the sharper version of the
+hazard: the clock a test reads to build a timestamp is a wish that advances on
+its own, so a seed derived from it re-runs partway through the run and takes
+the pattern's state with it. See
+[Seeding Stored State](../workflows/pattern-testing.md#seeding-stored-state).
+
 ## See Also
 
 - [Pattern Primitives](./primitives.md) — the contract for embedding reusable
