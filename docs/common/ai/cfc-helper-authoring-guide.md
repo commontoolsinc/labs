@@ -245,27 +245,38 @@ policy. The local pattern owns the role names, subjects, and integrity labels.
 Use this shape when a pattern has:
 
 - a list of role assignments stored in one registry value
-- a manager credential that permits editing the registry
+- one reviewed handler that every change to that list goes through
 - subject equality that should work for cells or structured objects
 
+One integrity atom runs through all of it. The roles carry it, the list carries
+it, and the list's floor asks for it. There is no second atom naming "who may
+edit the roster": a floored write may only consume reads that share a single
+witness atom for the floor, and deciding a roster change means reading the
+roster, so a floor on one atom over roles carrying another can never be met.
+
+The registry value around the list is written out here rather than reused from
+`AdminRegistryValue`, which types its `admins` as a plain array of roles and so
+has nowhere to carry the floor, the mint, or the write binding. Every pattern
+that floors a registry declares its own for the same reason.
+
 ```ts
-// Shown for illustration only.
+// Shown at module scope.
 import {
   type AddIntegrity,
+  type Default,
+  handler,
   type RequiresIntegrity,
   type Writable,
+  type WriteAuthorizedBy,
 } from "commonfabric";
 import {
-  type AdminManagerCredential,
-  adminManagerCredentialIsActive,
   adminRegistryEntries,
-  type AdminRegistryValue,
   type AdminRoleAssignment,
+  type EmptyAdminRegistryValue,
   subjectHasAdminRole,
 } from "../cfc/admin/mod.ts";
 
 const PROJECT_ADMIN = "project-admin" as const;
-const PROJECT_ADMIN_MANAGER = "project-admin-manager" as const;
 
 type ProjectSubject = { projectId: string };
 
@@ -274,27 +285,65 @@ type ProjectAdminRole = AddIntegrity<
   readonly [typeof PROJECT_ADMIN]
 >;
 
-type ProjectAdminRegistry = RequiresIntegrity<
-  AdminRegistryValue<ProjectAdminRole>,
-  readonly [typeof PROJECT_ADMIN_MANAGER]
+// `AddIntegrity` on the list mints the atom the floor beside it asks for. The
+// atom each role carries labels the entries, and does not reach the list path
+// the floor is declared on, so a list of endorsed roles with no mint of its
+// own refuses every write to itself.
+type ProjectAdminList = RequiresIntegrity<
+  WriteAuthorizedBy<
+    AddIntegrity<ProjectAdminRole[], readonly [typeof PROJECT_ADMIN]>,
+    typeof commitProjectAdminChange
+  >,
+  readonly [typeof PROJECT_ADMIN]
 >;
 
-type ProjectAdminManager = AdminManagerCredential<
-  typeof PROJECT_ADMIN_MANAGER
->;
+interface ProjectAdminRegistryStoredValue {
+  readonly admins?: ProjectAdminList;
+}
+type ProjectAdminRegistry =
+  | ProjectAdminRegistryStoredValue
+  | Default<EmptyAdminRegistryValue>;
+
+// The switch that reveals the admin controls is a plain boolean any viewer may
+// set for themselves, so it carries no integrity. Give it one and every
+// protected write that reads it inherits an endorsement its own user granted.
+type ProjectAdminManagerModeCell = Writable<boolean>;
 
 declare const registry: Writable<ProjectAdminRegistry>;
-declare const credential: Writable<ProjectAdminManager | undefined>;
 declare const subject: ProjectSubject;
 
-const admins = adminRegistryEntries<ProjectAdminRole>(registry);
-const canManage = adminManagerCredentialIsActive(credential.get());
+const admins: ProjectAdminRole[] = adminRegistryEntries(registry);
 const isAdmin = subjectHasAdminRole(admins, subject);
+
+// The handler named in the list's `writeAuthorizedBy` contract is the only
+// code that may write the roster, so an unreviewed action elsewhere in the
+// pattern cannot reach it.
+const commitProjectAdminChange = handler<
+  { subject: ProjectSubject; displayName: string },
+  {
+    registry: Writable<ProjectAdminRegistry>;
+    managerMode: ProjectAdminManagerModeCell;
+  }
+>((event, { registry, managerMode }) => {
+  if (managerMode.get() !== true) return;
+  const current: ProjectAdminRole[] = adminRegistryEntries(registry);
+  if (subjectHasAdminRole(current, event.subject)) return;
+  registry.key("admins").set([
+    ...current,
+    { subject: event.subject, displayName: event.displayName },
+  ] as ProjectAdminList);
+});
 ```
 
 Promote only registry-neutral behavior. Keep local actions like "make parking
 captain", "grant room moderator", or "assign project owner" beside the owning
 pattern, because those actions define domain policy.
+
+The five rules that make a floored registry work, and the failure each one
+produces when it is broken, are in `packages/patterns/cfc/README.md` under
+"Floor An Admin Registry". The parking coordinator, the lobby, the lot watch
+and the group-chat demo have each had to be repaired for breaking one of them,
+so read that section before writing a new registry.
 
 ## Authoring Prompt-Injection Helpers
 

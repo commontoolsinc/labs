@@ -393,47 +393,134 @@ a protected value.
 If a multi-user pattern has admins, moderators, managers, or protected writes:
 
 1. Keep the shared role registry in `PerSpace<T>`.
-2. Keep any current-user credential in `PerUser<T>` or a local trusted surface,
-   depending on how the credential is granted.
-3. Define role names, subjects, and integrity strings beside the owning pattern.
+2. Run one integrity atom through the whole thing: the roles, the roster the
+   roles sit in, and the floor on that roster. A second atom for "who may edit
+   the roster" makes every roster change after the first one impossible, for
+   the reason given below.
+3. Define role names, subjects, and the integrity string beside the owning
+   pattern.
 4. Reuse `packages/patterns/cfc/admin/mod.ts` for the registry shape and lookup
    helpers.
-5. Use CFC integrity types and trusted surfaces for enforcement.
+5. Name one reviewed handler in the roster's write contract, and send every
+   roster change to it as an event.
+6. Keep any per-user switch that reveals the admin controls in `PerUser<T>`,
+   and give it no integrity at all.
+7. Make a role name a profile cell drawn from the pattern's own list of
+   people, pinned with `resolveAsCell()`. An event says which row; it never
+   supplies the identity.
 
 ```ts
 // Shown at module scope.
 import {
   type ActiveAdminRole,
-  type AdminManagerCredential,
-  adminManagerCredentialIsActive,
   adminRegistryEntries,
-  type AdminRegistryValue,
+  type EmptyAdminRegistryValue,
   subjectHasAdminRole,
 } from "../cfc/admin/mod.ts";
-import { type RequiresIntegrity, type Writable } from "commonfabric";
+import {
+  type AddIntegrity,
+  type Default,
+  handler,
+  type RequiresIntegrity,
+  type Writable,
+  type WriteAuthorizedBy,
+} from "commonfabric";
 
 const CHAT_ADMIN = "chat-admin" as const;
-const CHAT_ADMIN_MANAGER = "chat-admin-manager" as const;
 
 type ChatAdminRole = ActiveAdminRole<ProfileCell, typeof CHAT_ADMIN>;
-type ChatAdminRegistry = RequiresIntegrity<
-  AdminRegistryValue<ChatAdminRole>,
-  readonly [typeof CHAT_ADMIN_MANAGER]
+
+// The roster carries three contracts, all naming the same atom.
+// `RequiresIntegrity` is the floor: a value landing here has to carry the
+// `chat-admin` endorsement, and so does every labeled value read on the way to
+// writing it. `AddIntegrity` mints that endorsement on the list itself, which
+// is what the floor tests; the endorsement each role carries labels the
+// entries and does not reach the list path. `WriteAuthorizedBy` names the one
+// handler that may write the roster.
+type ChatAdminList = RequiresIntegrity<
+  WriteAuthorizedBy<
+    AddIntegrity<ChatAdminRole[], readonly [typeof CHAT_ADMIN]>,
+    typeof commitChatAdminChange
+  >,
+  readonly [typeof CHAT_ADMIN]
 >;
-type ChatAdminManager = AdminManagerCredential<typeof CHAT_ADMIN_MANAGER>;
 
-type AdminRegistryCell = Writable<ChatAdminRegistry>;
-type AdminManagerCell = Writable<ChatAdminManager | null>;
+interface ChatAdminRegistryStoredValue {
+  readonly admins?: ChatAdminList;
+}
+type ChatAdminRegistryValue =
+  | ChatAdminRegistryStoredValue
+  | Default<EmptyAdminRegistryValue>;
+type AdminRegistryCell = Writable<ChatAdminRegistryValue>;
 
-const currentUserCanManageAdmins = (
-  manager: AdminManagerCell,
-): boolean => adminManagerCredentialIsActive(manager.get());
+// The switch that reveals the admin controls. Any viewer can turn it on for
+// themselves, so it carries no integrity: a self-granted value that claimed
+// one would endorse every protected write that consulted it.
+type AdminManagerModeCell = Writable<boolean>;
+
+// A row is a name until someone claims it with their own profile. A row with
+// no profile can hold no role, because nothing says who it is.
+interface ChatParticipant {
+  readonly name: string;
+  readonly profile?: ProfileCell;
+}
 
 const currentUserIsAdmin = (
   registry: AdminRegistryCell,
   profile: ProfileCell,
-): boolean => subjectHasAdminRole(adminRegistryEntries(registry), profile);
+): boolean =>
+  subjectHasAdminRole(adminRegistryEntries(registry), profile);
+
+// The one place the roster is written. Every other part of the pattern reaches
+// it by sending an event, so a write from an unreviewed action here, or from
+// another pattern holding the registry cell under this schema, is refused by
+// the runtime rather than by convention.
+const commitChatAdminChange = handler<
+  { name: string },
+  {
+    registry: AdminRegistryCell;
+    managerMode: AdminManagerModeCell;
+    participants: Writable<ChatParticipant[]>;
+  }
+>((event, { registry, managerMode, participants }) => {
+  if (managerMode.get() !== true) return;
+  // The event says which row to grant to. The identity comes from the row,
+  // never from the event, so a role can only name someone the pattern already
+  // lists.
+  const row = (participants.get() ?? []).findIndex(
+    (participant) => participant.name === event.name,
+  );
+  if (row < 0) return;
+  // Pin the terminal cell. Storing the bound alias stores "whoever the reader
+  // resolves", which is a different person in every runtime.
+  const subject = participants.key(row).key("profile").resolveAsCell();
+  // An unset optional cell reads back as a present-but-empty handle, so it is
+  // truthy. Requiring a value is the check the empty handle cannot pass.
+  const displayName = subject.get()?.name;
+  if (!displayName) return;
+  const admins: ChatAdminRole[] = adminRegistryEntries(registry);
+  if (subjectHasAdminRole(admins, subject)) return;
+  registry.key("admins").set([
+    ...admins,
+    { subject, displayName },
+  ] as ChatAdminList);
+});
 ```
+
+Two atoms are the trap here. A floored write may only consume reads that share
+a single witness atom for the floor. Deciding whether the acting person may
+change the roster means reading the roster, so a floor named on a
+`chat-admin-manager` atom over roles that carry `chat-admin` can never be met:
+the read carries one atom, the floor demands the other, and nothing carries
+both. The first change goes through, because it reads an empty roster and
+consumes no labeled read. Every change after that is dropped. The drop is
+silent, so a roster that can take one admin and never a second looks exactly
+like one that works. A test that changes the roster once cannot tell the
+difference. One that changes it twice can.
+
+`packages/patterns/cfc/README.md` gives the full set of rules under "Floor An
+Admin Registry", with the failure each one produces when it is broken, and says
+what choosing a cell rather than a name as the role's subject costs and saves.
 
 For protected writes that must come from reviewed UI, check the shared CFC
 helper docs before copying from a demo:

@@ -17,11 +17,6 @@ export type ActiveAdminRole<
   Integrity extends string,
 > = AddIntegrity<AdminRoleAssignment<Subject>, readonly [Integrity]>;
 
-export type AdminManagerCredential<Integrity extends string> = AddIntegrity<
-  { readonly canManageAdmins: true },
-  readonly [Integrity]
->;
-
 export interface AdminRegistryStoredValue<Role> {
   readonly admins?: readonly Role[];
   readonly everyoneIsAdmin?: boolean;
@@ -31,13 +26,6 @@ export type EmptyAdminRegistryValue = Record<PropertyKey, never>;
 export type AdminRegistryValue<Role> =
   | AdminRegistryStoredValue<Role>
   | Default<EmptyAdminRegistryValue>;
-
-export const adminManagerCredentialIsActive = (
-  credential:
-    | { readonly canManageAdmins?: boolean }
-    | null
-    | undefined,
-): boolean => credential?.canManageAdmins === true;
 
 export const adminRegistryEntries = <Role>(
   registry: {
