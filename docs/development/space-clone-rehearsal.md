@@ -9,6 +9,11 @@ generated cells are excluded from the fingerprint, what was deliberately not
 built) is in [`../plans/space-clone-rehearsal.md`](../plans/space-clone-rehearsal.md).
 This document is the operating procedure.
 
+A clone runs on your own machine. When the question is about the deployment
+rather than the store — the shell bundle, the sharded server, concurrent human
+traffic — the copy goes on the staging host instead, and that procedure is
+[`staging-space-copy.md`](staging-space-copy.md).
+
 ## When a rehearsal is required
 
 Required when updating a **populated** space and any of:
@@ -36,6 +41,11 @@ one. So acquisition is manual:
 # and emits one consistent file with no -wal/-shm companions.
 sqlite3 <store>/engine-v3/engine-v3/<did>.sqlite "VACUUM INTO '/tmp/<did>.sqlite'"
 # then copy it down (scp, or upload once and share the URL with the team)
+# Two notes: 
+# - <store> is currently /data/memory on estuary.
+# - estuary does not have enough free space in /tmp (as of 2026/08/31) to host
+#   new snapshots, so put them into the same /data/memory directory for now and
+#   clean them up as you go.
 ```
 
 Sharing **one** snapshot across operators is better hygiene than each taking
@@ -293,6 +303,8 @@ These are all failures that actually happened, not hypotheticals:
   cleaner on a clone than in production.
 - **A clone tests the store and the runtime, not the deployment.** CDN and shell
   versions, and concurrent human traffic, are all absent.
+  [`staging-space-copy.md`](staging-space-copy.md) is what covers that gap, at
+  the price of a copy of real content on a shared host.
 
 ## Before going live
 
