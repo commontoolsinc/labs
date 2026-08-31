@@ -74,6 +74,7 @@ import { PATTERN_AUTHOR_SUBAGENT_PROFILE } from "../src/contracts/subagent.ts";
 import type { BuiltinToolId } from "../src/contracts/tool-descriptor.ts";
 import {
   createHarnessInteractiveChatService,
+  type CreateHarnessInteractiveChatServiceOptions,
   type HarnessInteractiveChatEventListener,
   type HarnessInteractiveChatService,
 } from "../src/interactive-chat-service.ts";
@@ -1327,6 +1328,44 @@ const chatErrorResponse = (response: HarnessChatResponse): Response =>
   );
 
 /**
+ * Carries resolved console configuration into each interactive chat session.
+ */
+export const createConsoleInteractiveServiceOptions = (
+  config: ConsoleConfig,
+  modelOptions: CreateHarnessPromptLoopOptions,
+  onEvent: HarnessInteractiveChatEventListener,
+  sessionStore?: HarnessChatSessionStore,
+): CreateHarnessInteractiveChatServiceOptions => ({
+  basePromptLoopOptions: {
+    ...modelOptions,
+    model: config.model,
+    artifactRoot: config.artifactRoot,
+    workspaceHostPath: config.workspacePath,
+    cfcResultDir: config.cfcResultDir,
+    cfcInvocationContextDir: config.cfcInvocationContextDir,
+    fabricSession: config.fabricSession,
+    ...(config.patternIndex !== undefined
+      ? { patternIndex: config.patternIndex }
+      : {}),
+    ...(config.maxModelTurns !== undefined
+      ? { maxModelTurns: config.maxModelTurns }
+      : {}),
+    ...(config.skillsRoot !== undefined
+      ? { skillsRoot: config.skillsRoot }
+      : {}),
+    subagentCompositionGuidance: config.childCompositionGuidance,
+  },
+  ...(config.systemPrompt !== undefined
+    ? { systemPrompt: config.systemPrompt }
+    : {}),
+  ...(modelOptions.credentialOwner !== undefined
+    ? { credentialOwner: modelOptions.credentialOwner }
+    : {}),
+  ...(sessionStore !== undefined ? { sessionStore } : {}),
+  onEvent,
+});
+
+/**
  * Builds the service and starts serving. The fabric session and the pattern
  * index reach the engine as resolved configuration on the base prompt-loop
  * options: `CreateHarnessPromptLoopOptions` extends the engine's options,
@@ -1358,35 +1397,14 @@ export const startConsoleServer = async (
   const server = new ConsoleServer(
     config,
     (onEvent) =>
-      createHarnessInteractiveChatService({
-        basePromptLoopOptions: {
-          ...modelOptions,
-          model: config.model,
-          artifactRoot: config.artifactRoot,
-          workspaceHostPath: config.workspacePath,
-          cfcResultDir: config.cfcResultDir,
-          cfcInvocationContextDir: config.cfcInvocationContextDir,
-          fabricSession: config.fabricSession,
-          ...(config.patternIndex !== undefined
-            ? { patternIndex: config.patternIndex }
-            : {}),
-          ...(config.maxModelTurns !== undefined
-            ? { maxModelTurns: config.maxModelTurns }
-            : {}),
-          ...(config.skillsRoot !== undefined
-            ? { skillsRoot: config.skillsRoot }
-            : {}),
-          subagentCompositionGuidance: config.childCompositionGuidance,
-        },
-        ...(config.systemPrompt !== undefined
-          ? { systemPrompt: config.systemPrompt }
-          : {}),
-        ...(modelOptions.credentialOwner !== undefined
-          ? { credentialOwner: modelOptions.credentialOwner }
-          : {}),
-        ...(sessionStore !== undefined ? { sessionStore } : {}),
-        onEvent,
-      }),
+      createHarnessInteractiveChatService(
+        createConsoleInteractiveServiceOptions(
+          config,
+          modelOptions,
+          onEvent,
+          sessionStore,
+        ),
+      ),
   );
   await server.service.initializeFromStore();
 
