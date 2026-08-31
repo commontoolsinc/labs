@@ -406,6 +406,20 @@ export class SpeculationOverlayDestination
     return this.#entries.get(space)?.size ?? 0;
   }
 
+  /** DIAGNOSTIC (tests): await every live overlay entry in `space`
+   * settling, including entries registered while the wait is in flight.
+   * Event-driven: each pass sleeps on the entries' own settlement
+   * promises and rechecks after they resolve, rather than polling
+   * `entryCount`. Resolves immediately when the space is already empty
+   * and when the overlay closes. */
+  async waitForSpaceQuiescence(space: MemorySpace): Promise<void> {
+    while (!this.#closed) {
+      const entries = this.#entries.get(space);
+      if (entries === undefined || entries.size === 0) return;
+      await Promise.all([...entries.values()].map((entry) => entry.settled));
+    }
+  }
+
   /** DIAGNOSTIC (tests): cumulative EVENT-HANDLER-kind seals this
    * overlay diverted — never decremented by retirement, so it
    * witnesses transient echoes deterministically. The Phase-4
