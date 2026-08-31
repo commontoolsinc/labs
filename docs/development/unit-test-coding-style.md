@@ -243,14 +243,13 @@ Three nearby shapes are not this one:
   `describe()`: give the run its own block, and the comment goes inside that
   block by the rule above, which is where a long rationale belongs anyway.
   Wrapping a run renames every test in it, so where the history is worth
-  keeping, bridge the rename as
-  [test records](test-records.md) describes. A
+  keeping, bridge the rename as [test records](test-records.md) describes. A
   run that should not become a block takes a
   [section marker](code-comment-style.md#section-markers) instead, and then the
-  region needs closing — a second marker after the run — or a reader cannot
-  see where it ends. And where what you have to say names the cases one at a
-  time, say each part in the case it belongs to rather than all of it in one
-  place.
+  region needs closing — a second marker after the run, or the end of the
+  enclosing block — or a reader cannot see where it ends. And where what you
+  have to say names the cases one at a time, say each part in the case it
+  belongs to rather than all of it in one place.
 - A comment describing the **file** rather than any block in it is a file
   header. It goes at the top of the file as a doc comment, per
   [File headers](code-comment-style.md#file-headers), and not above the
@@ -270,8 +269,8 @@ Three nearby shapes are not this one:
   regions beats a file that demotes eleven markers and leaves the twelfth
   reading as an omission. And where the marker closes the region above it,
   removing it reopens that region, so it is replaced rather than removed —
-  by a marker titling what follows, or by giving the region above a closer of
-  its own.
+  by a marker titling what follows, or by wrapping the region above in a
+  `describe()` that ends it.
 
 ### The shape to aim for
 

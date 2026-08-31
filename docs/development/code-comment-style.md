@@ -242,8 +242,8 @@ we were not looking."
 Section markers separate major portions of a file or class. They are not
 headers for individual functions and their helpers — doc comments already
 carry that structure, and a reader navigating by rendered documentation never
-sees the marker at all. They are not headers for individual test blocks
-either;
+sees the marker at all. They are not, as a rule, headers for individual test
+blocks either;
 [`unit-test-coding-style.md`](unit-test-coding-style.md#commenting-a-block)
 says where a comment about one of those goes.
 
@@ -269,6 +269,13 @@ A blank line sets the frame off above as well as below. Without the one above,
 the marker runs into whatever comment precedes it and the two read as one
 comment; without the one below, the frame reads as a note on the declaration it
 touches rather than as a heading over what follows.
+
+Directly under an opening bracket there is nothing above to separate from, and
+`deno fmt` removes a blank line there in any case. A frame in that position is
+also the first content of the block, which is where a comment about the whole
+block goes, so the two shapes are indistinguishable to a reader: put the
+region's first marker after the block's shared setup instead, or let the block
+comment do the work.
 
 **A region has an end, and writing the marker is choosing it.** A marker opens
 a region that runs to the next marker at the same level, or to the end of the
