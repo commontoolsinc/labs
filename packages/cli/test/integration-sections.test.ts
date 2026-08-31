@@ -174,6 +174,18 @@ describe("integration-sections", () => {
     expect(everyStep.filter((step) => !covered.has(step))).toEqual([]);
   });
 
+  it("gives every step an arm that runs it alone", () => {
+    // What makes a step schedulable on its own. A step reachable only
+    // inside a group can only be asked for as the whole group, and a
+    // group is one thing that takes as long as everything in it. This
+    // says nothing about which arms CI dispatches, which is the check
+    // above: an arm may exist for a step nothing schedules by itself.
+    const alone = new Set(
+      arms.filter((arm) => arm.steps.length === 1).map((arm) => arm.steps[0]),
+    );
+    expect(everyStep.filter((step) => !alone.has(step))).toEqual([]);
+  });
+
   it("reads the CI section from the matrix leg it is named for", () => {
     expect(ciJobBlock(WORKFLOW)).toContain(
       "CF_CLI_INTEGRATION_SECTION: ${{ matrix.core_section }}",

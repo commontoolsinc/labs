@@ -127,8 +127,14 @@ dump_daemon_state() {
   >&2 echo "--- end daemon state dump ---"
 }
 
+# Each phase of this script announces itself here when it finishes, so
+# each announcement is also the record of one test named for it. Without
+# them the whole script — a FUSE mount, a daemon, and everything done with
+# them — is one identity that can only be scored, run, and skipped as a
+# unit.
 success() {
   echo "✓ $1"
+  cf_test_step_done "$1"
 }
 
 if [ -n "${CF_CLI_INTEGRATION_USE_LOCAL:-}" ]; then

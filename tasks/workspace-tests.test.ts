@@ -1,6 +1,7 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import {
   acceptsJUnitPath,
+  acceptsPreload,
   assertTaskTestsIncluded,
   initializeDb,
   junitCapableMembers,
@@ -475,6 +476,28 @@ Deno.test("acceptsJUnitPath reads an ordinary test task", () => {
     acceptsJUnitPath("./packages/x", "echo 'No tests defined.'"),
     false,
   );
+});
+
+Deno.test("acceptsPreload refuses a task naming its own import map", () => {
+  // That map governs every module of the invocation, the preload
+  // included, so a specifier the preload needs and the map does not carry
+  // fails the whole run rather than the preload alone.
+  assertEquals(acceptsPreload("./packages/x", "deno test"), true);
+  assertEquals(
+    acceptsPreload("./packages/x", "deno test -A --import-map ./m.json ."),
+    false,
+  );
+  assertEquals(
+    acceptsPreload("./packages/x", "deno test -A --import-map=./m.json ."),
+    false,
+  );
+  // A member that cannot take the JUnit path cannot take the preload
+  // either: neither reaches the leaf.
+  assertEquals(
+    acceptsPreload("./packages/x", "deno test a/ && deno test b/"),
+    false,
+  );
+  assertEquals(acceptsPreload("./packages/x", undefined), false);
 });
 
 Deno.test("acceptsJUnitPath refuses a task whose flag would land elsewhere", () => {

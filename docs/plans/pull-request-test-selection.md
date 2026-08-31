@@ -836,7 +836,7 @@ being imposed.
 
 ### The work this adds
 
-- [ ] The preload reads a skip list keyed by registering file and name,
+- [x] The preload reads a skip list keyed by registering file and name,
       and registers a listed bare `Deno.test` as ignored rather than
       dropping it.
 - [ ] `@commonfabric/test-support` gains a `describe` and `it` that
@@ -856,7 +856,7 @@ being imposed.
       identity whose file changed, the flag carried in the manifest, and
       the packer refusing to skip the siblings of an identity that has
       none.
-- [ ] A fixture proving the four properties that make this safe: an
+- [x] A fixture proving the four properties that make this safe: an
       unlisted new test runs, a renamed test runs, a listed test is
       reported as skipped rather than missing, and two files holding the
       same test name skip independently.
@@ -1394,20 +1394,17 @@ every variant. Resolution preserves the record's variant, so one rename
 bridges the default and every non-default history without joining those
 histories to each other.
 
-What is missing is not mechanism, it is practice. The file is empty. On
-2026-08-20 the store recorded `home rehydration churn (persistent
-scheduler state) > reloading a populated home stays within one known
-conflict`; the tree today has `home rehydration` with two
-differently-named cases, and nothing bridges the split. Nobody did
-anything wrong — there was no reason to care, because nothing read the
-history. Now something does.
+The mechanism is there and so, by now, is the practice: the file holds
+219 lines across nine dates, so renames are being bridged as they happen
+rather than swept up once. What the reporter's suggestion adds is the
+case nobody notices — a rename whose author had no reason to think the
+history mattered.
 
 Three things follow.
 
 **The publisher resolves through `loadAliasResolver`.** The report tool
-and the dashboard collector already do; the publisher must, or the file
-accomplishes nothing for selection. One line, and it is a requirement
-rather than a nicety.
+and the dashboard collector already do, and the publisher does. Without
+it the file accomplishes nothing for selection.
 
 **The tooling writes the line for you.** Everything needed to spot a
 rename is already computed: the drift guard knows which identities the
@@ -1855,18 +1852,13 @@ The object carries:
 - the name of the newest coverage attribution map, which is published
   beside the manifest on its own weekly cadence rather than inside it.
 
-The refreshed run supplies 17,995 stored identities before topology
-classification, not a manifest entry or item count. A unit-test item can
-contain many item-level identities, while suite-level identities do not
-contribute item scores or costs. Every item also adds its own packing and
-explanation data. The manifest implementation therefore builds a
-reference-scale fixture from classified item and suite data, serializes
-and gzips it, and records both sizes. Until that measurement exists the
-bound is what the identity count gives: at most one item entry per stored
-identity, and fewer in practice, so at a couple of 100 bytes an entry the
-ceiling is a few megabytes before compression. That is one fetch of no
-consequence at the start of a job, and the fixture replaces the ceiling
-with a measurement.
+The size is measured rather than bounded. A publisher run over one day of
+the store — 18,849 objects holding 5,487,611 executions — produced 20,091
+identities, and the manifest carrying them is 9.59 megabytes serialized
+and 1.05 megabytes gzipped, which is 478 bytes an entry. Identity names
+dominate that: a describe chain runs to a hundred characters and more, and
+the numbers beside it are rounded to the digits that mean anything. One
+megabyte is a fetch of no consequence at the start of a job.
 
 The same source item in default and non-default suites appears as two
 manifest items. Their suite identifiers and complete record identities
@@ -2840,7 +2832,7 @@ tape measure.
 | `FILL_DENSITY_SHARE` | 0.25 | share of the budget | Chosen | Up when more of the cheap tail should run; down when the tail is displacing tests with a record. |
 | `FILL_EXPLORATION_SHARE` | 0.15 | share of the budget | Chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
 | `FLAKE_EXCLUSION_RATE` | 0.05 | share of runs | Chosen | Up when fewer tests should be held back from pull requests; down when flakes are still blocking people. |
-| `FLAKE_REPEAT_RATES` | 0.01, 0.10 | share of runs | Chosen | Up when repeats cost more lane time than the intermittent failures they catch are worth; down when intermittent failures are still slipping through. |
+| `FLAKE_REPEAT_RATES` | 0.01, 0.03 | share of runs | Chosen | Up when repeats cost more lane time than the intermittent failures they catch are worth; down when intermittent failures are still slipping through. Every band stays under `FLAKE_EXCLUSION_RATE`, or an item is excluded before it reaches the band and the band never fires. |
 | `MAX_REPEATS` | 3 | runs of one item | Chosen | Up when intermittent regressions still get through; down when repeats are crowding a lane. |
 | `SUITE_FLAKE_PRIOR_RATE` | 0.02 | share of runs | Chosen | Up when too many suites count as flake-prone and their new items are repeated needlessly; down when new tests in a noisy suite land unrepeated and then flake. |
 | `COVERAGE_COMMENT_LINES` | 25 | lines | Chosen | Up when coverage comments are too noisy; down when debt is climbing unnoticed. |
@@ -2850,6 +2842,11 @@ tape measure.
 | `LOCAL_COVERAGE_BASELINE_DAYS` | 7 | days | Chosen | Up when branches based further back are being reported for want of an ancestor baseline; down when the manifest carries more history than anybody reads. |
 | `COVERAGE_TREND_WEEKS` | 3 | weeks | Chosen | Up when the tile goes amber too readily; down when debt climbs for a month before anybody is told. |
 | `CATCH_BREADTH_WINDOW_DAYS` | 2 | days | Chosen | Up when a broken runner's failures are being counted as catches; down when genuine breadth is being written off as environmental. |
+| `ENVIRONMENTAL_MIN_SOURCES` | 5 | sources | Chosen | How many distinct sources a failure spans inside that window before it reads as the environment. Up when a genuinely broad regression is written off; down when a broken runner's failures still count as catches. |
+| `BREADTH_SATURATION` | 2 | sources | Chosen | Where the breadth term reaches half its ceiling. Up when four sources should outrank one by more; down when one source should already be worth nearly all of it. |
+| `CHURN_WINDOW_DAYS` | 60 | days | Chosen | How far back the decayed counts are read. Past this the weight is under one part in sixteen, so this is a performance decision rather than a policy one. |
+| `FLAKE_WINDOW_DAYS` | 60 | days | Chosen | Up when a flake rate swings about on too little evidence; down when a test since fixed stays excluded. |
+| `COST_WINDOW_DAYS` | 7 | days | Chosen | Up when cost estimates are noisy; down when durations drift faster than the estimate follows. |
 | `ATTRIBUTION_MAP_DAYS` | 7 | days | Chosen | Up when rebuilding the map costs more than its staleness does; down when changed lines keep resolving to tests that have moved. |
 | `ALIAS_GATE_MIN_CATCHES` | off | catches | Chosen | Off by default. Turn it on at a catch count to fail a pull request that discards that much history in a rename without an alias line, and lower the count as the alias file becomes routine. |
 
@@ -2949,13 +2946,13 @@ Nothing about what continuous integration runs changes. This pull request
 only makes the store answer questions it cannot answer yet, and puts the
 answers somewhere people can see them.
 
-- [ ] A preload module in `@commonfabric/test-support` that captures the
+- [x] A preload module in `@commonfabric/test-support` that captures the
       registering module for every `Deno.test` and writes the name-to-file
       map into the spool; `ingestJUnit` joins on it; every `deno test`
       invocation carries the preload.
-- [ ] `packages/deno-web-test/runner.ts` sets `file` on the records it
+- [x] `packages/deno-web-test/runner.ts` sets `file` on the records it
       writes directly.
-- [ ] `tasks/test-selection/{policy,score,manifest,store}.ts` — the dials,
+- [x] `tasks/test-selection/{policy,score,manifest,store}.ts` — the dials,
       the catch and flake derivation, the manifest format and its
       validators, and the reader and writer. Complete identities use the
       canonical test-record key, optional variants included, and variants
@@ -2963,9 +2960,9 @@ answers somewhere people can see them.
       as the report tool and dashboard collector already do. A
       reference-scale fixture records the serialized and gzipped manifest
       sizes instead of deriving item size from the identity count.
-- [ ] `tasks/test-selection/plan.ts`, the pure packing function, tested
+- [x] `tasks/test-selection/plan.ts`, the pure packing function, tested
       offline against recorded manifests.
-- [ ] `tasks/test-selection-publish.ts` and
+- [x] `tasks/test-selection-publish.ts` and
       `.github/workflows/test-selection.yml`, on a four-hourly cron.
 - [ ] The one-off bootstrap dispatch.
 - [x] Repeat the record census after `main` emitted server-execution
@@ -2976,9 +2973,15 @@ answers somewhere people can see them.
       That last one is measurable today, before any of this changes what
       runs, which makes it the baseline everything after is judged
       against.
-- [ ] The `deno task test-selection` entry point and its modes: `dials`,
-      `coverage`, `explain <identity>`, and `plan` with `--dry-run` and
-      `--verify`.
+  - [x] The flake list, and what the newest manifest would select.
+  - [ ] The coverage debt trend, which needs the per-package figures the
+        full run produces in part two.
+  - [ ] The escape rate. Every manifest carries each identity's `main`
+        catches, but over unbounded history, so a rate needs the state to
+        keep those per day as well as in total.
+- [x] The `deno task test-selection` entry point and its modes: `dials`,
+      `coverage`, `explain <identity>`, and `plan` with `--dry-run`.
+      `--verify` needs the topology and lands with part two.
 
 On its own this part gives the repository a flake list derived from
 evidence rather than from anecdote, and a coverage trend nobody has today.
@@ -3002,17 +3005,27 @@ exercised on the branch on its own.
       `tasks/server-execution-on-skips.ts`: whole-file entries are declared
       unavailable and omitted from enumeration, while step entries exclude
       only the named leaf identity from unknown and coverage rules.
-- [ ] Give `packages/cli/integration/fuse-exec.sh` fine granularity. Its
-      23 `success` markers become `cf_test_step_begin` markers, so the
-      suite records 23 identities rather than one; then it gains a section
-      dispatch over whichever groups of phases can stand alone, so
-      `cli-fuse` becomes an `item` suite like its sibling.
-- [ ] Split the `piece-call` CLI integration dispatch into its eight
-      recorded steps. Seven already have an arm of their own; add the
-      missing one for `run_piece_call` and make the eight single-step arms
-      the `cli-core` items, removing the known item that exceeds the lane's
-      hard five-minute bound. The grouped arms stay for hand runs and are
-      not enumerated.
+- [ ] Give `packages/cli/integration/fuse-exec.sh` fine granularity.
+  - [x] Its 23 `success` markers record, so the suite records 23
+        identities rather than one. The markers trail their phases where
+        `integration.sh`'s lead theirs, so they close a step rather than
+        opening one, through a `cf_test_step_done` beside
+        `cf_test_step_begin`. What that leaves is failure attribution: a
+        phase that fails never reaches its marker, so the failure is
+        carried by the script's own record rather than by a step. Moving
+        each marker ahead of its phase is what buys that back, and is the
+        same reading of the script the dispatch needs.
+  - [ ] It gains a section dispatch over whichever groups of phases can
+        stand alone, so `cli-fuse` becomes an item suite like its sibling.
+- [x] Split the `piece-call` CLI integration dispatch into its eight
+      recorded steps. Seven already had an arm of their own; the missing
+      one for `run_piece_call` is added, and so are the two the
+      `piece-values` group hid, so every recorded step now has an arm that
+      runs it alone. The grouped arms stay for hand runs and are not
+      enumerated. Making those arms the `cli-core` items is the topology's
+      part. `packages/cli/test/integration-sections.test.ts` holds the
+      dispatch table to that property, and to every step being scheduled
+      by some group rather than only by name.
 - [ ] `tasks/check-test-topology.ts`, both halves, wired into
       `repo-gates`, with exact variant matching and one source-item claim
       allowed per variant.

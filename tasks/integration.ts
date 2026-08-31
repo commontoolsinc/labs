@@ -21,6 +21,7 @@ import * as path from "@std/path";
 import ports from "@commonfabric/ports" with { type: "json" };
 import {
   FragmentWriter,
+  preloadArgument,
   RECORDS_DIR_VARIABLE,
   recordsDir,
 } from "@commonfabric/test-support/records";
@@ -521,6 +522,8 @@ export async function findIntegrationTestFiles(
  * matching files are passed as explicit paths under `relDir`. Deno does not
  * filter explicitly-passed paths through a package `test` config's `exclude`,
  * so they run even where that config drops the `integration/` directory.
+ * With a JUnit directory the run also carries the registration preload,
+ * which is what gives the report's cases their files.
  */
 export function buildFilteredTestArgs(
   pkg: string,
@@ -538,6 +541,7 @@ export function buildFilteredTestArgs(
 
   if (junitDir) {
     args.push(`--junit-path=${path.join(junitDir, `${pkg}.xml`)}`);
+    args.push(preloadArgument());
   }
 
   for (const name of testFiles) {
@@ -626,7 +630,11 @@ export async function runPackageIntegration(
   if (junitDir) {
     await Deno.mkdir(junitDir, { recursive: true });
     const junitPath = path.resolve(junitDir, `${pkg}.xml`);
-    env.INTEGRATION_TEST_FLAGS = `--junit-path=${junitPath}`;
+    // The preload travels with the JUnit path: the report names each case
+    // by its describe chain, and the map the preload leaves in the spool
+    // is what turns that chain back into a file.
+    env.INTEGRATION_TEST_FLAGS =
+      `--junit-path=${junitPath} ${preloadArgument()}`;
   } else {
     // Pass through INTEGRATION_TEST_FLAGS if set in environment
     const testFlags = Deno.env.get("INTEGRATION_TEST_FLAGS");

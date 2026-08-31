@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import ports from "@commonfabric/ports" with { type: "json" };
+import { preloadArgument } from "@commonfabric/test-support/records";
 import {
   buildFilteredTestArgs,
   chooseGeneratedPortOffset,
@@ -206,6 +207,7 @@ Deno.test("buildFilteredTestArgs adds a junit path when a junit dir is given", (
       "test",
       "-A",
       "--junit-path=out/junit/shell.xml",
+      preloadArgument(),
       "./integration/a.test.ts",
     ],
   );

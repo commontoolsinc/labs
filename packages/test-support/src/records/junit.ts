@@ -6,10 +6,17 @@
  * container's name extended with " > " prefixes some other case's name.
  * Classnames carry a usable source file only on file-level suites, as a
  * path relative to the test process's working directory; the caller maps
- * that to a repository path with `filePrefix`.
+ * that to a repository path with `filePrefix`. For everything else the
+ * file comes from `fileByName`, the map the registration preload captured
+ * while the tests were registering.
  */
 
 import { type TestIdentity, type TestRecord } from "./schema.ts";
+import {
+  fileForName,
+  NAME_SEPARATOR,
+  REGISTRATION_MODULE_SUFFIX,
+} from "./registration.ts";
 
 /** One parsed `<testcase>`. */
 export interface JUnitCase {
@@ -223,7 +230,7 @@ export function parseJUnit(xml: string): JUnitCase[] {
  */
 export function dropContainerCases(cases: readonly JUnitCase[]): JUnitCase[] {
   return cases.filter((testcase) => {
-    const prefix = testcase.name + " > ";
+    const prefix = testcase.name + NAME_SEPARATOR;
     return !cases.some((other) => other.name.startsWith(prefix));
   });
 }
@@ -260,6 +267,35 @@ export interface IngestJUnitOptions {
    * repository-relative file metadata; without it, files are not recorded.
    */
   filePrefix?: string;
+
+  /**
+   * The file each `Deno.test` was registered from, as the registration
+   * preload captured it. It is repository-relative already, so it needs
+   * no prefix, and it overrides what the report's own classnames say —
+   * which is what the wrapper the preload installs costs them.
+   */
+  fileByName?: ReadonlyMap<string, string>;
+}
+
+/**
+ * The repository path a case's classname names, or undefined when it
+ * names something that is not a test file: a runtime-internal module, a
+ * remote one, or the registration wrapper that displaces the file while
+ * it is installed.
+ */
+function classnameFile(
+  testcase: JUnitCase,
+  filePrefix: string | undefined,
+): string | undefined {
+  if (filePrefix === undefined || testcase.classname === undefined) {
+    return undefined;
+  }
+  if (!isRelativeSourcePath(testcase.classname)) return undefined;
+  const cleaned = testcase.classname.replace(/^\.\//, "");
+  if (cleaned.endsWith(REGISTRATION_MODULE_SUFFIX)) return undefined;
+  return filePrefix.length > 0
+    ? `${filePrefix.replace(/\/$/, "")}/${cleaned}`
+    : cleaned;
 }
 
 /** Turns a JUnit document into records of the given kind and scope. */
@@ -267,7 +303,29 @@ export function ingestJUnit(
   xml: string,
   options: IngestJUnitOptions,
 ): TestRecord[] {
-  const leaves = dropContainerCases(parseJUnit(xml));
+  const cases = parseJUnit(xml);
+  const leaves = dropContainerCases(cases);
+  // Deno names a case's class after the module that registered the test,
+  // so a container carries the file of every leaf beneath it and the
+  // report joins itself. The preload's map is laid over that, because it
+  // is what remains once the preload has wrapped `Deno.test` and every
+  // classname names the preload instead.
+  const files = new Map<string, string>();
+  const ambiguous = new Set<string>();
+  for (const testcase of cases) {
+    const file = classnameFile(testcase, options.filePrefix);
+    if (file === undefined) continue;
+    const known = files.get(testcase.name);
+    // Two files reporting one name are one identity, and which of them a
+    // leaf came from is not a question this report can answer. Attributing
+    // it to whichever was read last would be a guess presented as a fact,
+    // so the name carries no file at all and the collision is what the
+    // report tool surfaces.
+    if (known !== undefined && known !== file) ambiguous.add(testcase.name);
+    else files.set(testcase.name, file);
+  }
+  for (const name of ambiguous) files.delete(name);
+  for (const [name, file] of options.fileByName ?? []) files.set(name, file);
   return leaves.map((leaf) => {
     const test: TestIdentity = {
       k: options.kind,
@@ -280,15 +338,8 @@ export function ingestJUnit(
       outcome: leaf.outcome,
       durationMs: Math.round((leaf.timeSeconds ?? 0) * 1000),
     };
-    if (
-      options.filePrefix !== undefined && leaf.classname !== undefined &&
-      isRelativeSourcePath(leaf.classname)
-    ) {
-      const cleaned = leaf.classname.replace(/^\.\//, "");
-      record.file = options.filePrefix.length > 0
-        ? `${options.filePrefix.replace(/\/$/, "")}/${cleaned}`
-        : cleaned;
-    }
+    const file = fileForName(leaf.name, files);
+    if (file !== undefined) record.file = file;
     return record;
   });
 }
