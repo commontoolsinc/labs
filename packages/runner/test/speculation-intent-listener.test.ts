@@ -80,6 +80,7 @@ import {
   flushMicrotasks,
   scriptedIntentManager,
 } from "./speculation-intent-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const SPACE = "did:key:z6MkIntentListenerSpace" as MemorySpace;
 const SIDECAR = "of:stream-events:listener-a";
@@ -1202,20 +1203,6 @@ const JOIN_CASCADE_PATTERN = [
   "  };",
   "});",
 ].join("\n");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 20_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 const sidecarIdsIn = (engine: Engine.Engine): string[] =>
   (engine.database.prepare(

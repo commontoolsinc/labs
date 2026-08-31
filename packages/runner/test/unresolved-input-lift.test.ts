@@ -36,25 +36,12 @@ import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("unresolved input space");
 const space = spaceSigner.did() as MemorySpace;
 const readerSigner = await Identity.fromPassphrase("unresolved input reader");
 const writerSigner = await Identity.fromPassphrase("unresolved input writer");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 15_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 /** A lift that CRASHES on an undefined input — the OW51 shape: the
  * body's guard covers the schema's stated absent value (`null`), not

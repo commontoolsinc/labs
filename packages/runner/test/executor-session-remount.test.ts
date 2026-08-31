@@ -65,6 +65,7 @@ import type { MemorySpace, URI } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { ACLManager } from "../src/index.ts";
 import { TEST_SESSION_OPEN_AUDIENCE } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const serviceSigner = await Identity.fromPassphrase("session remount service");
 const homeSigner = await Identity.fromPassphrase("session remount home");
@@ -74,20 +75,6 @@ const strangerSigner = await Identity.fromPassphrase(
 );
 const servingSigner = await Identity.fromPassphrase("session remount serving");
 const servingSpace = servingSigner.did() as MemorySpace;
-
-const waitUntil = async (
-  predicate: () => boolean | Promise<boolean>,
-  label: string,
-  timeoutMs = 20_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!(await predicate())) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 /**
  * The optional IStorageManager hook the fix adds. Read through a

@@ -57,6 +57,7 @@ import {
   setPatternEnvironment,
 } from "../src/builder/env.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 class SharedServerStorageManager extends EmulatedStorageManager {
   static override connectTo(
@@ -85,20 +86,6 @@ const foreignSpace = foreignSigner.did() as MemorySpace;
 const serviceSigner = await Identity.fromPassphrase("cross-space service");
 const aliceSigner = await Identity.fromPassphrase("cross-space alice");
 const bobSigner = await Identity.fromPassphrase("cross-space bob");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 10_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 describe("Phase 5 cross-space serving", () => {
   let server: MemoryV2Server.Server;
