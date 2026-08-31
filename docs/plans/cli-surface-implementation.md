@@ -61,11 +61,12 @@ Four decisions it explicitly declines to make are inherited as constraints:
 
 ## The accounting
 
-`cf piece` has nineteen subcommands:
+`cf piece` has twenty-six subcommands:
 
 ```
-ls  search  new  set-slug  step  apply  getsrc  setsrc  inspect  view
-render  link  map  verbs  rm  recreate-root  set-home  get-label  set-label
+apply  describe  get-label  getsrc  inspect  link  ls  map  new
+recreate-root  render  repair  restore  retarget  rm  rollback  search
+set-home  set-label  set-slug  setsrc  slugs  step  survey  verbs  view
 ```
 
 The target surface keeps eight — `new`, `setsrc`, `getsrc`, `rm`, `ls`,
@@ -73,7 +74,9 @@ The target surface keeps eight — `new`, `setsrc`, `getsrc`, `rm`, `ls`,
 `get-label` and `set-label` (#5673) postdate the shape document's accounting;
 whether they stay piece-scoped or join a label surface is a step-7-class
 decision that document has not made, so they are queued with the merges rather
-than silently kept or moved. The rest move:
+than silently kept or moved. The bulk operations — `survey`, `repair`,
+`retarget`, `rollback`, `restore` — and `describe` and `slugs` postdate it the
+same way and are queued on the same terms. The rest move:
 
 | Today | Becomes | Step |
 | --- | --- | --- |
@@ -137,8 +140,8 @@ here — both spellings mount the same builder and emit identical requests, and
 the CLI sends nothing that would let a server attribute one to either, so the
 condition could only ever have been estimated.
 
-*Exit:* no file in this repository teaches a deprecated spelling, and every
-deprecated spelling still works.
+*Exit:* no file in this repository taught a deprecated spelling, and every
+deprecated spelling still worked — the condition 6b then removed them under.
 
 ## Stage 4 — the merges
 

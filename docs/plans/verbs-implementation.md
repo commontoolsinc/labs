@@ -709,10 +709,10 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | #5698 | `cf piece verbs` returns nothing for a piece whose declared result type omits its verbs, though they are callable | the other direction of the same surface, and **fixed** by #5794: the listing enumerates candidates from the compiled graph as well as the result cell, and classifies each one on the stored signal that closed the first direction |
 | #5706 | a shaped read permanently writes to the user's space — per-element sub-patterns land at space scope | runner-owned, beside #5633 |
 | #5722 | a verb's help shows its usage twice, and shows no way to copy it | found by driving the surface by hand, which no test does |
-| #5558 | `piece call --help` claims every handler returns nothing, including one that declares a result | **fixed** by #5680 (the false claim) and #5717 (the enumerated fields) |
+| #5558 | `cf call --help` claims every handler returns nothing, including one that declares a result | **fixed** by #5680 (the false claim) and #5717 (the enumerated fields) |
 | #5637 | an author's prose does not reach a caller: on a verb, on an event field, and on the event interface | step 5a — it absorbed #5559, which described one symptom and had its cause backwards |
 | #5577 | a verb returning a child piece in a doubly-linked tree crashes readback on a cycle | **fixed** by #5740 |
-| #5523 | two identical `piece get` projections in one runtime collide on the transform result cell | **fixed** by #5757 |
+| #5523 | two identical `cf get` projections in one runtime collide on the transform result cell | **fixed** by #5757 |
 | #5632 | `--show-links` and a `$link` read return different entity ids for the same piece | step 11 — **working as designed**; closes once #5754 lands the documentation |
 | #5498 | `getEntityId()` strips the entity URI scheme, collapsing two kinds to one identity | unscheduled. It rode ordering step 11 while that step was a question about identity; the answer there was that the two routes are aliases by design, which says nothing about a scheme the id itself drops. Independent, and still open |
 | #5589 | a click's `detail` and a `cf-select`'s `target.value` reach a handler as types no pattern declares | carried alongside — it belongs to whoever next touches `packages/html`. The ruling that closed item 9b also removed the only thing that ever compared the renderer's output against an author's declared type, so this has no detector left |
