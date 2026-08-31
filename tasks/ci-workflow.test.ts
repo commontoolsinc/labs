@@ -164,10 +164,9 @@ Deno.test("every workflow and composite action is valid YAML", async () => {
   // Every other check in this file reads the workflow files as TEXT (regex over
   // job and step blocks), so none of them can notice that a file has stopped
   // being valid YAML — and a workflow that does not parse produces ZERO jobs on
-  // every push while every text-level check here stays green. That happened: an
-  // unquoted `default: ` inside two step names turned deno.yml into a nested
-  // mapping the runner refused, and CI silently ran nothing for a whole stack
-  // of pushes. This is the one check that would have caught it.
+  // every push while every text-level check here stays green. Parsing is what
+  // catches that, and an unquoted `default: ` inside a step name is enough to
+  // turn a workflow into a nested mapping the runner refuses.
 
   const broken: string[] = [];
   for await (const path of githubYamlPaths()) {
@@ -336,6 +335,7 @@ Deno.test("every step we name carries a phase marker", async () => {
   // "other", which is how a job's setup time goes missing from the timings
   // people read when deciding what to make faster. The classifier reads the
   // marker rather than the wording, so the check is the classifier itself.
+
   const unmarked: string[] = [];
   let steps = 0;
   for await (const path of githubYamlPaths()) {
@@ -364,6 +364,7 @@ Deno.test("every work step is bounded before its job is", async () => {
   // upload steps around it normally need. Both bounds are aliases to an anchor,
   // so each is a name here rather than a number, and the minutes behind the
   // names are written once.
+
   const headroom = 10;
   const contents = await workflow("deno.yml");
   const anchors = anchoredMinutes(contents);
@@ -513,6 +514,7 @@ Deno.test("pattern shard selection fails loudly instead of running an empty shar
   // internally-sharded files), so empty output is only ever a failure; the
   // exit status is the discriminator, and only a plain command
   // substitution propagates it under `bash -e`.
+
   const contents = withoutComments(await workflow("deno.yml"));
   for (
     const jobId of [
@@ -607,6 +609,7 @@ Deno.test("One commit publishes one set of release artifacts", async () => {
   // tarball beside the other build's checksum, which is what the deploy's
   // `sha256sum -c` reports as a failure. docs/development/deploying.md covers
   // the invariant.
+
   const contents = await workflow("deno.yml");
 
   // Main can receive the same head commit twice, which starts two runs of that
@@ -664,6 +667,7 @@ Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () =
   // prints its usage and exits 1, failing the deploy job. That script belongs
   // to the infra repository, so nothing else here sees it and the call sites
   // are checked instead. docs/development/deploying.md covers the seam.
+
   const environments = ["estuary", "rapids"];
   // The revision has to expand to a full SHA, which is a property of what the
   // expression reads rather than of the expression itself. `github.ref_name`
@@ -797,6 +801,7 @@ Deno.test("every test-records artifact name is store-safe and unique", async () 
   // these names, so distinct names stay distinct in the store. Uniqueness
   // matters per workflow: object names carry the run id, so two different
   // workflows can reuse a name.
+
   let shipSteps = 0;
   for (const name of await workflowNames()) {
     const contents = withoutComments(await workflow(name));

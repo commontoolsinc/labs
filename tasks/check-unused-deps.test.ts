@@ -37,8 +37,9 @@ Deno.test("importsAlias matches a dynamic import", () => {
 });
 
 //
-// These next few pin the specifier shapes that the matcher must keep handling:
-// dropping the `\s*` or an alternative from the lead would reintroduce a false
+// The specifier shapes the lead must keep matching
+//
+// Dropping the `\s*` or an alternative from the lead would reintroduce a false
 // positive on ordinary code, yet leave the happy-path tests above green.
 //
 
@@ -208,7 +209,7 @@ Deno.test("owningMember does not match a member that is only a path-segment pref
 });
 
 //
-// parsing
+// Parsing the config files
 //
 
 Deno.test("parseImportMap returns the imports block", () => {

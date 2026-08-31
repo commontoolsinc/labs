@@ -371,6 +371,8 @@ function generatedPortOffsets(): number[] {
 }
 
 //
+// Port offsets, and the ports they must not land on
+//
 // A port offset shifts every dev server together, and the servers bind whatever
 // port arithmetic lands on. Browsers and Deno's `fetch` both refuse to open a
 // connection to a port on the WHATWG bad-port list, so an offset that lands a

@@ -39,12 +39,15 @@ Deno.test("spans carry both the service attributes and the SDK defaults", () => 
 });
 
 //
+// Which copy of the tracer SDK is in use
+//
 // `OpenInferenceBatchSpanProcessor` subclasses `BatchSpanProcessor`, but
 // @arizeai/openinference-vercel imports @opentelemetry/sdk-trace-base without
 // declaring it as a dependency, and the range it names in its development
 // dependencies stops below the major this workspace resolves. Which copy it
 // subclasses is therefore decided by the workspace import map rather than by
-// anything the package states, and the span export above depends on the answer.
+// anything the package states, and the span export in this section depends on
+// the answer.
 //
 
 Deno.test("the OpenInference processor extends the tracer SDK in use", () => {
