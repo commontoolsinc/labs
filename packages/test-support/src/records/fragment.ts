@@ -22,11 +22,16 @@ const encoder = new TextEncoder();
 export class FragmentWriter {
   #file: Deno.FsFile | undefined;
   #warned = false;
-  readonly path: string;
+  readonly #path: string;
 
   private constructor(path: string, file: Deno.FsFile) {
-    this.path = path;
+    this.#path = path;
     this.#file = file;
+  }
+
+  /** The fragment file this writer appends to. */
+  get path(): string {
+    return this.#path;
   }
 
   /**
@@ -77,7 +82,7 @@ export class FragmentWriter {
     } catch (error) {
       if (!this.#warned) {
         this.#warned = true;
-        warnOnce(`cannot append to ${this.path}: ${error}`);
+        warnOnce(`cannot append to ${this.#path}: ${error}`);
       }
       this.close();
     }

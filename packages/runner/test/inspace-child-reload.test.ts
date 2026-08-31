@@ -136,11 +136,12 @@ describe("inSpace child piece reload from its own space (CT-1687)", () => {
     }
   });
 
-  // The build-time variant: the child node sits in the PARENT's graph (not a
-  // handler frame), so the cross-space transition is visible to
-  // `instantiatePatternNode` (resultCell.space !== resultCellLink.space) —
-  // the other replication hook.
   it("a fresh runtime can start a build-time inSpace child", async () => {
+    // The build-time variant: the child node sits in the PARENT's graph (not a
+    // handler frame), so the cross-space transition is visible to
+    // `instantiatePatternNode` (resultCell.space !== resultCellLink.space) —
+    // the other replication hook.
+
     const STATIC_PROGRAM: RuntimeProgram = {
       main: "/main.tsx",
       files: [

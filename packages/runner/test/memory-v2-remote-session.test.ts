@@ -10,6 +10,14 @@ import {
 } from "@commonfabric/memory/v2";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import {
+  decodeCompressedMemoryMessage,
+  encodeCompressedMemoryMessage,
+  type EncodedMemoryMessage,
+  encodeMemoryCompressionControlMessage,
+  type MemoryMessageFrame,
+  parseMemoryCompressionControlMessage,
+} from "@commonfabric/memory/v2/message-compression";
+import {
   createStorageAddressResolver,
   MEMORY_STORAGE_PATH,
   RemoteSessionFactory,
@@ -264,6 +272,7 @@ class RecordingWebSocket extends EventTarget {
   static dialed: string[] = [];
   static #waiters: Array<{ count: number; resolve: () => void }> = [];
   readyState = RecordingWebSocket.CONNECTING;
+  binaryType: BinaryType = "blob";
   constructor(url: string | URL) {
     super();
     RecordingWebSocket.dialed.push(url.toString());
@@ -285,17 +294,18 @@ class RecordingWebSocket extends EventTarget {
       RecordingWebSocket.#waiters.push({ count, resolve })
     );
   }
-  send(_payload: string): void {}
+  send(_payload: EncodedMemoryMessage): void {}
   close(): void {}
 }
 
 describe("StorageManager per-space host wiring", () => {
-  // The pending session promises hold no resources, but their microtask
-  // chains outlive the test body; opt out of the op sanitizer for that.
   it("dials a mapped space on its host and others on the default", {
     sanitizeOps: false,
     sanitizeResources: false,
   }, async () => {
+    // The pending session promises hold no resources, but their microtask
+    // chains outlive the test body; opt out of the op sanitizer for that.
+
     const realWebSocket = globalThis.WebSocket;
     (globalThis as { WebSocket: unknown }).WebSocket = RecordingWebSocket;
     try {
@@ -320,11 +330,25 @@ describe("StorageManager per-space host wiring", () => {
       (globalThis as { WebSocket: unknown }).WebSocket = realWebSocket;
     }
   });
+
+  it("forwards compression preferences without opening a session", async () => {
+    const signer = await Identity.fromPassphrase("storage-compression-mode");
+    const manager = StorageManager.open({
+      as: signer,
+      memoryHost: new URL("http://memory.test"),
+    });
+    try {
+      await manager.setMessageCompressionEnabled(false);
+    } finally {
+      await manager.closeNow();
+    }
+  });
 });
 
-// Site-table v0: runtime-learned host hints. A default-host connection remains
-// provisional until the first configured or accepted route is known.
 describe("StorageManager.registerSpaceHost", () => {
+  // Site-table v0: runtime-learned host hints. A default-host connection
+  // remains provisional until the first configured or accepted route is known.
+
   const spaceSeeded = "did:key:z6Mk-register-seeded" as MemorySpace;
   const spaceLearned = "did:key:z6Mk-register-learned" as MemorySpace;
   const spaceOpened = "did:key:z6Mk-register-opened" as MemorySpace;
@@ -461,13 +485,14 @@ describe("WebSocketTransport failure signaling", () => {
     static readonly CLOSED = 3;
     static instances: DrivableWebSocket[] = [];
     readyState = DrivableWebSocket.CONNECTING;
-    readonly sent: string[] = [];
+    binaryType: BinaryType = "blob";
+    readonly sent: EncodedMemoryMessage[] = [];
     #sentWaiters: Array<{ count: number; resolve: () => void }> = [];
     constructor(readonly url: string | URL) {
       super();
       DrivableWebSocket.instances.push(this);
     }
-    send(payload: string): void {
+    send(payload: EncodedMemoryMessage): void {
       this.sent.push(payload);
       this.#sentWaiters = this.#sentWaiters.filter((waiter) => {
         if (this.sent.length >= waiter.count) {
@@ -487,12 +512,33 @@ describe("WebSocketTransport failure signaling", () => {
       this.readyState = DrivableWebSocket.OPEN;
       this.dispatchEvent(new Event("open"));
     }
-    receive(payload: string): void {
+    receive(payload: MemoryMessageFrame): void {
       this.dispatchEvent(new MessageEvent("message", { data: payload }));
+    }
+    fail(error: Error): void {
+      this.dispatchEvent(new ErrorEvent("error", { error }));
     }
     close(): void {
       this.readyState = DrivableWebSocket.CLOSED;
       this.dispatchEvent(new Event("close"));
+    }
+  }
+
+  class DeferredBlob extends Blob {
+    readonly started = Promise.withResolvers<void>();
+    readonly released = Promise.withResolvers<void>();
+
+    readonly #contents: ArrayBuffer;
+
+    constructor(contents = new Uint8Array([0]).buffer) {
+      super();
+      this.#contents = contents;
+    }
+
+    override async arrayBuffer(): Promise<ArrayBuffer> {
+      this.started.resolve();
+      await this.released.promise;
+      return this.#contents;
     }
   }
 
@@ -516,6 +562,11 @@ describe("WebSocketTransport failure signaling", () => {
         (globalThis as { WebSocket: unknown }).WebSocket = realWebSocket;
       });
   }
+
+  const requireTextFrame = (frame: EncodedMemoryMessage): string => {
+    if (typeof frame !== "string") throw new Error("Expected text frame");
+    return frame;
+  };
 
   /**
    * Aborts `controller` at the moment the memory client stops listening for
@@ -584,8 +635,13 @@ describe("WebSocketTransport failure signaling", () => {
   const answerSessionOpen = (
     socket: DrivableWebSocket,
     sessionId: string,
+    requestIndex = 1,
   ): void => {
-    const open = decodeMemoryBoundary(socket.sent[1]) as { requestId: string };
+    const open = decodeMemoryBoundary(
+      requireTextFrame(socket.sent[requestIndex]),
+    ) as {
+      requestId: string;
+    };
     socket.receive(encodeMemoryBoundary({
       type: "response",
       requestId: open.requestId,
@@ -620,6 +676,26 @@ describe("WebSocketTransport failure signaling", () => {
     });
   });
 
+  it("rejects a compression control when the socket closes before opening", async () => {
+    await withTransport(async (transport, socket) => {
+      transport.setMessageCompressionEnabled(true);
+      const control = transport.requestMessageCompression(false);
+      socket().readyState = DrivableWebSocket.CLOSED;
+      socket().dispatchEvent(new Event("close"));
+
+      await expect(control).rejects.toThrow(
+        "memory websocket transport closed before opening",
+      );
+    });
+  });
+
+  it("declines compression controls before negotiation", async () => {
+    await withTransport(async (transport) => {
+      expect(await transport.requestMessageCompression(false)).toBe(false);
+      expect(DrivableWebSocket.instances).toHaveLength(0);
+    });
+  });
+
   it("dials once for two sends issued while the socket is opening", async () => {
     await withTransport(async (transport, socket) => {
       const first = transport.send("first");
@@ -630,6 +706,307 @@ describe("WebSocketTransport failure signaling", () => {
       await Promise.all([first, second]);
       expect(activeSocket.sent).toEqual(["first", "second"]);
       expect(DrivableWebSocket.instances).toHaveLength(1);
+    });
+  });
+
+  it("compresses and expands negotiated messages without reordering them", async () => {
+    await withTransport(async (transport, socket) => {
+      const opening = transport.send("hello");
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await opening;
+      transport.setMessageCompressionEnabled(true);
+
+      const payloads = [
+        "first compressed message ".repeat(1_000),
+        "small second",
+        "third compressed message ".repeat(1_000),
+        "small fourth",
+      ];
+      await Promise.all(payloads.map((payload) => transport.send(payload)));
+
+      expect(activeSocket.sent[1]).toBeInstanceOf(Uint8Array);
+      expect(typeof activeSocket.sent[2]).toBe("string");
+      expect(activeSocket.sent[3]).toBeInstanceOf(Uint8Array);
+      expect(typeof activeSocket.sent[4]).toBe("string");
+      expect(
+        await Promise.all(
+          activeSocket.sent.slice(1).map(decodeCompressedMemoryMessage),
+        ),
+      ).toEqual(payloads);
+
+      const received = Promise.withResolvers<string>();
+      transport.setReceiver(received.resolve);
+      activeSocket.receive(await encodeCompressedMemoryMessage(payloads[0]));
+      expect(await received.promise).toBe(payloads[0]);
+    });
+  });
+
+  it("uses the compression mode active when each send is submitted", async () => {
+    await withTransport(async (transport, socket) => {
+      const hello = transport.send("hello");
+      transport.setMessageCompressionEnabled(true);
+      const large = "submitted before compression was disabled ".repeat(1_000);
+      const submittedWhileEnabled = transport.send(large);
+      const disabling = transport.requestMessageCompression(false);
+
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await activeSocket.whenSent(3);
+
+      expect(activeSocket.sent[0]).toBe("hello");
+      expect(activeSocket.sent[1]).toBeInstanceOf(Uint8Array);
+      const control = parseMemoryCompressionControlMessage(
+        requireTextFrame(activeSocket.sent[2]),
+      );
+      if (!control) throw new Error("Expected disable control");
+      activeSocket.receive(encodeMemoryCompressionControlMessage({
+        requestId: control.requestId,
+        enabled: false,
+      }));
+
+      await Promise.all([hello, submittedWhileEnabled, disabling]);
+      expect(await decodeCompressedMemoryMessage(activeSocket.sent[1])).toBe(
+        large,
+      );
+    });
+  });
+
+  it("changes compression on a live socket", async () => {
+    await withTransport(async (transport, socket) => {
+      const opening = transport.send("hello");
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await opening;
+      transport.setMessageCompressionEnabled(true);
+
+      const disabling = transport.requestMessageCompression(false);
+      await activeSocket.whenSent(2);
+      const disableControl = parseMemoryCompressionControlMessage(
+        requireTextFrame(activeSocket.sent[1]),
+      );
+      expect(disableControl?.enabled).toBe(false);
+      if (!disableControl) throw new Error("Expected disable control");
+      activeSocket.receive(encodeMemoryCompressionControlMessage({
+        requestId: disableControl.requestId,
+        enabled: false,
+      }));
+      expect(await disabling).toBe(false);
+
+      const large = "visible memory websocket message ".repeat(1_000);
+      await transport.send(large);
+      expect(activeSocket.sent[2]).toBe(large);
+
+      const received = Promise.withResolvers<string>();
+      transport.setReceiver(received.resolve);
+      activeSocket.receive(await encodeCompressedMemoryMessage(large));
+      expect(await received.promise).toBe(large);
+
+      const enabling = transport.requestMessageCompression(true);
+      await activeSocket.whenSent(4);
+      const enableControl = parseMemoryCompressionControlMessage(
+        requireTextFrame(activeSocket.sent[3]),
+      );
+      expect(enableControl?.enabled).toBe(true);
+      if (!enableControl) throw new Error("Expected enable control");
+      activeSocket.receive(encodeMemoryCompressionControlMessage({
+        requestId: enableControl.requestId,
+        enabled: true,
+      }));
+      expect(await enabling).toBe(true);
+      await transport.send(large);
+      expect(activeSocket.sent[4]).toBeInstanceOf(Uint8Array);
+    });
+  });
+
+  it("rejects unsupported websocket message values", async () => {
+    await withTransport(async (transport, socket) => {
+      const opening = transport.send("hello");
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await opening;
+      const closed = Promise.withResolvers<Error | undefined>();
+      transport.setCloseReceiver(closed.resolve);
+
+      activeSocket.receive({ invalid: true } as unknown as MemoryMessageFrame);
+
+      await expect(closed.promise).resolves.toMatchObject({
+        message: "Unable to decode compressed memory websocket message",
+        cause: { message: "Unsupported memory websocket frame type" },
+      });
+    });
+  });
+
+  it("rejects binary websocket messages before negotiation", async () => {
+    await withTransport(async (transport, socket) => {
+      const opening = transport.send("hello");
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await opening;
+      const closed = Promise.withResolvers<Error | undefined>();
+      transport.setCloseReceiver(closed.resolve);
+
+      activeSocket.receive(new Uint8Array([1, 2, 3]));
+
+      await expect(closed.promise).resolves.toMatchObject({
+        message: "Unable to decode compressed memory websocket message",
+        cause: {
+          message:
+            "Memory websocket expects text before compression negotiation",
+        },
+      });
+    });
+  });
+
+  it("rejects invalid negotiated compression envelopes", async () => {
+    await withTransport(async (transport, socket) => {
+      const opening = transport.send("hello");
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await opening;
+      transport.setMessageCompressionEnabled(true);
+      const closed = Promise.withResolvers<Error | undefined>();
+      transport.setCloseReceiver(closed.resolve);
+
+      activeSocket.receive(new Uint8Array([1, 2, 3]));
+
+      await expect(closed.promise).resolves.toMatchObject({
+        message: "Unable to decode compressed memory websocket message",
+        cause: { message: "Invalid memory compression envelope" },
+      });
+    });
+  });
+
+  it("rejects a queued control when its websocket is replaced", async () => {
+    await withTransport(async (transport, socket) => {
+      const opening = transport.send("hello");
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await opening;
+      transport.setMessageCompressionEnabled(true);
+
+      const control = transport.requestMessageCompression(false);
+      activeSocket.fail(new Error("replace socket before control send"));
+
+      await expect(control).rejects.toThrow(
+        "Memory websocket changed before compression control",
+      );
+    });
+  });
+
+  it("ignores stale close events after a replacement socket enables compression", async () => {
+    await withTransport(async (transport, socket) => {
+      const firstOpening = transport.send("first hello");
+      const firstSocket = socket();
+      firstSocket.openConnection();
+      await firstOpening;
+      transport.setMessageCompressionEnabled(true);
+      const closes: Array<Error | undefined> = [];
+      transport.setCloseReceiver((error) => closes.push(error));
+
+      firstSocket.fail(new Error("replace first socket"));
+      const replacementOpening = transport.send("replacement hello");
+      const replacementSocket = socket();
+      replacementSocket.openConnection();
+      await replacementOpening;
+      transport.setMessageCompressionEnabled(true);
+      firstSocket.receive("stale response");
+      firstSocket.close();
+
+      await transport.send("replacement compressed message ".repeat(1_000));
+      expect(replacementSocket.sent.at(-1)).toBeInstanceOf(Uint8Array);
+      expect(closes).toHaveLength(1);
+    });
+  });
+
+  it("ignores a stale decode failure after the socket is replaced", async () => {
+    await withTransport(async (transport, socket) => {
+      const firstOpening = transport.send("first hello");
+      const firstSocket = socket();
+      firstSocket.openConnection();
+      await firstOpening;
+      transport.setMessageCompressionEnabled(true);
+      const closes: Array<Error | undefined> = [];
+      transport.setCloseReceiver((error) => closes.push(error));
+      const staleFrame = new DeferredBlob();
+      firstSocket.receive(staleFrame);
+      await staleFrame.started.promise;
+
+      firstSocket.fail(new Error("replace decoding socket"));
+      const replacementOpening = transport.send("replacement hello");
+      const replacementSocket = socket();
+      replacementSocket.openConnection();
+      await replacementOpening;
+      transport.setMessageCompressionEnabled(true);
+      const received = Promise.withResolvers<string>();
+      transport.setReceiver(received.resolve);
+      staleFrame.released.resolve();
+      replacementSocket.receive("replacement response");
+
+      expect(await received.promise).toBe("replacement response");
+      expect(closes).toHaveLength(1);
+      await transport.send("replacement compressed message ".repeat(1_000));
+      expect(replacementSocket.sent.at(-1)).toBeInstanceOf(Uint8Array);
+    });
+  });
+
+  it("ignores a stale decoded message after the socket is replaced", async () => {
+    await withTransport(async (transport, socket) => {
+      const firstOpening = transport.send("first hello");
+      const firstSocket = socket();
+      firstSocket.openConnection();
+      await firstOpening;
+      transport.setMessageCompressionEnabled(true);
+      const payload = "stale compressed response ".repeat(1_000);
+      const encoded = await encodeCompressedMemoryMessage(payload);
+      if (!(encoded instanceof Uint8Array)) {
+        throw new Error("Expected compressed response");
+      }
+      const staleFrame = new DeferredBlob(encoded.buffer.slice(0));
+      firstSocket.receive(staleFrame);
+      await staleFrame.started.promise;
+
+      firstSocket.fail(new Error("replace decoded socket"));
+      const replacementOpening = transport.send("replacement hello");
+      const replacementSocket = socket();
+      replacementSocket.openConnection();
+      await replacementOpening;
+      transport.setMessageCompressionEnabled(true);
+      const received = Promise.withResolvers<string>();
+      transport.setReceiver(received.resolve);
+      staleFrame.released.resolve();
+      replacementSocket.receive("replacement response");
+
+      expect(await received.promise).toBe("replacement response");
+    });
+  });
+
+  it("reports receiver failures without labeling them as decode failures", async () => {
+    await withTransport(async (transport, socket) => {
+      const opening = transport.send("hello");
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await opening;
+      const failure = new Error("receiver failed");
+      const reported = Promise.withResolvers<unknown>();
+      const onError = (event: ErrorEvent) => {
+        event.preventDefault();
+        reported.resolve(event.error);
+      };
+      globalThis.addEventListener("error", onError, { once: true });
+      const closes: Array<Error | undefined> = [];
+      transport.setCloseReceiver((error) => closes.push(error));
+      transport.setReceiver(() => {
+        throw failure;
+      });
+      try {
+        activeSocket.receive("ordinary response");
+        expect(await reported.promise).toBe(failure);
+        expect(closes).toEqual([]);
+        expect(activeSocket.readyState).toBe(WebSocket.OPEN);
+      } finally {
+        globalThis.removeEventListener("error", onError);
+      }
     });
   });
 
@@ -649,6 +1026,41 @@ describe("WebSocketTransport failure signaling", () => {
         factory.create(signer.did(), signer, {}, controller.signal),
       ).rejects.toBe(reason);
       expect(DrivableWebSocket.instances).toHaveLength(0);
+    });
+  });
+
+  it("applies a disabled preference to remote sessions opened later", async () => {
+    const signer = await Identity.fromPassphrase(
+      "disabled-compression-remote-session",
+    );
+    await withTransport(async (_transport, socket) => {
+      const factory = new RemoteSessionFactory(
+        () => new URL("wss://memory.test/api/storage/memory"),
+        signer,
+      );
+      await factory.setMessageCompressionEnabled(false);
+      const opening = factory.create(signer.did(), signer, {});
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await activeSocket.whenSent(1);
+      answerHello(activeSocket);
+
+      await activeSocket.whenSent(2);
+      const control = parseMemoryCompressionControlMessage(
+        requireTextFrame(activeSocket.sent[1]),
+      );
+      expect(control?.enabled).toBe(false);
+      if (!control) throw new Error("Expected disable control");
+      activeSocket.receive(encodeMemoryCompressionControlMessage({
+        requestId: control.requestId,
+        enabled: false,
+      }));
+
+      await activeSocket.whenSent(3);
+      expect(typeof activeSocket.sent[2]).toBe("string");
+      answerSessionOpen(activeSocket, "disabled-compression-session", 2);
+      const created = await opening;
+      await created.client.close();
     });
   });
 
@@ -801,9 +1213,9 @@ describe("WebSocketTransport failure signaling", () => {
           sessionOpen: TEST_HELLO_SESSION_OPEN,
         }));
         await initialSocket.whenSent(2);
-        const initialOpen = decodeMemoryBoundary(initialSocket.sent[1]) as {
-          requestId: string;
-        };
+        const initialOpen = decodeMemoryBoundary(
+          requireTextFrame(initialSocket.sent[1]),
+        ) as { requestId: string };
         initialSocket.receive(encodeMemoryBoundary({
           type: "response",
           requestId: initialOpen.requestId,

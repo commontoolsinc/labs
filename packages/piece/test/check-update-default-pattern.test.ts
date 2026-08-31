@@ -822,14 +822,15 @@ describe("opening a space root", () => {
     ).toBeUndefined();
   });
 
-  // The boot path (ensureDefaultPattern) reconciles an unloadable root before
-  // start — but registry listings, `cf piece ls`, FUSE, and the shell's list
-  // cells all resolve the root through PiecesController.getDefaultPattern instead,
-  // which used to inherit NO heal: the load failure propagated and every
-  // listing died with the root (2026-07-29 vendor gate, the cf-cell-context
-  // type retirement). The controller choke point must run the same awaited
-  // updater check and retry once.
   it("heals an unloadable stale root on the REGISTRY path (not just boot)", async () => {
+    // The boot path (ensureDefaultPattern) reconciles an unloadable root before
+    // start — but registry listings, `cf piece ls`, FUSE, and the shell's list
+    // cells all resolve the root through PiecesController.getDefaultPattern
+    // instead, which used to inherit NO heal: the load failure propagated and
+    // every listing died with the root (2026-07-29 vendor gate, the
+    // cf-cell-context type retirement). The controller choke point must run the
+    // same awaited updater check and retry once.
+
     await setup();
     const piece = await controller.ensureDefaultPattern();
     const root = piece.getCell();
@@ -1304,10 +1305,10 @@ describe("opening a space root", () => {
     expect(getPatternSource(root)).toBe(externalSource);
 
     // The local route moves. The root does not follow it: its origin names
-    // another host. Following an external endpoint is specified and not
-    // built, so nothing is fetched on the root's behalf at all.
+    // another host, and an external endpoint is no origin at all, so nothing
+    // is fetched on the root's behalf.
     stub.setSource(SOURCE_V2);
-    expect(await reconcilePieceSource(runtime, root)).toBe("unsupported");
+    expect(await reconcilePieceSource(runtime, root)).toBe("unusable");
     expect(getPatternIdentityRef(root)).toEqual(before);
     expect(getPatternSource(root)).toBe(externalSource);
     expect(stub.identityFetches()).toBe(identityFetchesBefore);

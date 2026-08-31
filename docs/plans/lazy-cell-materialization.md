@@ -113,10 +113,10 @@ and returns registers nothing, and the reader goes on reading its default howeve
 late the value arrives. Each is one line, and each was missing once.
 
 Point 2 is the other one worth stating plainly, because a view meets it in a
-place an eager read does not. Eager traversal walks THROUGH a link and combines
-the link's schema into the selector as it crosses (`combineOptionalSchema`); a
-view re-enters `validateAndTransform` per property, so the entry point has to do
-that combining itself. Handing the view the link's schema alone loses whatever
+place an eager read does not. Eager traversal walks THROUGH a link and settles
+the crossing's schema by reader precedence as it goes
+(`combineOptionalSchema`); a view re-enters `validateAndTransform` per
+property, so the entry point has to do that settling itself. Handing the view the link's schema alone loses whatever
 the reader asked for that the link's own schema does not name — a `title` read
 off a piece typed by its registration reads as a property the schema does not
 select, and the reader gets `undefined` for data that is right there.

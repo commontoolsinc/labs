@@ -75,11 +75,12 @@ describe("data-uri-codec", () => {
       expect(JsonCodecEngine.seemsLikeEncoded(payload)).toBe(true);
     });
 
-    // The payload is base64url of the UTF-8 form of the encoded text. The id
-    // is that payload, so however the bytes are arrived at, the answer has to
-    // be the one stated here. The cases cover text that is entirely
-    // ASCII, text that is not, and text too long to take any short cut.
     it("mints a payload that is base64url of the encoded text", () => {
+      // The payload is base64url of the UTF-8 form of the encoded text. The id
+      // is that payload, so however the bytes are arrived at, the answer has to
+      // be the one stated here. The cases cover text that is entirely
+      // ASCII, text that is not, and text too long to take any short cut.
+
       const textEncoder = new TextEncoder();
       const values = [
         { x: 1 },
@@ -95,27 +96,6 @@ describe("data-uri-codec", () => {
       }
     });
 
-    // The standard encoding canonicalizes key order, so the minted id is a
-    // function of content alone.
-    it("mints the same URI regardless of key insertion order", () => {
-      const inOrder = { alpha: 1, beta: [2, 3], gamma: { delta: 4 } };
-      const scrambled = { gamma: { delta: 4 }, beta: [2, 3], alpha: 1 };
-      expect(dataUriFromValue(scrambled)).toBe(dataUriFromValue(inOrder));
-    });
-
-    // Canonical order is UTF-8 byte order, which differs from the order a
-    // plain JavaScript string comparison gives whenever a key carries a
-    // surrogate pair.
-    it("mints the same URI for keys that a UTF-16 sort would order differently", () => {
-      const oneWay = { "￿": 1, "\u{10000}": 2 };
-      const other = { "\u{10000}": 2, "￿": 1 };
-      expect(dataUriFromValue(other)).toBe(dataUriFromValue(oneWay));
-      expect(Object.keys(valueFromDataUri(dataUriFromValue(other)))).toEqual([
-        "￿",
-        "\u{10000}",
-      ]);
-    });
-
     it("round-trips an `undefined` value", () => {
       expect(valueFromDataUri(dataUriFromValue(undefined))).toBeUndefined();
     });
@@ -129,10 +109,15 @@ describe("data-uri-codec", () => {
       expect(Object.is(parsed.i, -Infinity)).toBe(true);
     });
 
+    //
+    // Distinctness
+    //
     // Distinctness is a separate property from round-tripping, and the more
     // important one here: these URIs are content addresses, so two values that
     // are not equal must not mint the same identifier. A codec could round-trip
     // every value faithfully and still collide.
+    //
+
     it("mints distinct URIs for `-0` and `+0`", () => {
       expect(dataUriFromValue(-0)).not.toBe(dataUriFromValue(0));
       expect(dataUriFromValue({ z: -0 })).not.toBe(dataUriFromValue({ z: 0 }));
@@ -149,11 +134,44 @@ describe("data-uri-codec", () => {
       expect(dataUriFromValue(NaN)).not.toBe(dataUriFromValue(-Infinity));
     });
 
-    // Arithmetic only ever yields one `NaN` bit pattern, so `NaN` and `0 / 0`
-    // are the same value and comparing them proves only determinism. A
-    // distinct payload has to be built through a typed-array view, which is
-    // also how one reaches a caller in practice.
+    //
+    // Canonical sameness
+    //
+    // The other direction, and the reason distinctness is not the whole
+    // property: equal values mint one URI. Key order and a UTF-16 sort do not
+    // show through, every `NaN` payload collapses to the same identifier, and
+    // a repeated value mints deterministically.
+    //
+
+    it("mints the same URI regardless of key insertion order", () => {
+      // The standard encoding canonicalizes key order, so the minted id is a
+      // function of content alone.
+
+      const inOrder = { alpha: 1, beta: [2, 3], gamma: { delta: 4 } };
+      const scrambled = { gamma: { delta: 4 }, beta: [2, 3], alpha: 1 };
+      expect(dataUriFromValue(scrambled)).toBe(dataUriFromValue(inOrder));
+    });
+
+    it("mints the same URI for keys that a UTF-16 sort would order differently", () => {
+      // Canonical order is UTF-8 byte order, which differs from the order a
+      // plain JavaScript string comparison gives whenever a key carries a
+      // surrogate pair.
+
+      const oneWay = { "￿": 1, "\u{10000}": 2 };
+      const other = { "\u{10000}": 2, "￿": 1 };
+      expect(dataUriFromValue(other)).toBe(dataUriFromValue(oneWay));
+      expect(Object.keys(valueFromDataUri(dataUriFromValue(other)))).toEqual([
+        "￿",
+        "\u{10000}",
+      ]);
+    });
+
     it("mints one URI for every `NaN`, whatever its payload", () => {
+      // Arithmetic only ever yields one `NaN` bit pattern, so `NaN` and `0 / 0`
+      // are the same value and comparing them proves only determinism. A
+      // distinct payload has to be built through a typed-array view, which is
+      // also how one reaches a caller in practice.
+
       const buffer = new ArrayBuffer(8);
       const bytes = new Uint8Array(buffer);
       const doubles = new Float64Array(buffer);
@@ -233,9 +251,10 @@ describe("data-uri-codec", () => {
       );
     });
 
-    // Exactly one media type is accepted; the historical `application/json`
-    // form is not.
     it("throws given the `application/json` media type", () => {
+      // Exactly one media type is accepted; the historical `application/json`
+      // form is not.
+
       const payload = toUnpaddedBase64url(
         new TextEncoder().encode(jsonFromFabricValue({ a: 1 })),
       );
@@ -243,9 +262,10 @@ describe("data-uri-codec", () => {
         .toThrow(/Invalid URI/);
     });
 
-    // There are no header parameters in this format; a header carrying any
-    // fails the media-type check.
     it("throws given header parameters (charset, base64)", () => {
+      // There are no header parameters in this format; a header carrying any
+      // fails the media-type check.
+
       const payload = toUnpaddedBase64url(
         new TextEncoder().encode(jsonFromFabricValue({})),
       );
@@ -277,9 +297,10 @@ describe("data-uri-codec", () => {
       ).toThrow(/not base64url/);
     });
 
-    // Both `data:` URI payload readers (this one and attestation `load()`)
-    // reject an empty payload uniformly; see `valueFromDataUriPayloadText()`.
     it("throws given an empty payload", () => {
+      // Both `data:` URI payload readers (this one and attestation `load()`)
+      // reject an empty payload uniformly; see `valueFromDataUriPayloadText()`.
+
       expect(() => valueFromDataUri(`data:${DATA_URI_MEDIA_TYPE},`))
         .toThrow();
     });
@@ -320,10 +341,12 @@ describe("data-uri-codec", () => {
         expect(Object.is(result.value[2], Infinity)).toBe(true);
       });
 
-      // Sigil links are plain objects with a `/`-prefixed key, which the codec
-      // escapes on encode (spec section 5.6); they must come back as the same
-      // plain objects, since link recognition downstream depends on that shape.
       it("round-trips a plain object with a `/`-prefixed key", () => {
+        // Sigil links are plain objects with a `/`-prefixed key, which the
+        // codec escapes on encode (spec section 5.6); they must come back as
+        // the same plain objects, since link recognition downstream depends on
+        // that shape.
+
         const value = {
           value: { "/": { "link@1": { id: "of:xyz", path: ["a"] } } },
         };

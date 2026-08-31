@@ -400,12 +400,36 @@ describe("runtimePresets conformance (CT-1814)", () => {
         expect(parseServerExperimentalOptions({
           modernCellRep: true,
           serverExecution: false,
-        })).toEqual({ modernCellRep: true, serverExecution: false });
+        })).toEqual({
+          modernCellRep: true,
+          serverExecution: false,
+          readerSchemaPrecedence: false,
+        });
       });
 
-      it("returns nothing for a declaration that is not an object", () => {
+      it("adopts legacy false for an absent readerSchemaPrecedence declaration", () => {
+        // A responding server that declares no readerSchemaPrecedence predates
+        // the flag and necessarily runs the strict combine: absence adopts as
+        // the legacy false. A declared value wins as usual.
+
+        expect(parseServerExperimentalOptions({}).readerSchemaPrecedence)
+          .toBe(false);
+        expect(
+          parseServerExperimentalOptions({ readerSchemaPrecedence: true })
+            .readerSchemaPrecedence,
+        ).toBe(true);
+      });
+
+      it("adopts nothing for a published null and legacy false for an absent field", () => {
+        // toolshed publishes `experimental: null` until a Runtime exists —
+        // a NEW server saying "nothing yet", which adopts nothing — while a
+        // meta document with no experimental field at all predates the
+        // flag and takes the legacy arm. Malformed declarations adopt
+        // nothing.
         expect(parseServerExperimentalOptions(null)).toEqual({});
-        expect(parseServerExperimentalOptions(undefined)).toEqual({});
+        expect(parseServerExperimentalOptions(undefined)).toEqual({
+          readerSchemaPrecedence: false,
+        });
         expect(parseServerExperimentalOptions("modernCellRep")).toEqual({});
       });
 
@@ -418,7 +442,10 @@ describe("runtimePresets conformance (CT-1814)", () => {
             flagFromTheFuture: true,
           })
         );
-        expect(result).toEqual({ modernCellRep: true });
+        expect(result).toEqual({
+          modernCellRep: true,
+          readerSchemaPrecedence: false,
+        });
         expect(warnings.length).toBe(0);
       });
 
@@ -426,7 +453,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         const { warnings, result } = captureWarnings(() =>
           parseServerExperimentalOptions({ modernCellRep: "true" })
         );
-        expect(result).toEqual({});
+        expect(result).toEqual({ readerSchemaPrecedence: false });
         expect(warnings.length).toBe(1);
         expect(String(warnings[0][0])).toContain("modernCellRep");
       });
@@ -495,10 +522,13 @@ describe("runtimePresets conformance (CT-1814)", () => {
         // toolshed side pins the constant against the route that serves it.
         expect(requested).toEqual(["https://deployment.example/api/meta"]);
         // The env's explicit `false` outranks the server; the flag it says
-        // nothing about is adopted.
+        // nothing about is adopted — and a posture with no
+        // readerSchemaPrecedence declaration is a pre-flag server, adopted
+        // as the legacy strict `false`.
         expect(adopted).toEqual({
           modernCellRep: false,
           serverExecution: true,
+          readerSchemaPrecedence: false,
         });
       });
 
@@ -541,7 +571,9 @@ describe("runtimePresets conformance (CT-1814)", () => {
       });
 
       it("falls back to the environment for a server that publishes no posture", async () => {
-        // An older server, whose meta document predates the field.
+        // An older server, whose meta document predates the field. It also
+        // predates readerSchemaPrecedence, so that one flag adopts as the
+        // legacy strict `false` rather than staying unset.
         expect(
           await experimentalOptionsForDeployedClient({
             apiUrl: new URL("https://deployment.example"),
@@ -549,7 +581,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
             fetch: () =>
               Promise.resolve(metaResponse({ did: "did:key:z", gitSha: null })),
           }),
-        ).toEqual({});
+        ).toEqual({ readerSchemaPrecedence: false });
       });
 
       it("hands the request the caller's cancellation signal", async () => {
@@ -661,9 +693,89 @@ describe("runtimePresets conformance (CT-1814)", () => {
               })),
           })
         );
-        expect(await result).toEqual({ serverExecution: true });
+        expect(await result).toEqual({
+          serverExecution: true,
+          readerSchemaPrecedence: false,
+        });
         expect(warnings.length).toBe(1);
         expect(String(warnings[0][0])).toContain(ADOPT_SERVER_FLAGS_ENV);
+      });
+
+      it("an adopted server-OFF posture rides the deployed-topology presets explicitly, immune to the first-party default", async () => {
+        // The separately-installed-host shape (the #6535 Codex P1 on the
+        // GitHub host): nothing declared in the environment, talking to a
+        // server held on the explicit-OFF rollback posture. Adoption hands
+        // the preset an EXPLICIT `false`, and the presets' `??` fill then
+        // never consults `SERVER_EXECUTION_DEFAULT_ENABLED` — which is why
+        // the first arm of this pin references no constant: it must hold
+        // under EITHER value (that immunity is the rollback lever working
+        // across a staggered upgrade, not a restatement of the absolute
+        // pin in toolshed's server-execution-flag.test.ts).
+        const adopted = await experimentalOptionsForDeployedClient({
+          apiUrl: new URL("https://deployment.example"),
+          env: () => undefined,
+          fetch: () =>
+            Promise.resolve(metaResponse({
+              did: "did:key:z",
+              experimental: { serverExecution: false },
+            })),
+        });
+        expect(adopted.serverExecution).toBe(false);
+        for (const preset of ["remoteClient", "productionServer"] as const) {
+          expect(
+            runtimePresets[preset]({
+              apiUrl,
+              storageManager,
+              experimental: adopted,
+            })
+              .experimental?.serverExecution,
+          ).toBe(false);
+        }
+        // The arm adoption replaces: an env-only resolution leaves the
+        // unset flag ABSENT, and the preset fills it with the first-party
+        // constant — under a flipped default that is an ON client against
+        // the rolled-back OFF server, the mixed topology the adoption
+        // exists to prevent. Compared against the imported constant, not a
+        // literal, so this documents the exposure without pinning the
+        // constant's value.
+        expect(
+          runtimePresets.remoteClient({
+            apiUrl,
+            storageManager,
+            experimental: experimentalOptionsFromEnv(() => undefined),
+          }).experimental?.serverExecution,
+        ).toBe(SERVER_EXECUTION_DEFAULT_ENABLED);
+      });
+
+      it("an explicit environment outranks the published posture in both directions, through the preset", async () => {
+        // Both arms stay selectable on a deployed client: the env is the
+        // documented rollback lever and CI's way to pin a lane, so it must
+        // survive adoption AND the preset fill in each direction.
+        for (
+          const arm of [
+            { env: "true", server: false, resolved: true },
+            { env: "false", server: true, resolved: false },
+          ] as const
+        ) {
+          const adopted = await experimentalOptionsForDeployedClient({
+            apiUrl: new URL("https://deployment.example"),
+            env: (name) =>
+              name === "EXPERIMENTAL_SERVER_EXECUTION" ? arm.env : undefined,
+            fetch: () =>
+              Promise.resolve(metaResponse({
+                did: "did:key:z",
+                experimental: { serverExecution: arm.server },
+              })),
+          });
+          expect(adopted.serverExecution).toBe(arm.resolved);
+          expect(
+            runtimePresets.remoteClient({
+              apiUrl,
+              storageManager,
+              experimental: adopted,
+            }).experimental?.serverExecution,
+          ).toBe(arm.resolved);
+        }
       });
     });
   });

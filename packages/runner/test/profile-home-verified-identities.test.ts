@@ -132,6 +132,10 @@ describe("profile-home verified external identities", () => {
       result.withTx(revokeTx).key("revokeVerifiedIdentities").send({
         identities: [assertion.withTx(revokeTx)],
       });
+      // The send's resolution crosses the result doc's ifc-bearing link, which
+      // marks the transaction cfc-relevant, and a relevant transaction must be
+      // prepared before commit — same as the publish above.
+      runtime.prepareTxForCommit(revokeTx);
       expect((await revokeTx.commit()).error).toBeUndefined();
       await runtime.idle();
       await result.pull();

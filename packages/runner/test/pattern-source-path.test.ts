@@ -163,13 +163,14 @@ describe("pattern source path", () => {
       expect(new Set(sources)).toEqual(new Set(["/main.tsx", "/sub.tsx"]));
     });
 
-    // A re-export barrel puts the SAME artifact object in two namespaces, so
-    // the stamp is written twice for it — once naming the barrel, once naming
-    // the module that defines it. The defining module is the useful answer: it
-    // is the file a reader edits, and the only one whose default export is this
-    // pattern. Resolving to the barrel would hand the vintage gate a path whose
-    // default export is something else entirely.
     it("names the DEFINING module, not a re-export barrel", async () => {
+      // A re-export barrel puts the SAME artifact object in two namespaces, so
+      // the stamp is written twice for it — once naming the barrel, once naming
+      // the module that defines it. The defining module is the useful answer:
+      // it is the file a reader edits, and the only one whose default export is
+      // this pattern. Resolving to the barrel would hand the vintage gate a
+      // path whose default export is something else entirely.
+
       const program: RuntimeProgram = {
         main: "/main.tsx",
         files: [
@@ -222,13 +223,15 @@ describe("pattern source path", () => {
       expect(sources).not.toContain("/barrel.ts");
     });
 
-    // The by-identity/warm-cache path is the one this table exists for: it
-    // evaluates from cached bodies with NO source, so a pattern loaded through
-    // it has no program at all. Its `fileNameForPath` is identity, so what it
-    // records is whatever the cached graph keys its paths by — pin that this is
-    // the AUTHORED filename and not a `cf:module/<identity>` specifier, which
-    // would be worse than sourceless (a confident, unusable answer).
     it("the cached-module path records authored filenames, not identities", async () => {
+      // The by-identity/warm-cache path is the one this table exists for: it
+      // evaluates from cached bodies with NO source, so a pattern loaded
+      // through it has no program at all. Its `fileNameForPath` is identity, so
+      // what it records is whatever the cached graph keys its paths by — pin
+      // that this is the AUTHORED filename and not a `cf:module/<identity>`
+      // specifier, which would be worse than sourceless (a confident, unusable
+      // answer).
+
       const program: RuntimeProgram = {
         main: "/main.tsx",
         files: [

@@ -3323,7 +3323,6 @@ describe("runner utils", () => {
       // dependencies before registering handlers, which is where this race
       // used to allow duplicate starts for the same result cell.
       (runtime.runner as any).locallyPreparedResults.clear();
-      (resultCell as any).synced = true;
 
       const runner = runtime.runner as any;
       let dependencySyncRuns = 0;

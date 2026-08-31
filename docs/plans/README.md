@@ -81,6 +81,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
   confidentiality. Gated on a CFC review that has not happened.
 - [CFC runner implementation](runner_cfc_implementation.md) defines the
   commit-boundary enforcement workstreams and rollout.
+- [Finishing the piece source lifecycle](piece-source-lifecycle-completion.md)
+  compares the lifecycle spec against the repository and orders the remainder
+  as five pull requests in two tracks — what a revision records, and where a
+  space lives.
 - [Bulk piece operations](piece-bulk-operations.md) designs retargeting,
   repairing, and rolling back many pieces as one reviewable, resumable
   operation over a shared plan — with batching as an execution strategy
@@ -89,9 +93,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
   board and topic grow their verbs without breaking the pieces already holding
   data: the shape the board demands of a stored topic, the one rehearsed break
   that narrowing it needs, and the items waiting on platform work.
-- [Topics migration rehearsal](topics-migration-rehearsal.md) is the concrete,
-  unexecuted script for `setsrc`-ing the Estuary Topics board against a clone
-  and then live.
+- Topics migration rehearsal has been executed and is archived at
+  [`../history/plans/topics-migration-rehearsal.md`](../history/plans/topics-migration-rehearsal.md);
+  what the live run found, including where that script was wrong, is in
+  [`../history/topics-board-migration-2026-08-28.md`](../history/topics-board-migration-2026-08-28.md).
 - [`cf space clone` rehearsal](space-clone-rehearsal.md) records the design for
   rehearsal-grade copies of populated spaces. The tooling has shipped (`cf
   space`, `cf inspect churn`); the operating procedure lives in
@@ -143,6 +148,12 @@ a record: archive it to `docs/history/plans/` following the procedure in
   do one job under two names. Separate from the read-layer plan because it
   renames rather than adds, so its risk is what breaks for a caller who already
   learned the current spelling.
+- [Shuttle — a place-aware fabric shell](shuttle/README.md) is the working design
+  state for an interactive terminal tool: a REPL whose prompt carries a
+  mutable current place — the context that fills in the omitted levels of the
+  fabric's right-anchored references — plus full-screen live views, for
+  inspecting and editing space and piece state. Decisions so far and open
+  questions; nothing is built yet.
 - [Shell completion coverage](cli-completion-coverage.md) sequences the work
   that makes `cf completion` answer correctly across the surface it claims and
   reach the verb surface it does not: the slots that offer a wrong candidate,

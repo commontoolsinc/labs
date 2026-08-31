@@ -80,8 +80,11 @@ class FakeSandboxRuntime implements SandboxRuntime {
 }
 
 class FakeFabricSandboxRuntime extends FakeSandboxRuntime {
-  constructor(private readonly fabricStatusJson?: string) {
+  readonly #fabricStatusJson?: string;
+
+  constructor(fabricStatusJson?: string) {
     super();
+    this.#fabricStatusJson = fabricStatusJson;
   }
 
   override runShell(
@@ -89,10 +92,10 @@ class FakeFabricSandboxRuntime extends FakeSandboxRuntime {
   ): Promise<SandboxCommandResult> {
     if (request.command.includes(FABRIC_STATUS_PROBE_SENTINEL)) {
       return Promise.resolve(
-        this.fabricStatusJson === undefined
+        this.#fabricStatusJson === undefined
           ? { stdout: "missing\t\n", stderr: "", exitCode: 0 }
           : {
-            stdout: `present\t${this.fabricStatusJson}\n`,
+            stdout: `present\t${this.#fabricStatusJson}\n`,
             stderr: "",
             exitCode: 0,
           },

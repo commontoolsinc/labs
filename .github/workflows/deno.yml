@@ -8,8 +8,17 @@ on:
     branches:
       - main
 
+# Runs of a pull request are grouped by the pull request, and a new push to the
+# branch cancels the run already going. Runs of a push to main are grouped by
+# the commit that was pushed, and a push run is never cancelled: it may be
+# part-way through deploying that commit to staging. Main can receive the same
+# head commit twice, which starts two runs of one commit, and the commit as the
+# group makes the second of them wait for the first. Each run publishes a
+# release artifact named after the commit, and two runs publishing at once
+# leave one run's tarball beside the other run's checksum. See "One commit, one
+# set of artifacts" in docs/development/deploying.md.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # The bounds the jobs below are built from. They are YAML anchors, used as
@@ -1385,7 +1394,18 @@ jobs:
         timeout-minutes: *work-timeout
         working-directory: packages/patterns
         run: |
-          mapfile -t TEST_FILES < <(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          # Command substitution (not a process substitution) so a selector
+          # failure fails this step under `bash -e` instead of reading as an
+          # empty list that runs ZERO test files and exits green. The
+          # selector throws on an empty selection (every shard carries the
+          # internally-sharded files), so an empty result here is only ever
+          # a failure — reject it loudly as the backstop.
+          SELECTED_FILES=$(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          if [ -z "$SELECTED_FILES" ]; then
+            echo "::error::select-pattern-integration-files.ts selected no files for shard ${{ matrix.shard }}/${{ matrix.total }}"
+            exit 1
+          fi
+          mapfile -t TEST_FILES <<< "$SELECTED_FILES"
           printf 'Pattern integration shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
           printf '  %s\n' "${TEST_FILES[@]}"
           mkdir -p ../../test-results
@@ -1444,11 +1464,14 @@ jobs:
   # browser shell (build-toolshed-on) — the FULL ON posture, verified by the
   # probe below before the shard runs. Skips happen only through the explicit
   # per-phase lists in tasks/server-execution-on-skips.ts, printed by the run
-  # step — never by silent filtering (ONE `patterns` entry today: the
-  # lunch-poll-vote FILE, #5744's client-start re-skip, OW45 arm B, with its
-  # loud reason. default-app's reload STEP entry lifted 2026-08-28 under the
-  # ruled surface reading of the local-plus-CI-probe bar, so this lane now
-  # RUNS that step; the flip PR needs every list EMPTY).
+  # step — never by silent filtering (the lists are EMPTY across ALL suites
+  # since the lunch-poll-vote FILE entry's ruled-3b-close lift, 2026-08-28
+  # — the owner ruled the register's 3b fork, "go with (1) plus the (2-D)
+  # kick": failed replications now park under the WANTED identity and the
+  # matching persist RECORD re-issues them, and served sidecar patterns
+  # kick their closure into the demanding space at page-serve time; this
+  # lane now runs the FULL suite. The flip PR's list-EMPTY precondition
+  # is met; its bar remains a green ON lane, not merely the empty list).
   # No coverage collection and no cache save-back: the default lane owns
   # both; the compile byte cache is restored read-only (compiled bytes do not
   # depend on the flag).
@@ -1539,7 +1562,19 @@ jobs:
         timeout-minutes: *work-timeout
         working-directory: packages/patterns
         run: |
-          mapfile -t SHARD_FILES < <(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          # Command substitution (not a process substitution) so a selector
+          # failure fails this step under `bash -e` instead of reading as an
+          # empty list that runs ZERO test files and exits green. The
+          # selector throws on an empty selection (every shard carries the
+          # internally-sharded files), so an empty result here is only ever
+          # a failure — reject it loudly as the backstop. The legitimate
+          # empty case lives one stage LATER, after the ON-skip filter.
+          SELECTED_FILES=$(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          if [ -z "$SELECTED_FILES" ]; then
+            echo "::error::select-pattern-integration-files.ts selected no files for shard ${{ matrix.shard }}/${{ matrix.total }}"
+            exit 1
+          fi
+          mapfile -t SHARD_FILES <<< "$SELECTED_FILES"
           printf 'Pattern integration shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
           printf '  %s\n' "${SHARD_FILES[@]}"
           # The explicit ON-arm skip list, applied by FILTERING this shard's
@@ -2124,12 +2159,31 @@ jobs:
       - name: ⚙️ Setup Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
 
+      # A release artifact is named after the commit it was built from, and a
+      # host keeps whatever it has already downloaded under that name. So the
+      # first build of a commit publishes the artifact and a later build of the
+      # same commit leaves it alone. Two builds of one commit do not produce the
+      # same bytes: the binaries are compiled again, and `tar` records
+      # modification times.
+      #
+      # The tarball and its checksum are published as a pair. A commit that has
+      # one of them and not the other was published by a build that stopped
+      # between the two copies, and this publishes both of them again. See "One
+      # commit, one set of artifacts" in docs/development/deploying.md.
       - name: 📤 Upload artifacts to Google Cloud Storage
         run: |
-          gsutil cp release/labs-${{ github.sha }}.tar.gz gs://commontools-build-artifacts/workspace-artifacts/
-          gsutil cp release/labs-${{ github.sha }}.hash.txt gs://commontools-build-artifacts/workspace-artifacts/
+          BUCKET=gs://commontools-build-artifacts/workspace-artifacts
+          TARBALL=labs-${{ github.sha }}.tar.gz
+          CHECKSUM=labs-${{ github.sha }}.hash.txt
 
-          # Print clickable links to the uploaded files
+          if gsutil -q stat "$BUCKET/$TARBALL" && gsutil -q stat "$BUCKET/$CHECKSUM"; then
+            echo "An earlier build of ${{ github.sha }} published its artifacts; leaving them as they are."
+          else
+            gsutil cp "release/$TARBALL" "$BUCKET/"
+            gsutil cp "release/$CHECKSUM" "$BUCKET/"
+          fi
+
+          # Print clickable links to the published files
           echo "::group::📦 Artifact Links"
           echo "Tarball URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.tar.gz"
           echo "Hash URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.hash.txt"
@@ -2138,7 +2192,7 @@ jobs:
           # combine step produced it. To download it for a given commit:
           #   gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-<commit-sha>.lcov .
           if [ -f release/labs-${{ github.sha }}.lcov ]; then
-            gsutil cp release/labs-${{ github.sha }}.lcov gs://commontools-build-artifacts/workspace-artifacts/
+            gsutil cp "release/labs-${{ github.sha }}.lcov" "$BUCKET/"
             echo "Coverage LCOV URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.lcov"
           fi
           echo "::endgroup::"

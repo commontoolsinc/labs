@@ -43,6 +43,7 @@ import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 /** The serving runtime's storage manager, with the serving-loop suite's
  * settle-gate seam: while `settleGate` is set, the loop's settle hangs
@@ -75,21 +76,6 @@ const aliceSigner = await Identity.fromPassphrase(
   "instance-keyed replica alice",
 );
 const bobSigner = await Identity.fromPassphrase("instance-keyed replica bob");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string | (() => string),
-  timeoutMs = 20_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      const rendered = typeof label === "function" ? label() : label;
-      throw new Error(`timed out waiting for ${rendered}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 /** A piece with per-user state on both sides of the run: a PerUser
  * draft the derivations READ, a PerUser save slot the handler WRITES,

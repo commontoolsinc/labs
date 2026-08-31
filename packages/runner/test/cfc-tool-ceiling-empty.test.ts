@@ -4,13 +4,16 @@ import { llmDialogTestHelpers } from "../src/builtins/llm-dialog.ts";
 
 const { toolAllowsObservedConfidentiality } = llmDialogTestHelpers;
 
-// Regression guard for empty tool-ceiling semantics (review follow-up to W0.7).
-//
-// W0.7 made an empty maxConfidentiality "public only" in cfcObservationFitsCeiling,
-// but the LLM tool-call gate kept special-casing an empty ceiling as allow-all,
-// so a tool declaring ifc.maxConfidentiality: [] still received confidential
-// observations. A declared (even empty) ceiling must be enforced.
 describe("CFC tool ceiling empty", () => {
+  // Regression guard for empty tool-ceiling semantics (review follow-up to
+  // W0.7).
+  //
+  // W0.7 made an empty maxConfidentiality "public only" in
+  // cfcObservationFitsCeiling, but the LLM tool-call gate kept special-casing
+  // an empty ceiling as allow-all, so a tool declaring ifc.maxConfidentiality:
+  // [] still received confidential observations. A declared (even empty)
+  // ceiling must be enforced.
+
   const catalogWithToolCeiling = (
     maxConfidentiality: unknown,
   ): Parameters<typeof toolAllowsObservedConfidentiality>[0] =>

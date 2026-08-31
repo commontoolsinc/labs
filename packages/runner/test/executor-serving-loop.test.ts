@@ -47,6 +47,7 @@ import {
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { getArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { waitUntil } from "./support/wait-until.ts";
 
 class SharedServerStorageManager extends EmulatedStorageManager {
   // Delegate to the base connectTo (shared-harness extraction, CT-1962):
@@ -92,21 +93,6 @@ const space = spaceSigner.did() as MemorySpace;
 const serviceSigner = await Identity.fromPassphrase("serving loop service");
 const aliceSigner = await Identity.fromPassphrase("serving loop alice");
 const bobSigner = await Identity.fromPassphrase("serving loop bob");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string | (() => string),
-  timeoutMs = 10_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      const rendered = typeof label === "function" ? label() : label;
-      throw new Error(`timed out waiting for ${rendered}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 describe("stage F serving loop", () => {
   let server: MemoryV2Server.Server;

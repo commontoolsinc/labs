@@ -76,12 +76,17 @@ Deno.test("spans pass through the OpenInference processor to the exporter", asyn
 });
 
 //
-// The `ai` package collects no spans until a telemetry integration is
-// registered, and it reports nothing when none is: the LLM spans simply stop
-// being produced. Importing this module is what registers ours.
+// The module's telemetry lifecycle
+//
+// The module registers its integration on import, and shutdown behaves
+// differently before that has happened and after.
 //
 
 Deno.test("importing the module registers an AI SDK telemetry integration", () => {
+  // The `ai` package collects no spans until a telemetry integration is
+  // registered, and it reports nothing when none is: the LLM spans simply stop
+  // being produced. Importing this module is what registers ours.
+
   assert(
     (globalThis.AI_SDK_TELEMETRY_INTEGRATIONS?.length ?? 0) > 0,
     "no AI SDK telemetry integration registered; LLM spans would not be collected",

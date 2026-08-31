@@ -113,6 +113,7 @@ describe("CFC clause-aware ceiling fit", () => {
   describe("meet is the pairwise alternative-set union (decision 6)", () => {
     // Full coverage (incl. the both-direction property test) lives in
     // cfc-clause-meet.test.ts; these pin the fit-facing behavior.
+
     it("flat meet keeps flat-label decisions of the old atom intersection", () => {
       const met = meetCfcObservationCeilings([A, B], [B, C]);
       expect(cfcObservationFitsCeiling([B], met)).toBe(true);

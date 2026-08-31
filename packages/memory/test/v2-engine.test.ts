@@ -1276,17 +1276,15 @@ Deno.test("memory v2 engine conflicts are scoped by declared scope", async () =>
   }
 });
 
-//
-// CT-1824 contract: a stale-read ConflictError must name the conflicted
-// entity BOTH structurally (of/seq/conflictSeq — read in-process by
-// editWithRetry's pull) AND in the message with this exact shape — server
-// Error fields do not survive serialization to the browser, so the runner
-// client re-derives `of` by parsing the message (runner storage/v2.ts
-// toRejectedError). Changing either surface breaks conflict recovery for
-// blind writes.
-//
-
 Deno.test("memory v2 engine: stale-read ConflictError carries the conflicted entity structurally and in the message", async () => {
+  // CT-1824 contract: a stale-read ConflictError must name the conflicted
+  // entity BOTH structurally (of/seq/conflictSeq — read in-process by
+  // editWithRetry's pull) AND in the message with this exact shape — server
+  // Error fields do not survive serialization to the browser, so the runner
+  // client re-derives `of` by parsing the message (runner storage/v2.ts
+  // toRejectedError). Changing either surface breaks conflict recovery for
+  // blind writes.
+
   const { engine, path } = await createEngine();
   const sessionId = "session:alice";
   const principal = "did:key:alice";
@@ -2791,19 +2789,20 @@ Deno.test("memory v2 engine resolves pending reads and rejects stale pending rea
   }
 });
 
-// CT-1872 1c: an array localSeq names every pending layer the read sat on.
-// Non-highest elements impose resolution ONLY (the dependency must have an
-// accepted commit row) — staleness is based at the HIGHEST element, so a
-// foreign write that lands before the highest element's resolution must NOT
-// reject the read, while an unresolved element still must.
-//
-// NOTE: this pins main's de-facto basis semantics made explicit on the wire,
-// not an endorsement of the scan interval. The staleness scan starts at the
-// highest layer's resolution seq, so foreign writes in (reader's confirmed
-// basis, that resolution] go unscanned — a pre-existing gap tracked as
-// CT-1910 (pending-read basis over-advance), whose fix (own-session
-// exclusion + true-basis validation) supersedes the max-basis rule.
 Deno.test("memory v2 engine: array pending reads scan at the highest layer and require every layer to resolve", async () => {
+  // CT-1872 1c: an array localSeq names every pending layer the read sat on.
+  // Non-highest elements impose resolution ONLY (the dependency must have an
+  // accepted commit row) — staleness is based at the HIGHEST element, so a
+  // foreign write that lands before the highest element's resolution must NOT
+  // reject the read, while an unresolved element still must.
+  //
+  // NOTE: this pins main's de-facto basis semantics made explicit on the wire,
+  // not an endorsement of the scan interval. The staleness scan starts at the
+  // highest layer's resolution seq, so foreign writes in (reader's confirmed
+  // basis, that resolution] go unscanned — a pre-existing gap tracked as
+  // CT-1910 (pending-read basis over-advance), whose fix (own-session
+  // exclusion + true-basis validation) supersedes the max-basis rule.
+
   const { engine, path } = await createEngine();
 
   try {
@@ -3022,23 +3021,24 @@ Deno.test("memory v2 engine: array pending reads scan at the highest layer and r
   }
 });
 
-// CT-1872 1c, end to end at the engine: a fabricated composite must die on
-// the resolution edge, because no staleness scan can catch it.
-//
-//   base:  D = { items: [] }                                  (seq 1)
-//   T1  (localSeq 10): items = ["A"]  — REJECTED (stale read on title)
-//   T1.5 (localSeq 11): blind append "B", zero reads — APPLIED → items ["B"]
-//   T2  (localSeq 12): observed items ["A","B"] through the client stack
-//
-// T2's observation is not STALE — ["A","B"] never existed at any seq; "A"
-// lived only in the client's optimistic layer for a commit the server
-// refused. An under-declared T2 (scalar top-of-stack read: what a client
-// emits toward a server without the `pendingReadStacks` flag) passes both
-// resolution (T1.5 has a commit row) and the staleness scan (nothing touched
-// items after seq(T1.5)) and is durably ACCEPTED with a phantom premise.
-// The full-stack array shape (#4606) also names T1, and the missing commit
-// row rejects it.
 Deno.test("memory v2 engine: full-stack dependency recording rejects a fabricated composite an under-declared commit smuggles through", async () => {
+  // CT-1872 1c, end to end at the engine: a fabricated composite must die on
+  // the resolution edge, because no staleness scan can catch it.
+  //
+  //   base:  D = { items: [] }                                  (seq 1)
+  //   T1  (localSeq 10): items = ["A"]  — REJECTED (stale read on title)
+  //   T1.5 (localSeq 11): blind append "B", zero reads — APPLIED → items ["B"]
+  //   T2  (localSeq 12): observed items ["A","B"] through the client stack
+  //
+  // T2's observation is not STALE — ["A","B"] never existed at any seq; "A"
+  // lived only in the client's optimistic layer for a commit the server
+  // refused. An under-declared T2 (scalar top-of-stack read: what a client
+  // emits toward a server without the `pendingReadStacks` flag) passes both
+  // resolution (T1.5 has a commit row) and the staleness scan (nothing touched
+  // items after seq(T1.5)) and is durably ACCEPTED with a phantom premise.
+  // The full-stack array shape (#4606) also names T1, and the missing commit
+  // row rejects it.
+
   const { engine, path } = await createEngine();
 
   try {

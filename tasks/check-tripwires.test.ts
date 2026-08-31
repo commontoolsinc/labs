@@ -52,16 +52,21 @@ Deno.test("every obligation names concrete, runnable next steps", () => {
   }
 });
 
+//
+// The real manifest
+//
+
 Deno.test("the real manifest passes end to end", async () => {
   assertEquals(await main(), 0);
 });
 
 //
-// the evasion paths
+// The evasion paths, and the cases that are not
 //
-// Each of these is a way someone silences the reminder without meaning to.
-// They were originally verified by hand, once; a guard whose failure modes are
-// only ever checked manually is a guard that quietly stops working.
+// Each evasion is a way someone silences the reminder without meaning to, and
+// a guard whose failure modes are only ever checked by hand is a guard that
+// quietly stops working. Beside them sit the intact baseline, the legitimate
+// resolved weakness, and the driver that reports them all.
 //
 // Each case writes its own fixture file rather than pointing at a real one.
 // Self-reference bites here: a literal ".ignore(" anywhere in this file would

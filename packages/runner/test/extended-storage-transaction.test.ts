@@ -82,6 +82,7 @@ describe("extended-storage-transaction", () => {
     // commit is in flight, settled, or aborted. The underlying transaction
     // holds a single commit verdict, which stays with the commit that is
     // running.
+
     it("returns the completion error while the first commit is in flight", async () => {
       const tx = runtime.edit();
       runtime.getCell(space, "double-commit", undefined, tx).set({

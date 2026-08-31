@@ -151,21 +151,23 @@ export class XRootView extends BaseView implements ShellApp {
   @state()
   private accessor _resolvingAttention = new Map<string, symbol>();
 
-  private _eventAttentionMutation = 0;
-  private _eventAttentionMutationVersions = new Map<
+  #eventAttentionMutation = 0;
+  #eventAttentionMutationVersions = new Map<
     DID,
     Map<string, number>
   >();
-  private _eventAttentionRefreshOwners = new Map<DID, symbol>();
+  #eventAttentionRefreshOwners = new Map<DID, symbol>();
 
   // Invalidates callbacks from replaced workers. A coded compiler-load error
   // can arrive through either a request reply or an asynchronous runtime error;
   // only the currently-owned worker may trigger one replacement.
+  // TypeScript-private rather than a `#` name, because `test/root-view.test.ts`
+  // drives this member directly.
   private _runtimeGeneration = 0;
-  private _preserveRuntimeErrorsForNextViewChange = false;
+  #preserveRuntimeErrorsForNextViewChange = false;
 
   readonly preserveRuntimeErrorsForNextViewChange = (): void => {
-    this._preserveRuntimeErrorsForNextViewChange = true;
+    this.#preserveRuntimeErrorsForNextViewChange = true;
   };
 
   readonly _handleRuntimeError = (
@@ -216,12 +218,13 @@ export class XRootView extends BaseView implements ShellApp {
   @state()
   private accessor presenceUrl: string | undefined = PRESENCE_URL?.href;
 
-  // The runtime task runs when AppState changes, and determines if a
-  // new RuntimeInternals must be created — only when identity or host
-  // (apiUrl) change; one runtime serves every space. This is manually
-  // run in `updated()` because we want to compare to previous values,
-  // leaving this function responsible for cleaning up previous
-  // runtimes, and creating a new one.
+  // The runtime task runs when AppState changes, and determines if a new
+  // RuntimeInternals must be created — only when identity or host (apiUrl)
+  // change; one runtime serves every space. This is manually run in `updated()`
+  // because we want to compare to previous values, leaving this function
+  // responsible for cleaning up previous runtimes, and creating a new one.
+  // TypeScript-private rather than a `#` name, because `test/root-view.test.ts`
+  // drives this member directly.
   private _rt = new Task<[AppState | undefined], RuntimeInternals | undefined>(
     this,
     {
@@ -242,8 +245,8 @@ export class XRootView extends BaseView implements ShellApp {
           previous.dispose().catch(console.error);
         }
         this._eventAttention = [];
-        this._eventAttentionMutationVersions.clear();
-        this._eventAttentionRefreshOwners.clear();
+        this.#eventAttentionMutationVersions.clear();
+        this.#eventAttentionRefreshOwners.clear();
 
         if (!app || !app.identity) {
           // Clear the runtime when no app state. The space belongs to the
@@ -339,7 +342,7 @@ export class XRootView extends BaseView implements ShellApp {
     this.addEventListener(SHELL_COMMAND, this.onCommand);
     document.addEventListener(
       "theme-preference-changed",
-      this._onThemeChanged,
+      this.#onThemeChanged,
     );
     globalThis.addEventListener("beforeunload", this._onBeforeUnload);
   }
@@ -349,7 +352,7 @@ export class XRootView extends BaseView implements ShellApp {
     this.removeEventListener(SHELL_COMMAND, this.onCommand);
     document.removeEventListener(
       "theme-preference-changed",
-      this._onThemeChanged,
+      this.#onThemeChanged,
     );
     globalThis.removeEventListener("beforeunload", this._onBeforeUnload);
     super.disconnectedCallback();
@@ -362,6 +365,8 @@ export class XRootView extends BaseView implements ShellApp {
   // unconfirmed, ask the browser to confirm leaving instead of silently losing
   // them. Commits confirm quickly (typically well under a second), so the
   // prompt only appears in the narrow window a reload would actually lose data.
+  // TypeScript-private rather than a `#` name, because `test/root-view.test.ts`
+  // drives this member directly.
   private _onBeforeUnload = (event: BeforeUnloadEvent): void => {
     if (this.runtime?.hasPendingWrites()) {
       event.preventDefault();
@@ -376,10 +381,10 @@ export class XRootView extends BaseView implements ShellApp {
     if (changedProperties.has("app")) {
       const previous = changedProperties.get("app");
       if (JSON.stringify(previous?.view) !== JSON.stringify(this.app?.view)) {
-        if (!this._preserveRuntimeErrorsForNextViewChange) {
+        if (!this.#preserveRuntimeErrorsForNextViewChange) {
           this._runtimeLoadErrors = [];
         }
-        this._preserveRuntimeErrorsForNextViewChange = false;
+        this.#preserveRuntimeErrorsForNextViewChange = false;
       }
       this.#syncViewSpace(this.app);
     }
@@ -480,8 +485,8 @@ export class XRootView extends BaseView implements ShellApp {
     this.space = space;
     this._eventAttention = [];
     if (previousSpace !== undefined) {
-      this._eventAttentionMutationVersions.delete(previousSpace);
-      this._eventAttentionRefreshOwners.delete(previousSpace);
+      this.#eventAttentionMutationVersions.delete(previousSpace);
+      this.#eventAttentionRefreshOwners.delete(previousSpace);
     }
     // Keep browser OTel span attribution in sync with the resolved space —
     // the telemetry sink lives across navigations.
@@ -506,24 +511,24 @@ export class XRootView extends BaseView implements ShellApp {
   };
 
   #noteEventAttentionMutation(space: DID, key: string): void {
-    const versions = this._eventAttentionMutationVersions.get(space) ??
+    const versions = this.#eventAttentionMutationVersions.get(space) ??
       new Map<string, number>();
-    versions.set(key, ++this._eventAttentionMutation);
-    this._eventAttentionMutationVersions.set(space, versions);
+    versions.set(key, ++this.#eventAttentionMutation);
+    this.#eventAttentionMutationVersions.set(space, versions);
   }
 
   async #refreshEventAttention(space: DID, generation: number): Promise<void> {
     const runtime = this.runtime;
     if (runtime === undefined) return;
     const owner = Symbol(space);
-    const startedAt = this._eventAttentionMutation;
-    this._eventAttentionRefreshOwners.set(space, owner);
+    const startedAt = this.#eventAttentionMutation;
+    this.#eventAttentionRefreshOwners.set(space, owner);
     try {
       const notices = await runtime.listEventAttention(space);
       if (
         generation !== this._runtimeGeneration || runtime !== this.runtime ||
         space !== this.space ||
-        this._eventAttentionRefreshOwners.get(space) !== owner
+        this.#eventAttentionRefreshOwners.get(space) !== owner
       ) return;
       const currentByKey = new Map(
         this._eventAttention.filter((notice) => notice.space === space).map(
@@ -537,7 +542,7 @@ export class XRootView extends BaseView implements ShellApp {
       );
       for (
         const [key, version]
-          of this._eventAttentionMutationVersions.get(space) ?? []
+          of this.#eventAttentionMutationVersions.get(space) ?? []
       ) {
         if (version <= startedAt) continue;
         const current = currentByKey.get(key);
@@ -552,14 +557,14 @@ export class XRootView extends BaseView implements ShellApp {
       if (
         generation === this._runtimeGeneration && runtime === this.runtime &&
         space === this.space &&
-        this._eventAttentionRefreshOwners.get(space) === owner
+        this.#eventAttentionRefreshOwners.get(space) === owner
       ) {
         console.error("[RootView] Failed to load event attention:", error);
       }
     } finally {
-      if (this._eventAttentionRefreshOwners.get(space) === owner) {
-        this._eventAttentionRefreshOwners.delete(space);
-        this._eventAttentionMutationVersions.delete(space);
+      if (this.#eventAttentionRefreshOwners.get(space) === owner) {
+        this.#eventAttentionRefreshOwners.delete(space);
+        this.#eventAttentionMutationVersions.delete(space);
       }
     }
   }
@@ -594,7 +599,7 @@ export class XRootView extends BaseView implements ShellApp {
     }
   };
 
-  private _onThemeChanged = (e: Event) => {
+  #onThemeChanged = (e: Event) => {
     this._themePreference = (e as CustomEvent).detail;
   };
 

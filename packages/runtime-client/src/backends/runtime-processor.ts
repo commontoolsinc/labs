@@ -1,6 +1,10 @@
 import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  cloneIfNecessary,
+  fabricFromNativeValue,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import {
   toCompactDebugString,
   toStructuredDebugValue,
@@ -23,10 +27,12 @@ import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { setLLMUrl } from "@commonfabric/llm";
 import { type ACL, isACLUser, isCapability } from "@commonfabric/memory/acl";
 import {
+  dbNeedsColumnProvenance,
   eventAttentionEntryKey,
   type EventAttentionIndexValue,
   type OperationFieldAddress,
   SERVER_EXECUTION_ATTENTION_DOC_ID,
+  type SqliteDbRef,
   type StreamEventsDocValue,
   toValuePath,
   type UnresolvedEventAttention,
@@ -45,16 +51,22 @@ import {
   type Cancel,
   type Cell,
   convertCellsToLinks,
+  encodeSqliteParams,
   entityIdFrom,
   type EventIntentOutcome,
   getCellOrThrow,
   getPatternIdentityRef,
   hasOperationStorageCapability,
+  type IExtendedStorageTransaction,
   type IOperationStorageCapability,
   isCell,
   isCellResult,
+  markDurableReadTx,
   normalizeSpaceHost,
   PatternCoverageCollector,
+  popFrame,
+  pushFrame,
+  resolveExternalRootRefForStructure,
   Runtime,
   runtimePresets,
   RuntimeTelemetry,
@@ -102,6 +114,8 @@ import {
   type CellGetCfcLabelRequest,
   type CellGetRequest,
   type CellGetResponse,
+  type CellInitializeRequest,
+  type CellPullRequest,
   type CellPushRequest,
   type CellResolveAsCellRequest,
   CellResponse,
@@ -132,6 +146,7 @@ import {
   type InitializationData,
   type IPCClientNotification,
   IPCClientRequest,
+  isCellRef,
   type ListEventAttentionRequest,
   type LoggerCountsResponse,
   type LoggerMetadata,
@@ -176,6 +191,7 @@ import {
   type SetBreakpointsRequest,
   type SetLoggerEnabledRequest,
   type SetLoggerLevelRequest,
+  type SetMemoryMessageCompressionRequest,
   type SetSettleStatsEnabledRequest,
   type SetTelemetryEnabledRequest,
   type SettleStatsHistoryResponse,
@@ -188,6 +204,10 @@ import {
   type SpaceRemoveAclEntryRequest,
   type SpaceResponse,
   type SpaceSetAclEntryRequest,
+  type SqliteExecRequest,
+  type SqliteParams,
+  type SqliteQueryRequest,
+  type SqliteQueryResponse,
   type TriggerTraceResponse,
   type UploadBlobRequest,
   type UploadBlobResponse,
@@ -294,6 +314,76 @@ const cfcLabelLogger = getLogger("runtime-client.cfc-label", {
   enabled: true,
   level: "error",
 });
+
+function isSqliteDbRefValue(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.id === "string" &&
+    !!candidate.tables && typeof candidate.tables === "object" &&
+    !Array.isArray(candidate.tables) &&
+    (candidate.scope === undefined || candidate.scope === "space" ||
+      candidate.scope === "user" || candidate.scope === "session") &&
+    (candidate.owner === undefined || typeof candidate.owner === "string");
+}
+
+function sqliteParamForRuntime(
+  runtime: Runtime,
+  value: FabricValue,
+  tx?: IExtendedStorageTransaction,
+): unknown {
+  if (value instanceof FabricBytes) return value;
+  if (isCellRef(value)) {
+    const cell = getCell(runtime, value);
+    return tx ? cell.withTx(tx) : cell;
+  }
+  if (Array.isArray(value)) {
+    return value.map((member) => sqliteParamForRuntime(runtime, member, tx));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, member]) => [
+        key,
+        sqliteParamForRuntime(runtime, member, tx),
+      ]),
+    );
+  }
+  return value;
+}
+
+/** Converts a runtime cell value into the redacted client wire domain. */
+function cellValueForClient(value: unknown): FabricValue {
+  return redactSigilCfcLabelViewsForDisplay(
+    convertCellsToLinks(
+      value as Parameters<typeof convertCellsToLinks>[0],
+      {
+        includeSchema: true,
+        keepAsCell: KeepAsCell.All,
+        doNotConvertCellResults: true,
+        includeCfcLabelView: true,
+      },
+    ),
+  ) as FabricValue;
+}
+
+function sqliteParamsForRuntime(
+  runtime: Runtime,
+  params: SqliteParams,
+  tx?: IExtendedStorageTransaction,
+): ReadonlyArray<unknown> | Record<string, unknown> {
+  const decode = (value: FabricValue) =>
+    sqliteParamForRuntime(runtime, value, tx);
+  return params.kind === "positional"
+    ? params.values.map(decode)
+    : Object.fromEntries(
+      params.entries.map(([key, value]) => [key, decode(value)]),
+    );
+}
+
+function sqliteValueForClient(value: unknown): FabricValue {
+  return fabricFromNativeValue(value);
+}
 
 function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   const spaceBaseUrl = new URL(`/${space}/`, apiUrl);
@@ -546,6 +636,15 @@ type RuntimeOperationSession = {
 };
 
 export class RuntimeProcessor {
+  // These members stay TypeScript-private rather than becoming `#` names, which
+  // is the convention elsewhere. `test/backends/runtime-processor.test.ts`
+  // drives this class by calling methods off `RuntimeProcessor.prototype`
+  // against a stand-in receiver — in places a plain object literal holding just
+  // the one field a handler reads. A `#` name is scoped to real instances, so
+  // every such call would throw `Receiver must be an instance of class
+  // RuntimeProcessor`. Converting the class means rewriting that suite to build
+  // real instances.
+
   private runtime: Runtime;
   private cc: PiecesController;
   private spaces = new Map<DID, PiecesController>();
@@ -1003,14 +1102,7 @@ export class RuntimeProcessor {
     // `convertCellsToLinks()` preserves a `FabricPrimitive` by identity, and
     // the envelope's encoding carries one to the main thread with its class,
     // so what the response holds is what the cell held.
-    const converted = redactSigilCfcLabelViewsForDisplay(
-      convertCellsToLinks(value, {
-        includeSchema: true,
-        keepAsCell: KeepAsCell.All,
-        doNotConvertCellResults: true,
-        includeCfcLabelView: true,
-      }),
-    ) as FabricValue;
+    const converted = cellValueForClient(value);
     // The resolved cell's own schema-bearing ref, when asked for — for a meta
     // link read this addresses the linked cell itself, so the caller can
     // subscribe to it or consult its schema's declarations.
@@ -1030,17 +1122,97 @@ export class RuntimeProcessor {
     };
   }
 
-  // A `CellHandle.set` is a blind leaf overwrite (last-write-wins); a
-  // `CellHandle.push` is read-modify-write and keeps compare-and-set. The
-  // blind-vs-CAS decision is made by METHOD — which request type the client sent
-  // — not by inspecting the value's shape. Both carry the whole already-resolved
-  // value on the wire.
-  handleCellSet(request: CellSetRequest): void {
-    this.applyCellWrite(request, /* blind */ true);
+  async handleCellPull(
+    request: CellPullRequest,
+  ): Promise<CellGetResponse> {
+    await getCell(this.runtime, request.cell).pull();
+    // A client pull is the freshness barrier, not a cache sample. Reactive
+    // quiescence can expose a lazy scoped target before the commit that creates
+    // its value has registered or landed. Cross the commit-aware fixpoint in
+    // the same request so the returned value and subsequent operations observe
+    // all work causally demanded by this pull.
+    await this.runtime.scheduler.idleWithPendingCommits();
+    return this.handleCellGet({
+      type: RequestType.CellGet,
+      cell: request.cell,
+    });
   }
 
-  handleCellPush(request: CellPushRequest): void {
-    this.applyCellWrite(request, /* blind */ false);
+  /** Atomically stores a default only while the target has no backing value. */
+  async handleCellInitialize(
+    request: CellInitializeRequest,
+  ): Promise<{ value: FabricValue }> {
+    if (request.value === undefined) {
+      throw new TypeError("Cell initialize requires a defined value.");
+    }
+    const initial = mapCellRefsToSigilLinks(request.value);
+    const result = await this.runtime.editWithRetry((tx) => {
+      const cell = getCell(this.runtime, request.cell).withTx(tx);
+      // Initialization materializes the same backing value a whole-cell write
+      // targets. A schema default is a readable fallback, not proof that the
+      // cell has been stored, and a write redirect is an address rather than
+      // backing data. Treating either as an existing value leaves a later
+      // child write with no durable parent and can replace the visible default.
+      // Follow a final write redirect only for this existence check, while
+      // retaining the view schema because its scope cap controls whether that
+      // redirect is reachable. Then return the normal projected value when
+      // storage already won.
+      const stored = cell.getRaw({
+        lastNode: "writeRedirect",
+      });
+      if (stored !== undefined) {
+        const projected = cell.get();
+        if (projected === undefined) {
+          throw new TypeError(
+            "Cell backing value is incompatible with its schema.",
+          );
+        }
+        return cellValueForClient(projected);
+      }
+      cell.set(initial);
+      return cellValueForClient(initial);
+    });
+    if (result.error) throw new Error(result.error.message);
+    return { value: result.ok };
+  }
+
+  // A `CellHandle.set` is a blind leaf overwrite (last-write-wins);
+  // `CellHandle.push` sends only appended members and uses Cell.push's native
+  // mergeable operation. The decision is made by METHOD, never by inspecting
+  // the value's shape.
+  handleCellSet(request: CellSetRequest): void | Promise<void> {
+    const commit = this.applyCellSet(request);
+    if (request.awaitCommit) return this.requireCellCommit(commit);
+    void commit.catch((error) => {
+      console.error(
+        "[RuntimeProcessor] Cell set commit failed:",
+        error,
+      );
+    });
+  }
+
+  handleCellPush(request: CellPushRequest): void | Promise<void> {
+    const tx = this.runtime.edit();
+    // A frame ordinal distinguishes members within one append. The operation
+    // cause distinguishes first members minted by independent client runtimes.
+    const frame = pushFrame({
+      cause: `runtime-client cell push ${crypto.randomUUID()}`,
+      runtime: this.runtime,
+      tx,
+      space: request.cell.space,
+      generatedIdCounter: 0,
+    });
+    try {
+      const cell = getCell(this.runtime, request.cell) as Cell<FabricValue[]>;
+      const values = request.values.map(mapCellRefsToSigilLinks);
+      cell.withTx(tx).push(...values);
+    } finally {
+      popFrame(frame);
+    }
+    this.runtime.prepareTxForCommit(tx);
+    const commit = tx.commit();
+    if (request.awaitCommit) return this.requireCellCommit(commit);
+    this.observeCellCommit(commit, "push");
   }
 
   private operationSessionKey(cell: CellGetRequest["cell"]): string {
@@ -1261,55 +1433,56 @@ export class RuntimeProcessor {
     };
   }
 
-  // Shared write path for CellSet/CellPush. In blind mode the set's reads carry no
-  // value-equality precondition, so a UI overwrite is last-write-wins and no
-  // longer loses the own-write race that rolled the edit back. In their place we
-  // thread ONE structural precondition — the cell's PARENT address — which
-  // buildReads turns into a nonRecursive read: that catches a concurrent whole-doc
-  // delete or an ancestor reshape (so a stale nested patch can't throw at
-  // read-materialization) without conflicting on a concurrent write to the cell's
-  // own value. We compute the parent here, at handleCellSet, because the logical
-  // write path is known only here — buildReads sees the optimized element-level
-  // diff. In non-blind (push) mode the read-target stays a commit precondition, so
-  // a concurrent push aborts rather than being clobbered. The blind mark is
-  // cleared before prepareTxForCommit so CFC boundary-commit read-then-writes
-  // retain their preconditions.
-  applyCellWrite(
-    request: CellSetRequest | CellPushRequest,
-    blind: boolean,
-  ): void {
+  // A CellSet is the blind, last-write-wins arm. Runtime.commitUiCellWrite owns
+  // its structural precondition, retry policy, and per-address supersede lane.
+  // Ordinary UI writes remain fire-and-forget, while strict capability writes
+  // can await the same outcome through handleCellSet.
+  applyCellSet(request: CellSetRequest) {
     const cell = getCell(this.runtime, request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
-    // The commit-retry seam for UI writes (Runtime.commitUiCellWrite): the
-    // blind marking, the structural-parent precondition, and the commit run
-    // there, per attempt, under the ruled retryable-rejection vocabulary —
-    // a `stale confirmed read` conflict (a serving wave landing structure
-    // on the doc mid-typing) is retried after catch-up instead of silently
-    // dropping the user's input, and a finally-lost write is loudly counted
-    // (`runtime.ui-cell-write` / `lost`). One lane per cell address, so a
-    // retry never re-asserts an older input over a newer one.
-    //
-    // Local visibility is established by the first commit attempt; the
-    // returned promise tracks remote confirmation, retries, and the loss
-    // report, and must not block cell IPC. Only BLIND writes join a
-    // supersede lane: a CAS push carries a read-modify-write premise its
-    // lane-mates must never overwrite (cubic P2 on #6477).
-    void this.runtime.commitUiCellWrite(cell, value, {
-      blind,
-      ...(blind
-        ? { supersedeKey: this.operationSessionKey(request.cell) }
-        : {}),
+    return this.runtime.commitUiCellWrite(cell, value, {
+      blind: true,
+      supersedeKey: this.operationSessionKey(request.cell),
     });
   }
 
-  handleCellSend(request: CellSendRequest): void {
+  handleCellSend(request: CellSendRequest): void | Promise<void> {
     const tx = this.runtime.edit();
     const cell = getCell(this.runtime, request.cell);
     cell.withTx(tx).send(mapCellRefsToSigilLinks(request.event));
     this.runtime.prepareTxForCommit(tx);
-    // Local visibility is established by commit(); the promise tracks remote
-    // confirmation/rollback and must not block cell IPC.
-    tx.commit();
+    const commit = tx.commit();
+    if (request.awaitCommit) return this.requireCellCommit(commit);
+    this.observeCellCommit(commit, "send");
+  }
+
+  private observeCellCommit(
+    commit: ReturnType<ReturnType<Runtime["edit"]>["commit"]>,
+    operation: "set" | "push" | "send",
+  ): void {
+    void commit.then(
+      (result) => {
+        if (result.error) {
+          console.error(
+            `[RuntimeProcessor] Cell ${operation} commit failed:`,
+            result.error,
+          );
+        }
+      },
+      (error) => {
+        console.error(
+          `[RuntimeProcessor] Cell ${operation} commit failed:`,
+          error,
+        );
+      },
+    );
+  }
+
+  private async requireCellCommit(
+    commit: ReturnType<ReturnType<Runtime["edit"]>["commit"]>,
+  ): Promise<void> {
+    const result = await commit;
+    if (result.error) throw new Error(result.error.message);
   }
 
   handleCellSubscribe(request: CellSubscribeRequest): BooleanResponse {
@@ -1384,8 +1557,25 @@ export class RuntimeProcessor {
   handleCellResolveAsCell(request: CellResolveAsCellRequest): CellResponse {
     const cell = getCell(this.runtime, request.cell);
     const resolved = cell.resolveAsCell();
+    const ref = createCellRef(resolved);
+    if (
+      ref.schema && typeof ref.schema === "object" &&
+      !Array.isArray(ref.schema)
+    ) {
+      ref.schema = resolveExternalRootRefForStructure(ref.schema);
+    }
+    const raw = (resolved as Cell<unknown> & {
+      getRaw?: (options: { lastNode: "value" }) => unknown;
+    }).getRaw?.({ lastNode: "value" });
+    if (isSqliteDbRefValue(raw)) {
+      const schema = ref.schema && typeof ref.schema === "object" &&
+          !Array.isArray(ref.schema)
+        ? ref.schema
+        : { type: "object" as const };
+      ref.schema = { ...schema, asCell: ["sqlite"] as const };
+    }
     return {
-      cell: createCellRef(resolved),
+      cell: ref,
     };
   }
 
@@ -1416,6 +1606,136 @@ export class RuntimeProcessor {
     };
     cfcLabelLogger.time(totalStart, "total");
     return response;
+  }
+
+  async handleSqliteQuery(
+    request: SqliteQueryRequest,
+  ): Promise<SqliteQueryResponse> {
+    const cell = getCell(this.runtime, request.cell);
+    const db = await this.pullSqliteDbRef(cell);
+    // A direct IPC query has no runner result cell on which to persist the
+    // label derived from result-column provenance. Refuse that database shape
+    // instead of returning rows with their CFC labels silently stripped.
+    if (dbNeedsColumnProvenance(db.tables)) {
+      throw new Error(
+        "Direct SQLite bridge queries are unavailable for CFC-labeled " +
+          "tables; query them inside a pattern so result labels propagate.",
+      );
+    }
+    const provider = this.runtime.storageManager.open(request.cell.space);
+    if (!provider.sqliteQuery) {
+      throw new Error(
+        "sqlite: storage provider does not support queries " +
+          "(sqliteQuery unavailable)",
+      );
+    }
+    const params = request.params === undefined
+      ? undefined
+      : encodeSqliteParams(
+        request.sql,
+        sqliteParamsForRuntime(this.runtime, request.params),
+      );
+    const result = await provider.sqliteQuery(db, request.sql, params);
+    return {
+      rows: result.rows.map((row) =>
+        Object.fromEntries(
+          Object.entries(row).map(([key, value]) => [
+            key,
+            sqliteValueForClient(value),
+          ]),
+        )
+      ),
+    };
+  }
+
+  async handleSqliteExec(request: SqliteExecRequest): Promise<void> {
+    const source = getCell(this.runtime, request.cell);
+    const db = await this.pullSqliteDbRef(source);
+    const result = await this.runtime.editWithRetry((tx) => {
+      markDurableReadTx(tx);
+      const params = request.params === undefined
+        ? undefined
+        : sqliteParamsForRuntime(this.runtime, request.params, tx);
+      const cell = getCell(this.runtime, request.cell).withTx(
+        tx,
+      ) as unknown as Cell<unknown> & {
+        exec(
+          sql: string,
+          params?: ReadonlyArray<unknown> | Record<string, unknown>,
+        ): void;
+      };
+      if (cell.getRaw({ lastNode: "value" }) === undefined) {
+        cell.asSchema<SqliteDbRef>({
+          type: "object",
+          additionalProperties: true,
+        }).set(db);
+      }
+      cell.exec(request.sql, params);
+    });
+    if (result.error) throw new Error(result.error.message);
+  }
+
+  private async pullSqliteDbRef(cell: Cell<unknown>): Promise<SqliteDbRef> {
+    await cell.pull();
+    const raw = cell.getRaw({ lastNode: "value" });
+    const missing = raw === undefined ||
+      (raw !== null && typeof raw === "object" && !Array.isArray(raw) &&
+        Object.keys(raw).length === 0);
+    if (missing) {
+      // A resolved scoped target can be demanded while its lazy factory write
+      // is still committing. Its object schema presents that missing value as
+      // an empty object rather than `undefined`. Pull waits for reactive work,
+      // but deliberately not for in-flight commits; sync before that commit can
+      // confirm the target absent and leave this request holding an empty
+      // replica. Cross the commit-aware barrier before loading only that first
+      // missing value. Non-empty malformed handles still fail immediately in
+      // readSqliteDbRef instead of being mistaken for a pending factory.
+      await this.runtime.scheduler.idleWithPendingCommits();
+      await cell.sync();
+    }
+    return this.readSqliteDbRef(cell);
+  }
+
+  private readSqliteDbRef(cell: Cell<unknown>): SqliteDbRef {
+    const raw = cell.getRaw({ lastNode: "value" }) as
+      | {
+        id?: unknown;
+        tables?: unknown;
+        scope?: unknown;
+        owner?: unknown;
+      }
+      | undefined;
+    if (!raw || typeof raw.id !== "string") {
+      throw new TypeError(
+        "SQLite operations require a valid SqliteDb cell handle.",
+      );
+    }
+    if (
+      raw.scope !== undefined && raw.scope !== "space" &&
+      raw.scope !== "user" && raw.scope !== "session"
+    ) {
+      throw new TypeError(
+        `Invalid SQLite database scope: ${String(raw.scope)}`,
+      );
+    }
+    if (raw.owner !== undefined && typeof raw.owner !== "string") {
+      throw new TypeError("Invalid SQLite database owner.");
+    }
+    const materialized = cell.asSchema<{
+      tables?: FabricValue;
+    }>({ type: "object", additionalProperties: true }).get();
+    const tables = materialized?.tables !== undefined
+      ? cloneIfNecessary(materialized.tables, {
+        frozen: false,
+      }) as SqliteDbRef["tables"]
+      : raw.tables as SqliteDbRef["tables"];
+    return {
+      id: raw.id,
+      ...(tables !== undefined && { tables }),
+      ...((raw.scope === "space" || raw.scope === "user" ||
+        raw.scope === "session") && { scope: raw.scope }),
+      ...(typeof raw.owner === "string" && { owner: raw.owner }),
+    };
   }
 
   handleGetCell(request: GetCellRequest): CellResponse {
@@ -1575,13 +1895,16 @@ export class RuntimeProcessor {
   ): Promise<PageResponse> {
     const cc = this.getSpaceCtx(request.space);
     let program: Program | undefined;
-    let origin: string | undefined;
     if ("url" in request.source && request.source.url) {
       const sourceUrl = new URL(request.source.url);
       if (sourceUrl.protocol !== "http:" && sourceUrl.protocol !== "https:") {
         throw new Error("Piece source URL must use HTTP or HTTPS.");
       }
-      origin = sourceUrl.href;
+      // The URL is a place to read a program from once, not an origin. A piece
+      // follows what this deployment serves and what the fabric holds, so an
+      // arbitrary endpoint names nothing the lifecycle can resolve later, and
+      // recording one would leave the piece carrying an origin nothing follows.
+      // The piece is created detached, and its owner can name an origin after.
       program = await cc.runtime.harness.resolve(
         new HttpProgramResolver(sourceUrl),
       );
@@ -1608,7 +1931,6 @@ export class RuntimeProcessor {
 
     const piece = await cc.create<NameSchema>(program, {
       input: argument,
-      origin,
       start: request.run ?? true,
     }, request.cause);
     return {
@@ -1967,6 +2289,15 @@ export class RuntimeProcessor {
     this.runtime.scheduler.setEventPreflightTelemetryEnabled(request.enabled);
   }
 
+  /** Changes memory-message compression for every remote storage session. */
+  async setMemoryMessageCompression(
+    request: SetMemoryMessageCompressionRequest,
+  ): Promise<void> {
+    await this.runtime.storageManager.setMessageCompressionEnabled?.(
+      request.enabled,
+    );
+  }
+
   resetLoggerBaselines(_: any): void {
     resetAllCountBaselines();
     resetAllTimingBaselines();
@@ -2172,6 +2503,10 @@ export class RuntimeProcessor {
         return await this.dispose();
       case RequestType.CellGet:
         return this.handleCellGet(request);
+      case RequestType.CellPull:
+        return await this.handleCellPull(request);
+      case RequestType.CellInitialize:
+        return await this.handleCellInitialize(request);
       case RequestType.CellSet:
         return this.handleCellSet(request);
       case RequestType.CellPush:
@@ -2200,6 +2535,10 @@ export class RuntimeProcessor {
         return this.handleOperationUnsubscribe(request);
       case RequestType.OperationSessionClose:
         return this.handleOperationSessionClose(request);
+      case RequestType.SqliteQuery:
+        return await this.handleSqliteQuery(request);
+      case RequestType.SqliteExec:
+        return await this.handleSqliteExec(request);
       case RequestType.GetCell:
         return this.handleGetCell(request);
       case RequestType.GetHomeSpaceCell:
@@ -2272,6 +2611,8 @@ export class RuntimeProcessor {
         return this.setLoggerEnabled(request);
       case RequestType.SetTelemetryEnabled:
         return this.setTelemetryEnabled(request);
+      case RequestType.SetMemoryMessageCompression:
+        return await this.setMemoryMessageCompression(request);
       case RequestType.ResetLoggerBaselines:
         return this.resetLoggerBaselines(request);
       case RequestType.GetSettleStats:

@@ -48,7 +48,11 @@ const LINK_B = `/of:fid1:${HASH_B}/items/0`;
 class FakeSandboxRuntime implements SandboxRuntime {
   readonly shellRequests: SandboxShellRequest[] = [];
 
-  constructor(private readonly shellResults: SandboxCommandResult[] = []) {}
+  readonly #shellResults: SandboxCommandResult[];
+
+  constructor(shellResults: SandboxCommandResult[] = []) {
+    this.#shellResults = shellResults;
+  }
 
   describe(): SandboxRuntimeDescription {
     return {
@@ -88,7 +92,7 @@ class FakeSandboxRuntime implements SandboxRuntime {
       });
     }
     return Promise.resolve(
-      this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      this.#shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
   }
 }

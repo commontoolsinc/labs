@@ -242,7 +242,10 @@ we were not looking."
 Section markers separate major portions of a file or class. They are not
 headers for individual functions and their helpers — doc comments already
 carry that structure, and a reader navigating by rendered documentation never
-sees the marker at all.
+sees the marker at all. They are not, as a rule, headers for individual test
+blocks either;
+[`unit-test-coding-style.md`](unit-test-coding-style.md#commenting-a-block)
+says where a comment about one of those goes.
 
 Where `//` comments can be used, mark a section of a file or a class with a
 `//` comment block that opens and closes with a line holding nothing but `//`.
@@ -261,6 +264,42 @@ after a blank line:
 
 export function fry(): void {}
 ```
+
+A blank line sets the frame off above as well as below. Without the one above,
+the marker runs into whatever comment precedes it and the two read as one
+comment; without the one below, the frame reads as a note on the declaration it
+touches rather than as a heading over what follows.
+
+Directly under an opening bracket there is nothing above to separate from, and
+`deno fmt` removes a blank line there in any case. A frame in that position is
+also the first content of the block, which is where a comment about the whole
+block goes, so the two shapes are indistinguishable to a reader: put the
+region's first marker after the block's shared setup instead, or let the
+whole-block comment do the work.
+
+**A region has an end, and writing the marker is choosing it.** A marker opens
+a region that runs to the next marker at the same level, or to the end of the
+enclosing block or file. Read what sits between the marker and that point and
+check the title covers all of it. Where the material the title owns stops before
+the enclosing block does, put a marker there titling what follows. A file whose
+last marker does not head the file's last section has a region whose end nobody
+chose.
+
+**A title is a claim about everything in its region**, not an introduction to
+what comes next. The same words that pass as a label above the first of a run
+become false as a title over a region holding more than they name: "the two
+things that are not values" is a fact about a region with two of them in it.
+When a region grows, its title is read against it again.
+
+A title can be wrong by being too narrow as easily as too wide. Where the
+subject it names also appears outside its region, either the region is in the
+wrong place or the title names something smaller than its subject.
+
+**A region holds more than its blocks.** Everything between the marker and the
+region's end falls inside it: a helper function, a fixture constant, a
+`beforeEach()`. A helper that serves the whole file but happens to sit inside
+one region reads as belonging to that region, so shared setup goes above the
+first marker.
 
 **CSS takes a block comment.** CSS has no line comments, so a section marker in
 a `.css` file, a `css` template literal, or a `<style>` block is a `/* */`

@@ -2136,6 +2136,158 @@ describe("wish built-in", () => {
       const wishResult = result.key("result").get();
       expect(wishResult?.result).toBeDefined();
     });
+
+    it(
+      "a cached suggestion sidecar is served without a second fetch, and " +
+        "its serve-time closure kick passes NO demanding space off the " +
+        "serving posture — a client kicks nothing",
+      async () => {
+        // The (2-D) serve-time closure kick's SUGGESTION arm (the ruled 3b
+        // close, verification-coverage.md OW45). A multi-result wish launches
+        // the suggestion sidecar; the SECOND such launch finds the sidecar
+        // already fetched and takes the cached-run arm — the one arm that
+        // serves a pattern into a space no compile of it ever touched, which
+        // is why the kick is wired there. What this pins is the arm's GATE:
+        // the demanding space is passed only under `runtime.servingPosture`,
+        // so a client (this runtime) replicates nothing. The kick's own
+        // behaviour once a space IS passed is pinned in
+        // wish-sidecar-closure-kick.test.ts; the serving stack end to end is
+        // the lunch surface's own direct-CI probe.
+
+        // Two mentionables under one tag put the wish on its multi-result
+        // path, which is what launches the suggestion sidecar at all.
+        const spaceCell = runtime.getCell(
+          patternSpace.did(),
+          patternSpace.did(),
+        ).withTx(tx);
+        const defaultPatternCell = runtime.getCell(
+          patternSpace.did(),
+          "suggestion-serve-default-pattern",
+          undefined,
+          tx,
+        );
+        const backlinksIndexCell = runtime.getCell(
+          patternSpace.did(),
+          "suggestion-serve-backlinks",
+          undefined,
+          tx,
+        );
+        const mentionables = ["a", "b"].map((suffix) => {
+          const item = runtime.getCell(
+            patternSpace.did(),
+            `suggestion-serve-item-${suffix}`,
+            undefined,
+            tx,
+          );
+          const data: any = { type: `mentionable-${suffix}` };
+          data[NAME] = "serve-kick-tag";
+          item.set(data);
+          return item;
+        });
+        backlinksIndexCell.set({ mentionable: mentionables });
+        defaultPatternCell.set({ backlinksIndex: backlinksIndexCell });
+        (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        // A unique pattern-environment origin keys this test's entry in the
+        // module-global sidecar cache (the cache memoizes per URL), and the
+        // stub serves a trivial sidecar so the fetch actually SUCCEEDS —
+        // without that the cached arm is never reached.
+        const originalFetch = globalThis.fetch;
+        const originalEnvironment = getPatternEnvironment();
+        setPatternEnvironment({
+          apiUrl: new URL("https://suggestion-cached-serve.test/"),
+        });
+        let suggestionFetches = 0;
+        globalThis.fetch = ((input: Request | URL | string) => {
+          const url = input instanceof Request ? input.url : String(input);
+          if (url.includes("suggestion.tsx")) {
+            suggestionFetches++;
+            return Promise.resolve(
+              new Response(
+                [
+                  "import { pattern } from 'commonfabric';",
+                  "export default pattern(() => ({ label: 'stub sidecar' }));",
+                ].join("\n"),
+                { status: 200 },
+              ),
+            );
+          }
+          return Promise.resolve(new Response("not found", { status: 404 }));
+        }) as typeof fetch;
+
+        // Every closure replication this runtime issues, by TARGET space —
+        // the kick's second argument. A client arm must never name the
+        // demanding space here.
+        const managerSpy = runtime.patternManager as unknown as {
+          replicatePatternToSpace?: (...args: unknown[]) => void;
+        };
+        const realReplicate = runtime.patternManager.replicatePatternToSpace
+          .bind(runtime.patternManager);
+        const replicationTargets: unknown[] = [];
+        managerSpy.replicatePatternToSpace = (...args: unknown[]) => {
+          replicationTargets.push(args[1]);
+          (realReplicate as (...a: unknown[]) => void)(...args);
+        };
+
+        try {
+          // FIRST wish node: the sidecar cache is cold, so the launch takes
+          // the FETCH arm and warms it.
+          const firstPattern = pattern(() => ({
+            hits: wish({ query: "#serve-kick-tag", scope: ["."] }),
+          }));
+          const firstCell = runtime.getCell<Record<string, any>>(
+            patternSpace.did(),
+            "suggestion-cached-serve-first",
+            undefined,
+            tx,
+          );
+          const first = runtime.run(tx, firstPattern, {}, firstCell);
+          await tx.commit();
+          tx = runtime.edit();
+          await first.pull();
+          await runtime.settled();
+          expect(suggestionFetches).toBe(1);
+
+          // SECOND wish node: the sidecar is CACHED now, so this launch
+          // takes the cached-run arm — served, not re-fetched.
+          const secondPattern = pattern(() => ({
+            hits: wish({ query: "#serve-kick-tag", scope: ["."] }),
+          }));
+          const secondCell = runtime.getCell<Record<string, any>>(
+            patternSpace.did(),
+            "suggestion-cached-serve-second",
+            undefined,
+            tx,
+          );
+          const second = runtime.run(tx, secondPattern, {}, secondCell);
+          await tx.commit();
+          tx = runtime.edit();
+          await second.pull();
+          await runtime.settled();
+
+          // The discriminator between the two arms: the cached arm SENDS
+          // the sidecar's own result cell as the wish state (the stub's
+          // value), where the fetch arm sends the fast `{result,
+          // candidates}` shape and only launches. So this value is the
+          // witness that the cached-run arm — the one carrying the kick —
+          // is the arm that ran, and that it ran without re-fetching.
+          expect(second.key("hits").get()?.label).toBe("stub sidecar");
+          expect(suggestionFetches).toBe(1);
+          // THE PIN: off the serving posture the arm names no demanding
+          // space, so nothing replicated into the wish's own space.
+          expect(replicationTargets).not.toContain(patternSpace.did());
+        } finally {
+          delete managerSpy.replicatePatternToSpace;
+          globalThis.fetch = originalFetch;
+          setPatternEnvironment(originalEnvironment);
+          await runtime.idle();
+        }
+      },
+    );
   });
 
   describe("compiled pattern with object-based wish syntax", () => {
@@ -3562,12 +3714,13 @@ describe("wish built-in", () => {
       expect(pieceData).toHaveProperty("count");
     });
 
-    // Host-embedding contract seam 1 (docs/features/host-embedding.md §1):
-    // the well-known profile wish targets an embedder binds to, and the
-    // zero-profile `result ?? fallback` idiom. This describe pins the
-    // load-bearing embedder guarantees in one place; the broader profile suite
-    // above covers ordering/picker/headless behavior in depth.
     describe("host embedding contract: profile wish targets", () => {
+      // Host-embedding contract seam 1 (docs/features/host-embedding.md §1):
+      // the well-known profile wish targets an embedder binds to, and the
+      // zero-profile `result ?? fallback` idiom. This describe pins the
+      // load-bearing embedder guarantees in one place; the broader profile
+      // suite above covers ordering/picker/headless behavior in depth.
+
       it("resolves all five well-known targets from the default profile", async () => {
         const profileSpaceDid = (await Identity.fromPassphrase(
           "host-embedding-wish-profile-space",
@@ -3713,13 +3866,14 @@ describe("wish built-in", () => {
       });
     });
 
-    // CT-1829: `wish("#profile").result` is ALWAYS the single best profile
-    // (ordered default → MRU → first) in every mode. The picker no longer owns
-    // `.result`; it is only the `[UI]` switching affordance. These tests pin the
-    // decided contract that Loom (loom PR #3627) binds to. This is a distinct
-    // describe from the "host embedding contract" block landing in PR #4502 — do
-    // not depend on that one.
     describe("single-result #profile contract (CT-1829)", () => {
+      // CT-1829: `wish("#profile").result` is ALWAYS the single best profile
+      // (ordered default → MRU → first) in every mode. The picker no longer
+      // owns `.result`; it is only the `[UI]` switching affordance. These tests
+      // pin the decided contract that Loom (loom PR #3627) binds to. This is a
+      // distinct describe from the "host embedding contract" block landing in
+      // PR #4502 — do not depend on that one.
+
       // Stand up N profiles in one profile space, wire the home default-pattern
       // `profiles` list (and optionally `defaultProfile` / `mru`), run a
       // `#profile` wish (interactive unless `headless`), and return the wish
@@ -4040,20 +4194,120 @@ describe("wish built-in", () => {
         }
       });
 
-      // CT-1842: In real deployments each profile lives in its OWN space (an
-      // anonymous `ProfileHome.inSpace()`), and the `mru` / `defaultProfile` link
-      // and the `profiles` candidate for the SAME profile point at DIFFERENT
-      // cells WITHIN that profile's space — same space, DIFFERENT entity id (the
-      // picker stores the profile pattern's result cell; the list stores the
-      // pattern cell). So neither `Cell.equals` nor an id-based comparison matches
-      // them; the MRU/default match returned false for every candidate and the
-      // ordering silently collapsed to `profiles`-list (creation) order — the
-      // switcher was a no-op cross-space. The builtin now matches by the profile's
-      // own SPACE (the stable per-profile identity), so the id difference no
-      // longer defeats the match. Verified against live data (switchtest
-      // identity): mru[0].space == profiles[1].space for the same profile, while
-      // the ids differ.
+      it(
+        "a cached picker sidecar is served without a second fetch, and its " +
+          "serve-time closure kick replicates nothing — the picker cache " +
+          "has no compile context, so the kick is inert by construction",
+        async () => {
+          // The (2-D) serve-time closure kick's PICKER arm (the ruled 3b close,
+          // verification-coverage.md OW45). A second multi-profile wish finds
+          // the picker sidecar already fetched and takes the cached-run arm,
+          // where the kick is wired. What this pins is that the picker's kick
+          // is INERT — the cache is built with no compile context
+          // (`compileInUserSpace` unset for `profile-picker.tsx`), so
+          // `compiledSpace` is never set and the kick has no origin to
+          // replicate FROM. The arm is wired uniformly anyway so a future
+          // compile-context change cannot silently miss it; this step is what
+          // would notice such a change arriving unannounced.
+
+          const originalFetch = globalThis.fetch;
+          const originalEnvironment = getPatternEnvironment();
+          setPatternEnvironment({
+            apiUrl: new URL("https://picker-cached-serve.test/"),
+          });
+          let pickerFetches = 0;
+          globalThis.fetch = ((input: Request | URL | string) => {
+            const url = input instanceof Request ? input.url : String(input);
+            if (url.includes("profile-picker.tsx")) {
+              pickerFetches++;
+              return Promise.resolve(
+                new Response(
+                  [
+                    "import { pattern } from 'commonfabric';",
+                    "export default pattern(() => ({ label: 'stub picker' }));",
+                  ].join("\n"),
+                  { status: 200 },
+                ),
+              );
+            }
+            return Promise.resolve(new Response("not found", { status: 404 }));
+          }) as typeof fetch;
+
+          // Every closure replication this runtime issues, by TARGET space.
+          const managerSpy = runtime.patternManager as unknown as {
+            replicatePatternToSpace?: (...args: unknown[]) => void;
+          };
+          const realReplicate = runtime.patternManager.replicatePatternToSpace
+            .bind(runtime.patternManager);
+          const replicationTargets: unknown[] = [];
+          managerSpy.replicatePatternToSpace = (...args: unknown[]) => {
+            replicationTargets.push(args[1]);
+            (realReplicate as (...a: unknown[]) => void)(...args);
+          };
+
+          try {
+            // FIRST wish node: 2 profiles, no default — the picker path.
+            // Its launch finds the cache cold and warms it.
+            await setupProfiles("cached-picker", { names: ["Ada", "Grace"] });
+            await runtime.settled();
+            expect(pickerFetches).toBe(1);
+
+            // SECOND wish node over the same home: the picker sidecar is
+            // CACHED now, so this launch takes the cached-run arm.
+            const wishPattern = pattern(() => ({
+              profile: wish({ query: "#profile" }),
+            }));
+            const resultCell = runtime.getCell<Record<string, any>>(
+              patternSpace.did(),
+              "ct1829-cached-picker-second-result",
+              undefined,
+              tx,
+            );
+            const second = runtime.run(tx, wishPattern, {}, resultCell);
+            await tx.commit();
+            tx = runtime.edit();
+            await second.pull();
+            await runtime.settled();
+
+            // Served, not re-fetched — and the surface it served is the
+            // cached stub's, which is the witness that the cached-run arm
+            // ran (a re-fetch would have gone through the other arm).
+            expect(pickerFetches).toBe(1);
+            const ui = second.key("profile").key(UI).get() as any;
+            expect(ui?.props?.["data-profile-picker-ui"]).toBe("wish");
+            const pickerCell = second.key("profile").key(UI).key("props")
+              .key("$cell").resolveAsCell();
+            await pickerCell.sync();
+            await pickerCell.pull();
+            expect((pickerCell.get() as any)?.label).toBe("stub picker");
+            // THE PIN: the picker's kick has no compile context to
+            // replicate from, so the served space got no closure kick.
+            expect(replicationTargets).not.toContain(patternSpace.did());
+          } finally {
+            delete managerSpy.replicatePatternToSpace;
+            globalThis.fetch = originalFetch;
+            setPatternEnvironment(originalEnvironment);
+            await runtime.idle();
+          }
+        },
+      );
+
       describe("cross-space id skew (CT-1842)", () => {
+        // CT-1842: In real deployments each profile lives in its OWN space (an
+        // anonymous `ProfileHome.inSpace()`), and the `mru` / `defaultProfile`
+        // link and the `profiles` candidate for the SAME profile point at
+        // DIFFERENT cells WITHIN that profile's space — same space, DIFFERENT
+        // entity id (the picker stores the profile pattern's result cell; the
+        // list stores the pattern cell). So neither `Cell.equals` nor an
+        // id-based comparison matches them; the MRU/default match returned
+        // false for every candidate and the ordering silently collapsed to
+        // `profiles`-list (creation) order — the switcher was a no-op
+        // cross-space. The builtin now matches by the profile's own SPACE (the
+        // stable per-profile identity), so the id difference no longer defeats
+        // the match. Verified against live data (switchtest identity):
+        // mru[0].space == profiles[1].space for the same profile, while the ids
+        // differ.
+
         // Stand up N profiles, each in its OWN space (real cross-space), wire the
         // home `profiles` list from the profiles' CANONICAL cells, and write
         // `mru` / `defaultProfile` as links pointing at a DIFFERENT cell in the

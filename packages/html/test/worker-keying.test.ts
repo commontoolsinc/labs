@@ -71,10 +71,11 @@ Deno.test("keying - generateKey", async (t) => {
     assertEquals(generateKey(true), generateKey(true));
   });
 
-  // Members a child can differ by, each of which must key it apart: two
-  // children keying alike are reconciled as one, and the second one's content
-  // never reaches the DOM. Each of these is a value `WorkerProps` admits.
   await t.step("keys members that differ only in fabric terms", () => {
+    // Members a child can differ by, each of which must key it apart: two
+    // children keying alike are reconciled as one, and the second one's content
+    // never reaches the DOM. Each of these is a value `WorkerProps` admits.
+
     const key = (props: Record<string, unknown>) =>
       generateKey({ type: "vnode", name: "div", props });
 
@@ -90,7 +91,14 @@ Deno.test("keying - generateKey", async (t) => {
     assertNotEquals(key({ n: 1n }), key({ n: 1 }));
   });
 
-  // The two things a render node may hold that are not `FabricValue`s.
+  //
+  // Beyond `FabricValue`
+  //
+  // An event handler, which is not a `FabricValue` and so cannot be hashed as
+  // one, and the coarse key that comes back for a node the keyer cannot hash
+  // at all.
+  //
+
   await t.step("keys an event handler without falling back", () => {
     const key = (props: Record<string, unknown>) =>
       generateKey({ type: "vnode", name: "div", props });
@@ -113,6 +121,14 @@ Deno.test("keying - generateKey", async (t) => {
     assertEquals(typeof generateKey({ n: new Map() }), "string");
     assertEquals(generateKey({ n: new Map() }), generateKey({ n: new Map() }));
   });
+
+  //
+  // A hole and a cycle
+  //
+  // Neither is a value the keyer can hash by following it: one is a gap where
+  // an element would be, the other a structure that would not terminate if
+  // followed.
+  //
 
   await t.step("keys a hole apart from an undefined element", () => {
     const hole = [1, , 3];

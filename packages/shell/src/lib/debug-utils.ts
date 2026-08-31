@@ -48,6 +48,8 @@ export type CommonfabricDebugState =
     viewSettled?: () => Promise<void>;
     vdom?: ReturnType<typeof createVDomDebugHelpers>;
     detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
+    /** Changes memory-message compression for live and later connections. */
+    setMemoryMessageCompression?: (enabled: boolean) => Promise<void>;
   };
 
 type CommonfabricGlobal = { commonfabric?: CommonfabricDebugState };
@@ -78,6 +80,8 @@ export function exposeCommonfabricGlobals(
     console.log("Cycles:", result.cycles);
     return result;
   };
+  cf.setMemoryMessageCompression = (enabled) =>
+    runtime.setMemoryMessageCompression(enabled);
   const debugUtils = createDebugUtils(getSpace, getRuntime);
   cf.readCell = debugUtils.readCell;
   cf.readArgumentCell = debugUtils.readArgumentCell;
@@ -95,6 +99,7 @@ export function clearRuntimeDebugGlobals(global: CommonfabricGlobal): void {
   if (global.commonfabric) {
     global.commonfabric.rt = undefined;
     global.commonfabric.viewSettled = undefined;
+    global.commonfabric.setMemoryMessageCompression = undefined;
   }
 }
 

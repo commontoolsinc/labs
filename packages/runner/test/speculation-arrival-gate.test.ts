@@ -70,24 +70,11 @@ import {
   stampSpeculationRunContext,
 } from "../src/speculation/overlay-destination.ts";
 import { readWatermarkSeq as readWatermark } from "../src/executor/watermark.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("arrival gate space");
 const space = spaceSigner.did() as MemorySpace;
 const aliceSigner = await Identity.fromPassphrase("arrival gate alice");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 20_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 /** A per-user derivation: `echo` reads a PerUser draft, so its output
  * narrows into the reader's user instance — exactly the shape whose
@@ -1148,12 +1135,15 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     scripted.destination.close();
   });
 
-  // The class THREADING (the predicate's plumbing): the replica records
-  // the covering commit's class on its confirmed record — from the
-  // frame's `coverClass` on integrate, preserved across a same-seq
-  // re-upsert without one, dropped when the seq moves without one, and
-  // `authored` for an own commit's promotion — and
+  //
+  // The class THREADING (the predicate's plumbing)
+  //
+  // The replica records the covering commit's class on its confirmed record
+  // — from the frame's `coverClass` on integrate,
+  // preserved across a same-seq re-upsert without one, dropped when the seq
+  // moves without one, and `authored` for an own commit's promotion — and
   // `speculationRetirementView` surfaces it to the sweep.
+  //
 
   it("class threading: applySessionSync records the frame's coverClass on the confirmed record, preserves it across a same-seq re-upsert without one, and drops it when the seq moves without one; the retirement view surfaces it", async () => {
     const manager = StorageManager.emulate({ as: aliceSigner });
@@ -1317,6 +1307,14 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     expect(view.confirmedSeq).toBeGreaterThan(0);
     expect(view.coverClass).toBe("authored");
   });
+
+  //
+  // Content-addressed writes (#6304)
+  //
+  // Both of these turn on a `cid:` document's identity rather than on a cover
+  // class: the scripted case witnesses arrival by identity, and the
+  // real-replica case decides what a retiring stored-cid speculation renders.
+  //
 
   it("a content-addressed write witnesses arrival by identity (#6304, scripted): a stored `cid:` doc's frozen cover below the floor does not hold the entry — coverage retires it and its array patch stops replaying; a cid doc with NO confirmed cover still holds it (mutation: identity witness removed → the entry stands forever and fabricates a fourth row)", async () => {
     // The #6304 shape: a speculative derivation re-sets an already-stored

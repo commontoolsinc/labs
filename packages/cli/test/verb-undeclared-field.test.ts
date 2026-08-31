@@ -303,10 +303,11 @@ describe("verb-undeclared-field", () => {
       );
     });
 
-    // A transposition is one slip to the caller who made it, whatever it costs
-    // to spell as substitutions, and the threshold for a four-character key is
-    // one edit.
     it("counts an adjacent transposition as one edit", () => {
+      // A transposition is one slip to the caller who made it, whatever it
+      // costs to spell as substitutions, and the threshold for a four-character
+      // key is one edit.
+
       expect(undeclaredVerbFieldError({ doen: true }, addItem)).toMatch(
         /Did you mean "done"\?/,
       );
@@ -326,18 +327,20 @@ describe("verb-undeclared-field", () => {
       expect(undeclaredVerbFieldError({ anything: 1 }, true)).toBeUndefined();
     });
 
-    // A position with no property map is open by construction: the runtime
-    // delivers the whole payload there, so nothing is dropped and nothing is
-    // refused.
     it("returns `undefined` for an object schema stating no `properties`", () => {
+      // A position with no property map is open by construction: the runtime
+      // delivers the whole payload there, so nothing is dropped and nothing is
+      // refused.
+
       expect(undeclaredVerbFieldError({ anything: 1 }, { type: "object" }))
         .toBeUndefined();
     });
 
-    // The other reading of "declares no fields": an explicit empty map, which
-    // the runtime answers by delivering nothing at all. Every field a caller
-    // writes there is refused, and there is no vocabulary to offer instead.
     it("refuses every field against an explicitly empty `properties` map", () => {
+      // The other reading of "declares no fields": an explicit empty map, which
+      // the runtime answers by delivering nothing at all. Every field a caller
+      // writes there is refused, and there is no vocabulary to offer instead.
+
       expect(
         undeclaredVerbFieldError({ title: "Milk" }, {
           type: "object",
@@ -349,9 +352,10 @@ describe("verb-undeclared-field", () => {
       );
     });
 
-    // `additionalProperties` is what makes the runtime deliver a field no map
-    // names, so a position carrying one honors what it is sent.
     it("returns `undefined` where the position declares `additionalProperties`", () => {
+      // `additionalProperties` is what makes the runtime deliver a field no map
+      // names, so a position carrying one honors what it is sent.
+
       for (const additionalProperties of [true, {}, { type: "string" }]) {
         expect(
           undeclaredVerbFieldError({ title: "Milk", colour: "red" }, {
@@ -362,10 +366,11 @@ describe("verb-undeclared-field", () => {
       }
     });
 
-    // The position half of the message is load-bearing: a field goes missing
-    // wherever its enclosing position drops what it does not name, not only at
-    // the root.
     it("names a nested object position", () => {
+      // The position half of the message is load-bearing: a field goes missing
+      // wherever its enclosing position drops what it does not name, not only
+      // at the root.
+
       expect(
         undeclaredVerbFieldError({ item: { id: "1", lable: "Milk" } }, {
           type: "object",
@@ -419,9 +424,10 @@ describe("verb-undeclared-field", () => {
       ).toMatch(/"titel" at <event> .* Did you mean "title"\?/);
     });
 
-    // Below the root a marked position is where a caller may write a link
-    // instead of a value, and `"/"` is not a field anybody declared.
     it("returns `undefined` inside a position marked `asCell`", () => {
+      // Below the root a marked position is where a caller may write a link
+      // instead of a value, and `"/"` is not a field anybody declared.
+
       const schema: JSONSchema = {
         type: "object",
         properties: {
@@ -442,10 +448,11 @@ describe("verb-undeclared-field", () => {
       ).toBeUndefined();
     });
 
-    // A payload need satisfy only one branch of a disjunction, and schema
-    // traversal unions the branches before deciding which children exist, so a
-    // field only one branch names is one the runtime still delivers.
     it("returns `undefined` at a position carrying a combinator", () => {
+      // A payload need satisfy only one branch of a disjunction, and schema
+      // traversal unions the branches before deciding which children exist, so
+      // a field only one branch names is one the runtime still delivers.
+
       expect(
         undeclaredVerbFieldError({ title: "Milk", colour: "red" }, {
           type: "object",
@@ -462,10 +469,11 @@ describe("verb-undeclared-field", () => {
     });
   });
 
-  // Every shape `schemaIsObjectShaped` recognizes drops what its maps do not
-  // name, so every one of them is judged. An explicit `type: "object"` is only
-  // the most common of the four.
   describe('an object-shaped position with no explicit `type: "object"`', () => {
+    // Every shape `schemaIsObjectShaped` recognizes drops what its maps do not
+    // name, so every one of them is judged. An explicit `type: "object"` is
+    // only the most common of the four.
+
     const bareProperties: JSONSchema = {
       properties: { title: { type: "string" } },
     } as JSONSchema;
@@ -510,9 +518,10 @@ describe("verb-undeclared-field", () => {
         );
     });
 
-    // A payload satisfying a conjunction satisfies every member, so the fields
-    // it declares are the union across them.
     it("takes the fields a conjunction declares as the union across its members", () => {
+      // A payload satisfying a conjunction satisfies every member, so the
+      // fields it declares are the union across them.
+
       const schema = {
         type: "object",
         properties: { title: { type: "string" } },
@@ -539,9 +548,10 @@ describe("verb-undeclared-field", () => {
       );
     });
 
-    // A member spelled `true` constrains nothing and declares nothing, so the
-    // rest of the conjunction is the whole vocabulary.
     it("takes nothing from a conjunction member that is a boolean schema", () => {
+      // A member spelled `true` constrains nothing and declares nothing, so the
+      // rest of the conjunction is the whole vocabulary.
+
       const schema = {
         type: "object",
         properties: { title: { type: "string" } },
@@ -555,10 +565,11 @@ describe("verb-undeclared-field", () => {
       );
     });
 
-    // A definition whose conjunction names itself contributes its fields once
-    // and terminates, which is what lets a recursive event schema be judged at
-    // all.
     it("takes the fields of a conjunction that names itself, once", () => {
+      // A definition whose conjunction names itself contributes its fields once
+      // and terminates, which is what lets a recursive event schema be judged
+      // at all.
+
       const schema = {
         type: "object",
         properties: { title: { type: "string" } },
@@ -579,9 +590,11 @@ describe("verb-undeclared-field", () => {
       );
     });
 
-    // The array counterpart of the object type union: schema traversal descends
-    // the array branch, so the element's undeclared field goes missing there.
     it("refuses an undeclared field inside a type union admitting an array", () => {
+      // The array counterpart of the object type union: schema traversal
+      // descends the array branch, so the element's undeclared field goes
+      // missing there.
+
       expect(
         undeclaredVerbFieldError({ tags: [{ name: "a", colour: "red" }] }, {
           type: "object",
@@ -611,10 +624,11 @@ describe("verb-undeclared-field", () => {
       expect(await dispatchedPayload(conjunction, payload)).toEqual(payload);
     });
 
-    // A disjunction inside a conjunction makes the whole position honor
-    // everything: the branch a payload was meant for may name a field the
-    // others do not.
     it("dispatches an undeclared field where a conjunction holds a disjunction", async () => {
+      // A disjunction inside a conjunction makes the whole position honor
+      // everything: the branch a payload was meant for may name a field the
+      // others do not.
+
       const schema = {
         allOf: [
           { type: "object", properties: { title: { type: "string" } } },
@@ -630,9 +644,10 @@ describe("verb-undeclared-field", () => {
       expect(await dispatchedPayload(schema, payload)).toEqual(payload);
     });
 
-    // An untyped position naming `items` describes an array the same way an
-    // untyped position naming `properties` describes an object.
     it("refuses an undeclared field inside an untyped `items` position", () => {
+      // An untyped position naming `items` describes an array the same way an
+      // untyped position naming `properties` describes an object.
+
       expect(
         undeclaredVerbFieldError({ tags: [{ name: "a", colour: "red" }] }, {
           type: "object",
@@ -652,10 +667,6 @@ describe("verb-undeclared-field", () => {
     });
   });
 
-  // Positions the walk cannot judge, each asserted as the call GOING OUT
-  // rather than as no refusal coming back. The two are different facts, and
-  // only the first one states that a caller can still make the call.
-
   describe("a schema that forbids undeclared fields", () => {
     it("refuses the undeclared field rather than letting it be dropped", () => {
       const schema: JSONSchema = {
@@ -674,6 +685,7 @@ describe("verb-undeclared-field", () => {
     // never undertook to judge. Asserted here rather than through the flag
     // door, because each guard below answers for a schema shape no flag
     // parser can construct on its own.
+
     it("judges a schema that names fields and admits no others", () => {
       expect(eventSchemaJudgesRootFields({
         type: "object",
@@ -763,6 +775,10 @@ describe("verb-undeclared-field", () => {
   });
 
   describe("a position the walk cannot judge", () => {
+    // Positions the walk cannot judge, each asserted as the call GOING OUT
+    // rather than as no refusal coming back. The two are different facts, and
+    // only the first one states that a caller can still make the call.
+
     it("dispatches an array whose elements all carry declared fields", async () => {
       const schema: JSONSchema = {
         type: "object",
@@ -780,9 +796,11 @@ describe("verb-undeclared-field", () => {
       expect(await dispatchedPayload(schema, payload)).toEqual(payload);
     });
 
-    // No `items` beside the `type: "array"`, so the element has no schema and
-    // nothing there declares anything. The runtime delivers the element whole.
     it("dispatches an array element whose position declares no schema", async () => {
+      // No `items` beside the `type: "array"`, so the element has no schema and
+      // nothing there declares anything. The runtime delivers the element
+      // whole.
+
       const schema: JSONSchema = {
         type: "object",
         properties: { tags: { type: "array" } },
@@ -791,9 +809,10 @@ describe("verb-undeclared-field", () => {
       expect(await dispatchedPayload(schema, payload)).toEqual(payload);
     });
 
-    // A `$ref` naming a definition spelled `true` resolves to the wildcard
-    // schema, which declares nothing and refuses nothing.
     it("dispatches a position whose `$ref` resolves to a boolean schema", async () => {
+      // A `$ref` naming a definition spelled `true` resolves to the wildcard
+      // schema, which declares nothing and refuses nothing.
+
       const schema = {
         type: "object",
         properties: { detail: { $ref: "#/$defs/Anything" } },
@@ -803,9 +822,10 @@ describe("verb-undeclared-field", () => {
       expect(await dispatchedPayload(schema, payload)).toEqual(payload);
     });
 
-    // The marker rides the DEFINITION rather than the reference site, so it is
-    // reached only after the reference resolves.
     it("dispatches a position whose `asCell` marker rides the `$ref` target", async () => {
+      // The marker rides the DEFINITION rather than the reference site, so it
+      // is reached only after the reference resolves.
+
       const schema = {
         type: "object",
         properties: { target: { $ref: "#/$defs/Target" } },
@@ -829,10 +849,11 @@ describe("verb-undeclared-field", () => {
       required: ["title"],
     };
 
-    // Both refusals hold for this payload: `title` is missing and `titel` is
-    // undeclared. Only one of the two answers names something the caller
-    // wrote, and that is the one they get.
     it("reports the undeclared field ahead of the required one it displaced", () => {
+      // Both refusals hold for this payload: `title` is missing and `titel` is
+      // undeclared. Only one of the two answers names something the caller
+      // wrote, and that is the one they get.
+
       expect(verbInputSchemaError({ titel: "Milk" }, addItem)).toBe(
         '"titel" at <event> is not a field this verb declares. ' +
           'Did you mean "title"? <event> takes "title"',
@@ -938,10 +959,12 @@ describe("verb-undeclared-field", () => {
     });
   });
 
-  // The same two shapes on a running piece, reached through a verb whose event
-  // schema the pattern writes out. `count` reads what committed, so a dispatch
-  // is stated as the handling landing rather than as the command returning.
   describe("cf piece call on a verb whose event schema states no `type`", () => {
+    // The same two shapes on a running piece, reached through a verb whose
+    // event schema the pattern writes out. `count` reads what committed, so a
+    // dispatch is stated as the handling landing rather than as the command
+    // returning.
+
     const withExplicit = <T>(
       passphrase: string,
       body: (tracker: Tracker) => Promise<T>,

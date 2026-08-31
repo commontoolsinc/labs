@@ -174,7 +174,7 @@ async function loadParkingCoordinatorProgram(): Promise<RuntimeProgram> {
 }
 
 //
-// Pre-compile everything (outside bench timing)
+// Pre-compilation (outside bench timing)
 //
 
 const parkingCoordinatorProgram = await loadParkingCoordinatorProgram();
@@ -363,7 +363,10 @@ Deno.bench(
   },
 );
 
-// Also run the regression delta over all parking bodies summed
+//
+// Regression delta, all parking bodies summed
+//
+
 Deno.bench(
   "two-pass: parking",
   { group: "shadow-delta-all", baseline: true },

@@ -92,7 +92,7 @@ Deno.test("registry: a .md filename is highlighted as Markdown", () => {
 });
 
 //
-// createHighlighter no-op + diffRange identical (lines 297, 403)
+// Highlight refresh: the no-op paths, and an edit that is not (lines 297, 403)
 //
 
 Deno.test("createHighlighter: update with identical text returns the same lines", () => {
@@ -476,7 +476,7 @@ Deno.test("parse: an anonymous namespace (string-literal module name) has no nam
 });
 
 //
-// classify: multi-declarator variable statement & declaration (1400-1408) -
+// classify: multi-declarator variable statement & declaration (1400-1408)
 //
 
 Deno.test("parse: a multi-declarator var statement yields a binding node per declaration", () => {
@@ -548,7 +548,7 @@ Deno.test("parse: an uninitialized binding becomes a variable node with no init 
 });
 
 //
-// bindingDesc: object initializer that is a schema (lines 1534-1543)
+// bindingDesc: schema and plain-object initializers (lines 1534-1543)
 //
 
 Deno.test("parse: a binding whose initializer is a schema object is a schema node", () => {
@@ -578,7 +578,7 @@ Deno.test("parse: a binding whose initializer is a plain object is an object nod
 });
 
 //
-// expressionStatementDesc: arrow / function expression (1572-1579)
+// expressionStatementDesc: a bare arrow expression (1572-1579)
 //
 
 Deno.test("parse: a bare arrow-function expression statement is a closure node", () => {
@@ -627,7 +627,7 @@ Deno.test("parse: a return of a reactive call recurses into its arguments", () =
 });
 
 //
-// controlLabel: while / do / switch / for / for-in / try (1667-1674)
+// controlLabel: every control-flow shape (1667-1674)
 //
 
 Deno.test("parse: every control-flow shape gets its distinct label", () => {

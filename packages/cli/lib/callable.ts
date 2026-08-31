@@ -47,6 +47,7 @@ import {
 } from "./cell-selection.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
+import { noteWroteTo, transactionWroteTo } from "./write-receipt.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
 
@@ -765,7 +766,7 @@ export function eventSchemaJudgesRootFields(
  * never meets that; a caller writing JSON by hand or by model meets it first.
  *
  * Which positions drop, measured against the read a handler's event goes
- * through (`SchemaObjectTraverser.traverseObjectWithSchema`, runner
+ * through (`SchemaObjectTraverser.#traverseObjectWithSchema`, runner
  * traverse.ts, whose `addOptionalProperty` is a no-op on the
  * `validateAndTransform` path), for an object holding one declared and one
  * undeclared field:
@@ -1476,15 +1477,24 @@ function circularResultPath(value: unknown): string | undefined {
  * Bound a readback that closes a circle with the verb's own declared result,
  * and hand back the value that bounds to.
  *
- * The declaration is the boundary the AUTHOR drew: the position where the
- * declared type re-enters itself is the position that closes the circle, so
- * rendering an address there cuts exactly where the shape says it should, and
- * leaves every other position reading as it already did. The addresses are
- * written by the same walk `--select`/`--schema` compose theirs with, so a
- * derived bound and a hand-written one name the same position the same way.
+ * The declaration is the boundary the AUTHOR drew, and it is applied in two
+ * strengths, the weaker first. Where the declared type re-enters itself, that
+ * position IS the one that closes the circle, so rendering an address there
+ * cuts exactly where the shape says it should and leaves every other position
+ * reading as it already did; the addresses are written by the same walk
+ * `--select`/`--schema` compose theirs with, so a derived bound and a
+ * hand-written one name the same position the same way.
  *
- * The cut is applied to `value` — the result already in hand — and never reads
- * a second one. That is what lets it bound a result a caller ALREADY shaped
+ * Where the circle is somewhere the declaration does not describe at all, that
+ * cut has nowhere to land. A verb that declares a compact row over the piece
+ * it hands back is the case: the row re-enters nowhere, and the piece carries
+ * a view that reaches every piece it renders and back again. The stronger
+ * bound answers that one by reading the declaration as the shape it states —
+ * each object position it CLOSES held to the fields it declares, which is the
+ * boundary an author writing a narrow result already believes they drew.
+ *
+ * Both are applied to `value` — the result already in hand — and never read a
+ * second one. That is what lets them bound a result a caller ALREADY shaped
  * without widening it: a projection can name the re-entering subtree whole,
  * which selects the circle rather than cutting past it, and the cut then
  * removes the closing position from what they selected rather than answering
@@ -1492,11 +1502,11 @@ function circularResultPath(value: unknown): string | undefined {
  * renders, this is never reached at all.
  *
  * Refuses where nothing in reach bounds it: no declaration at all, a
- * declaration whose recursion does not reach the closing position, or a
- * `--filter` beside it — a filtered array's elements no longer say which
- * positions they came from, and the bound is written in addresses, which name
- * positions. A refusal names where the circle closes and how to collect the
- * outcome, which beats a stack trace for a handling that already committed.
+ * declaration that describes no less than the value does, or a `--filter`
+ * beside it — a filtered array's elements no longer say which positions they
+ * came from, and a bound is written in addresses, which name positions. A
+ * refusal names where the circle closes and how to collect the outcome, which
+ * beats a stack trace for a handling that already committed.
  */
 async function boundCyclicResult(
   resolved: CallableResolution,
@@ -1522,17 +1532,30 @@ async function boundCyclicResult(
       "the addresses a bound is written in cannot be composed beside it.";
   } else {
     const declared = await resolved.declaredResult?.();
-    const bounded = await boundReadValue(
-      receiptCell,
-      declared,
-      value,
-      resolved.space,
-    );
-    // The bound is only as good as the declaration: a position the declaration
-    // left wide can still expand into the circle, and answering with a value
-    // that cannot be written would move the same failure one step later.
-    if (bounded !== undefined && circularResultPath(bounded) === undefined) {
-      return bounded;
+    // Two bounds, weakest first, and the order is what keeps the stronger one
+    // from narrowing anything it does not have to. `"recursion"` cuts where
+    // the declared type re-enters itself and leaves every other position
+    // reading what it read; `"shape"` reads the whole declaration as the shape
+    // it states, which is the only bound in reach when the circle is somewhere
+    // the declaration does not describe at all — a verb declaring a compact
+    // row over the piece it returns, whose piece carries a view that reaches
+    // back to it. A value that renders under the weaker one never reaches the
+    // stronger.
+    for (const bound of ["recursion", "shape"] as const) {
+      const bounded = await boundReadValue(
+        receiptCell,
+        declared,
+        value,
+        resolved.space,
+        bound,
+      );
+      // The bound is only as good as the declaration: a position the
+      // declaration left wide can still expand into the circle, and answering
+      // with a value that cannot be written would move the same failure one
+      // step later.
+      if (bounded !== undefined && circularResultPath(bounded) === undefined) {
+        return bounded;
+      }
     }
     if (declared === undefined) {
       whyUnbounded = "This verb declares no result for `cf` to bound the " +
@@ -1624,6 +1647,13 @@ export async function executeResolvedCallable(
         }`,
       );
     }
+
+    // The handling committed, so the space it committed to is named here —
+    // before the early return below, which a call without an invocation id
+    // takes. A deduplicated retry is excluded: it settles on the original
+    // outcome and commits nothing, so a receipt would name a write this
+    // invocation did not perform.
+    if (!deduplicated) noteWroteTo(resolved.space);
 
     if (invocationId === undefined) return {};
 
@@ -1793,6 +1823,12 @@ export async function executeResolvedCallable(
     await runtime.idle();
     runtime.prepareTxForCommit(tx);
     await tx.commit();
+    // A tool's result cell is durable, so a transaction that wrote one is a
+    // write to the space like a handler's is. Neither `commit()` resolving
+    // nor a `done` status proves that: an empty transaction commits
+    // successfully too. The journal's novelty for this space is what was
+    // actually written, so the receipt follows it.
+    if (transactionWroteTo(tx, resolved.space)) noteWroteTo(resolved.space);
 
     // Drain the tool to a fully settled state — scheduler idle, storage synced,
     // and every in-flight async builtin finished — so the result is final by the

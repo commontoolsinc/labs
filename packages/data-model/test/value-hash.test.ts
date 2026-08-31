@@ -1373,11 +1373,12 @@ describe("value-hash", () => {
     });
   });
 
-  // Registry-interned symbols: hashed via TAG_SYMBOL (0x2a) followed by a
-  // self-tagged string-rep of `Symbol.keyFor(s)` (i.e., the same byte stream
-  // that a plain string of that key would feed). Unique (uninterned) symbols
-  // have no portable key and throw.
   describe("`hashOf()` interned symbols", () => {
+    // Registry-interned symbols: hashed via TAG_SYMBOL (0x2a) followed by a
+    // self-tagged string-rep of `Symbol.keyFor(s)` (i.e., the same byte stream
+    // that a plain string of that key would feed). Unique (uninterned) symbols
+    // have no portable key and throw.
+
     it("takes the inline TAG_STRING path for a short key", () => {
       // utf8Length(3) <= MAX_DIRECT_STRING_LENGTH(64), so the key is fed as
       // [TAG_STRING][len][utf8].

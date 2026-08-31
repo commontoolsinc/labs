@@ -749,7 +749,7 @@ Expected runtime seams/tests:
   `packages/runner/src/builtins/list-op-argument-usage.ts` only on the named
   legacy adaptation path; new `Factory@1` nodes go through generic
   materialization.
-- [ ] Isolate the legacy branch in `Runner.substituteOpPatternRefs()` so it
+- [ ] Isolate the legacy branch in `Runner.#substituteOpPatternRefs()` so it
   cannot remain an accidental writer dependency.
 - [ ] Update closure-capture diagnostics to recommend inline patterns, not
   manual sibling params.

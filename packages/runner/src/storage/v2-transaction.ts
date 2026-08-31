@@ -80,6 +80,7 @@ import {
 import {
   getBlindStructuralTarget,
   ignoreReadForCommit,
+  isDurableReadTx,
   isInternalVerifierRead,
   isMutableTransactionReadAllowed,
   isReadIgnoredForScheduling,
@@ -831,7 +832,11 @@ const buildReactivityPathsForChange = (
 };
 
 class V2TransactionJournal implements ITransactionJournal {
-  constructor(private readonly tx: V2StorageTransaction) {}
+  readonly #tx: V2StorageTransaction;
+
+  constructor(tx: V2StorageTransaction) {
+    this.#tx = tx;
+  }
 
   activity(): Iterable<Activity> {
     throw new Error(
@@ -851,7 +856,7 @@ class V2TransactionJournal implements ITransactionJournal {
           value: detail.value,
         };
       }
-    })(this.tx);
+    })(this.#tx);
   }
 
   history(space: MemorySpace): Iterable<IAttestation> {
@@ -865,7 +870,7 @@ class V2TransactionJournal implements ITransactionJournal {
           value: detail.previousValue,
         };
       }
-    })(this.tx);
+    })(this.#tx);
   }
 }
 
@@ -1008,7 +1013,11 @@ export class V2StorageTransaction implements IStorageTransaction {
     this.#lastDocument = undefined;
   }
 
-  constructor(private readonly storage: IStorageManager) {}
+  readonly #storage: IStorageManager;
+
+  constructor(storage: IStorageManager) {
+    this.#storage = storage;
+  }
 
   setReadOnly(reason = "runtime.readTx()"): void {
     this.#readOnlySource = reason;
@@ -1023,7 +1032,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   enableMultiSpaceWrites(order?: readonly MemorySpace[]): void {
-    this.assertWritable("enableMultiSpaceWrites()");
+    this.#assertWritable("enableMultiSpaceWrites()");
     this.#multiSpaceWrites = true;
     if (order !== undefined) {
       this.#commitOrder = order;
@@ -1031,7 +1040,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   markAuthoritativeWrites(): void {
-    this.assertWritable("markAuthoritativeWrites()");
+    this.#assertWritable("markAuthoritativeWrites()");
     this.#authoritativeWrites = true;
   }
 
@@ -1044,7 +1053,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   isSchemaDocPersisted(space: MemorySpace, hash: string): boolean {
-    return this.storage.isSchemaDocPersisted?.(space, hash) ?? false;
+    return this.#storage.isSchemaDocPersisted?.(space, hash) ?? false;
   }
 
   status(): StorageTransactionStatus {
@@ -1073,7 +1082,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   getReactivityLog() {
-    this.#reactivityLogCache ??= this.buildReactivityLog();
+    this.#reactivityLogCache ??= this.#buildReactivityLog();
     return this.#reactivityLogCache;
   }
 
@@ -1081,15 +1090,15 @@ export class V2StorageTransaction implements IStorageTransaction {
     space: MemorySpace,
     precondition: CommitPrecondition,
   ): void {
-    this.assertWritable("addCommitPrecondition()");
-    const ready = this.editable();
+    this.#assertWritable("addCommitPrecondition()");
+    const ready = this.#editable();
     if (ready.error) {
       throw ready.error;
     }
     // Claim `space` as a write target (sets #writeSpace, enforces single-space
     // write isolation) so a precondition-only commit is still sent and
     // validated instead of resolving ok without a write space.
-    const claimed = this.claimWriteSpace(space);
+    const claimed = this.#claimWriteSpace(space);
     if (claimed.error) {
       throw claimed.error;
     }
@@ -1110,12 +1119,12 @@ export class V2StorageTransaction implements IStorageTransaction {
   markCreateOnly(
     link: { space: MemorySpace; id: string; scope?: unknown },
   ): void {
-    this.assertWritable("markCreateOnly()");
-    const ready = this.editable();
+    this.#assertWritable("markCreateOnly()");
+    const ready = this.#editable();
     if (ready.error) {
       throw ready.error;
     }
-    const claim = this.claimWriteSpace(link.space);
+    const claim = this.#claimWriteSpace(link.space);
     if (claim.error) {
       throw claim.error;
     }
@@ -1139,13 +1148,13 @@ export class V2StorageTransaction implements IStorageTransaction {
     address: IMemorySpaceAddress,
     delta: MergeableOpDelta,
   ): void {
-    this.assertWritable("recordMergeableOp()");
-    const ready = this.editable();
+    this.#assertWritable("recordMergeableOp()");
+    const ready = this.#editable();
     if (ready.error) throw ready.error;
     if (isNoopMergeableDelta(delta)) {
       return;
     }
-    const doc = this.writableMergeableTarget(address);
+    const doc = this.#writableMergeableTarget(address);
     if (!doc) throw new Error(`${delta.op} target is not writable`);
     const pathKey = encodePointer(address.path);
     // A poisoned path has already fallen back to the whole-array diff; a further
@@ -1196,7 +1205,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     // editable — no editable() re-check. The write also made the address's
     // document writable, but a caller could resolve to a different (read-only)
     // slot, so a non-writable target is a real no-op.
-    const doc = this.writableMergeableTarget(address);
+    const doc = this.#writableMergeableTarget(address);
     if (!doc?.mergeableOps?.size) {
       return;
     }
@@ -1212,11 +1221,11 @@ export class V2StorageTransaction implements IStorageTransaction {
   // The caller wrote through this same transaction, so the entry is writable.
   // A missing writable entry is an invariant violation the record methods throw
   // on rather than silently dropping the operation.
-  private writableMergeableTarget(
+  #writableMergeableTarget(
     address: IMemorySpaceAddress,
   ): WritableDocumentEntry | undefined {
-    const branch = this.branch(address.space);
-    const { doc } = this.document(branch, address);
+    const branch = this.#branch(address.space);
+    const { doc } = this.#document(branch, address);
     return isWritableDocument(doc) ? doc : undefined;
   }
 
@@ -1226,7 +1235,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         if (!isWritableDocument(doc) || !doc.mergeableOps) {
           continue;
         }
-        const { id, scope } = this.parseDocKey(key);
+        const { id, scope } = this.#parseDocKey(key);
         for (const intent of doc.mergeableOps.values()) {
           yield { space, id, scope, path: intent.path };
         }
@@ -1235,14 +1244,14 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
-    this.assertWritable("recordSqliteWrite()");
-    const ready = this.editable();
+    this.#assertWritable("recordSqliteWrite()");
+    const ready = this.#editable();
     if (ready.error) {
       throw ready.error;
     }
     // Claim `space` as a write target (sets #writeSpace, enforces single-space
     // write isolation) so a sqlite-only commit still resolves a write space.
-    const claimed = this.claimWriteSpace(space);
+    const claimed = this.#claimWriteSpace(space);
     if (claimed.error) {
       throw claimed.error;
     }
@@ -1278,6 +1287,15 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     const operations: NativeStorageCommitOperation[] = [];
+    // Unconfirmed schema documents whose staged write nets to no visible
+    // change (#mustDeliverSchemaDoc; the visible copy sits on a layer the
+    // wire never carries, such as a client speculation overlay entry).
+    // They ride a commit that exports real content — whose references
+    // they back — and are dropped from one that exports nothing: a
+    // no-op-net transaction ships no references, so re-delivering there
+    // would mint a commit, and its exported read set with it, where none
+    // existed.
+    const redeliveries: NativeStorageCommitOperation[] = [];
     for (const [key, doc] of branch?.docs.entries() ?? []) {
       if (!isWritableDocument(doc)) {
         continue;
@@ -1285,20 +1303,34 @@ export class V2StorageTransaction implements IStorageTransaction {
       if (doc.writeDetails.size === 0) {
         continue;
       }
+      const { id, type, scope } = this.#parseDocKey(key);
       // Doc-level no-op elision — except for authoritative transactions
       // (markAuthoritativeWrites): `doc.initial` is the transaction-START
       // view, which may extrapolate over a DOOMED sealed overlay, so a
       // written doc that "ends where it started" may still differ from
       // the store — the completion asserts it anyway (the forced
-      // full-cover path in buildPatchOperation).
+      // full-cover path in buildPatchOperation). An unconfirmed schema
+      // document steps out to the re-delivery set instead — as a
+      // whole-doc set: content addressing makes any visible copy the
+      // whole document.
       if (
         !this.#authoritativeWrites &&
         valueEqual(doc.current.value, doc.initial.value)
       ) {
+        if (
+          this.#mustDeliverSchemaDoc(space, id) &&
+          doc.current.value !== undefined
+        ) {
+          redeliveries.push({
+            op: "set",
+            id,
+            type,
+            scope,
+            value: doc.current.value,
+          });
+        }
         continue;
       }
-
-      const { id, type, scope } = this.parseDocKey(key);
       // Authoritative transactions (markAuthoritativeWrites —
       // effect-completion writebacks under the serving posture) commit
       // WHOLE-DOC set/delete, never patches (round-2 thread 17): their
@@ -1321,8 +1353,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       // records mergeable deltas, and folding them with a whole-doc
       // set would double-apply.
       if (!this.#authoritativeWrites) {
-        const mergeable = this.buildMergeableOps(doc);
-        const patch = this.buildPatchOperation(
+        const mergeable = this.#buildMergeableOps(doc);
+        const patch = this.#buildPatchOperation(
           id,
           type,
           scope,
@@ -1362,6 +1394,12 @@ export class V2StorageTransaction implements IStorageTransaction {
       );
     }
 
+    if (
+      redeliveries.length > 0 && (operations.length > 0 || sqliteOps?.length)
+    ) {
+      operations.push(...redeliveries);
+    }
+
     return {
       operations,
       ...(nativePreconditions.length
@@ -1394,7 +1432,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       if (!frozenReads) {
         continue;
       }
-      const { id, scope } = this.parseDocKey(key);
+      const { id, scope } = this.#parseDocKey(key);
       for (const [path, value] of frozenReads.entries()) {
         yield {
           address: { space, scope, id, path: [...path] },
@@ -1410,7 +1448,7 @@ export class V2StorageTransaction implements IStorageTransaction {
    * single-space guarantee). With it enabled, tracks the space in first-write
    * order for commit() to split on.
    */
-  private claimWriteSpace(space: MemorySpace): Result<Unit, WriterError> {
+  #claimWriteSpace(space: MemorySpace): Result<Unit, WriterError> {
     if (
       !this.#multiSpaceWrites &&
       this.#writeSpace !== undefined &&
@@ -1436,13 +1474,13 @@ export class V2StorageTransaction implements IStorageTransaction {
     address: IMemorySpaceAddress,
     options?: IReadOptions,
   ): Result<IAttestation, ReadError> {
-    const ready = this.editable();
+    const ready = this.#editable();
     if (ready.error) {
       return { error: ready.error };
     }
 
-    const branch = this.branch(address.space);
-    const { doc } = this.document(branch, address);
+    const branch = this.#branch(address.space);
+    const { doc } = this.#document(branch, address);
     // The one place a read chooses which root it is reading. A materialized
     // read walking under an epoch describes the state that epoch names; every
     // other read describes the transaction's current state. The epoch is only
@@ -1476,7 +1514,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         journalIndex: this.#activityClock++,
       };
       this.#readActivities.push(readActivity);
-      this.invalidateReactivityLog();
+      this.#invalidateReactivityLog();
     }
     if (options?.trackReadWithoutLoad === true) {
       if (!hasDataUriScheme(address.id) && !skipCommitPrecondition) {
@@ -1708,11 +1746,11 @@ export class V2StorageTransaction implements IStorageTransaction {
     options?: Omit<IReadOptions, "trackReadWithoutLoad">,
   ): Result<Unit, ReadError> {
     if (paths.length === 0) return { ok: {} };
-    const ready = this.editable();
+    const ready = this.#editable();
     if (ready.error) return { error: ready.error };
 
-    const branch = this.branch(address.space);
-    const { doc } = this.document(branch, address);
+    const branch = this.#branch(address.space);
+    const { doc } = this.#document(branch, address);
     if (hasDataUriScheme(address.id)) return { ok: {} };
 
     const readMeta = options?.meta ?? EMPTY_META;
@@ -1746,7 +1784,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       }
     }
     if (!skipCommitPrecondition) doc.validated = true;
-    this.invalidateReactivityLog();
+    this.#invalidateReactivityLog();
     return { ok: {} };
   }
 
@@ -1755,11 +1793,11 @@ export class V2StorageTransaction implements IStorageTransaction {
     value?: FabricValue,
     options?: IWriteOptions,
   ): Result<IAttestation, WriterError | WriteError> {
-    const ready = this.prepareWriteSpace(address.space);
+    const ready = this.#prepareWriteSpace(address.space);
     if (ready.error) {
       return { error: ready.error };
     }
-    return this.writeWithinBranch(
+    return this.#writeWithinBranch(
       ready.ok,
       address.space,
       address,
@@ -1779,11 +1817,11 @@ export class V2StorageTransaction implements IStorageTransaction {
         return { ok: {} };
       }
       const [{ address }] = run;
-      const ready = this.prepareWriteSpace(address.space);
+      const ready = this.#prepareWriteSpace(address.space);
       if (ready.error) {
         return { error: ready.error };
       }
-      const result = this.writeBatchRun(address.space, ready.ok, run);
+      const result = this.#writeBatchRun(address.space, ready.ok, run);
       run = [];
       runKey = undefined;
       return result;
@@ -1791,7 +1829,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     for (const write of writes) {
       // The run is flushed against a single document, fetched from the first
-      // write's address (see `writeBatchRun`). Documents are keyed by scope as
+      // write's address (see `#writeBatchRun`). Documents are keyed by scope as
       // well as id (`makeDocKey`), so the run key must include scope: otherwise
       // writes to different scoped instances of the same id would be merged into
       // one run and applied to whichever instance came first, corrupting both.
@@ -1814,20 +1852,45 @@ export class V2StorageTransaction implements IStorageTransaction {
     return flushRun();
   }
 
-  private writeWithinSpace(
+  #writeWithinSpace(
     space: MemorySpace,
     address: IMemoryAddress,
     value?: FabricValue,
     options?: IWriteOptions,
   ): Result<IAttestation, WriteError> {
-    this.assertWritable("write()");
-    return this.writeWithinBranch(
-      this.branch(space),
+    this.#assertWritable("write()");
+    return this.#writeWithinBranch(
+      this.#branch(space),
       space,
       address,
       value,
       options,
     );
+  }
+
+  /**
+   * Whether a write to `id` must be recorded — and, in a commit that
+   * exports content, re-delivered — even when its value equals the
+   * currently-visible state. True for a `cid:` schema document the
+   * space's server has not confirmed: the visible copy may sit on a
+   * layer that never reaches the wire — a client speculation overlay
+   * entry, or a sibling commit still awaiting its verdict — so
+   * visibility is no evidence the server holds the document, and a
+   * commit whose content references it would be rejected with the
+   * document neither included nor stored (the write-side delivery
+   * guarantee, `docs/specs/content-addressed-schemas.md`). Only
+   * server-confirmed persistence makes a re-delivery redundant, and
+   * content addressing makes the confirmed copy immutable, so that
+   * elision cannot race a change. A storage without persistence
+   * tracking confirms nothing and always delivers — redundant `cid:`
+   * re-sets apply as no-ops. The write layer records such writes
+   * (`#writeWithinBranch`'s elisions yield) so commit assembly can decide;
+   * getNativeCommit emits them only alongside real content, keeping a
+   * no-op-net transaction's commit empty.
+   */
+  #mustDeliverSchemaDoc(space: MemorySpace, id: string): boolean {
+    return id.startsWith("cid:") &&
+      !this.isSchemaDocPersisted(space, id.slice("cid:".length));
   }
 
   /**
@@ -1849,7 +1912,7 @@ export class V2StorageTransaction implements IStorageTransaction {
    *     return the unchanged attestation; don't allocate intermediate
    *     containers just to delete a slot that wasn't there.
    */
-  private writeWithinBranch(
+  #writeWithinBranch(
     branch: SpaceBranch,
     space: MemorySpace,
     address: IMemoryAddress,
@@ -1861,7 +1924,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
     const isDelete = options?.delete === true;
 
-    const { doc: readDoc } = this.document(branch, address);
+    const { doc: readDoc } = this.#document(branch, address);
     const doc = ensureWritableDocument(readDoc);
     this.#preserveForReaders(doc);
     const current = doc.current;
@@ -1873,11 +1936,15 @@ export class V2StorageTransaction implements IStorageTransaction {
       // Authoritative mode (markAuthoritativeWrites) disables the
       // equal-VALUE elision only: the visible state being diffed against
       // may be an extrapolation over a doomed sealed overlay, so "already
-      // equal" is not evidence the store holds the value. Deletes of
-      // absent slots stay no-ops — there is nothing to assert.
+      // equal" is not evidence the store holds the value. An unconfirmed
+      // schema document (#mustDeliverSchemaDoc) disables it the same way:
+      // its visible copy may sit on a speculation layer the wire never
+      // carries. Deletes of absent slots stay no-ops — there is nothing
+      // to assert.
       if (
         isDelete ? !present : (present && valueEqual(previous.value, value) &&
-          !this.#authoritativeWrites)
+          !this.#authoritativeWrites &&
+          !this.#mustDeliverSchemaDoc(space, address.id))
       ) {
         return { ok: current };
       }
@@ -1936,9 +2003,15 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { error: result.error.from(space) };
     }
     // Authoritative mode records the (value-unchanged) write anyway so it
-    // reaches the commit as a full-cover re-assert; delete no-ops still
-    // return (see above).
-    if (!result.ok.changed && (isDelete || !this.#authoritativeWrites)) {
+    // reaches the commit as a full-cover re-assert, and an unconfirmed
+    // schema document is recorded for the same delivery reason; delete
+    // no-ops still return (see above).
+    if (
+      !result.ok.changed &&
+      (isDelete ||
+        (!this.#authoritativeWrites &&
+          !this.#mustDeliverSchemaDoc(space, address.id)))
+    ) {
       return { ok: current };
     }
 
@@ -1949,7 +2022,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     this.#replaceCurrent(doc, collapsedNext);
     invalidateFrozenReadsOnChain(doc, address.path);
-    this.recordPatchIntent(
+    this.#recordPatchIntent(
       space,
       address,
       readValueAtPath(collapsedNext.value, address.path, {
@@ -1959,7 +2032,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       doc,
       previousPresent,
     );
-    this.recordWriteActivity(
+    this.#recordWriteActivity(
       space,
       { ...address, path: activityPath },
       readValueAtPath(collapsedNext.value, activityPath, {
@@ -1973,7 +2046,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     return { ok: collapsedNext };
   }
 
-  private writeBatchRun(
+  #writeBatchRun(
     space: MemorySpace,
     branch: SpaceBranch,
     writes: readonly ITransactionWriteRequest[],
@@ -1986,7 +2059,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       // unified single-write entry, which itself handles
       // create-missing-intermediates.
       for (const { address, value, delete: isDelete } of writes) {
-        const result = this.writeWithinSpace(
+        const result = this.#writeWithinSpace(
           space,
           address,
           value,
@@ -1999,7 +2072,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { ok: {} };
     }
 
-    const { doc: readDoc } = this.document(branch, writes[0]!.address);
+    const { doc: readDoc } = this.#document(branch, writes[0]!.address);
     const doc = ensureWritableDocument(readDoc);
     this.#preserveForReaders(doc);
     const originalRoot = doc.current.value;
@@ -2020,7 +2093,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     // `nextRoot` BEFORE `applyMutablePathWrite()` is called. The helper
     // mutates `nextRoot` in place from the second iteration onward, so
     // reading it AFTER the call would observe the post-write state.
-    // (See `writeWithinBranch` for the same invariant and a regression
+    // (See `#writeWithinBranch` for the same invariant and a regression
     // test.)
     for (const { address, value, delete: isDelete } of writes) {
       const isolatedValue = value === undefined
@@ -2032,8 +2105,10 @@ export class V2StorageTransaction implements IStorageTransaction {
       // Presence-aware no-op detection (also keeps no-op deletes from
       // reaching `applyMutablePathWrite`, which would materialize
       // intermediates into `nextRoot` before the changed check).
-      // Authoritative mode records equal-VALUE writes anyway (see
-      // `writeWithinBranch`); delete no-ops still skip.
+      // Authoritative mode records equal-VALUE writes anyway, and an
+      // unconfirmed schema document is recorded for its delivery
+      // guarantee (see `#writeWithinBranch` for both); delete no-ops
+      // still skip.
       const present = hasValueAtPath(nextRoot, address.path, {
         allowArrayLength: true,
       });
@@ -2041,7 +2116,8 @@ export class V2StorageTransaction implements IStorageTransaction {
         isDelete
           ? !present
           : (present && valueEqual(previousValue, isolatedValue) &&
-            !this.#authoritativeWrites)
+            !this.#authoritativeWrites &&
+            !this.#mustDeliverSchemaDoc(space, address.id))
       ) {
         continue;
       }
@@ -2056,7 +2132,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         }),
       ) as FabricValue | undefined;
       // Pre-write slot presence for the write details (see
-      // `writeWithinBranch`; empty path = root definedness, since
+      // `#writeWithinBranch`; empty path = root definedness, since
       // `hasValueAtPath` is vacuously true there) — read before
       // `applyMutablePathWrite` mutates `nextRoot` in place.
       const previousPresent = address.path.length === 0
@@ -2090,12 +2166,17 @@ export class V2StorageTransaction implements IStorageTransaction {
         return { error: result.error.from(space) };
       }
       nextRoot = result.ok.root;
-      if (!result.ok.changed && (isDelete || !this.#authoritativeWrites)) {
+      if (
+        !result.ok.changed &&
+        (isDelete ||
+          (!this.#authoritativeWrites &&
+            !this.#mustDeliverSchemaDoc(space, address.id)))
+      ) {
         continue;
       }
       changed = true;
       writtenPaths.push(address.path);
-      this.recordPatchIntent(
+      this.#recordPatchIntent(
         space,
         address,
         readValueAtPath(result.ok.root, address.path, {
@@ -2105,7 +2186,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         doc,
         previousPresent,
       );
-      this.recordWriteActivity(
+      this.#recordWriteActivity(
         space,
         { ...address, path: activityPath },
         readValueAtPath(result.ok.root, activityPath, {
@@ -2133,7 +2214,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     return { ok: {} };
   }
 
-  private recordWriteActivity(
+  #recordWriteActivity(
     space: MemorySpace,
     address: IMemoryAddress,
     value: FabricValue | undefined,
@@ -2154,7 +2235,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       },
     );
 
-    this.upsertWriteDetail(
+    this.#upsertWriteDetail(
       doc.writeDetails,
       space,
       address,
@@ -2162,10 +2243,10 @@ export class V2StorageTransaction implements IStorageTransaction {
       previousValue,
       previousPresent,
     );
-    this.invalidateReactivityLog();
+    this.#invalidateReactivityLog();
   }
 
-  private recordPatchIntent(
+  #recordPatchIntent(
     space: MemorySpace,
     address: IMemoryAddress,
     value: FabricValue | undefined,
@@ -2188,7 +2269,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       path: address.path,
       journalIndex: this.#activityClock++,
     });
-    this.upsertWriteDetail(
+    this.#upsertWriteDetail(
       doc.patchDetails,
       space,
       address,
@@ -2198,7 +2279,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     );
   }
 
-  private upsertWriteDetail(
+  #upsertWriteDetail(
     details: Map<string, TransactionWriteDetail>,
     space: MemorySpace,
     address: IMemoryAddress,
@@ -2232,8 +2313,8 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {
-    this.assertWritable("abort()");
-    const ready = this.editable();
+    this.#assertWritable("abort()");
+    const ready = this.#editable();
     if (ready.error) {
       return { error: ready.error };
     }
@@ -2278,7 +2359,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     // registers its own entry spanning its disposition handling, which
     // chains on the WRAPPER's promise and trails this one by the
     // verdict-time effect run.)
-    this.storage.trackPendingCommit(promise);
+    this.#storage.trackPendingCommit(promise);
     return promise;
   }
 
@@ -2289,8 +2370,8 @@ export class V2StorageTransaction implements IStorageTransaction {
   async #commitImpl(
     options?: TransactionCommitOptions,
   ): Promise<Result<Unit, CommitError>> {
-    this.assertWritable("commit()");
-    const ready = this.editable();
+    this.#assertWritable("commit()");
+    const ready = this.#editable();
     if (ready.error) {
       return { error: ready.error };
     }
@@ -2299,7 +2380,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     // single-space transaction (the common case, even with the opt-in set) stays
     // on the proven path below.
     if (this.#multiSpaceWrites && this.#writtenSpaces.length > 1) {
-      return this.commitMultiSpace(options);
+      return this.#commitMultiSpace(options);
     }
 
     const writeSpace = this.#writeSpace;
@@ -2327,7 +2408,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const validation = withCommitTiming(
       ["commit", "validate"],
-      () => this.validate(),
+      () => this.#validate(),
     );
     if (validation.error) {
       // Rejected before reaching storage, so the activity stays: the scheduler
@@ -2339,7 +2420,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { error: validation.error };
     }
 
-    const replica = this.replicaForCommit(writeSpace);
+    const replica = this.#replicaForCommit(writeSpace);
     if (!replica.commitNative) {
       throw new Error("memory v2 replica does not support commitNative()");
     }
@@ -2382,11 +2463,11 @@ export class V2StorageTransaction implements IStorageTransaction {
    * cross-space atomicity: a later failure does not roll back earlier spaces; it
    * is logged and surfaced as the overall result.
    */
-  private async commitMultiSpace(
+  async #commitMultiSpace(
     options?: TransactionCommitOptions,
   ): Promise<Result<Unit, CommitError>> {
     const commits: { space: MemorySpace; native: NativeStorageCommit }[] = [];
-    for (const space of this.orderedCommitSpaces()) {
+    for (const space of this.#orderedCommitSpaces()) {
       const native = this.getNativeCommit(space);
       const operations = native?.operations ?? [];
       const hasCommitPreconditions = (native?.preconditions?.length ?? 0) > 0;
@@ -2407,7 +2488,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       return result;
     }
 
-    const validation = this.validate();
+    const validation = this.#validate();
     if (validation.error) {
       // Rejected before reaching storage, so the activity stays: the scheduler
       // rebuilds this action's dependencies from it and retries.
@@ -2418,7 +2499,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { error: validation.error };
     }
 
-    const promise = this.runSplitCommits(commits, options);
+    const promise = this.#runSplitCommits(commits, options);
     this.#state = { status: "pending", promise };
     try {
       const result = await promise;
@@ -2451,7 +2532,7 @@ export class V2StorageTransaction implements IStorageTransaction {
    * The written spaces in commit order: the explicit order first (restricted to
    * spaces actually written), then any remaining spaces in first-write order.
    */
-  private orderedCommitSpaces(): MemorySpace[] {
+  #orderedCommitSpaces(): MemorySpace[] {
     if (this.#commitOrder === undefined) {
       return [...this.#writtenSpaces];
     }
@@ -2472,13 +2553,13 @@ export class V2StorageTransaction implements IStorageTransaction {
     return ordered;
   }
 
-  private async runSplitCommits(
+  async #runSplitCommits(
     commits: { space: MemorySpace; native: NativeStorageCommit }[],
     options?: TransactionCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     for (let i = 0; i < commits.length; i++) {
       const { space, native } = commits[i];
-      const replica = this.replicaForCommit(space);
+      const replica = this.#replicaForCommit(space);
       if (!replica.commitNative) {
         throw new Error("memory v2 replica does not support commitNative()");
       }
@@ -2529,21 +2610,21 @@ export class V2StorageTransaction implements IStorageTransaction {
     // Same durability-barrier registration as commit(): by the time
     // sealInto() returns, the in-flight close is visible to
     // hasPendingCommits().
-    this.storage.trackPendingCommit(promise);
+    this.#storage.trackPendingCommit(promise);
     return promise;
   }
 
   async #sealImpl(
     sink: ITransactionSealSink,
   ): Promise<Result<Unit, CommitError>> {
-    this.assertWritable("sealInto()");
-    const ready = this.editable();
+    this.#assertWritable("sealInto()");
+    const ready = this.#editable();
     if (ready.error) {
       return { error: ready.error };
     }
 
     const commits: { space: MemorySpace; native: NativeStorageCommit }[] = [];
-    for (const space of this.orderedCommitSpaces()) {
+    for (const space of this.#orderedCommitSpaces()) {
       const native = this.getNativeCommit(space);
       const operations = native?.operations ?? [];
       const hasCommitPreconditions = (native?.preconditions?.length ?? 0) > 0;
@@ -2564,7 +2645,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       return result;
     }
 
-    const validation = this.validate();
+    const validation = this.#validate();
     if (validation.error) {
       // Rejected before sealing, so the activity stays: the scheduler
       // rebuilds this action's dependencies from it and retries.
@@ -2584,7 +2665,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (sink.sealSpaceReads !== undefined) {
       const writtenSpaces = new Set(commits.map((commit) => commit.space));
       const readOnlyReads = new Map<MemorySpace, IMemorySpaceAddress[]>();
-      const log = this.buildReactivityLog();
+      const log = this.#buildReactivityLog();
       // Both read classes: a shallow (nonRecursive) read of withdrawn
       // state makes a derived write exactly as blind as a deep one, and
       // the withdrawal closure folds by DOC identity anyway.
@@ -2650,7 +2731,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     return { ok: {} };
   }
 
-  private editable(): Result<Unit, InactiveTransactionError> {
+  #editable(): Result<Unit, InactiveTransactionError> {
     if (this.#state.status === "ready") {
       return { ok: {} };
     }
@@ -2661,7 +2742,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     };
   }
 
-  private invalidateReactivityLog(): void {
+  #invalidateReactivityLog(): void {
     this.#reactivityLogCache = undefined;
   }
 
@@ -2685,7 +2766,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     return resolveScopeKey(name, identity);
   }
 
-  private buildReactivityLog(): TransactionReactivityLog {
+  #buildReactivityLog(): TransactionReactivityLog {
     const reads: IMemorySpaceAddress[] = [];
     const shallowReads: IMemorySpaceAddress[] = [];
     let attemptedWrites: IMemorySpaceAddress[] | undefined;
@@ -2724,7 +2805,7 @@ export class V2StorageTransaction implements IStorageTransaction {
           continue;
         }
 
-        const { id, scope } = this.parseDocKey(key);
+        const { id, scope } = this.#parseDocKey(key);
         const reactivityPaths = new Map<string, readonly string[]>();
         for (const detail of doc.patchDetails.values()) {
           for (
@@ -2763,34 +2844,34 @@ export class V2StorageTransaction implements IStorageTransaction {
     };
   }
 
-  private prepareWriteSpace(
+  #prepareWriteSpace(
     space: MemorySpace,
   ): Result<SpaceBranch, InactiveTransactionError | WriterError> {
-    this.assertWritable("write()");
-    const ready = this.editable();
+    this.#assertWritable("write()");
+    const ready = this.#editable();
     if (ready.error) {
       return { error: ready.error };
     }
-    const claim = this.claimWriteSpace(space);
+    const claim = this.#claimWriteSpace(space);
     if (claim.error) {
       return { error: claim.error };
     }
-    return { ok: this.branch(space) };
+    return { ok: this.#branch(space) };
   }
 
-  private assertWritable(method: string): void {
+  #assertWritable(method: string): void {
     if (this.#readOnlySource === undefined) {
       return;
     }
     throw createReadOnlyTransactionError(method, this.#readOnlySource);
   }
 
-  private branch(space: MemorySpace): SpaceBranch {
+  #branch(space: MemorySpace): SpaceBranch {
     let branch = this.#branches.get(space);
     if (!branch) {
       branch = {
         space,
-        replica: this.storage.open(space).replica,
+        replica: this.#storage.open(space).replica,
         docs: new Map(),
       };
       this.#branches.set(space, branch);
@@ -2798,14 +2879,14 @@ export class V2StorageTransaction implements IStorageTransaction {
     return branch;
   }
 
-  private replicaForCommit(
+  #replicaForCommit(
     space: MemorySpace,
   ): ReturnType<IStorageManager["open"]>["replica"] {
     return this.#branches.get(space)?.replica ??
-      this.storage.open(space).replica;
+      this.#storage.open(space).replica;
   }
 
-  private document(
+  #document(
     branch: SpaceBranch,
     address: Pick<IMemoryAddress, "id" | "type" | "scope">,
   ): { doc: DocumentEntry } {
@@ -2819,10 +2900,10 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { doc: this.#lastDocument.doc };
     }
 
-    const key = this.docKey(address);
+    const key = this.#docKey(address);
     let doc = branch.docs.get(key);
     if (!doc) {
-      const loaded = this.loadRoot(branch, address);
+      const loaded = this.#loadRoot(branch, address);
       doc = {
         initial: loaded,
         validated: false,
@@ -2839,7 +2920,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     return { doc };
   }
 
-  private loadRoot(
+  #loadRoot(
     branch: SpaceBranch,
     address: Pick<IMemoryAddress, "id" | "type" | "scope">,
   ): RootAttestation {
@@ -2859,7 +2940,13 @@ export class V2StorageTransaction implements IStorageTransaction {
     this.#loadedUnderIdentity = true;
     const identity = this.#scopeKeyIdentity;
     const value = toTransactionDocumentValue(
-      branch.replica.getDocument(address.id, address.scope, identity),
+      isDurableReadTx(this) && branch.replica.getNonSpeculativeDocument
+        ? branch.replica.getNonSpeculativeDocument(
+          address.id,
+          address.scope,
+          identity,
+        )
+        : branch.replica.getDocument(address.id, address.scope, identity),
     );
     // The runner's explicit-instance read, transaction layer (stage A): a
     // per-instance run's read of a scoped instance the replica has NEVER
@@ -2875,16 +2962,16 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (
       value === undefined && identity !== undefined &&
       normalizeCellScope(address.scope) !== "space" &&
-      typeof this.storage.syncInstance === "function" &&
-      this.storage.shouldPullDoc?.(
+      typeof this.#storage.syncInstance === "function" &&
+      this.#storage.shouldPullDoc?.(
           branch.space,
           address.id,
           address.scope,
           identity,
         ) === true
     ) {
-      this.storage.trackUntilSettled(
-        this.storage.syncInstance(
+      this.#storage.trackUntilSettled(
+        this.#storage.syncInstance(
           { space: branch.space, id: address.id, scope: address.scope },
           identity,
         ).catch(() => {
@@ -2912,17 +2999,24 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   validateReplicaRoutes(): Result<Unit, IStorageTransactionInconsistent> {
     for (const [space, branch] of this.#branches) {
-      const currentReplica = this.storage.open(space).replica;
+      const currentReplica = this.#storage.open(space).replica;
       if (currentReplica !== branch.replica) {
         const firstDocument = branch.docs.values().next().value;
         if (firstDocument !== undefined) {
           const { address, value: expected } = firstDocument.initial;
           const actual = toTransactionDocumentValue(
-            currentReplica.getDocument(
-              address.id as URI,
-              address.scope,
-              this.#scopeKeyIdentity,
-            ),
+            isDurableReadTx(this) &&
+              currentReplica.getNonSpeculativeDocument
+              ? currentReplica.getNonSpeculativeDocument(
+                address.id as URI,
+                address.scope,
+                this.#scopeKeyIdentity,
+              )
+              : currentReplica.getDocument(
+                address.id as URI,
+                address.scope,
+                this.#scopeKeyIdentity,
+              ),
           );
           return {
             error: StateInconsistency({
@@ -2938,7 +3032,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     return { ok: {} };
   }
 
-  private validate(): Result<Unit, IStorageTransactionInconsistent> {
+  #validate(): Result<Unit, IStorageTransactionInconsistent> {
     const routes = this.validateReplicaRoutes();
     if (routes.error) {
       return routes;
@@ -2952,6 +3046,7 @@ export class V2StorageTransaction implements IStorageTransaction {
           doc.initial,
           branch.replica,
           this.#scopeKeyIdentity,
+          isDurableReadTx(this),
         );
         if (result.error) {
           return { error: result.error };
@@ -2961,13 +3056,13 @@ export class V2StorageTransaction implements IStorageTransaction {
     return { ok: {} };
   }
 
-  private docKey(
+  #docKey(
     address: Pick<IMemoryAddress, "id" | "type" | "scope">,
   ): string {
     return `${normalizeCellScope(address.scope)}\0${address.id}`;
   }
 
-  private parseDocKey(
+  #parseDocKey(
     key: string,
   ): { id: URI; type: MediaType; scope: CellScope } {
     const separator = key.indexOf("\0");
@@ -2981,7 +3076,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     };
   }
 
-  private buildPatchOperation(
+  #buildPatchOperation(
     id: URI,
     type: MediaType,
     scope: CellScope,
@@ -3209,7 +3304,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   // RECORDED, not on which ops survived — an intent contained by an op that is
   // itself abandoned must fall back with it, so that the whole-value diff is the
   // only thing carrying that region.
-  private buildMergeableOps(
+  #buildMergeableOps(
     doc: WritableDocumentEntry,
   ): { ops: PatchOp[]; suppress: OpSuppression[] } {
     const ops: PatchOp[] = [];
@@ -3219,7 +3314,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
     const pending = [...doc.mergeableOps.values()].map((intent) => ({
       intent,
-      ctx: this.mergeableBuildContext(doc, intent),
+      ctx: this.#mergeableBuildContext(doc, intent),
     }));
 
     const abandoned: string[] = [];
@@ -3245,7 +3340,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   // The working / initial state at one intent's path, which its builder turns
   // into wire ops.
-  private mergeableBuildContext(
+  #mergeableBuildContext(
     doc: WritableDocumentEntry,
     intent: MergeableOpIntent,
   ): MergeableBuildContext {

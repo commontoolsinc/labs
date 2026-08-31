@@ -85,16 +85,15 @@ export class XAppView extends BaseView {
   @state()
   private accessor _slugRevision = 0;
 
-  private slugCancel: Cancel | undefined = undefined;
-  private slugPollInterval: ReturnType<typeof setInterval> | undefined =
-    undefined;
-  private slugSubscriptionKey: string | undefined = undefined;
-  private slugSubscriptionToken = 0;
-  private slugTargetKey: string | undefined = undefined;
-  private selectedPatternTargetId: string | undefined = undefined;
+  #slugCancel: Cancel | undefined = undefined;
+  #slugPollInterval: ReturnType<typeof setInterval> | undefined = undefined;
+  #slugSubscriptionKey: string | undefined = undefined;
+  #slugSubscriptionToken = 0;
+  #slugTargetKey: string | undefined = undefined;
+  #selectedPatternTargetId: string | undefined = undefined;
 
-  private debuggerController = new DebuggerController(this);
-  private _keyboard = new GlobalShortcutsController(this);
+  #debuggerController = new DebuggerController(this);
+  #keyboard = new GlobalShortcutsController(this);
 
   _spaceRootPattern = new Task(this, {
     task: async (
@@ -151,14 +150,14 @@ export class XAppView extends BaseView {
       | undefined
     > => {
       if (!rt || !space) return;
-      this.selectedPatternTargetId = undefined;
+      this.#selectedPatternTargetId = undefined;
       try {
         await prepareNamedSpace(app, rt, space);
         if ("pieceSlug" in app.view && app.view.pieceSlug) {
           const pieceId = slugIdForSpace(space, app.view.pieceSlug);
           const target = await rt.getPattern(space, pieceId, { start: false });
           if (signal.aborted) return;
-          this.selectedPatternTargetId = target.id();
+          this.#selectedPatternTargetId = target.id();
           const pattern = await rt.getPattern(space, pieceId);
           if (!signal.aborted) this.#maybeDeliverOpenPath(pattern);
           return pattern;
@@ -168,7 +167,7 @@ export class XAppView extends BaseView {
             start: false,
           });
           if (signal.aborted) return;
-          this.selectedPatternTargetId = target.id();
+          this.#selectedPatternTargetId = target.id();
           const pattern = await rt.getPattern(space, app.view.pieceId);
           const slug = await rt.getSlug(space, app.view.pieceId);
           if (!signal.aborted && slug) {
@@ -242,34 +241,34 @@ export class XAppView extends BaseView {
       : undefined;
     const key = rt && space && slug ? `${space}:${slug}` : undefined;
 
-    if (key === this.slugSubscriptionKey) return;
+    if (key === this.#slugSubscriptionKey) return;
     this.#clearSlugSubscription();
     if (!rt || !space || !slug || !key) return;
 
-    this.slugSubscriptionKey = key;
-    const token = ++this.slugSubscriptionToken;
+    this.#slugSubscriptionKey = key;
+    const token = ++this.#slugSubscriptionToken;
     rt.getSlugCell(space, slug).then(async (cell) => {
       if (
-        this.slugSubscriptionToken !== token ||
-        this.slugSubscriptionKey !== key
+        this.#slugSubscriptionToken !== token ||
+        this.#slugSubscriptionKey !== key
       ) {
         return;
       }
 
       await this.#refreshSlugTarget(rt, space, slug, token, key, false);
       if (
-        this.slugSubscriptionToken !== token ||
-        this.slugSubscriptionKey !== key
+        this.#slugSubscriptionToken !== token ||
+        this.#slugSubscriptionKey !== key
       ) {
         return;
       }
 
-      this.slugPollInterval = globalThis.setInterval(() => {
+      this.#slugPollInterval = globalThis.setInterval(() => {
         void this.#refreshSlugTarget(rt, space, slug, token, key, true);
       }, 1000);
 
       let sawInitialCallback = false;
-      this.slugCancel = cell.subscribe(() => {
+      this.#slugCancel = cell.subscribe(() => {
         if (!sawInitialCallback) {
           sawInitialCallback = true;
           return;
@@ -277,7 +276,7 @@ export class XAppView extends BaseView {
         void this.#refreshSlugTarget(rt, space, slug, token, key, true);
       });
     }).catch((error) => {
-      if (this.slugSubscriptionToken !== token) return;
+      if (this.#slugSubscriptionToken !== token) return;
       if (rt.signal.aborted) {
         // Reset the subscription key so a replacement runtime for the
         // same space/slug re-subscribes instead of matching the stale key.
@@ -289,15 +288,15 @@ export class XAppView extends BaseView {
   }
 
   #clearSlugSubscription() {
-    this.slugSubscriptionToken++;
-    this.slugCancel?.();
-    if (this.slugPollInterval !== undefined) {
-      globalThis.clearInterval(this.slugPollInterval);
+    this.#slugSubscriptionToken++;
+    this.#slugCancel?.();
+    if (this.#slugPollInterval !== undefined) {
+      globalThis.clearInterval(this.#slugPollInterval);
     }
-    this.slugCancel = undefined;
-    this.slugPollInterval = undefined;
-    this.slugSubscriptionKey = undefined;
-    this.slugTargetKey = undefined;
+    this.#slugCancel = undefined;
+    this.#slugPollInterval = undefined;
+    this.#slugSubscriptionKey = undefined;
+    this.#slugTargetKey = undefined;
   }
 
   async #refreshSlugTarget(
@@ -309,8 +308,8 @@ export class XAppView extends BaseView {
     notify: boolean,
   ) {
     if (
-      this.slugSubscriptionToken !== token ||
-      this.slugSubscriptionKey !== key
+      this.#slugSubscriptionToken !== token ||
+      this.#slugSubscriptionKey !== key
     ) {
       return;
     }
@@ -327,8 +326,8 @@ export class XAppView extends BaseView {
         // teardown, worker replacement) — stop polling it; a new runtime
         // re-subscribes via #syncSlugSubscription.
         if (
-          this.slugSubscriptionToken === token &&
-          this.slugSubscriptionKey === key
+          this.#slugSubscriptionToken === token &&
+          this.#slugSubscriptionKey === key
         ) {
           this.#clearSlugSubscription();
         }
@@ -339,8 +338,8 @@ export class XAppView extends BaseView {
       }
       return;
     }
-    if (targetKey === this.slugTargetKey) return;
-    this.slugTargetKey = targetKey;
+    if (targetKey === this.#slugTargetKey) return;
+    this.#slugTargetKey = targetKey;
     if (notify) {
       this.#handleSlugCellUpdate(rt, space, slug);
     }
@@ -465,12 +464,12 @@ export class XAppView extends BaseView {
 
     // Update debugger controller with runtime
     if (changedProperties.has("rt") && this.rt) {
-      this.debuggerController.setRuntime(this.rt);
+      this.#debuggerController.setRuntime(this.rt);
     }
 
     // Update debugger visibility from app state
     if (changedProperties.has("app")) {
-      this.debuggerController.setVisibility(
+      this.#debuggerController.setVisibility(
         this.app.config.showDebuggerView ?? false,
       );
     }
@@ -485,7 +484,7 @@ export class XAppView extends BaseView {
 
   // Always defer to the loaded active pattern for the ID,
   // but until that loads, use an ID in the view if available.
-  private getActivePatternId(): string | undefined {
+  #getActivePatternId(): string | undefined {
     const activePattern = this._patterns.value?.activePattern;
     if (activePattern) return activePattern.id();
     if ("pieceId" in this.app.view && this.app.view.pieceId) {
@@ -498,9 +497,9 @@ export class XAppView extends BaseView {
     }
   }
 
-  private getRuntimeLoadError(): LoadError | undefined {
+  #getRuntimeLoadError(): LoadError | undefined {
     const event = this.runtimeLoadErrors.findLast((candidate) =>
-      this.runtimeErrorMatchesView(candidate)
+      this.#runtimeErrorMatchesView(candidate)
     );
     if (!event) return;
 
@@ -512,7 +511,7 @@ export class XAppView extends BaseView {
     };
   }
 
-  private runtimeErrorMatchesView(event: ErrorNotification): boolean {
+  #runtimeErrorMatchesView(event: ErrorNotification): boolean {
     if (!event.space || event.space !== this.space) return false;
 
     const isDefaultView = isViewingDefaultPatternView(this.app.view);
@@ -522,7 +521,7 @@ export class XAppView extends BaseView {
         ? [this._spaceRootPattern.value?.id()]
         : "pieceSlug" in this.app.view
         ? [
-          this.slugTargetKey ?? this.selectedPatternTargetId ??
+          this.#slugTargetKey ?? this.#selectedPatternTargetId ??
             (this._selectedPattern.status === TaskStatus.COMPLETE
               ? this._selectedPattern.value?.id()
               : undefined),
@@ -531,7 +530,7 @@ export class XAppView extends BaseView {
           this._selectedPattern.status === TaskStatus.COMPLETE
             ? this._selectedPattern.value?.id()
             : undefined,
-          this.selectedPatternTargetId,
+          this.#selectedPatternTargetId,
           "pieceId" in this.app.view ? this.app.view.pieceId : undefined,
         ];
       const knownPieceIds = addressedPieceIds.filter((id) => id !== undefined);
@@ -564,7 +563,9 @@ export class XAppView extends BaseView {
       ? { kind: "piece", error: this._selectedPattern.error }
       : undefined;
     const loadError = this.spaceLoadError ?? patternLoadError;
-    const runtimeLoadError = loadError ? undefined : this.getRuntimeLoadError();
+    const runtimeLoadError = loadError
+      ? undefined
+      : this.#getRuntimeLoadError();
     this.#setTitleSubscription(activePattern);
 
     const authenticated = html`
@@ -583,7 +584,7 @@ export class XAppView extends BaseView {
       <x-login-view .keyStore="${this.keyStore}"></x-login-view>
     `;
 
-    const pieceId = this.getActivePatternId();
+    const pieceId = this.#getActivePatternId();
     const spaceName = this.app && "spaceName" in this.app.view
       ? this.app.view.spaceName
       : this.app && "builtin" in this.app.view &&
@@ -617,9 +618,10 @@ export class XAppView extends BaseView {
       ${this.app.identity && !embedded
         ? html`
           <x-debugger-view
-            .visible="${this.debuggerController.isVisible()}"
-            .telemetryMarkers="${this.debuggerController.getTelemetryMarkers()}"
-            .debuggerController="${this.debuggerController}"
+            .visible="${this.#debuggerController.isVisible()}"
+            .telemetryMarkers="${this.#debuggerController
+              .getTelemetryMarkers()}"
+            .debuggerController="${this.#debuggerController}"
           ></x-debugger-view>
         `
         : ""}

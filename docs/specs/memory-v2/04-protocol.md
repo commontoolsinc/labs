@@ -51,11 +51,13 @@ The client MUST declare its protocol version in the first WebSocket message:
   "protocol": "memory",
   "flags": {
     "modernCellRep": true,
+    "messageCompressionV1": true,
     "syncSchemaTableV2": true,
     "verdictCatchUpMarkers": true,
     "entityIdListing": true,
     "entityIdPagination": true,
-    "entityIdLookup": true
+    "entityIdLookup": true,
+    "sessionHoldings": true
   }
 }
 ```
@@ -68,11 +70,13 @@ If the server accepts the protocol, it returns:
   "protocol": "memory",
   "flags": {
     "modernCellRep": true,
+    "messageCompressionV1": true,
     "syncSchemaTableV2": true,
     "verdictCatchUpMarkers": true,
     "entityIdListing": true,
     "entityIdPagination": true,
-    "entityIdLookup": true
+    "entityIdLookup": true,
+    "sessionHoldings": true
   },
   "sessionOpen": {
     "audience": "did:key:z6Mk...",
@@ -87,6 +91,61 @@ If the server accepts the protocol, it returns:
 If the server does not support the requested version or the required data-model
 flags do not match what it implements, it returns a typed error response and
 does not mark the connection ready.
+
+`hello` and `hello.ok` are always ordinary memory text messages. When both
+peers advertise `messageCompressionV1`, either peer may send later messages as
+a versioned binary compression envelope. Its fixed header is followed directly
+by one gzip member:
+
+```text
+bytes 0..3   ASCII "mcmp"
+byte 4       envelope version 1
+bytes 5..8   uncompressed UTF-8 byte length, unsigned 32-bit big-endian
+bytes 9..    raw gzip bytes
+```
+
+A binary first frame violates the protocol because the connection has not yet
+exchanged `hello`. Any binary frame on a connection that did not negotiate
+`messageCompressionV1` is likewise a protocol violation. Memory WebSocket
+hosts close the connection with WebSocket code 1003 in both cases.
+
+A peer expands the binary frame before decoding the memory message inside it.
+Messages below 1,024 UTF-8 bytes stay in their ordinary text form, as do
+messages whose binary envelope would not be smaller. Receivers therefore accept
+both ordinary text and compressed binary messages after negotiation. Expansion
+is limited to 256 MiB per envelope and must produce exactly the declared byte
+count. Compression work preserves WebSocket message order in both directions.
+
+The capability defaults to `false` when absent. A new peer connected to an old
+peer consequently keeps every message in the ordinary form. Each reconnect
+starts again with an uncompressed `hello`; compression from the previous
+connection does not carry across WebSocket boundaries.
+The local `setMessageCompressionConfig(false)` rollback override suppresses
+advertisement on clients and servers, keeping connections text-only even when
+both builds support compression.
+
+After compression negotiation, a client may change the send mode in both
+directions without reconnecting by sending an ordinary text control frame:
+
+```json
+{
+  "type": "memory.compression",
+  "requestId": "debug-1",
+  "enabled": false
+}
+```
+
+The server applies the requested mode to its later sends and returns the same
+control frame as an acknowledgement. It returns `enabled: false` when the
+connection did not negotiate compression. Both peers continue accepting text
+and binary frames after a negotiated connection disables sending compression,
+so compressed work already in flight remains valid. Control frames share the
+application-message queues and therefore cannot reorder the messages around
+them.
+
+The browser shell exposes this exchange as
+`await commonfabric.setMemoryMessageCompression(false)`. Passing `true`
+re-enables compression on connections which negotiated the capability.
 
 Memory hosts include `sessionOpen.audience` and `sessionOpen.challenge` in
 `hello.ok`. The audience is the server DID the client must sign for. Toolshed
@@ -158,6 +217,20 @@ this build) and defaults to `false` when absent: against an older server that
 stamps markers only for conflicts, the client applies verdicts immediately
 instead of parking them.
 
+`sessionHoldings` advertises that the server takes a reconnecting client's
+DECLARED holdings — the `holdings` a resuming `session.open` and a
+re-establishing `session.watch.set` may carry (sections 4.1.2 and 4.3.5) — as
+the base of its delivery diff, in place of its own memory of the session. It is
+build-inherent and defaults to `false` when absent. A client whose consumer
+declares holdings treats the flag's absence as terminal at restore: the initial
+connection proceeds normally (nothing is held yet, so nothing needs declaring),
+but a reconnect MUST fail that session with an explicit error rather than
+silently fall back to the delivery paths the declaration exists to replace — a
+server-memory resume can elide a document the replica lost. A consumer that
+declares no holdings is unaffected: its sessions restore on the
+declaration-less paths (a resumed session diffed against the server's memory, a
+fresh one delivered in full) on any server.
+
 ### 4.1.2 Logical Sessions and Resume
 
 Pending-read resolution, idempotent replay, and live sync are scoped to a
@@ -181,6 +254,25 @@ interface SessionOpenRequest {
   authorization?: {
     signature: SignatureBytes;
   };
+  // The client's declared holdings, sent when resuming (see the rules).
+  // Outside the signed descriptor: it shapes only what this session is
+  // re-sent, never what it may read.
+  holdings?: SessionHolding[];
+}
+
+// One document the client declares it HOLDS: the id, the scope name (the
+// instance resolves from the session, as for every frame), the branch
+// (absent = the default branch; the diff keys by branch, so a same-id
+// document on another branch is a different holding and never stands in
+// for this one), the server seq of the covering commit it has confirmed,
+// and whether that is a tombstone. A document the client does not list is
+// one it does not hold, whatever the server remembers delivering.
+interface SessionHolding {
+  id: EntityId;
+  scope?: CellScope;
+  branch?: BranchId;
+  seq: number;
+  deleted?: true;
 }
 
 interface SessionOpenInvocation {
@@ -245,9 +337,21 @@ Rules:
 - a stale `sessionToken` MUST fail with `SessionRevokedError`
 - when a resumed session already has watches installed, `sync` carries the
   catch-up delta the client missed while offline
+- a resuming client that advertises `sessionHoldings` (and whose server does)
+  sends `holdings`: the documents its replica holds, each at the seq it holds
+  it at. The server replaces its memory of what the session was delivered with
+  that statement before computing the catch-up, so the delta re-delivers every
+  document the client does not hold — one it never absorbed, or lost with a
+  replaced replica — and elides every one it does. A session with no watches
+  covers nothing: the catch-up retracts as `removes` whatever the declaration
+  (or, undeclared, the delivery memory) still lists, and clears the memory,
+  so nothing outside the empty union lingers as demand. A resume without
+  `holdings` is diffed against the server's memory
 - after reconnect, the client resumes the session, replays retained commits,
   applies inline catch-up `sync` when present, and only re-establishes the
-  watch set if the session was reopened fresh
+  watch set if the session was reopened fresh — declaring its holdings on that
+  `session.watch.set` (section 4.3.5) so the re-establishment carries the
+  difference rather than the whole union
 - a `session.open` denied with an `AuthorizationError` the server did NOT mark
   `retriable` is permanent: the client stops reopening that session and
   terminates it with the real error rather than retrying the identical handshake
@@ -277,10 +381,12 @@ interface HelloMessage {
   protocol: "memory";
   flags: {
     modernCellRep: boolean;
+    messageCompressionV1?: boolean;
     syncSchemaTableV2?: boolean;
     entityIdListing?: boolean;
     entityIdPagination?: boolean;
     entityIdLookup?: boolean;
+    sessionHoldings?: boolean;
   };
 }
 
@@ -670,12 +776,23 @@ interface WatchSpec {
   query: GraphQuery;
 }
 
+// As defined in section 4.1.2.
+type SessionHolding = {
+  id: EntityId;
+  scope?: CellScope;
+  seq: number;
+  deleted?: true;
+};
+
 interface WatchSetRequest {
   type: "session.watch.set";
   requestId: string;
   space: SpaceId;
   sessionId: SessionId;
   watches: WatchSpec[];
+  // The client's declared holdings (section 4.1.2): when present, the
+  // response's `sync` is the difference between the new union and these.
+  holdings?: SessionHolding[];
 }
 
 interface WatchSetResult {
@@ -689,7 +806,13 @@ Semantics:
 - the provided watch list replaces the entire prior watch set for the session
 - the server recomputes the union of watched entities
 - the response carries the initial `sync` needed to bring the session cache in
-  line with the new interest set
+  line with the new interest set: the whole union when the request declares no
+  `holdings`, and otherwise the difference between the union and the declared
+  holdings — a held document at its current seq is elided, a changed or
+  unlisted one is delivered, and a held document the union no longer covers is
+  removed. This is how a client whose server session lapsed (an expired
+  resume, a restarted server) re-establishes its watches without downloading
+  again every document it still holds
 - later committed changes continue to arrive via `session/effect`
 
 ### 4.3.6 `session.watch.add` — Extend the Session Watch Set
@@ -831,6 +954,10 @@ Transport security, origin checks, and product-level signing prompts remain
 part of the complete security boundary.
 
 The memory protocol does not add encryption above WebSocket.
+The `messageCompressionV1` envelope changes representation only and provides
+no confidentiality or integrity protection. Compressed frame sizes reveal
+plaintext-length and repeated-substring correlations, so callers must not treat
+wire length as confidential.
 Remote deployments must expose the route over `wss` or another TLS-protected
 transport.
 Plain `ws` is only appropriate for local development or a trusted private
@@ -886,8 +1013,10 @@ When the client replaces the watch set:
 
 - newly relevant entities are sent as `upserts`
 - entities no longer relevant are sent as `removes`
-- entities still relevant but unchanged are not resent unless needed for
-  catch-up
+- entities still relevant but unchanged are not resent when the replacement
+  declares `holdings` (section 4.3.5); a replacement that declares none is
+  delivered in full, since the server does not assume a silent client holds
+  anything
 
 In the current pass, that `removes` guarantee only applies to explicit
 watch-set replacement. Steady-state topology shrink during background refresh
@@ -995,7 +1124,8 @@ On disconnect:
 1. pending promises reject with `ConnectionError`
 2. the logical session may still be resumable
 3. the client reconnects, replays retained commits, restores the watch set, and
-   resumes integrating sync from `seenSeq`
+   resumes integrating sync from `seenSeq` — declaring what its replica holds
+   (section 4.1.2) so the server re-delivers exactly what it lacks
 
 ## 4.9 Blob Transfer
 

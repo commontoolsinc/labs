@@ -710,6 +710,10 @@ export type MetaField =
   | "patternSetupIdentity" // setup-completion {identity, symbol} marker
   | "patternSource" // active web or `cf:` source origin
   | "pieceSourceHistory" // append-only source revisions and retention roots
+  | "pieceReconciliation" // what following the active origin last did:
+  // {outcome, at, origin, offered?, reason?, detail?} — a piece that refused
+  // or could not reach its origin looks otherwise exactly like one that is
+  // running what its origin offers
   | "patternRepository" // optional caller-supplied repository locator
   | "displacedPattern" // {identity, symbol, displacedAt}: the prior pattern
   // reference recorded when system-pattern auto-update replaces an unloadable
@@ -3168,6 +3172,27 @@ export interface ISqliteExecutable {
   ): void;
 }
 
+/** Column names whose rows cannot be represented as durable Fabric records. */
+export type SqliteReservedColumnName = "constructor" | "__proto__";
+
+/** Entry-list representation used when a query row declares a reserved key. */
+export type SqliteEntryRow<Row> = Array<
+  {
+    [Key in Extract<keyof Row, string>]: readonly [Key, Row[Key]];
+  }[Extract<keyof Row, string>]
+>;
+
+/**
+ * Runtime row shape for a typed SQLite query. Rows with an explicitly declared
+ * Fabric-reserved alias use entries. Indexed row types admit either shape
+ * because their possible column names are not statically closed; all other
+ * typed rows remain objects.
+ */
+export type SqliteQueryRow<Row> = string extends keyof Row
+  ? Row | SqliteEntryRow<Row>
+  : Extract<keyof Row, SqliteReservedColumnName> extends never ? Row
+  : SqliteEntryRow<Row>;
+
 /** Reactive read on a SqliteDb handle: builds a `sqliteQuery` node. `<Row>` is
  *  lowered by the transformer to an injected result schema. */
 export interface ISqliteQueryable {
@@ -3190,7 +3215,12 @@ export interface ISqliteQueryable {
       readClearance?: boolean;
     },
   ): Reactive<
-    { pending: boolean; result?: Row[]; error?: any; withheld?: number }
+    {
+      pending: boolean;
+      result?: SqliteQueryRow<Row>[];
+      error?: any;
+      withheld?: number;
+    }
   >;
 }
 
@@ -3261,7 +3291,12 @@ export type SqliteQueryParams = {
 export type SqliteQueryFunction = <Row = Record<string, unknown>>(
   params: FactoryInput<SqliteQueryParams>,
 ) => Reactive<
-  { pending: boolean; result?: Row[]; error?: any; withheld?: number }
+  {
+    pending: boolean;
+    result?: SqliteQueryRow<Row>[];
+    error?: any;
+    withheld?: number;
+  }
 >;
 
 // Writes are the imperative SqliteDb.exec method (see ISqliteExecutable), which

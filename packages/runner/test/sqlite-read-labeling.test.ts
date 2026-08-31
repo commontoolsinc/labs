@@ -205,9 +205,9 @@ describe({
     return await tx.commit();
   };
 
-  // FFI loads the column-metadata lib (process-lifetime by design); exempt this
-  // test from the dynamic-library leak detector.
   it({
+    // FFI loads the column-metadata lib (process-lifetime by design); exempt
+    // this test from the dynamic-library leak detector.
     name: "labeled db: result columns carry the TRUE origin (alias resolved)",
     sanitizeResources: false,
   }, async () => {

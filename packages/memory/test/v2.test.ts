@@ -17,8 +17,10 @@ import {
   MEMORY_PROTOCOL,
   parseMemoryProtocolFlags,
   resetCommitPreconditionsConfig,
+  resetMessageCompressionConfig,
   resetSyncSchemaTableConfig,
   setCommitPreconditionsConfig,
+  setMessageCompressionConfig,
   setSyncSchemaTableConfig,
   toDocumentPath,
   toDocumentSelector,
@@ -127,9 +129,11 @@ describe("memory v2 flags", () => {
   it("reflects the active runtime storage flags", () => {
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
+    resetMessageCompressionConfig();
     resetSyncSchemaTableConfig();
     setModernCellRepConfig(false);
     setCommitPreconditionsConfig(false);
+    setMessageCompressionConfig(false);
     setSyncSchemaTableConfig(false);
 
     assertEquals(getMemoryProtocolFlags(), {
@@ -137,6 +141,7 @@ describe("memory v2 flags", () => {
       commitPreconditions: false,
       applyOp: true,
       operationCodecs: ["codemirror-changeset@1"],
+      messageCompressionV1: false,
       // Build-inherent capability, not configuration: always advertised.
       sqliteCommitRowLabelEval: true,
       pendingReadStacks: true,
@@ -144,11 +149,13 @@ describe("memory v2 flags", () => {
       entityIdListing: true,
       entityIdPagination: true,
       entityIdLookup: true,
+      sessionHoldings: true,
       syncSchemaTableV2: false,
     });
 
     setModernCellRepConfig(true);
     setCommitPreconditionsConfig(true);
+    setMessageCompressionConfig(true);
     setSyncSchemaTableConfig(true);
 
     assertEquals(getMemoryProtocolFlags(), {
@@ -156,17 +163,20 @@ describe("memory v2 flags", () => {
       commitPreconditions: true,
       applyOp: true,
       operationCodecs: ["codemirror-changeset@1"],
+      messageCompressionV1: true,
       sqliteCommitRowLabelEval: true,
       pendingReadStacks: true,
       verdictCatchUpMarkers: true,
       entityIdListing: true,
       entityIdPagination: true,
       entityIdLookup: true,
+      sessionHoldings: true,
       syncSchemaTableV2: true,
     });
 
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
+    resetMessageCompressionConfig();
     resetSyncSchemaTableConfig();
   });
 
@@ -177,18 +187,21 @@ describe("memory v2 flags", () => {
         commitPreconditions: true,
         applyOp: true,
         syncSchemaTableV2: true,
+        messageCompressionV1: true,
         sqliteCommitRowLabelEval: true,
         pendingReadStacks: true,
         verdictCatchUpMarkers: false,
         entityIdListing: true,
         entityIdPagination: true,
         entityIdLookup: true,
+        sessionHoldings: false,
       },
       {
         modernCellRep: true,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        messageCompressionV1: false,
         // A peer without commit-time sqlite row-label evaluation stays
         // compatible — the capability only gates the runner's write-gate
         // relaxation, never the connection.
@@ -198,6 +211,7 @@ describe("memory v2 flags", () => {
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        sessionHoldings: false,
       },
     ));
   });
@@ -210,24 +224,28 @@ describe("parseMemoryProtocolFlags", () => {
       commitPreconditions: false,
       applyOp: false,
       syncSchemaTableV2: false,
+      messageCompressionV1: false,
       sqliteCommitRowLabelEval: false,
       pendingReadStacks: false,
       verdictCatchUpMarkers: false,
       entityIdListing: false,
       entityIdPagination: false,
       entityIdLookup: false,
+      sessionHoldings: false,
     });
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       modernCellRep: false,
       commitPreconditions: false,
       applyOp: false,
       syncSchemaTableV2: false,
+      messageCompressionV1: false,
       sqliteCommitRowLabelEval: false,
       pendingReadStacks: false,
       verdictCatchUpMarkers: false,
       entityIdListing: false,
       entityIdPagination: false,
       entityIdLookup: false,
+      sessionHoldings: false,
     });
   });
 
@@ -241,12 +259,14 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: true,
         applyOp: false,
         syncSchemaTableV2: false,
+        messageCompressionV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        sessionHoldings: false,
       },
     );
   });
@@ -279,12 +299,34 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: true,
+        messageCompressionV1: false,
+        sessionHoldings: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+      },
+    );
+  });
+
+  it("accepts the messageCompressionV1 capability key", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({ messageCompressionV1: true }),
+      {
+        modernCellRep: false,
+        commitPreconditions: false,
+        applyOp: false,
+        syncSchemaTableV2: false,
+        messageCompressionV1: true,
+        sqliteCommitRowLabelEval: false,
+        pendingReadStacks: false,
+        verdictCatchUpMarkers: false,
+        entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
+        sessionHoldings: false,
       },
     );
   });
@@ -299,12 +341,14 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        messageCompressionV1: false,
         sqliteCommitRowLabelEval: true,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        sessionHoldings: false,
       },
     );
   });
@@ -327,12 +371,14 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        messageCompressionV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: true,
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        sessionHoldings: false,
       },
     );
   });
@@ -348,12 +394,14 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        messageCompressionV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: true,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        sessionHoldings: false,
       },
     );
   });
@@ -366,12 +414,14 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        messageCompressionV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
         entityIdListing: true,
         entityIdPagination: false,
         entityIdLookup: false,
+        sessionHoldings: false,
       },
     );
   });
@@ -381,18 +431,21 @@ describe("parseMemoryProtocolFlags", () => {
       parseMemoryProtocolFlags({
         entityIdPagination: true,
         entityIdLookup: true,
+        sessionHoldings: false,
       }),
       {
         modernCellRep: false,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        messageCompressionV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: true,
         entityIdLookup: true,
+        sessionHoldings: false,
       },
     );
   });
@@ -410,6 +463,10 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(parseMemoryProtocolFlags({ syncSchemaTableV2: "true" }), null);
     assertEquals(parseMemoryProtocolFlags({ applyOp: "true" }), null);
     assertEquals(
+      parseMemoryProtocolFlags({ messageCompressionV1: "true" }),
+      null,
+    );
+    assertEquals(
       parseMemoryProtocolFlags({ verdictCatchUpMarkers: "true" }),
       null,
     );
@@ -423,6 +480,7 @@ describe("parseMemoryProtocolFlags", () => {
       null,
     );
     assertEquals(parseMemoryProtocolFlags({ entityIdLookup: "true" }), null);
+    assertEquals(parseMemoryProtocolFlags({ sessionHoldings: "true" }), null);
     assertEquals(
       parseMemoryProtocolFlags({
         modernCellRep: true,

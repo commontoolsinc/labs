@@ -99,6 +99,20 @@ export enum RequestType {
   CellGet = "cell:get",
 
   /**
+   * Pulls a cell through the scheduler before reading it. Unlike
+   * {@link CellGet}, this demands lazy producers and waits for their
+   * transitive work to settle.
+   */
+  CellPull = "cell:pull",
+
+  /**
+   * Stores a value only when the cell has no backing value, using the raw read
+   * as an optimistic-concurrency precondition. A schema fallback does not
+   * count as stored. Returns the value that won.
+   */
+  CellInitialize = "cell:initialize",
+
+  /**
    * Overwrites a cell's value blindly: the write carries no value-equality
    * precondition, so a concurrent write to the same cell does not make it
    * fail. That is not the same as unconditional. A blind write still carries
@@ -110,7 +124,7 @@ export enum RequestType {
   CellSet = "cell:set",
 
   /**
-   * Applies a value to a cell read-modify-write, keeping compare-and-set.
+   * Appends values to an array cell as a mergeable server-side operation.
    * The counterpart to {@link CellSet}'s blind overwrite.
    */
   CellPush = "cell:push",
@@ -160,6 +174,12 @@ export enum RequestType {
 
   /** Forgets a client's pinned operation target. */
   OperationSessionClose = "operation:session-close",
+
+  /** Runs a read-only SQL query against a SQLite database cell. */
+  SqliteQuery = "sqlite:query",
+
+  /** Commits a SQL write through a SQLite database cell. */
+  SqliteExec = "sqlite:exec",
 
   // Runtime operations
 
@@ -240,6 +260,9 @@ export enum RequestType {
 
   /** Turns telemetry notifications on or off. */
   SetTelemetryEnabled = "runtime:setTelemetryEnabled",
+
+  /** Changes memory WebSocket compression without reconnecting. */
+  SetMemoryMessageCompression = "runtime:setMemoryMessageCompression",
 
   /**
    * Turns the worker's console bridge on or off. Answered by the worker entry
@@ -587,7 +610,10 @@ export type IPCRemotePost = IPCRemoteMessage | IPCTransportNotification;
 export type BaseRequest = {
   /**
    * Which request this is. Every arm narrows it to one member, so it is
-   * the discriminant dispatch turns on.
+   * the discriminant dispatch turns on. Each arm's narrowing is left
+   * undocumented on purpose: what a request does belongs on the request
+   * type, so a doc on `type: RequestType.Foo` would have nothing of its own
+   * to say.
    */
   type: RequestType;
 };
@@ -644,21 +670,51 @@ export type InitializationData = {
    * realms cannot diverge.
    */
   experimental?: {
+    /**
+     * Whether a link is a `FabricLink` and an entity reference a
+     * `FabricHash`, rather than the plain `{ "/": ... }` envelopes that
+     * represent both otherwise. Recognition is strict per regime, so the two
+     * spellings are a clean break rather than a pair a reader accepts.
+     */
     modernCellRep?: boolean;
-    // Server-execution v2 (docs/specs/server-side-execution/). The host
-    // DECLARES its posture here so the worker runs the same arm — the
-    // flag previously rode only as an untyped excess property, and any
-    // typed re-packaging silently reverted a worker to OFF while the
-    // host diverted (F10 alive and dead across realms; review
-    // 2026-08-11 m7). The worker refuses initialization when its
-    // resolved posture disagrees with this declaration.
+
+    /**
+     * Whether server-execution v2 is on
+     * (`docs/specs/server-side-execution/`). The host declares its posture
+     * here so the worker runs the same arm, and the worker refuses
+     * initialization when its own resolved posture disagrees. That refusal
+     * is why this is a declared field rather than an untyped excess
+     * property: as one, a typed re-packaging could revert a worker to off
+     * while the host stayed on, and each realm would believe a different
+     * answer.
+     */
     serverExecution?: boolean;
-    // Link writers emit cid: schema-document references, with each closure
-    // materialized in the carrying transaction (content-addressed schemas
-    // Phase 1). Default on; an explicit false is the rollback override.
+
+    /**
+     * Whether a link writer emits `cid:` schema-document references, each
+     * closure materialized in the carrying transaction. Default on; an
+     * explicit `false` is the rollback override.
+     */
     contentAddressedSchemas?: boolean;
+
+    /**
+     * Whether a link crossing resolves its schema by reader precedence,
+     * through `combineSchemaForLink`. Server-authoritative: the host
+     * declares the deployment's posture so the worker resolves a hop under
+     * the same combine rule as the server shipping its subscriptions.
+     * Default on; an explicit `false` is the rollback override.
+     */
+    readerSchemaPrecedence?: boolean;
   };
-  // Commit-boundary CFC mode for the worker runtime.
+
+  /**
+   * The commit-boundary CFC mode the worker runtime runs under, in
+   * increasing strictness. `disabled` checks nothing. `observe` checks and
+   * reports without refusing anything. `enforce-explicit` refuses against a
+   * declared policy and stays permissive where none is declared, which is
+   * the rollout posture. `enforce-strict` refuses a commit whose writes
+   * carry confidentiality the target's declared policy does not admit.
+   */
   cfcEnforcementMode?:
     | "disabled"
     | "observe"
@@ -688,7 +744,16 @@ export type InitializationData = {
    * `caveatKinds` a display can discharge. Absent means no ceiling.
    */
   renderConfidentialityCeiling?: {
+    /**
+     * The exact confidentiality clauses a display surface admits, an acting
+     * user's own identity atoms among them.
+     */
     atoms?: readonly CfcConfClause[];
+
+    /**
+     * The kinds of Caveat a display surface can discharge, named rather
+     * than carried, so a label bearing only these is still displayable.
+     */
     caveatKinds?: readonly string[];
   };
 
@@ -698,8 +763,22 @@ export type InitializationData = {
    * its own.
    */
   trustSnapshot?: {
+    /** Identifies the snapshot. The CFC gates require it to be present. */
     id: string;
+
+    /**
+     * The principal whose trust the snapshot is taken from. Absent leaves
+     * the worker to run against the snapshot with no acting principal
+     * named.
+     */
     actingPrincipal?: string;
+
+    /**
+     * Which revision of the snapshot this is: the runtime id with the
+     * trust configuration's digest folded in. It compares as equal or not
+     * rather than as older or newer, and a change to it is what invalidates
+     * digests prepared against the previous one.
+     */
     revision?: string;
   };
 
@@ -782,6 +861,26 @@ export type CellGetRequest = BaseRequest & {
   includeRef?: boolean;
 };
 
+/** The {@link RequestType.CellPull} request. */
+export type CellPullRequest = BaseRequest & {
+  type: RequestType.CellPull;
+  /**
+   * The cell whose producers to demand before reading its current value.
+   */
+  cell: CellRef;
+};
+
+/** The {@link RequestType.CellInitialize} request. */
+export type CellInitializeRequest = BaseRequest & {
+  type: RequestType.CellInitialize;
+
+  /** The cell to initialize when it has no backing value. */
+  cell: CellRef;
+
+  /** The non-undefined default to store. */
+  value: FabricValue;
+};
+
 /**
  * The {@link RequestType.CellSet} request. `value` is the whole
  * already-resolved value rather than a delta.
@@ -798,14 +897,14 @@ export type CellSetRequest = BaseRequest & {
    * The value to store, whole and already resolved.
    */
   value: FabricValue;
+  /** Wait for commit confirmation and return a refusal to the caller. */
+  awaitCommit?: boolean;
 };
 
 /**
- * The {@link RequestType.CellPush} request: a read-modify-write append.
- * The same wire shape as {@link CellSetRequest}, carrying the whole
- * already-appended array rather than a delta, but routed as its own request
- * so the runtime keeps the read target as a commit precondition. That is
- * the compare-and-set a blind set gives up.
+ * The {@link RequestType.CellPush} request: a mergeable server-side append.
+ * It carries only the invocation-time member snapshots, so an equivalent
+ * client handle with a stale local cache cannot replace a newer array base.
  */
 export type CellPushRequest = BaseRequest & {
   type: RequestType.CellPush;
@@ -815,10 +914,11 @@ export type CellPushRequest = BaseRequest & {
    */
   cell: CellRef;
 
-  /**
-   * The value to apply, whole and already resolved.
-   */
-  value: FabricValue;
+  /** The members to append, already resolved. */
+  values: FabricValue[];
+
+  /** Wait for commit confirmation and return a refusal to the caller. */
+  awaitCommit?: boolean;
 };
 
 /**
@@ -837,6 +937,8 @@ export type CellSendRequest = BaseRequest & {
    * The event to deliver.
    */
   event: FabricValue;
+  /** Wait for commit confirmation and return a refusal to the caller. */
+  awaitCommit?: boolean;
 };
 
 /**
@@ -894,75 +996,248 @@ export type CellGetCfcLabelRequest = BaseRequest & {
 /** The {@link RequestType.OperationQuery} request. */
 export type OperationQueryRequest = BaseRequest & {
   type: RequestType.OperationQuery;
+
+  /** The cell whose operation field this addresses. */
   cell: CellRef;
+
+  /**
+   * Groups this request into a named operation session. The worker pins a
+   * session to one cell when it opens, and refuses a later request naming
+   * the same session against a different one. Absent works outside any
+   * session, which is what a one-off request does.
+   */
   operationSessionId?: string;
+
+  /**
+   * The cursor to report from, exclusive: only operations integrated after
+   * it come back. Absent asks for the field from its beginning, which a
+   * field whose history has been trimmed answers with no operations and
+   * `reset`, telling the caller to rebuild from `materialized` instead.
+   */
   after?: OpCursor;
 };
 
 /** The {@link RequestType.OperationCapabilities} request. */
 export type OperationCapabilitiesRequest = BaseRequest & {
   type: RequestType.OperationCapabilities;
+
+  /** The cell whose operation field this addresses. */
   cell: CellRef;
+
+  /**
+   * Groups this request into a named operation session. The worker pins a
+   * session to one cell when it opens, and refuses a later request naming
+   * the same session against a different one. Absent works outside any
+   * session, which is what a one-off request does.
+   */
   operationSessionId?: string;
 };
 
 /** The {@link RequestType.OperationApply} request. */
 export type OperationApplyRequest = BaseRequest & {
   type: RequestType.OperationApply;
+
+  /** The cell whose operation field this addresses. */
   cell: CellRef;
+
+  /**
+   * Groups this request into a named operation session. The worker pins a
+   * session to one cell when it opens, and refuses a later request naming
+   * the same session against a different one. Absent works outside any
+   * session, which is what a one-off request does.
+   */
   operationSessionId?: string;
+
+  /**
+   * Names the operation codec the payload is written in, which is what
+   * decides how it integrates. {@link OperationCapabilitiesResponse} is
+   * where the choices come from.
+   */
   codec: string;
+
+  /**
+   * Identifies this submission, chosen by the submitter. It is what lets a
+   * re-sent apply be recognized as the same one rather than integrated
+   * twice; {@link ApplyOpResolution} reports that case as `duplicate`.
+   */
   submissionId: string;
+
+  /**
+   * The cursor the payload is expressed against. `null` submits against the
+   * field's beginning, which is what a first submission does.
+   */
   base: OpCursor | null;
+
+  /**
+   * The hash of the materialized value the payload was written against.
+   * Required exactly when `base` is `null`, and refused otherwise: an apply
+   * opening an epoch names the baseline it assumes, and one continuing from
+   * a cursor inherits it. A hash that does not match the field's own
+   * refuses the apply rather than integrating against a value the payload
+   * was not written for.
+   */
   baselineHash?: string;
+
+  /** The operations themselves, in whatever form `codec` gives them. */
   payload: FabricValue;
 };
 
 /** The {@link RequestType.OperationSubscribe} request. */
 export type OperationSubscribeRequest = BaseRequest & {
   type: RequestType.OperationSubscribe;
+
+  /**
+   * Identifies this subscription, chosen by the subscriber. Every
+   * {@link OperationUpdateNotification} carries it back, which is how a
+   * client with several subscriptions open routes an update to the one that
+   * asked for it.
+   */
   subscriptionId: string;
+
+  /** The cell whose operation field this addresses. */
   cell: CellRef;
+
+  /**
+   * Groups this request into a named operation session. The worker pins a
+   * session to one cell when it opens, and refuses a later request naming
+   * the same session against a different one. Absent works outside any
+   * session, which is what a one-off request does.
+   */
   operationSessionId?: string;
+
+  /**
+   * The cursor to report from, exclusive: only operations integrated after
+   * it come back. Absent asks for the field from its beginning, which a
+   * field whose history has been trimmed answers with no operations and
+   * `reset`, telling the caller to rebuild from `materialized` instead.
+   */
   after?: OpCursor;
 };
 
 /** The {@link RequestType.OperationRelease} request. */
 export type OperationReleaseRequest = BaseRequest & {
   type: RequestType.OperationRelease;
+
+  /** The cell whose operation field this addresses. */
   cell: CellRef;
+
+  /**
+   * Groups this request into a named operation session. The worker pins a
+   * session to one cell when it opens, and refuses a later request naming
+   * the same session against a different one. Absent works outside any
+   * session, which is what a one-off request does.
+   */
   operationSessionId?: string;
+
+  /** The field's codec, which must be the one it currently holds. */
   codec: string;
+
+  /**
+   * The field's head, exactly -- epoch and version both. A release naming
+   * anything else is refused, which is what keeps one racing an apply from
+   * discarding the other writer's work. Releasing deactivates the field for
+   * every client, and the next apply opens a fresh epoch.
+   */
   cursor: OpCursor;
 };
 
 /** The {@link RequestType.OperationUnsubscribe} request. */
 export type OperationUnsubscribeRequest = BaseRequest & {
   type: RequestType.OperationUnsubscribe;
+
+  /**
+   * The subscription to end, as {@link OperationSubscribeRequest} named it.
+   */
   subscriptionId: string;
 };
 
 /** The {@link RequestType.OperationSessionClose} request. */
 export type OperationSessionCloseRequest = BaseRequest & {
   type: RequestType.OperationSessionClose;
+
+  /**
+   * The session to close, releasing the worker's bookkeeping for it. Unlike
+   * the other requests in this family it is required, a close having
+   * nothing to name otherwise.
+   */
   operationSessionId: string;
 };
 
 /** A response carrying one operation-backed field snapshot. */
 export type OperationFieldResponse = {
+  /**
+   * The field as it stands: its codec and cursor, the materialized value,
+   * and the integrated operations the request asked to see.
+   */
   field: OperationFieldSnapshot;
 };
 
 /** A response naming the operation codecs available for a cell. */
 export type OperationCapabilitiesResponse = {
+  /**
+   * The operation codecs the space's server connection advertises, by name.
+   * It is what a submitter chooses an {@link OperationApplyRequest.codec}
+   * from, and it says nothing about any one cell: the answer is the same
+   * for every cell in the space, and a field pins its codec once its epoch
+   * is open, so the choice exists only at the apply that opens one.
+   */
   codecs: readonly string[];
 };
 
 /** A response carrying the authoritative resolution of an operation. */
 export type OperationApplyResponse = {
+  /**
+   * Where the submission landed: the cursor span it moved the field
+   * through, the operations as integrated, and whether the submission was
+   * a duplicate of one already there.
+   */
   resolution: ApplyOpResolution;
 };
 
+/** SQLite bind values as the main-thread connection carries them. */
+export type SqliteParams =
+  | {
+    /** Marks the positional form, whose values bind in the order given. */
+    kind: "positional";
+
+    /** The bind values, one per placeholder, in statement order. */
+    values: readonly FabricValue[];
+  }
+  | {
+    /** Marks the named form, whose entries bind by parameter name. */
+    kind: "named";
+
+    /** The bindings, as name/value pairs in no particular order. */
+    entries: readonly (readonly [string, FabricValue])[];
+  };
+
+/** The {@link RequestType.SqliteQuery} request. */
+export type SqliteQueryRequest = BaseRequest & {
+  type: RequestType.SqliteQuery;
+
+  /** The cell whose database to read. */
+  cell: CellRef;
+
+  /** The statement to run, with its bind parameters left as placeholders. */
+  sql: string;
+
+  /** What to bind the statement's placeholders to. Absent binds nothing. */
+  params?: SqliteParams;
+};
+
+/** The {@link RequestType.SqliteExec} request. */
+export type SqliteExecRequest = BaseRequest & {
+  type: RequestType.SqliteExec;
+
+  /** The cell whose database to write. */
+  cell: CellRef;
+
+  /** The statement to run, with its bind parameters left as placeholders. */
+  sql: string;
+
+  /** What to bind the statement's placeholders to. Absent binds nothing. */
+  params?: SqliteParams;
+};
 /**
  * The {@link RequestType.GetCell} request. `cause` is what derives the
  * cell: the same space and cause always name the same one.
@@ -1010,16 +1285,36 @@ export type IdleRequest = BaseRequest & {
 /** Reads unresolved attention notices for one open or reconnecting space. */
 export type ListEventAttentionRequest = BaseRequest & {
   type: RequestType.ListEventAttention;
+
+  /** The space whose unresolved notices to read. */
   space: DID;
 };
 
 /** Resolves one notice through the authenticated memory-v2 CAS endpoint. */
 export type ResolveEventAttentionRequest = BaseRequest & {
   type: RequestType.ResolveEventAttention;
+
+  /** The space the notice belongs to. */
   space: DID;
+
+  /** The event the notice was raised for. */
   eventId: string;
+
+  /**
+   * The stream seq the engine stamped on the commit that appended the
+   * event, which with `eventId` is what identifies the entry.
+   */
   seq: number;
+
+  /** The sidecar record holding the notice, which is what is compared and
+   * swapped. */
   sidecarId: string;
+
+  /**
+   * What to do with it: `retry` asks for the delivery again, `dismiss`
+   * accepts the failure and closes the notice. A notice whose
+   * {@link EventAttentionNotice.retryable} is false takes only `dismiss`.
+   */
   action: "retry" | "dismiss";
 };
 
@@ -1145,6 +1440,14 @@ export type SetTelemetryEnabledRequest = BaseRequest & {
   /**
    * Whether telemetry notifications are sent.
    */
+  enabled: boolean;
+};
+
+/** The {@link RequestType.SetMemoryMessageCompression} request. */
+export type SetMemoryMessageCompressionRequest = BaseRequest & {
+  type: RequestType.SetMemoryMessageCompression;
+
+  /** Whether live and later memory WebSocket sessions send compressed frames. */
   enabled: boolean;
 };
 
@@ -1602,10 +1905,13 @@ export type PageCreateRequest = BaseRequest & {
    * given directly. Never both.
    */
   source: {
+    /** Where to fetch the program from. */
     url: string;
   } | {
+    /** The program's entry point and its sources, given rather than fetched. */
     program: Program;
   };
+
   /**
    * The argument the piece is created with. The wire carries a `FabricValue`,
    * which is what the envelope's encoding makes true of it.
@@ -1827,7 +2133,7 @@ export type PieceCloneRequest = BaseRequest & {
 };
 
 /** How a piece's origin URL resolves. */
-export type PieceOriginKind = "web" | "fabric-piece" | "fabric-pattern";
+export type PieceOriginKind = "system" | "fabric-piece" | "fabric-pattern";
 
 /**
  * Where a piece's source came from. `recorded` is present only when
@@ -1860,6 +2166,75 @@ export type PiecePatternRefView = {
    * The export within it that is the pattern.
    */
   symbol: string;
+};
+
+/** What the last attempt to follow a piece's active origin did. */
+export type PieceReconciliationOutcome =
+  | "followed"
+  | "unreachable"
+  | "refused";
+
+/**
+ * Why a reconciliation did not adopt what its origin offered. Only
+ * `incompatible-schema` can be overruled: `argument-mismatch` says the
+ * piece's own stored data does not satisfy the candidate, so there is nothing
+ * to accept — the piece could not run it.
+ */
+export type PieceReconciliationReason =
+  | "incompatible-schema"
+  | "argument-mismatch"
+  | "source-invalid"
+  | "identity-mismatch"
+  | "apply-failed";
+
+/**
+ * The outcome of the last attempt to follow a piece's active origin. Recording
+ * an origin is not the same as running what it offers, and without this the two
+ * are indistinguishable.
+ */
+export type PieceReconciliationView = {
+  /**
+   * What that attempt did.
+   */
+  outcome: PieceReconciliationOutcome;
+
+  /**
+   * When the piece reached this outcome.
+   */
+  at: number;
+
+  /**
+   * The origin the attempt was following.
+   */
+  origin: string;
+
+  /**
+   * The pattern the origin offered, when one was resolved.
+   */
+  offered?: PiecePatternRefView;
+
+  /**
+   * Why the candidate was refused. Absent unless `outcome` is `refused`.
+   */
+  reason?: PieceReconciliationReason;
+
+  /**
+   * What the attempt reported, in its own words.
+   */
+  detail?: string;
+};
+
+/** A recorded source string no resolver can follow, with why. */
+export type PieceUnusableOriginView = {
+  /**
+   * The string the piece records.
+   */
+  recorded: string;
+
+  /**
+   * Why nothing can follow it.
+   */
+  reason: string;
 };
 
 /** What produced one revision of a piece's source. */
@@ -1955,6 +2330,17 @@ export type PieceSourceView = {
   origin?: PieceOriginView;
 
   /**
+   * A recorded source string no resolver can follow. A piece carrying one is
+   * neither following nor detached.
+   */
+  unusableOrigin?: PieceUnusableOriginView;
+
+  /**
+   * What following the active origin last did.
+   */
+  reconciliation?: PieceReconciliationView;
+
+  /**
    * The repository the source is tracked in, where it is.
    */
   repository?: string;
@@ -2018,11 +2404,18 @@ export type PieceSourceRevisionResponse = {
   source: PieceSourceRevisionSourceView;
 };
 
-/** A change to which source a piece follows. */
+/**
+ * A change to which source a piece follows. `repoint` moves the piece to an
+ * origin supplied by its owner, which may be one the piece has never followed;
+ * `adopt` takes what the active origin offers now, which is how a refused
+ * automatic update is overridden without giving up the origin.
+ */
 export type PieceSourceAction =
   | { kind: "detach" }
   | { kind: "restore"; revisionId: string }
-  | { kind: "follow"; revisionId: string };
+  | { kind: "follow"; revisionId: string }
+  | { kind: "repoint"; url: string }
+  | { kind: "adopt" };
 
 /**
  * The {@link RequestType.PieceUpdateSource} request. `confirmationToken` is the
@@ -2184,138 +2577,22 @@ export type VDomEventNotification = BaseClientNotification & {
 };
 
 /**
- * Serialized DOM event data for IPC.
+ * The shape a DOM event crosses in, and the shape of its target within it.
+ *
+ * `serializeEvent()` in `@commonfabric/html` is what produces both, so that is
+ * where they are defined; the protocol re-exports them so a message shape and
+ * the event inside it cannot describe different things. That is the same
+ * arrangement, and for the same reason, as the VDOM op union below.
+ *
+ * The event's name here is `SerializedDomEvent`, which says which of this
+ * file's messages it belongs to; `SerializedEvent` alone would not, among the
+ * other serialized things around it.
  */
-export type SerializedDomEvent = {
-  /**
-   * The DOM event's type, as `click` or `input`.
-   */
-  type: string;
-
-  /**
-   * Where the event came from, so a handler can tell a real user
-   * gesture from a synthesized one.
-   */
-  provenance?: {
-    origin?: string;
-    trusted?: boolean;
-    ui?: {
-      pattern?: string;
-      eventIntegrity?: readonly string[];
-      uiContractDataset?: Record<string, string>;
-    };
-  };
-
-  /**
-   * The key pressed, for a keyboard event.
-   */
-  key?: string;
-
-  /**
-   * The physical key, which `key` does not identify across layouts.
-   */
-  code?: string;
-
-  /**
-   * Whether the key was being held.
-   */
-  repeat?: boolean;
-
-  /**
-   * Whether Alt was held.
-   */
-  altKey?: boolean;
-
-  /**
-   * Whether Control was held.
-   */
-  ctrlKey?: boolean;
-
-  /**
-   * Whether Meta was held.
-   */
-  metaKey?: boolean;
-
-  /**
-   * Whether Shift was held.
-   */
-  shiftKey?: boolean;
-
-  /**
-   * What kind of edit an input event was.
-   */
-  inputType?: string;
-
-  /**
-   * The text an input event inserted, `null` where it inserted none.
-   */
-  data?: string | null;
-
-  /**
-   * Which button a pointer event used.
-   */
-  button?: number;
-
-  /**
-   * Which buttons were held during a pointer event.
-   */
-  buttons?: number;
-
-  /**
-   * What the event fired on, reduced to the fields a handler reads.
-   */
-  target?: SerializedEventTarget;
-
-  /**
-   * A custom event's payload.
-   */
-  detail?: FabricValue;
-};
-
-/**
- * Serialized event target data for IPC.
- */
-export type SerializedEventTarget = {
-  /**
-   * The element's name, or its tag where it has none.
-   */
-  name?: string;
-
-  /**
-   * The element's current value. A `FabricValue` rather than a string: a custom
-   * element chooses what its `value` is, and a `cf-input`, a `cf-tabs` and a
-   * `cf-calendar` each declare theirs as `CellHandle<string> | string`, which
-   * arrives here as the sigil link the main thread resolved it to.
-   */
-  value?: FabricValue;
-
-  /**
-   * Whether a checkbox or radio is checked -- or, where the element chose to
-   * expose something else, what it chose. `cf-checkbox` and `cf-switch` each
-   * declare theirs as `CellHandle<boolean> | boolean`.
-   */
-  checked?: FabricValue;
-
-  /**
-   * Whether an option is selected.
-   */
-  selected?: boolean;
-
-  /**
-   * Which option a select is on.
-   */
-  selectedIndex?: number;
-
-  /**
-   * Every selected option's value, for a multiple select.
-   */
-  selectedOptions?: { value: string }[];
-
-  /**
-   * The element's `data-` attributes.
-   */
-  dataset?: Record<string, string>;
-};
+import type {
+  SerializedEvent as SerializedDomEvent,
+  SerializedEventTarget,
+} from "@commonfabric/html/events";
+export type { SerializedDomEvent, SerializedEventTarget };
 
 /**
  * Request to start VDOM rendering for a cell.
@@ -2383,6 +2660,8 @@ export type IPCClientRequest =
   | InitializeRequest
   | DisposeRequest
   | CellGetRequest
+  | CellPullRequest
+  | CellInitializeRequest
   | CellSetRequest
   | CellPushRequest
   | CellSendRequest
@@ -2397,6 +2676,8 @@ export type IPCClientRequest =
   | OperationSubscribeRequest
   | OperationUnsubscribeRequest
   | OperationSessionCloseRequest
+  | SqliteQueryRequest
+  | SqliteExecRequest
   | GetCellRequest
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
@@ -2408,6 +2689,7 @@ export type IPCClientRequest =
   | SetLoggerLevelRequest
   | SetLoggerEnabledRequest
   | SetTelemetryEnabledRequest
+  | SetMemoryMessageCompressionRequest
   | SetForwardWorkerConsoleRequest
   | ResetLoggerBaselinesRequest
   | GetSettleStatsRequest
@@ -2499,6 +2781,17 @@ export type CellGetResponse = CellValueResponse & {
    * none to reference.
    */
   cell?: CellRef;
+};
+
+/** Rows returned by {@link RequestType.SqliteQuery}. */
+export type SqliteQueryResponse = {
+  /**
+   * The result set, one entry per row, each keyed by the column names the
+   * statement selected. Empty when the statement returned no rows.
+   */
+  rows: readonly {
+    readonly [key: string]: FabricValue;
+  }[];
 };
 
 /** A reference to one cell, for a request whose answer is which cell. */
@@ -2732,14 +3025,32 @@ export type PendingWritesNotification = {
 
 /** The authoritative safe recovery handle presented by the runtime client. */
 export type EventAttentionNotice = {
+  /** The space whose delivery ended this way. */
   space: DID;
+
+  /** The event that failed to deliver. */
   eventId: string;
+
+  /**
+   * The stream seq the engine stamped on the commit that appended the
+   * event. One notice covers every delivery attempt of that entry; the
+   * attempts themselves are counted inside `attention`.
+   */
   seq: number;
+
+  /** The sidecar record the notice is stored as, and the handle a
+   * resolution compares and swaps against. */
   sidecarId: string;
+
   /** False when the terminal event has no acting user and can only be
    * dismissed. Absence preserves Retry for older producers. */
   retryable?: boolean;
+
+  /** Why the delivery ended, in terms meant for the person reading it. */
   reason: string;
+
+  /** What the delivery is waiting on, which is what a surface renders the
+   * notice from. */
   attention: DeliveryAttention;
 };
 
@@ -2748,11 +3059,24 @@ export type EventNeedsAttentionNotification = EventAttentionNotice & {
   type: NotificationType.EventNeedsAttention;
 };
 
+/** The unresolved notices in one space that the requester may act on. */
 export type EventAttentionListResponse = {
+  /**
+   * The notices still awaiting a person, in no promised order, narrowed to
+   * those whose acting user is the requesting identity plus those with no
+   * acting user at all. Empty therefore says the requester has none to act
+   * on, not that the space is holding none.
+   */
   notices: EventAttentionNotice[];
 };
 
+/** What became of one notice a resolution was asked for. */
 export type EventAttentionResolveResponse = {
+  /**
+   * The outcome, which is the memory-v2 compare-and-swap's answer rather
+   * than the request's: a notice another client resolved first comes back
+   * as such rather than as a failure.
+   */
   resolution: EventAttentionResolution;
 };
 
@@ -2829,7 +3153,14 @@ export type VDomBatchNotification = {
 /** A new operation-backed snapshot for one active subscription. */
 export type OperationUpdateNotification = {
   type: NotificationType.OperationUpdate;
+
+  /**
+   * The subscription this is for, as
+   * {@link OperationSubscribeRequest.subscriptionId} named it.
+   */
   subscriptionId: string;
+
+  /** The field as it now stands, in the shape a query returns it. */
   field: OperationFieldSnapshot;
 };
 
@@ -2845,6 +3176,7 @@ export type RemoteResponse =
   | CellGetResponse
   | CellResponse
   | CfcLabelViewResponse
+  | SqliteQueryResponse
   | GraphSnapshotResponse
   | LoggerCountsResponse
   | PatternCoverageResponse
@@ -2889,6 +3221,11 @@ export type IPCRemoteNotification =
  * The request-and-response pairing for every {@link RequestType}. This is what
  * types a call site's return, so adding a request means adding its entry here
  * as well as its arm to {@link IPCClientRequest}.
+ *
+ * The `request` and `response` members carry no doc comments of their own,
+ * deliberately: each names a type documented where it is declared, and the
+ * pairing is the whole of what an entry says. A comment on either would
+ * restate the name beside it.
  */
 export type Commands = {
   // Runtime requests
@@ -2952,6 +3289,10 @@ export type Commands = {
     request: SetTelemetryEnabledRequest;
     response: EmptyResponse;
   };
+  [RequestType.SetMemoryMessageCompression]: {
+    request: SetMemoryMessageCompressionRequest;
+    response: EmptyResponse;
+  };
   [RequestType.SetForwardWorkerConsole]: {
     request: SetForwardWorkerConsoleRequest;
     response: EmptyResponse;
@@ -3000,6 +3341,14 @@ export type Commands = {
   [RequestType.CellGet]: {
     request: CellGetRequest;
     response: CellGetResponse;
+  };
+  [RequestType.CellPull]: {
+    request: CellPullRequest;
+    response: CellGetResponse;
+  };
+  [RequestType.CellInitialize]: {
+    request: CellInitializeRequest;
+    response: CellValueResponse;
   };
   [RequestType.CellSet]: {
     request: CellSetRequest;
@@ -3056,6 +3405,14 @@ export type Commands = {
   [RequestType.OperationSessionClose]: {
     request: OperationSessionCloseRequest;
     response: BooleanResponse;
+  };
+  [RequestType.SqliteQuery]: {
+    request: SqliteQueryRequest;
+    response: SqliteQueryResponse;
+  };
+  [RequestType.SqliteExec]: {
+    request: SqliteExecRequest;
+    response: EmptyResponse;
   };
   // Page requests
   [RequestType.PageCreate]: {

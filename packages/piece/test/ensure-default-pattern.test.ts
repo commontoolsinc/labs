@@ -107,7 +107,11 @@ describe("PiecesController.ensureDefaultPattern", () => {
     ).toBe("MockDefaultPattern");
   });
 
-  it("should find defaultPattern when its untyped schema view is undefined", async () => {
+  it("finds the defaultPattern when the schema view projects an empty object", async () => {
+    // The stored link's schema requires a field the pattern doc lacks. The
+    // space cell's own shaped reader takes precedence over that link schema,
+    // and projects an empty object — nothing the reader names is present. The
+    // controller's found-decision must not trust such a view: it reads raw.
     const schema = {
       type: "object",
       properties: {
@@ -129,9 +133,16 @@ describe("PiecesController.ensureDefaultPattern", () => {
     });
     await controller.linkDefaultPattern(mockPieceCell);
 
+    // The reader here is the runtime's own `spaceCellSchema` (the
+    // controller builds its space cell with no explicit schema): its
+    // `defaultPattern` property is a shaped asCell fetch-shape naming only
+    // `spaces`/`defaultAppUrl`/`suggestionHistory`/`recordSuggestion`,
+    // with no `additionalProperties`. That shape wins the crossing, the
+    // pattern doc carries none of those properties ([NAME] is not among
+    // them), so the projection is `{}`.
     const linked = controller.getSpaceCellContents().key("defaultPattern")
       .get();
-    expect(linked?.get()).toBeUndefined();
+    expect(linked?.get()).toEqual({});
 
     const defaultPattern = await controller.getDefaultPattern(false);
     expect(defaultPattern).toBeDefined();

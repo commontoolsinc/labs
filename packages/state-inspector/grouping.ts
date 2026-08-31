@@ -24,7 +24,7 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 // DB).
 
 import { openSpace, type SpaceDb } from "./db.ts";
-import { collectLinks } from "./decode.ts";
+import { linksWithPaths, type LinkWalkBounds } from "./decode.ts";
 import { candidatesMatching, reconstructDocument } from "./reconstruct.ts";
 import type { DiscoveredSpace } from "./discover.ts";
 
@@ -54,6 +54,22 @@ export interface SpaceSignals {
   commits: number;
   entities: number;
 }
+
+/**
+ * How far the space-signal walks reach. A signal here is "which other spaces
+ * does this one name", and the answer is a claim about a whole space, so the
+ * walk wants every link a document holds — twelve levels of nesting reaches
+ * past any value this tool has met.
+ *
+ * `maxNodes` is unbounded because `SpaceSignals` carries no field saying its
+ * DID lists are partial, and a space silently missing from the group is worse
+ * than a walk that does not stop early. Giving it a finite value belongs with
+ * giving `SpaceSignals` that field.
+ */
+const SPACE_SIGNAL_WALK: LinkWalkBounds = {
+  maxDepth: 12,
+  maxNodes: Number.POSITIVE_INFINITY,
+};
 
 const SESSION_RE = /^session:(did:key:[^:]+):/i;
 
@@ -136,7 +152,8 @@ export function analyzeSpaceSignals(
     isHome = true;
     // `profiles` is a link to the profiles cell; follow it and read the array.
     const profilesField = (value as Record<string, unknown>).profiles;
-    const link = collectLinks(profilesField)[0];
+    const link = linksWithPaths(profilesField, SPACE_SIGNAL_WALK)
+      .links[0]?.link;
     if (!link?.id) continue;
     let pdoc;
     try {
@@ -144,7 +161,9 @@ export function analyzeSpaceSignals(
     } catch {
       continue;
     }
-    for (const l of collectLinks(pdoc?.value)) {
+    for (
+      const { link: l } of linksWithPaths(pdoc?.value, SPACE_SIGNAL_WALK).links
+    ) {
       if (l.space && l.space !== own) profileDids.add(l.space);
     }
   }
@@ -164,7 +183,7 @@ export function analyzeSpaceSignals(
     } catch {
       continue;
     }
-    for (const l of collectLinks(doc)) {
+    for (const { link: l } of linksWithPaths(doc, SPACE_SIGNAL_WALK).links) {
       if (l.space && l.space !== own) crossSpaceDids.add(l.space);
     }
   }

@@ -63,6 +63,74 @@ Take the feedback into account and leave a comment if you disagree, as
 [the contributing section of the root `README.md`](../../README.md#contributing)
 requires.
 
+## Who a finding is posted by
+
+Three accounts leave findings on this repository, and a query that names one of
+them hides the other two:
+
+- `cubic-dev-ai[bot]` — cubic, on nearly every pull request.
+- `chatgpt-codex-connector[bot]` — the Codex connector, on a minority.
+- **the invoking user's own account** — a Codex review started by hand, through
+  the `review` script in a checkout, posts as whoever ran it. On a pull request
+  reviewed that way the findings are indistinguishable by author from the
+  author's own replies, and are told apart by `in_reply_to_id`.
+
+The third is the one that catches people, because a query selecting on `cubic`
+looks complete and returns a shorter list without saying so.
+
+## Filters that drop findings
+
+Every narrowing below looks reasonable and answers a different question than
+the one being asked. Enumerate with no predicate but the endpoint, and triage
+by reading; a pull request's whole population is usually small enough to read
+in a couple of minutes.
+
+- **By timestamp** — "what is new since I last looked" is not "what is
+  outstanding". A finding raised on an earlier push, about code the later
+  pushes did not touch, is still open and will not be re-posted.
+- **By `commit_id`** — this field is re-anchored as the code moves, so it is
+  not the commit the finding was raised against. Selecting on the head hides
+  everything anchored elsewhere.
+- **By `line`** — a comment whose line has changed comes back with `line`
+  null, as does a file-level comment. Any numeric comparison drops them.
+- **By author** — see above.
+
+## A review body is a mutable status, not a record
+
+The inline comments are the durable record of what a review found. The body is
+a live status display carrying a historical timestamp, and the two do not
+correspond.
+
+It says nothing reliable about the review it heads. A body reading "all
+reported issues were addressed" has been observed with the *same* `submitted_at`
+as inline comments of that review raising a P1 — to the second, twice on one
+pull request.
+
+And it is rewritten afterwards. The same review body, read twice about twenty
+minutes apart with a push in between, went from "1 issue found across 2 files"
+to "all reported issues were addressed", with `submitted_at` unchanged. So
+reading bodies in timestamp order does not repair the problem: the ordering is
+historical and the content is current. A body from three reviews ago saying
+everything is addressed is a statement about now, stamped then — and an
+"auto-approval blocked" body may equally have been rewritten since, or not.
+
+**Never read a body as evidence of what a review found, and never as evidence
+that nothing was found.** Its only safe use is as a prompt to go and read the
+inline comments.
+
+## Where else a pull request carries a verdict
+
+Two surfaces sit outside the inline list, and neither appears in it:
+
+```bash
+gh api --paginate repos/commontoolsinc/labs/pulls/<n>/reviews   # summary bodies
+gh api --paginate repos/commontoolsinc/labs/issues/<n>/comments # issue timeline
+```
+
+The issue timeline is where the coverage-debt bot posts, including the line
+that settles a coverage argument authoritatively — "Code coverage regression
+resolved", with the baseline and the pull request's number beside it.
+
 ## Why `gh pr view` shows nothing
 
 Neither of these returns inline review comments:

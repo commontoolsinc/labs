@@ -40,10 +40,12 @@ export {
 } from "./value-clone.ts";
 
 export {
+  assertValidFabricValueLayer,
   isFabricContainerValue,
   isFabricObjectOrArray,
   isFabricPlainContainer,
   isFabricPlainObject,
+  isValidFabricNativeObject,
   isValidFabricPlainObject,
   isValidFabricValue,
   isValidFabricValueLayer,
@@ -55,6 +57,7 @@ export {
   nativeFromFabricValue,
   shallowCleanArray,
   shallowCleanPlainObject,
+  shallowFabricFromNativeObjectElseUndefined,
   shallowFabricFromNativeValue,
 } from "./native-conversion.ts";
 

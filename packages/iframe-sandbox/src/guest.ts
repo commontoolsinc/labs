@@ -1,154 +1,809 @@
 /**
- * The guest side of the `common-iframe-sandbox` boundary.
- *
- * A guest runs in its own realm and reaches the host's key/value context over
- * a `MessagePort` the host hands it once its document has loaded. This module
- * is the client for that: it takes the port when it arrives, builds the
- * messages `./ipc.ts` describes, and hands the guest each value the host sends.
- *
- * The API is deliberately minimal -- it covers the operations the protocol
- * has, plus the teardown of its own listener.
+ * Connects sandboxed guest code to the capabilities granted by its host.
+ * Calls may begin before port handoff and settle once the host is ready.
  */
 
 import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  cloneIfNecessary,
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 
 import {
+  BRIDGE_PROTOCOL,
+  BRIDGE_VERSION,
+  type BridgeCellIdentity,
+  type BridgeCellPath,
+  type BridgeError,
+  type BridgeHostMessage,
+  type BridgeManifest,
+  type BridgeOperation,
+  type BridgeRequest,
+  type BridgeResolvedCell,
   GUEST_PORT_HANDOFF,
   type GuestError,
-  type GuestMessage,
-  GuestMessageType,
-  isHostMessage,
+  isBridgeHostMessage,
 } from "./ipc.ts";
 
-/**
- * Called with each value the host sends: the answer to a {@link
- * GuestContext.read}, and each update on a subscribed key.
- */
-export type UpdateHandler = (key: string, value: FabricValue) => void;
+/** Structured failure returned by a bridge operation. */
+export class FabricBridgeError extends Error {
+  readonly code: string;
+  readonly resource?: string;
 
-/**
- * A guest's handle on the host's key/value context.
- *
- * `read()` does not return the value. The host answers a read the same way it
- * announces a subscribed key's change, so both arrive at the handler given to
- * {@link connectGuestContext}.
- */
-export type GuestContext = {
-  /** Ask the host for `key`'s value, which arrives at the update handler. */
-  read(key: string): void;
+  constructor(error: BridgeError) {
+    super(error.message);
+    this.name = "FabricBridgeError";
+    this.code = error.code;
+    this.resource = error.resource;
+  }
+}
 
-  /** Write `value` to `key`. */
-  write(key: string, value: FabricValue): void;
+/** Current state of a remote resource watched by guest code. */
+export type ResourceSnapshot<T> =
+  | { status: "loading" }
+  | { status: "ready"; value: T }
+  | { status: "error"; error: FabricBridgeError };
 
-  /**
-   * Subscribe to each of `keys`. A change to one reaches the update handler;
-   * the guest's own writes do not.
-   */
-  subscribe(...keys: string[]): void;
+type SnapshotListener<T> = (snapshot: ResourceSnapshot<T>) => void;
+type CellSink<T> = (value: Readonly<T> | undefined) => void | (() => void);
+type EncodedBridgeRequest = ReturnType<typeof realmFromFabricValue>;
 
-  /** Unsubscribe from each of `keys`. */
-  unsubscribe(...keys: string[]): void;
-
-  /** Stop listening for the host's messages. */
-  disconnect(): void;
+type QueuedBridgeRequest = {
+  id: number;
+  encoded: EncodedBridgeRequest;
 };
 
-/**
- * Connects to the host, calling `onUpdate` with each value it sends.
- *
- * A guest may call the result's operations at once. The port arrives after the
- * document has loaded, and what is said before it does is sent when it comes,
- * in the order it was said.
- */
-export function connectGuestContext(onUpdate: UpdateHandler): GuestContext {
-  let port: MessagePort | undefined;
-  const unsent: GuestMessage[] = [];
+type CellOperationQueue = {
+  tail?: Promise<void>;
+};
 
-  const send = (message: GuestMessage): void => {
-    if (port) {
-      port.postMessage(realmFromFabricValue(message));
-    } else {
-      unsent.push(message);
+export type RemoteCellTarget = {
+  resource: string;
+  handle?: never;
+  path: BridgeCellPath;
+} | {
+  resource?: never;
+  handle: string;
+  path: BridgeCellPath;
+};
+
+function targetFields(target: RemoteCellTarget): Pick<
+  BridgeRequest,
+  "resource" | "handle" | "path"
+> {
+  return "handle" in target
+    ? { handle: target.handle, path: target.path }
+    : { resource: target.resource, path: target.path };
+}
+
+/** Cell-shaped guest handle rooted in an explicitly granted capability. */
+export class RemoteCell<T = FabricValue> {
+  readonly #client: FabricClient;
+  readonly #target: RemoteCellTarget;
+  readonly #snapshotListeners = new Set<SnapshotListener<T>>();
+  readonly #sinks = new Map<CellSink<T>, (() => void) | void>();
+  readonly #identity: BridgeCellIdentity | undefined;
+  readonly #operationQueue: CellOperationQueue;
+  #snapshot: ResourceSnapshot<T> = { status: "loading" };
+  #unsubscribeRemote: (() => void) | undefined;
+  #eventGeneration = 0;
+  #resolved: Promise<RemoteCell<T>> | undefined;
+
+  constructor(
+    client: FabricClient,
+    target: string | RemoteCellTarget,
+    options: { identity?: BridgeCellIdentity; value?: T } = {},
+    operationQueue: CellOperationQueue = {},
+  ) {
+    this.#client = client;
+    this.#target = typeof target === "string"
+      ? { resource: target, path: [] }
+      : target;
+    this.#identity = options.identity;
+    this.#operationQueue = operationQueue;
+    if (Object.hasOwn(options, "value")) {
+      this.#snapshot = { status: "ready", value: options.value as T };
     }
+  }
+
+  /** Stable identity metadata, present after resolve(). */
+  get identity(): BridgeCellIdentity | undefined {
+    return this.#identity;
+  }
+
+  /** Samples the current guest-side value without waiting for host work. */
+  get(): Readonly<T> | undefined {
+    return this.#snapshot.status === "ready" ? this.#snapshot.value : undefined;
+  }
+
+  getSnapshot = (): ResourceSnapshot<T> => this.#snapshot;
+
+  /** Internal status subscription used by framework adapters. */
+  subscribeSnapshot = (listener: SnapshotListener<T>): () => void => {
+    this.#snapshotListeners.add(listener);
+    listener(this.#snapshot);
+    this.#ensureRemoteSink();
+    return () => {
+      this.#snapshotListeners.delete(listener);
+      this.#closeRemoteSinkIfUnused();
+    };
   };
 
-  // The port's far end is the host, so what arrives on it is not the open
-  // question a window message is. It is still checked before being taken
-  // apart: what does not decode, and what decodes to something this protocol
-  // does not write, are both left alone rather than guessed at.
-  const onPortMessage = (event: MessageEvent): void => {
+  /**
+   * Calls `listener` synchronously with get(), then again whenever the value
+   * changes. The returned function tears down this sink.
+   */
+  sink(listener: CellSink<T>): () => void {
+    this.#sinks.set(listener, listener(this.get()));
+    this.#ensureRemoteSink();
+    return () => {
+      this.#runSinkCleanup(listener);
+      this.#sinks.delete(listener);
+      this.#closeRemoteSinkIfUnused();
+    };
+  }
+
+  /** Waits for the host Cell.pull() barrier and returns its current value. */
+  pull(): Promise<T> {
+    return this.#enqueueOperation(() => this.#pull());
+  }
+
+  async #pull(): Promise<T> {
+    const before = this.#snapshot;
+    const eventGeneration = this.#eventGeneration;
+    try {
+      const value = await this.#client.request("pull", {
+        ...targetFields(this.#target),
+      }) as T;
+      if (
+        eventGeneration === this.#eventGeneration &&
+        this.#snapshot === before
+      ) {
+        this.#setReady(value);
+      }
+      return value;
+    } catch (error) {
+      if (
+        eventGeneration === this.#eventGeneration &&
+        this.#snapshot === before
+      ) {
+        this.#setError(error);
+      }
+      throw error;
+    }
+  }
+
+  /** Replaces the cell's value. */
+  set(value: T): Promise<void> {
+    let snapshot: T;
+    try {
+      snapshot = cloneIfNecessary(value as FabricValue, {
+        frozen: false,
+      }) as T;
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    return this.#enqueueOperation(() => this.#set(snapshot));
+  }
+
+  /** Atomically stores a default while the cell has no backing value. */
+  initialize(value: T): Promise<T> {
+    if (value === undefined) {
+      return Promise.reject(
+        new TypeError("Cell initialize requires a defined value."),
+      );
+    }
+    let snapshot: T;
+    try {
+      snapshot = cloneIfNecessary(value as FabricValue, {
+        frozen: false,
+      }) as T;
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    return this.#enqueueOperation(() => this.#initialize(snapshot));
+  }
+
+  update(updater: (current: T) => T): Promise<void> {
+    return this.#enqueueOperation(async () => {
+      const snapshot = this.#snapshot;
+      const current = snapshot.status === "ready"
+        ? snapshot.value
+        : await this.#pull();
+      await this.#set(updater(current));
+    });
+  }
+
+  /** Appends members with the runtime's mergeable array operation. */
+  push<U>(this: RemoteCell<U[]>, ...values: U[]): Promise<void> {
+    let snapshots: U[];
+    try {
+      snapshots = cloneIfNecessary(values as FabricValue, {
+        frozen: false,
+      }) as U[];
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    return this.#enqueueOperation(async () => {
+      const eventGeneration = this.#eventGeneration;
+      const before = this.#snapshot;
+      await this.#client.request("push", {
+        ...targetFields(this.#target),
+        values: snapshots as FabricValue[],
+      });
+      if (
+        eventGeneration === this.#eventGeneration &&
+        this.#snapshot === before && before.status === "ready" &&
+        Array.isArray(before.value)
+      ) {
+        this.#setReady([...before.value, ...snapshots] as U[]);
+      }
+    });
+  }
+
+  /** Derives a path-scoped handle without a round trip. */
+  key<K extends Extract<keyof T, string | number>>(key: K): RemoteCell<T[K]>;
+  key(...keys: Array<string | number>): RemoteCell<unknown>;
+  key(...keys: Array<string | number>): RemoteCell<any> {
+    let value: unknown = this.get();
+    let hasValue = this.#snapshot.status === "ready";
+    for (const key of keys) {
+      if (value === null || typeof value !== "object") {
+        hasValue = false;
+        break;
+      }
+      value = (value as Record<string, unknown>)[String(key)];
+    }
+    return this.#client.cellTarget(
+      {
+        ...this.#target,
+        path: [...this.#target.path, ...keys],
+      },
+      hasValue ? { value } : {},
+    );
+  }
+
+  /** Resolves links and returns a stable, host-minted cell capability. */
+  resolve(): Promise<RemoteCell<T>> {
+    this.#resolved ??= this.#enqueueOperation(async () => {
+      const result = await this.#client.request("resolve", {
+        ...targetFields(this.#target),
+      }) as BridgeResolvedCell;
+      return this.#client.resolvedCell<T>(result);
+    });
+    return this.#resolved;
+  }
+
+  #enqueueOperation<U>(operation: () => Promise<U>): Promise<U> {
+    const running = this.#operationQueue.tail
+      ? this.#operationQueue.tail.then(operation)
+      : operation();
+    const tail = running.then(() => {}, () => {});
+    this.#operationQueue.tail = tail;
+    void tail.then(() => {
+      if (this.#operationQueue.tail === tail) {
+        this.#operationQueue.tail = undefined;
+      }
+    });
+    return running;
+  }
+
+  async #set(value: T): Promise<void> {
+    const before = this.#snapshot;
+    const eventGeneration = this.#eventGeneration;
+    const snapshot = cloneIfNecessary(value as FabricValue, {
+      frozen: false,
+    }) as T;
+    try {
+      await this.#client.request("set", {
+        ...targetFields(this.#target),
+        value: snapshot as FabricValue,
+      });
+      if (
+        eventGeneration === this.#eventGeneration &&
+        this.#snapshot === before
+      ) {
+        this.#setReady(snapshot);
+      }
+    } catch (error) {
+      if (
+        eventGeneration === this.#eventGeneration &&
+        this.#snapshot === before
+      ) {
+        this.#setError(error);
+      }
+      throw error;
+    }
+  }
+
+  async #initialize(value: T): Promise<T> {
+    const before = this.#snapshot;
+    const eventGeneration = this.#eventGeneration;
+    try {
+      const current = await this.#client.request("initialize", {
+        ...targetFields(this.#target),
+        value: value as FabricValue,
+      }) as T;
+      if (
+        eventGeneration === this.#eventGeneration &&
+        this.#snapshot === before
+      ) {
+        this.#setReady(current);
+      }
+      return current;
+    } catch (error) {
+      if (
+        eventGeneration === this.#eventGeneration &&
+        this.#snapshot === before
+      ) {
+        this.#setError(error);
+      }
+      throw error;
+    }
+  }
+
+  #setReady(value: T): void {
+    const previous = this.get();
+    if (
+      this.#snapshot.status === "ready" &&
+      valueEqual(
+        this.#snapshot.value as FabricValue,
+        value as FabricValue,
+      )
+    ) {
+      return;
+    }
+    this.#snapshot = { status: "ready", value };
+    for (const listener of this.#snapshotListeners) listener(this.#snapshot);
+    if (
+      previous !== undefined || value !== undefined
+    ) {
+      for (const listener of this.#sinks.keys()) {
+        this.#runSinkCleanup(listener);
+        this.#sinks.set(listener, listener(value));
+      }
+    }
+  }
+
+  #setError(error: unknown): void {
+    const bridgeError = error instanceof FabricBridgeError
+      ? error
+      : new FabricBridgeError({
+        code: "operation-failed",
+        message: error instanceof Error ? error.message : String(error),
+        resource: "resource" in this.#target
+          ? this.#target.resource
+          : undefined,
+      });
+    this.#snapshot = { status: "error", error: bridgeError };
+    for (const listener of this.#snapshotListeners) listener(this.#snapshot);
+  }
+
+  #ensureRemoteSink(): void {
+    if (this.#unsubscribeRemote) return;
+    this.#unsubscribeRemote = this.#client.sinkCell(
+      this.#target,
+      (value) => {
+        this.#eventGeneration++;
+        this.#setReady(value as T);
+      },
+      (error) => this.#setError(error),
+    );
+  }
+
+  #closeRemoteSinkIfUnused(): void {
+    if (this.#sinks.size > 0 || this.#snapshotListeners.size > 0) return;
+    this.#unsubscribeRemote?.();
+    this.#unsubscribeRemote = undefined;
+  }
+
+  #runSinkCleanup(listener: CellSink<T>): void {
+    try {
+      this.#sinks.get(listener)?.();
+    } catch {
+      // A broken consumer cleanup must not retain or block the other sinks.
+    }
+  }
+}
+
+/** SQL text and bind values accepted by a remote SQLite resource. */
+export type SqliteQueryInput = {
+  sql: string;
+  params?: ReadonlyArray<FabricValue> | Record<string, FabricValue>;
+};
+
+/** Key-safe wire form of SQLite rows transported through the realm codec. */
+export type SqliteQueryWireResult = {
+  rows: Array<Array<[string, FabricValue]>>;
+};
+
+function sqliteOperationInput(
+  sql: string,
+  params?: SqliteQueryInput["params"],
+): FabricValue {
+  if (params === undefined) return { sql };
+  return Array.isArray(params)
+    ? { sql, params }
+    : { sql, namedParams: Object.entries(params) };
+}
+
+/** Guest-side query and mutation interface for one SQLite resource. */
+export class RemoteSqlite {
+  readonly #client: FabricClient;
+  readonly #name: string;
+
+  constructor(client: FabricClient, name: string) {
+    this.#client = client;
+    this.#name = name;
+  }
+
+  async query<Row = Record<string, unknown>>(
+    sql: string,
+    params?: SqliteQueryInput["params"],
+  ): Promise<{ rows: Row[] }> {
+    const result = await this.#client.call(
+      this.#name,
+      "query",
+      sqliteOperationInput(sql, params),
+    ) as SqliteQueryWireResult;
+    return {
+      rows: result.rows.map((entries) => Object.fromEntries(entries) as Row),
+    };
+  }
+
+  async exec(
+    sql: string,
+    params?: SqliteQueryInput["params"],
+  ): Promise<void> {
+    await this.#client.call(
+      this.#name,
+      "exec",
+      sqliteOperationInput(sql, params),
+    );
+  }
+
+  /** Sinks database invalidations until the returned function is called. */
+  sink(listener: () => void): () => void {
+    return this.#client.sinkResource(this.#name, () => listener());
+  }
+}
+
+type PendingRequest = {
+  resolve: (value: FabricValue | undefined) => void;
+  reject: (error: unknown) => void;
+};
+
+type Subscription = {
+  update: (value: FabricValue | undefined) => void;
+  error?: (error: unknown) => void;
+};
+
+/** Guest connection to the resources granted by the embedding host. */
+export class FabricClient {
+  #port: MessagePort | undefined;
+  #nextRequestId = 0;
+  #nextSubscriptionId = 0;
+  #pending = new Map<number, PendingRequest>();
+  #queued: QueuedBridgeRequest[] = [];
+  #subscriptions = new Map<string, Subscription>();
+  #cells = new Map<string, RemoteCell<unknown>>();
+  #cellOperationQueues = new Map<string, CellOperationQueue>();
+  #resolvedOperations = new Map<string, ReadonlySet<string>>();
+  #manifest: Promise<BridgeManifest> | undefined;
+  #disconnected = false;
+
+  constructor() {
+    globalThis.addEventListener("message", this.#onHandoff);
+  }
+
+  describe(): Promise<BridgeManifest> {
+    return this.#manifest ??= this.#request("describe") as Promise<
+      BridgeManifest
+    >;
+  }
+
+  cell<T = FabricValue>(name: string): RemoteCell<T> {
+    return this.cellTarget<T>({ resource: name, path: [] });
+  }
+
+  /** Returns the one shared guest handle for a capability target and path. */
+  cellTarget<T = FabricValue>(
+    target: RemoteCellTarget,
+    options: { identity?: BridgeCellIdentity; value?: T } = {},
+  ): RemoteCell<T> {
+    const key = JSON.stringify([
+      "handle" in target ? "handle" : "resource",
+      "handle" in target ? target.handle : target.resource,
+      target.path,
+    ]);
+    const rootKey = JSON.stringify([
+      "handle" in target ? "handle" : "resource",
+      "handle" in target ? target.handle : target.resource,
+    ]);
+    let cell = this.#cells.get(key) as RemoteCell<T> | undefined;
+    if (!cell) {
+      let queue = this.#cellOperationQueues.get(rootKey);
+      if (!queue) {
+        queue = {};
+        this.#cellOperationQueues.set(rootKey, queue);
+      }
+      cell = new RemoteCell(this, target, options, queue);
+      this.#cells.set(key, cell as RemoteCell<unknown>);
+    }
+    return cell as unknown as RemoteCell<T>;
+  }
+
+  /** Rehydrates a host-minted stable cell capability. */
+  resolvedCell<T = FabricValue>(
+    descriptor: BridgeResolvedCell,
+  ): RemoteCell<T> {
+    this.#resolvedOperations.set(
+      descriptor.handle,
+      new Set(descriptor.operations ?? []),
+    );
+    return this.cellTarget<T>(
+      { handle: descriptor.handle, path: [] },
+      {
+        ...(descriptor.identity !== undefined && {
+          identity: descriptor.identity,
+        }),
+        value: descriptor.value as T,
+      },
+    );
+  }
+
+  sqlite(name: string): RemoteSqlite {
+    return new RemoteSqlite(this, name);
+  }
+
+  call(
+    resource: string,
+    method: string,
+    value?: FabricValue,
+  ): Promise<FabricValue | undefined> {
+    return this.request("call", { resource, method, value });
+  }
+
+  request(
+    operation: BridgeOperation,
+    fields: Partial<
+      Omit<
+        BridgeRequest,
+        "protocol" | "version" | "type" | "id" | "operation"
+      >
+    > = {},
+  ): Promise<FabricValue | undefined> {
+    if (operation === "initialize") {
+      return this.#initialize(fields);
+    }
+    return this.#request(operation, fields);
+  }
+
+  async #initialize(
+    fields: Partial<
+      Omit<
+        BridgeRequest,
+        "protocol" | "version" | "type" | "id" | "operation"
+      >
+    >,
+  ): Promise<FabricValue | undefined> {
+    if (this.#disconnected) {
+      return await this.#request("initialize", fields);
+    }
+    if (typeof fields.handle === "string") {
+      if (!this.#resolvedOperations.get(fields.handle)?.has("initialize")) {
+        throw new FabricBridgeError({
+          code: "method-not-supported",
+          message: "The resolved cell does not support initialize().",
+        });
+      }
+      return await this.#request("initialize", fields);
+    }
+    if (typeof fields.resource !== "string") {
+      throw new FabricBridgeError({
+        code: "method-not-supported",
+        message: "The cell capability cannot negotiate initialize().",
+      });
+    }
+    const manifest = await this.describe();
+    const descriptor = manifest.resources.find((entry) =>
+      entry.name === fields.resource
+    );
+    if (!descriptor?.operations.includes("initialize")) {
+      throw new FabricBridgeError({
+        code: "method-not-supported",
+        message: `Cell \`${fields.resource}\` does not support initialize().`,
+        resource: fields.resource,
+      });
+    }
+    return await this.#request("initialize", fields);
+  }
+
+  #request(
+    operation: BridgeOperation,
+    fields: Partial<
+      Omit<
+        BridgeRequest,
+        "protocol" | "version" | "type" | "id" | "operation"
+      >
+    > = {},
+  ): Promise<FabricValue | undefined> {
+    if (this.#disconnected) {
+      return Promise.reject(
+        new FabricBridgeError({
+          code: "disconnected",
+          message: "The Fabric bridge is disconnected.",
+        }),
+      );
+    }
+    const id = this.#nextRequestId++;
+    const request: BridgeRequest = {
+      protocol: BRIDGE_PROTOCOL,
+      version: BRIDGE_VERSION,
+      type: "request",
+      id,
+      operation,
+      ...fields,
+    };
+    let encoded: EncodedBridgeRequest;
+    try {
+      encoded = realmFromFabricValue(request);
+      // `postMessage()` snapshots at send time. Queued calls have no port yet,
+      // so they snapshot the encoded form at invocation time instead of
+      // retaining caller-owned objects by reference until capability handoff.
+      if (!this.#port) encoded = structuredClone(encoded);
+    } catch (cause) {
+      return Promise.reject(cause);
+    }
+    const result = Promise.withResolvers<FabricValue | undefined>();
+    result.promise.catch(() => {});
+    this.#pending.set(id, result);
+    if (this.#port) this.#sendPending(id, encoded);
+    else this.#queued.push({ id, encoded });
+    return result.promise;
+  }
+
+  sinkResource(
+    resource: string,
+    update: (value: FabricValue | undefined) => void,
+    error?: (error: unknown) => void,
+  ): () => void {
+    const subscription = `subscription-${this.#nextSubscriptionId++}`;
+    this.#subscriptions.set(subscription, { update, error });
+    void this.request("sink", { resource, subscription }).catch(
+      (cause) => {
+        this.#subscriptions.delete(subscription);
+        error?.(cause);
+      },
+    );
+    return () => {
+      this.#subscriptions.delete(subscription);
+      void this.request("unsink", { resource, subscription }).catch(
+        () => {},
+      );
+    };
+  }
+
+  /** Opens a value sink on a cell target. */
+  sinkCell(
+    target: RemoteCellTarget,
+    update: (value: FabricValue | undefined) => void,
+    error?: (error: unknown) => void,
+  ): () => void {
+    const subscription = `subscription-${this.#nextSubscriptionId++}`;
+    this.#subscriptions.set(subscription, { update, error });
+    void this.request("sink", {
+      ...targetFields(target),
+      subscription,
+    }).catch((cause) => {
+      this.#subscriptions.delete(subscription);
+      error?.(cause);
+    });
+    return () => {
+      this.#subscriptions.delete(subscription);
+      void this.request("unsink", {
+        ...targetFields(target),
+        subscription,
+      }).catch(() => {});
+    };
+  }
+
+  disconnect(): void {
+    if (this.#disconnected) return;
+    this.#disconnected = true;
+    globalThis.removeEventListener("message", this.#onHandoff);
+    if (this.#port) {
+      this.#send({
+        protocol: BRIDGE_PROTOCOL,
+        version: BRIDGE_VERSION,
+        type: "request",
+        id: this.#nextRequestId++,
+        operation: "disconnect",
+      });
+    }
+    this.#port?.close();
+    this.#port = undefined;
+    const error = new FabricBridgeError({
+      code: "disconnected",
+      message: "The Fabric bridge disconnected before the operation completed.",
+    });
+    for (const pending of this.#pending.values()) pending.reject(error);
+    this.#pending.clear();
+    this.#subscriptions.clear();
+    this.#resolvedOperations.clear();
+    this.#manifest = undefined;
+    this.#cellOperationQueues.clear();
+    this.#queued = [];
+  }
+
+  #send(request: BridgeRequest): void {
+    this.#port?.postMessage(realmFromFabricValue(request));
+  }
+
+  #sendPending(id: number, encoded: EncodedBridgeRequest): void {
+    try {
+      this.#port?.postMessage(encoded);
+    } catch (cause) {
+      const pending = this.#pending.get(id);
+      if (!pending) return;
+      this.#pending.delete(id);
+      pending.reject(cause);
+    }
+  }
+
+  #onHandoff = (event: MessageEvent): void => {
+    // The host owns the outer frame and posts directly to this inner guest, so
+    // it is two parent hops away. The guest has an opaque origin and cannot
+    // origin-check that post, but it can still refuse a port offered by any
+    // other window.
+    const expectedHost = globalThis.parent?.parent;
+    if (
+      this.#port || event.data !== GUEST_PORT_HANDOFF || !event.ports[0] ||
+      (expectedHost && event.source !== expectedHost)
+    ) return;
+    this.#port = event.ports[0];
+    this.#port.onmessage = this.#onPortMessage;
+    this.#port.start();
+    for (const request of this.#queued) {
+      this.#sendPending(request.id, request.encoded);
+    }
+    this.#queued = [];
+  };
+
+  #onPortMessage = (event: MessageEvent): void => {
     let decoded: FabricValue;
     try {
       decoded = fabricFromRealmValue(event.data);
     } catch {
       return;
     }
-    if (!isHostMessage(decoded)) {
+    if (!isBridgeHostMessage(decoded)) return;
+    this.#accept(decoded);
+  };
+
+  #accept(message: BridgeHostMessage): void {
+    if (message.type === "event") {
+      this.#subscriptions.get(message.subscription)?.update(message.value);
       return;
     }
-    const [key, value] = decoded.data;
-    onUpdate(key, value);
-  };
-
-  // A guest window receives whatever anyone able to reach it posts, so the
-  // handoff is recognized by what it says and taken only once. A second one
-  // would replace a live port with one the host is not listening on.
-  const onHandoff = (event: MessageEvent): void => {
-    if (port || event.data !== GUEST_PORT_HANDOFF || !event.ports[0]) {
-      return;
-    }
-    port = event.ports[0];
-    port.onmessage = onPortMessage;
-    port.start();
-    for (const message of unsent) {
-      port.postMessage(realmFromFabricValue(message));
-    }
-    unsent.length = 0;
-  };
-
-  globalThis.addEventListener("message", onHandoff);
-
-  return {
-    read(key: string): void {
-      send({ type: GuestMessageType.Read, data: key });
-    },
-
-    write(key: string, value: FabricValue): void {
-      send({ type: GuestMessageType.Write, data: [key, value] });
-    },
-
-    subscribe(...keys: string[]): void {
-      send({ type: GuestMessageType.Subscribe, data: keys });
-    },
-
-    unsubscribe(...keys: string[]): void {
-      send({ type: GuestMessageType.Unsubscribe, data: keys });
-    },
-
-    disconnect(): void {
-      globalThis.removeEventListener("message", onHandoff);
-      port?.close();
-      port = undefined;
-    },
-  };
+    const pending = this.#pending.get(message.id);
+    if (!pending) return;
+    this.#pending.delete(message.id);
+    if (message.ok) pending.resolve(message.value);
+    else pending.reject(new FabricBridgeError(message.error));
+  }
 }
 
-/**
- * Raises an alarm the host dispatches as a `common-iframe-error` event on the
- * element.
- *
- * This goes to the guest's parent rather than over the port, so it reaches the
- * host from a guest that has no working port -- a document whose scripts a
- * policy blocked, or one that failed before the handoff. It is the one thing
- * that route carries, and it is one-way: a guest cannot be answered on it.
- */
+/** Connects to the capability port supplied by the embedding iframe host. */
+export function connectFabric(): FabricClient {
+  return new FabricClient();
+}
+
+/** Raises an alarm without relying on the bridge port. */
 export function reportGuestError(error: GuestError): void {
-  globalThis.parent.postMessage(
-    { type: GuestMessageType.Error, data: error },
-    "*",
-  );
+  globalThis.parent.postMessage({ type: "error", data: error }, "*");
 }

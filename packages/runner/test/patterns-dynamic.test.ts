@@ -532,7 +532,9 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     expect(runCount - runsBeforeRestore).toBe(2);
   });
 
-  // filter builtin tests
+  //
+  // `filter` builtin tests
+  //
 
   it("should filter an array by predicate", async () => {
     const isEven = lift((x: number) => x % 2 === 0);
@@ -916,7 +918,9 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     expect(result.key("positives").get()).toEqual([1, 3]);
   });
 
-  // flatMap builtin tests
+  //
+  // `flatMap` builtin tests
+  //
 
   it("should flatMap an array", async () => {
     const duplicate = lift((x: number) => [x, x * 10]);
@@ -1280,7 +1284,9 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     expect(runCount - runsBeforeRestore).toBe(2);
   });
 
+  //
   // WithPattern variant tests
+  //
 
   it("should filter with a pre-defined pattern (filterWithPattern)", async () => {
     // The WithPattern variants receive { element, index, array, params } at

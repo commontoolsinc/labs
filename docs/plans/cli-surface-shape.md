@@ -9,6 +9,31 @@ does not make, which misdirects design work before it starts.
 This document is about the command surface, not the machinery underneath.
 Nothing here blocks [Shaped reads and verb results](shaped-reads-and-verb-results.md).
 
+## Where this stands — read this first
+
+This block is LIVE: the change that moves a step updates it here, so the plan
+says what the surface has rather than only what it wants. The steps themselves
+are in [How to get there](#how-to-get-there); this says only which of them
+have landed.
+
+**Arc one — what the commands are called.**
+
+| step | state |
+| --- | --- |
+| 1–5 — the shared read step, the read options on every arrival, `--piece` taking the `of:` form, positional addresses with the `#argument` suffix, and `cf get`/`set`/`call` | on main |
+| 6a — the old spellings warn, each naming its end date | on main |
+| 6b — the old spellings are removed | pending, on the date `PIECE_DATA_SPELLING_END_DATE` names |
+| 7 — the duplicated nouns are merged | not started; it is last because each pair is two working commands |
+
+**Arc two — how a caller writes what a command acts on.**
+
+| step | state |
+| --- | --- |
+| 8 — `CF_SPACE` is ambient, and a write names the space it wrote to | on main |
+| 9 — a reference takes a space by name and a piece by slug, positionally | not started; lands with 11, not alone |
+| 10 — the verb opens the callable's section and `--` closes it | not started; `PIECE_DATA_SPELLING_END_DATE` is the thing to check first |
+| 11 — `--url` decomposes into the transport it names and the reference it carries | not started; lands with 9 |
+
 ## What the surface is for
 
 Sorting commands by what they are for makes the trouble visible. Seven
@@ -618,6 +643,27 @@ thing to check before starting step
 Steps 8, 9 and 11 add. Step 10 is the one that changes what a written line
 means, and it is the one the rest of the surface reads against — a projection
 cannot be written after the verb until it lands.
+
+**9 and 11 land together, as one change.** Step 9 on its own gives the
+canonical reference a vocabulary another spelling already has and retires
+neither, so the surface it leaves is the same four spellings with more overlap
+between them — capability added to the accretion this document exists to
+reduce. What makes 9 worth doing is 11: the reference earns the human
+vocabulary so that `--url` can decompose to it and stop being the only spelling
+that carries a whole target. Landed as a pair, the surface ends with one fewer
+way to name a thing; landed alone, 9 ends with one more.
+
+Their ergonomics compound the same way, and mostly outside 9. Naming the space
+ambiently is step 8's, and the slug is what saves the hundred characters — so
+the increment 9 adds over 8 is that a slug also works in the canonical
+position, not the whole distance between the long form and the short one.
+
+**The prior question, which this document does not answer.** Whether a
+reference grammar is the right home for this at all, or whether it stands in
+for a naming and resolution layer that does not exist. Everything above assumes
+the canonical reference's structure is right and only its vocabulary is
+missing. That assumption is worth testing before 9 and 11 are built, because a
+resolution layer would make both of them smaller — or unnecessary.
 
 The sweep is bounded and enumerable: twelve files across `docs/`, `skills/`,
 `packages/cli/README.md`, and the CLI's own tests and integration scripts teach

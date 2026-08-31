@@ -144,6 +144,7 @@ export const claim = (
   // stage A — OW17's tx→replica seam): the claim re-reads the SAME instance
   // the load came from; absent = the replica's own, as before.
   identity?: ScopeKeyIdentity,
+  durable = false,
 ): Result<State, IStorageTransactionInconsistent> => {
   const type = address.type ?? "application/json";
   const state = replica.get(address) ?? { the: type, of: address.id };
@@ -152,7 +153,13 @@ export const claim = (
       address.path.length === 0 &&
       typeof replica.getDocument === "function"
     ? toTransactionDocumentValue(
-      replica.getDocument(address.id, address.scope, identity),
+      durable && replica.getNonSpeculativeDocument
+        ? replica.getNonSpeculativeDocument(
+          address.id,
+          address.scope,
+          identity,
+        )
+        : replica.getDocument(address.id, address.scope, identity),
     )
     : read(source, address)?.ok?.value;
 

@@ -29,10 +29,15 @@ const identityLogger = getLogger("lib-shell.identity", {
   level: "debug",
 });
 
-export type ExperimentalRuntimeFlags = {
-  modernCellRep?: boolean;
-  contentAddressedSchemas?: boolean;
-};
+/**
+ * The worker's experimental-flag declaration — the runtime-client protocol's
+ * own record, not a copy: a host-side copy that lagged the protocol silently
+ * dropped whichever flag it omitted, reverting the worker to that flag's
+ * default while the host ran the other arm.
+ */
+export type ExperimentalRuntimeFlags = NonNullable<
+  RuntimeClientOptions["experimental"]
+>;
 
 export type RuntimeCfcEnforcementMode = NonNullable<
   RuntimeClientOptions["cfcEnforcementMode"]

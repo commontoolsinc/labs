@@ -30,7 +30,6 @@ import {
  * - `legacy-path`: a rooted path from before the `system:` scheme existed.
  *   `ref` is the `system:` ref naming the same file when there is one, and is
  *   absent for a path that addresses nothing under the patterns route.
- * - `web`: an absolute HTTP or HTTPS program endpoint.
  * - `fabric-entity`: an unpinned fabric URL naming a mutable entity, whose
  *   current pattern the piece follows.
  * - `fabric-pattern`: content-addressed source, named directly or fixed by a
@@ -40,7 +39,6 @@ import {
 export type PieceOriginKind =
   | { kind: "system"; ref: string; route: string }
   | { kind: "legacy-path"; path: string; ref?: string }
-  | { kind: "web"; url: string }
   | { kind: "fabric-entity"; ref: FabricRef }
   | { kind: "fabric-pattern"; ref: FabricRef; identity: string }
   | { kind: "unusable"; reason: string };
@@ -50,8 +48,8 @@ export type PieceOriginKind =
  *
  * `host` is the origin of the host serving the piece's space, used only to
  * recognize the absolute spelling of a legacy patterns-route locator. Omitting
- * it leaves such a locator classified as the web URL it is, which is what it
- * means for a piece served by some other host.
+ * it leaves such a locator unusable, which is what it means for a piece served
+ * by some other host.
  */
 export function classifyPieceOriginString(
   origin: string,
@@ -106,17 +104,22 @@ export function classifyPieceOriginString(
     return { kind: "unusable", reason: `${source} is not an absolute URL` };
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
-    return { kind: "unusable", reason: `${source} is not a web URL` };
+    return { kind: "unusable", reason: `${source} names no program` };
   }
   // The absolute spelling of a legacy patterns-route locator, which is what a
   // pre-scheme lifecycle transition rewrote a rooted path into. It is that
-  // locator only when it names the host serving this piece's space; the same
-  // path on another host is an ordinary web origin.
+  // locator only when it names the host serving this piece's space.
   const rewritten = host === undefined
     ? source
     : normalizePatternSource(source, host);
   if (rewritten !== source) {
     return { kind: "legacy-path", path: source, ref: rewritten };
   }
-  return { kind: "web", url: url.href };
+  // Any other absolute URL names an endpoint outside this deployment. A piece
+  // follows what the deployment serves and what the fabric holds, so nothing
+  // resolves this and it is carried as a string a person can read and repair.
+  return {
+    kind: "unusable",
+    reason: `${source} is an external endpoint, which is not a source origin`,
+  };
 }

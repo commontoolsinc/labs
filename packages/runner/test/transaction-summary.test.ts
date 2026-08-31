@@ -14,22 +14,30 @@ import type {
 
 // Simple test transaction journal
 class TestJournal implements ITransactionJournal {
+  #noveltyData: IAttestation[];
+  #historyData: IAttestation[];
+  #activityData: any[];
+
   constructor(
-    private noveltyData: IAttestation[] = [],
-    private historyData: IAttestation[] = [],
-    private activityData: any[] = [],
-  ) {}
+    noveltyData: IAttestation[] = [],
+    historyData: IAttestation[] = [],
+    activityData: any[] = [],
+  ) {
+    this.#noveltyData = noveltyData;
+    this.#historyData = historyData;
+    this.#activityData = activityData;
+  }
 
   activity(): Iterable<any> {
-    return this.activityData;
+    return this.#activityData;
   }
 
   novelty(_space: any): Iterable<IAttestation> {
-    return this.noveltyData;
+    return this.#noveltyData;
   }
 
   history(_space: any): Iterable<IAttestation> {
-    return this.historyData;
+    return this.#historyData;
   }
 }
 

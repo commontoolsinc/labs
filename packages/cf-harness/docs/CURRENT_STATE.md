@@ -192,18 +192,22 @@ The current package provides:
   the `record_feedback` tool, which votes a pattern up or down with an optional
   note, so the index learns which of the patterns it holds were worth offering.
   And it closes the loop the other way: source the model authored and ran
-  successfully is published back under the identity the compile recorded for it,
+  successfully is recorded under the identity the compile recorded for it,
   carrying the `description` and `hashtags` the call named, the run's own task
   as the request the pattern answers, the compiled argument and result schemas,
-  and the published patterns the source imports. That publication is best-effort
-  in the same way — never awaited, never a failure of a run that worked — and a
-  run that names no `description` publishes nothing, since a pattern nobody can
-  read the purpose of is a pattern nobody finds. `--no-pattern-index-publish`,
-  or `CF_HARNESS_PATTERN_INDEX_PUBLISH=0`, makes the run a reader and voter
-  only. Without the index configuration `search_patterns` and `record_feedback`
-  are absent from the tool surface, for a `pattern-author`-profile subagent as
-  much as for the parent — a child searches through the one client the parent
-  built — and `run_pattern` refuses a `patternId`;
+  and the published patterns the source imports. Automatic publication records
+  the entry without offering it to search; discoverability is earned from later
+  evidence. Curated seeding may offer a passing run immediately by setting
+  `CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE=1`, while a render-gate failure
+  remains recorded and non-discoverable with the gate's reason. Publication is
+  best-effort in the same way — never awaited, never a failure of a run that
+  worked — and a run that names no `description` publishes nothing, since its
+  purpose could not be evaluated later. `--no-pattern-index-publish`, or
+  `CF_HARNESS_PATTERN_INDEX_PUBLISH=0`, makes the run a reader and voter only.
+  Without the index configuration `search_patterns` and `record_feedback` are
+  absent from the tool surface, for a `pattern-author`-profile subagent as much
+  as for the parent — a child searches through the one client the parent built —
+  and `run_pattern` refuses a `patternId`;
 - composition over that index: source the model authors may import a published
   pattern by the specifier a search reported,
   `import Sub from "cf:pattern:<patternId>"`, and `run_pattern` makes it

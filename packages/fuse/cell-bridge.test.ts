@@ -97,18 +97,18 @@ class SinkableCell {
   _value: unknown;
   _sinks: Array<(v: unknown) => void> = [];
   schema = undefined;
-  private root: SinkableCell;
-  private path: string[];
+  #root: SinkableCell;
+  #path: string[];
 
   constructor(value: unknown, root?: SinkableCell, path: string[] = []) {
     this._value = value;
-    this.root = root ?? this;
-    this.path = path;
+    this.#root = root ?? this;
+    this.#path = path;
   }
 
   get() {
-    let current = this.root._value;
-    for (const segment of this.path) {
+    let current = this.#root._value;
+    for (const segment of this.#path) {
       if (
         typeof current !== "object" || current === null ||
         Array.isArray(current)
@@ -125,7 +125,7 @@ class SinkableCell {
   }
 
   set(v: unknown) {
-    if (this.root !== this) {
+    if (this.#root !== this) {
       throw new Error("set() is only supported on the root SinkableCell");
     }
     this._value = v;
@@ -137,15 +137,15 @@ class SinkableCell {
   }
 
   key(segment: string): FakeCell {
-    return new SinkableCell(undefined, this.root, [
-      ...this.path,
+    return new SinkableCell(undefined, this.#root, [
+      ...this.#path,
       segment,
     ]) as unknown as FakeCell;
   }
 
   sink(fn: (v: unknown) => void): () => void {
-    if (this.root !== this) {
-      return this.root.sink(() => fn(this.get()));
+    if (this.#root !== this) {
+      return this.#root.sink(() => fn(this.get()));
     }
     this._sinks.push(fn);
     return () => {
@@ -3597,16 +3597,14 @@ Deno.test("CellBridge.addPieceToSpace assigns -2 suffix on name collision", asyn
   assertEquals(tree.lookup(state.piecesIno, "My-Note-2") !== undefined, true);
 });
 
-//
-// Regression: on a cold runtime the piece list doesn't load the linked piece
-// docs, so a synchronous piece.name() read returns undefined until the NAME
-// doc is synced. addPieceToSpace must await that sync before choosing the
-// directory name — otherwise the piece mounts under the opaque id-derived
-// fallback name, permanently if no later change event fires (CI fuse-exec
-// "Timed out waiting for path: pieces/Fuse-Exec-Fixture").
-//
-
 Deno.test("CellBridge.addPieceToSpace syncs a late-loading name before naming the directory", async () => {
+  // Regression: on a cold runtime the piece list doesn't load the linked piece
+  // docs, so a synchronous piece.name() read returns undefined until the NAME
+  // doc is synced. addPieceToSpace must await that sync before choosing the
+  // directory name — otherwise the piece mounts under the opaque id-derived
+  // fallback name, permanently if no later change event fires (CI fuse-exec
+  // "Timed out waiting for path: pieces/Fuse-Exec-Fixture").
+
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);

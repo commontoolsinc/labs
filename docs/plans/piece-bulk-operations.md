@@ -867,7 +867,7 @@ than being settled here.
 - [The space-clone rehearsal procedure](../development/space-clone-rehearsal.md)
   is the operating loop a bulk operation runs inside: clone, serve, verify,
   reset.
-- [Topics board migration](topics-migration-rehearsal.md) is a worked
+- [Topics board migration](../history/plans/topics-migration-rehearsal.md) is a worked
   instance of the retarget operation, with a manifest, an ordering, and a
   rollback record.
 - [CLI surface shape](cli-surface-shape.md) governs the command vocabulary

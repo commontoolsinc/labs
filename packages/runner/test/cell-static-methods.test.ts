@@ -208,11 +208,18 @@ describe("Cell Static Methods", () => {
       });
     });
 
+    //
+    // The static-data walk over special objects
+    //
     // The static-data validation walk descends anything `typeof === "object"`,
-    // which admits a `FabricSpecialObject`. Such a value survives it because it
-    // has zero enumerable own properties: `Object.keys()` is empty, the descent
-    // ends there, and the walk only ever reads -- it never rebuilds. Nothing
-    // guards that, so these pin it.
+    // which admits a `FabricSpecialObject`. A `FabricPrimitive` survives it
+    // because it has zero enumerable own properties: `Object.keys()` is empty,
+    // the descent ends there, and the walk only ever reads -- it never
+    // rebuilds. A `FabricInstance` is refused instead, its codec contents being
+    // able to hold a `Cell` the walk would never reach by property name.
+    // Nothing guards either, so these pin both.
+    //
+
     it("should accept a `FabricBytes` in static data", () => {
       withinHandlerContext(runtime, space, tx, () => {
         const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
@@ -274,6 +281,10 @@ describe("Cell Static Methods", () => {
         expect(() => Cell.of({ a: shared, b: shared })).not.toThrow();
       });
     });
+
+    //
+    // More `Cell.of()` value cases
+    //
 
     it("should create a cell with undefined value", () => {
       withinHandlerContext(runtime, space, tx, () => {
@@ -340,6 +351,10 @@ describe("Cell Static Methods", () => {
         expect(cell.get()).toEqual(complex);
       });
     });
+
+    //
+    // The schema parameter
+    //
 
     it("should accept a schema as second parameter", () => {
       withinHandlerContext(runtime, space, tx, () => {
@@ -1061,6 +1076,13 @@ describe("Cell Static Methods", () => {
       }
     };
 
+    //
+    // Date normalization on `set()`
+    //
+    // A native `Date` written through `set()` normalizes to a
+    // `FabricEpochNsec`, at the top level and nested inside an array.
+    //
+
     it("normalizes a top-level Date to FabricEpochNsec (set)", async () => {
       await inFreshRuntime((Cell) => {
         const cell = Cell.of<unknown>(0);
@@ -1077,13 +1099,9 @@ describe("Cell Static Methods", () => {
       });
     });
 
-    // The `Cell.of(new Date(...))` cases (top-level and nested) are absent.
-    // Unlike `set()`, the `Cell.of` initial-value path
-    // doesn't normalize native values (see the TODO in `createWithDefault` in
-    // `cell.ts`), so the raw `Date` reaches encode and throws under the strict
-    // codec. `get()` *appears* to convert (read-side projection), but the
-    // committed form is still raw. Add `... (Cell.of)` cases once that path
-    // normalizes its initial value the way `set()` does.
+    //
+    // Mixed type arrays
+    //
 
     it("should handle creating cell with mixed type array", () => {
       withinHandlerContext(runtime, space, tx, () => {

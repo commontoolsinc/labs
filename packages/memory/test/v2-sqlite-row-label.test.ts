@@ -753,6 +753,14 @@ Deno.test("an unsupported spec version fails closed", () => {
   );
 });
 
+//
+// Claim minting variants
+//
+// What the evaluator mints when it does not fail closed: the endorsed-by kind,
+// and the no-claim answer that zero matches gives where more than one would
+// have been an error.
+//
+
 Deno.test("endorsedBy mints claimed-endorsed-by", () => {
   // endorsedBy variant mints the endorsed claim kind.
   const schema = table(

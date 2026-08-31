@@ -45,8 +45,8 @@ authority, and a new test file is a reason to open it rather than to copy a
 neighbor. Not every file in the tree follows it, so what sits beside you in
 the same directory is not evidence of what to write.
 
-The four its readers most often get wrong by defaulting to the surrounding
-code:
+The eight rules its readers most often get wrong by defaulting to the
+surrounding code:
 
 - BDD only — `describe()` / `it()` / `beforeEach()` from `@std/testing/bdd`,
   never `Deno.test()`.
@@ -57,6 +57,28 @@ code:
   function", not "rejects a bare function".
 - `expect()` over `assert*()`, always for structured values. Plain `assert(x)`
   only where truthiness itself is the assertion.
+- A comment about a test or a group of tests goes inside the block, as the
+  first thing in the callback and followed by a blank line. Above the
+  `describe()` or `it()` line, the next block inserted there lands between the
+  comment and what it describes. Two shapes are exceptions: hooks — a
+  `beforeEach()` reads like any other statement with a comment over it — and a
+  callback with no body of its own, a bare expression or `{}` on the opener's
+  line, which keeps its comment beside it.
+- A comment covering several adjacent tests is telling you those tests want a
+  `describe()` of their own, or says one thing per case and belongs in each.
+  Wrapping a run renames every test in it; bridge the rename per
+  `docs/development/test-records.md`.
+- A section marker is a `//` frame: an opening `//` line, a noun-phrase title,
+  optionally a blank `//` line and a description, and a closing `//` line, set
+  off by a blank line below it and above it where there is anything above.
+- A section marker covers the region up to the next marker at the same level,
+  or the end of the block, so writing one means choosing where it ends and
+  putting a marker there. Its title is a claim about everything in that
+  region, and the region holds the helpers and fixtures sitting in it as well
+  as the blocks, so shared setup goes above the file's first marker. Moving
+  or deleting a comment takes away whatever boundary it was providing for the
+  region above it. None of this is checked mechanically; a file that reads
+  better than the rule wins.
 
 On placement: a test goes in the package's `test/` tree, mirroring `src/`. The
 exception is a directory of independent components, `packages/ui` and

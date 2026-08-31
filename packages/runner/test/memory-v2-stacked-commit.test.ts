@@ -203,14 +203,14 @@ class ScriptedServerModel {
   }
 
   seed(id: URI, value: RootValue): DocState {
-    return this.applyRootCommit({
+    return this.#applyRootCommit({
       label: "seed",
       operations: [{ op: value === undefined ? "delete" : "set", id, value }],
     }).states.get(id)!;
   }
 
   injectRemote(remote: RemoteCommit): void {
-    this.applyRootCommit(remote);
+    this.#applyRootCommit(remote);
   }
 
   transact(
@@ -230,7 +230,7 @@ class ScriptedServerModel {
 
     const scripted = this.scripted.get(commit.localSeq) ?? { kind: "accept" };
     if (scripted.remoteInterleave) {
-      this.applyRootCommit(scripted.remoteInterleave);
+      this.#applyRootCommit(scripted.remoteInterleave);
     }
 
     // A scripted retryAfterSeq marks whichever ConflictError this commit
@@ -243,9 +243,9 @@ class ScriptedServerModel {
     const readError =
       scripted.kind === "accept" && scripted.skipReadValidation === true
         ? null
-        : this.validateReads(commit);
+        : this.#validateReads(commit);
     if (readError) {
-      return this.reject(
+      return this.#reject(
         commit,
         retryAfterSeq === undefined
           ? readError
@@ -259,7 +259,7 @@ class ScriptedServerModel {
       scripted.kind === "dropThenReplayReject";
 
     if (shouldReject) {
-      const rejected = this.reject(commit, {
+      const rejected = this.#reject(commit, {
         name: "ConflictError",
         message: scripted.message ?? "synthetic conflict",
         ...(retryAfterSeq !== undefined ? { retryAfterSeq } : {}),
@@ -271,7 +271,7 @@ class ScriptedServerModel {
       return rejected;
     }
 
-    const applied = this.accept(commit);
+    const applied = this.#accept(commit);
     if (shouldDrop && !this.dropped.has(commit.localSeq)) {
       this.dropped.add(commit.localSeq);
       return { type: "drop" };
@@ -279,7 +279,7 @@ class ScriptedServerModel {
     return applied;
   }
 
-  private validateReads(
+  #validateReads(
     commit: ClientCommit,
   ): RejectionError | null {
     for (const read of commit.reads.pending) {
@@ -344,7 +344,7 @@ class ScriptedServerModel {
     return null;
   }
 
-  private reject(
+  #reject(
     commit: ClientCommit,
     error: RejectionError,
   ) {
@@ -356,7 +356,7 @@ class ScriptedServerModel {
     return { type: "reject" as const, error };
   }
 
-  private accept(commit: ClientCommit) {
+  #accept(commit: ClientCommit) {
     const touched = commit.operations.flatMap((operation) =>
       touchedWritesForOperation(operation)
     );
@@ -398,7 +398,7 @@ class ScriptedServerModel {
     return { type: "accept" as const, applied };
   }
 
-  private applyRootCommit(
+  #applyRootCommit(
     remote: RemoteCommit,
   ): { states: Map<URI, DocState> } {
     const seq = ++this.serverSeq;
@@ -2240,9 +2240,9 @@ Deno.test("memory v2 stacked commits: whenApplied resolves at the parked accept'
 // materialized view (and therefore the change notification) reflects the
 // own overlay, not the foreign value, until the marker promotes the parked
 // accept. `unappliedForeignSeqFloor` reports the shadowed seqs so the
-// serving loop's W advance can exclude them, and — flag ON — the
-// promotion fires the shadow-flip notification the moment the foreign
-// value becomes visible.
+// serving loop's W advance can exclude them, and — flag ON — the shadow
+// flip fires the moment the foreign value becomes visible, whether that is
+// the parked accept promoting or the shadowing write being dropped.
 //
 
 const shadowFloorOf = (harness: Harness): number | undefined =>
@@ -2773,6 +2773,13 @@ Deno.test("memory v2 stacked commits: a REJECTED own write that was shadowing fo
   }
 });
 
+//
+// The verdict, and when a parked accept applies
+//
+// A parked accept waits for its covering marker. These pin the verdict round
+// trip and the occasions that apply a parked accept without one.
+//
+
 Deno.test("memory v2 stacked commits: rejection round trip — verdict, repair frame, regenerate against the repaired base (CT-1927)", async () => {
   const harness = await markerHarness();
   try {
@@ -3095,6 +3102,13 @@ class PreStackTransport extends ScriptedModelTransport {
   }
 }
 
+//
+// An older server
+//
+// A peer advertising fewer capabilities than the current one, and the holds the
+// client takes on its behalf.
+//
+
 Deno.test("memory v2 stacked commits: a server without pendingReadStacks receives scalar top-of-stack reads", async () => {
   const harness = await createHarness({
     transport: (model) => new PreStackTransport(model),
@@ -3234,6 +3248,15 @@ Deno.test("memory v2 stacked commits: old-server hold releases once every omitte
     await harness.close();
   }
 });
+
+//
+// Cascading a local rejection
+//
+// A doomed in-flight dependant is rejected locally rather than waiting for a
+// server verdict — whether its dependency was dropped or the replica holding
+// it was reset. These pin how far the cascade reaches, what each victim
+// reports, and what a late verdict may no longer change.
+//
 
 Deno.test("memory v2 stacked commits: dropped dependency locally rejects the in-flight dependant before its server verdict", async () => {
   const harness = await createHarness();
@@ -3711,6 +3734,13 @@ type AdmissionReplica = {
   noteCaughtUpLocalSeq(localSeq: number | undefined): void;
 };
 
+//
+// Read repair, and commits minted against it
+//
+// A rejection whose repair has not yet landed, and what happens to a commit
+// that reads the base while the repair is in flight.
+//
+
 Deno.test("memory v2 stacked commits: preempt-mode admission rejects a floored commit without sending", async () => {
   setConflictAdmissionMode("preempt");
   const harness = await createHarness();
@@ -4146,6 +4176,13 @@ Deno.test("memory v2 stacked commits: a commit sitting on two rejected layers wa
   }
 });
 
+//
+// Materializing pending state, and invalidating it
+//
+// The cache over a stack of pending writes: what it reuses as the stack is
+// confirmed, and what it must drop when a write below it goes away.
+//
+
 Deno.test("memory v2 stacked commits: repeated pending reads reuse the latest materialized state", async () => {
   const harness = await createHarness();
   try {
@@ -4497,6 +4534,13 @@ Deno.test("memory v2 stacked commits: dropping an earlier pending write invalida
   }
 });
 
+//
+// Pending visibility
+//
+// What a pending overlay shows a reader before it is confirmed, and the patches
+// it declines to apply over a branch their ops cannot reach.
+//
+
 Deno.test("memory v2 stacked commits: pending visibility preserves `FabricValue`s", async () => {
   const harness = await createHarness();
   let commitPromise: Promise<any> | undefined;
@@ -4765,6 +4809,10 @@ Deno.test("memory v2 stacked commits: pending visibility skips a patch over an a
   }
 });
 
+//
+// Miscellaneous cases
+//
+
 Deno.test("memory v2 stacked commits: C1->C2->C3 where C2 fails and C3 error is pending-dependency, not stale-read", async () => {
   const harness = await createHarness();
   try {
@@ -4838,24 +4886,25 @@ for (
   });
 }
 
-// Integrated from PR #4961 (Hixie's repro for the cf-render counter flake):
-// a foreground editWithRetry write that reads documents the scheduler is
-// concurrently writing declares pending reads on still-unconfirmed optimistic
-// writes. When one of those is rejected, the dependant is doomed — its
-// pending read names a localSeq that will never become a confirmed seq — and
-// a client without the cascade leaves it in flight awaiting its own verdict,
-// burning editWithRetry's bounded retry budget and surfacing the raw
-// "pending dependency not resolved" ConflictError to the caller.
-//
-// Distinct from the basic cascade test above: T2's OWN verdict stays gated
-// for the whole test, so the ONLY thing that can settle it is the client-side
-// cascade off T1's drop — pinning that the settle is entirely local (the
-// server never judges T2 at all). Adapted from the original's 2s wall-clock
-// absence bound to a settled-flag + microtask drain: the clock preload
-// freezes test-file timers, and the cascade path is pure promise flow, so a
-// missing cascade surfaces within microtasks as a failed assertion instead
-// of a hang.
 Deno.test("memory v2 stacked commits: a dependant stranded by a dropped optimistic sibling is rejected off the drop alone, without its own server verdict", async () => {
+  // Integrated from PR #4961 (Hixie's repro for the cf-render counter flake):
+  // a foreground editWithRetry write that reads documents the scheduler is
+  // concurrently writing declares pending reads on still-unconfirmed optimistic
+  // writes. When one of those is rejected, the dependant is doomed — its
+  // pending read names a localSeq that will never become a confirmed seq — and
+  // a client without the cascade leaves it in flight awaiting its own verdict,
+  // burning editWithRetry's bounded retry budget and surfacing the raw
+  // "pending dependency not resolved" ConflictError to the caller.
+  //
+  // Distinct from the basic cascade test above: T2's OWN verdict stays gated
+  // for the whole test, so the ONLY thing that can settle it is the client-side
+  // cascade off T1's drop — pinning that the settle is entirely local (the
+  // server never judges T2 at all). Adapted from the original's 2s wall-clock
+  // absence bound to a settled-flag + microtask drain: the clock preload
+  // freezes test-file timers, and the cascade path is pure promise flow, so a
+  // missing cascade surfaces within microtasks as a failed assertion instead
+  // of a hang.
+
   const harness = await createHarness();
   const g1 = Promise.withResolvers<void>();
   const g2 = Promise.withResolvers<void>();
@@ -4936,6 +4985,7 @@ Deno.test("memory v2 stacked commits: a dependant stranded by a dropped optimist
     await harness.close();
   }
 });
+
 //
 // CT-1872 Class 1a pins (ported from #4608, expectations rewritten for the
 // ops-replay contract): a pending patch layer renders by REPLAYING ITS OPS

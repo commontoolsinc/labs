@@ -28,7 +28,9 @@ session-scoped catch-up sync.
 8. **Session-scoped catch-up sync** — The server tracks what a session has
    already integrated and pushes catch-up frames for the union of the session's
    active interests, rather than routing updates through individual
-   subscriptions.
+   subscriptions. On a reconnect the client's own statement of what it holds
+   takes that tracking's place as the diff base, so the catch-up re-delivers
+   exactly what the client lacks.
 9. **Schema-based traversal** — Graph queries follow JSON Schema-defined
    references, reusing `traverse.ts` patterns (cycle detection, schema
    narrowing).

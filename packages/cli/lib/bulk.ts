@@ -26,6 +26,7 @@ import {
   readPiecePin,
   repairPieces,
   type RepairReport,
+  type RepairRow,
   type RestoreOutcome,
   restorePiece,
   type RetargetSource,
@@ -103,6 +104,12 @@ export interface RepairRunRequest {
 
   /** Write the fixer's documents; absent, the run is the dry report. */
   apply?: boolean;
+
+  /**
+   * Called with each row as it settles, so a caller can say where a run that
+   * never returned had reached. Passed through to the engine's own reporter.
+   */
+  onRow?: (row: RepairRow) => void;
 }
 
 export interface RepairRunDependencies {
@@ -171,6 +178,7 @@ export async function runRepair(
       fixerIdentity,
       plan,
       ...(request.apply === true ? { apply: true } : {}),
+      ...(request.onRow === undefined ? {} : { onRow: request.onRow }),
     });
   }
   const module = await (deps.importProgram ?? importProgramSnapshot)(program);
@@ -188,6 +196,7 @@ export async function runRepair(
     fixerIdentity,
     ...(plan === undefined ? {} : { plan }),
     ...(request.apply === true ? { apply: true } : {}),
+    ...(request.onRow === undefined ? {} : { onRow: request.onRow }),
   });
 }
 

@@ -19,9 +19,13 @@ import {
 // promise never settles on its own.
 class WithheldCommitSessionFactory implements SessionFactory {
   withhold = false;
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  readonly #server: MemoryV2Server.Server;
+
+  constructor(server: MemoryV2Server.Server) {
+    this.#server = server;
+  }
   async create(id: string, signer?: Signer) {
-    const base = MemoryV2Client.loopback(this.server);
+    const base = MemoryV2Client.loopback(this.#server);
     const transport: MemoryV2Client.Transport = {
       send: (payload: string) =>
         this.withhold && payload.includes('"transact"')

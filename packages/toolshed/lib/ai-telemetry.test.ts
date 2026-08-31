@@ -1,3 +1,10 @@
+/**
+ * Per-request metadata reaches spans only when it is passed as runtime context
+ * and named in `includeRuntimeContext`. Nothing throws when that wiring is
+ * wrong: the spans are still exported, just without the attributes. These
+ * tests assert the attributes are present.
+ */
+
 import { assert, assertEquals } from "@std/assert";
 import { registerTelemetry, streamText } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -12,11 +19,6 @@ import {
   metadataAttributeValue,
   runtimeContextFromMetadata,
 } from "@/lib/ai-telemetry.ts";
-
-// Per-request metadata reaches spans only when it is passed as runtime context
-// and named in `includeRuntimeContext`. Nothing throws when that wiring is
-// wrong: the spans are still exported, just without the attributes. These tests
-// assert the attributes are present.
 
 function mockModel() {
   return new MockLanguageModelV4({
@@ -142,13 +144,14 @@ Deno.test(
   },
 );
 
-// The model-call span gets its attributes from enrichSpan rather than from the
-// supplemental runtime-context option, so it is the span that can disagree with
-// the rest of the trace about how a value is spelled.
 Deno.test(
   "nested and non-string runtime context is flattened the same way on every span",
   { sanitizeOps: false, sanitizeResources: false },
   async () => {
+    // The model-call span gets its attributes from enrichSpan rather than from
+    // the supplemental runtime-context option, so it is the span that can
+    // disagree with the rest of the trace about how a value is spelled.
+
     const spans = await collectSpans(
       {
         isEnabled: true,
@@ -207,8 +210,10 @@ Deno.test("metadataAttributeValue drops values that have no attribute form", () 
 });
 
 //
-// A request may carry non-string metadata, and every value it can carry has to
-// reach the spans, not just the string ones.
+// Metadata into runtime context
+//
+// A request may carry non-string metadata, and every value it can carry has
+// to reach the spans, not just the string ones.
 //
 
 Deno.test("runtimeContextFromMetadata carries every value that has an attribute form", () => {
@@ -241,13 +246,14 @@ Deno.test("runtimeContextFromMetadata passes nothing on when there is no metadat
   });
 });
 
-// The reported gap: object metadata reached the root span as JSON but never any
-// AI SDK span. Routed through runtimeContextFromMetadata it now reaches every
-// span, spelled the same way the root span spells it.
 Deno.test(
   "object metadata reaches every span as the JSON the root span records",
   { sanitizeOps: false, sanitizeResources: false },
   async () => {
+    // The reported gap: object metadata reached the root span as JSON but never
+    // any AI SDK span. Routed through runtimeContextFromMetadata it now reaches
+    // every span, spelled the same way the root span spells it.
+
     const { runtimeContext, includeRuntimeContext } =
       runtimeContextFromMetadata(
         { labels: { team: "search" }, attempt: 2 },

@@ -1,6 +1,8 @@
 /**
  * The predicates deciding whether a value belongs to the `FabricValue` type,
  * and the narrowings that ask a shape question about one that already does.
+ * The single-level predicate has a throwing form beside it, which decides
+ * exactly what the predicate decides and exists to say why the answer was no.
  *
  * Membership turns on inertness: a `FabricValue` is data, so anything that is
  * live code is refused -- a function, an accessor-backed property, the
@@ -14,8 +16,12 @@
  * refuses, the difference is stated on that narrowing rather than here.
  */
 
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isInertArray } from "@commonfabric/utils/arrays";
-import { isInertPlainObject } from "@commonfabric/utils/objects";
+import {
+  constructorOfObject,
+  isInertPlainObject,
+} from "@commonfabric/utils/objects";
 import {
   isPlainContainer,
   isPlainObject,
@@ -26,11 +32,14 @@ import {
   type FabricArray,
   type FabricContainerValue,
   FabricInstance,
+  type FabricNativeObject,
   type FabricPlainObject,
   FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
+import { VALUE_TAGS } from "./VALUE_TAGS.ts";
+import { tagFromNativeBuiltinClass } from "./tagFromNativeBuiltinClass.ts";
 import { BaseFabricInstance } from "./fabric-bases/BaseFabricInstance.ts";
 import { BaseFabricPrimitive } from "./fabric-bases/BaseFabricPrimitive.ts";
 
@@ -95,6 +104,170 @@ export function isValidFabricValueLayer(
 }
 
 /**
+ * Reads a value's constructor, or `undefined` where there is none to read.
+ *
+ * The class is read from the prototype rather than from the value, for the
+ * reason the dispatch reads it there: an own `constructor` property is
+ * ordinary data, so a value could otherwise choose the name it is refused
+ * under.
+ *
+ * Nothing here is allowed to throw, because every caller is already on its way
+ * to reporting a different problem and an error raised here would replace it.
+ * A `constructor` accessor on the prototype that throws is the reachable way
+ * that happens.
+ */
+function constructorElseUndefined(
+  value: object,
+): { name?: unknown } | undefined {
+  try {
+    return constructorOfObject(value) as { name?: unknown } | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Helper for `assertValidFabricValueLayer()`, which names the class of a value
+ * being refused, given the constructor already read from it. A `name` that is
+ * not a string is treated as no name at all.
+ */
+function classNameOf(
+  ctor: { name?: unknown } | undefined,
+  value: unknown,
+): string {
+  let name: unknown;
+  try {
+    name = ctor?.name;
+  } catch {
+    // `name` can be an accessor too, and this runs while a refusal is being
+    // explained. A class that will not say what it is called has no name here.
+    return typeof value;
+  }
+  return (typeof name === "string" && name !== "") ? name : typeof value;
+}
+
+/**
+ * Throws unless the value is usable as a `FabricValueLayer`, naming what is
+ * wrong with it when it is not. This is `isValidFabricValueLayer()` asked so
+ * that the answer carries a reason: that predicate decides the outcome and
+ * this adds nothing to it, everything past the decision existing to say why it
+ * went the way it did.
+ *
+ * A `FabricNativeObject` gets a reason of its own: a `Date` and a `Map` alike
+ * are values conversion has a say over, which is a different position from a
+ * class instance that has no fabric form at all. The message says which, and
+ * sends the caller to ask.
+ *
+ * @param value The value to check.
+ */
+export function assertValidFabricValueLayer(
+  value: unknown,
+): asserts value is FabricValueLayer {
+  if (isValidFabricValueLayer(value)) {
+    return;
+  }
+
+  // Past here the value is refused, and all that is left is to say why. Each
+  // test below distinguishes two reasons from each other; none of them decides
+  // the outcome, which the call above already did.
+
+  // Read once, and let every arm below share it. A `constructor` accessor is
+  // ordinary code and may answer differently each time it is asked, so asking
+  // it repeatedly would let one refusal name two different classes.
+  const ctor = ((value !== null) && (typeof value === "object"))
+    ? constructorElseUndefined(value)
+    : undefined;
+  // Compared with `Array` itself rather than asked of the tag lookup, which
+  // reads `.prototype` -- a read a callable `Proxy` can trap, and this is the
+  // refusal path. `Array` is the only constructor that lookup calls an array,
+  // so the two ask the same question.
+  const classIsArray = ctor === Array;
+
+  if (Array.isArray(value) || classIsArray) {
+    // An array in this system is _inert_: a direct `Array` instance, which may
+    // only carry numeric index properties, each a data property. A named or
+    // symbol-keyed property has no fabric representation, and an
+    // accessor-backed index is live code rather than inert data -- as is the
+    // prototype of an `Array` subclass instance, which can make iteration
+    // yield differently than the indices say.
+    //
+    // A value whose class is `Array` without being one gets this reason too.
+    // It is not an array, so the rule that decides arrays never reached it,
+    // but `Array` is what it presents itself as and so what a reader is owed
+    // an answer about -- and it is the reason the conversion gives.
+    throw new Error(
+      "Not representable as a `FabricValue`: array that is not an inert array",
+    );
+  }
+
+  switch (typeof value) {
+    case "function": {
+      throw new Error("Not representable as a `FabricValue`: function");
+    }
+    case "symbol": {
+      // Registry-interned symbols are valid `FabricValue`s; unique ones have
+      // no portable representation.
+      throw new Error(
+        "Not representable as a `FabricValue`: unique (uninterned) symbol",
+      );
+    }
+  }
+
+  // The outcome is already settled; this only picks which reason to give, so a
+  // value that makes the probe fail gets the generic reason rather than the
+  // probe's error in place of a refusal. A `constructor` accessor on the
+  // prototype that throws is the reachable way that happens.
+  let isNativeObject: boolean;
+  try {
+    isNativeObject = isValidFabricNativeObject(value);
+  } catch {
+    isNativeObject = false;
+  }
+
+  if (isNativeObject) {
+    throw new Error(
+      `Not already a \`FabricValue\`: ${
+        backtickQuote(classNameOf(ctor, value))
+      } (a \`FabricNativeObject\`, so conversion is what decides it)`,
+    );
+  }
+
+  if (isPlainObject(value)) {
+    // A reserved property name is a restriction of this implementation rather
+    // than of the model, so it says so rather than blaming inertness: such an
+    // object _is_ inert, and a runtime that does not route property assignment
+    // through a prototype chain reserves no names at all.
+    const unsafeKey = isInertPlainObject(value)
+      ? unsafeObjectKeyIn(value)
+      : undefined;
+    if (unsafeKey !== undefined) {
+      throw new Error(
+        "Not representable as a `FabricValue`: object with a property name " +
+          `this runtime reserves (\`${unsafeKey}\`)`,
+      );
+    }
+    // A plain object is _inert_ for the same reasons an array is:
+    // `FabricPlainObject` is keyed by `string`, so a symbol key has no fabric
+    // representation, and neither does a non-enumerable string key; an
+    // accessor-backed property is live code rather than inert data. A
+    // null-prototype object is refused here too: a record has one shape in
+    // this system, and a prototype is not part of what a value says as data.
+    throw new Error(
+      "Not representable as a `FabricValue`: object that is not an inert " +
+        "plain object",
+    );
+  }
+
+  // No recognized shape at all -- an ordinary class instance, most commonly.
+  // Death before confusion!
+  throw new Error(
+    `Not representable as a \`FabricValue\`: ${
+      backtickQuote(classNameOf(ctor, value))
+    } (not a recognized fabric type)`,
+  );
+}
+
+/**
  * Indicates whether the value is a `FabricValue` -- a recursive check of exact
  * structural membership in the `FabricValue` type, independent of frozen-ness.
  *
@@ -125,9 +298,11 @@ export function isValidFabricValueLayer(
  * *convertible* to fabric form).
  *
  * This is the admission test the encoding path's input contract is written
- * against: a value this accepts encodes, and one it does not gets whatever
- * best-effort handling costs correct input nothing. See
- * `BaseCodecEngine.encode()`.
+ * against: a value this accepts is one that path takes, and one it does not
+ * gets whatever best-effort handling costs correct input nothing. What an
+ * accepted value encodes to is `BaseCodecEngine.encode()`'s to say -- given
+ * one, a format writes its serialized form or throws for a reason it names,
+ * a cycle among them.
  */
 export function isValidFabricValue(value: unknown): value is FabricValue {
   // Fast leaf paths first, so a function or a primitive returns without
@@ -299,4 +474,56 @@ export function isFabricPlainObject(
   value: FabricValue,
 ): value is FabricPlainObject {
   return isPlainObject(value);
+}
+
+/**
+ * Returns `true` if the value is a `FabricNativeObject`: one of the
+ * "wild-west" native JS instances that the conversion layer wraps into a
+ * `FabricNativeWrapper` subclass, a `FabricPrimitive`, or a `FabricInstance`.
+ *
+ * Arrays, plain objects, and system-defined `FabricPrimitive`s are _not_
+ * `FabricNativeObject`s -- they have their own handling paths in the
+ * conversion layer.
+ *
+ * Membership is not convertibility: a `Map` and a `Set` are members whose
+ * fabric form has yet to be built.
+ *
+ * This function is a TypeScript type guard for `FabricNativeObject`.
+ */
+export function isValidFabricNativeObject(
+  value: unknown,
+): value is FabricNativeObject {
+  if (value === null || typeof value !== "object") return false;
+
+  // Arrays first, and unconditionally, exactly as the full dispatch does it.
+  // An array's class is USUALLY `Array`, whose tag is not one of the six
+  // below -- but a prototype can be re-pointed, and an array whose
+  // `prototype` is `Date.prototype` would otherwise be reported as a
+  // convertible `Date`.
+  // `Array.isArray()` sees through that, and through a subclass and a severed
+  // prototype besides, which is why the array rule alone decides what an array
+  // may be.
+  if (Array.isArray(value)) return false;
+
+  const ctor = constructorOfObject(value);
+  const tag = (ctor !== undefined) ? tagFromNativeBuiltinClass(ctor) : null;
+
+  // `Error.isError()` is the test that holds across realms, where `instanceof`
+  // does not, and it is what sees an error whose constructor is unreachable.
+  // The one environment here that rebuilds the `Error` constructor -- SES
+  // lockdown -- has the method restored before any of this runs.
+  switch (tag ?? (Error.isError(value) ? VALUE_TAGS.Error : null)) {
+    case VALUE_TAGS.Error:
+    case VALUE_TAGS.Map:
+    case VALUE_TAGS.Set:
+    case VALUE_TAGS.Date:
+    case VALUE_TAGS.Uint8Array:
+    case VALUE_TAGS.RegExp: {
+      return true;
+    }
+
+    default: {
+      return false;
+    }
+  }
 }

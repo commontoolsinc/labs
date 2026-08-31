@@ -38,13 +38,19 @@ function makeServer(): MemoryV2Server.Server {
  * pull, and thus the sync) fails authorization.
  */
 class DenyingWatchSessionFactory implements SessionFactory {
+  readonly #server: MemoryV2Server.Server;
+  readonly #retriable: boolean;
+
   constructor(
-    private readonly server: MemoryV2Server.Server,
-    private readonly retriable: boolean,
-  ) {}
+    server: MemoryV2Server.Server,
+    retriable: boolean,
+  ) {
+    this.#server = server;
+    this.#retriable = retriable;
+  }
 
   async create(id: string, signer?: Signer) {
-    const base = MemoryV2Client.loopback(this.server);
+    const base = MemoryV2Client.loopback(this.#server);
     let receive: (payload: string) => void = () => {};
     const transport: MemoryV2Client.Transport = {
       send: (payload: string) => {
@@ -59,7 +65,7 @@ class DenyingWatchSessionFactory implements SessionFactory {
             error: {
               name: "AuthorizationError",
               message: "Principal lacks READ on space",
-              ...(this.retriable ? { retriable: true } : {}),
+              ...(this.#retriable ? { retriable: true } : {}),
             },
           }));
           return Promise.resolve();

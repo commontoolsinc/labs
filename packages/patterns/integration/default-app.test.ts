@@ -1460,6 +1460,21 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
       .filter((entry) => entry.path.length === 0)
       .sort((a, b) => a.recordedAt - b.recordedAt);
 
+    // The `stack.includes(...)` tests in `classifyStack` and
+    // `interestingCallPath` match frame text, which no engine promises to keep
+    // stable, and a filter that matches nothing looks exactly like a run with
+    // nothing to report. Two ways they go quiet:
+    //
+    // The `_CellImpl` names are the bundler's, not the source's. Renaming
+    // `CellImpl` or changing how the shell is bundled breaks every one of them.
+    //
+    // A member converted to a `#` private name changes its own frame text.
+    // Chrome writes `at #member`, Deno writes `at Class.#member`, and a
+    // public member keeps its class in both. The split does not follow the V8
+    // version -- for one example, the two were a single V8 minor apart on the
+    // machine this was tested on, as of this writing -- so it says nothing
+    // about a third engine, or a later Chrome. Match the bare `#member`, a
+    // substring of both, rather than either whole form.
     function classifyStack(stack?: string): string {
       if (!stack) return "unknown";
       if (
@@ -1502,7 +1517,7 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
         line.includes("handler:") ||
         line.includes("raw:") ||
         line.includes("postRun") ||
-        line.includes("Runner.instantiatePatternNode") ||
+        line.includes("#instantiatePatternNode") ||
         line.includes("Runner.run") ||
         line.includes("Runner.setupInternal") ||
         line.includes("sendValueToBinding") ||

@@ -224,10 +224,22 @@ Mostly Improvement / Nit — don't drown the report in these. Dead code, unused
 exports, superfluous abstraction, unclear names. Types: no needless `any`; no
 needless casts (an `as Something` that isn't required for correctness) and no
 unjustified `as unknown as Something`, especially one erasing `Immutable<T>` /
-`Readonly<T>`. For the rest — named exports, JSDoc on exports and public
-members, import grouping, `@commonfabric/api` xor `/interface`, module-graph
-hygiene — follow `docs/development/DEVELOPMENT.md` and point to it rather than
-relisting it.
+`Readonly<T>`.
+
+For the rest the authority is `docs/development/DEVELOPMENT.md`, § Style &
+Conventions: follow it and point to it rather than relisting it. Its subsections
+seed what to look for — e.g. named exports, JSDoc on exports and public members,
+import grouping and collation, `@commonfabric/api` xor `/interface`,
+module-graph hygiene. Two of them seed nothing any gate will ever raise, which
+is where a diff-reading reviewer earns their keep: **§ Classes** —
+`#privateName` over TypeScript's `private`, a class exposing no enumerable
+properties, and the member order; the wrong form compiles and type-checks clean,
+and an erased `private` leaves an own enumerable property behind — and **§ Word
+choice**, American spelling and one word per concept, which reaches comments and
+error and log messages as much as it reaches documents.
+
+`skills/writing-code/SKILL.md` is what an author is handed for this same
+material. A finding here that it does not cover is a gap in the skill; say so.
 
 ### 7. Test rigor — the special-attention area
 
@@ -299,6 +311,8 @@ file.
   `docs/development/skill-authoring.md`
 - Pattern rules + severity taxonomy: `docs/common/ai/pattern-critique-guide.md`
 - Design principles & idioms: `docs/development/DEVELOPMENT.md`
+- What an author is handed for the same conventions:
+  `skills/writing-code/SKILL.md`
 - Comment style, `//` and JSDoc alike, file headers included:
   `docs/development/code-comment-style.md`
 - Transformer semantics: `docs/specs/ts-transformer/README.md`

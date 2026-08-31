@@ -509,6 +509,7 @@ describe("value-debug", () => {
     // fields, which have no enumerable own properties for an inspector to find.
     // The elided `(...)` is the debug renderer's own current limitation, marked
     // by a TODO there; delegating means this surface inherits the fix.
+
     it("renders a FabricPrimitive as its debug string, not `{}`", () => {
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
       expect(Deno.inspect(bytes)).toBe("/Bytes(...)");

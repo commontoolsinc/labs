@@ -92,6 +92,7 @@ export {
 export {
   type CellLinkInput,
   convertCellsToLinks,
+  encodeSqliteParams,
   isCell,
   isReadableCell,
   isStream,
@@ -133,6 +134,7 @@ export {
 export {
   type BlindStructuralTarget,
   isRendererInputTx,
+  markDurableReadTx,
   markRendererInputTx,
   markUiInputBlindWriteTx,
   setBlindStructuralTarget,
@@ -189,12 +191,16 @@ export {
   getPatternRepository,
   getPatternSetupIdentityRef,
   getPatternSource,
+  getPieceReconciliation,
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
   isStoredArgumentSchemaRefusal,
   mergeSchemaDefaults,
   patternIdentityKey,
   PIECE_SOURCE_MOVED,
+  type PieceReconciliation,
+  type PieceReconciliationOutcome,
+  type PieceReconciliationReason,
   type PieceSourceRevision,
   type PieceSourceRevisionOperation,
   type PieceSourceSnapshot,
@@ -205,6 +211,7 @@ export {
   schemaHasDefaultValue,
   setPatternRepository,
   setPatternSource,
+  setPieceReconciliation,
   STORED_ARGUMENT_SCHEMA_REFUSAL,
 } from "./runner.ts";
 
@@ -280,6 +287,7 @@ export {
   CFC_RUNTIME_SUBJECT,
   cfcAtom,
   ContextualFlowControl,
+  resolveExternalRootRefForStructure,
 } from "./cfc.ts";
 export type { Mutable } from "@commonfabric/utils/types";
 export {

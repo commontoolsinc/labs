@@ -14,19 +14,19 @@ import {
   publishExperimentalPosture,
 } from "@/lib/experimental-posture.ts";
 
-// The Phase-6 env knobs (serving-loop.md §5) are the production
-// multi-tenancy bound: a runaway fan-out must degrade only its own space,
-// so the outstanding-effect cap is ON by default and only the LITERAL `0`
-// opts out. The property worth pinning is that a typo cannot disable it:
-// garbage must fall back to the default (loudly), never read as the
-// opt-out (the Phase-6 independent review's F4 — the pre-fix parser
-// mapped "abc"/"-1" to `undefined` = unbounded, indistinguishable from
-// the explicit `0`).
-
 const envOf = (values: Record<string, string | undefined>) => (name: string) =>
   values[name];
 
 describe("serverExecutionPolicyFromEnv", () => {
+  // The Phase-6 env knobs (serving-loop.md §5) are the production
+  // multi-tenancy bound: a runaway fan-out must degrade only its own space,
+  // so the outstanding-effect cap is ON by default and only the LITERAL `0`
+  // opts out. The property worth pinning is that a typo cannot disable it:
+  // garbage must fall back to the default (loudly), never read as the
+  // opt-out (the Phase-6 independent review's F4 — the pre-fix parser
+  // mapped "abc"/"-1" to `undefined` = unbounded, indistinguishable from
+  // the explicit `0`).
+
   it("defaults the outstanding cap ON when the knob is unset or empty", () => {
     const warnings: string[] = [];
     expect(serverExecutionPolicyFromEnv(envOf({}), (m) => warnings.push(m)))
@@ -103,20 +103,21 @@ describe("serverExecutionPolicyFromEnv", () => {
   });
 });
 
-// The OFF witness for the serving-loop bootstrap (OW45 arm-B
-// server-ensure stage 1's explicit pin; the arc's OFF byte-identity
-// bar): with the flag OFF — unset (the first-party default is OFF until
-// the flip PR) or explicitly "false" — `startServerExecutionHost`
-// returns undefined, so NO ExecutorHost exists, NO SpaceServer is ever
-// built, and the server-side space-root ensure path added by stage 1
-// (the SpaceServer activation owed-step) structurally does not exist
-// OFF. The seat's only reachability chain is toolshed bootstrap →
-// ExecutorHost → SpaceServer.activate, and it severs at its first link.
-//
-// The options are untouchable fakes on purpose: the flag check is the
-// function's FIRST act, so the OFF arm must touch neither the server
-// nor the identity — any use throws and fails the pin.
 describe("startServerExecutionHost OFF witness", () => {
+  // The OFF witness for the serving-loop bootstrap (OW45 arm-B
+  // server-ensure stage 1's explicit pin; the arc's OFF byte-identity
+  // bar): with the flag OFF — unset (the first-party default is OFF until
+  // the flip PR) or explicitly "false" — `startServerExecutionHost`
+  // returns undefined, so NO ExecutorHost exists, NO SpaceServer is ever
+  // built, and the server-side space-root ensure path added by stage 1
+  // (the SpaceServer activation owed-step) structurally does not exist
+  // OFF. The seat's only reachability chain is toolshed bootstrap →
+  // ExecutorHost → SpaceServer.activate, and it severs at its first link.
+  //
+  // The options are untouchable fakes on purpose: the flag check is the
+  // function's FIRST act, so the OFF arm must touch neither the server
+  // nor the identity — any use throws and fails the pin.
+
   const untouchable = <T extends object>(label: string): T =>
     new Proxy({} as T, {
       get(_target, property) {
@@ -148,11 +149,12 @@ describe("startServerExecutionHost OFF witness", () => {
     expect(host).toBeUndefined();
   });
 
-  // What `/api/meta` reports has to be the posture this deployment SERVES at,
-  // not the generic webhook runtime's: a serving runtime forces flags of its
-  // own, and a client adopting the base alone would run values the deployment
-  // does not (docs/development/EXPERIMENTAL_OPTIONS.md).
   describe("the posture it publishes", () => {
+    // What `/api/meta` reports has to be the posture this deployment SERVES at,
+    // not the generic webhook runtime's: a serving runtime forces flags of its
+    // own, and a client adopting the base alone would run values the deployment
+    // does not (docs/development/EXPERIMENTAL_OPTIONS.md).
+
     // Enough of a server for the host to register its observer on and let go
     // of again; an inert host touches nothing else.
     const observableServer = () =>

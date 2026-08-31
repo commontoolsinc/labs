@@ -54,11 +54,15 @@ const testSessionOpenAudience = "did:key:z6Mk-cell-set-echo-race-audience";
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 class SharedV2SessionFactory implements V2Storage.SessionFactory {
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  readonly #server: MemoryV2Server.Server;
+
+  constructor(server: MemoryV2Server.Server) {
+    this.#server = server;
+  }
 
   async create(sessionSpace: MemorySpace) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(
       sessionSpace,
@@ -114,8 +118,11 @@ class InProcessWorkerTransport extends EventEmitter<RuntimeTransportEvents>
   implements RuntimeTransport {
   readonly outbox: IPCRemoteMessage[] = [];
 
-  constructor(private readonly processor: RuntimeProcessor) {
+  readonly #processor: RuntimeProcessor;
+
+  constructor(processor: RuntimeProcessor) {
     super();
+    this.#processor = processor;
   }
 
   send(original: IPCClientMessage | IPCClientNotification): void {
@@ -143,7 +150,7 @@ class InProcessWorkerTransport extends EventEmitter<RuntimeTransportEvents>
     }
     void Promise.resolve()
       .then(() =>
-        RuntimeProcessor.prototype.handleRequest.call(this.processor, data)
+        RuntimeProcessor.prototype.handleRequest.call(this.#processor, data)
       )
       .then(
         (response) =>

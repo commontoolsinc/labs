@@ -222,114 +222,47 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     // recommendations, proceed". Under that surface reading this entry's bar
     // was fully met by the evidence above. Full chain: verification-coverage.md
     // OW45 (the PHASE 3 block and the LIFT block that follows it).
-    {
-      // Re-listed by the lunch-poll identity PR (#5744). This file was
-      // LIFTED 2026-08-19 for the swatch-stall class (stage-C W3.1 —
-      // history in the header comment above); the profile-first join
-      // that PR introduces newly exposes the arm-B family's REMAINING
-      // member (then the default-app reload STEP entry, LIFTED
-      // 2026-08-28 — the comment above): the test now creates the viewer's
-      // profile piece mid-test, and the flag-ON client's deferred start
-      // of that fresh piece dies terminally on the first-hydration
-      // stale-confirmed-read ConflictError, killing the client's piece
-      // context for the session — so the wish `#profile` never
-      // resolves and the join card never renders `#lp-join-button`.
-      // Both the 2026-08-22 red (run 32539777265, shards 7 and 9 —
-      // shard 9's cfc-staged-publish red is the same class's per-run
-      // lottery) and the 2026-08-24 red (run 32769542550) carry the
-      // deferred-start tx-commit-error signature; the OFF lane runs
-      // this file green. Every later step depends on that join, hence
-      // a FILE entry rather than a step guard. Same class, same fork
-      // memo as the lifted default-app STEP entry. MERGE NOTE (the
-      // catch-up-and-start PR): both recorded reds PREDATE the
-      // recovery landing — the "dies terminally" mechanism is exactly
-      // the b04 death that recovery closes (verification-coverage.md
-      // OW45's CATCH-UP-AND-START block), so this entry's lift condition is
-      // now concretely testable; it lifts on its own gate evidence at
-      // the merged head, never by inference from the default-app gate.
-      // THAT GATE RAN 2026-08-24 — 10 runs at merged head f14e44830
-      // (ON binary sha256 ce65782063f4f14a1…, fresh store + posture
-      // probe per run, ensure-off, 5 quiet / 5 loaded interleaved):
-      // 7/10, NO LIFT, and the b04 class above is CLOSED on this
-      // file's own evidence (catchup activations in 10/10 runs,
-      // deferred-start-catchup-failed 0, terminal "Error committing
-      // deferred …" 0, pattern-load-error 0 — the "dies terminally"
-      // mechanism did not reproduce once). The three reds are ONE
-      // shape and a THIRD residue member, on the WRITE side: the
-      // GUEST browser's mid-session profile piece never lands its
-      // ~98-101-op program-materialization commit, so its space holds
-      // exactly 4 commits (byte-identical across all three reds), no
-      // patternIdentity anywhere, and appears in ZERO toolshed log
-      // lines — greens reach 14-21 commits with patternIdentity named
-      // 57-216 times. That campaign deliberately left refused vs
-      // dropped vs never issued undetermined. PR #6378 later pinned the
-      // mechanism: the authoritative server attempt was dropped on its
-      // `RetryImmediately` name-resolution signal before it could issue
-      // the transaction. Flagged there, not here: S-B's barrier
-      // cannot cover a write that is never in flight, and the S-C
-      // skip ruling's premise (waitForRuntimeIdle before any reload)
-      // does not reach a surface with no reload. Recorded so nobody
-      // re-derives them: piece-start-commit-failed is NOT the
-      // discriminator (13 occurrences, green runs included) and
-      // OW46's structure-load-stuck is blind here (fires in both
-      // arms, names only the host's space). Full evidence in
-      // verification-coverage.md OW45's LUNCH-POLL FILE ENTRY'S OWN
-      // GATE block.
-      file: "integration/lunch-poll-vote.test.ts",
-      phase: "phase-7",
-      reason: "OW45 arm B. The charge is now the ROW'S OWN ROOT " +
-        "MECHANISM, observed SERVER-SIDE in CI for the first time. " +
-        "Phase-3 re-baseline 2026-08-27 at main 1fc841b6e (ON binary " +
-        "sha256 a93047a461c0c4d8 re-verified per run, fresh store + own " +
-        "97xx port + ON posture probe per run, ensure defaulting ON, " +
-        "toolshed self-sourced, LLM masked): 8/8 GREEN in 16-18s, the " +
-        "owner-directed approximately-eight-run pin MET locally, with " +
-        "pattern-load-error, deferred-start-catchup, session-remount, " +
-        "piece-start-commit-failed(server), load-park and " +
-        "handlerNotRunDeferrals all ZERO. The DIRECT CI UNSKIP PROBE (run " +
-        "33138358110, ON shard 7, job 98743591583, head 95f313835) went " +
-        "RED at the SAME stage and signature as the 2026-08-26 probe: " +
-        "lunch-poll-vote.test.ts:271, the HOST's " +
-        "clickCfButton(#lp-join-button), " +
-        "'Timed out waiting for #lp-join-button to render. Last probe: " +
-        "{\"#lp-join-button\": []}', waitForCondition's unchanged " +
-        "300000ms bound, 5m5s; the body read '0 joined' and 'Unknown " +
-        "profile #MjhprA'. WHAT IS NEW: CI now publishes the toolshed log " +
-        "as a job artifact, closing the 2026-08-26 disposition's stated " +
-        "blind spot. In the file's window that log carries EIGHTY " +
-        "structure-load-stuck WARNs on the profile space " +
-        "did:key:z6MktpA5, the first naming demanded root " +
-        "of:fid1:32Pic3-REdd7zmJ8gPchJyFD0LECk0u-QrFUXMjhprA as " +
-        "pattern-unloadable after 8 consecutive deferred cycles — 'a " +
-        "forever-park ... the home-profile program-write-loss shape' — " +
-        "and that root's suffix IS the #MjhprA the placeholder rendered. " +
-        "Upstream sit TWENTY seal-space-commit-failed / " +
-        "foreign-write-refused pairs: applyInitialName and a __cfLift_1 " +
-        "action running in the HOME wave did:key:z6Mkv7Tjz refused a " +
-        "write to the profile space for want of the section 2b delegated " +
-        "carriage. CRUCIAL DISCRIMINATOR, so nobody chases the refusal: " +
-        "the refusal is NOT it. All eight local GREENS carry 80 " +
-        "foreign-write-refused and 40 seal-space-commit-failed each, with " +
-        "structureLoadStuck 0, structureLoadRearmed 7-10 and " +
-        "structureLoadTerminal 190-199. The PARK is the discriminator — " +
-        "locally the profile space's structure load always resolves, in " +
-        "CI it never does. Excluded from the CI window, all zero: " +
-        "pattern-load-error, pattern-swap-setup-error, " +
-        "deferred-start-catchup, session-remount, " +
-        "piece-start-commit-failed, sidecar-run-raced, handler-not-run, " +
-        "arrival-barrier, 'memory session revoked', sync-load-failure, " +
-        "Event deferred and Event dropped. So this is NOT the b04 " +
-        "client-start class (closed 2026-08-24), NOT the a04 " +
-        "mark/effects family (#6459), NOT the #6312 sidecar clobber, NOT " +
-        "the fifth-face load-park member, and NOT #6378's " +
-        "name-resolution drop — those were the entry's prior charges and " +
-        "each is now excluded by observation rather than by absence. The " +
-        "OFF lane's shard 7 PASSED on the same run, so the red is " +
-        "ON-specific. Local 8/8 against CI 1/1 red, for the second " +
-        "campaign running: this file's lift needs the PARK explained, " +
-        "not another local count. This FILE entry remains explicit until " +
-        "the phase-7 coordinator lifts it.",
-    },
+    // lunch-poll-vote's FILE entry LIFTED 2026-08-28 (the THIRD lift; the
+    // list is EMPTY again) — the entry's own stated lift condition met: the
+    // OWNER RULED the 3b fork 2026-08-28 ("go with (1) plus the (2-D)
+    // kick") and both mechanisms are LANDED red-first. (1) event-driven
+    // re-supply: a supply-class replication failure PARKS under the WANTED
+    // identity (the dependency's own in a recursion frame) and
+    // recordPersistedClosureSpaces re-issues it when a matching supply
+    // records — once per persist event, no timers, bounded; at failure
+    // registration the fallback map is checked once so a record that
+    // landed inside the read window re-issues immediately (review-6502
+    // F1-(b)); the failure line is byte-identical and the park/re-issue/
+    // heal are loud; genuine absence keeps the loud one-shot, now worded
+    // "…and on the next persist event". (2-D) serve-time kick: a cached
+    // sidecar pattern served for a space it did not compile into
+    // replicates its closure there at page-serve time, so the demanding
+    // space's supplier is REGISTERED before any create-profile click and
+    // the child replication's strictly-older-ticket await covers the
+    // lunch class by registration. Pins:
+    // pattern-replication-sibling-race.test.ts steps 7-10 (heal,
+    // module-wake, registration-time check, dependency-frame park) +
+    // executor-cross-space late-carriage + wish-sidecar-closure-kick, all
+    // watched RED at bare main d569f3722; new mutations N1/N2/N3/N3b/N4
+    // each independently isolated; the existing kill matrix re-verified
+    // cell-for-cell (K1's kill rebound to step 1's zero-failure-lines
+    // assertion — the heal would otherwise mask its END-STATE, the F1
+    // masking class recreated and closed at design time). Entry history
+    // (four geometries mapped on five probe boards; geometries 1-3
+    // closed by #6484/#6502) is in git history and
+    // verification-coverage.md OW45's lunch blocks — the RULING block
+    // records the ruling, the landed mechanism, and what stays open (the
+    // cross-replica never-records supplier — heals at the server's first
+    // matching persist; the prior-session third-space closure; the
+    // recursive-(b) sliver). Lift evidence per the ruled
+    // local-plus-CI-probe bar: campaign R 8/8 quiet-and-loaded at this
+    // head (fresh store + posture probe per run, ensure defaulting ON,
+    // toolshed self-sourced, sha re-verified per run, LLM masked;
+    // structureLoadStuck 0; closure-replication-failed 0 — the heal
+    // machinery dormant locally, exactly the model), and the lift PR's
+    // own ON-lane board as the direct-CI unskip probe (PROBE 6) under
+    // the ruled SURFACE reading — a red at that surface restores the
+    // entry with the accumulated map and the honest classification.
     // The sqlite identity pair's two FILE entries were LIFTED (OW53
     // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's
     // ambient identity — the SERVICE, on a serving runtime — where the

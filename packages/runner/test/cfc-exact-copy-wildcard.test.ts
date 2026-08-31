@@ -7,14 +7,15 @@ import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-exact-copy-wildcard");
 
-// Regression guard for exactCopyOf under array wildcards (audit W2.15).
-//
-// walkIfcSchema emits "*" for array items, but the write-value reconstruction
-// matches path segments literally, so a wildcard exactCopyOf claim never matched
-// a concrete write and deepEqual(undefined, undefined) passed vacuously — the
-// claim was accepted (and its label copied) with no verification. A wildcard
-// exactCopyOf must fail closed.
 describe("CFC exactCopyOf array wildcard", () => {
+  // Regression guard for exactCopyOf under array wildcards (audit W2.15).
+  //
+  // walkIfcSchema emits "*" for array items, but the write-value reconstruction
+  // matches path segments literally, so a wildcard exactCopyOf claim never
+  // matched a concrete write and deepEqual(undefined, undefined) passed
+  // vacuously — the claim was accepted (and its label copied) with no
+  // verification. A wildcard exactCopyOf must fail closed.
+
   it("rejects an exactCopyOf claim on an array-item (wildcard) path", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({

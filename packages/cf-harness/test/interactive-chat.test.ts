@@ -23,8 +23,8 @@ import {
 
 class InMemoryInteractiveChatContract {
   readonly events: HarnessChatEventEnvelope[] = [];
-  private readonly sessions = new Map<string, HarnessChatSessionStatus>();
-  private sequence = 0;
+  readonly #sessions = new Map<string, HarnessChatSessionStatus>();
+  #sequence = 0;
 
   startSession(params: HarnessChatStartSessionParams) {
     const session = createHarnessChatSessionStatus({
@@ -38,8 +38,8 @@ class InMemoryInteractiveChatContract {
       browserAccess: params.browserAccess,
       metadata: params.metadata,
     });
-    this.sessions.set(session.sessionId, session);
-    this.emit(session.sessionId, undefined, {
+    this.#sessions.set(session.sessionId, session);
+    this.#emit(session.sessionId, undefined, {
       kind: "session_started",
       session,
     });
@@ -47,9 +47,9 @@ class InMemoryInteractiveChatContract {
   }
 
   startTurn(params: HarnessChatStartTurnParams) {
-    const session = this.requireSession(params.sessionId);
+    const session = this.#requireSession(params.sessionId);
     const turnId = params.turnId ?? `turn-${session.turnCount + 1}`;
-    this.emit(params.sessionId, turnId, {
+    this.#emit(params.sessionId, turnId, {
       kind: "turn_started",
       turn: {
         turnId,
@@ -58,61 +58,61 @@ class InMemoryInteractiveChatContract {
         updatedAt: "2026-05-22T00:01:00.000Z",
       },
     });
-    return this.requireSession(params.sessionId).activeTurn;
+    return this.#requireSession(params.sessionId).activeTurn;
   }
 
   cancelTurn(sessionId: string, reason: string) {
-    const session = this.requireSession(sessionId);
+    const session = this.#requireSession(sessionId);
     const turnId = session.activeTurnId ?? "turn-unknown";
-    this.emit(sessionId, turnId, {
+    this.#emit(sessionId, turnId, {
       kind: "turn_canceled",
       turnId,
       reason,
     });
-    return this.requireSession(sessionId);
+    return this.#requireSession(sessionId);
   }
 
   completeTurn(sessionId: string, finalText: string) {
-    const session = this.requireSession(sessionId);
+    const session = this.#requireSession(sessionId);
     const turnId = session.activeTurnId ?? "turn-unknown";
-    this.emit(sessionId, turnId, {
+    this.#emit(sessionId, turnId, {
       kind: "assistant_delta",
       text: finalText,
     });
-    this.emit(sessionId, turnId, {
+    this.#emit(sessionId, turnId, {
       kind: "assistant_completed",
       text: finalText,
     });
-    this.emit(sessionId, turnId, {
+    this.#emit(sessionId, turnId, {
       kind: "turn_completed",
       turnId,
       finalText,
     });
-    return this.requireSession(sessionId);
+    return this.#requireSession(sessionId);
   }
 
   closeSession(sessionId: string, reason: string) {
-    this.requireSession(sessionId);
-    this.emit(sessionId, undefined, {
+    this.#requireSession(sessionId);
+    this.#emit(sessionId, undefined, {
       kind: "session_closed",
       reason,
     });
-    return this.requireSession(sessionId);
+    return this.#requireSession(sessionId);
   }
 
   status() {
-    return Array.from(this.sessions.values());
+    return Array.from(this.#sessions.values());
   }
 
-  private requireSession(sessionId: string) {
-    const session = this.sessions.get(sessionId);
+  #requireSession(sessionId: string) {
+    const session = this.#sessions.get(sessionId);
     if (!session) {
       throw new Error(`missing session ${sessionId}`);
     }
     return session;
   }
 
-  private emit(
+  #emit(
     sessionId: string,
     turnId: string | undefined,
     event: HarnessChatEventEnvelope["event"],
@@ -120,16 +120,16 @@ class InMemoryInteractiveChatContract {
     const envelope = createHarnessChatEventEnvelope({
       sessionId,
       ...(turnId !== undefined ? { turnId } : {}),
-      sequence: ++this.sequence,
+      sequence: ++this.#sequence,
       emittedAt: `2026-05-22T00:00:${
-        String(this.sequence).padStart(2, "0")
+        String(this.#sequence).padStart(2, "0")
       }.000Z`,
       event,
     });
     this.events.push(envelope);
-    const current = this.sessions.get(sessionId);
+    const current = this.#sessions.get(sessionId);
     if (current) {
-      this.sessions.set(
+      this.#sessions.set(
         sessionId,
         reduceHarnessChatSessionStatus(current, envelope),
       );

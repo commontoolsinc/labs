@@ -3160,11 +3160,12 @@ describe("mounted callable resolution and execution", () => {
     expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
-  // A mounted handler whose event schema sits behind a top-level local $ref
-  // is refused at the flag door, which reads the definition's fields and can
-  // name the type the caller must supply. Nothing dispatches, so an
-  // invocation id is never spent.
   it("refuses an absent payload for a mounted handler that cannot run without one", async () => {
+    // A mounted handler whose event schema sits behind a top-level local $ref
+    // is refused at the flag door, which reads the definition's fields and can
+    // name the type the caller must supply. Nothing dispatches, so an
+    // invocation id is never spent.
+
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
       relativePath: "home/pieces/notes-2/result/add.handler",
@@ -3498,6 +3499,10 @@ function createExecHarness(options: {
           tracker.events.push("commit");
           return Promise.resolve();
         },
+        // The real transaction reports both, and the write receipt reads
+        // them rather than treating a resolved `commit()` as proof of a
+        // write. This stub stages none, so it reports none.
+        status: () => ({ status: "done", journal: { novelty: () => [] } }),
       }),
       prepareTxForCommit: () => {},
       getCell: (

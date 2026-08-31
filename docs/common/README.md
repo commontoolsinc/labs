@@ -25,6 +25,7 @@ on the Common Fabric runtime.
 | Task | Read |
 |------|------|
 | Build a pattern | [ai/pattern-development-guide.md](ai/pattern-development-guide.md) |
+| Build an iframe-first pattern | [plain DOM](ai/iframe-pattern-guide.md), [React](ai/iframe-pattern-react-guide.md), [D3](ai/iframe-pattern-d3-guide.md), [Phaser](ai/iframe-pattern-phaser-guide.md), or [Babylon.js](ai/iframe-pattern-babylon-guide.md) |
 | Write tests | [ai/pattern-testing-guide.md](ai/pattern-testing-guide.md) (mechanics: [workflows/pattern-testing.md](workflows/pattern-testing.md)) |
 | Review / critique a pattern | [ai/pattern-critique-guide.md](ai/pattern-critique-guide.md) |
 | Manual / runtime testing | [ai/manual-testing-guide.md](ai/manual-testing-guide.md) |

@@ -251,7 +251,9 @@ describe("wish profile-create sidecar duplicate launch", () => {
 });
 
 //
-// The discrimination itself, exhaustively — this is the shared decision both
+// The failure disposition, exhaustively
+//
+// The discrimination itself — this is the shared decision both
 // the commit-error arm AND the thrown-error arm of runSidecarInOwnTx consume
 // (a thrown conflict carries the same object shape as a commit-refused one).
 // The thrown arm is not deterministically drivable through the public flow
@@ -321,6 +323,10 @@ describe("sidecarRunFailureDisposition", () => {
     ).toBe("error-ui");
   });
 });
+
+//
+// Which value wins
+//
 
 describe("sidecarValueIsWinner", () => {
   // The winner predicate itself (Cubic P2, review round): an error ACCOUNT left

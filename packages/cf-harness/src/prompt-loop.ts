@@ -1181,7 +1181,7 @@ const buildSubagentSystemPrompt = (
             "An indexed pattern imported that way is a component of the source you are writing: run_pattern fetches and compiles each one you name before it compiles your source, so composing one costs you the import line and nothing else. Reach for that before reimplementing what a search already found.",
             'Compose one by calling it where you want its result. `import Card from "cf:pattern:<patternId>"` and then `card: Card({ item })` puts its result object under a field of yours; writing the same call inside your JSX — `<div>{Card({ item })}</div>` — renders its UI in place. The result shapes search_patterns reported are what you wire against.',
             "A search hit is a component to wire, not a specification to rebuild. When a result's description says it does something one of your atoms needs, import and call it. Rewriting it from its description is the one move that makes the index worth nothing: it publishes a second pattern doing the same job under a different id, and the next searcher has two things to choose between and no reason to prefer either.",
-            "A pattern you author and run successfully is published back to the index, so pass run_pattern a `description` saying in one line what it does and `hashtags` naming the words someone looking for that capability would search. Write them for the next person, not for this task: a pattern published without a description is not published at all.",
+            "A pattern you author and run successfully is recorded in the index for later evaluation, so pass run_pattern a `description` saying in one line what it does and `hashtags` naming the words someone should find it under if evidence earns discoverability. Write them for the next person, not for this task: a pattern recorded without a description is not published at all.",
             "Give every atom its own description and hashtags, not just the composition on top of them. The atom is the part someone else can reuse; the composition is usually specific to the task that asked for it.",
             'Tag at two levels: the domain (what it is about — "grocery", "budget") AND the capabilities (what interactions it embodies — "crud-list", "form-input", "counter", "toggle"). Searchers hunting a scaffold for a different domain find your pattern only through its capability tags. The description should name the interactions too: "add items, toggle done, count remaining" finds readers that "a handy list app" never will.',
           ]
@@ -2490,7 +2490,29 @@ export class CfHarnessPromptLoop {
     });
   }
 
+  /**
+   * Runs the loop, then sends whatever this session staged for the pattern
+   * index.
+   *
+   * The flush belongs here rather than at each `run_pattern` because the
+   * ledger publishes once per capability per SESSION, and a session's last
+   * word on a capability is only known once the session is over. It runs on
+   * the failure paths too: a run that ends in an error still authored
+   * whatever it authored, and the alternative is silently discarding it.
+   * A flush failure is logged by the ledger and never displaces the loop's
+   * own result or its error.
+   */
   async runTranscript(
+    options: RunHarnessTranscriptOptions,
+  ): Promise<HarnessPromptLoopResult> {
+    try {
+      return await this.#runTranscript(options);
+    } finally {
+      await this.engine.flushPatternIndexPublications();
+    }
+  }
+
+  async #runTranscript(
     options: RunHarnessTranscriptOptions,
   ): Promise<HarnessPromptLoopResult> {
     const initialRunState = this.engine.getRunState();

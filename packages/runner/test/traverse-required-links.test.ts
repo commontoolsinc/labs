@@ -201,12 +201,13 @@ describe("required link-valued properties", () => {
 });
 
 describe("array-void diagnosability", () => {
-  // The 2026-07-10 board outage presented as a blanked array with a bare
-  // "Item doesn't match" log — nothing named WHICH element was at fault. Pin
-  // that the (unchanged) strict void now leaves an info breadcrumb carrying
-  // the failing index + doc address (the message body is a lazy lambda: it
-  // only runs when the level admits it).
   it("still voids on a mismatched element, and names the failing index + doc at info", () => {
+    // The 2026-07-10 board outage presented as a blanked array with a bare
+    // "Item doesn't match" log — nothing named WHICH element was at fault. Pin
+    // that the (unchanged) strict void now leaves an info breadcrumb carrying
+    // the failing index + doc address (the message body is a lazy lambda: it
+    // only runs when the level admits it).
+
     const traverseLogger = getLogger("traverse");
     const priorLevel = traverseLogger.level;
     traverseLogger.level = "info";

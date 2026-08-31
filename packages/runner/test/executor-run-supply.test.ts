@@ -506,14 +506,18 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     }
   });
 
+  //
+  // Fan-out stage B, review F1: a bounded RetryImmediately
+  //
   // Fan-out stage B, independent review F1: `RetryImmediately` inside a
-  // fanned-out instance run must be BOUNDED — the OFF arm's shape (one
-  // queued retry per attempt, a macrotask apart, MAX_RETRIES_FOR_REACTIVE
-  // attempts, then the accepted zombie). Before the fix the loop re-ran
-  // the same instance in the SAME pass (its key never became clean, so
-  // the set kept offering it): 501 invocations of a 500-throw action
-  // inside ONE `run()`, and a never-resolving name spun the process's
-  // microtask queue forever — no timer fired, `idle()` never resolved.
+  // fanned-out instance run must be BOUNDED — the OFF arm's shape (one queued
+  // retry per attempt, a macrotask apart, MAX_RETRIES_FOR_REACTIVE attempts,
+  // then the accepted zombie). Before the fix the loop re-ran the same instance
+  // in the SAME pass (its key never became clean, so the set kept offering it):
+  // 501 invocations of a 500-throw action inside ONE `run()`, and a
+  // never-resolving name spun the process's microtask queue forever — no timer
+  // fired, `idle()` never resolved.
+  //
 
   it("F1: a demanded action that keeps throwing RetryImmediately is bounded per pass — the loop DEFERS the instance instead of re-running it, the retry rides the queue (a timer fires between attempts), and the budget is MAX_RETRIES_FOR_REACTIVE", async () => {
     const rootId = "of:p2f-retry-root";

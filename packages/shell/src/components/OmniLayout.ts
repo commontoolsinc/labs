@@ -135,8 +135,8 @@ export class XOmniLayout extends LitElement {
   @state()
   private accessor isResizing = false;
 
-  private resizeStartX = 0;
-  private resizeStartWidth = 0;
+  #resizeStartX = 0;
+  #resizeStartWidth = 0;
 
   override firstUpdated() {
     const slot = this.shadowRoot?.querySelector(
@@ -182,33 +182,33 @@ export class XOmniLayout extends LitElement {
     this.hasSidebarContent = hasContent;
   }
 
-  private handleResizeStart = (e: PointerEvent) => {
+  #handleResizeStart = (e: PointerEvent) => {
     e.preventDefault();
     this.isResizing = true;
-    this.resizeStartX = e.clientX;
-    this.resizeStartWidth = this.sidebarWidth;
+    this.#resizeStartX = e.clientX;
+    this.#resizeStartWidth = this.sidebarWidth;
 
     const handle = e.target as HTMLElement;
     handle.setPointerCapture(e.pointerId);
     handle.classList.add("dragging");
 
-    document.addEventListener("pointermove", this.handleResizeMove);
-    document.addEventListener("pointerup", this.handleResizeEnd);
+    document.addEventListener("pointermove", this.#handleResizeMove);
+    document.addEventListener("pointerup", this.#handleResizeEnd);
   };
 
-  private handleResizeMove = (e: PointerEvent) => {
+  #handleResizeMove = (e: PointerEvent) => {
     if (!this.isResizing) return;
 
-    const delta = this.resizeStartX - e.clientX;
+    const delta = this.#resizeStartX - e.clientX;
     const newWidth = Math.min(
       MAX_SIDEBAR_WIDTH,
-      Math.max(MIN_SIDEBAR_WIDTH, this.resizeStartWidth + delta),
+      Math.max(MIN_SIDEBAR_WIDTH, this.#resizeStartWidth + delta),
     );
 
     this.sidebarWidth = newWidth;
   };
 
-  private handleResizeEnd = (_e: PointerEvent) => {
+  #handleResizeEnd = (_e: PointerEvent) => {
     if (!this.isResizing) return;
 
     this.isResizing = false;
@@ -219,8 +219,8 @@ export class XOmniLayout extends LitElement {
       handle.classList.remove("dragging");
     }
 
-    document.removeEventListener("pointermove", this.handleResizeMove);
-    document.removeEventListener("pointerup", this.handleResizeEnd);
+    document.removeEventListener("pointermove", this.#handleResizeMove);
+    document.removeEventListener("pointerup", this.#handleResizeEnd);
   };
 
   override render() {
@@ -234,7 +234,7 @@ export class XOmniLayout extends LitElement {
         <div class="sidebar">
           <div
             class="resize-handle"
-            @pointerdown="${this.handleResizeStart}"
+            @pointerdown="${this.#handleResizeStart}"
           ></div>
           <div class="sidebar-content">
             <slot name="sidebar"></slot>

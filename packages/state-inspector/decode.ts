@@ -684,9 +684,17 @@ export interface LinkWalkBounds {
    * decoded into memory. This bound is against the value that is not that: a
    * malformed row, or an at-rest form restoring as an object graph with a
    * cycle in it, is otherwise walked forever. `maxDepth` settles that on its
-   * own only while it is small, because a cycle that branches two ways costs
-   * exponentially in the depth — so the node count is what makes the work
-   * finite at a large depth, and the depth is what keeps one deep chain cheap.
+   * own only while it is small AND the value branches narrowly, because a
+   * cycle that branches `b` ways costs `b` to the depth — so the node count is
+   * what makes the work finite, and the depth is what keeps one deep chain
+   * cheap.
+   *
+   * A finite value here states a fact about the answer — that the walk may
+   * have stopped short — and `budgetExhausted` is where that fact comes back.
+   * A caller with nowhere to carry it forward has no honest finite value to
+   * set, since a truncation nothing reports is worse than one that cannot
+   * happen; such a caller passes `Number.POSITIVE_INFINITY` and takes the
+   * depth as its whole bound.
    */
   maxNodes: number;
 }
@@ -710,6 +718,24 @@ export interface LinkWalk {
   tooDeep: readonly (readonly string[])[];
 
   /**
+   * The paths holding a value the walk could read only in part: an object
+   * that is neither a link, an array, nor a plain record — a class instance,
+   * whose state lives in private fields where a structural walk cannot reach
+   * it. The walk descends such a value's enumerable properties, so a link on
+   * one is reported like any other, but those properties are some of what the
+   * value holds rather than all of it, and a link in the part not reached is
+   * neither reported nor ruled out.
+   *
+   * Some values named here hold nothing at all — a hash, a byte string, a
+   * timestamp. Others hold a whole value out of reach: a `ProblematicValue` or
+   * an `UnknownValue` keeps the state it wrapped in a private field, and that
+   * state is exactly the data whose decoding went wrong or arrived under a tag
+   * this build does not know, links in it included. So a path here is a place
+   * the walk cannot answer for, not a place a link is known to be.
+   */
+  opaque: readonly (readonly string[])[];
+
+  /**
    * Whether `maxNodes` ran out, which stops the walk wherever it had reached.
    * This is a statement about the walk rather than about a path: the values
    * it never visited were never enumerated, so nothing names them, and
@@ -721,21 +747,44 @@ export interface LinkWalk {
 }
 
 /**
+ * The path to the value a walk is at, as a chain back to the root.
+ *
+ * A walk visits far more values than it reports, so it carries the path in the
+ * shape that costs one cell per step rather than a copy of the path so far per
+ * step, and materializes the array only where a result names a path. That is
+ * what lets one traversal serve both a caller wanting every link with its
+ * location and a caller wanting a count over every entity in a space.
+ */
+type Trail = { readonly parent: Trail; readonly segment: string } | null;
+
+/** The root-to-here segments of a trail, in that order. */
+function pathOf(at: Trail): readonly string[] {
+  const reversed: string[] = [];
+  for (let step = at; step !== null; step = step.parent) {
+    reversed.push(step.segment);
+  }
+  return reversed.reverse();
+}
+
+/**
  * Every link in a value that `bounds` reaches, in either at-rest form, each
  * with the path inside the value it sits at — and, beside them, where the
- * bounds stopped the walk. The walk descends the objects and arrays of the
- * value and stops at each link it meets, so a linked value's own links belong
- * to that value rather than to this one.
+ * bounds stopped the walk and where it read a value only in part. The walk
+ * descends the objects and arrays of the value and stops at each link it
+ * meets, so a linked value's own links belong to that value rather than to
+ * this one.
  *
  * It is generic over shape rather than over an enumeration of the places a
  * link may appear: `decodedLinkOf` is the whole of the link knowledge in it,
  * which is why no caller keeps a list of link-bearing keys in step with the
- * ones the store writes.
+ * ones the store writes. It stops at nothing else either — a stream marker
+ * and an entity reference are values like any other, and the walk reads them
+ * for links rather than assuming their shape.
  *
  * A link past `bounds` is not found, and a caller for which a link missed and
- * a value holding none read alike must take `tooDeep` and `budgetExhausted`
- * with the links: they are what say that the found set is partial, and which
- * part of the value the walk can say nothing about.
+ * a value holding none read alike must take `tooDeep`, `opaque` and
+ * `budgetExhausted` with the links: they are what say that the found set is
+ * partial, and which part of the value the walk can say nothing about.
  *
  * Links come back in the order the walk meets them, depth first, with an
  * object's keys in `Object.entries` order and an array's items in index order.
@@ -746,9 +795,10 @@ export function linksWithPaths(
 ): LinkWalk {
   const links: LinkAtPath[] = [];
   const tooDeep: (readonly string[])[] = [];
+  const opaque: (readonly string[])[] = [];
   let budget = bounds.maxNodes;
   let budgetExhausted = false;
-  const walk = (held: Json, at: readonly string[]): void => {
+  const walk = (held: Json, at: Trail, depth: number): void => {
     if (budgetExhausted) return;
     // Budget before depth: once the budget is gone the walk is over, and a
     // path it declines from there is one it never reached rather than one it
@@ -757,64 +807,32 @@ export function linksWithPaths(
       budgetExhausted = true;
       return;
     }
-    if (at.length > bounds.maxDepth) {
-      tooDeep.push(at);
+    if (depth > bounds.maxDepth) {
+      tooDeep.push(pathOf(at));
       return;
     }
     budget -= 1;
     const link = decodedLinkOf(held);
     if (link) {
-      links.push({ link, at });
+      links.push({ link, at: pathOf(at) });
       return;
     }
     if (Array.isArray(held)) {
-      held.forEach((item, index) => walk(item, [...at, String(index)]));
+      held.forEach((item, index) =>
+        walk(item, { parent: at, segment: String(index) }, depth + 1)
+      );
       return;
     }
     if (isObjectNotArray(held)) {
+      // Enumerable properties are the whole of a plain record and only a part
+      // of anything else, so reading them is exact for the one and partial for
+      // the other. Both are read; only the partial read is recorded.
+      if (!isNameWalkable(held)) opaque.push(pathOf(at));
       for (const [key, child] of Object.entries(held)) {
-        walk(child, [...at, key]);
+        walk(child, { parent: at, segment: key }, depth + 1);
       }
     }
   };
-  walk(v, []);
-  return { links, tooDeep, budgetExhausted };
-}
-
-/** Collect every link reachable in a value (does not descend into links). */
-export function collectLinks(v: Json, maxDepth = 12): DecodedLink[] {
-  const out: DecodedLink[] = [];
-  const walk = (x: Json, depth: number) => {
-    if (depth < 0) return;
-    const link = decodedLinkOf(x);
-    if (link) {
-      out.push(link);
-      return;
-    }
-    if (isStream(x) || parseEntityRef(x) !== null) return;
-    if (Array.isArray(x)) {
-      for (const e of x) walk(e, depth - 1);
-    } else if (isNameWalkable(x)) {
-      for (const e of Object.values(x)) walk(e, depth - 1);
-    }
-  };
-  walk(v, maxDepth);
-  return out;
-}
-
-/** Count links reachable in a value (a cheap fan-out proxy). */
-export function countLinks(v: Json, maxDepth = 8): number {
-  if (maxDepth < 0) return 0;
-  if (decodedLinkOf(v)) return 1;
-  if (isStream(v) || parseEntityRef(v) !== null) return 0;
-  if (Array.isArray(v)) {
-    return v.reduce<number>((n, x) => n + countLinks(x, maxDepth - 1), 0);
-  }
-  if (isNameWalkable(v)) {
-    return Object.values(v).reduce<number>(
-      (n, x) => n + countLinks(x, maxDepth - 1),
-      0,
-    );
-  }
-  return 0;
+  walk(v, null, 0);
+  return { links, tooDeep, opaque, budgetExhausted };
 }

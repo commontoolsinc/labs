@@ -73,9 +73,14 @@ const compileHomePattern = async (
 };
 
 describe("CFC additive-required default preserves old documents", () => {
-  // Tight pin on the guard itself: a generated output does not need a default,
-  // while an unclassified document field still does. This isolates the
-  // role-aware schema-merge rule from the full home compile.
+  //
+  // Tight pin on the guard itself
+  //
+  // A generated output does not need a default, while an unclassified document
+  // field still does. This isolates the role-aware schema-merge rule from the
+  // full home compile.
+  //
+
   it("exempts an additive-required generated output from the default requirement", () => {
     const stored: JSONSchema = {
       type: "object",
@@ -121,11 +126,16 @@ describe("CFC additive-required default preserves old documents", () => {
     );
   });
 
-  // Faithful end-to-end: run the real home pattern's setup over a realistic
-  // old home root, with enforcement ON. Before the fix, the setup commit is
-  // rejected (defaultProfile, then the handler streams). After the fix it
-  // commits and the home heals.
+  //
+  // The same rule end to end
+  //
+
   it("materializes the real home pattern over a pre-favorites root under enforcement", async () => {
+    // Faithful end-to-end: run the real home pattern's setup over a realistic
+    // old home root, with enforcement ON. Before the fix, the setup commit is
+    // rejected (defaultProfile, then the handler streams). After the fix it
+    // commits and the home heals.
+
     const storageManager = StorageManager.emulate({ as: alice });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -198,13 +208,14 @@ describe("CFC additive-required default preserves old documents", () => {
     }
   });
 
-  // The producer→consumer token contract, end to end at the runner layer:
-  // mergeRequired throws CfcSchemaMigrationError → the prepare catch records it
-  // as a TAGGED reason → the COMMIT rejection message carries the framed
-  // `: <token>: ` the piece backstop keys on. The piece tests synthesize this
-  // string; this test proves the runner actually produces it, so the two ends
-  // stay in lockstep if either side's wording drifts.
   it("frames a real additive-required-no-default commit rejection with the migration token", async () => {
+    // The producer→consumer token contract, end to end at the runner layer:
+    // mergeRequired throws CfcSchemaMigrationError → the prepare catch records
+    // it as a TAGGED reason → the COMMIT rejection message carries the framed
+    // `: <token>: ` the piece backstop keys on. The piece tests synthesize this
+    // string; this test proves the runner actually produces it, so the two ends
+    // stay in lockstep if either side's wording drifts.
+
     const storageManager = StorageManager.emulate({ as: alice });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),

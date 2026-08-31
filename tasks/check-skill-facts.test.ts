@@ -331,8 +331,10 @@ Deno.test("collectDrift reports a package that declares no exports", () => {
 });
 
 //
-// The tests below drive the command entry point over temp git fixtures, so they
-// cover the clean and drift paths without depending on the real tree.
+// The entry point over temp git fixtures
+//
+// These drive the command over fixtures, so they cover the clean and drift
+// paths without depending on the real tree.
 //
 
 Deno.test("main reports success and returns 0 on a clean repo", async () => {
@@ -386,6 +388,13 @@ Deno.test("main reports an unresolvable specifier", async () => {
     await Deno.remove(root, { recursive: true });
   }
 });
+
+//
+// Reading the tree and the workspace exports
+//
+// The two readers on their own, over fixtures: what each drops, marks, and
+// surfaces when the input is not what it expects.
+//
 
 Deno.test("readTree drops a file the working tree has lost", async () => {
   const root = await fixtureRepo(
@@ -472,6 +481,13 @@ Deno.test("readWorkspaceExports surfaces an unreadable member config", async () 
   }
 });
 
+//
+// The real repository
+//
+// The two runs that read this tree rather than a fixture, which is what makes
+// the gate answer for the repository as it stands.
+//
+
 /**
  * Runs the script as `deno task check-skill-facts` does. This is what exercises
  * the entry point, and the only thing that proves the permissions the shebang
@@ -523,7 +539,9 @@ Deno.test("every cited path and specifier resolves", async () => {
 });
 
 //
-// The three kinds of document this covers are named by different conventions,
+// The three kinds of document the scan reaches
+//
+// They are named by different conventions,
 // so each is pinned: a rename that drops one from the scan would otherwise be
 // invisible.
 //
@@ -588,6 +606,10 @@ Deno.test("a package AGENTS.md resolves paths inside its own package", async () 
     await Deno.remove(root, { recursive: true });
   }
 });
+
+//
+// The conservative half of the heuristic
+//
 
 Deno.test("a relative citation with no matching directory is left alone", async () => {
   // The conservative half of the heuristic, which the widened scan leans on

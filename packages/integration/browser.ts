@@ -5,22 +5,22 @@ import {
   UserAgentOptions,
   WaitForOptions,
 } from "@astral/astral";
-import { closeAstralBrowser } from "./astral-adapter.ts";
+import { astralBinaryPath, closeAstralBrowser } from "./astral-adapter.ts";
 import { Page } from "./page.ts";
 
 const DEFAULT_ASTRAL_TIMEOUT = 60_000;
 
 // Wrapper around `@astral/astral`'s `Browser`.
 export class Browser {
-  private browser: AstralBrowser | null;
-  private timeout: number;
+  #browser: AstralBrowser | null;
+  #timeout: number;
 
   private constructor(
     browser: AstralBrowser,
     options: { timeout: number },
   ) {
-    this.browser = browser;
-    this.timeout = options.timeout;
+    this.#browser = browser;
+    this.#timeout = options.timeout;
   }
 
   static async launch(
@@ -33,6 +33,9 @@ export class Browser {
     const browser = await launch({
       args,
       headless,
+      // `undefined` leaves the choice to astral, which is the answer when no
+      // system browser is installed.
+      path: astralBinaryPath(),
     });
     return new Browser(browser, { timeout });
   }
@@ -43,28 +46,28 @@ export class Browser {
     url?: string,
     options?: WaitForOptions & SandboxOptions & UserAgentOptions,
   ): Promise<Page> {
-    this.checkIsOk();
-    const page = await this.browser!.newPage(url, options);
-    return new Page(page, { timeout: this.timeout });
+    this.#checkIsOk();
+    const page = await this.#browser!.newPage(url, options);
+    return new Page(page, { timeout: this.#timeout });
   }
 
   // The browser-level CDP websocket endpoint. Chrome supports multiple
   // concurrent CDP clients, so a second connection (e.g. for CPU profiling
   // via `cdp-profiler.ts`) can attach alongside Astral's.
   wsEndpoint(): string {
-    this.checkIsOk();
-    return this.browser!.wsEndpoint();
+    this.#checkIsOk();
+    return this.#browser!.wsEndpoint();
   }
 
   async close(): Promise<void> {
-    this.checkIsOk();
-    const browser = this.browser;
-    this.browser = null;
+    this.#checkIsOk();
+    const browser = this.#browser;
+    this.#browser = null;
     await closeAstralBrowser(browser!);
   }
 
-  private checkIsOk() {
-    if (!this.browser) {
+  #checkIsOk() {
+    if (!this.#browser) {
       throw new Error("Browser is already closed.");
     }
   }

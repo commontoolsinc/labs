@@ -38,9 +38,10 @@ import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
 import { hashOf } from "@/value-hash.ts";
 
 describe("FabricLink", () => {
-  // Pure type-identity / supertype check: cross-cutting carve-out per the
-  // rule (doesn't fit a single member, isn't construction mechanics).
   it("extends `FabricInstance` (not `FabricPrimitive`)", () => {
+    // Pure type-identity / supertype check: cross-cutting carve-out per the
+    // rule (doesn't fit a single member, isn't construction mechanics).
+
     const link = new FabricLink({ id: "fid1:abc" });
     expect(link instanceof FabricInstance).toBe(true);
     expect(link instanceof FabricPrimitive).toBe(false);
@@ -257,9 +258,10 @@ describe("FabricLink", () => {
     });
   });
 
-  // Free functions exercising `FabricLink` rather than members of the class
-  // itself, so they live directly under the class `describe()`.
   describe("round-trip via `jsonFromFabricValue()` / `fabricFromJsonValue()`", () => {
+    // Free functions exercising `FabricLink` rather than members of the class
+    // itself, so they live directly under the class `describe()`.
+
     it("round-trips a `FabricLink`, including a nested schema", () => {
       const original = new FabricLink({
         id: "fid1:abc",
@@ -294,9 +296,10 @@ describe("FabricLink", () => {
     });
   });
 
-  // A `FabricLink` nested in a container must clone through the generic
-  // `FabricInstance` clone path (no dedicated dispatch case anymore).
   describe("generic clone dispatch (nested in a container)", () => {
+    // A `FabricLink` nested in a container must clone through the generic
+    // `FabricInstance` clone path (no dedicated dispatch case anymore).
+
     it("deep-clones a container holding one without throwing", () => {
       const link = new FabricLink({ id: "fid1:abc" });
       const cloned = cloneIfNecessary({ link }, { frozen: true });

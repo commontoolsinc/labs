@@ -112,7 +112,161 @@ const aliceShareFact = (audience: CfcAtom = userBob) => ({
 });
 
 describe("CFC grant records (§8.12.7 route 2a)", () => {
+  // The shared harness every region below draws on: a labeled cell, a
+  // policyState-guarded sink rule, a Runtime, and the grant writer and reader.
+
+  const SECRET_SCHEMA = internSchema(
+    {
+      type: "object",
+      properties: {
+        secret: { type: "string", ifc: { confidentiality: ["never-fits"] } },
+      },
+      required: ["secret"],
+    } satisfies JSONSchema,
+    true,
+  );
+
+  const seedLabeledCell = async (
+    runtime: Runtime,
+    id: string,
+    label: IFCLabel,
+  ): Promise<void> => {
+    const seed = runtime.edit();
+    const target = runtime.getCell(signer.did(), id, undefined, seed);
+    const targetId = target.getAsNormalizedFullLink().id;
+    seed.writeOrThrow({
+      space: signer.did(),
+      scope: "space",
+      id: targetId,
+      path: [],
+    }, {
+      value: { secret: "rosebud" },
+      cfc: {
+        version: 1,
+        schemaHash: SECRET_SCHEMA.taggedHashString,
+        labelMap: { version: 1, entries: [{ path: ["secret"], label }] },
+      },
+    });
+    seed.writeOrThrow({
+      space: signer.did(),
+      scope: "space",
+      id: `cid:${SECRET_SCHEMA.taggedHashString}`,
+      path: [],
+    }, { value: SECRET_SCHEMA.schema });
+    expect((await seed.commit()).ok).toBeDefined();
+  };
+
+  // The §13.4.4 rule at the network egress boundary: the acting owner's
+  // User(...) clause gains the grant's audience as an alternative.
+  const sinkShareRule: ExchangeRule = shareRule({
+    preCondition: {
+      policyState: [{
+        kind: "ShareGrant",
+        owner: { var: "$owner" },
+        resource: PHOTO_REF,
+        audience: { type: CFC_ATOM_TYPE.User, subject: { var: "$recipient" } },
+      }],
+      boundary: [{
+        type: CFC_ATOM_TYPE.BoundaryContext,
+        key: "sinkClass",
+        value: "network",
+      }],
+    },
+  });
+
+  const withRuntime = async (
+    opts: {
+      policyEvaluation?: "off" | "observe" | "enforce";
+      enforcement?: "enforce-explicit" | "observe" | "disabled";
+      flowLabels?: "off" | "observe" | "persist";
+      storageManager?: ReturnType<typeof StorageManager.emulate>;
+    },
+    body: (
+      runtime: Runtime,
+      storageManager: ReturnType<typeof StorageManager.emulate>,
+    ) => void | Promise<void>,
+  ): Promise<void> => {
+    const storageManager = opts.storageManager ??
+      StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: opts.enforcement ?? "enforce-explicit",
+      cfcFlowLabels: opts.flowLabels ?? "off",
+      cfcSinkMaxConfidentiality: { fetchJson: [userBob] },
+      cfcPolicyRecords: [{ id: "share-policy", rules: [sinkShareRule] }],
+      cfcPolicyEvaluation: opts.policyEvaluation ?? "enforce",
+    });
+    try {
+      await body(runtime, storageManager);
+    } finally {
+      await runtime.dispose();
+      if (opts.storageManager === undefined) {
+        await storageManager.close();
+      }
+    }
+  };
+
+  const writeGrant = async (
+    runtime: Runtime,
+    overrides: Record<string, unknown> = {},
+  ): Promise<{ space: string; id: string }> => {
+    const tx = runtime.edit();
+    // The trusted policy-writer authors under a builtin identity — the same
+    // way the llm/compile-cache builtins author their runtime-evidence
+    // writes (codex P1 on #4627).
+    tx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "cfc-grant-writer",
+    });
+    const written = tx.writeCfcGrant({
+      kind: "ShareGrant",
+      owner: signer.did(),
+      resource: PHOTO_REF,
+      audience: [userBob],
+      grantedAt: 1000,
+      ...overrides,
+    });
+    const result = await tx.commit();
+    expect(result.ok).toBeDefined();
+    return written;
+  };
+
+  const readThenSink = (
+    runtime: Runtime,
+    id: string,
+    { abort = true }: { abort?: boolean } = {},
+  ) => {
+    const tx = runtime.edit();
+    const cell = runtime.getCell(signer.did(), id, SECRET_SCHEMA.schema, tx);
+    expect(cell.key("secret").get()).toBe("rosebud");
+    enqueueSinkRequestPostCommitEffect(
+      tx,
+      "fetchJson",
+      "fetchJson:grant-records-test",
+      createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
+      "fetchJson-start",
+      () => {},
+    );
+    tx.prepareCfc();
+    const state = tx.getCfcState();
+    const reasons = state.prepare.status === "invalidated"
+      ? [...state.prepare.reasons]
+      : [];
+    const result = {
+      tx,
+      reasons,
+      diagnostics: [...state.diagnostics],
+      prepare: state.prepare,
+    };
+    if (abort) tx.abort();
+    return result;
+  };
+
+  //
   // Build-order item 1: the `policyState` guard kind.
+  //
+
   describe("policyState guard validation (boot, fail closed)", () => {
     const withGuard = (policyState: unknown): CfcPolicyRecordInput[] => [{
       id: "p",
@@ -332,7 +486,10 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
+  //
   // Build-order item 2: grant records + reserved-path storage discipline.
+  //
+
   describe("grant document addressing", () => {
     const identity = {
       space: ALICE,
@@ -399,154 +556,6 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       expect(facts[1]).toMatchObject({ audience: userCarol, owner: ALICE });
     });
   });
-
-  const SECRET_SCHEMA = internSchema(
-    {
-      type: "object",
-      properties: {
-        secret: { type: "string", ifc: { confidentiality: ["never-fits"] } },
-      },
-      required: ["secret"],
-    } satisfies JSONSchema,
-    true,
-  );
-
-  const seedLabeledCell = async (
-    runtime: Runtime,
-    id: string,
-    label: IFCLabel,
-  ): Promise<void> => {
-    const seed = runtime.edit();
-    const target = runtime.getCell(signer.did(), id, undefined, seed);
-    const targetId = target.getAsNormalizedFullLink().id;
-    seed.writeOrThrow({
-      space: signer.did(),
-      scope: "space",
-      id: targetId,
-      path: [],
-    }, {
-      value: { secret: "rosebud" },
-      cfc: {
-        version: 1,
-        schemaHash: SECRET_SCHEMA.taggedHashString,
-        labelMap: { version: 1, entries: [{ path: ["secret"], label }] },
-      },
-    });
-    seed.writeOrThrow({
-      space: signer.did(),
-      scope: "space",
-      id: `cid:${SECRET_SCHEMA.taggedHashString}`,
-      path: [],
-    }, { value: SECRET_SCHEMA.schema });
-    expect((await seed.commit()).ok).toBeDefined();
-  };
-
-  // The §13.4.4 rule at the network egress boundary: the acting owner's
-  // User(...) clause gains the grant's audience as an alternative.
-  const sinkShareRule: ExchangeRule = shareRule({
-    preCondition: {
-      policyState: [{
-        kind: "ShareGrant",
-        owner: { var: "$owner" },
-        resource: PHOTO_REF,
-        audience: { type: CFC_ATOM_TYPE.User, subject: { var: "$recipient" } },
-      }],
-      boundary: [{
-        type: CFC_ATOM_TYPE.BoundaryContext,
-        key: "sinkClass",
-        value: "network",
-      }],
-    },
-  });
-
-  const withRuntime = async (
-    opts: {
-      policyEvaluation?: "off" | "observe" | "enforce";
-      enforcement?: "enforce-explicit" | "observe" | "disabled";
-      flowLabels?: "off" | "observe" | "persist";
-      storageManager?: ReturnType<typeof StorageManager.emulate>;
-    },
-    body: (
-      runtime: Runtime,
-      storageManager: ReturnType<typeof StorageManager.emulate>,
-    ) => void | Promise<void>,
-  ): Promise<void> => {
-    const storageManager = opts.storageManager ??
-      StorageManager.emulate({ as: signer });
-    const runtime = new Runtime({
-      apiUrl: new URL("https://example.com"),
-      storageManager,
-      cfcEnforcementMode: opts.enforcement ?? "enforce-explicit",
-      cfcFlowLabels: opts.flowLabels ?? "off",
-      cfcSinkMaxConfidentiality: { fetchJson: [userBob] },
-      cfcPolicyRecords: [{ id: "share-policy", rules: [sinkShareRule] }],
-      cfcPolicyEvaluation: opts.policyEvaluation ?? "enforce",
-    });
-    try {
-      await body(runtime, storageManager);
-    } finally {
-      await runtime.dispose();
-      if (opts.storageManager === undefined) {
-        await storageManager.close();
-      }
-    }
-  };
-
-  const writeGrant = async (
-    runtime: Runtime,
-    overrides: Record<string, unknown> = {},
-  ): Promise<{ space: string; id: string }> => {
-    const tx = runtime.edit();
-    // The trusted policy-writer authors under a builtin identity — the same
-    // way the llm/compile-cache builtins author their runtime-evidence
-    // writes (codex P1 on #4627).
-    tx.setCfcImplementationIdentity({
-      kind: "builtin",
-      builtinId: "cfc-grant-writer",
-    });
-    const written = tx.writeCfcGrant({
-      kind: "ShareGrant",
-      owner: signer.did(),
-      resource: PHOTO_REF,
-      audience: [userBob],
-      grantedAt: 1000,
-      ...overrides,
-    });
-    const result = await tx.commit();
-    expect(result.ok).toBeDefined();
-    return written;
-  };
-
-  const readThenSink = (
-    runtime: Runtime,
-    id: string,
-    { abort = true }: { abort?: boolean } = {},
-  ) => {
-    const tx = runtime.edit();
-    const cell = runtime.getCell(signer.did(), id, SECRET_SCHEMA.schema, tx);
-    expect(cell.key("secret").get()).toBe("rosebud");
-    enqueueSinkRequestPostCommitEffect(
-      tx,
-      "fetchJson",
-      "fetchJson:grant-records-test",
-      createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
-      "fetchJson-start",
-      () => {},
-    );
-    tx.prepareCfc();
-    const state = tx.getCfcState();
-    const reasons = state.prepare.status === "invalidated"
-      ? [...state.prepare.reasons]
-      : [];
-    const result = {
-      tx,
-      reasons,
-      diagnostics: [...state.diagnostics],
-      prepare: state.prepare,
-    };
-    if (abort) tx.abort();
-    return result;
-  };
 
   describe("sanctioned grant writer (trusted policy-writer path)", () => {
     it("writes a grant document at the derived id, committable in enforce mode", async () => {
@@ -669,6 +678,13 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
   });
 
   describe("reserved-namespace write gate (S18-class)", () => {
+    // The mergeable-op path (push/increment/…) cannot bypass the gate: the
+    // storage layer refuses a mergeable op on a document this transaction has
+    // not already written ("target is not writable"), and that prior write
+    // goes through the gated write chokepoint below. recordMergeableOp still
+    // calls noteSystemWrite as defense-in-depth should that structural
+    // precondition ever loosen.
+
     it("rejects an unprivileged write to a grant document in enforce mode", async () => {
       await withRuntime({}, async (runtime) => {
         const tx = runtime.edit();
@@ -693,13 +709,14 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       });
     });
 
-    // Under a non-rejecting mode the forged write reaches storage, so the
-    // flow stage must still measure it. The reserved namespaces are held out
-    // of value-write targeting because the runtime persists policy state
-    // through them; a document some transaction forged is not that, and the
-    // label it carries is what ties a later read of the stash back to what
-    // the forging transaction observed.
     it("labels an unprivileged write to a grant document under observe", async () => {
+      // Under a non-rejecting mode the forged write reaches storage, so the
+      // flow stage must still measure it. The reserved namespaces are held out
+      // of value-write targeting because the runtime persists policy state
+      // through them; a document some transaction forged is not that, and the
+      // label it carries is what ties a later read of the stash back to what
+      // the forging transaction observed.
+
       await withRuntime(
         { enforcement: "observe", flowLabels: "persist" },
         async (runtime, storageManager) => {
@@ -743,13 +760,6 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       );
     });
 
-    // The mergeable-op path (push/increment/…) cannot bypass the gate: the
-    // storage layer refuses a mergeable op on a document this transaction has
-    // not already written ("target is not writable"), and that prior write
-    // goes through the gated write chokepoint above. recordMergeableOp still
-    // calls noteSystemWrite as defense-in-depth should that structural
-    // precondition ever loosen.
-
     it("records a diagnostic and allows the write in observe mode", async () => {
       await withRuntime({ enforcement: "observe" }, async (runtime) => {
         const tx = runtime.edit();
@@ -771,7 +781,10 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
+  //
   // Resolution wired into the egress gate (build-order items 1+3).
+  //
+
   describe("grant resolution at the sink egress gate", () => {
     it("a live grant releases the owner clause to the audience (enforce)", async () => {
       await withRuntime({}, async (runtime) => {
@@ -955,7 +968,10 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
-  // Build-order item 3: read non-taint + digest binding.
+  //
+  // Build-order item 3: read non-taint
+  //
+
   describe("read non-taint (internalVerifierRead discipline)", () => {
     it("grant lookups never enter the consumed read set", async () => {
       await withRuntime({}, async (runtime) => {
@@ -981,9 +997,14 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
-  // Arm-level coverage: every reachable validation / fail-closed branch is
-  // pinned directly (the repo standard — defensive arms reachable from the
-  // runner side get tests, not just the happy path).
+  //
+  // Arm-level coverage
+  //
+  // Every reachable validation / fail-closed branch is pinned directly (the
+  // repo standard — defensive arms reachable from the runner side get tests,
+  // not just the happy path).
+  //
+
   describe("writer validation arms (prepareCfcGrantWrite)", () => {
     const base: CfcGrantWriteInput = {
       kind: "ShareGrant",
@@ -1474,6 +1495,10 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       });
     });
   });
+
+  //
+  // Build-order item 3: digest binding
+  //
 
   describe("digest binding of consulted grants", () => {
     const base: PreparedDigestInput = {

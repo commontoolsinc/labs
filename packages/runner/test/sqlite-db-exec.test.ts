@@ -13,6 +13,7 @@ import { table } from "@commonfabric/memory/sqlite/schema";
 import type { SqliteDbRef } from "@commonfabric/memory/v2";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
+import { encodeSqliteParams } from "../src/index.ts";
 import { decodeCfLinkValue } from "../src/builtins/sqlite/cf-link.ts";
 import { areNormalizedLinksSame } from "../src/link-utils.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -59,6 +60,31 @@ describe("SqliteDb .exec (commit-folded write)", () => {
       "sqlite",
     ) as unknown as SqliteDbCell;
   }
+
+  it("exports the parameter encoder used by remote SQLite callers", () => {
+    expect(encodeSqliteParams("SELECT :value", { value: null })).toEqual({
+      value: null,
+    });
+  });
+
+  it("preserves reserved names in named SQLite parameters", () => {
+    const params = Object.fromEntries([
+      ["constructor", 1],
+      ["__proto__", 2],
+    ]);
+
+    const encoded = encodeSqliteParams(
+      "SELECT :constructor, :__proto__",
+      params,
+    ) as Record<string, unknown>;
+
+    expect(Object.hasOwn(encoded, "constructor")).toBe(true);
+    expect(Object.hasOwn(encoded, "__proto__")).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(encoded, "constructor")?.value)
+      .toBe(1);
+    expect(Object.getOwnPropertyDescriptor(encoded, "__proto__")?.value)
+      .toBe(2);
+  });
 
   it("folds a write atomically with a sibling cell write", async () => {
     const dbRef: SqliteDbRef = {
@@ -182,6 +208,76 @@ describe("SqliteDb .exec (commit-folded write)", () => {
       ),
     ).toBe(true);
     await tx2.commit();
+  });
+
+  it("encodes nested cells before a JSON bind reaches storage", async () => {
+    const dbRef: SqliteDbRef = {
+      id: `of:exec-nested-link-${crypto.randomUUID()}`,
+      tables: {
+        documents: table({ id: "integer primary key", payload: "text" }),
+      },
+    };
+    const tx = runtime.edit();
+    const author = runtime.getCell<{ name: string }>(
+      space,
+      "nested-author",
+      undefined,
+      tx,
+    );
+    author.set({ name: "Ada" });
+    const db = sqliteDb(dbRef, tx, "db-h");
+    db.exec("INSERT INTO documents (payload) VALUES (:payload)", {
+      payload: { links: [author] },
+    });
+
+    const res = await tx.commit();
+    expect(res.error).toBeUndefined();
+
+    const provider = storageManager.open(space);
+    const rows = await provider.sqliteQuery!(
+      dbRef,
+      "SELECT payload FROM documents",
+    );
+    const payload = JSON.parse((rows.rows[0] as { payload: string }).payload);
+    expect(payload).toEqual({ links: [author.toJSON()] });
+  });
+
+  it("encodes nested cells in positional statements without a column list", async () => {
+    const dbRef: SqliteDbRef = {
+      id: `of:exec-nested-positional-${crypto.randomUUID()}`,
+      tables: {
+        documents: table({ id: "integer primary key", payload: "text" }),
+      },
+    };
+    const tx = runtime.edit();
+    const author = runtime.getCell<{ name: string }>(
+      space,
+      "nested-positional-author",
+      undefined,
+      tx,
+    );
+    author.set({ name: "Ada" });
+    const db = sqliteDb(dbRef, tx, "db-h");
+    db.exec("INSERT INTO documents VALUES (?, ?)", [
+      1,
+      { links: [author] },
+    ]);
+
+    const res = await tx.commit();
+    expect(res.error).toBeUndefined();
+
+    const provider = storageManager.open(space);
+    const rows = await provider.sqliteQuery!(
+      dbRef,
+      "SELECT payload FROM documents",
+    );
+    const payload = JSON.parse((rows.rows[0] as { payload: string }).payload);
+    expect(payload).toEqual({ links: [author.toJSON()] });
+  });
+
+  it("rejects nested undefined in positional statements without a column list", () => {
+    expect(() => encodeSqliteParams("SELECT ?", [{ value: undefined }]))
+      .toThrow("sqlite: param is undefined");
   });
 
   it("encodes link cells across a multi-row INSERT (cols cycle per tuple)", async () => {

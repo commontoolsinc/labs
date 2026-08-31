@@ -21,9 +21,8 @@ import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 //         │◄──────ERROR───────────┤◄───────(unread)────────┤
 //
 // The host and the guest hold the two ends of a `MessagePort` and every
-// message of the key/value protocol -- `HostMessage` and `GuestMessage` --
-// crosses on it. The outer frame carries the CSP and loads documents; it
-// relays nothing that protocol says.
+// capability request, response, and event crosses on it. The outer frame
+// carries the CSP and loads documents; it relays nothing that protocol says.
 //
 // The one thing it does pass along is whatever the guest posts to it, which it
 // forwards without reading. A guest has a port for everything it means to say,
@@ -106,82 +105,196 @@ export function isGuestError(e: object): e is GuestError {
     "stacktrace" in e && typeof e.stacktrace === "string";
 }
 
-export enum HostMessageType {
-  Update = "update",
-}
+export const BRIDGE_PROTOCOL = "common-fabric-bridge";
 
 /**
- * A message the host sends its guest over the port. `data` is a key and the
- * value read for it; `GuestMessage`'s `Write` arm is the same value going the
- * other way.
- *
- * This is a `FabricValue` whole, and crosses as one `codec-realm` encoding,
- * that being the format written for a realm boundary. What travels is
- * therefore a `RealmEncodedValue`, and this is what decoding one yields.
+ * Exact encoding revision. An additive operation stays within this revision
+ * only when a current guest negotiates it through describe() before sending
+ * it, so an older host can reject the unsupported capability without hanging.
  */
-export type HostMessage = {
-  type: HostMessageType.Update;
-  data: [string, FabricValue];
+export const BRIDGE_VERSION = 2;
+
+export type BridgeError = {
+  code: string;
+  message: string;
+  resource?: string;
 };
 
-/**
- * Is `message` a {@link HostMessage}? Takes what a decode produced, a guest
- * having no reason to trust that what decoded is what this protocol writes.
- */
-export function isHostMessage(message: unknown): message is HostMessage {
-  return typeof message === "object" && message !== null &&
-    (message as { type?: unknown }).type === HostMessageType.Update &&
-    Array.isArray((message as { data?: unknown }).data) &&
-    (message as { data: unknown[] }).data.length === 2 &&
-    typeof (message as { data: unknown[] }).data[0] === "string";
-}
+export type BridgeResourceDescriptor = {
+  name: string;
+  kind: "cell" | "stream" | "sqlite" | "service";
+  operations: string[];
+  methods: string[];
+  schema?: FabricValue;
+  description?: string;
+};
 
-export enum GuestMessageType {
-  Error = "error",
-  Subscribe = "subscribe",
-  Unsubscribe = "unsubscribe",
-  Write = "write",
-  Read = "read",
-}
+export type BridgeManifest = {
+  protocol: typeof BRIDGE_PROTOCOL;
+  version: typeof BRIDGE_VERSION;
+  resources: BridgeResourceDescriptor[];
+};
 
-export type GuestMessage =
-  | { type: GuestMessageType.Error; data: GuestError }
-  | { type: GuestMessageType.Subscribe; data: string | string[] }
-  | { type: GuestMessageType.Unsubscribe; data: string | string[] }
-  | { type: GuestMessageType.Read; data: string }
-  | { type: GuestMessageType.Write; data: [string, FabricValue] };
+export type BridgeOperation =
+  | "describe"
+  | "disconnect"
+  | "pull"
+  | "initialize"
+  | "set"
+  | "push"
+  | "resolve"
+  | "call"
+  | "sink"
+  | "unsink";
 
-export function isGuestMessage(message: unknown): message is GuestMessage {
+/** A path beneath a granted or previously resolved cell capability. */
+export type BridgeCellPath = Array<string | number>;
+
+/** Stable identity metadata returned with an opaque resolved capability. */
+export type BridgeCellIdentity = {
+  /** Stored document ID, shared by every instance of a scoped Cell. */
+  id: string;
+
+  /** Opaque identity for this space-, user-, or session-scoped instance. */
+  instanceId?: string;
+
+  /** Space holding the Cell. */
+  space?: string;
+
+  /** Scope which selects the Cell instance. */
+  scope?: "space" | "user" | "session";
+
+  /** Path within the stored document. */
+  path: BridgeCellPath;
+};
+
+/** Guest-visible descriptor for a host-minted stable cell capability. */
+export type BridgeResolvedCell = {
+  handle: string;
+  hasValue: true;
+  /** Operations the host authorizes on this resolved capability. */
+  operations?: string[];
+  identity?: BridgeCellIdentity;
+  value?: FabricValue;
+};
+
+export type BridgeRequest = {
+  protocol: typeof BRIDGE_PROTOCOL;
+  version: typeof BRIDGE_VERSION;
+  type: "request";
+  id: number;
+  operation: BridgeOperation;
+  resource?: string;
+  handle?: string;
+  path?: BridgeCellPath;
+  method?: string;
+  subscription?: string;
+  value?: FabricValue;
+  values?: FabricValue[];
+};
+
+export type BridgeResponse = {
+  protocol: typeof BRIDGE_PROTOCOL;
+  version: typeof BRIDGE_VERSION;
+  type: "response";
+  id: number;
+  ok: true;
+  value?: FabricValue;
+} | {
+  protocol: typeof BRIDGE_PROTOCOL;
+  version: typeof BRIDGE_VERSION;
+  type: "response";
+  id: number;
+  ok: false;
+  error: BridgeError;
+};
+
+export type BridgeEvent = {
+  protocol: typeof BRIDGE_PROTOCOL;
+  version: typeof BRIDGE_VERSION;
+  type: "event";
+  subscription: string;
+  value?: FabricValue;
+};
+
+export type BridgeHostMessage = BridgeResponse | BridgeEvent;
+
+const hasBridgeHeader = (
+  message: unknown,
+): message is Record<string, unknown> =>
+  typeof message === "object" && message !== null &&
+  (message as Record<string, unknown>).protocol === BRIDGE_PROTOCOL &&
+  (message as Record<string, unknown>).version === BRIDGE_VERSION;
+
+export function isBridgeRequest(message: unknown): message is BridgeRequest {
+  if (!hasBridgeHeader(message)) return false;
   if (
-    typeof message !== "object" ||
-    message === null ||
-    !("type" in message) ||
-    typeof message.type !== "string" ||
-    !("data" in message) ||
-    message.data == null
-  ) {
-    return false;
+    message.type !== "request" || !Number.isSafeInteger(message.id) ||
+    typeof message.operation !== "string"
+  ) return false;
+  switch (message.operation) {
+    case "describe":
+    case "disconnect":
+      return true;
+    case "pull":
+    case "set":
+    case "resolve":
+      return hasCellTarget(message) && hasCellPath(message);
+    case "initialize":
+      return hasCellTarget(message) && hasCellPath(message) &&
+        Object.hasOwn(message, "value") && message.value !== undefined;
+    case "push":
+      return hasCellTarget(message) && hasCellPath(message) &&
+        Array.isArray(message.values);
+    case "call":
+      return typeof message.resource === "string" &&
+        typeof message.method === "string";
+    case "sink":
+    case "unsink":
+      return hasCellTarget(message) &&
+        hasCellPath(message) && typeof message.subscription === "string";
+    default:
+      return false;
   }
+}
 
-  switch (message.type) {
-    case GuestMessageType.Error: {
-      return isGuestError(message.data);
-    }
-    case GuestMessageType.Read: {
-      return typeof message.data === "string";
-    }
-    case GuestMessageType.Subscribe:
-    case GuestMessageType.Unsubscribe: {
-      return typeof message.data === "string" ||
-        (Array.isArray(message.data) &&
-          message.data.every((key: unknown) => typeof key === "string"));
-    }
-    case GuestMessageType.Write: {
-      return Array.isArray(message.data) &&
-        message.data.length === 2 &&
-        typeof message.data[0] === "string";
-    }
+function hasCellTarget(message: Record<string, unknown>): boolean {
+  return (typeof message.resource === "string") !==
+    (typeof message.handle === "string");
+}
+
+function hasCellPath(message: Record<string, unknown>): boolean {
+  return message.path === undefined ||
+    Array.isArray(message.path) &&
+      message.path.every((part) =>
+        typeof part === "string" ||
+        typeof part === "number" && Number.isSafeInteger(part)
+      );
+}
+
+export function isBridgeHostMessage(
+  message: unknown,
+): message is BridgeHostMessage {
+  if (!hasBridgeHeader(message)) return false;
+  if (message.type === "event") {
+    return typeof message.subscription === "string";
   }
+  if (
+    message.type !== "response" || !Number.isSafeInteger(message.id) ||
+    typeof message.ok !== "boolean"
+  ) return false;
+  if (message.ok) return true;
+  return typeof message.error === "object" && message.error !== null &&
+    typeof (message.error as BridgeError).code === "string" &&
+    typeof (message.error as BridgeError).message === "string" &&
+    (!("resource" in message.error) ||
+      typeof (message.error as BridgeError).resource === "string");
+}
 
-  return false;
+export type GuestAlarm = { type: "error"; data: GuestError };
+
+export function isGuestAlarm(message: unknown): message is GuestAlarm {
+  return typeof message === "object" && message !== null &&
+    (message as { type?: unknown }).type === "error" &&
+    "data" in message && isGuestError(message.data as object);
 }
