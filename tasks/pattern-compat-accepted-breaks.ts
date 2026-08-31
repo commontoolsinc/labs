@@ -112,6 +112,34 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     record: "docs/history/topics-demand-narrowing-break.md",
   },
   {
+    // A SECOND entry for this pattern, deliberately: the one-entry rule the
+    // neighbors state guards against two entries naming the SAME baseline —
+    // the gate's Map keeps one path set and drops the other — and no
+    // baseline here appears above. Keeping the pairs disjoint is what keeps
+    // the bound tight: forgiving this path on the older baselines too would
+    // let the proof's one-issue-per-role limit hide an unintended break
+    // behind pairs this break never produced a finding against.
+    pattern: "topics/main.tsx",
+    baselines: [
+      "20260826T221814Z-pt-HCeVbN-iyz9VX",
+      "20260831T174843Z-iQFp3QQPN2zAkRuJ",
+    ],
+    paths: [
+      // The published mention universe stopped carrying the topics' own
+      // surface: a row is two strings and an unread `piece` reference,
+      // because every field a row carries by value ships to every reader
+      // of the universe.
+      "result.mentionable[].body",
+    ],
+    reason:
+      "The board's mention universe became a derived index of two-string " +
+      "rows holding each topic as an unread reference, so the published " +
+      "`mentionable` stopped carrying a topic's own surface. Wired to the " +
+      "raw topics list it multiplied every topic's resume into every " +
+      "sibling topic under document-granular delivery.",
+    record: "docs/history/topics-mentionable-index-break.md",
+  },
+  {
     // ONE entry per pattern, and that is a requirement rather than tidiness:
     // the gate keys accepted pairs into a Map, so a second entry naming a
     // baseline this one also names REPLACES its path set rather than adding to

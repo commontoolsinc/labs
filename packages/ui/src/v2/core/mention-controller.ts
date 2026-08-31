@@ -8,6 +8,7 @@ import {
   type Mentionable,
   type MentionableArray,
   MentionableArraySchema,
+  MentionableSchema,
 } from "./mentionable.ts";
 
 /**
@@ -289,19 +290,38 @@ export class MentionController implements ReactiveController {
   }
 
   /**
+   * The entry's destination: a row's hydrated `piece` when it carries one,
+   * the entry itself otherwise. An entry with `piece` is a derived index
+   * row standing for the piece — encoding the entry would make every
+   * mention name a row of somebody's bookkeeping. Bound to the mentionable
+   * schema so field reads on the destination materialize.
+   */
+  private _destinationOf(
+    mention: CellHandle<Mentionable>,
+  ): CellHandle<Mentionable> {
+    const piece = mention.get()?.piece;
+    return isCellHandle(piece)
+      ? piece.asSchema<Mentionable>(MentionableSchema)
+      : mention;
+  }
+
+  /**
    * Encode a piece as markdown link [name](/of:entityId).
-   * Resolves the sub-cell to the real piece entity ID so downstream
-   * consumers (LLM tools, read operations) can access the full schema.
+   * Resolves the entry's destination to the real piece entity ID so
+   * downstream consumers (LLM tools, read operations) can access the full
+   * schema. The display name is the entry's own — for an index row, the
+   * label it lists.
    */
   private async encodePieceAsMarkdown(
     piece: CellHandle<Mentionable>,
   ): Promise<string> {
     const name = piece.get()?.[NAME] || "Unknown";
+    const destination = this._destinationOf(piece);
     try {
-      const resolved = await piece.resolveAsCell();
+      const resolved = await destination.resolveAsCell();
       return `[${name}](/${resolved.ref().id})`;
     } catch {
-      return `[${name}](${this._buildHref(piece.ref())})`;
+      return `[${name}](${this._buildHref(destination.ref())})`;
     }
   }
 
@@ -324,10 +344,12 @@ export class MentionController implements ReactiveController {
       }
     }
 
-    // Second pass: resolve each and match against stable entity ID
+    // Second pass: resolve each entry's destination and match against the
+    // stable entity ID — the id the encode above persists, which for an
+    // index row is the piece's and never the row's.
     for (const mention of all) {
       try {
-        const resolved = await mention.resolveAsCell();
+        const resolved = await this._destinationOf(mention).resolveAsCell();
         if (href === `/${resolved.ref().id}`) {
           return mention;
         }

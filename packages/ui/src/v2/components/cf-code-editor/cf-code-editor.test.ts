@@ -1,5 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { NAME } from "@commonfabric/runner/shared";
+import { type CellHandle, type CellRef } from "@commonfabric/runtime-client";
+import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
+import type { Mentionable, MentionableArray } from "../../core/mentionable.ts";
 import { CFCodeEditor, MimeType } from "./index.ts";
 
 describe("CFCodeEditor", () => {
@@ -344,5 +348,104 @@ describe("CFCodeEditor pasted-mention decision", () => {
     const result = paste(fakeThis, `/of:fid1:${HASH}`);
     expect(result.handled).toBe(false);
     expect(result.prevented).toBe(false);
+  });
+});
+
+describe("CFCodeEditor mention-piece resolution", () => {
+  // The private resolution surface under test. `piece`-bearing entries are
+  // index rows standing for their piece; entries without one ARE the piece.
+  type ResolutionInternals = {
+    mentionable: CellHandle<MentionableArray> | null;
+    _resolvePieceIds(): Promise<void>;
+    _resolvedPieceCells: Map<number, CellHandle<Mentionable>>;
+    _getPieceId(index: number): string;
+    findPieceById(id: string): CellHandle<Mentionable> | null;
+  };
+
+  const internals = (element: CFCodeEditor): ResolutionInternals =>
+    element as unknown as ResolutionInternals;
+
+  const pieceRef = { id: "of:target-piece" } as Partial<CellRef>;
+
+  it("resolves a piece-bearing entry to its piece", async () => {
+    const element = internals(new CFCodeEditor());
+    const piece = createMockCellHandle({ title: "Target" }, pieceRef);
+    element.mentionable = createMockCellHandle([
+      { [NAME]: "Row", title: "Row", piece },
+    ]) as unknown as CellHandle<MentionableArray>;
+
+    await element._resolvePieceIds();
+
+    const resolved = element._resolvedPieceCells.get(0);
+    expect(resolved?.id()).toBe(piece.id());
+  });
+
+  it("resolves an entry without a piece to the entry itself", async () => {
+    const element = internals(new CFCodeEditor());
+    const list = createMockCellHandle([{ [NAME]: "Direct" }]);
+    element.mentionable = list as unknown as CellHandle<MentionableArray>;
+
+    await element._resolvePieceIds();
+
+    const resolved = element._resolvedPieceCells.get(0);
+    expect(resolved?.id()).toBe(list.key(0).id());
+  });
+
+  it("finds a row's piece before resolution lands", () => {
+    // Nothing resolved yet: the id and the returned cell both come from the
+    // row's hydrated piece, never from the row's own sub-cell.
+    const element = internals(new CFCodeEditor());
+    const piece = createMockCellHandle({ title: "Target" }, pieceRef);
+    element.mentionable = createMockCellHandle([
+      { [NAME]: "Row", title: "Row", piece },
+    ]) as unknown as CellHandle<MentionableArray>;
+
+    const found = element.findPieceById(element._getPieceId(0));
+    expect(found?.id()).toBe(piece.id());
+  });
+
+  it("keeps the newer resolution when an older pass finishes late", async () => {
+    // The mentionable HANDLE stays identical when its contents change, so an
+    // older pass that resolves slowly can finish after a newer one. The
+    // slow pass here is gated open only once the fast pass has published;
+    // what the caches hold at the end decides the race.
+    const element = internals(new CFCodeEditor());
+    const slow = createMockCellHandle(
+      { title: "Slow" },
+      { id: "of:slow-piece" } as Partial<CellRef>,
+    );
+    const fast = createMockCellHandle(
+      { title: "Fast" },
+      { id: "of:fast-piece" } as Partial<CellRef>,
+    );
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    // The resolution path reads the piece through an `asSchema` copy, so the
+    // gate has to ride the copy: an override on `slow` itself would be left
+    // behind by the copy and the "slow" pass would resolve instantly.
+    const realResolve = slow.resolveAsCell.bind(slow);
+    const realAsSchema = slow.asSchema.bind(slow);
+    slow.asSchema = ((schema: never) => {
+      const copy = realAsSchema(schema);
+      copy.resolveAsCell = (async () => {
+        await gate;
+        return await realResolve();
+      }) as typeof copy.resolveAsCell;
+      return copy;
+    }) as typeof slow.asSchema;
+
+    const list = createMockCellHandle([
+      { [NAME]: "Row", title: "Row", piece: slow },
+    ]);
+    element.mentionable = list as unknown as CellHandle<MentionableArray>;
+    const older = element._resolvePieceIds();
+
+    list.set([{ [NAME]: "Row", title: "Row", piece: fast }]);
+    await element._resolvePieceIds();
+    expect(element._resolvedPieceCells.get(0)?.id()).toBe(fast.id());
+
+    release();
+    await older;
+    expect(element._resolvedPieceCells.get(0)?.id()).toBe(fast.id());
   });
 });

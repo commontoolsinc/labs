@@ -22,10 +22,12 @@ import {
 } from "commonfabric";
 import { pattern } from "commonfabric";
 import Topics, {
+  mentionableRowsOf,
   mentionedBy,
   mentionListsOf,
   submitProfileTopic,
   type TopicCrossrefRow,
+  type TopicMentionableRow,
   type TopicPiece,
 } from "./main.tsx";
 import Topic, {
@@ -669,6 +671,99 @@ export default pattern(() => {
     );
   });
 
+  // --- mentionable: the board's mention index ---
+
+  // The mention index mirrors the board as COPIES plus a reference: the two
+  // strings the autocomplete needs are in the rows themselves, and `piece`
+  // is the topic each row stands for — the same document, by identity.
+  const assert_mention_index_baseline = assert(() =>
+    (board.mentionable ?? []).length === 2 &&
+    board.mentionable?.[0]?.[NAME] === "First topic" &&
+    board.mentionable?.[0]?.title === "First topic" &&
+    board.mentionable?.[1]?.[NAME] === "Second topic" &&
+    equals(
+      board.mentionable?.[0]?.piece as object,
+      board.topics?.[0] as object,
+    ) &&
+    equals(
+      board.mentionable?.[1]?.piece as object,
+      board.topics?.[1] as object,
+    )
+  );
+
+  // The bound: one self-contained list of scalars and held references.
+  // Serializing every row carries no expanded topic content, no verb
+  // streams, and no runtime values — the copies plus a link each, nothing
+  // else. The declared row schema, not reader discipline, is the guarantee.
+  const assert_mention_index_bounded = assert(() => {
+    const rows = board.mentionable ?? [];
+    if (rows.length < 2) return false;
+    const serialized = JSON.stringify(rows);
+    return !serialized.includes('"body"') &&
+      !serialized.includes('"comments"') &&
+      !serialized.includes('"addComment"') &&
+      !serialized.includes("vnode");
+  });
+
+  // The index tracks the board rather than snapshotting it: a topic added
+  // later gets its own row, standing for the new topic by identity.
+  const assert_mention_index_tracks_the_board = assert(() =>
+    (board.mentionable ?? []).length === 3 &&
+    board.mentionable?.[2]?.[NAME] === "Composed topic" &&
+    equals(
+      board.mentionable?.[2]?.piece as object,
+      board.topics?.[2] as object,
+    )
+  );
+
+  // The derivation's own rules, on sources a board cannot produce mid-run:
+  // a mid-sync entry contributes no row, the display name falls back to the
+  // persisted title until a topic derives its `[NAME]` (and past a blank
+  // one), and a row records its SOURCE as `piece` — identity, not a copy.
+  const assert_mention_index_rows_pure = assert(() => {
+    const named = { get: () => ({ [NAME]: "Named", title: "Titled" }) };
+    const cold = {
+      get: () => ({ [NAME]: undefined, title: "Cold title" }),
+    };
+    const blankName = { get: () => ({ [NAME]: "", title: "Blank name" }) };
+    const midSync = { get: () => undefined };
+    const rows = mentionableRowsOf(
+      [named, cold, midSync, blankName, undefined],
+    );
+    return rows.length === 3 &&
+      rows[0]?.[NAME] === "Named" &&
+      rows[0]?.title === "Titled" &&
+      rows[0]?.piece === named &&
+      rows[1]?.[NAME] === "Cold title" &&
+      rows[2]?.[NAME] === "Blank name" &&
+      rows[2]?.piece === blankName;
+  });
+
+  // A topic accepts the index's rows as its mention universe — the exact
+  // list the backfill rewires onto every existing topic. The consumer
+  // materializing proves the two-string demand validates a row list; the
+  // read-back proves the row landed with its copies intact and its piece
+  // still a reference, not a flattened copy of the cell.
+  const rowPieceTarget = new Writable({ title: "Row piece target" });
+  const rowUniverse = new Writable<TopicMentionableRow[] | Default<[]>>([]);
+  const rowUniverseConsumer = Topic({
+    title: "Row universe consumer",
+    mentionable: rowUniverse,
+  });
+  const action_seed_row_universe = action(() => {
+    rowUniverse.push({
+      [NAME]: "Seeded row",
+      title: "Seeded row",
+      piece: rowPieceTarget,
+    });
+  });
+  const assert_row_universe_accepted = assert(() =>
+    rowUniverse.get().length === 1 &&
+    rowUniverse.get()[0]?.[NAME] === "Seeded row" &&
+    equals(rowUniverse.get()[0]?.piece as object, rowPieceTarget) &&
+    rowUniverseConsumer[NAME] === "Row universe consumer"
+  );
+
   // --- mention retraction through the UI affordance ---
 
   // The board's mention PIVOT is no longer exercisable from a pattern test.
@@ -920,6 +1015,8 @@ export default pattern(() => {
       { render: board[UI] },
       { assertion: assert_index_baseline },
       { assertion: assert_index_bounded },
+      { assertion: assert_mention_index_baseline },
+      { assertion: assert_mention_index_bounded },
       { assertion: assert_cell_link_markup },
       { render: board[UI] },
       { action: action_comment_first_again },
@@ -927,6 +1024,7 @@ export default pattern(() => {
       { assertion: assert_third_topic },
       { render: board[UI] },
       { assertion: assert_index_tracks_the_board },
+      { assertion: assert_mention_index_tracks_the_board },
       { action: action_submit_blank_comment_draft },
       { assertion: assert_blank_draft_rejected },
       { action: action_start_edit },
@@ -938,6 +1036,9 @@ export default pattern(() => {
       // board's shared TopicPiece projection.
       { render: directTopic[UI] },
       { assertion: assert_pure_helpers },
+      { assertion: assert_mention_index_rows_pure },
+      { action: action_seed_row_universe },
+      { assertion: assert_row_universe_accepted },
       { assertion: assert_self_mention_inert_through_a_twin },
       { assertion: assert_mention_lists_tolerate_a_mid_sync_source },
       { action: action_mention_subject_gets_a_link },

@@ -394,6 +394,10 @@ export class CFCodeEditor extends BaseElement {
   // The resolved cell behind each mentionable entry, which a reference stores
   // directly rather than by id. Populated by the same pass.
   private _resolvedPieceCells = new Map<number, CellHandle<Mentionable>>();
+  // Which resolution pass may publish its maps. The mentionable HANDLE stays
+  // identical when its contents change, so identity alone cannot stop an
+  // older pass finishing late and overwriting a newer pass's ordering.
+  private _resolveGeneration = 0;
   private _referencesUnsub: (() => void) | null = null;
   // Label text last seen for each reference key, to detect a user's edit.
   private _previousRefLabels = new Map<string, string>();
@@ -1161,7 +1165,16 @@ export class CFCodeEditor extends BaseElement {
       if (!pieceValue) continue;
       const pieceId = this._getPieceId(i);
       if (pieceId === id) {
-        return handle.key(i) as CellHandle<Mentionable>;
+        // The resolved cell IS the piece. For an index row the sub-cell is
+        // the row rather than the topic behind it, and every caller here
+        // wants the piece — to navigate to it, subscribe to its title, or
+        // write its name back. Before resolution completes, a row's own
+        // hydrated piece is the piece by a shorter road; only an entry
+        // that IS the piece falls through to the sub-cell, with exactly
+        // _getPieceId's instability caveat.
+        return this._resolvedPieceCells.get(i) ??
+          this._hydratedPiece(i) ??
+          (handle.key(i) as CellHandle<Mentionable>);
       }
     }
 
@@ -1169,14 +1182,30 @@ export class CFCodeEditor extends BaseElement {
   }
 
   /**
+   * The piece handle an index row carries, hydrated by the client — the
+   * synchronous stand-in until resolution lands, and null for an entry that
+   * is the piece itself. Bound to the mentionable schema so field reads on
+   * it materialize, as `_refDestination` binds a stored destination.
+   */
+  private _hydratedPiece(index: number): CellHandle<Mentionable> | null {
+    const item = ((this.mentionable?.get() ?? []) as MentionableArray)[index];
+    return item && isCellHandle(item.piece)
+      ? item.piece.asSchema<Mentionable>(MentionableSchema)
+      : null;
+  }
+
+  /**
    * Get the stable piece cell ID for a mentionable item at the given index,
    * in the BARE embed form wiki-link text persists (see mentionIdFromCellId
    * — CellHandle.id() is the full schemed URI; renderers add `/of:` back).
-   * Returns the pre-resolved ID if available, otherwise falls back to
-   * the sub-cell ID (which may be unstable across recomputations).
+   * Returns the pre-resolved ID if available, then an index row's own
+   * hydrated piece, and only then the sub-cell ID (which may be unstable
+   * across recomputations, and for an index row names the row rather than
+   * the piece).
    */
   private _getPieceId(index: number): string {
     const id = this._resolvedPieceIds.get(index) ??
+      this._hydratedPiece(index)?.id() ??
       (this.mentionable?.key(index)?.id() ?? "");
     return id ? mentionIdFromCellId(id) : id;
   }
@@ -1186,6 +1215,10 @@ export class CFCodeEditor extends BaseElement {
    * Each mentionable sub-cell (mentionable.key(i)) may be an indirect
    * reference whose ID changes when the list recomputes. resolveAsCell()
    * follows the indirection to get the piece's own stable cell ID.
+   *
+   * An entry carrying `piece` resolves through it instead: such an entry is
+   * a derived index row standing for the piece, and resolving the entry
+   * itself would make every mention name a row of somebody's bookkeeping.
    */
   private async _resolvePieceIds(): Promise<void> {
     const handle = this.mentionable;
@@ -1193,8 +1226,12 @@ export class CFCodeEditor extends BaseElement {
 
     const mentionableData = (handle.get() ?? []) as MentionableArray;
 
-    // Keep a reference to the current mentionable to detect staleness
+    // Keep a reference to the current mentionable to detect a rebind, and a
+    // generation to detect a newer pass over the SAME handle: contents can
+    // change under an identical handle, and an older pass finishing late
+    // must not overwrite the newer pass's ordering.
     const currentMentionable = this.mentionable;
+    const generation = ++this._resolveGeneration;
     const newResolved = new Map<number, string>();
     const newCells = new Map<number, CellHandle<Mentionable>>();
 
@@ -1202,10 +1239,18 @@ export class CFCodeEditor extends BaseElement {
     const promises = mentionableData.map(async (item, i) => {
       if (!item) return;
       try {
-        const subCell = handle.key(i);
-        const resolved = await subCell.resolveAsCell();
-        newCells.set(i, resolved as CellHandle<Mentionable>);
-        const resolvedId = resolved.id();
+        const hydrated = this._hydratedPiece(i);
+        const source = hydrated ?? handle.key(i);
+        const resolved = await source.resolveAsCell();
+        // Resolution answers with the canonical cell under its own schema,
+        // so a piece reached through a row is rebound to the mentionable
+        // schema — the `_refDestination` shape — for the field reads its
+        // consumers make (the title subscription, the name write-back).
+        const pieceCell = hydrated !== null
+          ? resolved.asSchema<Mentionable>(MentionableSchema)
+          : (resolved as CellHandle<Mentionable>);
+        newCells.set(i, pieceCell);
+        const resolvedId = pieceCell.id();
         if (resolvedId) {
           newResolved.set(i, resolvedId);
         }
@@ -1216,8 +1261,12 @@ export class CFCodeEditor extends BaseElement {
 
     await Promise.all(promises);
 
-    // Only apply if mentionable hasn't changed while we were resolving
-    if (this.mentionable === currentMentionable) {
+    // Only apply if mentionable hasn't been rebound and no newer pass has
+    // started while we were resolving
+    if (
+      this.mentionable === currentMentionable &&
+      generation === this._resolveGeneration
+    ) {
       this._resolvedPieceIds = newResolved;
       this._resolvedPieceCells = newCells;
       // Re-resolve mentioned from content now that we have stable IDs
