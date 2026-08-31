@@ -142,7 +142,8 @@ the CLI sends nothing that would let a server attribute one to either, so the
 condition could only ever have been estimated.
 
 *Exit:* no file in this repository taught a deprecated spelling, and every
-deprecated spelling still worked — the condition 6b then removed them under.
+deprecated spelling still worked. Step 6b then removed them on the date each
+warning named.
 
 ## Stage 4 — the merges
 
