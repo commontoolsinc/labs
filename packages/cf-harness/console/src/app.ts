@@ -12,9 +12,9 @@
 import { html, LitElement, nothing, type TemplateResult } from "lit";
 import {
   cancelTurn,
+  type ConsoleChatEventEnvelope,
   type ConsoleFlow,
   type ConsoleRunSummary,
-  type HarnessChatEventEnvelope,
   listRuns,
   readRunFlow,
   startTask,
@@ -262,7 +262,7 @@ export class ConsoleApp extends LitElement {
     });
   }
 
-  #onEvent(envelope: HarnessChatEventEnvelope): void {
+  #onEvent(envelope: ConsoleChatEventEnvelope): void {
     this.#lastSequence = envelope.sequence;
     const event = envelope.event;
     switch (event.kind) {

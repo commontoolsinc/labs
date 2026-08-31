@@ -4,7 +4,6 @@
  * changes shape is a type error in the page rather than a blank pane.
  */
 
-import type { HarnessChatEventEnvelope } from "../../src/contracts/interactive-chat.ts";
 import type {
   PatternIndexEvent,
   PatternIndexListEventsRequest,
@@ -23,8 +22,13 @@ import type {
 import type { ConsoleFlow, ConsoleFlowCell, ConsoleFlowNode } from "../flow.ts";
 import type { ConsoleRunSummary } from "../runs.ts";
 import type { ConsoleSessionSummary } from "../sessions.ts";
+import type {
+  ConsoleChatEventEnvelope,
+  ConsoleTurnResult,
+} from "../turn-result.ts";
 
 export type {
+  ConsoleChatEventEnvelope,
   ConsoleFlow,
   ConsoleFlowCell,
   ConsoleFlowNode,
@@ -34,7 +38,7 @@ export type {
   ConsoleRunDetail,
   ConsoleRunSummary,
   ConsoleSessionSummary,
-  HarnessChatEventEnvelope,
+  ConsoleTurnResult,
   PatternIndexEvent,
   PatternIndexListPatternsResponse,
   PatternIndexPattern,
@@ -116,6 +120,14 @@ export const listRuns = async (): Promise<readonly ConsoleRunSummary[]> =>
   (await json<{ runs: readonly ConsoleRunSummary[] }>(
     await fetch("/api/runs"),
   )).runs;
+
+/** The durable external result of one completed turn. */
+export const readTurnResult = async (
+  turnId: string,
+): Promise<ConsoleTurnResult> =>
+  await json<ConsoleTurnResult>(
+    await fetch(`/api/turns/${encodeURIComponent(turnId)}/result`),
+  );
 
 export const readRun = async (runId: string): Promise<ConsoleRunDetail> =>
   await json<ConsoleRunDetail>(
