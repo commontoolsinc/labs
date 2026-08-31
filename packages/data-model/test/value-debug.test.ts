@@ -97,6 +97,7 @@ describe("value-debug", () => {
       // A user string that just happens to read "undefined" or "42n" should
       // remain a quoted string in the output -- only sentinel-wrapped payloads
       // get unquoted.
+
       expect(toCompactDebugString("undefined"))
         .toBe('"undefined"');
       expect(toCompactDebugString("42n")).toBe('"42n"');
@@ -119,6 +120,7 @@ describe("value-debug", () => {
 
     it("renders an anonymous arrow function as a bare abbreviated form", () => {
       // An immediately-passed arrow expression has no `name`.
+
       expect(toCompactDebugString((() => 1) as unknown))
         .toBe("(...) => {...}");
     });
@@ -126,6 +128,7 @@ describe("value-debug", () => {
     it("renders an anonymous `function` expression as a bare abbreviated form", () => {
       // Force an empty `name` to simulate a true anonymous function expression
       // (`(function(){}).name === ""`).
+
       const anon = function () {};
       Object.defineProperty(anon, "name", { value: "" });
       expect(toCompactDebugString(anon)).toBe("(...) => {...}");
@@ -266,6 +269,7 @@ describe("value-debug", () => {
       it("renders shared non-cyclic refs in full at each occurrence", () => {
         // Sibling references to the same object are not a cycle, so each
         // occurrence is rendered fully rather than treated as a back-edge.
+
         const x = { v: 1 };
         expect(toCompactDebugString({ a: x, b: x }))
           .toBe('{"a":{"v":1},"b":{"v":1}}');
@@ -280,6 +284,7 @@ describe("value-debug", () => {
         // The formatter is most likely to be reached for a value that is
         // already malformed, so it renders what it can rather than adding a
         // second failure on top of the first.
+
         class RogueSpecial extends FabricSpecialObject {}
 
         expect(toCompactDebugString(new RogueSpecial())).toBe(
@@ -290,6 +295,7 @@ describe("value-debug", () => {
       it("honors a normal `toJSON()` and renders its return value", () => {
         // Sanity check that `toJSON()` is consulted in the usual way; this is
         // the happy-path counterpart to the throw cases below.
+
         const v = { toJSON: () => ({ simplified: 1 }) };
         expect(toCompactDebugString(v)).toBe('{"simplified":1}');
       });
@@ -499,6 +505,7 @@ describe("value-debug", () => {
       // An object whose prototype was sliced out has no usable
       // `constructor` chain; the predicate returns "object" as a final
       // fallback.
+
       const weird = Object.create({ constructor: undefined as unknown });
       expect(toDebugKindString(weird)).toBe("object");
     });

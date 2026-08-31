@@ -308,6 +308,7 @@ describe("native-conversion", () => {
 
     it("deeply unwraps `Error` internals (C2)", () => {
       // `Error` with a `FabricError` cause and a custom `FabricMap` property.
+
       const innerErr = new Error("inner");
       const innerSe = FabricError.fromNativeError(innerErr);
       const outerErr = new Error("outer");
@@ -441,6 +442,7 @@ describe("native-conversion", () => {
       it("is deep-frozen when `shouldDeepFreeze` is `true`, mutable when `false`", () => {
         // Tag travels separately; the bare inner state is the codec payload,
         // which for this class is a record of the three facts it preserves.
+
         const state = { tag: "Bad@1", state: { x: 1 }, error: "oops" };
         const frozen = ProblematicValue[CODEC].decode(
           "Bad@1",
@@ -489,6 +491,7 @@ describe("native-conversion", () => {
         // `deepFreeze(wrapper)` runs Arm 4 it recurses into the FabricError
         // (Arm 3), which subFreezes `error.cause` = wrapper, which re-enters
         // `deepFreeze()` -> the FabricError again -> ...
+
         const err = new Error("cycle-cause");
         const fe = FabricError.fromNativeError(err);
         const wrapper: Record<string, unknown> = { fe };
@@ -530,6 +533,7 @@ describe("native-conversion", () => {
       // recursing slots. Both must terminate, both must end deep-frozen.
       // FabricError snapshots its FabricValue state at construction, so wire
       // up the native Error's `cause` BEFORE `fromNativeError`.
+
       const peShared: Record<string, unknown> = { tag: "shared" };
       const pv = new ProblematicValue(
         "Cycle@1",
@@ -549,6 +553,7 @@ describe("native-conversion", () => {
   describe("shallowFabricFromNativeObjectElseUndefined()", () => {
     // The `FabricNativeObject`s that have a fabric form, each with the class
     // it mints.
+
     const MINTED: ReadonlyArray<[string, unknown, FabricClass]> = [
       ["a `Date`", new Date(1234), FabricEpochNsec],
       ["a `Uint8Array`", new Uint8Array([1, 2, 3]), FabricBytes],
@@ -751,6 +756,7 @@ describe("native-conversion", () => {
       it("leaves an `Error` `cause` unconverted (shallow)", () => {
         // Shallow conversion wraps the top-level `Error` but does not recurse
         // into its `cause`, which therefore stays a raw `Error`.
+
         const cause = new Error("root cause");
         const error = new Error("wrapper", { cause });
         const result = shallowFabricFromNativeValue(error) as FabricError;
@@ -783,6 +789,7 @@ describe("native-conversion", () => {
       // the pass-through is a `switch` with one `case` per class and a
       // throwing `default`, so a class missing a `case` is invisible to any
       // test that only ever hands it a different one.
+
       const PRIMITIVES: readonly FabricPrimitive[] = [
         new FabricBytes(new Uint8Array([1, 2, 3])),
         new FabricEpochDay(1n),
@@ -902,6 +909,7 @@ describe("native-conversion", () => {
       it("returns a plain object's `toJSON` as an ordinary member", () => {
         // Shallow conversion validates the container, not its members, so the
         // method comes through as the value it is rather than being called.
+
         const toJSON = () => ({ exposed: true });
         expect(shallowFabricFromNativeValue({ secret: "internal", toJSON }))
           .toEqual({ secret: "internal", toJSON });
@@ -910,6 +918,7 @@ describe("native-conversion", () => {
       it("throws for an array carrying `toJSON()`", () => {
         // An array is handled by the array rule whatever it carries, and that
         // rule rejects the named own property `toJSON` is.
+
         const arr = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
         arr.toJSON = () => "custom array";
         expect(() => shallowFabricFromNativeValue(arr)).toThrow(
@@ -936,6 +945,7 @@ describe("native-conversion", () => {
         // Type dispatch reads the constructor from the prototype, so an own
         // `constructor` property does not decide the value's type. It reaches
         // the object rule, which names it as the reserved property it is.
+
         expect(() => fabricFromNativeValue({ ["constructor"]: "c" })).toThrow(
           "Not representable as a `FabricValue`: object with a property name " +
             "this runtime reserves (`constructor`)",
@@ -1142,6 +1152,7 @@ describe("native-conversion", () => {
         // of what a value says as data -- it would not survive the first
         // encoding boundary. Rejecting says so, where accepting would mean
         // carrying a distinction that quietly stops existing.
+
         const obj = Object.create(null) as Record<string, unknown>;
         obj.a = 1;
         expect(() => shallowFabricFromNativeValue(obj, true)).toThrow(
@@ -1210,6 +1221,7 @@ describe("native-conversion", () => {
       it("returns an already-converted `FabricError` as-is", () => {
         // `fabricFromNativeValue(Error)` produces a deep-frozen `FabricError`;
         // feeding that back in is an identity passthrough.
+
         const fe = fabricFromNativeValue(new Error("test"));
         expect(fabricFromNativeValue(fe)).toBe(fe);
       });
@@ -1570,6 +1582,7 @@ describe("native-conversion", () => {
       it("throws for a plain object whose `toJSON` is its only member", () => {
         // The deep conversion reaches the member and refuses it for what it
         // is, rather than calling it.
+
         expect(() => fabricFromNativeValue({ toJSON: () => ({ x: 1 }) }))
           .toThrow("Not representable as a `FabricValue`: function");
       });
@@ -1657,6 +1670,7 @@ describe("native-conversion", () => {
       it("throws for an array with a getter-backed index", () => {
         // An accessor is live code, not a value: converting would silently
         // flatten it to its momentary answer. Reject it loudly instead.
+
         const arr = [1, 2, 3];
         Object.defineProperty(arr, 1, {
           get: () => 22,
@@ -1689,6 +1703,7 @@ describe("native-conversion", () => {
       it("throws even for an already-frozen array with named properties", () => {
         // Such an array is not a valid `FabricValue`, so it must not slip
         // through the deep-frozen identity short-circuit.
+
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
         arr.foo = "bar";
         Object.freeze(arr);
@@ -1708,6 +1723,7 @@ describe("native-conversion", () => {
       it("throws for an object with a symbol-keyed property", () => {
         // Previously such a property was silently dropped, which is exactly the
         // confusion the array rule already refuses to allow.
+
         const obj = { a: 1 } as Record<string | symbol, unknown>;
         obj[Symbol("s")] = 2;
         expect(() => fabricFromNativeValue(obj)).toThrow(
@@ -1744,6 +1760,7 @@ describe("native-conversion", () => {
         // it to array handling even though `Array.isArray()` is `false` for it.
         // It has no fabric representation as either an array or an object, so
         // it must be rejected rather than quietly converted.
+
         const fake = Object.create(Array.prototype) as Record<string, unknown>;
         fake[0] = "a";
         fake.length = 1;
@@ -1785,6 +1802,7 @@ describe("native-conversion", () => {
         // through unconverted, prototype and all: iteration yields content
         // that the indices never show, and freezing the instance does nothing
         // about the prototype that does it.
+
         class Smuggler extends Array {
           override *[Symbol.iterator](): Generator<unknown> {
             yield "smuggled";
@@ -1812,6 +1830,7 @@ describe("native-conversion", () => {
       it("throws for a subclass instance carrying `toJSON()`", () => {
         // No property an array carries can route it away from the array rule,
         // on the prototype or as an own key.
+
         class ProtoJson extends Array<unknown> {
           toJSON(): unknown[] {
             return [7, 8];
@@ -1905,6 +1924,7 @@ describe("native-conversion", () => {
       it("round-trips interned symbols with stable identity", () => {
         // Same registry key in any realm yields the same symbol instance
         // -- so the result equals the constructed sentinel by identity.
+
         const out = fabricFromNativeValue(Symbol.for("identity-check"));
         expect(Object.is(out, Symbol.for("identity-check"))).toBe(true);
       });
@@ -1914,6 +1934,7 @@ describe("native-conversion", () => {
         // regardless of the `freeze` flag -- the deep-frozen fast-path
         // (`isValidDeepFrozenFabricValue`) must not admit it and short-circuit
         // the validation that `freeze=false` performs (see below).
+
         expect(() => fabricFromNativeValue(Symbol("bad"))).toThrow(
           "Not representable as a `FabricValue`: unique (uninterned) symbol",
         );
@@ -2387,6 +2408,7 @@ describe("native-conversion", () => {
     it("preserves trailing holes, so `length` survives", () => {
       // Assigning element-by-element without setting `length` first would
       // truncate these away.
+
       const arr: unknown[] = [];
       arr[0] = 1;
       arr.length = 10;
@@ -2402,6 +2424,7 @@ describe("native-conversion", () => {
       // engine still scans the index range to find which keys exist, so this
       // is not O(present elements); what it pins is that the scan is not done
       // here, one property access at a time.
+
       const target: unknown[] = [];
       target.length = 1_000_000;
       target[5] = "x";
@@ -2429,6 +2452,7 @@ describe("native-conversion", () => {
       // A `Proxy` chooses its own key order, so index keys need not come first
       // the way they do on an ordinary array. Stopping at the first non-index
       // key would therefore silently drop elements -- here, all of them.
+
       const target = [10, 20];
       const reordered = new Proxy(target, {
         ownKeys: () => ["foo", "0", "1", "length"],

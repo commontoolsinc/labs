@@ -54,6 +54,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns `-0` as `-0` and not as `0`", () => {
       // `toBe` is `Object.is`, which is the only matcher that can tell the two
       // apart; `toEqual` would pass either way.
+
       expect(toStructuredDebugValue(-0)).toBe(-0);
     });
 
@@ -93,6 +94,7 @@ describe("toStructuredDebugValue()", () => {
 
     it("returns `<anonymous>(...)` for a function with no name", () => {
       // A bare arrow assigned to nothing has an empty `name`.
+
       expect(toStructuredDebugValue((() => () => {})()))
         .toEqual({ "/function": "<anonymous>(...)" });
     });
@@ -106,6 +108,7 @@ describe("toStructuredDebugValue()", () => {
       // The failure is reported within the wrapper rather than in place of
       // it, so the result still says a function was here, and the sibling
       // properties are unaffected.
+
       const value = new Proxy(function real() {}, {
         get(target, key, receiver) {
           if (key === "name") throw new Error("name trap");
@@ -145,6 +148,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns nested containers converted all the way down", () => {
       // The converting value sits at the bottom of an object-array-object
       // chain, so reaching it at all is the assertion.
+
       expect(toStructuredDebugValue({ a: [{ b: Symbol("deep") }] }))
         .toEqual({ a: [{ b: { "/uniqueSymbol": "deep" } }] });
     });
@@ -169,6 +173,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns a sparse array without visiting the indices it has no element at", () => {
       // A very sparse array has to cost its element count and not its
       // `length`, which is what visiting only the keys it has buys.
+
       const probed: string[] = [];
       const target: unknown[] = [];
       target.length = 1000;
@@ -199,6 +204,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns a null-prototype object as an ordinary plain object", () => {
       // Were it treated as a general instance instead, the result would carry
       // a class-name tag rather than the object's own keys.
+
       const value = Object.assign(Object.create(null), { m: new Map() });
       expect(toStructuredDebugValue(value)).toEqual({ m: { "/Map": "/..." } });
     });
@@ -208,6 +214,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns a `/`-prefixed key with one more `/` prepended", () => {
       // Without the escape, a key of `/circle` would be indistinguishable
       // from the cycle marker this module writes.
+
       expect(toStructuredDebugValue({ "/circle": 3 }))
         .toEqual({ "//circle": 3 });
     });
@@ -251,6 +258,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns each `FabricInstance` under the tag of its own class", () => {
       // The tag comes from the value's codec, so a second class must not
       // arrive under the first one's tag.
+
       const value = new FabricLink({
         id: "of:fid1:abc",
         path: ["x"],
@@ -297,6 +305,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns `/...` rather than `{}` when there is nothing to show", () => {
       // Claiming an empty object about a `Map` would be a lie; `/...` says
       // "contents not represented", which is true.
+
       expect(toStructuredDebugValue(new Map([["a", 1]])))
         .toEqual({ "/Map": "/..." });
       expect(toStructuredDebugValue(new Set([1, 2])))
@@ -326,6 +335,7 @@ describe("toStructuredDebugValue()", () => {
       // Only ancestors count as a cycle. A value reached twice by different
       // paths is shown at both, since identical siblings are an ordinary
       // shape and calling the second one circular would misdescribe it.
+
       const shared = { s: 1 };
       expect(toStructuredDebugValue({ x: shared, y: shared }))
         .toEqual({ x: { s: 1 }, y: { s: 1 } });
@@ -348,12 +358,14 @@ describe("toStructuredDebugValue()", () => {
     it("returns content within the limit unelided", () => {
       // The converting leaf makes this say that conversion reached the
       // bottom, not merely that nothing was elided on the way.
+
       expect(toStructuredDebugValue({ a: { b: Symbol("leaf") } }, 3))
         .toEqual({ a: { b: { "/uniqueSymbol": "leaf" } } });
     });
 
     it("returns a `FabricPrimitive` at the limit rather than eliding it", () => {
       // A primitive is atomic, so including it adds no nesting to the result.
+
       const value = new FabricEpochNsec(123n);
       expect((toStructuredDebugValue({ t: value }, 2) as { t: unknown }).t)
         .toBe(value);
@@ -410,6 +422,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns the converted replacement, not the replacement verbatim", () => {
       // The replacement re-enters conversion, so a value the replacer hands
       // back still gets escaped, tagged, and depth-limited like any other.
+
       const result = toStructuredDebugValue(
         { a: 1 },
         undefined,
@@ -421,6 +434,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns the original value when the `replacer` throws", () => {
       // A failed replacement reads as a refusal to replace rather than as a
       // conversion error, so the rest of the result is unaffected.
+
       const result = toStructuredDebugValue(
         { a: 1, m: new Map() },
         undefined,
@@ -464,6 +478,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns the failure at the property whose read threw", () => {
       // The read of a property is part of converting it, so a getter that
       // throws costs its own property and no other.
+
       const value = {
         before: "kept",
         get boom(): number {
@@ -496,6 +511,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns the failure in place for a throwing proxy trap", () => {
       // These traps are reached before any single property is, so each costs
       // the whole proxy. The `get` trap, reached per-property, is below.
+
       const traps: ProxyHandler<object>[] = [
         {
           getPrototypeOf() {
@@ -577,6 +593,7 @@ describe("toStructuredDebugValue()", () => {
       it("returns the stringification when a message is not a string", () => {
         // An `Error` may carry a non-string `message`, in which case the
         // whole value is stringified rather than the message read out.
+
         const error = new Error("ignored");
         (error as unknown as Record<string, unknown>).message = 5;
         expect(messageFor(error)).toBe("Error: 5");
@@ -585,6 +602,7 @@ describe("toStructuredDebugValue()", () => {
       it("returns a fixed token when the thrown value resists stringifying", () => {
         // A null-prototype object has no `toString` to reach, so `String()`
         // throws on it; the message derivation must not throw in turn.
+
         expect(messageFor(Object.create(null))).toBe("/unconvertibleError");
       });
 
@@ -592,6 +610,7 @@ describe("toStructuredDebugValue()", () => {
         // Nothing is lost by not falling back to stringifying this one:
         // `Error.prototype.toString()` reads `message` too, so `String()`
         // throws on it just the same.
+
         const error = new Error("ignored");
         Object.defineProperty(error, "message", {
           get() {
@@ -604,6 +623,7 @@ describe("toStructuredDebugValue()", () => {
 
       it("returns a fixed token when the `instanceof` check itself throws", () => {
         // A thrown value can refuse even to be asked what it is.
+
         const thrown = new Proxy({}, {
           getPrototypeOf() {
             throw new Error("proto trap");
@@ -619,6 +639,7 @@ describe("toStructuredDebugValue()", () => {
       // The contract is what the two shipped bugs broke: a unique symbol's
       // payload and a reserved key each produced a result the membership
       // check refuses.
+
       const cyclic: Record<string, unknown> = { name: "root" };
       cyclic.self = cyclic;
 

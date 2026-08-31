@@ -89,6 +89,7 @@ describe("BaseCodecEngine", () => {
 
     it("reads the kind from the codec's base class, not from its state", () => {
       // The clinching case: identical states in, different wire forms out.
+
       const { engine } = newProbeEngine();
 
       expect((engine.encode(TERMINAL_HOST) as Tagged).state)
@@ -143,6 +144,7 @@ describe("BaseCodecEngine", () => {
       // encoded, and the walk expands that state. Without the enter/leave
       // around the tagged form, this recurses until the stack gives out
       // instead of being refused.
+
       class SelfNaming {}
 
       const selfNaming = new SelfNaming() as unknown as FabricValue;
@@ -182,6 +184,7 @@ describe("BaseCodecEngine", () => {
       // as the walk leaves each value rather than only grown. A `Marker`
       // rather than a plain object, because that bookkeeping lives on the
       // codec-matched path and a container never reaches it.
+
       const { engine } = newProbeEngine();
       const shared = new Marker() as unknown as FabricValue;
 
@@ -216,6 +219,7 @@ describe("BaseCodecEngine", () => {
       // A cycle need not run through a container at all: the state under a tag
       // is walked for an unknown tag, as it is for a nonterminal codec, so
       // guarding only the container arms would follow this one forever.
+
       const { engine } = newProbeEngine({ lenient: true });
       const state: Record<string, ProbeValue> = {};
       const tagged = new Tagged("Zz@1", state);
@@ -246,6 +250,7 @@ describe("BaseCodecEngine", () => {
       // The same node twice over is not a cycle, so `seen` has to be unwound as
       // the walk leaves each node rather than only grown. Both a container and
       // a tagged node, those being entered by the same call site.
+
       const { engine } = newProbeEngine();
       const shared: Record<string, ProbeValue> = { v: 1 };
       const tagged = new Tagged("Zz@1", 2);
@@ -284,6 +289,7 @@ describe("BaseCodecEngine", () => {
       // An unrecognized tag becomes an `UnknownValue` only if it is a tag.
       // `hole` is a meta-tag, well-formed only in the context that defines
       // it, and nowhere else a type this or any registry could carry.
+
       const { engine } = newProbeEngine();
 
       expect(() => engine.decode(new Tagged("hole", 5), ENV))
@@ -293,6 +299,7 @@ describe("BaseCodecEngine", () => {
     it("rejects a tag that is not a string at all", () => {
       // A format finds a tag wherever its own shape puts one, and what it
       // finds off the wire need not be a string.
+
       const { engine } = newProbeEngine();
 
       expect(() => engine.decode(new Tagged(42 as never, "x"), ENV))
@@ -303,6 +310,7 @@ describe("BaseCodecEngine", () => {
       // `MarkerCodec.decode()` returns a mutable nested object. Every other
       // codec here returns a primitive, which is deep-frozen however the
       // engine behaves, and so could not witness this.
+
       const { engine } = newProbeEngine();
       const result = engine.decode(new Tagged("M@1", "m"), ENV);
 
@@ -317,6 +325,7 @@ describe("BaseCodecEngine", () => {
       // what needs pinning is that the entry point consults the factory per
       // call, and a test that only calls the factory stays green even if
       // `encode()` starts memoizing one act for the engine's lifetime.
+
       const seen: unknown[] = [];
       const { registry } = newProbeEngine();
       // The spy sits on the act rather than the engine, and records `this`:
@@ -373,6 +382,7 @@ describe("BaseCodecEngine", () => {
       // engine rather than per act, an encode reached from INSIDE another one
       // shares the outer walk's set, so entering a container the outer walk is
       // currently inside reports a cycle that is not there.
+
       class Reentrant {}
 
       const outer: FabricValue[] = [];
@@ -419,6 +429,7 @@ describe("BaseCodecEngine", () => {
       // is not there. The differential is the message: with the leave in a
       // `finally` the second visit fails the same way the first did; without
       // it, the second fails as a circular reference instead.
+
       class Boom {}
 
       const codec = new (class BoomCodec extends BaseTerminalCodec<ProbeValue> {
@@ -455,6 +466,7 @@ describe("BaseCodecEngine", () => {
       // tree itself, so its walk guards cycles; with one act shared across
       // calls, an inner decode entering a node the outer walk is inside would
       // report a cycle that is not there.
+
       let reentered = false;
       let innerResult: unknown;
       const outer: ProbeValue[] = [];
@@ -547,6 +559,7 @@ describe("BaseCodecEngine", () => {
       it("turns a `ProblematicValue` a codec returned into a throw", () => {
         // The half that used to do nothing: this rejection stood either way
         // before, so the setting governed only the codecs that threw.
+
         const { engine } = newProbeEngine();
 
         expect(() => engine.decode(RETURNED, ENV))
@@ -559,6 +572,7 @@ describe("BaseCodecEngine", () => {
         // through the codec-facing `catch`. `cause` is what says it arrives
         // unaltered: a rebuilt error carries the original there, and this one
         // carries nothing, the facts alone being no proof either way.
+
         const { engine } = newProbeEngine();
 
         try {
@@ -584,6 +598,7 @@ describe("BaseCodecEngine", () => {
 
       it("wraps an unclaimed tag in an `UnknownValue` regardless", () => {
         // Not a rejection, so the setting has no say in it.
+
         const { engine } = newProbeEngine();
 
         expect(engine.decode(UNCLAIMED, ENV)).toBeInstanceOf(UnknownValue);
@@ -594,6 +609,7 @@ describe("BaseCodecEngine", () => {
         // choice and say nothing about what a caller wants, so a strict
         // failure must look the same either way. It did not: the returned
         // form used to become a bare `Error`.
+
         const { engine } = newProbeEngine();
 
         for (
@@ -615,6 +631,7 @@ describe("BaseCodecEngine", () => {
       it("raises a `ProblematicStateError` carrying tag and state", () => {
         // The strict counterpart of the `ProblematicValue` the lenient side
         // returns: the same three facts, disposed of by throwing.
+
         const { engine } = newProbeEngine();
 
         try {
@@ -630,6 +647,7 @@ describe("BaseCodecEngine", () => {
       it("keeps what a codec threw as `cause`", () => {
         // Rethrowing as-is would lose the state; building afresh would lose
         // the original. Neither is acceptable, so the original is the cause.
+
         const { engine } = newProbeEngine();
 
         try {
@@ -690,6 +708,7 @@ describe("BaseCodecEngine", () => {
 
       it("deep-freezes a `ProblematicValue` a codec returned", () => {
         // The codec arm's freeze: this report is the codec's own product.
+
         const { engine } = newProbeEngine({ lenient: true });
 
         expect(isDeepFrozen(engine.decode(RETURNED, ENV))).toBe(true);
@@ -699,6 +718,7 @@ describe("BaseCodecEngine", () => {
         // The other arm, and a separate line of code: one is the engine
         // wrapping a throw, the other the walk reporting a malformation.
         // Neither stands in for the other.
+
         const { engine } = newProbeEngine({ lenient: true });
 
         expect(isDeepFrozen(engine.decode(THROWN, ENV))).toBe(true);
