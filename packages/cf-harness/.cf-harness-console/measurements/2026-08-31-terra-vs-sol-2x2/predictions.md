@@ -74,3 +74,25 @@ anomalies. A provider error stops the experiment; it is never retried.
 | sol/V0 | composition four | not yet read | not yet read | not run |
 | sol/V2 | standing six | not yet read | not yet read | not run |
 | sol/V2 | composition four | not yet read | not yet read | not run |
+
+## Admissibility read, before the first provider turn
+
+Read through the current-main console's read-only index proxy against the
+deployed index. The standing suite is **dropped loudly**: every task has a
+single whole application in its top-five result set, so it cannot measure
+discovery/reuse rather than corpus saturation.
+
+| Dropped id | Whole answering pattern |
+| --- | --- |
+| `counter` | `U5g1VlAb1uFmmec7D-fzPXZy0erldi7inqmXN8j7Vi0` |
+| `reading-list` | `FimzoBmTy8QTJQOjaKpsHPjmyMCUJFAGCXoO2vKJMDc` |
+| `friends-birthdays` | `2QGxpAuh-TxmV1Em462NcFiWDa9AnBjrJpBZbSnmZS0` |
+| `project-notes` | `GWkpTfEhKE5hScyU_ddiKVPmUlZw7xm5pbFyl6-yCDA` |
+| `trip-timeline` | `2h0TVvTMdhGlcFhGubyLvQ1IZhSF5FS5QkgM10aQQTc` |
+| `monthly-expenses` | `DWl3kXPQc1qRvGZaG_rkLEkpOuea6oh2k_CIm62Rf6c` |
+
+The composition suite remains admissible in this read: `dice-tally`,
+`party-prep`, `team-picker`, and `workout-streak` each have separate relevant
+parts or only partial applications; no result answers the whole task. This
+does not authorize a later batch without repeating the same read immediately
+before it.
