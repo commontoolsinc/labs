@@ -38,11 +38,11 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   viewer's canonical `#profile` name/avatar and store a `{ kind: "person", … }`
   snapshot. There is no free-text “commenting as” field.
 - **Wish-free agent handlers.** CLI streams do not depend on profile wishes.
-  Blank `agentName` values reject the mutation, and the signature is carried in
-  the same event as the content, avoiding shared mutable attribution state.
-  During the deployed-schema migration, omission (distinct from an explicit
-  blank value) remains accepted for old callers; topic/comment attribution then
-  falls back to their hidden legacy `myName`.
+  Every authored-content verb requires a non-blank `agentName`, and the
+  signature is carried in the same event as the content, avoiding shared mutable
+  attribution state. `mention` and `unmention` carry no authored content, so
+  they take only the referenced piece; Fabric still retains the authenticated
+  principal behind the edge.
 - **Mergeable writes everywhere users collide**: comments, links, and topics are
   `push` appends; concurrent writers all land. The body and the title are single
   strings (whole-value conflict semantics), so both edit through an explicit
@@ -54,12 +54,11 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   duplicate nor an application-level revision/CAS protocol. If Fabric cannot
   preserve history or safely arbitrate concurrent body writes, this dogfood
   surface should expose the framework gap rather than conceal it mechanically.
-- **Compatibility is temporary but honest.** The previous result contract made
-  `myName`, `createdByName`, and `authorName` observable, and its mutation
-  streams omitted `agentName`. Those surfaces remain deprecated but functional:
-  new structured writes mirror the legacy display strings, while old unsigned
-  topic/comment calls use `myName` and the other streams preserve their prior
-  behavior. New browser and agent callers never depend on them.
+- **Stored compatibility is explicit.** Durable records may lack a structured
+  author snapshot, so stored author fields remain optional or defaulted. Every
+  current authored-content verb writes structured attribution; the public result
+  and mutation contracts contain no mutable "current author" state or
+  display-name mirrors.
 - **`mentionable` is a structural reference, not derived data.** The board
   passes its own topics list at creation; the topic's body editor autocompletes
   `@`-mentions over it. Backfillable as a one-time link-bind on pieces created
@@ -155,18 +154,18 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
 
 ## Headless / agent use
 
-Agents are first-class participants. **Deployed lag:** a live board can run an
-older pattern than this source — the Estuary team board does today — and an
-older schema silently discards fields it does not declare. Until a migration
-lands, `body`-at-create and the loud rejections described here may not be live
-on a given board; check `cf piece verbs`, whose listing carries the deployed
-pattern's source identity, before relying on either. Against a deployed board
-piece:
+Agents are first-class participants. Treat the running piece as authoritative:
+start with `cf piece describe --piece <piece>`,
+`cf piece verbs --piece <piece> --json`, and
+`cf call --piece <piece> <verb> --help --json`. The default verb listing is the
+contract surface; `--all` additionally shows UI wrappers and deprecated verbs.
+Against a deployed board piece:
 
 ```bash
-cf call --piece <board> addTopic \
+cf call --piece <board> \
+  --schema '{"properties":{"topic":{"$link":true}}}' addTopic \
   '{"title":"...","body":"the initial living document","agentName":"Sol"}'
-# -> { "result": { "topic": … } }: the topic this call created
+# -> { "result": { "topic": { "$link": "/of:fid1:..." } } }
 cf get --piece <board> topics --input \
   --select title,createdAt,lastActivityAt,commentCount
 cf call --piece <topic> addComment \
@@ -176,19 +175,25 @@ cf call --piece <topic> setBody \
 cf call --piece <topic> setTitle \
   '{"title":"a sharper name for the same attention","agentName":"Sol"}'
 cf call --piece <topic> addLink \
-  '{"kind":"pr","url":"https://github.com/org/repo/pull/123","label":"PR #123","agentName":"Sol"}'
+  '{"url":"https://github.com/org/repo/pull/123","kind":"pr","label":"PR #123","agentName":"Sol"}'
+cf call --piece <topic> mention '{"topic":"/of:fid1:other-topic"}'
+cf call --piece <topic> unmention '{"topic":"/of:fid1:other-topic"}'
 ```
 
-`addLink` still requires `kind` and `label` even though the handler would
-default them (`"web"`, the URL): the compat gate compares a verb's event schema
-in the result direction, where required-to-optional is refused, so the
-relaxation rides the next acknowledged schema break. `setTitle` renames with
-attribution — it stamps `titleUpdatedBy`/`titleUpdatedAt` and moves
+`addLink` requires `url` and `agentName`; `kind` defaults to `"web"`, and a
+blank or omitted `label` defaults to the URL. `setTitle` renames with
+attribution: it stamps `titleUpdatedBy`/`titleUpdatedAt` and moves
 `lastActivityAt`, so a renamed topic surfaces in the board's most-recent sort.
 It lives on the topic's direct interface rather than the shared `TopicPiece`
 projection: a holder's required demands are write-once, so a verb added to the
 projection every board embeds would refuse those boards' updates. Address the
 topic itself and the verb is there.
+
+`mention` and `unmention` take a canonical piece reference in the inline JSON
+event. The CLI recognizes the declared reference position and turns `/of:...`
+into the live piece link; neither verb takes `agentName` or returns a value. Do
+not use `-- --topic /of:...`: the schema-derived flag parses its declared object
+before reference resolution and rejects a bare address.
 
 **A full-board survey is one bounded read of `index`.** Each row IS the topic it
 describes, declared through a schema of scalar summaries (`title`, `createdAt`,
@@ -201,16 +206,17 @@ cf get --piece <board> index --step
 ```
 
 A row's own address is the address of the topic it describes — the one to pass
-as `--piece` for that topic's own reads and verbs. `--select index[].@` resolves
-it. An address names a position and a filtered array's survivors no longer say
-which positions they came from, so `@` and `--filter` do not combine: read the
-index, which the row schema keeps narrow enough to read whole, and pick the row
-you want.
+as `--piece` for that topic's own reads and verbs. Reading the `index` path with
+`--select @,title` resolves it. An address names a position and a filtered
+array's survivors no longer say which positions they came from, so `@` and
+`--filter` do not combine: read the index, which the row schema keeps narrow
+enough to read whole, and pick the row you want.
 
-The board input links to complete Topic objects, including bodies, threads, and
-handlers. Targeted headless discovery beyond the index should therefore combine
-an exact/range `--filter` with a concise `--select` instead of materializing the
-whole corpus:
+The board input is declared through `TopicDemand`: the card/index fields and
+reference-graph inputs, with no Topic verbs or full thread. Targeted headless
+discovery beyond the index should combine an exact/range `--filter` with a
+concise `--select`, then address one Topic directly for its body, comments,
+links, and verbs:
 
 ```bash
 cf get --piece <board> index --step \
@@ -219,8 +225,8 @@ cf get --piece <board> topics --input \
   --filter '.lastActivityAt >= <epoch-milliseconds>' \
   --select title,lastActivityAt,commentCount,createdBy.kind,createdBy.name
 cf get --piece <topic> comments --input \
-  --filter '.author.name == "Sol" or .authorName == "Sol"' \
-  --select sentAt,author.kind,author.name,authorName,body
+  --filter '.author.name == "Sol"' \
+  --select sentAt,author.kind,author.name,body
 cf get --piece <topic> links --input \
   --filter '.kind == "pr"' --select kind,url,label,addedAt
 ```
@@ -234,9 +240,11 @@ filter/map/lift expressions. The durable `topics --input` list remains evidence
 when the computed `index --step` read cannot materialize, but only a successful
 index row supplies a Topic's address.
 
-Every agent-authored mutation carries `agentName`; there is no preceding “set
-current name” call. Fabric's operation history retains the authenticated human
-principal, while the stored snapshot disambiguates which agent acted.
+Every agent-authored content mutation carries `agentName`; there is no preceding
+“set current name” call. Fabric's operation history retains the authenticated
+human principal, while the stored snapshot disambiguates which agent acted.
+Reference-only `mention` and `unmention` calls are not content authorship and
+carry no agent signature.
 
 **Every content verb returns what it recorded** — `mention` and `unmention` sit
 outside the claim: they record an edge, a reference with nothing resolved about
@@ -271,9 +279,7 @@ _update_: `bodyUpdatedBy`/`bodyUpdatedAt` stay unset.
 
 Invalid mutations **throw** instead of silently returning (verb contract rule
 4): an empty title, an empty comment body, a blank or non-http(s) link URL, and
-a blank `agentName` on any verb all surface as a failed call — a nonzero CLI
-exit — never as apparent success. An _omitted_ `agentName` remains the tolerated
-legacy-caller path on the verbs that predate signing; `setTitle` postdates it,
-so there the field is simply required. The UI composer wrappers keep their
-silent guards: an empty draft is a non-event in a composer, not a headless
+a blank `agentName` on an authored-content verb all surface as a failed call — a
+nonzero CLI exit — never as apparent success. The UI composer wrappers keep
+their silent guards: an empty draft is a non-event in a composer, not a headless
 mutation.
