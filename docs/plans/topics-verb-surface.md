@@ -142,7 +142,8 @@ Each item waits on platform work rather than on this plan:
 
 - **`removeLink`, and comment edit and removal.** References-as-arguments has
   landed, so these are buildable. They go on the topic's own interface and need
-  no migration; the no-synthetic-ids rule is what prepared for them.
+  no migration; the no-synthetic-ids rule is what prepared for them. The
+  decisions they turn on are settled and recorded below.
 - **`AgentActor` execution provenance** replacing per-event `agentName`, when
   the retention-and-provenance track clears its review. Required-now relaxes to
   optional-then-deprecated, which is the compatible direction and the reason
@@ -205,10 +206,42 @@ Two preconditions belong to the board rather than to the code:
 - A result narrowing happens in place rather than under a new verb name;
   breaking source-level consumers is accepted and updating them is part of the
   work.
-- `removeLink` waits for references-as-arguments rather than taking a
-  URL-keyed interim form.
+- `removeLink` takes a reference, the form `unmention` established. It carries
+  a URL spelling as well, which is not the interim form this plan once weighed
+  against waiting: it is an addition on top of the reference form, and it earns
+  its inconsistency by being the only way an agent can retract a link, since a
+  link record has no fid to name from the CLI. Where a URL appears more than
+  once the spelling stamps the newest un-tombstoned record, so removing twice
+  removes two.
+- **A removal is stamped, not performed.** `removeLink` and comment removal
+  write `removedAt` onto the record and leave it in place; the reader does not
+  render it by default. Three consequences, and the first is the reason:
+  `lastActivityAt` is a max over the array, so a real removal would move a
+  topic's activity *backwards* and visibly reorder the board, while a stamped
+  one cannot. `lastActivityOf` therefore keeps counting stamped records, and
+  changing it to skip them reintroduces that silently. `commentCount` is the
+  other side: it counts the array's length today, so it has to exclude stamped
+  records or a card reads more comments than the topic shows. Both are
+  computations rather than schema, so neither needs a migration.
+- Every field a stamped removal adds is optional, for the reason recorded on
+  `TopicComment`: a stored record type has to accept what is already stored,
+  and the deployed board holds records written before these fields existed.
+- **Anyone may remove or edit anyone's comment or link**, matching the
+  References card, which already lets anyone retract any mention. Narrowing
+  this to the author is expected to come later.
+- An edited comment carries `editedAt` beside its original `sentAt`, and the
+  edit does not rewrite the author.
+- **`unmention` keeps removing rather than stamping**, and the pattern carries
+  two removal semantics until [#6573] closes it. Not because an edge matters
+  less than content, but because a mention is a bare reference with no record
+  to stamp: giving it one means changing what the array's elements are, and
+  `mentions` is in the board's demand and is a union of three sources, only one
+  of which `unmention` reaches. The gap underneath is that a mention is the
+  only authored act here with no attribution at all.
 - Stage B keeps the existing verb names. The rehearsed break is the *one*
   deliberate break in this plan: anything break-shaped discovered along the way
   rides it, and every other change stays gate-clean.
 - The board's demand names the eight members above, and losing the excluded
   fields from the board's published projection is accepted.
+
+[#6573]: https://github.com/commontoolsinc/labs/issues/6573
