@@ -361,9 +361,11 @@ spec test failing.
 - **Post-commit sink-release re-verification** — the runner re-checks the frozen
   request snapshot after commit; §8.10 defines only pre-commit verification. Define
   the contract (what it re-verifies, whether it re-runs the ceiling). (audit 3.11.)
-- **`ExternalIngest` vouched-ingest provenance mark** — split-mint, module-private
-  trigger, bypasses `gateRuntimeMintedIntegrity`, audience recorded-not-enforced —
-  defined only in a proposal doc.
+- **`ExternalIngest` provenance mark** — split-mint, module-private trigger,
+  and bypasses `gateRuntimeMintedIntegrity`. Its vouched-channel variant
+  records an audience without enforcing it; its weaker fetch variant records
+  only a pinned source and makes no audience claim. Defined only in feature
+  documents.
 - **Atom registry parity (`ExternalIngest` / `UserSurfaceInput`).** Both are
   *already* registered in the runtime — `CFC_ATOM_TYPE`
   ([`packages/api/cfc.ts:35`,`:49`](../../packages/api/cfc.ts)) and the propagation

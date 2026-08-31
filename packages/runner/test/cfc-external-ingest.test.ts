@@ -6,7 +6,10 @@ import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 
 import type { JSONSchema } from "../src/builder/types.ts";
-import { stampExternalIngest } from "../src/cfc/external-ingest.ts";
+import {
+  stampExternalFetchIngest,
+  stampExternalIngest,
+} from "../src/cfc/external-ingest.ts";
 import type { IFCLabel } from "../src/cfc/mod.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -85,6 +88,29 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
     valueDigest,
   });
 
+  const fetchMeta = (id: string, valueDigest: string) => ({
+    pinnedSource: {
+      url:
+        "https://raw.githubusercontent.com/owner/repo/0123456789abcdef0123456789abcdef01234567/skills/plaid/SKILL.md",
+      commitSha: "0123456789abcdef0123456789abcdef01234567",
+    },
+    receivedAt: "2026-09-01T12:00:00.000Z",
+    valueDigest,
+    target: { space, id: id as never, scope: "space" as const, path: [] },
+  });
+
+  const externalFetchIngestAtom = (valueDigest: string) => ({
+    type: CFC_ATOM_TYPE.ExternalIngest,
+    kind: "fetch",
+    pinnedSource: {
+      url:
+        "https://raw.githubusercontent.com/owner/repo/0123456789abcdef0123456789abcdef01234567/skills/plaid/SKILL.md",
+      commitSha: "0123456789abcdef0123456789abcdef01234567",
+    },
+    receivedAt: "2026-09-01T12:00:00.000Z",
+    valueDigest,
+  });
+
   it("mints the mark on the ingest target even when CFC is disabled", async () => {
     const { storageManager, runtime } = makeRuntime();
     try {
@@ -105,6 +131,38 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
       expect(entries[0].label.integrity).toContainEqual(
         externalIngestAtom("sha256:payload-1"),
       );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("mints fetch provenance without a vouched channel or audience", async () => {
+    const { storageManager, runtime } = makeRuntime({
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const id = runtime.getCell(space, "fetch-ingest-a")
+        .getAsNormalizedFullLink().id;
+      const { error } = await runtime.editWithRetry((tx) => {
+        stampExternalFetchIngest(
+          tx,
+          fetchMeta(id, "sha256:fetched-payload"),
+        );
+        tx.writeOrThrow(
+          { space, scope: "space", id, path: ["value"] },
+          "skill text",
+        );
+      });
+      expect(error).toBeUndefined();
+
+      const atoms = ingestEntries(storageManager, id)
+        .flatMap((entry) => entry.label.integrity ?? []);
+      expect(atoms).toEqual([
+        externalFetchIngestAtom("sha256:fetched-payload"),
+      ]);
+      expect(atoms[0]).not.toHaveProperty("channel");
+      expect(atoms[0]).not.toHaveProperty("audience");
     } finally {
       await runtime.dispose();
       await storageManager.close();

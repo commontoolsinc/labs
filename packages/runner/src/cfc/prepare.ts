@@ -6952,25 +6952,29 @@ export const prepareBoundaryCommit = (
     }
 
     if (isIngestTarget && ingestStamp !== undefined) {
-      // The split-mint: a builtin-authored ExternalIngest provenance mark,
-      // derived ONLY from the verified channel metadata the operator-side
-      // helper stamped on this tx — channel, audience, receivedAt, and a digest
-      // of the payload the helper wrote — touching zero attacker bytes. Pushed
-      // with a runtime origin, so it bypasses gateRuntimeMintedIntegrity (the
-      // member-authored payload's `declared` label above is still gated,
-      // stripping any ExternalIngest atom an attacker smuggled into the
-      // payload). Anchored at the declared ingest target path; the stale prior
-      // mark for this doc was dropped from carry-forward above, so this
-      // replaces rather than accumulates.
+      // The split-mint is derived only from trusted host metadata stamped on
+      // the transaction, touching zero attacker bytes. A vouched-channel stamp
+      // names the grant and its audience; the weaker fetch stamp names only
+      // the immutable source the host read. Pushed with a runtime origin, so
+      // it bypasses `gateRuntimeMintedIntegrity`; a smuggled payload atom is
+      // still stripped by that gate. The declared target anchors either form.
       persistedLabelEntries.push({
         path: canonicalizeLogicalPath(ingestStamp.target.path),
         label: {
-          integrity: [cfcAtom.externalIngest(
-            ingestStamp.channel,
-            ingestStamp.audience,
-            ingestStamp.receivedAt,
-            ingestStamp.valueDigest,
-          )],
+          integrity: [
+            ingestStamp.kind === "fetch"
+              ? cfcAtom.externalFetchIngest(
+                ingestStamp.pinnedSource,
+                ingestStamp.receivedAt,
+                ingestStamp.valueDigest,
+              )
+              : cfcAtom.externalIngest(
+                ingestStamp.channel,
+                ingestStamp.audience,
+                ingestStamp.receivedAt,
+                ingestStamp.valueDigest,
+              ),
+          ],
         },
         origin: "external-ingest",
       });
