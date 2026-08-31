@@ -717,7 +717,8 @@ Deno.test("a configured presence URL reaches every shell bundle CI builds", asyn
   // shell. Every check the wiring performs therefore sits inside an
   // `if [ -n "$PRESENCE_URL" ]` that a repository without the variable never
   // enters, so those checks cannot report on the wiring itself: remove the
-  // same runs stay green. The properties a configured value depends on are
+  // wiring and the same runs stay green. The properties a configured value
+  // depends on are
   // checked here instead, against the workflow text, where repository
   // configuration does not get to decide whether the check runs.
 

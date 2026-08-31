@@ -1074,7 +1074,7 @@ describe("Cell Static Methods", () => {
     // Date normalization on `set()`
     //
     // A native `Date` written through `set()` normalizes to a
-    // `FabricEpochNsec`, at the top level and nested inside a record.
+    // `FabricEpochNsec`, at the top level and nested inside an array.
     //
 
     it("normalizes a top-level Date to FabricEpochNsec (set)", async () => {

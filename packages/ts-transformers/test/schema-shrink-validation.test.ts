@@ -713,7 +713,8 @@ Deno.test("Schema Shrink Validation", async (t) => {
   // Type-arg form against inline form
   //
   // The two spellings of a signature — a type argument, or an annotated
-  // callback parameter — must produce identical schemas.
+  // callback parameter — should produce the same schemas. Optional-property
+  // encoding is a known remaining divergence, noted where it bites.
   //
 
   await t.step(
