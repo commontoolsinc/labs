@@ -3557,7 +3557,7 @@ Deno.test("CellBridge.hydratePieceProp labels void handlers as no-arg callables 
 });
 
 //
-// Group 2: addPieceToSpace — name collision
+// Group 2: addPieceToSpace — the directory name
 //
 
 Deno.test("CellBridge.addPieceToSpace assigns -2 suffix on name collision", async () => {

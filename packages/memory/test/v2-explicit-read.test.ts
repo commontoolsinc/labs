@@ -845,18 +845,6 @@ Deno.test("stage A: a lease holder names two instances of one (branch, id, scope
   }
 });
 
-// The exemption LIFECYCLE under the keyed wire (fan-out stage A's
-// independent review, finding 1 — 2026-08-17). Two halves of one
-// invariant: (i) a session's wire vocabulary is STICKY once it was
-// admitted explicit-instance reads — an instance delivered KEYED is
-// always retracted KEYED, so a former holder's catch-up names exactly the
-// foreign instances it retracts and never the session's own (an unkeyed
-// remove resolves against the client's OWN instance: the wipe); (ii) the
-// DELIVERY of foreign instances is live-lease-gated per pass, and a lapse
-// RE-ARMS on the first live pass with a full evaluation that re-delivers
-// what the lapse withheld — a renewal blip the SpaceServer survives
-// in-process must not leave its serving replica silently stale.
-
 /** Every session/effect frame's upserts at or past `from`, with keys. */
 const effectUpserts = (
   messages: ServerMessage[],
@@ -902,6 +890,18 @@ const writeOwnProfile = async (
 };
 
 Deno.test("finding 1 (wire half): a former holder's catch-up RETRACTS a keyed-delivered foreign instance BY KEY — its own instance of the same doc is never named; and once the lease is back, the next foreign write's pass re-arms and re-delivers the instance keyed (no re-issued watch)", async () => {
+  // The exemption LIFECYCLE under the keyed wire (fan-out stage A's
+  // independent review, finding 1 — 2026-08-17). Two halves of one
+  // invariant: (i) a session's wire vocabulary is STICKY once it was
+  // admitted explicit-instance reads — an instance delivered KEYED is
+  // always retracted KEYED, so a former holder's catch-up names exactly the
+  // foreign instances it retracts and never the session's own (an unkeyed
+  // remove resolves against the client's OWN instance: the wipe); (ii) the
+  // DELIVERY of foreign instances is live-lease-gated per pass, and a lapse
+  // RE-ARMS on the first live pass with a full evaluation that re-delivers
+  // what the lapse withheld — a renewal blip the SpaceServer survives
+  // in-process must not leave its serving replica silently stale.
+
   const server = newServer("memory://explicit-read-keyed-retract");
   setServerExecutionConfig(true);
   try {

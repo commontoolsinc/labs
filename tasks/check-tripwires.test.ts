@@ -68,7 +68,8 @@ Deno.test("the real manifest passes end to end", async () => {
 // quietly stops working. Beside them sit the intact baseline, the legitimate
 // resolved weakness, and the driver that reports them all.
 //
-// Each case writes its own fixture file rather than pointing at a real one.
+// No case points at a real repository file: four write their own fixture,
+// and two name a path the repository does not have.
 // Self-reference bites here: a literal ".ignore(" anywhere in this file would
 // make the healthy case trip the DISABLED branch.
 //

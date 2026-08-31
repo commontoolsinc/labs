@@ -112,8 +112,9 @@ const aliceShareFact = (audience: CfcAtom = userBob) => ({
 });
 
 describe("CFC grant records (§8.12.7 route 2a)", () => {
-  // The shared harness every region below draws on: a labeled cell, a
-  // policyState-guarded sink rule, a Runtime, and the grant writer and reader.
+  // The shared harness the regions from build-order item 2 on draw on: a
+  // labeled cell, a policyState-guarded sink rule, a Runtime, and the grant
+  // writer and reader.
 
   const SECRET_SCHEMA = internSchema(
     {

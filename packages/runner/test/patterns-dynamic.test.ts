@@ -1285,7 +1285,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
   });
 
   //
-  // WithPattern variant tests
+  // `filterWithPattern` and `flatMapWithPattern` variants
   //
 
   it("should filter with a pre-defined pattern (filterWithPattern)", async () => {

@@ -361,6 +361,8 @@ Deno.test("memory v2 patch reuses unchanged branches across sibling updates", ()
 });
 
 //
+// `append`
+//
 // An `append` op is tail-relative: it inserts `values` at the array's live tail,
 // creating the array (and the path to it) when absent. This is what lets a client
 // whose base is stale or empty still land its elements after whatever durably
@@ -406,6 +408,8 @@ Deno.test("memory v2 append rejects a non-array target", () => {
   assert(threw, "append onto a non-array must throw");
 });
 
+//
+// `add-unique`
 //
 // `add-unique` appends each value only if no existing element equals it, and
 // creates the array if absent. It is idempotent against durable state.
@@ -476,6 +480,8 @@ Deno.test("memory v2 add-unique on the weird numbers", () => {
   assert(Object.is(zero.value[1], +0), "the added +0 must be distinct");
 });
 
+//
+// `increment`
 //
 // `increment` adds `by` to the number at the path, treats an absent value as 0,
 // creates the path if absent, and sums when composed.
@@ -551,6 +557,8 @@ Deno.test("memory v2 increment rejects a non-finite amount", () => {
 });
 
 //
+// `remove-by-value`
+//
 // `remove-by-value` removes every element equal to the given value (by stored
 // value), idempotently, and is a no-op on a missing/non-array target.
 //
@@ -618,10 +626,12 @@ Deno.test("memory v2 remove-by-value is a no-op when absent", () => {
 });
 
 //
+// Targets an op refuses
+//
 // A non-array target is rejected once the path resolves to a traversable
 // container (an object) rather than to a scalar. A scalar target is caught
 // earlier by the spine thaw with a "not traversable" message; an object target
-// reaches the op's own array-shape check.
+// reaches the op's own array-shape check. The root path is refused outright.
 //
 
 Deno.test("memory v2 append rejects a non-array object target", () => {
@@ -688,6 +698,8 @@ Deno.test("memory v2 remove-by-value is a no-op through a missing array index", 
   assertEquals(out, { items: [["a"]] });
 });
 
+//
+// `applyPatchToDocument`
 //
 // `applyPatchToDocument` is the shared "replay these ops over whatever this
 // document currently is" entry point (server-side reconstruction and the
