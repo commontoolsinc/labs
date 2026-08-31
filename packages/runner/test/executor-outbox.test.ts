@@ -385,9 +385,7 @@ describe("stage G outbox + sqlite discharge", () => {
   });
 
   //
-  // The durable half: rows in the wave's own transaction
-  //
-  // (FP1)
+  // The durable half (FP1): rows in the wave's own transaction
   //
 
   it("lands outbound append rows INSIDE the wave's engine transaction, for surviving contributions only (FP1; the model's committed-only fold)", async () => {
@@ -480,9 +478,7 @@ describe("stage G outbox + sqlite discharge", () => {
   });
 
   //
-  // Delivery: admit at the target, then delete
-  //
-  // (FP1 closure)
+  // Delivery (FP1 closure): admit at the target, then delete
   //
 
   it("delivers pending rows: delegated admission at the target stamps firedAt from the CARRIED actor (LT5 envelope), then deletes the row; a re-sent duplicate dedupes at the eventId horizon", async () => {
@@ -667,6 +663,14 @@ describe("stage G outbox + sqlite discharge", () => {
       "evt-fifo-3",
     ]);
   });
+
+  //
+  // The fold's completeness, and the gate at the source
+  //
+  // What the durable half must still carry — a foreign-only survivor's
+  // appends, and a tx that sealed nothing but staged some — and the refusal
+  // that happens at enqueue rather than at delivery.
+  //
 
   it("folds a FOREIGN-only-seal survivor's appends into the home batch's outbox rows (FP1 fold completeness; the stage-G review's M-A)", async () => {
     // A contribution whose only sealed space is FOREIGN (the Phase-5
@@ -853,6 +857,13 @@ describe("stage G outbox + sqlite discharge", () => {
     wave.abandon("test over");
     lease.release();
   });
+
+  //
+  // Refusals and failures at delivery
+  //
+  // What the drain does with a row it cannot deliver: a deterministic
+  // rejection retires, a transport failure does not.
+  //
 
   it("does not retry an LT4 deterministic admission rejection: the row is deleted and counted failed", async () => {
     // The accumulator refuses userless entries at the source (above),
@@ -1123,9 +1134,7 @@ describe("stage G outbox + sqlite discharge", () => {
   });
 
   //
-  // The sqliteQuery memo decision
-  //
-  // (B1's fix, serving-loop.md §4/§6)
+  // The sqliteQuery memo decision (serving-loop.md §4/§6)
   //
 
   it("sqliteQuery memo decision: a settled result is a hit, a bare claim never is; an orphaned claim re-issues ONLY under the serving posture", () => {
@@ -1184,7 +1193,13 @@ describe("stage G outbox + sqlite discharge", () => {
     })).toBe("issue");
   });
 
-  // the sqlite bound's discharge
+  //
+  // Discharging a sqlite op through the attachment hook
+  //
+  // What the decision above leads to: a folded op applied atomically through
+  // the hook, and a loud refusal everywhere else — no hook, no resolved scope
+  // key, or a foreign batch.
+  //
 
   // Unique per test run: the cell-db FILE for a memory-URL engine lives
   // at a deterministic TMPDIR path keyed by (space, id) — a stable id
@@ -1225,13 +1240,6 @@ describe("stage G outbox + sqlite discharge", () => {
       ? { sqliteScopeKeys: [{ op: 1, scopeKey: "space" }] }
       : { sqliteScopeKeys: options.scopeKeys }),
   });
-
-  //
-  // Discharging a sqlite op through the attachment hook
-  //
-  // What the decision above leads to: a folded op applied atomically where the
-  // hook exists, and a loud refusal where it does not.
-  //
 
   it("applies a folded sqlite op in a HOME wave batch atomically via the server's attachment hook (the stage-D bound discharged)", async () => {
     const lease = liveLease();

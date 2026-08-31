@@ -233,6 +233,7 @@ describe("mergeable remove-by-value build guards", () => {
   // working array must be exactly the base with the removed values taken out.
   // Anything else the transaction changed on that array would otherwise be
   // silently discarded.
+
   const removeIntent = (...values: string[]) =>
     ({ op: "remove-by-value", path: ["value"], values }) as const;
 
@@ -327,10 +328,12 @@ describe("mergeable op payload containment", () => {
   // already had its change applied by the containing op, whose payload is read
   // from the working array at commit. `buildMergeableOps` abandons the
   // contained intent; this pins the per-op answers it asks for.
-  // A tail op sends `array.slice(tailStart)` — live values out of the working
-  // document — so it carries every path at or past that index, at any depth.
 
   it("a tail op contains the paths at or past its tail start", () => {
+    // A tail op sends `array.slice(tailStart)` — live values out of the
+    // working document — so it carries every path at or past that index, at
+    // any depth.
+
     const ctx = {
       workingArray: [["a"], ["x"]],
       hadInitialArray: true,

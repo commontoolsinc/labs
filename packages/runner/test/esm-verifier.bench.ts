@@ -364,7 +364,7 @@ Deno.bench(
 );
 
 //
-// Also run the regression delta over all parking bodies summed
+// Regression delta, all parking bodies summed
 //
 
 Deno.bench(
