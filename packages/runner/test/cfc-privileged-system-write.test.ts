@@ -293,15 +293,16 @@ describe("CFC privileged system write (S18)", () => {
   });
 
   it("does not gate a path-[] full-document write carrying a cfc field", async () => {
-    // Documented deferred residual: the guard keys on path[0] === "cfc", so a
-    // path-[] full-document write whose value embeds a `cfc` record is NOT
-    // gated. This is the shape hydration delivers and the raw-seed idiom other
-    // CFC tests rely on (seedPrivilegedCfc in cfc-boundary.test.ts); per the
-    // sandbox invariant only the logical `value` surface is exposed to
-    // untrusted or user-authored code (docs/plans/runner_cfc_implementation.md
-    // "Document Surface Rules"), so untrusted code cannot reach this vector.
-    // If document-root writes ever become reachable from untrusted code, this
-    // test documents the seam that must then be gated.
+    // Open residual: the guard keys on path[0] === "cfc", so a path-[]
+    // full-document write whose value embeds a `cfc` record is NOT gated.
+    // This is the shape hydration delivers and the raw-seed idiom other CFC
+    // tests rely on (seedPrivilegedCfc in cfc-boundary.test.ts), and it is
+    // reachable from untrusted code: a handler holds a runtime cell and the
+    // transaction it is bound to addresses the whole document
+    // (docs/plans/runner_cfc_implementation.md "Document Surface Rules").
+    // The meta seam is gated across both addressing modes, this one included
+    // (meta-seam-write-authorization.test.ts); label-map forgery through the
+    // document root is what this test still records as ungated.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),

@@ -1,4 +1,3 @@
-import { MetaLinkField } from "@commonfabric/api";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
@@ -20,6 +19,8 @@ import {
   onSchemaRegistryClear,
   registerSchemaDocument,
 } from "./schema-registry.ts";
+import type { MetaLinkField } from "./meta-seam.ts";
+import type { IReadOptions } from "./storage/interface.ts";
 import { getContentAddressedSchemasConfig } from "./schema-doc-config.ts";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
@@ -840,7 +841,7 @@ const META_READ_OPTIONS = {
 export function getMetaLink(
   resultCell: Cell<unknown>,
   field: MetaLinkField,
-  options: unknown = META_READ_OPTIONS,
+  options: IReadOptions = META_READ_OPTIONS,
 ): NormalizedFullLink | undefined {
   const linkObj = resultCell.getMetaRaw(field, options);
   if (linkObj === undefined) return undefined;

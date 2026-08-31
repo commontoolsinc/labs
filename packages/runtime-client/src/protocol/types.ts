@@ -1,4 +1,4 @@
-import type { MetaField } from "@commonfabric/api";
+import type { MetaField } from "@commonfabric/runner";
 import type {
   FabricBytes,
   FabricKeyPair,

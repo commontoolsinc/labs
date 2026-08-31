@@ -5274,7 +5274,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       );
       expect(getMetaLink(plainTarget2, "result", {
         meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
-        frozen: false,
       })).toBeDefined();
       plainTarget2.set({ bar: "updated" });
       tx2.prepareCfc();

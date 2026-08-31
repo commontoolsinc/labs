@@ -55,6 +55,17 @@ export type {
 export * from "./interface.ts";
 export { raw } from "./module.ts";
 export type { Cell, Stream } from "./cell.ts";
+// The seam's vocabulary, which describes a document's shape and is read by
+// hosts. Its write authorization is deliberately not here: it rides the
+// `@commonfabric/runner/meta-seam` subpath, so an import of it names the seam
+// it opens.
+export {
+  isMetaField,
+  META_FIELDS,
+  META_LINK_FIELDS,
+  type MetaField,
+  type MetaLinkField,
+} from "./meta-seam.ts";
 export type { NormalizedFullLink, NormalizedLink } from "./link-types.ts";
 export { encodeJsonPointer } from "./link-types.ts";
 export type { SigilLink, URI } from "./sigil-types.ts";

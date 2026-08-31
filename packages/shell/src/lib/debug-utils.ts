@@ -21,7 +21,7 @@ import type {
 import type { DID } from "@commonfabric/identity";
 import { hasEntityUriScheme } from "@commonfabric/runner/entity-kind";
 import { isObjectOrArray } from "@commonfabric/utils/types";
-import type { MetaField } from "@commonfabric/api";
+import type { MetaField } from "@commonfabric/runner";
 import { createVDomDebugHelpers, viewSettled } from "@commonfabric/html/debug";
 
 /**

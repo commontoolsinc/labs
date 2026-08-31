@@ -1,5 +1,4 @@
 import type { ReadonlyCell } from "@commonfabric/api";
-import { MetaField } from "@commonfabric/api";
 import {
   type EntityRef,
   entityRefFromString,
@@ -134,6 +133,7 @@ import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
+import { type MetaField, type RawMetaWriteAuthorization } from "./meta-seam.ts";
 import type { Runtime } from "./runtime.ts";
 import {
   type Action,
@@ -485,6 +485,15 @@ declare module "@commonfabric/api" {
       ) => Cancel | undefined | void,
       options?: SinkOptions,
     ): Cancel;
+    getMetaRaw(
+      metaField: MetaField,
+      options?: IReadOptions,
+    ): FabricValue | undefined;
+    setMetaRaw(
+      metaField: MetaField,
+      value: FabricValue,
+      authorization: RawMetaWriteAuthorization,
+    ): void;
     sinkMeta(
       metaField: MetaField,
       callback: (value: FabricValue) => Cancel | undefined | void,
@@ -3225,7 +3234,23 @@ export class CellImpl<T extends FabricValue>
     return this.runtime.readTx(this.tx).readOrThrow(metaAddr, options);
   }
 
-  setMetaRaw(metaField: MetaField, value: FabricValue): void {
+  /**
+   * Writes a meta field on this cell's document.
+   *
+   * A meta field names the program a piece runs, the cells it is wired to,
+   * the shape its result is validated against, and its name in the space, so
+   * a write here redirects a piece rather than editing its data. The seam is
+   * the runtime's: `authorization` travels with the write as its options, and
+   * the storage-write chokepoint refuses a meta write that arrives without
+   * one. {@link rawMetaWriteAuthorization} is the value, and the sandbox
+   * hands pattern code the builder namespace rather than the runner's
+   * modules, so pattern code cannot name it.
+   */
+  setMetaRaw(
+    metaField: MetaField,
+    value: FabricValue,
+    authorization: RawMetaWriteAuthorization,
+  ): void {
     if (!this.tx) throw new Error("Transaction required for setMetaRaw");
     // No await for the sync, just kicking this off, so we have the data to
     // retry on conflict.
@@ -3236,7 +3261,7 @@ export class CellImpl<T extends FabricValue>
       path: [metaField],
       ...(this.#link.scope !== undefined && { scope: this.#link.scope }),
     };
-    this.tx.writeOrThrow(metaAddr, value);
+    this.tx.writeOrThrow(metaAddr, value, authorization);
   }
 
   /**

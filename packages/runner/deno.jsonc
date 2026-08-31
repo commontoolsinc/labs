@@ -29,6 +29,7 @@
     "./entity-kind": "./src/entity-kind.ts",
     "./experimental-posture": "./src/experimental-posture.ts",
     "./fabric-url": "./src/fabric-url.ts",
+    "./meta-seam": "./src/meta-seam.ts",
     "./slugs": "./src/slugs.ts",
     "./schemas": "./src/schemas.ts",
     "./telemetry-otel-bridge": "./src/telemetry-otel-bridge.ts",

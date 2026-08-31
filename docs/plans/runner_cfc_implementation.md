@@ -325,10 +325,54 @@ Memory-v2 keeps a full entity-document boundary. Low-level `tx.read()` and
 `tx.write()` operate on the whole entity document, including reserved metadata
 siblings such as `source` and `cfc`.
 
-Only the logical `value` surface is exposed to untrusted or user-authored code.
+The read and materialization paths present the logical `value` surface:
 `Cell.get()`, `Cell.sync()`, query materialization, and similar
-validate/transform paths read under `value`, not the full document. Reserved
-siblings remain system metadata, not user JSON content.
+validate/transform paths read under `value`, not the full document, so a
+reserved sibling never arrives as user JSON content.
+
+That is a property of those paths rather than a boundary around untrusted
+code. A pattern's handler holds a runtime cell in the runtime's own realm, so
+the document surface is within its reach: `getMetaRaw` reads a meta field, and
+the storage transaction the cell is bound to addresses any path of the
+document, `value` and its reserved siblings alike. Each seam on that surface
+therefore carries its own guard:
+
+- The meta seam — `patternIdentity`, `argument`, `slug`, and the rest of the
+  `MetaField` union — is the runtime's to write. `setMetaRaw` marks the write
+  it makes, and the write chokepoint refuses a meta write that arrives
+  unmarked, whatever the enforcement mode, because a write there names the
+  program a piece runs rather than editing its data. Three shapes reach a
+  meta field and all three are refused: an address naming the field, a
+  document-root envelope carrying it as a key, and a document-root write that
+  leaves it out, which drops it, since a root write replaces the envelope.
+  The third is decided by reading each meta member of the stored document,
+  never its root: a root read would name a logical path covering every entry
+  in the document's label map, and a guard has no business widening what the
+  transaction around it counts as consumed. Those reads carry no commit
+  precondition, because a precondition would turn a whole-document write into
+  a read-modify-write, and the blind root writes the runtime makes would lose
+  the race against any advance of the document they replace. What that leaves
+  open is an erasure racing the guard, never a forgery: the two shapes that
+  name a field are refused from the write itself, with no read at all. The
+  refusal is also the first of these guards to run, ahead of the ones keyed
+  by target id, so which document a write names cannot decide whether it is
+  asked for an authorization. Meta fields stay readable.
+- A write addressed at a document's `["cfc"]` label map from outside the
+  runtime's privileged persistence scope is recorded, and the commit boundary
+  turns each record into a fail-closed reason (audit S18).
+- A document-root (`path: []`) write whose envelope carries a `cfc` record
+  reaches the label map with no record made: the `["cfc"]` guard keys on the
+  address, and this write's address is the document. The meta guard covers
+  that shape for its own fields, so what stands open here is label-map
+  forgery through the document root.
+- A guard on a seam governs writes to it, not the runtime entry points that
+  write it while doing their own work. The same reach that hands a handler
+  the storage transaction hands it the runtime: `runtime.run` instantiates a
+  pattern of the caller's choosing onto a cell the caller names, and stamps
+  that cell's `patternIdentity` through the authorized entry point on the
+  caller's behalf. What that costs is a question about the object graph a
+  cell hands pattern code, and it is where a boundary around untrusted code
+  would have to be drawn.
 
 Storage rules:
 
