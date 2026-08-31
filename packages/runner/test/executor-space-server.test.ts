@@ -103,6 +103,7 @@ describe("stage G SpaceServer recovery seams", () => {
       serverFacade?: MemoryV2Server.Server;
       stats?: ServingLoopStats;
       policy?: ConstructorParameters<typeof SpaceServer>[0]["policy"];
+      onParked?: (reason: string) => void;
     } = {},
   ): SpaceServer => {
     const stats = options.stats ?? emptyServingLoopStats();
@@ -134,6 +135,7 @@ describe("stage G SpaceServer recovery seams", () => {
       localSeqRef: { value: 0 },
       stats,
       policy: options.policy ?? { flushDeadlineMs: 2_000, idleParkMs: 600_000 },
+      ...(options.onParked !== undefined ? { onParked: options.onParked } : {}),
     });
     spaceServer = created;
     return created;
@@ -200,6 +202,35 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(
       liveExecutionLeaseHolder(engine, space),
     ).toBeUndefined();
+  });
+
+  it("returns `false` from `activate()` while another process holds the space's execution lease, and reports `lease-unavailable` without building a runtime (serving-loop.md §3)", async () => {
+    // The rival's row is the whole staging: a lease acquired under a
+    // holder this server can never match, live for far longer than the
+    // activation below takes.
+    const rival = executionLeaseHolder("did:key:space-server-rival");
+    expect(
+      acquireExecutionLease(engine, {
+        space,
+        holder: rival,
+        ttlMs: 600_000,
+      }),
+    ).toBe(true);
+
+    const parks: string[] = [];
+    const refused = newSpaceServer({
+      onParked: (reason) => parks.push(reason),
+    });
+
+    expect(await refused.activate()).toBe(false);
+    expect(refused.active).toBe(false);
+    expect(parks).toEqual(["lease-unavailable"]);
+    // The refusal precedes the runtime factory — a second deriver must
+    // not build a serving runtime it has no right to commit from — and
+    // it leaves the rival's row exactly as it found it.
+    expect(servingRuntime).toBeUndefined();
+    expect(liveExecutionLeaseHolder(engine, space)).toBe(rival);
+    expect(lastStats.lease.held).toBe(0);
   });
 
   it("re-sends pending durable append rows on ACTIVATION (serving-loop.md §6 step 5): park-stranded rows deliver, then retire", async () => {

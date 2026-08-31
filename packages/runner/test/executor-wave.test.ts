@@ -904,6 +904,88 @@ describe("stage D seal-into-wave", () => {
     expect(stored?.document).toEqual({ value: { a: 2, b: 50 } });
   });
 
+  it("rebases an event's consequence mark against a CONCURRENT tail append to the same stream sidecar (§3d's stream-sidecar refinement)", async () => {
+    // The sidecar's two writers meet at `/value/entries`: the loop marks
+    // the entry it just processed, and a delivery appends a new one. The
+    // general prefix-overlap rule reads that as a conflict — an
+    // index-addressed mark sits under the appended-to array — and would
+    // requeue every event whose stream took a concurrent fire. A tail
+    // append creates only NEW indices, so the two commute.
+
+    const streamLink = { id: "of:sidecar-rebase-stream", path: ["stream"] };
+    const sidecarId = streamEntriesDocId(streamLink);
+    const deliver = (eventId: string, localSeq: number) =>
+      server.commitDelegatedAppend({
+        targetSpace: space,
+        targetStream: sidecarId,
+        targetStreamLink: streamLink,
+        eventId,
+        payload: { via: "sidecar rebase" },
+        actingPrincipal: "did:key:alice",
+        actingSession: "sidecar-rebase-session",
+        capabilityRef: "cap-sidecar-rebase",
+        sessionId: `service:${space}`,
+        localSeq,
+      });
+
+    // The event under processing: one durable entry at index 0.
+    expect((await deliver("e-marked", 900_001)).deduped).toBe(false);
+    // Loaded before the mark, as the drain leaves it: a write against an
+    // unloaded doc commits as a whole-doc set, and only a patch can
+    // commute with anything.
+    await runtime.getCellFromLink({
+      space,
+      id: sidecarId as never,
+      scope: "space",
+      path: [],
+    }).sync();
+
+    const lease = liveLease();
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, {
+      actionId: "sidecar-handler",
+      kind: "event-handler",
+      eventId: "e-marked",
+      acting: { user: "did:key:alice" },
+    });
+    // The consequence mark, written exactly as the dispatch writes it:
+    // the handler's own tx carries `entries/<index>/consequenced`.
+    runtime.getCellFromLink<boolean>({
+      space,
+      id: sidecarId as never,
+      scope: "space",
+      path: ["entries", "0", "consequenced"],
+    }).withTx(tx).set(true);
+    expect((await tx.commit()).error).toBeUndefined();
+    runtime.clearSealDestination();
+
+    // The concurrent writer: a second event delivered onto the same
+    // stream after the wave's basis — a tail append at `/value/entries`,
+    // the only shape the sidecar admits from anyone but the loop.
+    expect((await deliver("e-appended", 900_002)).deduped).toBe(false);
+
+    const outcome = await wave.commitWave(newSink());
+    await wave.settled();
+
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.requeuedEventIds).toEqual([]);
+    expect(outcome.committedEventIds).toEqual(["e-marked"]);
+    // Both survive: the appended entry AND the mark on the entry that
+    // was already there.
+    const stored = Engine.readState(engine, { id: sidecarId })?.document
+      ?.value as {
+        entries?: Array<{ eventId?: string; consequenced?: boolean }>;
+      } | undefined;
+    expect(stored?.entries?.map((entry) => entry.eventId)).toEqual([
+      "e-marked",
+      "e-appended",
+    ]);
+    expect(stored?.entries?.[0].consequenced).toBe(true);
+    expect(stored?.entries?.[1].consequenced).toBeUndefined();
+  });
+
   it("aborts the wave commit when the lease tenure lapsed (work sealed under a lapsed tenure never commits)", async () => {
     let now = 1_000_000;
     const cycle = new ExecutionLeaseCycle({

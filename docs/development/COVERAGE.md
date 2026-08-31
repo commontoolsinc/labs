@@ -332,6 +332,20 @@ moved — a sibling branch in the same file is the next one to flap.
 follows that line from a group-level `+2` down to the two integration hits that
 covered it in one run and not the next.
 
+What the second party holds need not be a write. A lease row another process
+owns puts a branch in the same position: the server executor's `activate()`
+reports `lease-unavailable` and returns `false` only when the space's execution
+lease is already held, and the host arm that unregisters the refused space runs
+only behind that. Nothing in the suite asks for a rival holder, so both were
+reached when one case's park happened to chain a re-activation while the rival
+row it had installed for a different purpose still stood. The way out is the
+same one: a lease is a row, so a test writes the row and calls `activate()`. The
+cases are in `packages/runner/test/executor-space-server.test.ts` and
+`packages/runner/test/executor-serving-loop.test.ts`, and
+[their investigation record](../history/development/coverage-flake-executor-contention-paths-2026-08-26.md)
+follows ten lines across three files from a group-level `+10` down to the two
+shards that reached them.
+
 ### Failure reports reached only when the operation fails
 
 A fourth shape is the branch that reports a failure: the `if (error)` arm of an
