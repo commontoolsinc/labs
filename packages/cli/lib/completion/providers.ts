@@ -336,7 +336,8 @@ async function cellPathCandidates(
   if (!config) return NOTHING;
 
   const { parentPath, prefix } = splitPathPrefix(line.word);
-  const keys = await childKeys(config, parentPath, {
+  const { listCellKeys } = await import("../cell-listing.ts");
+  const keys = await listCellKeys(config, parentPath, {
     // `#argument` on the reference and `--input` as a flag are two spellings
     // of one selection, so both reach the arguments cell here.
     input: line.flags.has("input") || config.pieceInput === true,
@@ -347,42 +348,6 @@ async function cellPathCandidates(
     candidates: keys.map((key) => ({ value: `${prefix}${key}` })),
     directives: [{ kind: "nospace" }],
   };
-}
-
-/**
- * Keys directly under `path` on a piece's cell. An array yields its indices, an
- * object its property names, and a leaf yields nothing — which is the correct
- * signal that the path is already complete.
- *
- * A path embedded in the reference comes first, the way `mergePiecePath` puts
- * it, so `--piece /of:fid1:…/items` completes `items`' keys rather than the
- * root's.
- */
-async function childKeys(
-  config: PieceConfig,
-  path: string,
-  options: { input?: boolean } = {},
-): Promise<string[]> {
-  const { getCellValue } = await import("../piece.ts");
-  const { parseCellPath } = await import("@commonfabric/runner");
-  const segments = [
-    ...(config.piecePath ?? []),
-    ...(path ? parseCellPath(path) : []),
-  ];
-  return keysOf(await getCellValue(config, segments, options));
-}
-
-/**
- * The completable keys of one cell value: an array yields its indices, an
- * object its property names, and a leaf yields nothing — which is the correct
- * signal that the path already names a value rather than a container.
- */
-export function keysOf(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map((_, index) => String(index));
-  if (value && typeof value === "object") {
-    return Object.keys(value as Record<string, unknown>);
-  }
-  return [];
 }
 
 /**
@@ -662,7 +627,8 @@ async function linkEndpointCandidates(
   const pieceId = typed.slice(0, cut);
   const { parentPath } = splitPathPrefix(typed.slice(cut + 1));
 
-  const keys = await childKeys({ ...config, piece: pieceId }, parentPath);
+  const { listCellKeys } = await import("../cell-listing.ts");
+  const keys = await listCellKeys({ ...config, piece: pieceId }, parentPath);
   if (keys.length === 0) return NOTHING;
 
   const prefix = linkEndpointPrefix(pieceId, parentPath);

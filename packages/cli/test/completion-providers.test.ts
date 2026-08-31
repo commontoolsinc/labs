@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertFalse } from "@std/assert";
+import { assert, assertEquals, assertFalse, assertRejects } from "@std/assert";
 import { Database } from "@db/sqlite";
 import {
   type CompletionLine,
@@ -12,7 +12,6 @@ import {
   completionProviderKeys,
   descendProjection,
   entityListingView,
-  keysOf,
   linkEndpointPrefix,
   liveCandidates,
   projectionKeys,
@@ -26,6 +25,7 @@ import {
   splitSelectPrefix,
   wishTargetCandidates,
 } from "../lib/completion/providers.ts";
+import { listCellKeys } from "../lib/cell-listing.ts";
 import {
   parseSelectionProjection,
   parseSelectProjection,
@@ -173,6 +173,30 @@ Deno.test("space context: the line's own --space wins over an embedded one", asy
       "team",
     );
   });
+});
+
+Deno.test("live candidates: a listing that raises completes to nothing", async () => {
+  // The two halves of one split. `listCellKeys` raises, because `cf`'s
+  // callers have to tell a leaf from a read that never happened; the provider
+  // dispatch turns that into an empty answer, because a stack trace pasted
+  // between two keystrokes is the wrong answer at any prompt.
+  //
+  // The line carries its whole connection, so the identity that cannot be
+  // read is the failure under test rather than whatever the surrounding
+  // environment holds.
+
+  const text = "cf get --identity /nonexistent/missing.key " +
+    "--api-url http://127.0.0.1:1 --space test --piece fid1:abc items/";
+  const line = lineFor(text);
+  const config = resolveSpaceContext(line);
+  assert(config, "the line names a connection");
+  await assertRejects(() =>
+    listCellKeys({ ...config, piece: "fid1:abc" }, "items")
+  );
+
+  const result = await liveCandidates(line);
+  assertEquals(result.candidates, []);
+  assertEquals(result.directives, []);
 });
 
 Deno.test("live candidates: unmapped slots ask for nothing", async () => {
@@ -1141,18 +1165,6 @@ Deno.test("every wish target offered is one the command's help enumerates", () =
       documented.has(candidate.value),
       `${candidate.value} is offered but not documented in cf wish --help`,
     );
-  }
-});
-
-Deno.test("shaping: containers yield keys, leaves yield nothing", () => {
-  // A leaf yielding nothing is the correct signal that the path already names
-  // a value; offering anything there would invent paths that do not exist.
-  assertEquals(keysOf({ title: 1, done: 2 }), ["title", "done"]);
-  assertEquals(keysOf(["a", "b", "c"]), ["0", "1", "2"]);
-  assertEquals(keysOf([]), []);
-  assertEquals(keysOf({}), []);
-  for (const leaf of ["text", 42, true, null, undefined]) {
-    assertEquals(keysOf(leaf), [], String(leaf));
   }
 });
 

@@ -9,7 +9,16 @@
     "acl-integration": "CF_CLI_INTEGRATION_USE_LOCAL=1 CF_LOG_LEVEL=error ./integration/acl.sh"
   },
   "exports": {
-    ".": "./mod.ts"
+    // Importing `.` builds the whole command tree, so a sibling package that
+    // calls a library seam names the module holding it. Each entry here is a
+    // contract with a second caller; a module with only one caller keeps its
+    // relative path.
+    ".": "./mod.ts",
+    "./commands/piece": "./commands/piece.ts",
+    "./lib/cell-listing": "./lib/cell-listing.ts",
+    "./lib/piece": "./lib/piece.ts",
+    "./lib/piece-render": "./lib/piece-render.ts",
+    "./lib/wish": "./lib/wish.ts"
   },
   "imports": {
     // Dependency guide: ../../docs/development/DEPENDENCIES.md
