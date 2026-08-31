@@ -75,6 +75,8 @@ Deno.test("pinned libsqlite3 release matches the resolved @db/sqlite", () => {
 });
 
 //
+// Picking the library file
+//
 // Provenance has to be read from the same libsqlite3 image that runs the query,
 // so the only acceptable file is the one `@db/sqlite` picks. These cover the
 // picking rule and the refusal to substitute a different file for one that

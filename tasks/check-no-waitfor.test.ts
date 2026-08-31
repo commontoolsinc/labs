@@ -269,7 +269,7 @@ Deno.test("importsPollingWaitFor ignores an import in a line-continued string", 
 });
 
 //
-// Which relative paths reach the same `waitFor`, and which do not.
+// Relative paths that reach the same `waitFor`, and those that do not
 //
 
 Deno.test("importsPollingWaitFor detects a relative import of the package's utils.ts", () => {

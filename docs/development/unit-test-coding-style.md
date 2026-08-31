@@ -233,13 +233,13 @@ Deno.test("would-pass", function () {});
 Deno.test({ name: "derive array leak", fn: runTest, sanitizeOps: false });
 ```
 
-An options object whose `fn` is written out — `fn() { … }` or
-`fn: async () => { … }` — has a body like any other callback, and the
-comment goes inside it.
-
 This is the same allowance
 [`code-comment-style.md`](code-comment-style.md#where-one-goes) makes for a
 declaration with no body to put a note in.
+
+An options object whose `fn` is written out — `fn() { … }` or
+`fn: async () => { … }` — has a body like any other callback, and the
+comment goes inside it.
 
 Three nearby shapes are not this one:
 
