@@ -1,5 +1,6 @@
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type { CfcConfClause } from "./clause.ts";
@@ -309,12 +310,25 @@ export const rebaseCfcLabelView = (
   ]);
 };
 
+/**
+ * Whether two label views carry the same labels.
+ *
+ * `cloneCfcLabelView` puts each side into canonical form: logical paths, entry
+ * order, empty labels dropped, and a view left holding nothing reduced to
+ * `undefined`. `deepEqual` then compares what remains property by property, so
+ * an atom written `{type, subject}` equals the same atom written
+ * `{subject, type}`. That is the reading `uniqueCfcAtoms` gives atoms on the
+ * merge path, where a fabric-converted clone of an atom is the same atom.
+ *
+ * The clause list and the integrity set are compared IN ORDER. That matches
+ * `canonicalizeCfcLabel`, which reorders the alternatives inside an OR-clause
+ * and leaves those two lists as they were given, so this answer stays aligned
+ * with the persist-side idempotence check in `prepare.ts` that deep-equals
+ * canonicalized metadata.
+ */
 export const cfcLabelViewsEqual = (
   left: CfcLabelView | undefined,
   right: CfcLabelView | undefined,
-): boolean => {
-  if (left === right) return true;
-  if (left === undefined || right === undefined) return false;
-  return JSON.stringify(cloneCfcLabelView(left)) ===
-    JSON.stringify(cloneCfcLabelView(right));
-};
+): boolean =>
+  left === right ||
+  deepEqual(cloneCfcLabelView(left), cloneCfcLabelView(right));
