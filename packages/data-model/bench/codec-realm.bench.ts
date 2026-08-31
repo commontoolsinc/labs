@@ -77,6 +77,7 @@ const SINGLE_SHOT = new Set(["bytes"]);
 const SINGLES_REALM = SINGLES
   .filter(([name]) => !SINGLE_SHOT.has(name))
   .map(([n, v]) => [n, realmFromFabricValue(v)] as const);
+
 const ARRAYS_REALM = ARRAYS.map(([n, v]) =>
   [n, realmFromFabricValue(v)] as const
 );

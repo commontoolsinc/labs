@@ -37,6 +37,7 @@ import {
 const SINGLES_JSON = SINGLES.map(([n, v]) =>
   [n, jsonFromFabricValue(v)] as const
 );
+
 const ARRAYS_JSON = ARRAYS.map(([n, v]) =>
   [n, jsonFromFabricValue(v)] as const
 );

@@ -40,6 +40,7 @@ class MockRuntime extends BaseLiveEnvironment {
     throw new Error("getCell not implemented in test runtime");
   }
 }
+
 const mockRuntime = new MockRuntime();
 
 /** Encodes and then decodes a value, per the current dispatch configuration. */

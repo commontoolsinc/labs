@@ -443,11 +443,19 @@ function computeHashAsString(value: unknown): string {
 // Caches
 //
 
-/** Pre-computed constant hashes (these values never change). */
+/** Pre-computed hash of `null`. */
 const NULL_HASH = computeHash(null);
+
+/** Pre-computed hash of `undefined`. */
 const UNDEFINED_HASH = computeHash(undefined);
+
+/** Pre-computed hash of `true`. */
 const TRUE_HASH = computeHash(true);
+
+/** Pre-computed hash of `false`. */
 const FALSE_HASH = computeHash(false);
+
+/** Pre-computed hash of negative zero. */
 const NEGATIVE_ZERO_HASH = computeHash(-0);
 
 /**
