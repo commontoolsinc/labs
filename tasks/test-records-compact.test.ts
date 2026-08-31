@@ -574,6 +574,29 @@ describe("test-records-compact", () => {
       expect(Object.keys(store.created)).toEqual([]);
     });
 
+    it("takes a partition with more shards than the day has objects", async () => {
+      // One raw object past the size a shard aims at: the count its bytes
+      // come to is above the count of objects, and is what a run writes.
+      const store = storeOf(
+        DAY,
+        [buildObjectBody(contextOn(DAY), [RECORD])],
+        SHARD_TARGET_BYTES * 3,
+      );
+      store.objects[rollupPartitionName(DAY)] = JSON.stringify({
+        schema: 1,
+        day: DAY,
+        count: 3,
+      });
+      await compactDays({ ...OPTIONS, fetchImpl: storeFetch(store) });
+      // The one object reaches one of the three shards; the other two
+      // hold nothing and are not written.
+      const written = createdShards(store);
+      expect(written.length).toBe(1);
+      expect(written[0]).toMatch(/\/\d{4}-of-0003\.ndjson$/);
+      expect(createdManifest(store, DAY)?.shards.length).toBe(1);
+      expect(await compactedNames(store)).toEqual([RECORD.test.n]);
+    });
+
     it("leaves a folder with shards and no partition open", async () => {
       const store = storeOf(DAY, [buildObjectBody(contextOn(DAY), [RECORD])]);
       store.objects[`${rollupPrefix(DAY)}0000-of-0002.ndjson`] = "";

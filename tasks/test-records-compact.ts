@@ -446,15 +446,17 @@ export async function compactDays(options: CompactOptions): Promise<void> {
     const claimed = partitioned
       ? parseRollupPartition(await readText(partitionName) ?? "", day)?.count
       : undefined;
-    // A partition dividing a day into more shards than it has objects is
-    // one no run writes: shards are sized from the day's bytes, and an
-    // object is at most a fraction of a shard. Taking a count on trust is
-    // what turns a partition object nobody can replace into a day nobody
-    // can compact.
-    if (partitioned && (claimed === undefined || claimed > raw.length)) {
+    // No run divides a day into more shards than the larger of what its
+    // objects and its bytes come to, so a count past that is one nothing
+    // wrote. The count sizes an array before a record is read, and a
+    // partition object cannot be replaced, so a count taken on trust is
+    // what turns one bad object into a day nobody can compact.
+    const ceiling = Math.max(raw.length, shardCount(stored));
+    if (partitioned && (claimed === undefined || claimed > ceiling)) {
       console.error(
         `${day}: ${partitionName} is not a partition of this day's ` +
-          `${raw.length} object(s); leaving the day open`,
+          `${raw.length} object(s) and ${(stored / 1e6).toFixed(1)} MB; ` +
+          "leaving the day open",
       );
       continue;
     }
