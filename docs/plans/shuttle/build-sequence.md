@@ -12,22 +12,19 @@ prerequisites land.
 
 ## Stage A — seams in `packages/cli`
 
-**A1 — export entries.** `@commonfabric/cli` exports only `.` → `mod.ts`,
-whose import runs CLI startup. Add workspace-internal export entries for
-the modules a sibling calls: `./lib/piece`, `./commands/piece`,
+**A1 — export entries.** Done (#6626). Importing `@commonfabric/cli`'s `.`
+entry runs CLI startup, so the package carries workspace-internal entries
+for the modules a sibling calls: `./lib/piece`, `./commands/piece`,
 `./lib/wish`, `./lib/piece-render`. The completion listing is not a plain
-entry: `cellPathCandidates` and `childKeys` in
-`lib/completion/providers.ts` are module-private and open a fresh runtime
-through the default `getCellValue` path, so A1 factors the listing logic
-behind an injectable connection and exports that, beside the
-already-public `keysOf`. The providers are designed to fail silently and
-empty — right for tab completion, wrong for `ls` — so the factored
-listing surfaces its errors, and completion keeps swallowing them at its
-own call site. Keep the
-list to what shuttle names — an export entry is a contract, and the short
-list is the record of which internals have a second caller. (The view
-substrate's entries wait for B3, which is when they earn their place on
-that record.)
+entry: it is `listCellKeys` in `packages/cli/lib/cell-listing.ts`,
+exported as `./lib/cell-listing` behind a `PieceResolutionDeps` seam with
+`keysOf` beside it. The providers are designed to fail silently and
+empty — right for tab completion, wrong for `ls` — so the listing raises
+its errors and completion's provider dispatch swallows them at its own
+call site. Keep the list to what shuttle names — an export entry is a
+contract, and the short list is the record of which internals have a
+second caller. (The view substrate's entries wait for B3, which is when
+they earn their place on that record.)
 
 **A2 — connection injection for the write path.** Three shapes of work,
 not one. `stepPiece` is already done — it gained the

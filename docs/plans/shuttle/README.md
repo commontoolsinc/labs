@@ -4,9 +4,10 @@ Status: v1 design settled — the decisions below are ruled, and nothing
 blocks construction. The v1 cutline is drawn: a handful of settled designs
 are deferred past v1 and preserved in [`futures.md`](futures.md), so they
 are re-scheduled later rather than re-litigated, and the decisions below
-say so where they defer. Nothing here is built yet; the order of
-construction is [`build-sequence.md`](build-sequence.md). This document
-stays the working design state: new decisions land here as they are made.
+say so where they defer. Construction is under way;
+[`build-sequence.md`](build-sequence.md) carries the order and where each
+item stands. This document stays the working design state: new decisions
+land here as they are made.
 
 Shuttle is an interactive terminal tool for exploring and editing fabric
 state: a line-oriented REPL whose prompt carries a mutable **current place**,
@@ -282,7 +283,7 @@ several) stay reachable later.
 | --- | --- | --- |
 | Canonical + alias reference grammar | `packages/cli/lib/llm-friendly-ref.ts` (doc comment), runner's `parseLLMFriendlyLink` | The address syntax; shuttle consumes it and must not fork it |
 | Target option surface | `targetOptions` in `packages/cli/commands/piece.ts` | The enumeration of exactly what a place must supply |
-| Live-state completion | `packages/cli/lib/completion/providers.ts` — the listing logic is module-private (`cellPathCandidates`, `childKeys`) beside the exported `keysOf`, and opens its own runtime through the default `getCellValue` path | The `ls` primitive and tab completion; A1 factors the listing behind an injectable connection and exports it |
+| Live-state listing and completion | `listCellKeys` in `packages/cli/lib/cell-listing.ts` — exported, taking its connection as a parameter, with `keysOf` beside it; path completion in `packages/cli/lib/completion/providers.ts` reads it | The `ls` primitive and tab completion; shuttle passes the connection it holds, and a failed read raises rather than listing empty |
 | Pager/TUI substrate | `packages/cli/lib/view/` — `pager.ts` is the only module doing raw-mode full-screen TTY handling; `mod.ts` and `loadinput.ts` touch stdio for the one-shot path (capability probes, plain-output writes, piped input); `keys.ts`, `ansi.ts`, `render.ts`, `session.ts` hold state and decoding as pure logic | The full-screen half: raw mode, frames, key decoding, testable without a terminal; already follows references and edits buffers |
 | FUSE mount | `packages/fuse` | The same addressing as a POSIX filesystem; prior art for layout (arrays as numeric directories, handlers as executables, links as symlinks). Shuttle is its interactive, live sibling, not a replacement |
 | Offline inspector | `packages/state-inspector`, `cf inspect` | The forensic counterpart (snapshots, scopes, history); its HTML explorer is prior art for tree-plus-detail browsing |
