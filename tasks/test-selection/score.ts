@@ -208,7 +208,15 @@ function resolvePendingMain(
     pending.day < earliest.day ? pending : earliest
   );
   state.pendingMain = [];
-  if (first.commit === observation.commit) return;
+  if (first.commit === observation.commit) {
+    // The same commit, passing now and failing before, is the test
+    // disagreeing with itself there. The two runs can arrive in separate
+    // batches, so the same-commit check that catches this within one
+    // batch does not see it, and dropping the pending failure silently
+    // would lose the flake as well as the catch.
+    bump(state.flakesByDay, first.day);
+    return;
+  }
   if (coveredChanged(key, first.commit, observation.commit)) {
     creditCatch(state, "main", first.day, first.source);
   } else {
@@ -491,7 +499,6 @@ export function foldObservations(
     if (observation.outcome === "skip") continue;
 
     bump(state.runsByDay, day);
-    recordDuration(state, day, observation.durationMs);
     if (observation.place === "main") {
       resolvePendingMain(state, key, observation, coveredChanged);
       state.lastMainOutcome = observation.outcome;
@@ -543,27 +550,6 @@ export function foldObservations(
     if (state.lastMainOutcome === "fail") mainRed.add(key);
   }
   return { states, mainRed };
-}
-
-/**
- * Folds one duration into the day's percentile. The running value is the
- * larger of what the day held and this execution, which converges on the
- * day's own ninetieth percentile from below without keeping the samples;
- * `sealDay` is what replaces it with the exact figure when the day's
- * observations are all in hand.
- */
-function recordDuration(
-  state: IdentityState,
-  day: string,
-  durationMs: number,
-): void {
-  const sample = state.costByDay[day];
-  if (sample === undefined) {
-    state.costByDay[day] = { p90: durationMs, count: 1 };
-    return;
-  }
-  sample.count++;
-  if (durationMs > sample.p90) sample.p90 = durationMs;
 }
 
 /**
@@ -635,6 +621,12 @@ export function sealDay(
   day: string,
   durationsMs: readonly number[] | DaySamples,
 ): void {
+  // The only writer of a day's cost, so what is already there is another
+  // sealing of the same day from an earlier run and can be combined with
+  // this one. Nothing writes a provisional value alongside it: a running
+  // maximum kept as the fold went would be merged here as though it were
+  // a percentile, and its count added to a count that already includes
+  // it.
   const batch = Array.isArray(durationsMs)
     ? { p90: percentile90(durationsMs), count: durationsMs.length }
     : {

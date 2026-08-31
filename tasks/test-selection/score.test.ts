@@ -162,6 +162,21 @@ describe("score", () => {
       expect(state.pendingMain).toEqual([]);
     });
 
+    it("reads a green rerun of the same commit as a flake", () => {
+      // The two runs can arrive in separate batches, so the same-commit
+      // check inside one batch does not see this pair.
+      const state = stateFrom([
+        saw("fail", { commit: "c1" }),
+        saw("pass", {
+          commit: "c1",
+          day: "2026-08-21",
+          startedAt: "2026-08-21T00:00:00.000Z",
+        }),
+      ]);
+      expect(state.mainCatches).toBe(0);
+      expect(flakeRate(state, "2026-08-21")).toBe(1);
+    });
+
     it("reads a failure nothing fixed as a flake", () => {
       const folded = foldObservations([
         saw("fail", { day: "2026-08-19", commit: "c0" }),
@@ -313,6 +328,19 @@ describe("score", () => {
   });
 
   describe("cost", () => {
+    it("combines a day read across two runs without double counting", () => {
+      // A day arrives over as many runs as it takes, so sealing combines
+      // rather than replaces — and nothing else writes a day's cost, or
+      // the combination would fold a running value into itself.
+      const state = emptyState();
+      sealDay(state, "2026-08-20", [100, 100, 900]);
+      const first = state.costByDay["2026-08-20"]!;
+      sealDay(state, "2026-08-20", [200]);
+      const both = state.costByDay["2026-08-20"]!;
+      expect(both.count).toBe(first.count + 1);
+      expect(both.p90).toBe(Math.max(first.p90, 200));
+    });
+
     it("takes the ninetieth percentile by nearest rank", () => {
       expect(percentile90([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])).toBe(9);
       expect(percentile90([5])).toBe(5);

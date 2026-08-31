@@ -304,6 +304,53 @@ describe("plan", () => {
     });
   });
 
+  describe("the hard bound", () => {
+    it("reports an identity no lane could hold, and runs it nowhere", () => {
+      const manifest = sampleManifest({
+        entries: entries(3, (i) => (i === 1 ? { cost: 400 } : { cost: 1 })),
+      });
+      const result = run(manifest, { boundSeconds: 300 });
+      expect(result.unschedulable.map((e) => e.test.n)).toEqual(["case 1"]);
+      expect(selected(result).some((s) => s.entry.test.n === "case 1")).toBe(
+        false,
+      );
+    });
+
+    it("counts the overheads a lane would pay for it", () => {
+      // A test inside the bound whose suite, unit and capability setup
+      // put the lane past it is still one no lane can hold.
+      const manifest = sampleManifest({
+        entries: entries(
+          1,
+          () => ({ cost: 200, suite: "pattern-integration" }),
+        ),
+        calibration: {
+          setupCost: { toolshed: 60 },
+          suites: { "pattern-integration": { overhead: 50, correction: 1 } },
+          unitOverhead: {},
+          prologue: 0,
+        },
+      });
+      const result = run(manifest, {
+        boundSeconds: 300,
+        capabilities: new Map([["pattern-integration", ["toolshed"]]]),
+      });
+      expect(result.unschedulable.length).toBe(1);
+    });
+
+    it("does not force one in even when the change touches it", () => {
+      const manifest = sampleManifest({
+        entries: entries(1, () => ({ cost: 400 })),
+      });
+      const mandatory = new Map([[
+        testIdentityKey(manifest.entries[0]!.test),
+        "changed" as const,
+      ]]);
+      const result = run(manifest, { mandatory, boundSeconds: 300 });
+      expect(selected(result)).toEqual([]);
+    });
+  });
+
   describe("the cost model", () => {
     it("charges a suite's overhead once per lane", () => {
       const manifest = sampleManifest({

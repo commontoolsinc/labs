@@ -29,7 +29,7 @@ import {
   LANES,
 } from "./test-selection/policy.ts";
 import { fetchManifest } from "./test-selection/store.ts";
-import type { Manifest, ManifestEntry } from "./test-selection/manifest.ts";
+import type { Manifest } from "./test-selection/manifest.ts";
 import { plan } from "./test-selection/plan.ts";
 import { readWorkspaceMembers } from "./workspace-tests.ts";
 
@@ -253,10 +253,7 @@ function printDryRun(manifest: Manifest, laneNumber: number | undefined): void {
         `${result.overBudgetSeconds.toFixed(1)}s`,
     );
   }
-  const unschedulable = manifest.entries.filter(
-    (entry: ManifestEntry) => entry.cost > LANE_BUDGET_SECONDS,
-  );
-  for (const entry of unschedulable) {
+  for (const entry of result.unschedulable) {
     console.log(
       `unschedulable: ${testIdentityKey(entry.test)} costs ` +
         `${entry.cost.toFixed(1)}s, past a lane's whole budget`,

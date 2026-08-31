@@ -441,6 +441,13 @@ async function main(args: readonly string[]): Promise<number> {
     mandatory: new Map(),
     capabilities: new Map(),
   });
+  // What the packer refused, from the packer, rather than recomputed from
+  // a raw cost that leaves out every overhead the lane would have paid.
+  manifest.unschedulable = reference.unschedulable.map((entry) => ({
+    test: entry.test,
+    suite: entry.suite,
+    cost: entry.cost,
+  }));
   manifest.lanes = reference.lanes.map((lane) => ({
     lane: lane.lane,
     projectedSeconds: Math.round(lane.projectedSeconds * 10) / 10,
@@ -538,10 +545,7 @@ function summarize(
     `test selection: ${selected} of ${manifest.entries.length} identities ` +
       `fit the budget`,
   );
-  const unschedulable = manifest.entries.filter(
-    (entry) => entry.cost > LANE_BUDGET_SECONDS,
-  );
-  for (const entry of unschedulable) {
+  for (const entry of reference.unschedulable) {
     console.log(
       `test selection: unschedulable, ${entry.cost.toFixed(1)}s: ` +
         JSON.stringify(entry.test),

@@ -216,9 +216,7 @@ export function readReport(
       // onto the preload, so one identity can have records of both kinds.
       const surface = recordSurface(test, record.file);
       const known = surfaces.get(key);
-      if (record.file !== undefined || known === undefined) {
-        surfaces.set(key, surface);
-      }
+      if (known === undefined || surface.fromFile) surfaces.set(key, surface);
       observations.push({
         test,
         outcome: record.outcome,
@@ -245,6 +243,14 @@ export function readReport(
 export interface Surface {
   suite: string;
   unit: string;
+
+  /** Whether the unit came from a record's file rather than its name. */
+  fromFile: boolean;
+}
+
+/** Whether a surface names a file rather than falling back to a name. */
+function isFileBacked(surface: Surface): boolean {
+  return surface.fromFile;
 }
 
 /**
@@ -261,7 +267,7 @@ export function recordSurface(
   const suite = test.v === undefined
     ? `${test.k}:${test.s}`
     : `${test.k}:${test.s}:${test.v}`;
-  return { suite, unit: file ?? test.n };
+  return { suite, unit: file ?? test.n, fromFile: file !== undefined };
 }
 
 /** How many times a lane runs an identity, given how flaky it is. */
@@ -451,7 +457,13 @@ export class Fold {
       const read = readReport(report, this.#resolver);
       observations.push(...read.observations);
       for (const [key, surface] of read.surfaces) {
-        this.#surfaces.set(key, surface);
+        // A file names something a runner can be pointed at, and an
+        // identity's own name does not. A record with no file arriving in
+        // a later report must not replace one that had it.
+        const known = this.#surfaces.get(key);
+        if (known === undefined || isFileBacked(surface)) {
+          this.#surfaces.set(key, surface);
+        }
       }
       for (const [key, byDay] of read.durations) {
         let known = this.#samples.get(key);

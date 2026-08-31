@@ -144,6 +144,28 @@ interface Filling {
   load: number;
 }
 
+/** What one identity costs a lane that is running nothing else. */
+function loneCost(
+  manifest: Manifest,
+  input: PlanInput,
+  entry: ManifestEntry,
+): number {
+  return marginalCost(
+    manifest,
+    input,
+    {
+      lane: 0,
+      selections: [],
+      capabilities: new Set(),
+      suites: new Set(),
+      units: new Set(),
+      load: 0,
+    },
+    entry,
+    1,
+  );
+}
+
 function capabilityCost(manifest: Manifest, capability: string): number {
   return manifest.calibration.setupCost[capability] ?? 0;
 }
@@ -264,9 +286,11 @@ export function plan(input: PlanInput): Plan {
   const unschedulable: ManifestEntry[] = [];
   const beyondBound = new Set<string>();
   for (const entry of manifest.entries) {
-    const correction = manifest.calibration.suites[entry.suite]?.correction ??
-      1;
-    if (entry.cost * correction <= bound) continue;
+    // What an empty lane would pay for it: its own corrected time plus
+    // every overhead and setup that lane would open. Charging only the
+    // test's own time would schedule an identity whose suite, unit, and
+    // capabilities together put the lane past the bound it is killed at.
+    if (loneCost(manifest, input, entry) <= bound) continue;
     unschedulable.push(entry);
     beyondBound.add(testIdentityKey(entry.test));
   }

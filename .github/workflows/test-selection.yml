@@ -109,6 +109,13 @@ jobs:
                 exit 1
                 ;;
             esac
+            if [ "$((PUBLISH_DAYS))" -lt 1 ]; then
+              # A window of no days reads as a typo rather than a request,
+              # and the failure belongs here, where the input was given,
+              # rather than several steps later inside the publisher.
+              echo "::error::days must be at least 1"
+              exit 1
+            fi
             args+=(--days "$PUBLISH_DAYS")
           fi
           deno run --allow-read --allow-env --allow-net --allow-write \
