@@ -60,6 +60,7 @@ on the Common Fabric runtime.
 - [patterns/navigation.md](patterns/navigation.md) — navigating to detail views
 - [patterns/composition.md](patterns/composition.md) — composing patterns into reactive graphs
 - [patterns/llm-dialog.md](patterns/llm-dialog.md) — `llmDialog` tool catalog facts: built-in tool injection, reserved built-in tool names, mutation tools as handlers
+- [patterns/held-item-interfaces.md](patterns/held-item-interfaces.md) — shaping what a pattern demands of the pieces it holds, across generations
 - [patterns/primitives.md](patterns/primitives.md) — the composition contract
   for reusable pattern logic and state
 - [patterns/multi-user-patterns.md](patterns/multi-user-patterns.md) — shared spaces, per-user state, collaboration
