@@ -4,14 +4,14 @@
  *
  * The states are what make this more than one figure. `IndexTrackingStack`
  * answers by scanning while it is short, from an index once it has been
- * `INDEX_AT` entries tall, and by scanning again once it has come back below
- * `DROP_BELOW`:
+ * `ADD_INDEX_AT` entries tall, and by scanning again once it has come back
+ * below `DROP_INDEX_BELOW`:
  *
  * | state | index | height while timed |
  * | --- | --- | --- |
- * | `scanning` | never built | below `INDEX_AT` |
- * | `crossed` | built, then dropped on the way down | below `DROP_BELOW` |
- * | `indexed` | built | above `INDEX_AT` |
+ * | `scanning` | never built | below `ADD_INDEX_AT` |
+ * | `crossed` | built, then dropped | below `DROP_INDEX_BELOW` |
+ * | `indexed` | built | above `ADD_INDEX_AT` |
  *
  * `scanning` and `crossed` do the same work at the same height, so the two of
  * them meeting is what says the index was dropped rather than carried. No test
@@ -57,10 +57,10 @@ const BATCH = 32;
  */
 const POOL = 128;
 
-/** How far above `INDEX_AT` the indexed state sits. */
+/** How far above `ADD_INDEX_AT` the indexed state sits. */
 const ABOVE = 8;
 
-/** How far below `DROP_BELOW` the crossed state comes back down to. */
+/** How far below `DROP_INDEX_BELOW` the crossed state comes back down to. */
 const BELOW = 8;
 
 /** Distinct objects, as many as asked for. */
@@ -89,22 +89,22 @@ function batchOf(repeated: boolean): object[] {
   return out;
 }
 
-/** The three states, as the height a stack is brought to and how it got there. */
+/** The three states, as the height a stack reaches and where it settles. */
 const STATES = [
   { name: "scanning", climb: 0, settle: 0 },
   {
     name: "crossed",
-    climb: IndexTrackingStack.INDEX_AT + ABOVE,
-    settle: IndexTrackingStack.DROP_BELOW - BELOW,
+    climb: IndexTrackingStack.ADD_INDEX_AT + ABOVE,
+    settle: IndexTrackingStack.DROP_INDEX_BELOW - BELOW,
   },
   {
     name: "indexed",
-    climb: IndexTrackingStack.INDEX_AT + ABOVE,
-    settle: IndexTrackingStack.INDEX_AT + ABOVE,
+    climb: IndexTrackingStack.ADD_INDEX_AT + ABOVE,
+    settle: IndexTrackingStack.ADD_INDEX_AT + ABOVE,
   },
 ] as const;
 
-/** A stack brought to the given state, ready for a batch to be timed against. */
+/** A stack in the given state, ready for a batch to be timed against it. */
 function stackIn(state: typeof STATES[number]): IndexTrackingStack {
   const stack = new IndexTrackingStack();
 
@@ -125,24 +125,24 @@ function poolIn(state: typeof STATES[number]): IndexTrackingStack[] {
 
 /**
  * The oscillating cases, as the band a stack swings through: one that never
- * indexes, one that indexes and stays above `DROP_BELOW`, and one that crosses
- * both marks on every swing.
+ * indexes, one that indexes and stays above `DROP_INDEX_BELOW`, and one that
+ * crosses both marks on every swing.
  */
 const BANDS = [
   {
     name: "below the threshold",
     floor: 0,
-    ceiling: IndexTrackingStack.INDEX_AT - 8,
+    ceiling: IndexTrackingStack.ADD_INDEX_AT - 8,
   },
   {
     name: "above the low mark",
-    floor: IndexTrackingStack.INDEX_AT - 8,
-    ceiling: IndexTrackingStack.INDEX_AT + 48,
+    floor: IndexTrackingStack.ADD_INDEX_AT - 8,
+    ceiling: IndexTrackingStack.ADD_INDEX_AT + 48,
   },
   {
     name: "across both marks",
-    floor: IndexTrackingStack.DROP_BELOW - 8,
-    ceiling: IndexTrackingStack.INDEX_AT + 48,
+    floor: IndexTrackingStack.DROP_INDEX_BELOW - 8,
+    ceiling: IndexTrackingStack.ADD_INDEX_AT + 48,
   },
 ] as const;
 

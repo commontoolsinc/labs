@@ -1,9 +1,10 @@
 /**
  * `IndexTrackingStack` answers its two lookups two ways -- by scanning, and
  * from the index it builds once it is tall enough -- so every question worth
- * asking gets asked on both sides of {@link IndexTrackingStack.INDEX_AT}. The
- * two must agree, and a stack that crosses the threshold and comes back down
- * must answer as one that never crossed it.
+ * asking gets asked on both sides of
+ * {@link IndexTrackingStack.ADD_INDEX_AT}. The two must agree, and a stack
+ * that crosses the threshold and comes back down must answer as one that never
+ * crossed it.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -21,7 +22,7 @@ function objects(count: number): object[] {
 }
 
 /** How tall a stack has to be for the index to have been built. */
-const TALL = IndexTrackingStack.INDEX_AT + 5;
+const TALL = IndexTrackingStack.ADD_INDEX_AT + 5;
 
 /**
  * A stack holding the given objects, padded first to `height` with distinct
@@ -289,9 +290,9 @@ describe("IndexTrackingStack", () => {
     });
 
     it("answers from the scan again once the index has been dropped", () => {
-      // Coming back down past `DROP_BELOW` drops the index, so what answers
-      // afterwards is the scan -- over a stack that a `Map` was tracking a
-      // moment ago, and has to have stopped tracking cleanly.
+      // Coming back down past `DROP_INDEX_BELOW` drops the index, so what
+      // answers afterwards is the scan -- over a stack that a `Map` was
+      // tracking a moment ago, and has to have stopped tracking cleanly.
       const twice = {};
       const stack = new IndexTrackingStack();
 
