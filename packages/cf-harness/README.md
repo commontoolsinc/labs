@@ -1239,6 +1239,20 @@ bare fabric identifiers a diagnostic can embed (compiler-generated `fid1:`
 module roots, DIDs, `data:` URIs) are replaced with a `[fabric-id]` placeholder
 in the model-facing message, while the persisted artifact keeps the raw text.
 
+Only the newest such diagnostic is carried at full length. When a `run_pattern`
+result arrives, every earlier failed `run_pattern` result in that loop's
+transcript has its `message` replaced with a one-line summary naming the
+attempt, the status, how many errors the diagnostic reports and what they say —
+or the message's first line, where it reports no compiler error — and the tool
+output holding the full text; the summary is marked with `messageCollapsed` and
+the length it replaced. The newest failure is what the model writes its next
+source against, and the ones before it are re-read on every remaining turn
+without being acted on. Every other field of the result, a policy refusal among
+them, is left as it stands, as is a diagnostic already shorter than its own
+summary. The rewrite happens in the transcript itself, so the persisted
+transcript records the context the model was given, and the tool-output
+artifacts keep every diagnostic in full.
+
 Interactive chat stdio transport:
 
 ```bash
