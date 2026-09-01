@@ -184,6 +184,39 @@ describe("console/turn-result", () => {
     }
   });
 
+  it("rejects a run report whose generated transcript index is negative", async () => {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-console-result-",
+    });
+    try {
+      const turnId = "turn-with-negative-index";
+      await writeTranscript(artifactRoot, turnId, [
+        { role: "user", content: "build a reading list" },
+        { role: "assistant", content: "Your reading list is ready." },
+      ]);
+      await Deno.writeTextFile(
+        join(artifactRoot, turnId, "run-report.json"),
+        JSON.stringify({
+          finalAssistantText: "Your reading list is ready.",
+          timeline: [{
+            kind: "transcript_message",
+            transcriptIndex: -1,
+            role: "assistant",
+            modelTurn: 1,
+          }],
+        }),
+      );
+
+      await expect(readConsoleTurnResult({
+        artifactRoot,
+        turnId,
+        spaceName: "console-test",
+      })).resolves.toBeUndefined();
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  });
+
   it("rejects unsafe run identifiers and malformed transcripts", async () => {
     const artifactRoot = await Deno.makeTempDir({
       prefix: "cf-harness-console-result-",

@@ -75,7 +75,8 @@ export interface CreateHarnessInteractiveChatServiceOptions {
 
   /**
    * Maps one service turn to a run artifact identifier when the transport
-   * owns that mapping.
+   * owns that mapping. The prompt loop must construct the run from its
+   * options, so this cannot accompany an injected engine or run state.
    */
   runIdForTurn?: (sessionId: string, turnId: string) => string;
 
@@ -682,12 +683,17 @@ export class HarnessInteractiveChatService {
 
   constructor(options: CreateHarnessInteractiveChatServiceOptions = {}) {
     this.#basePromptLoopOptions = options.basePromptLoopOptions ?? {};
+    const injectedRunSource = this.#basePromptLoopOptions.engine !== undefined
+      ? "engine"
+      : this.#basePromptLoopOptions.runState !== undefined
+      ? "run state"
+      : undefined;
     if (
       options.runIdForTurn !== undefined &&
-      this.#basePromptLoopOptions.engine !== undefined
+      injectedRunSource !== undefined
     ) {
       throw new Error(
-        "turn run-id mapping cannot be combined with an injected engine",
+        `turn run-id mapping cannot be combined with an injected ${injectedRunSource}`,
       );
     }
     this.#runIdForTurn = options.runIdForTurn;
