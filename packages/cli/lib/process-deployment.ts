@@ -10,11 +10,13 @@
  * rewrites all of it while the first connection carries on — against the
  * second deployment's settings, and reporting nothing.
  *
- * One deployment per process is the limit taken in place of scoping those
- * globals per connection, and this is where it is enforced.
- * `docs/plans/shuttle/runtime-integration.md` records what the limit costs a
- * long-lived process that holds a connection, and where the scoping work
- * belongs when a caller needs more than one.
+ * So a process holds one deployment, and a connection to a second is refused
+ * here. What a caller holding a connection across many commands has to hold
+ * to is tighter than that, because a second connection to the *same*
+ * deployment shares this state too and is indistinguishable from the several
+ * an ordinary verb opens. `docs/plans/shuttle/runtime-integration.md` records
+ * the whole of that, what it costs such a caller, and where the scoping work
+ * belongs when one connection stops being enough.
  */
 
 /**

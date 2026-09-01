@@ -80,21 +80,24 @@ Each threaded seam carries the test the override makes possible: an
 injected exit that throws, and the report read back as a value.
 
 **A5 — module-global state.** Done, as the recorded limit rather than as
-scoping: **one deployment per process**. `quietMode` (`commands/piece.ts`)
-is the process's hint posture and `receipted` (`lib/write-receipt.ts`)
-memoizes the write receipt for the life of the process, while a
-connection's own settings — the LLM endpoint, the base URL a pattern's
-relative `fetch` resolves against, and the ambient experimental flags a
-`Runtime` applies — land in globals under `packages/llm` and
-`packages/runner` that no connection owns. Each declaration carries the
-limit, and `claimProcessDeployment` (`lib/process-deployment.ts`) enforces
-the half a check can see: `loadPieces` claims the deployment it opens
-against, so a connection to a second one fails naming both, where two
-connections to one deployment write the same settings and are what a `cf`
-verb already does. Scoping them is part of multi-space sessions
-([`futures.md`](futures.md) candidate 3), and
+scoping: **shuttle v1 holds one connection per process**, revisited when
+multiple places arrive ([`futures.md`](futures.md) candidate 3). What the
+limit covers is `quietMode` (`commands/piece.ts`), the process's hint
+posture; `receipted` (`lib/write-receipt.ts`), which memoizes the write
+receipt for the life of the process; and a connection's own settings —
+the LLM endpoint, the base URL a pattern's relative `fetch` resolves
+against, and the ambient experimental flags a `Runtime` applies — which
+land in globals under `packages/llm` and `packages/runner` that no
+connection owns. Part of that is mechanically enforced and the rest is
+prose: `claimProcessDeployment` (`lib/process-deployment.ts`) refuses a
+connection to a second *deployment*, a weaker bound than the limit and
+the one where those settings actually fight, since a verb reaching an
+un-injected library function opens another connection to the same
+deployment as a matter of course. The three declarations in
+`packages/cli` carry the limit;
 [`runtime-integration.md`](runtime-integration.md) item 6 carries the
-list and the bound.
+inventory, both bounds, and the globals in the other two packages, which
+are recorded there and nowhere else.
 
 ## Stage B — the shuttle package
 

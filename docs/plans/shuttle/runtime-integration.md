@@ -284,8 +284,10 @@ Each of these is small and lands on its own; together they are what decision
 
    Sweep each as views need it captured.
 6. **Module-global state.** Done, as the recorded limit rather than as
-   scoping: **one deployment per process**. Three kinds of state are the
-   process's rather than a connection's, and the first kind is what a
+   scoping: **shuttle v1 holds one connection per process**, revisited
+   when multiple places arrive ([`futures.md`](futures.md) candidate 3).
+   Three kinds of state are the process's rather than a connection's, and
+   the first kind is what a
    connection writes for itself — the endpoint `setLLMUrl` holds, written
    by `loadPieces` and by `PiecesController.initialize` in another
    package; the base URL `getPatternEnvironment()` hands a pattern's
@@ -301,22 +303,27 @@ Each of these is small and lands on its own; together they are what decision
    version-skew note `deferSkewNoteUntilFailureExit` holds for a failure
    exit, which is one note about one server and prints at process end.
 
-   `claimProcessDeployment` (`lib/process-deployment.ts`) holds the limit
-   where a check can reach it: `loadPieces` claims the deployment it opens
-   against, and a connection to a different one throws naming both rather
-   than rewriting the first's settings. Two bounds on that. A second
-   connection to the *same* deployment is unremarked — it writes the same
-   settings, and it is what a verb reaching an un-injected library
-   function already does — so the posture and the two memos are held by
-   the limit rather than by the check. And a connection opened through
+   What a check can reach is narrower than the limit, and the two are not
+   the same claim. `claimProcessDeployment` (`lib/process-deployment.ts`)
+   refuses a connection to a second *deployment*: `loadPieces` claims the
+   one it opens against, and a connection to a different one throws
+   naming both rather than rewriting the first's settings. That is the
+   bound where those settings actually fight, and it is weaker than the
+   limit in two directions. A second connection to the *same* deployment
+   passes — it writes the same settings, and it is what a verb reaching an
+   un-injected library function already does — so the posture and the two
+   memos rest on the limit alone. And a connection opened through
    `PiecesController.initialize` directly, as `packages/fuse` and
-   `packages/cf-harness` open one, passes no claim. The declarations carry
-   the limit too, which is where a maintainer reading one finds it, and
-   `packages/cli/README.md` records it for a caller of the library seams.
+   `packages/cf-harness` open one, passes no claim at all.
 
-   A shuttle process therefore serves one deployment, and scoping these
-   per connection is part of multi-space sessions
-   ([`futures.md`](futures.md) candidate 3).
+   Three declarations carry the limit, all of them in `packages/cli`:
+   `quietMode`, `receipted`, and `loadPieces`, where a connection's own
+   writes begin. The globals in `packages/llm` and `packages/runner`
+   belong to other packages and say nothing about it, so this inventory is
+   the only record of them — and the part of it that goes stale first if
+   nobody reads it back against those files.
+   `packages/cli/README.md` records the limit for a caller of the library
+   seams, and a shuttle process holds the one connection the limit allows.
 7. **Disposal.** `withRuntimeCleanupOnFailure` disposes only on throw; the
    success path relies on process exit. In a long-lived shell every
    un-injected call leaks a runtime, a storage manager, and a WebSocket —

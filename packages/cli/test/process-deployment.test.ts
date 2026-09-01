@@ -1,3 +1,15 @@
+/**
+ * Unit tests for the process's claim on the deployment it connects to: what
+ * `claimProcessDeployment` accepts, what it refuses, and how it compares two
+ * spellings of one API URL. The claim is a module-level string and nothing
+ * else, so each case resets it and calls the function directly.
+ *
+ * The last case drives the real `loadPieces`, which claims ahead of the
+ * identity it reads and the flags it fetches from the deployment. A refused
+ * connection therefore rejects with the limit's own message, and no runtime,
+ * socket, or server stands behind that case either.
+ */
+
 import { expect } from "@std/expect";
 import { beforeEach, describe, it } from "@std/testing/bdd";
 
