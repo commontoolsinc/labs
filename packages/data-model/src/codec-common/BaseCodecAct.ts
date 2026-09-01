@@ -32,7 +32,7 @@ export abstract class BaseCodecAct<Encoded> {
    * The values whose walk is in progress, or `undefined` before the first one
    * is entered.
    */
-  #inProgress: IndexTrackingStack<object> | undefined;
+  #seen: IndexTrackingStack<object> | undefined;
 
   /** Constructs an instance. */
   constructor(config: CodecEngineConfig<Encoded>, env: LiveEnvironment) {
@@ -57,7 +57,7 @@ export abstract class BaseCodecAct<Encoded> {
    * @throws If the value is not the one most recently entered.
    */
   leave(value: object): void {
-    this.#inProgress?.popExpect(value);
+    this.#seen?.popExpect(value);
   }
 
   /** The configuration of the engine that minted this act. */
@@ -87,13 +87,13 @@ export abstract class BaseCodecAct<Encoded> {
    *   progress.
    */
   protected tryEnter(value: object): boolean {
-    const inProgress = this.#inProgress ??= new IndexTrackingStack<object>();
+    const seen = this.#seen ??= new IndexTrackingStack<object>();
 
-    if (inProgress.has(value)) {
+    if (seen.has(value)) {
       return false;
     }
 
-    inProgress.push(value);
+    seen.push(value);
     return true;
   }
 }
