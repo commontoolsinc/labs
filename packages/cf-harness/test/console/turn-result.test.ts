@@ -150,4 +150,37 @@ describe("console/turn-result", () => {
       await Deno.remove(artifactRoot, { recursive: true });
     }
   });
+
+  it("rejects a run report whose generated transcript index is out of bounds", async () => {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-console-result-",
+    });
+    try {
+      const turnId = "turn-with-invalid-index";
+      await writeTranscript(artifactRoot, turnId, [
+        { role: "user", content: "build a reading list" },
+        { role: "assistant", content: "Your reading list is ready." },
+      ]);
+      await Deno.writeTextFile(
+        join(artifactRoot, turnId, "run-report.json"),
+        JSON.stringify({
+          finalAssistantText: "Your reading list is ready.",
+          timeline: [{
+            kind: "transcript_message",
+            transcriptIndex: 2,
+            role: "assistant",
+            modelTurn: 1,
+          }],
+        }),
+      );
+
+      await expect(readConsoleTurnResult({
+        artifactRoot,
+        turnId,
+        spaceName: "console-test",
+      })).resolves.toBeUndefined();
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  });
 });

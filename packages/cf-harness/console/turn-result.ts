@@ -1,7 +1,9 @@
 /**
- * Projects a completed console turn from the durable transcript the model
- * received. Missing or malformed artifacts produce no result rather than a
- * partial object that could be mistaken for a completed contract.
+ * Projects a completed console turn from its durable run report and the
+ * transcript the model received. The report identifies this run's transcript
+ * messages and supplies its final assistant text. Missing or malformed
+ * artifacts produce no result rather than a partial object that could be
+ * mistaken for a completed contract.
  */
 
 import { join } from "@std/path";
@@ -148,7 +150,10 @@ const readTurnRunArtifacts = async (
     const currentTranscriptIndexes = new Set<number>();
     for (const entry of reportValue.timeline) {
       const index = currentTranscriptIndex(entry);
-      if (index !== undefined && index < transcriptValue.length) {
+      if (index !== undefined) {
+        if (index >= transcriptValue.length) {
+          return undefined;
+        }
         currentTranscriptIndexes.add(index);
       }
     }
@@ -189,8 +194,9 @@ const pieceFromAssignSlug = (
 };
 
 /**
- * Reads one completed turn from its durable model-facing transcript. Returns
- * `undefined` when the artifact cannot establish a complete result.
+ * Reads one completed turn from its durable report and model-facing
+ * transcript. The report supplies the run boundary and final text. Returns
+ * `undefined` when the artifacts cannot establish a complete result.
  */
 export const readConsoleTurnResult = async (
   options: ReadConsoleTurnResultOptions,
