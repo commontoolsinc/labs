@@ -94,6 +94,8 @@ export function visibleWidth(text: string): number {
 export const term = {
   enterAltScreen: `${CSI}?1049h`,
   leaveAltScreen: `${CSI}?1049l`,
+  enableMouse: `${CSI}?1000h${CSI}?1006h`,
+  disableMouse: `${CSI}?1006l${CSI}?1000l`,
   hideCursor: `${CSI}?25l`,
   showCursor: `${CSI}?25h`,
   clearScreen: `${CSI}2J`,

@@ -245,7 +245,7 @@ export async function runPager(
       tty.setRaw(false);
     } catch { /* ignore */ }
     deps.write(
-      `${CSI}?7h${term.showCursor}` +
+      `${term.disableMouse}${CSI}?7h${term.showCursor}` +
         (padBg ? term.resetDefaultBg : "") + term.leaveAltScreen,
     );
     try {
@@ -289,7 +289,7 @@ export async function runPager(
 
   tty.setRaw(true);
   deps.write(
-    `${term.enterAltScreen}${term.hideCursor}` +
+    `${term.enterAltScreen}${term.enableMouse}${term.hideCursor}` +
       (padBg ? term.setDefaultBg(padBg) : ""),
   );
 

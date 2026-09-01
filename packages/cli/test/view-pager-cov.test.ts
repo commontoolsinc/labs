@@ -142,6 +142,31 @@ Deno.test("pager: draws the document and quits on q", async () => {
   // The alt screen is entered on start and left on cleanup.
   assert(writes.some((w) => w.includes("\x1b[?1049h")), "entered alt screen");
   assert(writes.some((w) => w.includes("\x1b[?1049l")), "left alt screen");
+  assert(writes.some((w) => w.includes(term.enableMouse)), "enabled the mouse");
+  assert(
+    writes.some((w) => w.includes(term.disableMouse)),
+    "disabled the mouse",
+  );
+});
+
+Deno.test("pager: an SGR mouse-wheel report scrolls the document", async () => {
+  const doc = parseDocument(
+    Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n"),
+  );
+  const { deps, writes } = makeFake({
+    consoleSize: { columns: 30, rows: 6 },
+    steps: [
+      { bytes: enc("\x1b[<65;1;1M") },
+      { bytes: enc("q") },
+    ],
+  });
+  await runPager(doc, OPTS, undefined, undefined, deps);
+  const frames = writes.filter((write) => write.includes("\x1b[?7l"));
+  const wheelFrame = frames.at(-1)!;
+  assert(
+    wheelFrame.includes("line 3") && !wheelFrame.includes("line 0"),
+    "the wheel redraw starts three lines down",
+  );
 });
 
 Deno.test("pager: unknown named files schedule no semantic work", async () => {

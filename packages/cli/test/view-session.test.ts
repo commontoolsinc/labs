@@ -68,6 +68,38 @@ Deno.test("session: vertical scrolling and clamping", () => {
   assertEquals(s.view().top, 0);
 });
 
+Deno.test("session: the mouse wheel scrolls without moving the edit cursor", () => {
+  const text = Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n");
+  const source: EditableSource = {
+    label: null,
+    editable: true,
+    parse: (next) => parseDocument(next),
+    save: () => "",
+  };
+  const session = new Session(
+    parseDocument(text),
+    { color: false, showLineNumbers: false },
+    { width: 30, height: 6 },
+    undefined,
+    source,
+  );
+  press(session, "e");
+  const cursor = session.view().cursor;
+  press(session, "wheel-down");
+  assertEquals(session.view().top, 3);
+  assertEquals(session.view().cursor, cursor);
+  press(session, "wheel-up", "wheel-up");
+  assertEquals(session.view().top, 0);
+});
+
+Deno.test("session: the mouse wheel scrolls an overlay", () => {
+  const session = makeSession();
+  press(session, "?");
+  assertEquals(session.view().overlay?.scroll, 0);
+  press(session, "wheel-down");
+  assertEquals(session.view().overlay?.scroll, 3);
+});
+
 Deno.test("session: an ordinary file ends at the bottom of the viewport", () => {
   const text = Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n");
   const s = new Session(

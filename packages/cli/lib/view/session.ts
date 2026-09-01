@@ -151,6 +151,7 @@ interface PeekOverlay {
 }
 
 const HORIZONTAL_STEP = 8;
+const MOUSE_WHEEL_STEP = 3;
 
 // Messages shown when a diff's edit policy refuses an edit.
 const NOT_EDITABLE_MSG =
@@ -1155,6 +1156,10 @@ export class Session {
     this.pendingReveal = null;
     this.pendingPush = null;
     this.expireMessage();
+    if (key.name === "wheel-up" || key.name === "wheel-down") {
+      this.#handleWheel(key.name === "wheel-up" ? -1 : 1);
+      return;
+    }
     if (
       this.#mode === "savePrompt" || this.#mode === "amendPrompt" ||
       this.#mode === "revertPrompt"
@@ -1191,6 +1196,37 @@ export class Session {
 
   #contentRows(): number {
     return Math.max(1, this.height - 1);
+  }
+
+  /** Scrolls the active document or list without moving the edit cursor. */
+  #handleWheel(direction: -1 | 1): void {
+    this.#message = "";
+    const delta = direction * MOUSE_WHEEL_STEP;
+    if (
+      this.#mode === "savePrompt" || this.#mode === "amendPrompt" ||
+      this.#mode === "revertPrompt"
+    ) return;
+    if (this.#mode === "filePicker") {
+      const last = Math.max(0, this.#pickerEntries.length - 1);
+      this.#pickerSel = clamp(this.#pickerSel + delta, 0, last);
+      this.#ensurePickerVisible();
+      return;
+    }
+    if (this.#mode === "jumpList") {
+      const last = Math.max(0, this.#jumpEntries.length - 1);
+      this.#jumpSel = clamp(this.#jumpSel + delta, 0, last);
+      this.#scrollJumpToSelection(this.#jumpSel);
+      return;
+    }
+    if (this.#overlay) {
+      this.#overlayScroll = clamp(
+        this.#overlayScroll + delta,
+        0,
+        this.#overlayMaxScroll(this.#overlay),
+      );
+      return;
+    }
+    this.top = clamp(this.top + delta, 0, this.#lastTop());
   }
 
   #clampScroll(): void {
@@ -1733,14 +1769,7 @@ export class Session {
   private handleOverlayKey(key: Key): void {
     const overlay = this.#overlay;
     if (!overlay) return;
-    // Stop scrolling once the last line reaches the bottom of the box, so the
-    // final line does not drift up past the frame — the same clamp the main
-    // view uses.
-    const innerH = overlayBox(this.width, this.height).innerH;
-    const maxScroll = Math.max(
-      0,
-      this.#activeOverlayLines(overlay).length - innerH,
-    );
+    const maxScroll = this.#overlayMaxScroll(overlay);
     const hasTargets = overlay.mode === "info" && overlay.targets.length > 0;
     switch (key.name) {
       case "escape":
@@ -1832,6 +1861,12 @@ export class Session {
         this.#overlayScroll = clamp(this.#overlayScroll - 10, 0, maxScroll);
         break;
     }
+  }
+
+  /** Furthest scroll position which keeps the overlay's last line in its box. */
+  #overlayMaxScroll(overlay: PeekOverlay): number {
+    const innerH = overlayBox(this.width, this.height).innerH;
+    return Math.max(0, this.#activeOverlayLines(overlay).length - innerH);
   }
 
   #handleNormalKey(key: Key): void {
@@ -4956,6 +4991,7 @@ export function helpOverlay(): {
 } {
   const rows: Array<[string, string]> = [
     ["Scrolling", ""],
+    ["  mouse wheel", "scroll up / down"],
     ["  K / J", "line up / down"],
     ["  H / L", "scroll left / right"],
     ["  ↑ ↓ ← →", "scroll / pan the view"],

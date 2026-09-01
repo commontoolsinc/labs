@@ -38,6 +38,26 @@ Deno.test("decode: arrow keys (CSI)", () => {
   assertEquals(names(raw(0x1b, 0x5b, 0x46)), ["end"]);
 });
 
+Deno.test("decode: SGR mouse wheel reports", () => {
+  assertEquals(names(bytes("\x1b[<64;12;7M")), ["wheel-up"]);
+  assertEquals(names(bytes("\x1b[<65;12;7M")), ["wheel-down"]);
+  assertEquals(names(bytes("\x1b[<68;12;7M")), ["wheel-up"]);
+  assertEquals(names(bytes("\x1b[<69;12;7M")), ["wheel-down"]);
+  assertEquals(names(bytes("\x1b[<65;12;7m")), ["unknown"]);
+});
+
+Deno.test("decode: X10 mouse wheel reports", () => {
+  assertEquals(names(raw(0x1b, 0x5b, 0x4d, 96, 33, 33)), ["wheel-up"]);
+  assertEquals(names(raw(0x1b, 0x5b, 0x4d, 97, 33, 33)), ["wheel-down"]);
+});
+
+Deno.test("decode: an incomplete X10 mouse report remains buffered", () => {
+  const input = raw(0x1b, 0x5b, 0x4d, 96, 33);
+  const result = decodeKeys(input);
+  assertEquals(result.keys, []);
+  assertEquals(result.rest, input);
+});
+
 Deno.test("decode: page up/down and home/end (tilde sequences)", () => {
   assertEquals(names(raw(0x1b, 0x5b, 0x35, 0x7e)), ["pageup"]);
   assertEquals(names(raw(0x1b, 0x5b, 0x36, 0x7e)), ["pagedown"]);
