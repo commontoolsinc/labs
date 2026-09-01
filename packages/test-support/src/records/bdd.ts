@@ -27,6 +27,7 @@ import {
   NAME_SEPARATOR,
   registerFrameworkModule,
   registeringFile,
+  type RegistrationCapture,
 } from "./registration.ts";
 
 export {
@@ -97,9 +98,12 @@ export function bodyOf(
  * thinks the test was registered, and the class name is what ingestion
  * falls back to when there is no name map to join onto.
  */
-function wrapDescribe(through: AnyFunction): AnyFunction {
+export function wrapDescribe(
+  through: AnyFunction,
+  capture: () => RegistrationCapture | undefined = activeCapture,
+): AnyFunction {
   return (...args: unknown[]): unknown => {
-    if (activeCapture() === undefined) return through(...args);
+    if (capture() === undefined) return through(...args);
     const name = nameOf(args);
     const found = bodyOf(args);
     if (name === undefined || found === undefined) return through(...args);
@@ -134,9 +138,13 @@ function wrapDescribe(through: AnyFunction): AnyFunction {
  * the registration stack the same way the preload reads it — the two
  * together, because the same test name occurs in more than one file.
  */
-function wrapIt(through: AnyFunction, ignore: AnyFunction): AnyFunction {
+export function wrapIt(
+  through: AnyFunction,
+  ignore: AnyFunction,
+  active: () => RegistrationCapture | undefined = activeCapture,
+): AnyFunction {
   return (...args: unknown[]): unknown => {
-    const capture = activeCapture();
+    const capture = active();
     if (capture === undefined) return through(...args);
     const name = nameOf(args);
     if (name === undefined) return through(...args);

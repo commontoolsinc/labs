@@ -11,7 +11,7 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { bodyOf, nameOf } from "../../src/records/bdd.ts";
+import { bodyOf, nameOf, wrapDescribe, wrapIt } from "../../src/records/bdd.ts";
 
 describe("bdd", () => {
   describe("the shapes a suite can be declared in", () => {
@@ -81,5 +81,68 @@ describe("reading the shape of a bdd call", () => {
     // argument.
     expect(bodyOf([{ name: "x", fn: body }])).toEqual({ index: -1, body });
     expect(bodyOf(["a name"])).toBeUndefined();
+  });
+});
+
+describe("what the wrappers do once a capture is installed", () => {
+  /** A capture that skips whatever a case names. */
+  function capturing(skips: readonly string[] = []) {
+    return () => ({
+      names: new Map<string, string>(),
+      skipped: (_file: string | undefined, name: string) =>
+        skips.includes(name),
+      flush: () => {},
+    });
+  }
+
+  it("passes a call it cannot read straight through", () => {
+    // An unfamiliar overload still runs and still reports its own
+    // error, rather than being dropped by a wrapper that did not
+    // recognize it.
+    const seen: unknown[][] = [];
+    const through = (...args: unknown[]) => seen.push(args);
+    wrapDescribe(through, capturing())("a name with no body");
+    wrapIt(through, () => {}, capturing())({ no: "name" });
+    expect(seen).toEqual([["a name with no body"], [{ no: "name" }]]);
+  });
+
+  it("replaces the body of a suite declared as one definition", () => {
+    // The chain has to be pushed around the body wherever the body
+    // sits, so a definition carrying its own `fn` has that field
+    // replaced rather than an argument.
+    let inner: string | undefined;
+    const through = (definition: { name: string; fn: () => void }) => {
+      definition.fn();
+    };
+    const it_ = wrapIt(
+      (name: string) => {
+        inner = name;
+      },
+      () => {},
+      capturing(),
+    );
+    wrapDescribe(through, capturing())({
+      name: "outer",
+      fn: () => it_("leaf"),
+    });
+    // The leaf is named by the chain that encloses it, which is what
+    // the store speaks in.
+    expect(inner).toBe("leaf");
+  });
+
+  it("registers a listed leaf as ignored rather than running it", () => {
+    const ran: string[] = [];
+    const ignored: string[] = [];
+    const it_ = wrapIt(
+      (name: string) => ran.push(name),
+      (name: string) => ignored.push(name),
+      capturing(["skipped leaf"]),
+    );
+    it_("kept leaf", () => {});
+    it_("skipped leaf", () => {});
+    expect(ran).toEqual(["kept leaf"]);
+    // Listed rather than dropped, so it appears in the report as
+    // skipped and the store learns it was deliberately not run.
+    expect(ignored).toEqual(["skipped leaf"]);
   });
 });
