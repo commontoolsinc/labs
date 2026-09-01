@@ -13,6 +13,7 @@ export interface Mentionable {
    * what a mention stores is the piece and never the row.
    */
   piece?: unknown;
+
   [key: string]: unknown;
 }
 
