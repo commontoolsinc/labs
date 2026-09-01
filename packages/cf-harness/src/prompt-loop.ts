@@ -2664,6 +2664,7 @@ export class CfHarnessPromptLoop {
     }
     this.engine.bindRunModel(model);
     const transcript: HarnessTranscriptMessage[] = [...options.transcript];
+    this.#restorePatternSearchRecords(transcript);
     const maxModelTurns = options.maxModelTurns ?? this.#maxModelTurns;
     const toolActivity: HarnessToolActivity[] = [];
     const modelAttempts: HarnessModelAttempt[] = [];
@@ -2989,6 +2990,25 @@ export class CfHarnessPromptLoop {
     });
     if (minted.table !== table) {
       await this.engine.recordHandleTable(minted.table);
+    }
+  }
+
+  /** Restores successful search hits already present in parent history. */
+  #restorePatternSearchRecords(
+    transcript: readonly HarnessTranscriptMessage[],
+  ): void {
+    for (const message of transcript) {
+      if (message.role !== "tool" || message.toolName !== "search_patterns") {
+        continue;
+      }
+      try {
+        this.#recordPatternSearchResult(
+          "search_patterns",
+          JSON.parse(message.content),
+        );
+      } catch {
+        // A malformed persisted result grants no pattern reference.
+      }
     }
   }
 

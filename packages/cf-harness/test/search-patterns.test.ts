@@ -6,6 +6,7 @@ import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessFetch } from "../src/contracts/http-fetch.ts";
 import { PatternIndexClient } from "../src/pattern-index/client.ts";
 import {
+  isSearchPatternsToolSuccessOutput,
   searchPatternsTool,
   type SearchPatternsToolErrorOutput,
   type SearchPatternsToolSuccessOutput,
@@ -218,6 +219,14 @@ describe("search-patterns", () => {
 
   it("declares itself a read, since a search alters nothing", () => {
     expect(searchPatternsTool.descriptor.effectClass).toBe("read");
+  });
+
+  it("does not trust a persisted success whose hit is incomplete", () => {
+    expect(isSearchPatternsToolSuccessOutput({
+      outputId: "search_patterns-1",
+      status: "ok",
+      results: [{ patternId: "pat-incomplete" }],
+    })).toBe(false);
   });
 
   it("describes deployed stopword-free disjunctive matching", () => {

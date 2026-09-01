@@ -222,6 +222,102 @@ const runDelegation = async (
   };
 };
 
+/** Starts a fresh parent loop over a transcript whose earlier loop searched. */
+const runResumedDelegation = async (): Promise<DelegationFixture> => {
+  const index = stubIndex();
+  const firstRequests: unknown[] = [];
+  const firstTurns = [
+    toolCallTurn("call-search", "search_patterns", {
+      text: "expense list totals",
+    }),
+    assistantTurn("Search complete."),
+  ];
+  const firstFetch: typeof fetch = (_input, init) => {
+    firstRequests.push(JSON.parse(String(init?.body)));
+    const turn = firstTurns[firstRequests.length - 1];
+    if (turn === undefined) {
+      throw new Error("first scripted model ran out of turns");
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify(responsesBodyFromChatFixture(turn)), {
+        status: 200,
+      }),
+    );
+  };
+  const engine = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runId: `run-pattern-refs-resume-${crypto.randomUUID()}`,
+    model: "gpt-5.4",
+    cfcEnforcementMode: "disabled",
+    patternIndexClientFactory: () =>
+      Promise.resolve(
+        new PatternIndexClient({
+          baseUrl: "https://index.test",
+          fetchFn: index.fetchFn,
+          signer,
+        }),
+      ),
+  });
+  const firstLoop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine,
+    allowedToolIds: ["search_patterns", "delegate_task"],
+    allowedSubagentProfiles: ["default"],
+    fetchFn: firstFetch,
+  });
+  const firstResult = await firstLoop.runPrompt({ prompt: "Search first." });
+
+  const resumedRequests: unknown[] = [];
+  const resumedTurns = [
+    toolCallTurn("call-delegate", "delegate_task", {
+      goal: "Use the pattern searched before this parent loop resumed.",
+      patternRefs: [{ patternId: SEARCH_HIT.patternId }],
+    }),
+    assistantTurn("Child completed the resumed task."),
+    assistantTurn("Parent received the resumed delegation result."),
+  ];
+  const resumedFetch: typeof fetch = (_input, init) => {
+    resumedRequests.push(JSON.parse(String(init?.body)));
+    const turn = resumedTurns[resumedRequests.length - 1];
+    if (turn === undefined) {
+      throw new Error("resumed scripted model ran out of turns");
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify(responsesBodyFromChatFixture(turn)), {
+        status: 200,
+      }),
+    );
+  };
+  const resumedLoop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine,
+    allowedToolIds: ["search_patterns", "delegate_task"],
+    allowedSubagentProfiles: ["default"],
+    fetchFn: resumedFetch,
+  });
+  const result = await resumedLoop.runTranscript({
+    transcript: [
+      ...firstResult.transcript,
+      { role: "user", content: "Delegate using the earlier search." },
+    ],
+  });
+  const delegateMessage = result.transcript.findLast((message) =>
+    message.role === "tool" && message.toolName === "delegate_task"
+  );
+  if (delegateMessage?.role !== "tool") {
+    throw new Error("expected a resumed `delegate_task` tool result");
+  }
+  const childRequest = resumedRequests[1] === undefined
+    ? undefined
+    : chatViewOfRequest(resumedRequests[1]);
+  return {
+    childPrompt: childRequest?.messages.at(-1)?.content ?? "",
+    indexCalls: index.calls,
+    delegateOutput: JSON.parse(delegateMessage.content),
+    subagentRuns: result.runState.subagentRuns?.length ?? 0,
+  };
+};
+
 describe("prompt-loop pattern references", () => {
   it("rehydrates a selected hit into neutral child context", async () => {
     const result = await runDelegation([{
@@ -283,6 +379,15 @@ Use this as available evidence; do not assume it is mandatory.`,
 
     expect(result.subagentRuns).toBe(1);
     expect(result.childPrompt).toContain(SEARCH_HIT.patternId);
+    expect(result.indexCalls).toEqual(["searchPatterns", "getPattern"]);
+  });
+
+  it("rehydrates an earlier search after the parent loop resumes", async () => {
+    const result = await runResumedDelegation();
+
+    expect(result.subagentRuns).toBe(1);
+    expect(result.childPrompt).toContain(SEARCH_HIT.patternId);
+    expect(result.delegateOutput.patternRefRefusals).toBeUndefined();
     expect(result.indexCalls).toEqual(["searchPatterns", "getPattern"]);
   });
 });

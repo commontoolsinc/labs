@@ -106,12 +106,13 @@ The current package provides:
   the injected text;
 - pattern references by search record: `delegate_task` takes up to eight
   optional `{ patternId, note? }` entries and resolves each id only from
-  successful `search_patterns` results retained by that parent prompt loop. A
-  known id contributes a neutral child-context block containing the trusted
-  record's kind, quality, description, match evidence, import hint, argument
-  shape, result shape, and the parent note verbatim; an unknown id is omitted
-  and named in `patternRefRefusals` as `not-searched-by-parent`. Delegation does
-  not refetch the index;
+  successful `search_patterns` results retained by that parent run and restored
+  from its persisted transcript on resume. A known id contributes a neutral
+  child-context block containing the trusted record's kind, quality,
+  description, match evidence, import hint, argument shape, result shape, and
+  the parent note verbatim; an unknown id is omitted and named in
+  `patternRefRefusals` as `not-searched-by-parent`. Delegation does not refetch
+  the index;
 - shape captured where it is free and read back by token: a handle entry may
   carry the schema of its referent — a `run_pattern` result reference records
   the compiled pattern's result schema, marked `schemaSource: "harness"` — while

@@ -86,13 +86,48 @@ export type SearchPatternsToolOutput =
   | SearchPatternsToolSuccessOutput
   | SearchPatternsToolErrorOutput;
 
+const isSearchPatternsToolResult = (
+  result: unknown,
+): result is SearchPatternsToolResult => {
+  if (typeof result !== "object" || result === null || Array.isArray(result)) {
+    return false;
+  }
+  const record = result as Record<string, unknown>;
+  const signals = record.signals;
+  return typeof record.patternId === "string" &&
+    typeof record.description === "string" &&
+    Array.isArray(record.hashtags) &&
+    record.hashtags.every((hashtag) => typeof hashtag === "string") &&
+    (signals === undefined ||
+      (typeof signals === "object" && signals !== null &&
+        !Array.isArray(signals) && "uses" in signals &&
+        typeof signals.uses === "number" && "score" in signals &&
+        typeof signals.score === "number")) &&
+    (record.kind === "part" || record.kind === "app") &&
+    (record.quality === "penalized" || record.quality === "unproven" ||
+      record.quality === "proven") &&
+    (record.matchedTerms === undefined ||
+      typeof record.matchedTerms === "number") &&
+    (record.queryTerms === undefined ||
+      typeof record.queryTerms === "number") &&
+    typeof record.importHint === "string" &&
+    (record.argumentType === undefined ||
+      typeof record.argumentType === "string") &&
+    (record.resultType === undefined || typeof record.resultType === "string");
+};
+
 /** Narrows a raw tool result to a successful search response. */
 export const isSearchPatternsToolSuccessOutput = (
   output: unknown,
-): output is SearchPatternsToolSuccessOutput =>
-  typeof output === "object" && output !== null &&
-  "status" in output && output.status === "ok" &&
-  "results" in output && Array.isArray(output.results);
+): output is SearchPatternsToolSuccessOutput => {
+  if (typeof output !== "object" || output === null || Array.isArray(output)) {
+    return false;
+  }
+  const record = output as Record<string, unknown>;
+  return typeof record.outputId === "string" && record.status === "ok" &&
+    Array.isArray(record.results) &&
+    record.results.every(isSearchPatternsToolResult);
+};
 
 export const searchPatternsToolDescriptor: HarnessToolDescriptor = {
   toolId: "search_patterns",

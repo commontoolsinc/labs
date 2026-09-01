@@ -974,13 +974,14 @@ the skill and what it said.
 
 `delegate_task` also takes up to eight optional `patternRefs`, each containing a
 `patternId` and an optional bounded parent note. The harness resolves an id only
-from successful `search_patterns` results retained by that parent prompt loop;
-it neither trusts model-retyped metadata nor fetches the index during
-delegation. A known id gives the child a neutral generated block with the
-record's kind, quality, description, match evidence, import hint, argument
-shape, result shape, and the note verbatim. An id absent from the parent's
-record is omitted from child context and returned by name in
-`patternRefRefusals` with reason `not-searched-by-parent`.
+from successful `search_patterns` results retained by that parent run and
+restored from its persisted transcript on resume; it neither trusts
+model-retyped metadata nor fetches the index during delegation. A known id gives
+the child a neutral generated block with the record's kind, quality,
+description, match evidence, import hint, argument shape, result shape, and the
+note verbatim. An id absent from the parent's record is omitted from child
+context and returned by name in `patternRefRefusals` with reason
+`not-searched-by-parent`.
 
 Cell handles passed as tokens, `skillHandle`, and `patternRefs` are sibling
 channels of one conceptual kind: an id names hashed information stored
