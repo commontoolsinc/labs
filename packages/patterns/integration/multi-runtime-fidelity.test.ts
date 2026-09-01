@@ -95,10 +95,13 @@ describe("multi-runtime harness value fidelity", () => {
     // location, and a cell belongs to the runtime's own realm. `setWeird` is
     // a stream, which is one such location; a pattern's `[UI]` tree is full of
     // them. Reading the whole result at all is half the assertion.
+    await alice.send("setWeird", { weird: 41 });
+    await harness.settle();
+
     const whole = await alice.read() as Record<string, unknown>;
     assertEquals(
-      typeof whole.weird,
-      "number",
+      whole.weird,
+      41,
       `weird came back as ${toCompactDebugString(whole.weird)}`,
     );
     assert(
