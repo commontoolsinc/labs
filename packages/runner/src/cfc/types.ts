@@ -36,15 +36,24 @@ export const CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION =
 export const CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION =
   "runtime.setup.seed-materialization";
 
-// A document a piece is being set up in: its argument document, or an
-// internal document or stream its result projects to. `target` is the
-// document, minted from the piece's result cell; `sources` is that result
-// document. The prepare gate reads it for the §8.12.5 route-2 declaration
-// described in `docs/specs/cfc-enforcement-matrix.md` §4, and takes it only
-// where `target` names a whole document AND the input was recorded under
-// {@link runtimeWritePolicyAuthorization}.
-export const CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE =
-  "runtime.setup.piece-substrate";
+// A store the runtime owns: a document it materializes to hold a piece's
+// machinery rather than data an author named. Four kinds carry it — a piece's
+// argument, result and internal documents, minted by the runner from the
+// piece's result cause; the state documents a builtin mints from its own
+// node's cause; the per-event documents a builtin mints inside one
+// transaction; and the documents anchoring splits out of a value written into
+// any of those. `target` is that document; `sources` is the document the
+// runtime derived it from. The prepare gate reads it for the §8.12.5 route-2
+// declaration described in `docs/specs/cfc-enforcement-matrix.md` §4, and
+// takes it only where `target` names a whole document AND the input was
+// recorded under {@link runtimeWritePolicyAuthorization}.
+//
+// The marker names the store for one transaction. A store written outside the
+// transaction that minted it is enrolled beside it
+// (`IExtendedStorageTransaction.enrollRuntimeOwnedStore`), which lasts for the
+// runtime's life.
+export const CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE =
+  "runtime.owned-store";
 
 /**
  * Marks a write-policy input as one the runtime itself recorded.
@@ -76,7 +85,7 @@ export interface RuntimeWritePolicyAuthorization {
  *
  * In-package callers only: `cfc/mod.ts` re-exports the type and not this
  * value, so it stays out of the package's public entry points, and holding it
- * is what naming a piece's substrate takes.
+ * is what naming a store the runtime owns takes.
  */
 export const runtimeWritePolicyAuthorization: RuntimeWritePolicyAuthorization =
   Object.freeze(

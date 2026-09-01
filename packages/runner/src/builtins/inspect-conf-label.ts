@@ -8,7 +8,8 @@ import {
   type InspectConfLabelResult,
   inspectStoredConfLabel,
 } from "../cfc/label-introspection.ts";
-import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
+import { ownedCell } from "./runtime-owned-store.ts";
+import { resolvedCellScope } from "./scope-policy.ts";
 
 // Inv-12 Stage 2 (spec §4.6.4.1; docs/specs/cfc-label-metadata-confidentiality
 // .md §3): `inspectConfLabel` — the ONLY pattern-facing surface for
@@ -72,13 +73,14 @@ export function inspectConfLabel(
       tx,
       inputsWithTx.key("target"),
     );
-    const baseResult = runtime.getCell<InspectConfLabelResult>(
-      parentCell.space,
+    const result = ownedCell<InspectConfLabelResult>(
+      runtime,
+      tx,
+      parentCell,
       { inspectConfLabel: cause },
       undefined,
-      tx,
+      resultScope,
     );
-    const result = scopedCell(runtime, tx, baseResult, resultScope);
     sendResult(tx, result);
 
     const inputs = inputsWithTx.asSchema(INPUT_SCHEMA).get() as {

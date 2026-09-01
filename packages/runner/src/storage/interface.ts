@@ -1929,6 +1929,52 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   isRuntimeWritePolicyInput(input: WritePolicyInput): boolean;
 
   /**
+   * Enroll `target` as a store this runtime owns for `owner`'s piece — a
+   * document it materializes to hold that piece's machinery rather than data
+   * an author named — for as long as that piece's nodes run, rather than for
+   * this transaction alone.
+   *
+   * Enrollment is what a store written outside the transaction that minted it
+   * needs: the runtime instantiates a piece's nodes, and mints a builtin's
+   * state stores, before the reactive updates, event handlers and settled
+   * requests that fill them run. A store minted and filled in one transaction
+   * wants only the write-policy marker.
+   *
+   * `owner` is a `runtimeOwnedStoreOwnerKey` value — per scope instance, since
+   * two scope instances of one causal piece start and stop separately, and
+   * absent for a store outside the owner's own space. A store several pieces
+   * enroll leaves when the last of them releases it.
+   *
+   * Ignored without `runtimeWritePolicyAuthorization`, and ignored for an
+   * address carrying a path: ownership is a claim about a whole store.
+   */
+  enrollRuntimeOwnedStore(
+    target: CfcAddress,
+    owner: string,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): void;
+
+  /**
+   * Whether the runtime owns the store at `id` in `space` — named by an
+   * authorized whole-document
+   * `CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE` marker on this
+   * transaction, or enrolled by a previous {@link enrollRuntimeOwnedStore}.
+   *
+   * Scope is not an argument — every scoped instance of one causal id is an
+   * instance of the same cell.
+   *
+   * Takes the runtime's mark, like the recorders do: it answers about the
+   * whole runtime rather than this transaction, and every id it knows is
+   * derivable from a piece's cause, so an ungated answer would tell
+   * pattern-authored code whether a given piece is running here.
+   */
+  isRuntimeOwnedStore(
+    space: string,
+    id: string,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): boolean;
+
+  /**
    * Records a grant document consulted by policyState-guarded boundary
    * evaluation (§8.12.7 route 2a) — address plus resolution-time content
    * digest — for the prepared-digest binding (`PreparedDigestInput.

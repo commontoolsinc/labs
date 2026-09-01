@@ -11,8 +11,15 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
-import { createNonReactiveTransaction } from "../src/storage/extended-storage-transaction.ts";
-import { runtimeWritePolicyAuthorization } from "../src/cfc/types.ts";
+import {
+  createNonReactiveTransaction,
+  type ExtendedStorageTransaction,
+} from "../src/storage/extended-storage-transaction.ts";
+import { RuntimeOwnedStores } from "../src/cfc/runtime-owned-stores.ts";
+import {
+  CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
+  runtimeWritePolicyAuthorization,
+} from "../src/cfc/types.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("extended-storage-transaction");
@@ -242,7 +249,7 @@ describe("extended-storage-transaction", () => {
       ({
         kind: "structural-provenance",
         target: { space, id, scope: "space", path: [] },
-        claim: "runtime.setup.piece-substrate",
+        claim: CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
         sources: [],
       }) as const;
 
@@ -307,6 +314,145 @@ describe("extended-storage-transaction", () => {
           runtimeWritePolicyAuthorization,
         );
         expect(tx.isRuntimeWritePolicyInput(input("of:owned"))).toBe(false);
+      } finally {
+        await tx.commit();
+      }
+    });
+  });
+  describe("the enrollment of a store the runtime owns", () => {
+    // The enrollment answers for the whole runtime rather than for one
+    // transaction, which is what carries it to the reactive updates and
+    // settled requests that fill such a store. Every id in it is derivable
+    // from a piece's cause, so the answer takes the runtime's mark: without
+    // it, pattern-authored code reaching `cell.tx` could ask whether a given
+    // piece is running here.
+
+    const address = (id: string) =>
+      ({ space, id, scope: "space", path: [] }) as const;
+
+    it("answers for a store a previous transaction enrolled", async () => {
+      const first = runtime.edit();
+      first.enrollRuntimeOwnedStore(
+        address("of:enrolled"),
+        "owner-key",
+        runtimeWritePolicyAuthorization,
+      );
+      await first.commit();
+
+      const later = runtime.edit();
+      try {
+        expect(
+          later.isRuntimeOwnedStore(
+            space,
+            "of:enrolled",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(true);
+      } finally {
+        await later.commit();
+      }
+    });
+
+    it("answers `false` to a caller without the runtime's mark", async () => {
+      const tx = runtime.edit();
+      try {
+        tx.enrollRuntimeOwnedStore(
+          address("of:unmarked-reader"),
+          "owner-key",
+          runtimeWritePolicyAuthorization,
+        );
+        expect(tx.isRuntimeOwnedStore(space, "of:unmarked-reader")).toBe(false);
+        expect(
+          tx.isRuntimeOwnedStore(
+            space,
+            "of:unmarked-reader",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(true);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("is answered through a wrapper as through what it wraps", async () => {
+      const tx = runtime.edit();
+      const wrapper = createNonReactiveTransaction(tx);
+      try {
+        tx.enrollRuntimeOwnedStore(
+          address("of:through-a-wrapper"),
+          "owner-key",
+          runtimeWritePolicyAuthorization,
+        );
+        expect(
+          wrapper.isRuntimeOwnedStore(
+            space,
+            "of:through-a-wrapper",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(true);
+        expect(
+          wrapper.isRuntimeOwnedStore(space, "of:through-a-wrapper"),
+        ).toBe(false);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("enrolls through a wrapper into what it wraps", async () => {
+      const tx = runtime.edit();
+      const wrapper = createNonReactiveTransaction(tx);
+      try {
+        wrapper.enrollRuntimeOwnedStore(
+          address("of:enrolled-through-a-wrapper"),
+          "owner-key",
+          runtimeWritePolicyAuthorization,
+        );
+        expect(
+          tx.isRuntimeOwnedStore(
+            space,
+            "of:enrolled-through-a-wrapper",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(true);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("answers for a store enrolled at a different scope instance", async () => {
+      // The store key omits scope deliberately: the scope instances of one
+      // causal cell are instances of the same store, materialized for the
+      // same piece, so an enrollment made while the store was addressed at
+      // one scope has to answer the write that arrives at another. Keying on
+      // scope would enroll whichever instance the runtime minted first and
+      // refuse the rest.
+      const tx = runtime.edit();
+      try {
+        tx.enrollRuntimeOwnedStore(
+          { space, id: "of:scoped-instance", scope: "session", path: [] },
+          "owner-key",
+          runtimeWritePolicyAuthorization,
+        );
+        expect(
+          tx.isRuntimeOwnedStore(
+            space,
+            "of:scoped-instance",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(true);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("takes one handover of the runtime's set, not two", async () => {
+      // `Runtime.edit` hands its set to every transaction it makes, so a
+      // second handover would swap the set a transaction already answers
+      // from.
+      const tx = runtime.edit() as ExtendedStorageTransaction;
+      try {
+        expect(() => tx.configureRuntimeOwnedStores(new RuntimeOwnedStores()))
+          .toThrow("already configured");
       } finally {
         await tx.commit();
       }
