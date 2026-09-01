@@ -1103,6 +1103,36 @@ written and to be read. The compactor is implemented and handles days at
 that size; provisioning it is a small infra change and this plan
 recommends doing it, but does not depend on it.
 
+**A re-run's earlier attempts can be stored a second time.** An object's
+day partition comes from the run's start time, and GitHub reports that
+per attempt rather than per run: across four re-run builds in this
+repository every one reported a later start for its second attempt, one
+of them nearly six hours later. Artifacts are scoped to the run rather
+than to the attempt, so a later attempt's relay re-ships the earlier
+attempts' as well as its own. Where two attempts fall either side of a
+UTC midnight their partitions differ, so the re-shipped records are
+written as a second object under the later day rather than colliding with
+the first, and the publisher folds both because it keys on the object
+name. A survey of five days of the store, 68,822 objects, found no run
+identifier written into two partitions, so this has not happened yet.
+
+What it would distort is narrower than it first looks, and the rest of
+this paragraph is inference rather than measurement. Catches are safe by
+construction, because each is attributed to the pair of the commit and
+the source that saw it. Costs are a percentile over many observations and
+would barely move. Duplicating a report doubles its failures and its runs
+together, so a ratio over both is largely unmoved — but the report that
+gets duplicated is the earlier attempt's, which is the one somebody
+re-ran because it failed, so `churn` would carry those failures twice
+against run counts that are only partly duplicated.
+
+Fixing it means settling something this plan should not settle on its
+own. The partition wants to be stable across attempts, while a record's
+context honestly wants the attempt's own start, and one field is doing
+both jobs today. The change reaches `ciObjectName`, the compactor, and
+[the record spec](../specs/test-records.md), so it belongs to the store
+rather than to selection, and it is its own piece of work.
+
 ## Scoring
 
 ### What the score is trying to measure
@@ -2837,6 +2867,7 @@ is pinned to the commit's date. And if none of that settles it,
 | A change touches more than two covered packages | The per-package gate does not run at all, and `Status` says so. The full run on `main` still measures every package, and a rise it finds is reported back to the pull request. |
 | A lane dies without uploading its coverage | `Status` is already failing for the dead lane. It says the coverage total is incomplete rather than gating on a partial one. |
 | A lane exceeds five minutes repeatedly | The correction factors rise on the next publisher run and less is packed. If it persists, the publisher's summary shows the miss and somebody looks. |
+| Two attempts of one run straddle a UTC midnight | The later attempt's relay writes the earlier attempt's records a second time, under the later day, and the publisher folds both. Not observed in the store so far; see [What the store is missing](#what-the-store-is-missing). |
 | A fork pull request | Works unchanged. The manifest is world-readable, and the existing member gate decides whether the fork's records ship. |
 | A re-run of one failed lane | Runs the same set, because the manifest is resolved by the commit's date, which no attempt changes. |
 | Both `pr-tests` and `full-tests` skip | `Status` fails. Its second clause requires one of them to have succeeded, so a pull request that ran no tests can never report green. |
