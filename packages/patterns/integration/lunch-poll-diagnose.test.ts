@@ -15,7 +15,8 @@
 
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { runCase } from "../tools/lunch-poll-diagnose.ts";
+import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
+import { runCase, voterKey } from "../tools/lunch-poll-diagnose.ts";
 
 describe("lunch-poll-diagnose", () => {
   it("measures a poll two voters joined, filled, and voted in", async () => {
@@ -47,5 +48,37 @@ describe("lunch-poll-diagnose", () => {
         "user-2",
       ]);
     }
+  });
+
+  describe("voterKey", () => {
+    // A vote names its voter by profile cell, and a read of the poll output
+    // hands that back either resolved or as the link that reaches it. Both
+    // name the same person, and the convergence fingerprint is only a
+    // comparison of vote sets while every voter has a key of their own.
+
+    it("names a voter by the name on their resolved profile", () => {
+      expect(voterKey({ name: "User 1" })).toBe("User 1");
+    });
+
+    it("names a voter by the link that reaches their profile", () => {
+      const id = "of:fid1:lj_-VYUlQNO3nl9TB-U3wTrLA7NTtge02az-NgnaA1g";
+      const space = "did:key:z6Mkh7LjNUSoSVtFSQQRAVZz5XigakGLvLemwAeC4nCjQb4m";
+      const key = voterKey(
+        linkRefFrom({ path: [], id, space, scope: "space" }),
+      );
+      expect(key).toBe(`${space}/${id}/`);
+    });
+
+    it("names no voter for a vote that has none", () => {
+      expect(voterKey(undefined)).toBe("");
+    });
+
+    it("refuses a voter it cannot name", () => {
+      // An empty key for a voter who has one would read as a vote nobody
+      // cast, in every session at once, and compare equal everywhere.
+      expect(() => voterKey({ profile: "not a link" })).toThrow(
+        "cannot identify",
+      );
+    });
   });
 });

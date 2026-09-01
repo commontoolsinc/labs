@@ -17,6 +17,7 @@ import { join } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { isLinkRef } from "@commonfabric/data-model/cell-rep";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   MultiRuntimeHarness,
@@ -34,11 +35,6 @@ const BYTES: (string | number)[] = ["bytes"];
 const WEIRD: (string | number)[] = ["weird"];
 
 const CONTENT = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
-
-/** Whether `value` is a link sigil, the form a cell crosses the boundary in. */
-const isSigilLink = (value: unknown): boolean =>
-  isObjectNotArray(value) && isObjectNotArray(value["/"]) &&
-  isObjectNotArray(value["/"]["link@1"]);
 
 describe("multi-runtime harness value fidelity", () => {
   let harness: MultiRuntimeHarness;
@@ -105,7 +101,7 @@ describe("multi-runtime harness value fidelity", () => {
       `weird came back as ${toCompactDebugString(whole.weird)}`,
     );
     assert(
-      isSigilLink(whole.setWeird),
+      isLinkRef(whole.setWeird),
       `setWeird came back as ${toCompactDebugString(whole.setWeird)}, ` +
         "not the link that reaches it",
     );

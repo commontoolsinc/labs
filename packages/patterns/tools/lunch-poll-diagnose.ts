@@ -1,3 +1,4 @@
+import { parseLink } from "@commonfabric/runner";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   MultiRuntimeHarness,
@@ -9,8 +10,8 @@ interface PollOutputSummary {
   users: readonly { name?: string }[];
   options: readonly { id?: string; title?: string }[];
   votes: readonly {
-    /** The name on the voter's profile, or "" for a vote with no voter. */
-    voterName: string;
+    /** What names the voter — see `voterKey` — or "" for a vote with none. */
+    voter: string;
     optionId?: string;
     voteType?: string;
   }[];
@@ -201,7 +202,7 @@ async function collectConvergence(
     const poll = pollSummary(await session.read());
     const fingerprint = poll.votes
       .map((vote) =>
-        `${vote.voterName}|${vote.optionId ?? "?"}|${vote.voteType ?? "?"}`
+        `${vote.voter}|${vote.optionId ?? "?"}|${vote.voteType ?? "?"}`
       )
       .sort()
       .join(",");
@@ -251,12 +252,35 @@ const asStringArray = (value: unknown): readonly string[] =>
     ? value.filter((entry): entry is string => typeof entry === "string")
     : [];
 
-// A vote names its voter by profile cell, which a read of the poll output
-// resolves to the profile's contents. The name on it is what tells one voter
-// from another in the convergence fingerprint below, and this tool gives every
-// session a distinct one.
-const voterName = (value: unknown): string =>
-  isObjectNotArray(value) ? asString(value.name) : "";
+/**
+ * What names a vote's voter, for the convergence fingerprint below.
+ *
+ * A vote's voter is a profile cell, and a read of the poll output can hand it
+ * back either way round: resolved to the profile's contents, whose name tells
+ * one voter from another and which this tool gives every session a distinct
+ * one of, or — where the result schema declares the location a cell — as the
+ * link that reaches it, which names the same profile just as well. A vote with
+ * no voter at all is a vote stored by the poll's name-keyed predecessor, which
+ * tallies anonymously.
+ *
+ * Anything else refuses. A voter this cannot name flattens every vote's key to
+ * the same empty string, in every session at once, which leaves the votes
+ * comparing equal and the run reporting a convergence it never checked.
+ */
+export function voterKey(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  const link = parseLink(value);
+  if (link) {
+    return `${link.space ?? "?"}/${link.id}/${link.path.join(".")}`;
+  }
+  if (isObjectNotArray(value)) {
+    const name = asString(value.name);
+    if (name !== "") return name;
+  }
+  throw new Error(
+    `a vote names a voter this tool cannot identify: ${JSON.stringify(value)}`,
+  );
+}
 
 function pollSummary(value: unknown): PollOutputSummary {
   if (!isObjectNotArray(value)) {
@@ -268,7 +292,7 @@ function pollSummary(value: unknown): PollOutputSummary {
     users: asRecordArray(value.users),
     options: asRecordArray(value.options),
     votes: asRecordArray(value.votes).map((vote) => ({
-      voterName: voterName(vote.voter),
+      voter: voterKey(vote.voter),
       optionId: asString(vote.optionId),
       voteType: asString(vote.voteType),
     })),
