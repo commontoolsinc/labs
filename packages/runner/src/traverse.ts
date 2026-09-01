@@ -1302,7 +1302,7 @@ export type TraversalContext = {
    * rail eagerly.
    */
   lazyMetaRails: readonly MetaRail[];
-  lazyMetaSink?: (key: string) => void;
+  lazyMetaSink?: (key: string, referrerKey: string) => void;
 
   /** Tracker key → the rails already chased for that document within this
    * traversal, so a later chase under a wider rail set still walks the
@@ -1367,7 +1367,7 @@ export function createTraversalContext(
   schemaDocsAvailable: Set<string> = new Set<string>(),
   loadedMetaRails: readonly MetaRail[] = ALL_META_RAILS,
   lazyMetaRails: readonly MetaRail[] = [],
-  lazyMetaSink?: (key: string) => void,
+  lazyMetaSink?: (key: string, referrerKey: string) => void,
 ): TraversalContext {
   return {
     tracker,
@@ -2648,12 +2648,18 @@ function trackVisitedDoc(
  * keys from the links the document already carries and hand them to `sink`,
  * reading nothing. What the sink does with a key — typically register it
  * for delivery on its next commit — is the caller's contract.
+ *
+ * A metadata family is a SAME-SPACE structure: a registration is promoted
+ * by the registering space's own refresh, which a foreign space's commits
+ * never reach, and the per-space engine could not read the target either.
+ * A manifest entry resolving to another space selects nothing here and is
+ * logged, exactly as a malformed entry is.
  */
 export function sinkMetaLinkedDocKeys(
   valueEntry: IMemorySpaceAttestation,
   meta: MetaRail,
   identity: ScopeKeyIdentity,
-  sink: (key: string) => void,
+  sink: (key: string, referrerKey: string) => void,
 ): void {
   const targetObj = valueEntry.value as Immutable<JSONObject>;
   if (!isObjectOrArray(targetObj) || !(meta in targetObj)) return;
@@ -2679,10 +2685,25 @@ export function sinkMetaLinkedDocKeys(
   for (const linkObj of links) {
     const link = parseLink(linkObj, valueEntry.address);
     if (link?.id === undefined) continue;
-    sink(getTrackerKey(
-      { space: link.space, id: link.id, scope: link.scope },
-      identity,
-    ));
+    if (link.space !== valueEntry.address.space) {
+      logger.warn(
+        "traverse",
+        () => [
+          "Foreign-space metadata link ignored in",
+          valueEntry.address,
+          "->",
+          link.space,
+        ],
+      );
+      continue;
+    }
+    sink(
+      getTrackerKey(
+        { space: link.space, id: link.id, scope: link.scope },
+        identity,
+      ),
+      getTrackerKey(valueEntry.address, identity),
+    );
   }
 }
 
@@ -2977,10 +2998,11 @@ export function loadMetaLinkedDocs(
         context.lazyMetaSink !== undefined &&
         context.lazyMetaRails.includes(meta)
       ) {
-        // Registered, not loaded: the sink receives each target's key,
-        // derived from the manifest link alone. No read, no tracker
-        // entry, no recursion — and no visited record, so a later eager
-        // chase of this document's rail (a root naming it) still runs.
+        // Registered, not loaded: the sink receives each same-space
+        // target's key, derived from the manifest link alone. No read, no
+        // tracker entry, no recursion — and no visited record, so a later
+        // eager chase of this document's rail (a root naming it) still
+        // runs.
         sinkMetaLinkedDocKeys(
           currentDoc,
           meta,

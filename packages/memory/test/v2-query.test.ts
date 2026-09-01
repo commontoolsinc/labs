@@ -2363,7 +2363,17 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
             value: { name: "target" },
             pattern: link("of:target-family"),
             result: link("of:target-result"),
-            internal: [{ link: link("of:target-cell") }],
+            internal: [{ link: link("of:target-cell") }, {
+              link: {
+                "/": {
+                  "link@1": {
+                    id: "of:foreign-cell",
+                    path: [],
+                    space: "did:key:z6Mk-memory-v2-query-meta-other",
+                  },
+                },
+              },
+            }],
           },
         }, {
           op: "set",
@@ -2663,6 +2673,271 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
     assert(
       isGraphQueryCoveredByState(space, lateTracked.state, absentRootQuery),
     );
+
+    // A foreign-space manifest target is never registered lazily — the
+    // registering space's refresh could not promote it — and its presence
+    // does not disturb the walk.
+    assert(
+      ![...lazyTracked.state.lazy].some((key) => key.includes("foreign-cell")),
+    );
+    assert(
+      ![...lazyTracked.state.tracker].some(([key]) =>
+        key.includes("foreign-cell")
+      ),
+    );
+
+    // A registration whose document is DELETED before promotion stays
+    // registered: the deletion's refresh delivers nothing, and the
+    // recreation promotes it.
+    const cTracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:meta-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              child: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    const cellKey = `${space}/space/of:target-cell`;
+    assert(cTracked.state.lazy.has(cellKey));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(5),
+      authorization,
+      commit: {
+        localSeq: 5,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "delete", id: "of:target-cell" }],
+      },
+    });
+    const deletedRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      cTracked.state,
+      new Set([toDirtyKey("of:target-cell")]),
+    );
+    if (deletedRefresh !== null) {
+      assert(!deletedRefresh.updates.has(cellKey));
+    }
+    assert(cTracked.state.lazy.has(cellKey));
+    assert(!cTracked.state.tracker.has(cellKey));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(6),
+      authorization,
+      commit: {
+        localSeq: 6,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:target-cell",
+          value: { value: { derived: "target cell, reborn" } },
+        }],
+      },
+    });
+    const rebornRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      cTracked.state,
+      new Set([toDirtyKey("of:target-cell")]),
+    );
+    assertExists(rebornRefresh);
+    assertExists(rebornRefresh.updates.get(cellKey));
+    assert(cTracked.state.tracker.has(cellKey));
+
+    // A manifest entry edited away retires its registration: the
+    // crossing's re-walk releases what its previous walk recorded, and
+    // the dropped document's later commits neither wake nor deliver.
+    const dropTracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:meta-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              child: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    assert(dropTracked.state.lazy.has(cellKey));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(7),
+      authorization,
+      commit: {
+        localSeq: 7,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:crossing-target",
+          value: {
+            value: { name: "target, unhooked" },
+            pattern: link("of:target-family"),
+            result: link("of:target-result"),
+            internal: [],
+          },
+        }],
+      },
+    });
+    const droppedRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      dropTracked.state,
+      new Set([toDirtyKey("of:crossing-target")]),
+    );
+    assertExists(droppedRefresh);
+    assert(!dropTracked.state.lazy.has(cellKey));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(8),
+      authorization,
+      commit: {
+        localSeq: 8,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:target-cell",
+          value: { value: { derived: "target cell, orphaned" } },
+        }],
+      },
+    });
+    const orphanRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      dropTracked.state,
+      new Set([toDirtyKey("of:target-cell")]),
+    );
+    if (orphanRefresh !== null) {
+      assert(!orphanRefresh.updates.has(cellKey));
+    }
+    assert(!dropTracked.state.tracker.has(cellKey));
+
+    // Two referrers, one lets go: the registration lives while ANY
+    // manifest still carries it, and the surviving attribution delivers.
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(9),
+      authorization,
+      commit: {
+        localSeq: 9,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:crossing-target2",
+          value: {
+            value: { name: "second referrer" },
+            internal: [{ link: link("of:target-cell") }],
+          },
+        }, {
+          op: "set",
+          id: "of:crossing-target",
+          value: {
+            value: { name: "target, rehooked" },
+            pattern: link("of:target-family"),
+            result: link("of:target-result"),
+            internal: [{ link: link("of:target-cell") }],
+          },
+        }, {
+          op: "set",
+          id: "of:meta-root",
+          value: {
+            value: {
+              child: link("of:crossing-target"),
+              child2: link("of:crossing-target2"),
+            },
+            pattern: link("of:root-family"),
+          },
+        }],
+      },
+    });
+    const twoRefTracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:meta-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              child: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+              child2: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    assert(twoRefTracked.state.lazy.has(cellKey));
+    assertEquals(twoRefTracked.state.lazyBy.get(cellKey)?.size, 2);
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(10),
+      authorization,
+      commit: {
+        localSeq: 10,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:crossing-target",
+          value: {
+            value: { name: "target, unhooked again" },
+            pattern: link("of:target-family"),
+            result: link("of:target-result"),
+            internal: [],
+          },
+        }],
+      },
+    });
+    const oneRefRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      twoRefTracked.state,
+      new Set([toDirtyKey("of:crossing-target")]),
+    );
+    assertExists(oneRefRefresh);
+    assert(twoRefTracked.state.lazy.has(cellKey));
+    assertEquals(twoRefTracked.state.lazyBy.get(cellKey)?.size, 1);
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(11),
+      authorization,
+      commit: {
+        localSeq: 11,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:target-cell",
+          value: { value: { derived: "target cell, still wanted" } },
+        }],
+      },
+    });
+    const survivorRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      twoRefTracked.state,
+      new Set([toDirtyKey("of:target-cell")]),
+    );
+    assertExists(survivorRefresh);
+    assertExists(survivorRefresh.updates.get(cellKey));
+    assert(twoRefTracked.state.tracker.has(cellKey));
   } finally {
     close(engine);
     await Deno.remove(path);

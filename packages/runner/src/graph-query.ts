@@ -151,7 +151,7 @@ export type GraphQueryWalkOptions = {
    * crossings chase the internal rail eagerly, exactly as named roots
    * always do.
    */
-  lazyInternalSink?: (key: string) => void;
+  lazyInternalSink?: (key: string, referrerKey: string) => void;
 
   /** Schema-traversal results reused across walks that share it. */
   memo?: SchemaMemo;

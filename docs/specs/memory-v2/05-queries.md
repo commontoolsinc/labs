@@ -290,6 +290,11 @@ document's ROLE in the query:
   these same rules, so a subscription's delivered shape does not depend on
   the order in which documents changed.
 
+A metadata family is a same-space structure: a metadata or manifest link
+that resolves to another space selects nothing — the evaluating space's
+engine cannot read it, and its refresh could never deliver it — and the
+server MUST ignore such an entry rather than register or chase it.
+
 A later query naming a document the evaluation had only reached does not
 count as covered by existing watch state until that document's full family
 has been chased: naming, not reachability, is what entitles a caller to the
