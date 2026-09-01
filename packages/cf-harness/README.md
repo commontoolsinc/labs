@@ -1255,6 +1255,26 @@ summary. The rewrite happens in the transcript itself, so the persisted
 transcript records the context the model was given, and the tool-output
 artifacts keep every diagnostic in full.
 
+The source those attempts carried is collapsed on the same terms. A
+`run_pattern` call arriving in the transcript replaces the `sourceText` of every
+earlier `run_pattern` call with a marker naming the attempt, how long its source
+ran, and the tool output holding it — the loop edits against the source it wrote
+last, and the drafts before it are re-sent whole on every remaining turn. Each
+call's source is written to `tool-outputs` under that call's own `outputId` as
+it runs, so the marker names an artifact that exists; a call whose result
+reported no `outputId`, one naming a `patternId` rather than source, and one
+whose source is shorter than the marker are all left as they stand, along with
+every other argument of a call that is collapsed.
+
+What a tool result may weigh in model context is bounded per tool. A `bash` or
+`run_skill_script` stream keeps 60,000 characters of head and 20,000 of tail; a
+`read_file` result keeps 8,000 and 2,000, because a file is read for a passage
+and the whole document would otherwise sit in context for every later turn.
+Either way the omitted middle is replaced by a marker counting the characters
+dropped and naming the tool output that holds the whole text, the result carries
+the original length beside the truncated field, and the artifact is written
+before the bound is applied.
+
 Interactive chat stdio transport:
 
 ```bash

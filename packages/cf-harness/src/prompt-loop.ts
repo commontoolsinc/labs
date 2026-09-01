@@ -126,6 +126,7 @@ import type {
 import { OpenAICompatibleGatewayModelClient } from "./model/openai-compatible-gateway.ts";
 import { sumHarnessModelUsage } from "./model/usage.ts";
 import { collapseSupersededRunPatternDiagnostics } from "./run-pattern-diagnostic-collapse.ts";
+import { collapseSupersededRunPatternSources } from "./run-pattern-source-collapse.ts";
 import {
   loadHarnessSkillContext,
   loadHarnessSkillContextFromText,
@@ -1342,6 +1343,8 @@ const buildSubagentSystemPrompt = (
         "Return a durable result object directly — `return { count, $UI: <div>…</div> }`. A whole-result derived wrapper is a known smell, but not a deterministic failure: after instantiation run_pattern checks the actual pattern pointer and refuses a piece materialized under a session-only identity.",
         "You own the write, compile-error, fix loop. A `compile-error` result is normal iteration material: read the diagnostic, correct the source, and call run_pattern again. Do not hand a compile error back to the parent as the answer.",
         "Use read_file and bash to read existing patterns and pattern documentation in the workspace when the compiler or the preloaded skills leave a question open.",
+        "Read the passage, not the guide. Locate it first with bash — `grep -n` for the term — and read the lines around the hit with `sed -n '120,180p'`. Where you do reach for read_file on a document, bound it with `maxBytes`. A read is cut at roughly ten thousand characters with the full text left in the run artifact, so a whole-guide read spends the turn and still does not land on the passage.",
+        "Read again rather than hoard. Everything you have read stays in front of you for the rest of the run whether you need it again or not, so read what the next call needs and come back to the file when a later question wants a different part of it.",
         "Every reference in your task is an address, not a value. Wire it into the pattern as a run_pattern `inputs` entry so the pattern reads it live; never try to read, print, or transcribe the data behind it yourself.",
         "Use describe_handle on a reference you were given to see its shape before authoring against it. It answers with a schema and never with data.",
         'To read what the pattern computed, pass run_pattern a `resultSchema` describing the fields you want; without one you get a reference and no value at all. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. Numbers, booleans and enum strings come back as themselves; unconstrained strings and anything the schema does not model are withheld as text and come back as reference tokens addressing those positions, which you can describe_handle or wire into a later pattern. You do not need to declare $NAME or $UI.',
@@ -1729,10 +1732,27 @@ type RecordHarnessPolicyEvent = (
   event: Parameters<CfHarnessEngine["recordPolicyEvent"]>[0],
 ) => Promise<void>;
 
-const MODEL_FACING_BASH_STREAM_HEAD_CHARS = 60_000;
-const MODEL_FACING_BASH_STREAM_TAIL_CHARS = 20_000;
-const MODEL_FACING_BASH_STREAM_MAX_CHARS = MODEL_FACING_BASH_STREAM_HEAD_CHARS +
-  MODEL_FACING_BASH_STREAM_TAIL_CHARS;
+/** How much of one stream or file a model-facing rendering carries. */
+interface ModelFacingTextBounds {
+  head: number;
+  tail: number;
+}
+
+const MODEL_FACING_BASH_STREAM_BOUNDS: ModelFacingTextBounds = {
+  head: 60_000,
+  tail: 20_000,
+};
+
+/**
+ * A file is read for a passage rather than run for its output, and a whole
+ * document then sits in context for every later turn of the loop that read
+ * it. What is kept is enough to answer from or to locate the passage in, and
+ * the read is repeatable against the same file.
+ */
+const MODEL_FACING_READ_FILE_BOUNDS: ModelFacingTextBounds = {
+  head: 8_000,
+  tail: 2_000,
+};
 const REDACTED_READ_FILE_ERROR_PATH = "[redacted]";
 const REDACTED_READ_FILE_ERROR_MESSAGE =
   "read_file failed: filesystem status not observable under CFC policy";
@@ -1955,23 +1975,22 @@ const truncateModelFacingBashStream = (
   value: string | ObservationDenied,
   channel: "stdout" | "stderr",
   resultRef: ToolResultRef,
+  bounds: ModelFacingTextBounds = MODEL_FACING_BASH_STREAM_BOUNDS,
 ): {
   value: string | ObservationDenied;
   truncated?: boolean;
   originalLength?: number;
 } => {
-  if (
-    typeof value !== "string" ||
-    value.length <= MODEL_FACING_BASH_STREAM_MAX_CHARS
-  ) {
+  const kept = bounds.head + bounds.tail;
+  if (typeof value !== "string" || value.length <= kept) {
     return { value };
   }
-  const omitted = value.length - MODEL_FACING_BASH_STREAM_MAX_CHARS;
+  const omitted = value.length - kept;
   return {
-    value: `${value.slice(0, MODEL_FACING_BASH_STREAM_HEAD_CHARS)}\n\n` +
+    value: `${value.slice(0, bounds.head)}\n\n` +
       `[cf-harness: ${channel} truncated for model context; omitted ${omitted} characters. ` +
       `Full ${channel} is preserved in tool output ${resultRef.outputId}.]\n\n` +
-      value.slice(-MODEL_FACING_BASH_STREAM_TAIL_CHARS),
+      value.slice(-bounds.tail),
     truncated: true,
     originalLength: value.length,
   };
@@ -2024,6 +2043,7 @@ const truncateModelFacingReadFileOutput = (
     typeof output.content === "string" ? output.content : "",
     "stdout",
     resultRef,
+    MODEL_FACING_READ_FILE_BOUNDS,
   );
   return {
     ...output,
@@ -2306,6 +2326,7 @@ const renderMediatedReadFileOutput = (
     renderStreamObservation(cfcResult.stdout, resultRef),
     "stdout",
     resultRef,
+    MODEL_FACING_READ_FILE_BOUNDS,
   );
   const observation = modelContextObservationForStream(
     cfcResult.stdout,
@@ -2489,6 +2510,13 @@ export class CfHarnessPromptLoop {
     string,
     SearchPatternsToolResult
   >();
+
+  /**
+   * The `outputId` of every `run_pattern` call whose source this loop wrote to
+   * an artifact. A source is collapsed only where its id is here, so a run
+   * with no artifact store keeps every draft it was given.
+   */
+  readonly #persistedRunPatternSources = new Set<string>();
 
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
     this.engine = options.engine ?? new CfHarnessEngine(options);
@@ -2954,8 +2982,17 @@ export class CfHarnessPromptLoop {
           );
           const toolMessage = invokedToolCall.toolMessage;
           transcript.push(toolMessage);
+          // After the result rather than after the call that asked for it: a
+          // marker names the artifact holding what it replaced, and both the
+          // result's `outputId` and the source artifact under it exist only
+          // once the call has run. One assistant message may carry several
+          // calls, and each result collapses what it supersedes.
           if (toolMessage.toolName === "run_pattern") {
             collapseSupersededRunPatternDiagnostics(transcript);
+            collapseSupersededRunPatternSources(
+              transcript,
+              this.#persistedRunPatternSources,
+            );
           }
           await this.engine.persistTranscript(transcript);
           reportTimeline.push(transcriptTimelineEntry(
@@ -3070,6 +3107,41 @@ export class CfHarnessPromptLoop {
     if (minted.table !== table) {
       await this.engine.recordHandleTable(minted.table);
     }
+  }
+
+  /**
+   * Helper for `#invokeToolCall()`, which records the source a `run_pattern`
+   * call carried beside that call's tool output, under the same `outputId`.
+   *
+   * The transcript holds each attempt's source only until a later attempt
+   * supersedes it, at which point the call's arguments are collapsed to a
+   * marker naming this artifact. Writing it here rather than at the collapse
+   * keeps the record independent of whether the loop ran again, and the
+   * source is the model's own writing, so nothing crosses a boundary by
+   * being kept.
+   */
+  async #persistRunPatternSource(
+    toolId: BuiltinToolId,
+    input: Record<string, unknown>,
+    resultRef: ToolResultRef,
+  ): Promise<void> {
+    const store = this.engine.artifactStore;
+    if (
+      store === undefined || toolId !== "run_pattern" ||
+      typeof input.sourceText !== "string"
+    ) {
+      return;
+    }
+    await store.persistToolOutput(
+      "run-pattern-source",
+      resultRef.outputId,
+      {
+        type: "cf-harness.run-pattern-source",
+        outputId: resultRef.outputId,
+        sourceText: input.sourceText,
+      },
+    );
+    this.#persistedRunPatternSources.add(resultRef.outputId);
   }
 
   /** Restores successful search hits already present in parent history. */
@@ -3690,6 +3762,7 @@ export class CfHarnessPromptLoop {
       toolId,
       result.output,
     );
+    await this.#persistRunPatternSource(toolId, input, result.resultRef);
     const modelOutputResult = await this.#modelFacingToolOutput(
       toolId,
       result.output,

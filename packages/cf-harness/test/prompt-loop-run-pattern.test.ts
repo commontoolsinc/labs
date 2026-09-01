@@ -676,4 +676,433 @@ describe("prompt-loop run_pattern model boundary", () => {
       await storageManager.close();
     }
   });
+
+  it("collapses the superseded pattern source when a second run_pattern call arrives", async () => {
+    const signer = await Identity.fromPassphrase("run-pattern source collapse");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const fabricRuntime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    });
+    const pieces = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `run-pattern-source-${crypto.randomUUID()}`,
+      }),
+      fabricRuntime,
+    );
+    await pieces.synced();
+    try {
+      const runId = "run-pattern-source";
+      const artifactStore = new RecordingArtifactStore(runId);
+      const sourceFor = (attempt: number) =>
+        [
+          "import { computed, pattern } from 'commonfabric';",
+          `// draft ${attempt}: ${"a reason this line exists. ".repeat(20)}`,
+          "export default pattern<{ n: number }, { doubled: number }>(",
+          `  ({ n }) => ({ doubled: computed(() => missing${attempt}(n)) }),`,
+          ");",
+        ].join("\n");
+      let calls = 0;
+      const fetchFn: typeof fetch = () => {
+        calls += 1;
+        const payload = calls <= 2
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: `call-${calls}`,
+                  type: "function",
+                  function: {
+                    name: "run_pattern",
+                    arguments: JSON.stringify({
+                      sourceText: sourceFor(calls),
+                      description: "Doubles a number",
+                    }),
+                  },
+                }],
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "Done." },
+            }],
+          };
+        return Promise.resolve(
+          new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+            status: 200,
+          }),
+        );
+      };
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          artifactStore,
+          runId,
+          model: "gpt-5.4",
+          cfcEnforcementMode: "disabled",
+          fabricSessionFactory: () => Promise.resolve({ pieces }),
+        }),
+        fetchFn,
+      });
+
+      const result = await loop.runPrompt({ prompt: "Run the pattern." });
+
+      const sourcesIn = (
+        transcript: readonly HarnessTranscriptMessage[],
+      ): string[] =>
+        transcript.filter((message) => message.role === "assistant")
+          .flatMap((message) => message.toolCalls ?? [])
+          .filter((toolCall) => toolCall.function.name === "run_pattern")
+          .map((toolCall) =>
+            (JSON.parse(toolCall.function.arguments) as { sourceText: string })
+              .sourceText
+          );
+      const sources = sourcesIn(result.transcript);
+      expect(sources.length).toBe(2);
+      expect(sources[0]).toBe(
+        "[cf-harness: superseded run_pattern source collapsed for model " +
+          `context; attempt 1, ${sourceFor(1).length} characters. The newest ` +
+          "run_pattern call carries the source to edit; this attempt's " +
+          `source is preserved in tool output ${runId}:run_pattern:1.]`,
+      );
+      expect(sources[1]).toBe(sourceFor(2));
+      // The rest of the call the model wrote is left as it wrote it.
+      const collapsedCall = result.transcript
+        .filter((message) => message.role === "assistant")
+        .flatMap((message) => message.toolCalls ?? [])[0];
+      expect(JSON.parse(collapsedCall.function.arguments).description).toBe(
+        "Doubles a number",
+      );
+      // Each persisted transcript holds the context the model was given on
+      // the turn that followed it.
+      const persisted = artifactStore.transcripts.map(sourcesIn)
+        .filter((entry) => entry.length > 0);
+      expect(persisted[0][0]).toBe(sourceFor(1));
+      expect(persisted.at(-1)?.[0]).toContain(
+        "superseded run_pattern source collapsed",
+      );
+      // Both drafts stay whole in artifacts of their own.
+      const preserved = artifactStore.toolOutputs
+        .filter((entry) => entry.toolId === "run-pattern-source")
+        .map((entry) =>
+          entry.output as { outputId: string; sourceText: string }
+        );
+      expect(preserved.map((entry) => entry.outputId)).toEqual([
+        `${runId}:run_pattern:1`,
+        `${runId}:run_pattern:2`,
+      ]);
+      expect(preserved[0].sourceText).toBe(sourceFor(1));
+      expect(preserved[1].sourceText).toBe(sourceFor(2));
+    } finally {
+      await fabricRuntime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("collapses both sources of a batched turn once a later call supersedes them", async () => {
+    const signer = await Identity.fromPassphrase("run-pattern source batch");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const fabricRuntime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    });
+    const pieces = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `run-pattern-batch-${crypto.randomUUID()}`,
+      }),
+      fabricRuntime,
+    );
+    await pieces.synced();
+    try {
+      const runId = "run-pattern-batch";
+      const artifactStore = new RecordingArtifactStore(runId);
+      const sourceFor = (attempt: number) =>
+        [
+          "import { computed, pattern } from 'commonfabric';",
+          `// draft ${attempt}: ${"a reason this line exists. ".repeat(20)}`,
+          "export default pattern<{ n: number }, { doubled: number }>(",
+          `  ({ n }) => ({ doubled: computed(() => missing${attempt}(n)) }),`,
+          ");",
+        ].join("\n");
+      const patternCall = (attempt: number) => ({
+        id: `call-${attempt}`,
+        type: "function",
+        function: {
+          name: "run_pattern",
+          arguments: JSON.stringify({ sourceText: sourceFor(attempt) }),
+        },
+      });
+      let calls = 0;
+      const fetchFn: typeof fetch = () => {
+        calls += 1;
+        // One turn making two calls at once, then a turn making a third.
+        const payload = calls === 1
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [patternCall(1), patternCall(2)],
+              },
+            }],
+          }
+          : calls === 2
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [patternCall(3)],
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "Done." },
+            }],
+          };
+        return Promise.resolve(
+          new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+            status: 200,
+          }),
+        );
+      };
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          artifactStore,
+          runId,
+          model: "gpt-5.4",
+          cfcEnforcementMode: "disabled",
+          fabricSessionFactory: () => Promise.resolve({ pieces }),
+        }),
+        fetchFn,
+      });
+
+      const result = await loop.runPrompt({ prompt: "Run the patterns." });
+
+      const sources = result.transcript
+        .filter((message) => message.role === "assistant")
+        .flatMap((message) => message.toolCalls ?? [])
+        .map((toolCall) =>
+          (JSON.parse(toolCall.function.arguments) as { sourceText: string })
+            .sourceText
+        );
+      expect(sources.length).toBe(3);
+      expect(sources[0]).toContain(
+        `attempt 1, ${sourceFor(1).length} characters`,
+      );
+      expect(sources[0]).toContain(`tool output ${runId}:run_pattern:1.]`);
+      expect(sources[1]).toContain(
+        `attempt 2, ${sourceFor(2).length} characters`,
+      );
+      expect(sources[1]).toContain(`tool output ${runId}:run_pattern:2.]`);
+      expect(sources[2]).toBe(sourceFor(3));
+      // Each marker names an artifact that was written.
+      const preserved = artifactStore.toolOutputs
+        .filter((entry) => entry.toolId === "run-pattern-source")
+        .map((entry) => (entry.output as { outputId: string }).outputId);
+      expect(preserved).toEqual([
+        `${runId}:run_pattern:1`,
+        `${runId}:run_pattern:2`,
+        `${runId}:run_pattern:3`,
+      ]);
+    } finally {
+      await fabricRuntime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("collapses the first source of a batched turn that no later turn follows", async () => {
+    const signer = await Identity.fromPassphrase("run-pattern batch final");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const fabricRuntime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    });
+    const pieces = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `run-pattern-batch-final-${crypto.randomUUID()}`,
+      }),
+      fabricRuntime,
+    );
+    await pieces.synced();
+    try {
+      const runId = "run-pattern-batch-final";
+      const artifactStore = new RecordingArtifactStore(runId);
+      const sourceFor = (attempt: number) =>
+        [
+          "import { computed, pattern } from 'commonfabric';",
+          `// draft ${attempt}: ${"a reason this line exists. ".repeat(20)}`,
+          "export default pattern<{ n: number }, { doubled: number }>(",
+          `  ({ n }) => ({ doubled: computed(() => missing${attempt}(n)) }),`,
+          ");",
+        ].join("\n");
+      let calls = 0;
+      const fetchFn: typeof fetch = () => {
+        calls += 1;
+        // The batch is the run's last word before the final answer, so the
+        // sibling it superseded has no later call to collapse it.
+        const payload = calls === 1
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [1, 2].map((attempt) => ({
+                  id: `call-${attempt}`,
+                  type: "function",
+                  function: {
+                    name: "run_pattern",
+                    arguments: JSON.stringify({
+                      sourceText: sourceFor(attempt),
+                    }),
+                  },
+                })),
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "Done." },
+            }],
+          };
+        return Promise.resolve(
+          new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+            status: 200,
+          }),
+        );
+      };
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          artifactStore,
+          runId,
+          model: "gpt-5.4",
+          cfcEnforcementMode: "disabled",
+          fabricSessionFactory: () => Promise.resolve({ pieces }),
+        }),
+        fetchFn,
+      });
+
+      const result = await loop.runPrompt({ prompt: "Run the patterns." });
+
+      const sources = result.transcript
+        .filter((message) => message.role === "assistant")
+        .flatMap((message) => message.toolCalls ?? [])
+        .map((toolCall) =>
+          (JSON.parse(toolCall.function.arguments) as { sourceText: string })
+            .sourceText
+        );
+      expect(sources.length).toBe(2);
+      expect(sources[0]).toContain(`tool output ${runId}:run_pattern:1.]`);
+      expect(sources[1]).toBe(sourceFor(2));
+    } finally {
+      await fabricRuntime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("keeps every draft when the run has no artifact store to preserve them in", async () => {
+    const signer = await Identity.fromPassphrase("run-pattern no store");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const fabricRuntime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    });
+    const pieces = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `run-pattern-no-store-${crypto.randomUUID()}`,
+      }),
+      fabricRuntime,
+    );
+    await pieces.synced();
+    try {
+      const sourceFor = (attempt: number) =>
+        [
+          "import { computed, pattern } from 'commonfabric';",
+          `// draft ${attempt}: ${"a reason this line exists. ".repeat(20)}`,
+          "export default pattern<{ n: number }, { doubled: number }>(",
+          `  ({ n }) => ({ doubled: computed(() => missing${attempt}(n)) }),`,
+          ");",
+        ].join("\n");
+      let calls = 0;
+      const fetchFn: typeof fetch = () => {
+        calls += 1;
+        const payload = calls <= 2
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: `call-${calls}`,
+                  type: "function",
+                  function: {
+                    name: "run_pattern",
+                    arguments: JSON.stringify({ sourceText: sourceFor(calls) }),
+                  },
+                }],
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "Done." },
+            }],
+          };
+        return Promise.resolve(
+          new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+            status: 200,
+          }),
+        );
+      };
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId: "run-pattern-no-store",
+          model: "gpt-5.4",
+          cfcEnforcementMode: "disabled",
+          fabricSessionFactory: () => Promise.resolve({ pieces }),
+        }),
+        fetchFn,
+      });
+
+      const result = await loop.runPrompt({ prompt: "Run the pattern." });
+
+      // Nothing holds the drafts but the transcript, so the transcript keeps
+      // them: a marker here would name an artifact nobody wrote.
+      const sources = result.transcript
+        .filter((message) => message.role === "assistant")
+        .flatMap((message) => message.toolCalls ?? [])
+        .map((toolCall) =>
+          (JSON.parse(toolCall.function.arguments) as { sourceText: string })
+            .sourceText
+        );
+      expect(sources).toEqual([sourceFor(1), sourceFor(2)]);
+    } finally {
+      await fabricRuntime.dispose();
+      await storageManager.close();
+    }
+  });
 });
