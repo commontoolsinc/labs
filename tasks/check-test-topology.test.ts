@@ -5,6 +5,7 @@ import {
   check,
   checkStore,
   checkTree,
+  main,
   parseCheckArgs,
   readRecords,
   report,
@@ -235,7 +236,8 @@ describe("what the tree half looks at", () => {
     }
   });
 
-  it("passes over the directories that hold no surface of their own", async () => {
+  it("never descends into the directories the walk is told to skip", async () => {
+    // These hold test files; what keeps them out is their names.
     const root = await tree([
       "packages/oven/node_modules/dep/a.test.ts",
       "packages/oven/dist/b.test.ts",
@@ -412,6 +414,37 @@ describe("running the check and saying what it found", () => {
       ).toBe(true);
     } finally {
       await Deno.remove(at);
+    }
+  });
+
+  it("exits zero over a tree it accounts for and one over a tree it does not", async () => {
+    // A surface nobody registered has to stop a build; a guard that only
+    // printed would be a log line nobody reads.
+    const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+    const log = console.log;
+    const err = console.error;
+    console.log = () => {};
+    console.error = () => {};
+    try {
+      expect(await main([], root)).toBe(0);
+      const at = await Deno.makeTempFile({ suffix: ".ndjson" });
+      await Deno.writeTextFile(
+        at,
+        JSON.stringify({
+          line: "record",
+          test: { k: "gate", s: "repo", n: "a gate nobody declares" },
+          outcome: "pass",
+          durationMs: 1,
+        }) + "\n",
+      );
+      try {
+        expect(await main(["--records", at], root)).toBe(1);
+      } finally {
+        await Deno.remove(at);
+      }
+    } finally {
+      console.log = log;
+      console.error = err;
     }
   });
 

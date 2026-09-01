@@ -232,7 +232,10 @@ describe("a member whose manifest says less than usual", () => {
     expect(tasks.browserTest).toBe(false);
   });
 
-  it("passes over the directories that hold no test of their own", async () => {
+  it("never descends into the directories the walk is told to skip", async () => {
+    // These hold test files; what keeps them out is their names. A
+    // dependency's own tests are its own business, and a build output
+    // holds a copy of tests that already ran from their source.
     const dir = await member({}, [
       "node_modules/dep/a.test.ts",
       "dist/b.test.ts",

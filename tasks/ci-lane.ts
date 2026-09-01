@@ -671,18 +671,28 @@ export async function runLane(
   return ok;
 }
 
-async function main(): Promise<void> {
-  const options = parseLaneArgs(Deno.args);
+/**
+ * Runs the lane the way the job runs it, and answers with the status it
+ * would exit with: two for a command line this cannot read, one for a
+ * lane that failed, zero otherwise.
+ */
+export async function main(
+  args: readonly string[] = Deno.args,
+  root: string = Deno.cwd(),
+  deps: LaneDeps = {},
+): Promise<number> {
+  const options = parseLaneArgs(args, root);
   if (options === undefined) {
     console.error(
       "usage: ci-lane.ts [--lane N] [--of M] [--full] [--dry-run] " +
         "[--base <ref>] [--at <iso>]",
     );
-    Deno.exit(2);
+    return 2;
   }
-  if (!await runLane(options)) Deno.exit(1);
+  return await runLane(options, deps) ? 0 : 1;
 }
 
 if (import.meta.main) {
-  await main();
+  const status = await main();
+  if (status !== 0) Deno.exit(status);
 }

@@ -3,17 +3,12 @@ import { describe, it } from "@std/testing/bdd";
 import { testIdentityKey } from "@commonfabric/test-support/records";
 import { loadTopology } from "./test-topology.ts";
 
-/**
- * The repository, found from this file rather than from the process's
- * own directory: a package's tests run with that package as the working
- * directory, and the paths the topology reads are the repository's.
- */
-const REPOSITORY = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 import {
   batchesOf,
   changedFiles,
   describePlan,
   everyBatch,
+  main,
   mandatoryFor,
   manifestMoment,
   parseLaneArgs,
@@ -25,6 +20,12 @@ import {
 import type { Suite } from "./test-topology/suite.ts";
 import type { Manifest, ManifestEntry } from "./test-selection/manifest.ts";
 
+/**
+ * The repository, found from this file rather than from the process's
+ * own directory: a package's tests run with that package as the working
+ * directory, and the paths the topology reads are the repository's.
+ */
+const REPOSITORY = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 /** A suite holding exactly what a case describes. */
 function suite(partial: Partial<Suite> & { id: string }): Suite {
   return {
@@ -640,6 +641,27 @@ describe("planning a lane the manifest chose", () => {
 
 describe("the lane's own housekeeping", () => {
   const root = REPOSITORY;
+
+  it("answers with the status the job would exit with", async () => {
+    const log = console.log;
+    const err = console.error;
+    console.log = () => {};
+    console.error = () => {};
+    try {
+      // A command line this cannot read is a usage error rather than a
+      // lane that ran nothing and reported success.
+      expect(await main(["--shard", "1/5"], REPOSITORY)).toBe(2);
+      expect(
+        await main(
+          ["--lane", "9999", "--of", "10000", "--full", "--dry-run"],
+          REPOSITORY,
+        ),
+      ).toBe(0);
+    } finally {
+      console.log = log;
+      console.error = err;
+    }
+  });
 
   it("reads the two flags that carry no value", () => {
     const options = parseLaneArgs(["--full", "--dry-run", "--lane", "2"]);

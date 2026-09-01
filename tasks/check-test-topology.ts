@@ -454,12 +454,21 @@ export function report(
   return false;
 }
 
-async function main(): Promise<void> {
-  const options = parseCheckArgs(Deno.args, Deno.cwd());
-  const { findings, suites } = await check(options);
-  if (!report(findings, suites)) Deno.exit(1);
+/**
+ * Runs the check the way the command line runs it, and answers with the
+ * status it would exit with. Zero when the topology accounts for
+ * everything, and one when it does not: a surface nobody registered has
+ * to stop a build, or the guard is a log line nobody reads.
+ */
+export async function main(
+  args: readonly string[] = Deno.args,
+  root: string = Deno.cwd(),
+): Promise<number> {
+  const { findings, suites } = await check(parseCheckArgs(args, root));
+  return report(findings, suites) ? 0 : 1;
 }
 
 if (import.meta.main) {
-  await main();
+  const status = await main();
+  if (status !== 0) Deno.exit(status);
 }
