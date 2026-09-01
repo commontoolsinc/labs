@@ -324,16 +324,21 @@ const isAdmin = subjectHasAdminRole(admins, subject);
 
 // The handler named in the list's `writeAuthorizedBy` contract is the only
 // code that may write the roster, so an unreviewed action elsewhere in the
-// pattern cannot reach it.
+// pattern cannot reach it. The binding says which code may write. It does not
+// say which person may, and the mode switch does not either, so the handler
+// checks the acting subject's own role: an empty roster is open, so the first
+// admin can exist, and after that only an admin grants one.
 const commitProjectAdminChange = handler<
   { subject: ProjectSubject; displayName: string },
   {
     registry: Writable<ProjectAdminRegistry>;
     managerMode: ProjectAdminManagerModeCell;
+    actor: ProjectSubject;
   }
->((event, { registry, managerMode }) => {
+>((event, { registry, managerMode, actor }) => {
   if (managerMode.get() !== true) return;
   const current: ProjectAdminRole[] = adminRegistryEntries(registry);
+  if (current.length > 0 && !subjectHasAdminRole(current, actor)) return;
   if (subjectHasAdminRole(current, event.subject)) return;
   registry.key("admins").set([
     ...current,
