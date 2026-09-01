@@ -12,16 +12,13 @@
 
 import * as path from "@std/path";
 import { PATTERN_TREES } from "../pattern-files.ts";
-import {
-  SERVER_EXECUTION_ON_SKIPS,
-  type ServerExecutionSuite,
-} from "../server-execution-on-skips.ts";
+import { SERVER_EXECUTION_ON_SKIPS } from "../server-execution-on-skips.ts";
 import {
   fileSuite,
   type Invocation,
   type Location,
   type Suite,
-  type Unavailable,
+  unavailableFrom,
 } from "./suite.ts";
 
 /** The variant the server-execution ON arms mark their records with. */
@@ -71,32 +68,6 @@ async function patternTestFiles(root: string): Promise<string[]> {
   return found.sort();
 }
 
-/**
- * What a configuration's skip registry says about one suite, as the
- * topology reads it. A whole-file entry leaves the file out of the
- * enumeration; a step-level entry leaves the file in and names the one
- * leaf that does not run, so that leaf is excluded from the
- * unknown-identity and coverage rules while the rest behave normally.
- */
-function unavailableFor(
-  suite: ServerExecutionSuite,
-  packageDir: string,
-): { whole: Set<string>; unavailable: Unavailable[] } {
-  const whole = new Set<string>();
-  const unavailable: Unavailable[] = [];
-  for (const skip of SERVER_EXECUTION_ON_SKIPS[suite]) {
-    const unit = `${packageDir}/${skip.file}`;
-    if (skip.step === undefined) whole.add(unit);
-    unavailable.push({
-      unit,
-      ...(skip.step === undefined ? {} : { leafName: skip.step }),
-      phase: skip.phase,
-      reason: skip.reason,
-    });
-  }
-  return { whole, unavailable };
-}
-
 /** The integration suites over `packages/patterns/integration/`. */
 async function patternIntegrationSuites(root: string): Promise<Suite[]> {
   const packageDir = "packages/patterns";
@@ -111,7 +82,7 @@ async function patternIntegrationSuites(root: string): Promise<Suite[]> {
     scope: "patterns",
     filePrefix: packageDir,
   };
-  const on = unavailableFor("patterns", packageDir);
+  const on = unavailableFrom(SERVER_EXECUTION_ON_SKIPS.patterns, packageDir);
   return [
     fileSuite({
       id: "pattern-integration",

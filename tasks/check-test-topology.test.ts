@@ -247,7 +247,7 @@ describe("what the tree half looks at", () => {
     }
   });
 
-  it("holds a listed exception to still being in the tree", async () => {
+  it("holds a listed exception to still being in the tree", () => {
     // A file that gets registered or deleted takes its line with it,
     // which is what stops the list describing a tree nobody has.
     const findings = checkTree([], [], {

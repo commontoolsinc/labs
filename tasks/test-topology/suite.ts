@@ -219,6 +219,49 @@ export function unavailableLeaves(
   return leaves;
 }
 
+/** One entry of a configuration's skip registry, as the topology reads it. */
+export interface ConfiguredSkip {
+  /** The file, relative to the package the suite runs in. */
+  file: string;
+
+  /** The one leaf inside it that does not run, where only one does not. */
+  step?: string;
+
+  /** Which part of the work it is unavailable for. */
+  phase?: string;
+
+  /** Why, in words a person reads. */
+  reason: string;
+}
+
+/**
+ * What a configuration's skip registry says, as units and leaves.
+ *
+ * A whole-file entry leaves the file out of the variant suite's units. A
+ * step-level entry leaves the file in and names the one leaf that does
+ * not run, so that leaf is excluded from the unknown-identity and
+ * coverage-target rules while every other identity in the file behaves
+ * normally.
+ */
+export function unavailableFrom(
+  skips: readonly ConfiguredSkip[],
+  packageDir: string,
+): { whole: Set<Unit>; unavailable: Unavailable[] } {
+  const whole = new Set<Unit>();
+  const unavailable: Unavailable[] = [];
+  for (const skip of skips) {
+    const unit = `${packageDir}/${skip.file}`;
+    if (skip.step === undefined) whole.add(unit);
+    unavailable.push({
+      unit,
+      ...(skip.step === undefined ? {} : { leafName: skip.step }),
+      ...(skip.phase === undefined ? {} : { phase: skip.phase }),
+      reason: skip.reason,
+    });
+  }
+  return { whole, unavailable };
+}
+
 /** Writes a batch's skip list where its invocations will read it. */
 export async function writeSkipList(
   skipListPath: string,

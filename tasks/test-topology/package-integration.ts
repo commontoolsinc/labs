@@ -13,7 +13,12 @@ import {
   SERVER_EXECUTION_ON_SKIPS,
   type ServerExecutionSuite,
 } from "../server-execution-on-skips.ts";
-import { type FilePart, fileSuite, type Suite } from "./suite.ts";
+import {
+  type FilePart,
+  fileSuite,
+  type Suite,
+  unavailableFrom,
+} from "./suite.ts";
 import { SERVER_EXECUTION_VARIANT } from "./patterns.ts";
 
 /** The packages the suite spans, and what each one's tests need. */
@@ -61,21 +66,10 @@ export async function loadPackageIntegrationSuites(
     const env: Record<string, string> = headless ? { HEADLESS: "1" } : {};
     defaults.push({ packageDir, flags: ["-A"], env, junit, files });
 
-    // A whole-file skip leaves the file out of the variant suite's units.
-    // A step-level skip leaves the file in and names the one leaf that
-    // does not run, so that leaf is neither unknown nor a coverage
-    // target while the rest of the file behaves normally.
-    const whole = new Set<string>();
-    const unavailable = SERVER_EXECUTION_ON_SKIPS[scope].map((skip) => {
-      const unit = `${packageDir}/${skip.file}`;
-      if (skip.step === undefined) whole.add(unit);
-      return {
-        unit,
-        ...(skip.step === undefined ? {} : { leafName: skip.step }),
-        phase: skip.phase,
-        reason: skip.reason,
-      };
-    });
+    const { whole, unavailable } = unavailableFrom(
+      SERVER_EXECUTION_ON_SKIPS[scope],
+      packageDir,
+    );
     on.push({
       packageDir,
       flags: ["-A"],

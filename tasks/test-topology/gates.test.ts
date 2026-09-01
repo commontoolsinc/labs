@@ -145,10 +145,48 @@ describe("the repository's gate suites", () => {
     ).toEqual({ level: "unit", unit: "pattern-vintage" });
   });
 
+  it("runs the pattern type check and the vintage replay whole", async () => {
+    // Both write a record per item and neither takes a way of running
+    // part of itself, so the suite is one unit and the command is the
+    // task, wrapped so its exit code becomes that unit's record.
+    for (const id of ["cfcheck", "pattern-vintage"]) {
+      const suite = byId(id);
+      const [invocation] = await suite.command(
+        [{ unit: suite.units[0]!, skip: [] }],
+        context,
+      );
+      expect(invocation!.command).toContain("run-recorded");
+      expect(invocation!.command.at(-1)).toBe(suite.units[0]);
+      expect(await suite.command([], context)).toEqual([]);
+    }
+  });
+
+  it("declines a type-check record whose name is another gate's", () => {
+    // Both record under the `typecheck` kind, so within one scope only
+    // the name separates them.
+    expect(
+      byId("typecheck").locate({
+        test: { k: "typecheck", s: "memory", n: "cfcheck a/b.tsx" },
+      }),
+    ).toBeUndefined();
+  });
+
   it("builds no command for units it does not hold", async () => {
     expect(await byId("cfcheck").command([], context)).toEqual([]);
     expect(
       await byId("typecheck").command([{ unit: "nowhere", skip: [] }], context),
+    ).toEqual([]);
+    expect(
+      await byId("repo-gates").command(
+        [{ unit: "nowhere", skip: [] }],
+        context,
+      ),
+    ).toEqual([]);
+    expect(
+      await byId("pattern-compat").command(
+        [{ unit: "nowhere", skip: [] }],
+        context,
+      ),
     ).toEqual([]);
   });
 });
