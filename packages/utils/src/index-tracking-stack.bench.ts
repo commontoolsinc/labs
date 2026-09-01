@@ -3,7 +3,7 @@
  * with and without a repeated object in play.
  *
  * The states are what make this more than one figure. `IndexTrackingStack`
- * answers by scanning while it is short, from an index once it has been
+ * operates by scanning while it is short, from an index once it has been
  * `ADD_INDEX_AT` entries tall, and by scanning again once it has come back
  * below `DROP_INDEX_BELOW`:
  *
@@ -15,7 +15,7 @@
  *
  * `scanning` and `crossed` do the same work at the same height, so the two of
  * them meeting is what says the index was dropped rather than carried. No test
- * can say it, the drop changing no answer.  `indexed` is what a deep graph
+ * can say it, the drop changing no answer. `indexed` is what a deep graph
  * pays.
  *
  * The `oscillating` group is what says the two marks are far enough apart. A
