@@ -6586,6 +6586,28 @@ const readRowForBranch = (
   });
 };
 
+/** The head revision of `(branch, scopeKey, id)` without decoding the
+ * document: the row's (seq, opIndex) and op, or null when no row resolves.
+ * A `delete` head is a row — the caller decides whether that reads as
+ * absent (readState's `document: null`). */
+export const readRevision = (
+  engine: Engine,
+  options: { id: EntityId; scopeKey: string; branch?: BranchName },
+): { seq: number; opIndex: number; op: AppliedRevision["op"] } | null => {
+  const branch = options.branch ?? DEFAULT_BRANCH;
+  const resolved = readRowForBranch(engine, {
+    id: options.id,
+    scopeKey: options.scopeKey,
+    branch,
+    seq: headSeq(engine, branch),
+  });
+  return resolved === null ? null : {
+    seq: resolved.row.seq,
+    opIndex: resolved.row.op_index,
+    op: resolved.row.op,
+  };
+};
+
 const getBranch = (engine: Engine, branch: BranchName): BranchState | null => {
   const row = engine.statements.selectBranch.get({
     branch,

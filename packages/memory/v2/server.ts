@@ -115,6 +115,12 @@ import {
   trackGraph,
 } from "./query.ts";
 import {
+  createSchemaWalkMemoStore,
+  type SchemaWalkMemoDiagnostics,
+  schemaWalkMemoDiagnostics,
+  type SchemaWalkMemoStore,
+} from "./schema-walk-memo.ts";
+import {
   executionLeaseHolder,
   liveExecutionLeaseHolder,
 } from "./execution-lease.ts";
@@ -1345,6 +1351,13 @@ export class Server {
    * most QUERY_EVALUATION_CACHE_MAX_SPACES spaces in LRU order. */
   #queryEvaluationCaches = new Map<string, QueryEvaluationCache>();
 
+  /**
+   * Per-space revision-keyed schema-walk memos (schema-walk-memo.ts),
+   * populated only under `experimentalSchemaWalkMemo`, held for at most
+   * QUERY_EVALUATION_CACHE_MAX_SPACES spaces in LRU order.
+   */
+  #schemaWalkMemos = new Map<string, SchemaWalkMemoStore>();
+
   #engines = new Map<string, Promise<Engine.Engine>>();
   // The resolved-engine index for the SYNC cross-engine lease lookup
   // (server-execution v2 Phase 5; see openEngine / #liveCoHostedLeaseSpaceFor).
@@ -1455,6 +1468,13 @@ export class Server {
        * fits. A single evaluation heavier than the whole budget is not
        * retained at all. */
       queryEvaluationCacheBudget?: number;
+      /**
+       * Serves per-document schema-walk subtrees across evaluations from a
+       * per-space revision-keyed memo
+       * (docs/plans/revision-keyed-schema-memo.md). Experimental, off by
+       * default; `true` uses the store's default entry bound.
+       */
+      experimentalSchemaWalkMemo?: boolean | { maxEntries?: number };
 
       authorizeSessionOpen: (
         message: SessionOpenRequest,
@@ -4419,6 +4439,7 @@ export class Server {
               principal: session.principal,
               sessionId: message.sessionId,
               evaluationCache: this.#evaluationCacheFor(message.space),
+              schemaWalkMemo: this.#schemaWalkMemoFor(message.space),
             },
           );
           foldRootAttribution(attribution, tracked.stats);
@@ -4558,6 +4579,39 @@ export class Server {
     return cache;
   }
 
+  /** The space's schema-walk memo store, or undefined when the
+   * experimental option is off. Same space-count backstop as the
+   * evaluation caches. */
+  #schemaWalkMemoFor(space: string): SchemaWalkMemoStore | undefined {
+    const config = this.options.experimentalSchemaWalkMemo;
+    if (config === undefined || config === false) return undefined;
+    let store = this.#schemaWalkMemos.get(space);
+    if (store !== undefined) {
+      this.#schemaWalkMemos.delete(space);
+      this.#schemaWalkMemos.set(space, store);
+      return store;
+    }
+    store = createSchemaWalkMemoStore(
+      config === true ? undefined : config.maxEntries,
+    );
+    this.#schemaWalkMemos.set(space, store);
+    if (this.#schemaWalkMemos.size > QUERY_EVALUATION_CACHE_MAX_SPACES) {
+      const oldest = this.#schemaWalkMemos.keys().next().value;
+      if (oldest !== undefined) {
+        this.#schemaWalkMemos.delete(oldest);
+      }
+    }
+    return store;
+  }
+
+  /** The space's schema-walk memo counters, for diagnostics and tests. A
+   * peek: an absent (never-evaluated, evicted, or option-off) space reads
+   * as empty rather than being created or recency-bumped. */
+  schemaWalkMemoDiagnostics(space: string): SchemaWalkMemoDiagnostics {
+    const store = this.#schemaWalkMemos.get(space);
+    return schemaWalkMemoDiagnostics(store ?? createSchemaWalkMemoStore());
+  }
+
   /** Evict least-recently-evaluated spaces' oldest entries until the
    * caches' total retained weight fits the budget. Runs after every
    * evaluation that may have inserted; an entry heavier than the whole
@@ -4634,7 +4688,10 @@ export class Server {
         {
           ...scopeContext,
           ...(cacheEligible
-            ? { evaluationCache: this.#evaluationCacheFor(space) }
+            ? {
+              evaluationCache: this.#evaluationCacheFor(space),
+              schemaWalkMemo: this.#schemaWalkMemoFor(space),
+            }
             : {}),
         },
       );
@@ -4681,6 +4738,7 @@ export class Server {
         {
           ...scopeContext,
           evaluationCache: this.#evaluationCacheFor(space),
+          schemaWalkMemo: this.#schemaWalkMemoFor(space),
         },
       );
       foldRootAttribution(attribution, result.stats);

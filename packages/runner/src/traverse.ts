@@ -76,6 +76,9 @@ import {
   type ValuePath,
 } from "./link-types.ts";
 import { addressKey, NormalizedFullLink, parseLink } from "./link-utils.ts";
+// Re-exported: the cross-traversal memo interface names it, so implementers
+// reach one module (graph-query re-exports the traversal vocabulary).
+export type { NormalizedFullLink };
 import { canFollowScopedLink } from "./scope.ts";
 import { type CellLinkRefPayload, SigilLink, type URI } from "./sigil-types.ts";
 import {
@@ -1303,6 +1306,13 @@ export type TraversalContext = {
   schemaDocsLoaded: Set<string>;
 
   /**
+   * Cross-traversal schema memo the query path consults (see
+   * {@link CrossTraversalSchemaMemo}); absent on the read path and on
+   * traversals whose results must not be shared across evaluations.
+   */
+  crossTraversalMemo?: CrossTraversalSchemaMemo;
+
+  /**
    * `\${space}/\${taggedHash}` keys for the schema documents this traversal
    * loaded AND verified, qualified by the space each was collected from —
    * one traversal can cross spaces through links, and a document collected
@@ -1684,6 +1694,53 @@ export abstract class BaseObjectTraverser {
     this.tx = wrapTxForTraverseCapture(tx);
   }
   protected dagMemo = new Map<string, FabricValue>();
+
+  /** The cross-traversal memo, on the one path that may consult it: the
+   * query path. Read-path results are bound to their materialization (see
+   * the schema-memo comment in `traverseWithSchema`), so the read arm
+   * reads this as absent even when the context carries one. */
+  protected get crossMemo(): CrossTraversalSchemaMemo | undefined {
+    return this.traverseCells ? this.context.crossTraversalMemo : undefined;
+  }
+
+  crossTraversalMemoHits = 0;
+
+  /** Route a linked document's untyped traversal through the
+   * cross-traversal memo: serve it from an entry, or compute it inside
+   * its own frame so repeats — this evaluation's and later ones' — serve
+   * from what the computation stores. A `defaultValue` changes the
+   * result, so those computations stay unframed and unserved (the same
+   * rule the DAG memo applies). Each frame gets its own DAG memo: a DAG
+   * memo entry elides the registrations its first walk recorded, which is
+   * sound only within the frame that recorded them. */
+  protected traverseLinkedDAG(
+    doc: IMemorySpaceValueAttestation,
+    defaultValue?: FabricValue,
+    itemLink?: NormalizedFullLink,
+  ): FabricValue {
+    const cross = this.crossMemo;
+    if (cross === undefined || defaultValue !== undefined) {
+      return this.traverseDAG(doc, defaultValue, itemLink);
+    }
+    const served = cross.lookup(doc, true, itemLink);
+    if (served !== undefined && served.error === undefined) {
+      this.crossTraversalMemoHits++;
+      return served.ok;
+    }
+    cross.enter(doc, true, itemLink);
+    const outerDagMemo = this.dagMemo;
+    this.dagMemo = new Map();
+    let completed = false;
+    try {
+      const value = this.traverseDAG(doc, undefined, itemLink);
+      cross.exit(doc, true, { ok: value }, itemLink);
+      completed = true;
+      return value;
+    } finally {
+      this.dagMemo = outerDagMemo;
+      if (!completed) cross.abandon();
+    }
+  }
   traverseDAGCalls = 0;
   getDocAtPathCalls = 0;
   abstract traverse(
@@ -1755,6 +1812,10 @@ export abstract class BaseObjectTraverser {
       const newValue = new Array<FabricValue>(doc.value.length);
       using t = this.tracker.include(doc.value, true, newValue, doc);
       if (t === null) {
+        // A value cycle closed against an ancestor in progress: this
+        // computation is not a standalone one, so no frame containing it
+        // may become a cross-traversal entry.
+        this.crossMemo?.poison();
         return this.tracker.getExisting(doc.value, true);
       }
       doc.value.forEach((item, index) => {
@@ -1773,7 +1834,8 @@ export abstract class BaseObjectTraverser {
         // We follow the first link in array elements so we don't have
         // strangeness with setting item at 0 to item at 1
         let arrayElementLink = itemLink;
-        if (isSigilLink(item)) {
+        const crossedLink = isSigilLink(item);
+        if (crossedLink) {
           const [redirDoc, redirSelector] = this.getDocAtPath(
             docItem,
             [],
@@ -1801,7 +1863,12 @@ export abstract class BaseObjectTraverser {
             );
           }
         }
-        const v = this.traverseDAG(docItem, itemDefault, arrayElementLink);
+        // A sigil item crossed into another document, so its traversal is
+        // a memoizable subtree of its own; a plain item's walk stays part
+        // of this document's.
+        const v = crossedLink
+          ? this.traverseLinkedDAG(docItem, itemDefault, arrayElementLink)
+          : this.traverseDAG(docItem, itemDefault, arrayElementLink);
         // Use null for missing/undefined elements (consistent with other value
         // transforms in this system, e.g. toJSON and shallowFabricFromNativeValue)
         newValue[index] = v === undefined ? null : v;
@@ -1891,6 +1958,8 @@ export abstract class BaseObjectTraverser {
         const newValue: Record<string, FabricValue> = {};
         using t = this.tracker.include(doc.value, true, newValue, doc);
         if (t === null) {
+          // Cycle cut (see the array arm): no enclosing frame may store.
+          this.crossMemo?.poison();
           return this.tracker.getExisting(doc.value, true);
         }
         const entries = Object.entries(doc.value as JSONObject).map((
@@ -1974,6 +2043,14 @@ export abstract class BaseObjectTraverser {
     doc: IMemorySpaceValueAttestation,
     selector: SchemaPathSelector,
   ): boolean {
+    // Under a cross-traversal memo, coverage never grants a skip: a skip
+    // makes a frame's recorded effects depend on what the rest of the walk
+    // covered first, which is exactly what a stored entry must not do. The
+    // memo's own entries are the dedup instead (a repeated subtree hits
+    // the entry its first computation stored moments earlier).
+    if (this.crossMemo !== undefined) {
+      return false;
+    }
     const link = parseLink(doc.value, doc.address);
     if (link?.id === undefined) {
       return false;
@@ -3464,7 +3541,7 @@ function fail<T>(
   return { error };
 }
 
-type TraverseResult<T> = { ok: T; error?: never } | {
+export type TraverseResult<T> = { ok: T; error?: never } | {
   ok?: never;
   error: TraverseFailure;
 };
@@ -3490,7 +3567,7 @@ export function createSchemaMemo(): SchemaMemo {
 // Map.
 const schemaMemoIdentityBindings = new WeakMap<SchemaMemo, string>();
 
-const schemaMemoIdentityKey = (identity: ScopeKeyIdentity): string =>
+export const schemaMemoIdentityKey = (identity: ScopeKeyIdentity): string =>
   // Injective over the pair: JSON escapes every delimiter, and `null`
   // keeps an ABSENT component distinct from an empty string. A raw
   // `\0`-joined key let two DISTINCT identities collide (a NUL inside a
@@ -3523,6 +3600,65 @@ export function assertSchemaMemoIdentity(
     );
   }
 }
+
+/**
+ * A cross-traversal memo the QUERY path consults per (document, schema)
+ * subtree, serving whole subtree computations recorded by earlier
+ * evaluations. The traverser only signals frame boundaries and consumes
+ * served results; the implementation owns entry storage, validity, and
+ * the replay of a served subtree's recorded effects — tracker
+ * registrations and misses — into the current walk. A served subtree MUST
+ * reproduce those effects, because `lookup` returns before the traversal
+ * that would have recorded them (the schema-memo comment in
+ * `traverseWithSchema` states the failure: an entry living past its
+ * traversal answers a later traversal that never recorded its reads).
+ * Only the query path consults it: read-path results are bound to the
+ * materialization that produced them and must not outlive it.
+ *
+ * Sharing entries across identities is sound only under instance-resolved
+ * entry keys (the implementation's obligation) — the memo counterpart of
+ * {@link assertSchemaMemoIdentity}'s single-identity rule for shared
+ * schema memos.
+ */
+export type CrossTraversalSchemaMemo = {
+  /** Serve (doc, schema) from a prior evaluation: replays the entry's
+   * recorded effects into the current walk and returns its result, or
+   * returns undefined — with no side effects — when no valid entry
+   * exists. */
+  lookup(
+    doc: IMemorySpaceValueAttestation,
+    schema: JSONSchema,
+    link?: NormalizedFullLink,
+  ): TraverseResult<FabricValue> | undefined;
+  /** A (doc, schema) computation begins; effects until the matching
+   * `exit` or `abandon` attribute to its frame. */
+  enter(
+    doc: IMemorySpaceValueAttestation,
+    schema: JSONSchema,
+    link?: NormalizedFullLink,
+  ): void;
+  /** The computation completed; record its frame as an entry. */
+  exit(
+    doc: IMemorySpaceValueAttestation,
+    schema: JSONSchema,
+    result: TraverseResult<FabricValue>,
+    link?: NormalizedFullLink,
+  ): void;
+  /** The computation is unwinding on an error; discard the open frame. */
+  abandon(): void;
+  /** A within-traversal memo hit consumed (doc, schema) without
+   * re-entering it; record the dependency for the open frame. */
+  dependency(
+    doc: IMemorySpaceValueAttestation,
+    schema: JSONSchema,
+    link?: NormalizedFullLink,
+  ): void;
+  /** The open frame's computation was cut short by walk-global state (a
+   * value cycle closing against an ancestor in progress), so its recorded
+   * effects are not the complete effects of a standalone computation. The
+   * frame and its ancestors must not become entries. */
+  poison(): void;
+};
 
 export class SchemaObjectTraverser<V extends FabricValue>
   extends BaseObjectTraverser {
@@ -3605,7 +3741,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       }
       return ok;
     }
-    return this.traverseDAG(doc, defaultValue, itemLink);
+    return this.traverseLinkedDAG(doc, defaultValue, itemLink);
   }
 
   override traverse(
@@ -3636,6 +3772,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     this.#maxDepth = 0;
     this.#currentDepth = 0;
     this.schemaMemoHits = 0;
+    this.crossTraversalMemoHits = 0;
     // The private memo is per-traversal on both paths — the read path holds
     // its entries there precisely because they must not outlive the
     // traversal that recorded their reads — so it is cleared unconditionally.
@@ -3847,10 +3984,39 @@ export class SchemaObjectTraverser<V extends FabricValue>
         ? schemaMemoAddressKey(doc.address) + "|" + hashSchema(schema)
         : schemaMemoAddressKey(doc.address) + "|" + hashSchema(schema) + "|" +
           schemaMemoLinkKey(link);
+      const cross = this.crossMemo;
       const cached = memo.get(memoKey);
       if (cached !== undefined) {
         this.schemaMemoHits++;
+        // Consumed without re-entering: the open cross-memo frame still
+        // depends on this subtree.
+        cross?.dependency(doc, schema, link);
         return cached;
+      }
+      if (cross !== undefined) {
+        const served = cross.lookup(doc, schema, link);
+        if (served !== undefined) {
+          this.crossTraversalMemoHits++;
+          memo.set(memoKey, served);
+          return served;
+        }
+        cross.enter(doc, schema, link);
+        // Each frame's DAG memo is its own: a DAG memo entry elides the
+        // registrations its first walk recorded, which is sound only
+        // within the frame that recorded them.
+        const outerDagMemo = this.dagMemo;
+        this.dagMemo = new Map();
+        let completed = false;
+        try {
+          const result = this.#traverseWithSchemaInner(doc, schema, link);
+          memo.set(memoKey, result);
+          cross.exit(doc, schema, result, link);
+          completed = true;
+          return result;
+        } finally {
+          this.dagMemo = outerDagMemo;
+          if (!completed) cross.abandon();
+        }
       }
       const result = this.#traverseWithSchemaInner(doc, schema, link);
       memo.set(memoKey, result);
@@ -4254,6 +4420,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
       const newValue: FabricValue[] = [];
       using t = this.tracker.include(doc.value, schema, newValue, doc);
       if (t === null) {
+        // Cycle cut (see traverseDAG's array arm): no enclosing frame may
+        // store.
+        this.crossMemo?.poison();
         // newValue will be converted to a createObject result by the
         // function that added it to the tracker, so don't do that here
         return { ok: this.tracker.getExisting(doc.value, schema) };
@@ -4312,6 +4481,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
       const newValue: Record<string, FabricValue> = {};
       using t = this.tracker.include(doc.value, schemaObj, newValue, doc);
       if (t === null) {
+        // Cycle cut (see traverseDAG's array arm): no enclosing frame may
+        // store.
+        this.crossMemo?.poison();
         // newValue will be converted to a createObject result by the
         // function that added it to the tracker, so don't do that here
         return { ok: this.tracker.getExisting(doc.value, schemaObj) };
