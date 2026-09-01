@@ -5602,7 +5602,7 @@ Deno.test("CellBridge.finalizeSourceWritePath preserves both warnings when the r
     throw new Error("the failed rebuild produced no persistent warning");
   }
   // This is the outer flush's final write into the synthetic log.
-  bridge.writeSourceErrorLog(writePath, finalized.errorLogWarning);
+  bridge.writeSourceErrorLog(writePath, finalized.logWarning);
 
   assertEquals(
     errors.lines.filter((line) =>

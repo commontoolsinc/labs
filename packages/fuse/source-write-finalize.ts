@@ -55,7 +55,7 @@ export async function finalizeCommittedSourceWrite(
     return {
       status: "failed" as const,
       warning,
-      errorLogWarning: refreshWarning === undefined
+      logWarning: refreshWarning === undefined
         ? warning
         : `${refreshWarning}\n${warning}`,
       error,

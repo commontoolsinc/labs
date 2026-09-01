@@ -207,7 +207,7 @@ Deno.test("source writeback finalizes its receipt and persists every warning", a
   );
   assert(
     sourceWriteback.includes(
-      "finalized.errorLogWarning",
+      "finalized.logWarning",
     ),
     "source writeback must persist the complete post-commit diagnostic",
   );
@@ -232,7 +232,7 @@ Deno.test("source projection failures after commit become warnings, not rejected
       `Source revision revision-committed-before-finalize committed as ` +
       `cf:module/${"A".repeat(43)}#default, but refreshing the FUSE ` +
       `projection failed: projection rebuild failed`,
-    errorLogWarning:
+    logWarning:
       `Source revision revision-committed-before-finalize committed as ` +
       `cf:module/${"A".repeat(43)}#default, but refreshing the FUSE ` +
       `projection failed: projection rebuild failed`,
