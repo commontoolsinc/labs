@@ -39,8 +39,9 @@ possible — a controller stub driving the function's body against a doubled
 piece, with no socket and no server behind it — which is the PR's
 standalone value.
 
-**A3 — extract `callFromCommand`.** Done. `call` carries the named-export
-shape its siblings have: the mount's spelling and the two arrays Cliffy
+**A3 — extract `callFromCommand`.** Done (#6682). `call` carries the
+named-export shape its siblings have: the mount's spelling and the two
+arrays Cliffy
 splits the argv into — this command's own arguments, the line past
 `cf call`, which a grammar refusal reprints, and the words past `--`,
 which the read step parses — are parameters beside the options and the
