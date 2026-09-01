@@ -63,6 +63,7 @@ import {
 } from "../src/storage/v2.ts";
 import type { Signer } from "@commonfabric/memory/interface";
 import { Runtime } from "../src/runtime.ts";
+import type { Module, Pattern } from "../src/builder/types.ts";
 import type {
   ITransactionSealSink,
   MemorySpace,
@@ -148,6 +149,124 @@ describe("stage D seal-into-wave", () => {
       // exactly the stage-F SpaceServer posture.
       sessionId: executionLeaseHolder(`service:${space}`),
     });
+
+  const stoppedWitnessPiece = async (id: string) => {
+    let instantiations = 0;
+    let lastRunInstantiation = 0;
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {
+        type: "object",
+        properties: { witness: { type: "number" } },
+      },
+      result: {},
+      nodes: [{
+        module: {
+          type: "raw",
+          implementation: (...args: unknown[]) => {
+            const parentCell = args[4] as {
+              key: (name: string) => { set: (value: number) => void };
+            };
+            instantiations += 1;
+            // `parentCell` is bound to startCore's actual transaction. A
+            // changing value makes every instantiation contribute a real
+            // bookkeeping write instead of being optimized to a no-op.
+            parentCell.key("witness").set(instantiations);
+            const thisInstantiation = instantiations;
+            const action = () => {
+              lastRunInstantiation = thisInstantiation;
+            };
+            return {
+              action,
+            };
+          },
+        } as Module,
+        inputs: {},
+        outputs: {},
+      }],
+    };
+    const tx = runtime.edit();
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      id,
+      undefined,
+      tx,
+    );
+    const running = runtime.runner.run(tx, pattern, {}, cell);
+    expect((await tx.commit()).error).toBeUndefined();
+    await running.pull();
+    runtime.runner.stop(cell);
+    return {
+      cell,
+      instantiations: () => instantiations,
+      lastRunInstantiation: () => lastRunInstantiation,
+    };
+  };
+
+  const routePieceInstantiationWaves = (
+    firstWave: WaveAccumulator,
+    recoveryWave: WaveAccumulator,
+  ) => {
+    let destinationWave = firstWave;
+    const firstSeal = Promise.withResolvers<void>();
+    const recoverySeal = Promise.withResolvers<void>();
+    let recoverySeals = 0;
+    let sealChain = Promise.resolve();
+    runtime.installSealDestination({
+      seal: (tx) => {
+        const target = destinationWave;
+        const sealed = sealChain.then(async () => {
+          const result = await target.seal(tx);
+          if (
+            result.error === undefined &&
+            waveSettlementOf(tx) !== undefined &&
+            waveRunContextOf(tx)?.actionId.startsWith("piece-instantiate/")
+          ) {
+            if (target === firstWave) firstSeal.resolve();
+            else {
+              recoverySeals += 1;
+              recoverySeal.resolve();
+            }
+          }
+          return result;
+        });
+        sealChain = sealed.then(() => undefined, () => undefined);
+        return sealed;
+      },
+    }, {
+      runStamper: (tx, info) =>
+        stampWaveRunContext(tx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        }),
+    });
+    return {
+      firstSeal: firstSeal.promise,
+      recoverySeal: recoverySeal.promise,
+      recoverySeals: () => recoverySeals,
+      idleSeals: () => sealChain,
+      useRecoveryWave: () => {
+        destinationWave = recoveryWave;
+      },
+    };
+  };
+
+  const wholeDocumentConflictSink = (
+    inner: WaveCommitSink,
+  ): WaveCommitSink => {
+    const conflictHead = Engine.serverSeq(engine) + 1;
+    return {
+      currentHeads: (_targetSpace, docs) =>
+        Promise.resolve(
+          new Map(docs.map((doc) => [
+            `${doc.id} ${doc.scopeKey}`,
+            conflictHead,
+          ])),
+        ),
+      concurrentWritePaths: () => Promise.resolve([[]]),
+      commitWave: (batch) => inner.commitWave(batch),
+    };
+  };
 
   /** Seed a foreign engine's GENESIS ACL as its first commit (OW31 B4:
    * the sink refuses a foreign data batch into a seq-0/no-ACL engine —
@@ -3562,6 +3681,156 @@ describe("stage D seal-into-wave", () => {
     // Both survive: the concurrent field AND the rebased advance.
     const stored = Engine.readState(engine, { id: link.id });
     expect(stored?.document).toEqual({ value: { seq: 9, other: 7 } });
+  });
+
+  it("reinstantiates a piece once after its bookkeeping contribution is withdrawn, preserving the live registration and action", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-recovery",
+    );
+    const { cell } = witness;
+    const lease = liveLease();
+    const firstWave = newWave({ lease });
+    const recoveryWave = newWave({ lease });
+    const route = routePieceInstantiationWaves(firstWave, recoveryWave);
+    const failures: Array<{ actionId: string; error: unknown }> = [];
+    runtime.pieceStartCommitFailureObserver = (failure) => {
+      failures.push(failure);
+    };
+
+    expect(await runtime.start(cell)).toBe(true);
+    await route.firstSeal;
+    await runtime.idle();
+    await route.idleSeals();
+    route.useRecoveryWave();
+
+    // Every document the first wave wrote appears to have advanced, and a
+    // whole-document rival write overlaps it. Bookkeeping cannot commute with
+    // that shape, so the accumulator deterministically drops the complete
+    // piece-instantiate contribution instead of relying on event-loop timing.
+    const inner = newSink();
+    const conflictSink = wholeDocumentConflictSink(inner);
+    const firstOutcome = await firstWave.commitWave(conflictSink);
+    await firstWave.settled();
+    expect(
+      firstOutcome.dispositions.some((disposition) =>
+        disposition.kind === "dropped"
+      ),
+    ).toBe(true);
+
+    // Settlement, not seal acceptance, triggers one fresh instantiation into
+    // the next wave. Let its newly registered actions quiesce before closing
+    // that wave, matching the serving loop's seal barrier.
+    await route.recoverySeal;
+    await runtime.idle();
+    runtime.clearSealDestination();
+    const recoveryOutcome = await recoveryWave.commitWave(inner);
+    await recoveryWave.settled();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(recoveryOutcome.aborted).toBeUndefined();
+    expect(route.recoverySeals()).toBe(1);
+    expect(
+      failures.some((failure) =>
+        failure.actionId.startsWith("piece-instantiate/")
+      ),
+    ).toBe(true);
+
+    // The retry kept the original outer registration alive, and the action
+    // belonging to its third raw-module instantiation ran.
+    expect(witness.instantiations()).toBe(3);
+    expect(witness.lastRunInstantiation()).toBe(3);
+    lease.release();
+  });
+
+  it("tears down after a second dropped piece-instantiation contribution instead of retrying again", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-second-drop",
+    );
+    const lease = liveLease();
+    const firstWave = newWave({ lease });
+    const recoveryWave = newWave({ lease });
+    const route = routePieceInstantiationWaves(firstWave, recoveryWave);
+    const conflictSink = wholeDocumentConflictSink(newSink());
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await route.firstSeal;
+    await runtime.idle();
+    await route.idleSeals();
+    route.useRecoveryWave();
+    await firstWave.commitWave(conflictSink);
+    await firstWave.settled();
+    await route.recoverySeal;
+    await runtime.idle();
+    await recoveryWave.commitWave(conflictSink);
+    await recoveryWave.settled();
+    await runtime.runner.idlePieceInstantiationSettlements();
+
+    // Initial materialization + losing start + its one retry. A loop would
+    // instantiate a fourth graph after the recovery wave withdrew it.
+    expect(witness.instantiations()).toBe(3);
+
+    runtime.clearSealDestination();
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(witness.instantiations()).toBe(4);
+    lease.release();
+  });
+
+  it("does not revive a piece stopped before its withdrawn instantiation settles", async () => {
+    const { cell } = await stoppedWitnessPiece(
+      "wave-piece-instantiate-stop",
+    );
+    const lease = liveLease();
+    const firstWave = newWave({ lease });
+    const recoveryWave = newWave({ lease });
+    const route = routePieceInstantiationWaves(firstWave, recoveryWave);
+
+    expect(await runtime.start(cell)).toBe(true);
+    await route.firstSeal;
+    await runtime.idle();
+    await route.idleSeals();
+    runtime.runner.stop(cell);
+    route.useRecoveryWave();
+    firstWave.abandon("the stopped-start settlement gate");
+    await firstWave.settled();
+    await runtime.runner.idlePieceInstantiationSettlements();
+
+    expect(route.recoverySeals()).toBe(0);
+    runtime.clearSealDestination();
+    recoveryWave.abandon("test cleanup");
+    lease.release();
+  });
+
+  it("does not retry an abandoned piece-instantiation wave in place", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-abandon",
+    );
+    const lease = liveLease();
+    const firstWave = newWave({ lease });
+    const recoveryWave = newWave({ lease });
+    const route = routePieceInstantiationWaves(firstWave, recoveryWave);
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await route.firstSeal;
+    await runtime.idle();
+    await route.idleSeals();
+    route.useRecoveryWave();
+    firstWave.abandon("whole-wave lifecycle recovery owns this case");
+    await firstWave.settled();
+    await runtime.runner.idlePieceInstantiationSettlements();
+
+    expect(route.recoverySeals()).toBe(0);
+    expect(witness.instantiations()).toBe(2);
+
+    // The non-retryable withdrawal removed the dead registration, so an
+    // ordinary later start can rebuild it through its owning lifecycle.
+    runtime.clearSealDestination();
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(witness.instantiations()).toBe(3);
+    recoveryWave.abandon("test cleanup");
+    lease.release();
   });
 });
 

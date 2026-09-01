@@ -1266,8 +1266,14 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   reads stale; the client's `piece-instantiate` then failed
   `piece-start-commit-failed` and the shells never idled) — the
   client-instantiate-vs-server-derive race at piece creation is
-  pre-existing and only softened, not closed (owner: the runner's
-  piece-start path).
+  still possible, but its one-shot loss arms are bounded in the runner:
+  a deferred client start that loses a stale-read race catches up from
+  served state, while a serving `piece-instantiate` contribution that
+  is dropped cancels only its exact speculative node group and
+  re-instantiates once in the next wave. The grace still reduces the
+  contention rate; correctness no longer depends on winning that first
+  bookkeeping wave. Whole-wave aborts and abandons keep their existing
+  lifecycle recovery instead of retrying in place.
 - OW19 — the demand-cycle terminal state: CLOSED by stage P2-F
   (2026-08-13; the RULED 2026-08-07 direction, built whole). A
   demanded root CONFIRMED synced with no pattern meta parks TERMINAL
@@ -2964,9 +2970,11 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   Owed (Stage C, a NAMED FOLLOW-UP, NOT stage-B-owned): the served
   interval `#now/300` wish's value for a serving runtime at dispatch
   (or the pattern's `if (!now) return` guard reading a wall clock the
-  serving runtime supplies) — plus the pre-existing
-  client-instantiate-vs-server-derive race at piece creation (the
-  300 ms demand-wake grace mitigates, does not close it; residual x).**
+  serving runtime supplies). The separate
+  client-instantiate-vs-server-derive race at piece creation remains a
+  source of contention, but not an unrecovered one-shot loss: deferred
+  client starts catch up and dropped serving-instantiation contributions
+  retry once under exact lifecycle guards (residual x).**
 - OW34 — a CFC-serving POLICY item: served handler runs carry NO
   renderer-trusted event mark, so a per-user served handler's write to a
   UI-contract-gated (owner-protected) cell is refused by CFC at prepare
@@ -6639,11 +6647,18 @@ supply; OW29/OW32/OW34 closed):
     **Anti-red-herrings, recorded so the next seat does not
     re-derive them.** `piece-start-commit-failed` is NOT this file's
     discriminator: 13 occurrences across the campaign, 1-2 per run,
-    in GREEN runs as often as red. It remains a real unrecovered arm
-    — the catch-up recovery is wired to the deferred-start commit,
-    not to the piece-instantiate one — and this row already carries
-    it as an open residual, but it does not explain these reds, and
-    ruling it out cost the measuring seat real time. And OW46's
+    in GREEN runs as often as red. It did not explain these reds, and
+    ruling it out cost the measuring seat real time. The arm now observes
+    the self-minted transaction's wave settlement: a contribution drop
+    cancels only the node group that transaction installed, preserves
+    the outer registration and its parent/root cancellation ownership,
+    waits for retry readiness, and instantiates the still-current
+    pattern once into the next wave. A stop, runtime cycle, pointer
+    change, or newer node group wins through exact guards; a second drop
+    tears the exact registration down rather than spinning. A whole-wave
+    abort or abandon is not retried in place.
+    Pinned in `executor-wave.test.ts` by a deterministic whole-document
+    conflict plus a stop-before-settlement companion. And OW46's
     `structure-load-stuck` counter is BLIND here: it fires 6× per run
     in BOTH arms and in the reds names only the HOST's space, because
     it counts deferred structure loads of DEMANDED roots and this
