@@ -30,6 +30,7 @@ import {
   OperationUpdateNotification,
   PendingWritesNotification,
   RequestType,
+  type RuntimeSecurityContext,
   SerializedDomEvent,
   TelemetryNotification,
   VDomBatchNotification,
@@ -237,12 +238,35 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     return this as InitializedRuntimeConnection;
   }
 
+  /**
+   * Joins the runtime already running behind this transport, asserting the
+   * security context it is believed to run under.
+   *
+   * @throws If the runtime refuses the assertion, or if no runtime is running
+   *   behind the transport to join.
+   */
+  async attach(
+    context: RuntimeSecurityContext,
+  ): Promise<InitializedRuntimeConnection> {
+    await this.request<RequestType.Attach>({
+      type: RequestType.Attach,
+      data: context,
+    });
+    this.#initialized = true;
+    return this as InitializedRuntimeConnection;
+  }
+
   request<
     T extends keyof Commands,
   >(
     data: CommandRequest<T>,
   ): Promise<CommandResponse<T>> {
-    if (!this.#initialized && data.type !== RequestType.Initialize) {
+    // Initialize and Attach are the two requests that make a connection
+    // usable, so each is the one thing an unusable connection may send.
+    if (
+      !this.#initialized && data.type !== RequestType.Initialize &&
+      data.type !== RequestType.Attach
+    ) {
       throw new Error("RuntimeConnection is uninitialized.");
     }
     const signal = this.#lifetime.signal;

@@ -16,6 +16,7 @@
   },
   "exports": {
     ".": "./src/mod.ts",
+    "./transports/message-port": "./src/client/transports/message-port/transport-message-port.ts",
     "./transports/web-worker": "./src/client/transports/web-worker/transport-web-worker.ts"
   }
 }

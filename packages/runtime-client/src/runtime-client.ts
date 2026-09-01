@@ -92,6 +92,24 @@ export type RuntimeClientEvents = {
 export const $conn = Symbol("$request");
 
 /**
+ * Refuses a render-declassification policy that names no known posture.
+ *
+ * It is a security knob, so a host's own config error surfaces here, early and
+ * loudly. The worker side additionally fails CLOSED -- an unknown value there
+ * becomes `deny` -- for peers that do not come through this entry point.
+ *
+ * @throws If `policy` is present and is neither `allow` nor `deny`.
+ */
+function assertRenderDeclassificationPolicy(policy: unknown): void {
+  if (policy === undefined || policy === "allow" || policy === "deny") return;
+  throw new Error(
+    `Invalid renderDeclassificationPolicy: ${
+      JSON.stringify(policy)
+    } (expected "allow" or "deny")`,
+  );
+}
+
+/**
  * RuntimeClient provides a main-thread interface to a Runtime running elsewhere.
  */
 export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
@@ -272,25 +290,41 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return this.#conn.signal;
   }
 
+  /**
+   * Joins a runtime a first client already stood up, over a transport already
+   * connected to that runtime's worker.
+   *
+   * What `options` says of the runtime's security posture is asserted rather
+   * than declared: the runtime is running under a posture of its own, and an
+   * attach whose assertion differs anywhere is refused. Everything else in
+   * `options` describes this client, and reaches nothing across the wire.
+   *
+   * @throws If the runtime refuses the attach, or if there is no runtime to
+   *   attach to.
+   */
+  static async attach(
+    transport: RuntimeTransport,
+    options: RuntimeClientOptions,
+  ): Promise<RuntimeClient> {
+    assertRenderDeclassificationPolicy(options.renderDeclassificationPolicy);
+    const attached = await (new RuntimeConnection(transport)).attach({
+      identity: options.identity.did(),
+      spaceDid: options.spaceDid,
+      experimental: options.experimental,
+      cfcEnforcementMode: options.cfcEnforcementMode,
+      cfcFlowLabels: options.cfcFlowLabels,
+      renderDeclassificationPolicy: options.renderDeclassificationPolicy,
+      renderConfidentialityCeiling: options.renderConfidentialityCeiling,
+      trustSnapshot: options.trustSnapshot,
+    });
+    return new RuntimeClient(attached, options);
+  }
+
   static async initialize(
     transport: RuntimeTransport,
     options: RuntimeClientOptions,
   ): Promise<RuntimeClient> {
-    // renderDeclassificationPolicy is a security knob: reject unknown values
-    // loudly here, where the host's own config error can surface early. The
-    // worker side additionally fails CLOSED (treats unknown as "deny") for
-    // peers that don't go through this entry point.
-    const renderPolicy = options.renderDeclassificationPolicy;
-    if (
-      renderPolicy !== undefined && renderPolicy !== "allow" &&
-      renderPolicy !== "deny"
-    ) {
-      throw new Error(
-        `Invalid renderDeclassificationPolicy: ${
-          JSON.stringify(renderPolicy)
-        } (expected "allow" or "deny")`,
-      );
-    }
+    assertRenderDeclassificationPolicy(options.renderDeclassificationPolicy);
     const initialized = await (new RuntimeConnection(transport)).initialize({
       apiUrl: options.apiUrl.toString(),
       spaceHostMap: options.spaceHostMap,

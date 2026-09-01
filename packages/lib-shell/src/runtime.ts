@@ -15,6 +15,7 @@ import {
   RuntimeClientEvents,
   RuntimeClientOptions,
   RuntimeTelemetryMarkerResult,
+  type RuntimeTransport,
 } from "@commonfabric/runtime-client";
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -182,8 +183,34 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    * Override the runtime worker URL. By default, deployed builds use the
    * immutable `/builds/<clientVersion>/` asset namespace while local builds
    * fall back to `/scripts/worker-runtime.js`.
+   *
+   * Ignored when `transport` supplies the connection, there being no worker to
+   * address.
    */
   workerUrl?: URL;
+
+  /**
+   * The connection to the runtime's worker. Absent, this page spawns a
+   * dedicated worker of its own and connects to that, which is what a page
+   * with no runtime around it does.
+   *
+   * Supplied, the embedder has already made the connection and this page
+   * speaks over it. How -- a port a family root's page transferred, a channel
+   * a native shell relays -- is the embedder's to know and nothing here reads.
+   */
+  transport?: RuntimeTransport;
+
+  /**
+   * Join the runtime already running behind `transport` rather than standing
+   * one up. It says which client this page is: the one whose initialization
+   * settles the runtime's identity and security posture, or one attaching to a
+   * runtime whose posture is already settled and which it asserts rather than
+   * declares.
+   *
+   * Only meaningful with `transport`: a worker this page spawned has no
+   * runtime to attach to.
+   */
+  attach?: boolean;
 
   getBuildHash?: () => Promise<string | undefined>;
 
@@ -664,11 +691,20 @@ export class RuntimeInternals extends EventTarget {
     concurrentWatchRefresh,
     getBuildHash = fetchBuildHash,
     workerUrl,
+    transport,
+    attach = false,
     navigate,
     onConsole,
     onError,
     telemetry,
   }: RuntimeInternalsCreateOptions): Promise<RuntimeInternals> {
+    if (attach && !transport) {
+      throw new Error(
+        "`attach` needs a `transport`: a worker this page spawns has no " +
+          "runtime to attach to.",
+      );
+    }
+
     // One runtime per identity: the worker session is always the
     // identity's home session. Spaces — including derived named spaces —
     // are addressed per call; nothing is bound at creation.
@@ -683,46 +719,50 @@ export class RuntimeInternals extends EventTarget {
       `[Identity] User DID: ${identity.did()}`,
     );
 
-    // Production deploys retain each complete module graph under its commit
-    // SHA. Keeping the entry and all of its relative split chunks in that same
-    // immutable namespace prevents a later root deployment from deleting a
-    // chunk that a long-lived page still needs. An explicit worker URL (local
-    // development) or an absent clientVersion retains the mutable root URL and
-    // its manifest cache-buster.
-    const immutableBuildId = workerUrl === undefined && clientVersion
-      ? clientVersion
-      : undefined;
-    const resolvedWorkerUrl = workerUrl ?? new URL(
-      immutableBuildId
-        ? `/builds/${
-          encodeURIComponent(immutableBuildId)
-        }/scripts/worker-runtime.js`
-        : "/scripts/worker-runtime.js",
-      globalThis.location.origin,
-    );
-    if (!immutableBuildId) {
-      const buildHash = await getBuildHash();
-      if (buildHash) resolvedWorkerUrl.searchParams.set("v", buildHash);
+    let connection = transport;
+    if (!connection) {
+      // Production deploys retain each complete module graph under its commit
+      // SHA. Keeping the entry and all of its relative split chunks in that
+      // same immutable namespace prevents a later root deployment from
+      // deleting a chunk that a long-lived page still needs. An explicit
+      // worker URL (local development) or an absent clientVersion retains the
+      // mutable root URL and its manifest cache-buster.
+      const immutableBuildId = workerUrl === undefined && clientVersion
+        ? clientVersion
+        : undefined;
+      const resolvedWorkerUrl = workerUrl ?? new URL(
+        immutableBuildId
+          ? `/builds/${
+            encodeURIComponent(immutableBuildId)
+          }/scripts/worker-runtime.js`
+          : "/scripts/worker-runtime.js",
+        globalThis.location.origin,
+      );
+      if (!immutableBuildId) {
+        const buildHash = await getBuildHash();
+        if (buildHash) resolvedWorkerUrl.searchParams.set("v", buildHash);
+      }
+      connection = await WebWorkerRuntimeTransport.connect({
+        workerUrl: resolvedWorkerUrl,
+      });
     }
-    const transport = await WebWorkerRuntimeTransport.connect({
-      workerUrl: resolvedWorkerUrl,
+
+    const clientOptions = createRuntimeClientOptions({
+      session,
+      apiUrl,
+      spaceHostMap,
+      experimental,
+      cfcEnforcementMode,
+      cfcFlowLabels,
+      cfcRenderCeiling,
+      trustSnapshot,
+      forwardWorkerConsole,
+      patternCoverage,
+      concurrentWatchRefresh,
     });
-    const client = await RuntimeClient.initialize(
-      transport,
-      createRuntimeClientOptions({
-        session,
-        apiUrl,
-        spaceHostMap,
-        experimental,
-        cfcEnforcementMode,
-        cfcFlowLabels,
-        cfcRenderCeiling,
-        trustSnapshot,
-        forwardWorkerConsole,
-        patternCoverage,
-        concurrentWatchRefresh,
-      }),
-    );
+    const client = attach
+      ? await RuntimeClient.attach(connection, clientOptions)
+      : await RuntimeClient.initialize(connection, clientOptions);
 
     // Expose a usable RuntimeInternals immediately. Callers that need
     // storage/piece-manager convergence should await `rt.synced(space)`

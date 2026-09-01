@@ -34,8 +34,9 @@ import {
   RuntimeErrorCode,
 } from "@/protocol/mod.ts";
 import { RuntimeProcessor } from "@/backends/mod.ts";
-import { postThrough } from "./post-to-client.ts";
+import type { MessagePortLike } from "@/shared/message-port-like.ts";
 import { describeFailure } from "@/shared/utils.ts";
+import { postThrough } from "./post-to-client.ts";
 import {
   type ClientId,
   OWNER_CLIENT_ID,
@@ -71,27 +72,6 @@ const ipcTimingLogger = getLogger("runner.ipc", { enabled: false });
  * cannot flood the channel it is being reported on.
  */
 const MAX_INVALID_REQUEST_RENDER = 512;
-
-/**
- * The far end of one client's duplex, as much of a `MessagePort` as this
- * worker uses. Declared as a shape rather than as the class so that what
- * arrives is a duplex and not a story about how it got here.
- */
-export interface ClientDuplex {
-  postMessage(message: unknown): void;
-
-  addEventListener(
-    type: "message",
-    listener: (event: MessageEvent) => void,
-  ): void;
-
-  /**
-   * Begins delivery. A `MessagePort` queues everything sent to it until this
-   * is called, which is what lets a listener be installed without racing the
-   * messages already in flight.
-   */
-  start?(): void;
-}
 
 export interface RuntimeClientsOptions {
   /**
@@ -150,7 +130,7 @@ export class RuntimeClients {
    * The client is registered but not yet attached: until its
    * {@link RequestType.Attach} is accepted it may ask for nothing else.
    */
-  attach(duplex: ClientDuplex): WorkerClient {
+  attach(duplex: MessagePortLike): WorkerClient {
     const id = this.#nextClientId++;
     const client: WorkerClient = {
       id,
