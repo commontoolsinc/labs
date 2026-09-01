@@ -1,3 +1,10 @@
+/**
+ * An integration fixture: a counter whose increment handler sets the value
+ * `INCREMENTS_PER_CLICK` times in one run, and a computed array of that
+ * length mapped into the view, so one click drives the derivation that
+ * many times.
+ */
+
 import {
   Cell,
   computed,

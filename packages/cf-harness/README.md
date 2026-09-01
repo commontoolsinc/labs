@@ -1707,9 +1707,36 @@ cd packages/cf-harness
 deno task test:integration
 ```
 
+No continuous-integration job dispatches that task, and it is meant to stay that
+way: `integration/engine.integration.test.ts` wants a Docker daemon carrying the
+`runsc-cfc` gVisor runtime, and
+`integration/pattern-index-live.integration.test.ts` wants a deployed pattern
+index plus a keyfile that deployment authorizes. Neither is a runner's to hold.
+Both files are type-checked by `deno task check` along with the rest of the
+package, so they answer for the interfaces they use whether or not anyone runs
+them; what they do not answer for is behavior, and a person running the task is
+the only thing that asks them to.
+
 The integration suite requires a working local Docker + `runsc-cfc` environment.
 By default it also uses the published kitchen-sink image above, unless you
 override `CF_HARNESS_INTEGRATION_IMAGE`.
+
+Every case in `engine.integration.test.ts` is skipped unless
+`CF_HARNESS_INTEGRATION=1` is set, which the task sets for you; the narrower
+opt-ins below each add a further variable. The pattern-index cases take a
+separate flag and are skipped even under that task:
+
+```bash
+cd packages/cf-harness
+CF_PATTERN_INDEX_LIVE_E2E=1 \
+CF_PATTERN_INDEX_LIVE_IDENTITY=/path/to/pattern-index.key \
+deno task test:integration
+```
+
+`CF_PATTERN_INDEX_LIVE_URL` names the deployment and defaults to the standing
+one. `CF_PATTERN_INDEX_LIVE_IDENTITY` has no default: which identity an index
+admits is a fact about that deployment, so the run fails rather than guess at a
+keyfile.
 
 To opt into a local Labs CLI smoke inside the sandbox, use a Deno 2-compatible
 image and enable the CF CLI case:

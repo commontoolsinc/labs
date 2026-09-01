@@ -10,6 +10,12 @@
  * keyfile named fails rather than passing vacuously or signing with whatever
  * key happened to sit at a guessed path.
  *
+ * A deployment and a keyfile it authorizes are not a continuous-integration
+ * runner's to hold, so no job dispatches this file. `deno task
+ * test:integration` loads it, a person runs that, and without the flag every
+ * case is skipped. `deno task check` type-checks it whether or not anything
+ * runs it.
+ *
  * The pattern it runs is content-addressed, so `LIVE_PATTERN_ID` is the
  * identity of `DOUBLING_PATTERN_SOURCE` and nothing else. Publishing that
  * exact source again is a no-op on the index; changing the source here
