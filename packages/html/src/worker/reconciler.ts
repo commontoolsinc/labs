@@ -82,6 +82,7 @@ import {
 
 /** Sentinel key in propSubscriptions for the Cell<Props> subscription itself. */
 const CELL_PROPS_KEY = "__cellProps__";
+
 const CFC_RENDER_BOUNDARY_TAG = "cf-cfc-render-boundary";
 const CFC_AUTHORSHIP_TAG = "cf-cfc-authorship";
 const CFC_BLOCKED_PLACEHOLDER_TAG = "cf-cfc-blocked";

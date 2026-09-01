@@ -53,6 +53,7 @@ function twoMeaningsTree() {
 function reportFor(known: {
   /** Option name -> the commands its provider answers on, `null` for all. */
   providerOptions?: Record<string, readonly string[] | null>;
+
   providerArguments?: string[];
   enumerated?: string[];
   allowedOptions?: string[];

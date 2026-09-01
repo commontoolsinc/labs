@@ -35,6 +35,7 @@ import {
 
 /** Annotation depth used for values included in diff output. */
 const COMPARE_DEPTH = 32;
+
 const DEFAULT_DIFF_DEPTH = 12;
 
 export type ChangeKind = "added" | "removed" | "changed";
@@ -60,6 +61,7 @@ export interface ValueChange {
 
   /** Exact path segments, e.g. `["value", "items", "0"]`. */
   pathSegments?: string[];
+
   kind: ChangeKind;
   before?: unknown;
   after?: unknown;

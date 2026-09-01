@@ -77,6 +77,7 @@ export function serverExecutionPolicyFromEnv(
    * prefixes of those). */
   const strictNonNegativeInt = (raw: string): number | undefined =>
     /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : undefined;
+
   const readRaw = (name: string): string | undefined => {
     const raw = envGet(name);
     return raw === undefined || raw === "" ? undefined : raw;
@@ -96,6 +97,7 @@ export function serverExecutionPolicyFromEnv(
     }
     return value;
   };
+
   const flushDeadlineMs = positiveOrDefault(
     "SERVER_EXECUTION_FLUSH_DEADLINE_MS",
   );
@@ -167,6 +169,7 @@ export function startServerExecutionHost(options: {
 
   /** The patterns/compile base — the serving runtimes' `apiUrl`. */
   apiUrl: URL;
+
   envGet?: EnvReader;
 }): ExecutorHost | undefined {
   const envGet = options.envGet ?? Deno.env.get;

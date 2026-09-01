@@ -35,6 +35,7 @@ export class SpaceManager {
    * drives this member directly.
    */
   private activePiece: Cell<BGPieceEntry> | null = null;
+
   #deactivationTimeoutMs: number;
 
   /**
@@ -42,6 +43,7 @@ export class SpaceManager {
    * drives this member directly.
    */
   private workerController!: WorkerController;
+
   #rerunIntervalMs: number;
 
   /**
@@ -55,6 +57,7 @@ export class SpaceManager {
    * drives this member directly.
    */
   private failureTracking = new Map<string, number>();
+
   #workerOptions: WorkerOptions;
 
   /**

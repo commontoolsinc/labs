@@ -311,6 +311,7 @@ export interface ReplayReport {
    * cell's cause-stability (the moved-`.for()` class) gated.
    */
   capturesSuperseded: string[];
+
   failures: ReplayFailure[];
 }
 
@@ -360,6 +361,7 @@ export async function replayVintage(
         .map((e) => patternKeyFromMain(e.main, patternsPrefix(roots)))
         .filter((key): key is string => key !== undefined),
     );
+
   // Stated once, because every "this fixture is not usable" message needs it and
   // the obvious remedy is WRONG: `--update` skips a key that already has a
   // pinned vintage and the capture refuses to overwrite one, so "recapture it"
@@ -992,6 +994,7 @@ export async function replayAll(
      * it — a superseded stored argument, or a hoist no longer emitted.
      */
     capturesSuperseded: string[];
+
     failures: ReplayFailure[];
   }
 > {

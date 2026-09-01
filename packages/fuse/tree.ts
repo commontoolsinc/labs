@@ -81,6 +81,7 @@ export class FsTree {
    * member directly.
    */
   private cfcEntryIndexes = new Map<bigint, Map<string, number>>();
+
   #unsortedCfcEntryDirectories = new Set<bigint>();
   #nextIno = 2n;
   #now: () => number;

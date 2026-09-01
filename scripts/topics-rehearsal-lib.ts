@@ -265,6 +265,7 @@ export const STRUCTURAL_LINK_SOURCES: Record<string, string> = {
   mentionable: "topics",
   boardCrossrefs: "crossrefs",
 };
+
 export const STRUCTURAL_LINK_FIELDS = Object.keys(STRUCTURAL_LINK_SOURCES);
 export const LEGACY_LINK_FIELDS = ["myName"] as const;
 

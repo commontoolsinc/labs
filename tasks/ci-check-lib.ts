@@ -15,6 +15,7 @@ export const REPO = Deno.env.get("GITHUB_REPOSITORY") ?? "commontoolsinc/labs";
 /** Where the repository is hosted; a workflow run names it. */
 export const SERVER_URL = Deno.env.get("GITHUB_SERVER_URL") ??
   "https://github.com";
+
 export const TOKEN = Deno.env.get("GITHUB_TOKEN");
 export const WORKFLOW_FILE = "deno.yml";
 
@@ -29,6 +30,8 @@ export const WORKFLOW_FILE = "deno.yml";
  * in the identical JSON shape, so it reads as a valid baseline unchanged.
  */
 export const PERF_METRICS_ARTIFACT_NAME = "perf-metrics";
+
+/** The file inside that artifact. */
 export const PERF_METRICS_FILE = "perf-metrics.json";
 
 /**
@@ -37,6 +40,7 @@ export const PERF_METRICS_FILE = "perf-metrics.json";
  * contains one JSON file matching {@link CacheStateRecord}.
  */
 export const CACHE_STATE_ARTIFACT_PREFIX = "cache-state-";
+
 export const COVERAGE_METRIC_PREFIX = "coverage-debt:";
 export const COVERAGE_BASELINE_RESET_MARKER = "NEW_COVERAGE_BASELINE";
 
@@ -53,6 +57,8 @@ export const COVERAGE_SUGGESTION_MARKER = "<!-- coverage-debt-suggestion -->";
  * up and posts it with a write token from the base-repo context.
  */
 export const COVERAGE_COMMENT_ARTIFACT_NAME = "coverage-comment";
+
+/** The file inside that artifact. */
 export const COVERAGE_COMMENT_FILE = "coverage-comment.json";
 
 /**
@@ -86,6 +92,7 @@ export interface CoverageCommentPayload {
    * changed group's debt was accepted with a per-group acceptance or the reset
    * marker, not because the new code is covered. */
   overridden?: boolean;
+
   /** Present when `overridden` is set: the files holding the uncovered lines
    * the acceptance covers for. */
   files?: CoverageSuggestionFileLines[];

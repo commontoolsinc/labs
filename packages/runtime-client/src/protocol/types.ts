@@ -484,6 +484,7 @@ export enum NotificationType {
 
   /** Reports a new operation-backed snapshot for a subscription. */
   OperationUpdate = "operation:update",
+
   /** Reports one authoritative terminal event-delivery notice. */
   EventNeedsAttention = "callback:event-needs-attention",
 }
@@ -897,6 +898,7 @@ export type CellSetRequest = BaseRequest & {
    * The value to store, whole and already resolved.
    */
   value: FabricValue;
+
   /** Wait for commit confirmation and return a refusal to the caller. */
   awaitCommit?: boolean;
 };
@@ -937,6 +939,7 @@ export type CellSendRequest = BaseRequest & {
    * The event to deliver.
    */
   event: FabricValue;
+
   /** Wait for commit confirmation and return a refusal to the caller. */
   awaitCommit?: boolean;
 };
@@ -1238,6 +1241,7 @@ export type SqliteExecRequest = BaseRequest & {
   /** What to bind the statement's placeholders to. Absent binds nothing. */
   params?: SqliteParams;
 };
+
 /**
  * The {@link RequestType.GetCell} request. `cause` is what derives the
  * cell: the same space and cause always name the same one.
@@ -2605,6 +2609,7 @@ import type {
   SerializedEvent as SerializedDomEvent,
   SerializedEventTarget,
 } from "@commonfabric/html/events";
+
 export type { SerializedDomEvent, SerializedEventTarget };
 
 /**
@@ -2909,6 +2914,7 @@ export type CellUpdateNotification = {
    * The cell that changed.
    */
   cell: CellRef;
+
   /** Its new value, as {@link CellValueResponse} carries the pulled form. */
   value: FabricValue;
 
@@ -3138,6 +3144,7 @@ export type WorkerConsoleNotification = {
  * different things.
  */
 import type { VDomOp } from "@commonfabric/html/vdom-ops";
+
 export type { VDomOp };
 
 /**

@@ -45,10 +45,12 @@ export interface LinkRef {
 
   /** Resolved label of the target (if in this space). */
   label?: string;
+
   kind?: EntityKind;
 
   /** Cross-space target space DID. */
   space?: string;
+
   path?: string[];
 
   /** True when the target is in another space (not resolvable locally). */
@@ -93,15 +95,18 @@ export interface EntityDetail {
 
   /** Top-level document paths present (the control plane). */
   paths: string[];
+
   valueShape: string;
 
   /** The annotated value (links/streams normalized; depth-bounded). */
   value: unknown;
+
   valuePreview: string;
 
   /** The result JSONSchema (annotated), if the entity carries one. Streams and
    * named owned cells get their DECLARED schema resolved from the owner piece. */
   schema?: unknown;
+
   schemaKeys?: string[];
 
   /** Where `schema` came from when it isn't the entity's own (e.g. owner piece). */
@@ -115,6 +120,7 @@ export interface EntityDetail {
 
   /** Parsed CFC labels from the `cfc` meta path, if present. */
   cfc?: CfcSummary;
+
   revisions: number;
   headSeq: number | null;
   firstSeq: number | null;
@@ -289,6 +295,7 @@ interface DetailContext {
 
   /** entityId → { ownerId, key } naming it in its owner piece's value. */
   nameOf: Map<string, { owner: string; key: string }>;
+
   moduleIndex: Map<string, ModuleEntry>;
   docs: Map<string, EntityDocument>;
 }
@@ -475,6 +482,7 @@ function roleFor(kind: EntityKind, owned: boolean): string {
 export interface DetailListing {
   /** The entities detailed, at most `extent.limit` of them. */
   details: EntityDetail[];
+
   extent: ScanExtent;
 }
 

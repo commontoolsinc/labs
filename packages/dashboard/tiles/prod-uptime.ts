@@ -69,6 +69,7 @@ export interface ProxyStream {
   write(buffer: Uint8Array): Promise<number>;
   close(): void;
 }
+
 type OpenProxyStream = (
   options: Deno.ConnectOptions,
 ) => Promise<ProxyStream>;

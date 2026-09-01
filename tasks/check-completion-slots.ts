@@ -220,6 +220,7 @@ export function reportSlots(
      * where it answers on every command declaring the option.
      */
     readonly providerOptions: ReadonlyMap<string, readonly string[] | null>;
+
     readonly providerArguments: ReadonlySet<string>;
     readonly enumerated: ReadonlySet<string>;
     readonly allowedOptions: ReadonlySet<string>;

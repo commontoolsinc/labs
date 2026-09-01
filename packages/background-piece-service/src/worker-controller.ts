@@ -69,6 +69,7 @@ export class WorkerController extends EventTarget {
 
   /** Promise that resolves when the worker is fully initialized. */
   public initializeResolve = this.#initializeDeferred.promise;
+
   #state = WorkerState.Uninitialized;
 
   constructor(options: WorkerOptions) {

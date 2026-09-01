@@ -41,13 +41,19 @@ interface Bucket {
   path: string;
   depth: number;
 
-  /** Spans recorded at this exact path. */
+  /** How many spans were recorded at this exact path. */
   own: number;
+
+  /** How long those spans took, summed. */
   ownTime: number;
 
-  /** Spans recorded at this path or anywhere beneath it. */
+  /** How many spans were recorded at this path or anywhere beneath it. */
   calls: number;
+
+  /** How long those spans took, summed. */
   time: number;
+
+  /** The buckets one level beneath this one, by path segment. */
   children: Map<string, Bucket>;
 }
 
@@ -57,6 +63,7 @@ interface Bucket {
  * away — see `attribute-measures.ts --detail` for reading it.
  */
 const MEASURE_PREFIX = "cf:";
+
 function keyOf(name: string): string {
   const body = name.startsWith(MEASURE_PREFIX)
     ? name.slice(MEASURE_PREFIX.length)

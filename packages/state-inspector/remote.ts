@@ -14,6 +14,7 @@ const DUMP_PATH = "/api/storage/memory/dump";
 export interface RemoteSpace {
   /** Canonical space DID. */
   space: string;
+
   sizeBytes: number;
   mtimeMs: number;
 }

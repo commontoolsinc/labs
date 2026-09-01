@@ -312,6 +312,7 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
    * concurrent increments sum against durable state rather than clobber.
    */
   increment(this: IsThisNumber, by?: number): void;
+
   remove(
     this: IsThisArray,
     ref: T extends (infer U)[] ? (U | AnyBrandedCell<U>) : never,
@@ -326,6 +327,7 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
     this: IsThisArray,
     ref: T extends (infer U)[] ? (U | AnyBrandedCell<U>) : never,
   ): void;
+
   removeAll(
     this: IsThisArray,
     ref: T extends (infer U)[] ? (U | AnyBrandedCell<U>) : never,
@@ -469,6 +471,7 @@ export interface IKeyable<out T, Wrap extends HKT> {
     k1: K1,
     k2: K2,
   ): Apply<Wrap, T[K1][K2]>;
+
   // Three keys
   key<
     K1 extends keyof T,
@@ -691,6 +694,7 @@ export interface IKeyableOpaque<T> {
     k1: K1,
     k2: K2,
   ): OpaqueCell<UnwrapCell<T>[K1][K2]>;
+
   key<
     K1 extends keyof UnwrapCell<T>,
     K2 extends keyof UnwrapCell<T>[K1],
@@ -1110,6 +1114,7 @@ export declare const Cell: CellTypeConstructor<AsCell>;
  * all data in patterns is reactive by default, whether wrapped or not.
  */
 export type Writable<T = unknown> = Cell<T>;
+
 export declare const Writable: CellTypeConstructor<AsCell>;
 
 /**
@@ -1256,6 +1261,7 @@ export type Reactive<T> = T;
 type CellWrappedValue<T> = AnyBrandedCell<CellWrappedData<T>> & {
   [CELL_LIKE]?: unknown;
 };
+
 export type CellLike<T> = CellWrappedValue<T> | T;
 type CellWrappedData<T> =
   | T
@@ -1995,6 +2001,7 @@ export type BuiltInGenerateObjectParams =
      * `search: true` is the friendly shorthand for `["google_search"]`.
      */
     nativeModelToolIds?: readonly string[];
+
     queue?: string;
   }
   | {
@@ -2024,6 +2031,7 @@ export type BuiltInGenerateObjectParams =
      * `search: true` is the friendly shorthand for `["google_search"]`.
      */
     nativeModelToolIds?: readonly string[];
+
     queue?: string;
   };
 
@@ -2050,6 +2058,7 @@ export type BuiltInGenerateTextParams =
      * `search: true` is the friendly shorthand for `["google_search"]`.
      */
     nativeModelToolIds?: readonly string[];
+
     queue?: string;
   }
   | {
@@ -2074,6 +2083,7 @@ export type BuiltInGenerateTextParams =
      * `search: true` is the friendly shorthand for `["google_search"]`.
      */
     nativeModelToolIds?: readonly string[];
+
     queue?: string;
   };
 
@@ -2097,6 +2107,7 @@ export interface BuiltInCompileAndRunParams<T> {
    * reads one with `dataFile()`; nothing compiles, imports, or transforms it.
    */
   dataFiles?: string[];
+
   input?: T;
 }
 
@@ -2898,12 +2909,14 @@ export interface CfSqliteHelpers {
 
   /** The db's owner (fixed, from the db ref — never the acting reader). */
   dbOwner(): unknown;
+
   endorsedBy(p: unknown): unknown;
   authoredBy(p: unknown): unknown;
 
   /** A literal atom (escape hatch). */
   constant(atom: unknown): unknown;
 }
+
 export type SqliteCfLinkFunction = <_T = unknown>() => JSONSchema;
 
 export type WishTag = `/${string}` | `#${string}`;
@@ -3301,6 +3314,7 @@ export declare const uiVariant: UIVariantFunction;
 
 /** @deprecated Use generateText() or generateObject() instead */
 export declare const llm: LLMFunction;
+
 export declare const llmDialog: LLMDialogFunction;
 export declare const generateObject: GenerateObjectFunction;
 export declare const generateText: GenerateTextFunction;
@@ -3330,10 +3344,12 @@ export declare const wish: WishFunction;
 export declare const multiUserTest: <T extends MultiUserTestDescriptor>(
   descriptor: T,
 ) => T;
+
 export declare const createNodeFactory: CreateNodeFactoryFunction;
 
 /** @deprecated Use Cell.of(defaultValue?) instead */
 export declare const cell: CellTypeConstructor<AsCell>["of"];
+
 export declare const equals: EqualsFunction;
 export declare const valueEqual: ValueEqualFunction;
 export declare const byRef: ByRefFunction;
@@ -3379,6 +3395,7 @@ export declare function UiDisclosure(props: UiDisclosureProps): JSXElement;
 export type GetEntityIdFunction = (
   value: any,
 ) => { "/": string } | FabricHash | undefined;
+
 export declare const getEntityId: GetEntityIdFunction;
 
 /**
@@ -3389,6 +3406,7 @@ export declare const getEntityId: GetEntityIdFunction;
 export type EntityRefToStringFunction = (
   value: { "/": string } | FabricHash,
 ) => string;
+
 export declare const entityRefToString: EntityRefToStringFunction;
 
 export declare const schema: SchemaFunction;

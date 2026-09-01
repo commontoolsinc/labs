@@ -286,6 +286,7 @@ export interface CompactOptions {
 
   /** Required unless plan is set. */
   token?: string;
+
   fetchImpl?: typeof fetch;
   now?: number;
 }

@@ -254,6 +254,7 @@ export interface SourceWritePath {
 
   /** Relative path within .src/, e.g. "main.tsx" or "utils/helper.tsx". */
   relPath: string;
+
   piece: PieceController;
 
   /** Inode of the .src/ directory (for error.log lookups). */
@@ -288,6 +289,7 @@ export interface SpaceState {
 
   /** Per-piece subscription cancellers, keyed by piece name. */
   pieceSubs: Map<string, Cancel[]>;
+
   did: string;
   unsubscribes: Cancel[];
 
@@ -371,6 +373,7 @@ export class CellBridge {
 
   /** Callback for kernel cache invalidation (set by mod.ts after mount). */
   onInvalidate: InvalidateCallback | null = null;
+
   onInvalidateInode: InvalidateInodeCallback | null = null;
   #identity: string = "";
   #apiUrl: string = "";
@@ -446,6 +449,7 @@ export class CellBridge {
 
   /** In-flight hydration promises keyed by `${pieceIno}-${propName}`. */
   #pendingHydrations = new Map<string, Promise<boolean>>();
+
   #pendingPropRebuildQueues = new Map<string, Promise<void>>();
 
   /** Monotonic invalidation epoch per hydration key. */
@@ -456,6 +460,7 @@ export class CellBridge {
    * cleared when the result switches back to the default result/ tree.
    */
   #fsProjectionEntries: Map<bigint, Set<string>> = new Map();
+
   #cfcAnnotationsEnabled = false;
   #explicitCfcProjectionGeneration: string | undefined;
   #statusProvider: (() => Record<string, unknown>) | undefined;
@@ -473,6 +478,7 @@ export class CellBridge {
    * Reconnection is attempted automatically with exponential backoff.
    */
   private _disconnected = false;
+
   #disconnectCount = 0;
   #lastDisconnectReason: string | null = null;
 
