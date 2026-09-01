@@ -47,12 +47,21 @@ function makeCiTrust(opts: { id: string; label: string; repo: string; workflow: 
         outcome,
         href: run.html_url,
       }));
+      const times = scored.flatMap(({ run }) => {
+        const createdAt = Date.parse(run.created_at);
+        return Number.isFinite(createdAt) ? [createdAt] : [];
+      });
+      const spanMs = times.length === scored.length && times.length >= 2
+        ? Math.max(...times) - Math.min(...times)
+        : 0;
       return {
         label: opts.label,
         status: s,
         value: `${pct.toFixed(1)}%`,
         sub: `first-try green · ${runSummary}`,
-        extra: strip(cells, TRUST_COLS),
+        extra: strip(cells, TRUST_COLS, spanMs > 0),
+        duration: spanMs,
+        alignChartBottom: true,
       };
     },
   };

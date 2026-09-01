@@ -20,6 +20,7 @@ import {
 } from "./palette.ts";
 import { FAVICON_VERSION } from "./favicon.ts";
 import { liveUpdateStream } from "./stream-client.ts";
+import { TILE_LABEL_RULE } from "./chart-layout.ts";
 
 const TEST_VERSION = "1".repeat(40);
 
@@ -102,7 +103,7 @@ Deno.test("renderTile: label and sub are escaped — a hostile label cannot inje
   assertStringIncludes(html, "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
   assertStringIncludes(
     html,
-    `<p class="sub">a &amp; b &quot;quoted&quot; &lt;script&gt;</p>`,
+    `<p class="sub" title="a &amp; b &quot;quoted&quot; &lt;script&gt;">a &amp; b &quot;quoted&quot; &lt;script&gt;</p>`,
   );
 });
 
@@ -115,12 +116,24 @@ Deno.test("renderTile: value, extra and aside are trusted html; hint is escaped"
   }));
   // A tile builds these itself, escaping any data it puts in them.
   assertStringIncludes(html, `<p class="big good"><b>42</b></p>`);
+  assert(!html.includes(`title="&lt;b&gt;42&lt;/b&gt;"`));
   assertStringIncludes(html, `<span class="hmtd">$12</span>`);
   assertStringIncludes(html, `<svg viewBox="0 0 1 1"></svg>`);
   // The hint is plain text from the tile, so the renderer escapes it.
   assertStringIncludes(
     html,
-    `<span class="drill">commits ↗ &lt;not a tag&gt;</span>`,
+    `<span class="drill" title="commits ↗ &lt;not a tag&gt;">commits ↗ &lt;not a tag&gt;</span>`,
+  );
+});
+
+Deno.test("renderTile: a plain headline label supplies truncated text", () => {
+  const html = renderTile(view({
+    value: `<b>42</b>`,
+    valueLabel: `42 "requests"`,
+  }));
+  assertStringIncludes(
+    html,
+    `<p class="big good" title="42 &quot;requests&quot;"><b>42</b></p>`,
   );
 });
 
@@ -128,7 +141,7 @@ Deno.test("renderTile: the aside and hint sit after the label, separated by the 
   const html = renderTile(view({ aside: "<i>mtd</i>", hint: "runs" }));
   assertStringIncludes(
     html,
-    `<p class="lbl"><span class="dot green"></span> labs ci<span class="spacer"></span><i>mtd</i><span class="drill">runs</span></p>`,
+    `<p class="lbl"><span class="dot green"></span> labs ci<span class="spacer"></span><i>mtd</i><span class="drill" title="runs">runs</span></p>`,
   );
 });
 
@@ -136,7 +149,10 @@ Deno.test("renderTile: a duration wraps the chart so the span can be pinned to i
   const html = renderTile(
     view({ extra: "<svg></svg>", duration: 25 * 86_400_000 }),
   );
-  assertStringIncludes(html, `<div style="position:relative"><svg></svg>`);
+  assertStringIncludes(
+    html,
+    `<div class="chart" style="position:relative"><svg></svg>`,
+  );
   // The corner tag is the auto-formatted span, and it is inside the wrapper.
   assertStringIncludes(html, ">25 days</span></div>");
   assertStringIncludes(html, "position:absolute");
@@ -161,7 +177,7 @@ Deno.test("renderTile: a duration with no chart draws nothing to label", () => {
     "nothing to position, so no wrapper",
   );
   assert(!html.includes(humanSpan(90 * 60_000)), "and no orphaned span label");
-  assertStringIncludes(html, `<p class="sub">things</p>`); // the sub is left alone
+  assertStringIncludes(html, `<p class="sub" title="things">things</p>`); // the sub is left alone
 });
 
 Deno.test("renderTile: the body order is label, headline, sub, chart", () => {
@@ -200,6 +216,31 @@ Deno.test("shell: the grid and the wide tiles land in their own slots", () => {
     `href="/favicon.png?status=bad&v=${FAVICON_VERSION}"`,
   );
   assertStringIncludes(html, "</body></html>");
+});
+
+Deno.test("shell: labeled cell grids share the sparkline label baseline", () => {
+  const html = shell("", "", 0, 30_000, TEST_VERSION, "good");
+  assertStringIncludes(
+    html,
+    `.cells.labeled{margin-top:9px;height:28px;box-sizing:border-box;padding-bottom:9px;align-content:start;transform:translateY(-2px)}`,
+  );
+  assertStringIncludes(
+    html,
+    `.cells.labeled .cell{aspect-ratio:auto;height:4px}`,
+  );
+  assertStringIncludes(html, `.tile.bottom-chart{display:flex;flex-direction:column}`);
+  assertStringIncludes(html, `.tile.bottom-chart .chart{margin-top:auto}`);
+  assertStringIncludes(html, TILE_LABEL_RULE);
+});
+
+Deno.test("renderTile: a bottom-aligned chart can absorb a taller grid row", () => {
+  const html = renderTile(view({
+    extra: "<svg></svg>",
+    duration: 86_400_000,
+    alignChartBottom: true,
+  }));
+  assertStringIncludes(html, `class="tile good bottom-chart"`);
+  assertStringIncludes(html, `class="chart"`);
 });
 
 Deno.test("shell: the shared message is directly editable in the header center", () => {

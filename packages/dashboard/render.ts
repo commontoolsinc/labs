@@ -4,8 +4,20 @@
  * wide tiles in the page, together with the client that listens for updates.
  */
 
-import type { Status, TileView } from "./types.ts";
-import { durationTag, escapeHtml, STATUS_DOT } from "./lib.ts";
+import type { Status } from "./types.ts";
+export { renderTile } from "./tile-render.ts";
+import {
+  BOTTOM_CHART_RULES,
+  DASHBOARD_GRID_RULE,
+  TILE_BOX_RULE,
+  tileContentRules,
+} from "./chart-layout.ts";
+import {
+  DURATION_LABEL_HEIGHT,
+  escapeHtml,
+  SPARKLINE_HEIGHT,
+  STATUS_DOT,
+} from "./lib.ts";
 import {
   STATUS_EDGE,
   STATUS_WASH,
@@ -187,41 +199,6 @@ export function formatViewerTimes(
   }
 }
 
-export function renderTile(v: TileView, id?: string, wide = false): string {
-  const cls = `tile ${v.status}${v.href ? " link" : ""}${wide ? " wide" : ""}`;
-  const key = id ? ` data-tile-id="${escapeHtml(id)}"` : "";
-  const dot = `<span class="dot ${STATUS_DOT[v.status]}"></span>`;
-  const hint = v.hint ? `<span class="drill">${escapeHtml(v.hint)}</span>` : "";
-  const header = `<p class="lbl">${dot} ${
-    escapeHtml(v.label)
-  }<span class="spacer"></span>${v.aside ?? ""}${hint}</p>`;
-  const big = v.value !== undefined
-    ? `<p class="big ${v.status}">${v.value}</p>`
-    : "";
-  const sub = v.sub ? `<p class="sub">${escapeHtml(v.sub)}</p>` : "";
-  // The chart plus its duration label (bottom-left corner, auto-formatted). The
-  // relative wrapper positions the duration; a tile with no duration renders extra
-  // unwrapped, unchanged. The label describes the chart's span, so it needs a chart
-  // to sit in: drawn without one, the wrapper has no height and the label lands on
-  // top of the sub line. A tile whose series is too short to plot still reports a
-  // span, so this is reachable.
-  const body = v.duration && v.extra
-    ? `<div style="position:relative">${v.extra}${
-      durationTag(v.duration)
-    }</div>`
-    : (v.extra ?? "");
-  // The status texture is painted by this empty layer rather than by the tile,
-  // because the texture is turned on an angle and drawn past every edge, while
-  // the fade that thins it towards the bottom is measured against the tile.
-  // Those are two frames of reference, so they need two boxes.
-  const inner = `<div class="texture"></div>${header}${big}${sub}${body}`;
-  if (!v.href) return `<div class="${cls}"${key}>${inner}</div>`;
-  const tgt = /^https?:/.test(v.href) ? ` target="_blank" rel="noopener"` : "";
-  return `<a class="${cls}"${key} href="${
-    escapeHtml(v.href)
-  }"${tgt}>${inner}</a>`;
-}
-
 function renderShell(
   gridHtml: string,
   wideHtml: string,
@@ -253,8 +230,9 @@ ${DASHBOARD_THEME_STYLES}
   .message-input:focus{outline:none}
   .message-input[aria-invalid="true"]{border-color:var(--status-bad)}
   .message-status{position:absolute;top:100%;left:9px;right:9px;color:var(--status-bad-text);font-size:11px;text-align:center}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:12px}
-  .tile{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;position:relative;isolation:isolate;overflow:hidden}
+  ${DASHBOARD_GRID_RULE}
+  ${TILE_BOX_RULE}
+  ${BOTTOM_CHART_RULES}
   .tile.wide{margin-bottom:12px}
 ${TILE_RULES}
   .tile.unknown,.tile.wide.unknown{border-color:var(--border-strong)}
@@ -277,32 +255,14 @@ ${TILE_RULES}
   .tile.unknown .texture::before{${DOT_TEXTURE}}
   .tile.warn .texture::before{${WAVE_TEXTURE};--turn:120deg}
   .tile.bad .texture::before{${ZIGZAG_TEXTURE}}
-  .lbl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin:0 0 7px;display:flex;align-items:center;gap:7px}
-  .lbl .spacer{flex:1}
-  .drill{font-size:10px;color:var(--text-muted);letter-spacing:0;text-transform:none}
-  .hmtd{font-size:11px;color:var(--text-muted);letter-spacing:0;text-transform:none;font-variant-numeric:tabular-nums;margin-right:8px}
-  /* Fixed line-height so the headline's line box is the same height regardless of
-     which font the glyph comes from: the ▲/▼ trend arrows fall back to a taller
-     symbol font, and under line-height:normal that stretched the tile. */
-  .big{font-size:30px;font-weight:600;margin:0;line-height:1.2}
+  ${tileContentRules(SPARKLINE_HEIGHT, DURATION_LABEL_HEIGHT)}
   ${BIG_RULES}
-  .sub{font-size:13px;color:var(--text-muted);margin:5px 0 0}
-  .running{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:var(--text-muted);letter-spacing:.02em;text-transform:none;margin-top:10px}
-  /* In the header the badge is a facet of a single line, not a block under the
-     chart, so it takes the line's own vertical rhythm. */
-  .lbl .running{margin-top:0;margin-right:8px}
-  .rdot{width:7px;height:7px;border-radius:50%;background:var(--running);flex:none}
-  .cells{display:grid;gap:1px;margin-top:10px}
-  .cell{aspect-ratio:1;border-radius:1px}
   a.cell{display:block}
   a.cell:hover{outline:1px solid var(--accent);outline-offset:-1px}
   /* The dot is drawn by its own layer so each status can take a shape as well
      as a color. The shape carries the same signal the color does, which is
      what a viewer who cannot separate the hues reads instead. */
-  .dot{width:10px;height:10px;display:inline-block;flex:none;position:relative}
-  .dot::before{content:"";position:absolute;inset:0}
   ${DOT_RULES}
-  a.tile.link{display:block;text-decoration:none;color:inherit;cursor:pointer;transition:border-color .12s}
   a.tile.link:hover{border-color:var(--border-hover)}
   .evscroll{max-height:340px;overflow:auto}
   .ev{display:flex;align-items:center;gap:11px;padding:6px 0;font-size:13px;border-top:1px solid var(--divider)}.ev:first-child{border-top:0}
@@ -313,7 +273,6 @@ ${TILE_RULES}
   a.evdur:hover{color:var(--accent)}
   .evarrow{color:var(--icon-subtle);text-decoration:none;flex:none;font-size:11px;transition:color .1s}
   .evarrow:hover{color:var(--text-subtle)}
-  .swatch{display:inline-block;width:8px;height:8px;border-radius:2px;vertical-align:middle}
   .note{font-size:11px;color:var(--text-faint);margin-top:14px}
   code{background:var(--surface-code);padding:1px 5px;border-radius:4px}
   @media(max-width:560px){.top{grid-template-columns:minmax(0,1fr) max-content;gap:8px 12px}.brand span:last-child{display:none}.top-actions{gap:8px}.message-form{grid-column:1/-1;grid-row:2;width:100%}.message-input{font-size:14px;padding-inline:5px}}

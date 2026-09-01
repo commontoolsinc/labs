@@ -277,8 +277,8 @@ export const discordOnline: Tile = {
     // With the chart drawn, the counts sit at each line's end; until there are
     // two samples show them inline so the tile is never numberless.
     const subline = chart
-      ? `<p class="sub">${swatch(teamSeries.color)} team + ${swatch(visitorSeries.color)} visitors</p>`
-      : `<p class="sub">${swatch(teamSeries.color)} team ${snap.team} + ${swatch(visitorSeries.color)} visitors ${snap.visitors}</p>`;
+      ? `<p class="sub" title="team + visitors">${swatch(teamSeries.color)} team + ${swatch(visitorSeries.color)} visitors</p>`
+      : `<p class="sub" title="team ${snap.team} + visitors ${snap.visitors}">${swatch(teamSeries.color)} team ${snap.team} + ${swatch(visitorSeries.color)} visitors ${snap.visitors}</p>`;
 
     return {
       label,

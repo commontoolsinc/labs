@@ -8,11 +8,29 @@
 
 import type { Status } from "./types.ts";
 import { PROD_SERVICE } from "./config.ts";
-import { CHART_HIGHLIGHT } from "./theme.ts";
 import {
   type GitHubPrimaryRateLimit,
   performanceGitHubRateLimit,
 } from "./github-rate-limit.ts";
+import {
+  daysLabel,
+  DURATION_LABEL_HEIGHT,
+  durationTag,
+  escapeHtml,
+  humanSpan,
+  SPARKLINE_HEIGHT,
+  STATUS_DOT,
+} from "./tile-render-values.ts";
+
+export {
+  daysLabel,
+  DURATION_LABEL_HEIGHT,
+  durationTag,
+  escapeHtml,
+  humanSpan,
+  SPARKLINE_HEIGHT,
+  STATUS_DOT,
+};
 
 // The service.name to scope a SigNoz query to. The name lands inside a query
 // expression, so anything outside the shape a service name has falls back to the
@@ -481,31 +499,7 @@ export function memo<T>(ttlMs: number, fn: () => Promise<T>): () => Promise<T> {
   };
 }
 
-// good/warn/bad/unknown -> the dot color class the renderer uses.
-export const STATUS_DOT: Record<Status, string> = { good: "green", warn: "amber", bad: "red", unknown: "gray" };
-
-export const escapeHtml = (s: string) =>
-  s.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
-
 export { SPARK_FADE_CSS as SPARK_FADE } from "./palette.ts";
-
-// How a sparkline caption spells a day span, consistently across tiles:
-// "5 days", "1 day", "<1 day".
-export function daysLabel(days: number): string {
-  if (days < 1) return "<1 day";
-  return `${days} day${days === 1 ? "" : "s"}`;
-}
-
-// A time span for sparkline captions: "5 days" (>= 1 day, via daysLabel), else a
-// finer "8 hours", else "30 min".
-export function humanSpan(ms: number): string {
-  if (ms >= 86_400_000) return daysLabel(Math.round(ms / 86_400_000));
-  if (ms >= 3_600_000) {
-    const hr = Math.round(ms / 3_600_000);
-    return `${hr} hour${hr === 1 ? "" : "s"}`;
-  }
-  return `${Math.max(1, Math.round(ms / 60_000))} min`;
-}
 
 export function humanDur(ms: number): string {
   const m = Math.floor(ms / 60000);
@@ -577,17 +571,6 @@ export function lighten(hex: string, amount = 0.6): string {
   const [r, g, b] = [mix((n >> 16) & 255), mix((n >> 8) & 255), mix(n & 255)];
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
 }
-
-// The span the line covers, formatted with humanSpan for the bottom-left corner
-// of a chart, absolutely positioned. The renderer draws it for a tile's `duration`
-// slot; standalone chart pages (the bench drill-down) reuse it directly. Its
-// container must be position:relative.
-export function durationTag(ms: number): string {
-  return `<span style="position:absolute;left:1px;bottom:0;font-size:9px;line-height:1;color:${CHART_HIGHLIGHT};pointer-events:none">${escapeHtml(humanSpan(ms))}</span>`;
-}
-
-// All sparkline variants and their duration labels occupy this rendered height.
-const SPARKLINE_HEIGHT = 28;
 
 function scaleValues(
   vals: number[],
@@ -895,7 +878,11 @@ export function thin<T>(arr: T[], max: number): T[] {
 // A grid of small run-outcome cells (one per run, oldest first) laid out in
 // `cols` fixed columns. Each cell links to that run's CI results. Cells shrink
 // to fit width.
-export function strip(cells: { outcome: string; href: string }[], cols: number): string {
+export function strip(
+  cells: { outcome: string; href: string }[],
+  cols: number,
+  labelSpace = false,
+): string {
   if (!cells.length) return "";
   const col = (d: string) =>
     d === "green"
@@ -908,7 +895,8 @@ export function strip(cells: { outcome: string; href: string }[], cols: number):
   const html = cells.map((c) =>
     `<a class="cell" href="${escapeHtml(c.href)}" target="_blank" rel="noopener" style="background:${col(c.outcome)}"></a>`
   ).join("");
-  return `<div class="cells" style="grid-template-columns:repeat(${cols},1fr)">${html}</div>`;
+  const className = labelSpace ? "cells labeled" : "cells";
+  return `<div class="${className}" style="grid-template-columns:repeat(${cols},1fr)">${html}</div>`;
 }
 
 // The PR that landed a commit: squash titles end "(#123)", merge commits start

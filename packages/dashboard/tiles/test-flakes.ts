@@ -65,11 +65,20 @@ async function flakesView(
       : held.length >= FLAKES_WARN
       ? "warn"
       : "good";
-    const worst = flaky.slice(0, NAMED).map((entry) =>
-      `<div>${(entry.flakeRate * 100).toFixed(1)}% · ${
-        escapeHtml(shortName(entry.test))
-      }</div>`
-    ).join("");
+    const named = flaky.slice(0, NAMED);
+    const listAttributes = named.length > 2
+      ? ` aria-label="Flaky test details; scroll for more" title="Scroll for more details"`
+      : ` aria-label="Flaky test details"`;
+    const worst = named.length === 0
+      ? ""
+      : `<div class="tile-detail-list" role="region" tabindex="0"${listAttributes}>${
+        named.map((entry) => {
+          const line = `${(entry.flakeRate * 100).toFixed(1)}% · ${
+            shortName(entry.test)
+          }`;
+          return `<div title="${escapeHtml(line)}">${escapeHtml(line)}</div>`;
+        }).join("")
+      }</div>`;
     return {
       label: "flaky tests",
       status,

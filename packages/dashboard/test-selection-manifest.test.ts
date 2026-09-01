@@ -163,6 +163,10 @@ Deno.test("the flake tile counts what selection held back, and names the worst",
     .collect(CTX);
   assertEquals(view.status, "warn");
   assertEquals(view.value, "1");
+  assertEquals(view.extra?.includes('class="tile-detail-list"'), true);
+  assertEquals(view.extra?.includes('role="region"'), true);
+  assertEquals(view.extra?.includes('tabindex="0"'), true);
+  assertEquals(view.extra?.includes("scroll for more"), false);
   assertEquals(view.extra?.includes("40.0% · memory: space &gt; flakes"), true);
 });
 
