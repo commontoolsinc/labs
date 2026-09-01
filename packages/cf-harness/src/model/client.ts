@@ -24,7 +24,24 @@ export interface HarnessModelAttemptDiagnostic {
   maxTransportAttempts: number;
   startedAt: string;
   endedAt: string;
+
+  /**
+   * Elapsed time from request dispatch until the response headers arrive. A
+   * provider that sends headers ahead of the generated tokens ends this long
+   * before the model is done, so it measures the transport rather than the
+   * turn.
+   */
   durationMs: number;
+
+  /**
+   * Elapsed time from request dispatch until the response is complete — the
+   * whole body read, or the stream closed at its terminal event. This is the
+   * model's own working time, and the number to compare a turn against wall
+   * clock with. Absent when the provider client never observed the exchange
+   * end.
+   */
+  responseCompleteDurationMs?: number;
+
   request: HarnessModelRequestSummary;
   outcome: "http_response" | "transport_error";
   httpStatus?: number;

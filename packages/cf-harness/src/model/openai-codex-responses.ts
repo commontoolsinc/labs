@@ -41,6 +41,12 @@ export interface OpenAICodexResponsesClientOptions {
   fetchFn?: HarnessFetch;
   endpoint?: string;
   now?: () => Date;
+
+  /**
+   * Monotonic milliseconds, the source of every measured duration. Defaults to
+   * `performance.now()`.
+   */
+  monotonicNowMs?: () => number;
 }
 
 const OPENAI_CODEX_PROVIDER_ID = "openai-codex";
@@ -185,6 +191,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
   readonly #fetchFn: HarnessFetch;
   readonly #endpoint: string;
   readonly #now: () => Date;
+  readonly #monotonicNowMs: () => number;
 
   constructor(options: OpenAICodexResponsesClientOptions) {
     this.#resolver = options.credentialResolver;
@@ -218,6 +225,12 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       );
     }
     this.#now = options.now ?? (() => new Date());
+    this.#monotonicNowMs = options.monotonicNowMs ?? (() => performance.now());
+  }
+
+  /** Whole milliseconds elapsed since a monotonic reading. */
+  #elapsedMsSince(startedAtMs: number): number {
+    return Math.max(0, Math.round(this.#monotonicNowMs() - startedAtMs));
   }
 
   async listModels(
@@ -369,7 +382,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       parallel_tool_calls: true,
     });
     const startedAt = this.#now();
-    const startedAtMs = performance.now();
+    const startedAtMs = this.#monotonicNowMs();
     let response: Response;
     try {
       response = await this.#fetchFn(this.#endpoint, {
@@ -399,6 +412,9 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         error instanceof Error ? error.message : String(error),
         credential,
       );
+      // A transport failure ends the exchange where it is thrown, so the two
+      // durations are one measurement.
+      const durationMs = this.#elapsedMsSince(startedAtMs);
       await emitAttempt(request.onAttempt, {
         type: "cf-harness.model-attempt",
         providerId: this.providerId,
@@ -408,7 +424,8 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         maxTransportAttempts: 1,
         startedAt: startedAt.toISOString(),
         endedAt: endedAt.toISOString(),
-        durationMs: Math.max(0, Math.round(performance.now() - startedAtMs)),
+        durationMs,
+        responseCompleteDurationMs: durationMs,
         request: {
           model: request.model,
           messageCount: request.transcript.length,
@@ -432,7 +449,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       maxTransportAttempts: 1,
       startedAt: startedAt.toISOString(),
       endedAt: endedAt.toISOString(),
-      durationMs: Math.max(0, Math.round(performance.now() - startedAtMs)),
+      durationMs: this.#elapsedMsSince(startedAtMs),
       request: {
         model: request.model,
         messageCount: request.transcript.length,
@@ -456,6 +473,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       }
       await emitAttempt(request.onAttempt, {
         ...baseAttempt,
+        responseCompleteDurationMs: this.#elapsedMsSince(startedAtMs),
         ...(responseBodyBytes !== undefined ? { responseBodyBytes } : {}),
       });
       if (request.signal?.aborted) throw abortReason(request.signal);
@@ -471,7 +489,6 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         `OpenAI Codex Responses request failed (${response.status})`,
       );
     }
-    await emitAttempt(request.onAttempt, baseAttempt);
     let terminal: Record<string, unknown> | undefined;
     // The ChatGPT Codex backend streams each completed output item via a
     // `response.output_item.done` event, but with `store: false` it returns an
@@ -479,31 +496,40 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
     // not assemble a stored response to echo back). Accumulate the streamed
     // items so the model's message and tool calls are not silently dropped.
     const streamedItems: unknown[] = [];
-    for await (const event of parseSse(response, request.signal)) {
-      const type = event.type;
-      if (type === "response.output_item.done" && event.item !== undefined) {
-        streamedItems.push(event.item);
-      }
-      if (type === "error") {
-        throw providerUnavailable(
-          "OpenAI Codex Responses stream returned an error event",
-        );
-      }
-      if (
-        type === "response.completed" || type === "response.done" ||
-        type === "response.incomplete" || type === "response.failed"
-      ) {
-        if (
-          typeof event.response !== "object" || event.response === null ||
-          Array.isArray(event.response)
-        ) {
+    try {
+      for await (const event of parseSse(response, request.signal)) {
+        const type = event.type;
+        if (type === "response.output_item.done" && event.item !== undefined) {
+          streamedItems.push(event.item);
+        }
+        if (type === "error") {
           throw providerUnavailable(
-            "Codex Responses terminal event did not include a response object",
+            "OpenAI Codex Responses stream returned an error event",
           );
         }
-        terminal = event.response as Record<string, unknown>;
-        break;
+        if (
+          type === "response.completed" || type === "response.done" ||
+          type === "response.incomplete" || type === "response.failed"
+        ) {
+          if (
+            typeof event.response !== "object" || event.response === null ||
+            Array.isArray(event.response)
+          ) {
+            throw providerUnavailable(
+              "Codex Responses terminal event did not include a response object",
+            );
+          }
+          terminal = event.response as Record<string, unknown>;
+          break;
+        }
       }
+    } finally {
+      // The generation happens across this stream, not before it, so the one
+      // record this attempt gets is emitted here — however the stream ended.
+      await emitAttempt(request.onAttempt, {
+        ...baseAttempt,
+        responseCompleteDurationMs: this.#elapsedMsSince(startedAtMs),
+      });
     }
     if (!terminal) {
       throw providerUnavailable(
