@@ -76,19 +76,20 @@ export interface PresenceSocket {
   /** Closes the socket with an optional protocol code and public reason. */
   close(code?: number, reason?: string): void;
 
-  /** Registers an open-event listener. */
+  /**
+   * Registers a listener for one socket event, typed to the event that name
+   * carries.
+   */
+  // Open.
   addEventListener(type: "open", listener: (event: Event) => void): void;
-
-  /** Registers a message-event listener. */
+  // Message.
   addEventListener(
     type: "message",
     listener: (event: MessageEvent) => void,
   ): void;
-
-  /** Registers an error-event listener. */
+  // Error.
   addEventListener(type: "error", listener: (event: Event) => void): void;
-
-  /** Registers a close-event listener. */
+  // Close.
   addEventListener(type: "close", listener: (event: CloseEvent) => void): void;
 }
 
