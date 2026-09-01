@@ -2,7 +2,7 @@
  * Rejection-path tests for the Topics mutating verbs (verb contract rule 4,
  * docs/plans/pattern-verb-contract.md: rejection is a value, never a silent
  * no-op). Every action here makes a verb throw, so the runtime errors are
- * required (`expectRuntimeErrors: 25` — exact count, so a rejection quietly
+ * required (`expectRuntimeErrors: 33` — exact count, so a rejection quietly
  * reverting to a silent return fails the suite); each assertion then verifies
  * the write did NOT land. Happy and legacy paths live in topics.test.tsx — including the UI
  * composer wrappers, whose silent guards are correct behavior (an empty draft
@@ -203,6 +203,95 @@ export default pattern(() => {
     foreignLink.get().removedAt === undefined
   );
 
+  // A payload that is not a reference at all. The verb must refuse rather than
+  // resolve it to nothing and report success — the same shape `mention` and
+  // `unmention` are held to above.
+  const action_remove_comment_text_address = action(() => {
+    // deno-lint-ignore no-explicit-any
+    (seedTopic.removeComment as any)?.send({
+      comment: "fid1:notAReference",
+      agentName: "Sol",
+    });
+  });
+  const action_edit_comment_text_address = action(() => {
+    // deno-lint-ignore no-explicit-any
+    (seedTopic.editComment as any)?.send({
+      comment: "fid1:notAReference",
+      body: "rewritten",
+      agentName: "Sol",
+    });
+  });
+  const action_remove_link_text_address = action(() => {
+    // deno-lint-ignore no-explicit-any
+    (seedTopic.removeLink as any)?.send({
+      link: "fid1:notAReference",
+      agentName: "Sol",
+    });
+  });
+  const action_edit_comment_unsigned = action(() => {
+    seedTopic.editComment.send({
+      comment: foreignComment,
+      body: "rewritten",
+      agentName: "   ",
+    });
+  });
+  const action_remove_link_unsigned = action(() => {
+    seedTopic.removeLink.send({ link: foreignLink, agentName: "   " });
+  });
+
+  // Retracting what is already retracted. A second call is not a no-op that
+  // quietly succeeds: the record carries one retraction, and a caller asking
+  // for another is wrong about the state.
+  const retractedComments = new Writable<TopicComment[]>([]);
+  const retractedLinks = new Writable<TopicLink[]>([]);
+  const retractedTopic = Topic({
+    title: "Already retracted",
+    comments: retractedComments,
+    links: retractedLinks,
+  });
+  const action_seed_retractable = action(() => {
+    retractedTopic.addComment.send({ body: "once", agentName: "Sol" });
+    retractedTopic.addLink.send({
+      url: "https://example.com/once",
+      agentName: "Sol",
+    });
+  });
+  const action_retract_both = action(() => {
+    retractedTopic.removeComment.send({
+      comment: retractedComments.key(0),
+      agentName: "Sol",
+    });
+    retractedTopic.removeLink.send({
+      link: retractedLinks.key(0),
+      agentName: "Sol",
+    });
+  });
+  const action_retract_comment_again = action(() => {
+    retractedTopic.removeComment.send({
+      comment: retractedComments.key(0),
+      agentName: "Sol",
+    });
+  });
+  const action_edit_retracted_comment = action(() => {
+    retractedTopic.editComment.send({
+      comment: retractedComments.key(0),
+      body: "rewriting a retraction",
+      agentName: "Sol",
+    });
+  });
+  const action_retract_link_again = action(() => {
+    retractedTopic.removeLink.send({
+      link: retractedLinks.key(0),
+      agentName: "Sol",
+    });
+  });
+  const assert_one_retraction_each = assert(() =>
+    retractedTopic.commentCount === 0 &&
+    (retractedComments.get()[0]?.removedAt ?? 0) > 0 &&
+    retractedComments.get()[0]?.body === "once" &&
+    (retractedLinks.get()[0]?.removedAt ?? 0) > 0
+  );
+
   const action_rename_blank_title = action(() => {
     directTopic.setTitle.send({ title: "   ", agentName: "Sol" });
   });
@@ -246,7 +335,7 @@ export default pattern(() => {
     // means a
     // single verb quietly reverting to a silent early-return fails this suite;
     // the no-write assertions then prove the throw also blocked the write.
-    expectRuntimeErrors: 25,
+    expectRuntimeErrors: 33,
     [TESTS]: [
       { action: action_seed_topic },
       { assertion: assert_seeded },
@@ -300,6 +389,25 @@ export default pattern(() => {
       { assertion: assert_foreign_link_untouched },
       { action: action_remove_foreign_link },
       { assertion: assert_foreign_link_untouched },
+      { action: action_remove_comment_text_address },
+      { assertion: assert_foreign_comment_untouched },
+      { action: action_edit_comment_text_address },
+      { assertion: assert_foreign_comment_untouched },
+      { action: action_remove_link_text_address },
+      { assertion: assert_foreign_link_untouched },
+      { action: action_edit_comment_unsigned },
+      { assertion: assert_foreign_comment_untouched },
+      { action: action_remove_link_unsigned },
+      { assertion: assert_foreign_link_untouched },
+      { action: action_seed_retractable },
+      { action: action_retract_both },
+      { assertion: assert_one_retraction_each },
+      { action: action_retract_comment_again },
+      { assertion: assert_one_retraction_each },
+      { action: action_edit_retracted_comment },
+      { assertion: assert_one_retraction_each },
+      { action: action_retract_link_again },
+      { assertion: assert_one_retraction_each },
     ],
   };
 });

@@ -814,6 +814,13 @@ export default pattern(() => {
       body: "first thought",
       agentName: "Sol",
     });
+    // A second comment, so the thread's sort comparator actually compares.
+    // One comment sorts without ever calling it, which leaves the ordering
+    // rule — the thing that decides what a reader sees first — unexercised.
+    retractionSubject.addComment.send({
+      body: "second thought",
+      agentName: "Sol",
+    });
     retractionSubject.addLink.send({
       url: "https://example.com/a-page",
       agentName: "Sol",
@@ -831,7 +838,7 @@ export default pattern(() => {
   // An edit revises the body and stamps `editedAt`, leaving `author` and
   // `sentAt` alone: an edit changes what was said, not who said it.
   const assert_comment_edited = assert(() =>
-    retractionSubject.commentCount === 1 &&
+    retractionSubject.commentCount === 2 &&
     retractionSubject.comments?.[0]?.body === "first thought, revised" &&
     retractionSubject.comments?.[0]?.author?.name === "Sol" &&
     (retractionSubject.comments?.[0]?.editedAt ?? 0) > 0 &&
@@ -860,8 +867,8 @@ export default pattern(() => {
   // Stamped, not deleted: the record is still stored and still carries what it
   // said, while the count stops counting it.
   const assert_comment_retracted = assert(() =>
-    retractionSubject.commentCount === 0 &&
-    (retractionSubject.comments ?? []).length === 1 &&
+    retractionSubject.commentCount === 1 &&
+    (retractionSubject.comments ?? []).length === 2 &&
     retractionSubject.comments?.[0]?.body === "first thought, revised" &&
     (retractionSubject.comments?.[0]?.removedAt ?? 0) > 0 &&
     retractionSubject.comments?.[0]?.removedBy?.name === "Sol"
