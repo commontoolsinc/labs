@@ -6,7 +6,7 @@ import {
   type ProbeApi,
   waitForCondition,
 } from "@commonfabric/integration";
-import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
+import { toIndentedDebugString } from "@commonfabric/data-model";
 
 /**
  * Attribute a mark predicate stamps on the element it resolved, so the test can

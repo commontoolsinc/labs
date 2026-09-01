@@ -6,8 +6,8 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "@commonfabric/runner";
 
 import type { Cell as BuilderCell } from "../../../runner/src/builder/types.ts";
+import { hashStringOf } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 import {
   assertPlanRunsFixer,

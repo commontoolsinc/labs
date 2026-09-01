@@ -2,7 +2,10 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
-import { isValidFabricValue } from "@commonfabric/data-model";
+import {
+  isValidFabricValue,
+  taggedHashStringOf,
+} from "@commonfabric/data-model";
 import { entityRefFrom } from "@commonfabric/data-model/cell-rep";
 import {
   fabricFromRealmValue,
@@ -13,7 +16,6 @@ import {
   FabricBytes,
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
-import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { getLogger } from "@commonfabric/utils/logger";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";

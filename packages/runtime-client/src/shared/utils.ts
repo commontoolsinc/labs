@@ -1,4 +1,4 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model";
 import { cloneCfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
 
 import type { CellRef } from "@/protocol/mod.ts";

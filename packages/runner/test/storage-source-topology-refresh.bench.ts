@@ -1,5 +1,5 @@
 import { Identity } from "@commonfabric/identity";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model";
 import {
   entityRefFrom,
   setModernCellRepConfig,

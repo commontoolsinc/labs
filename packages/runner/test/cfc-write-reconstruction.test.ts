@@ -11,7 +11,7 @@
 
 import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
 
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { deepFreeze } from "@commonfabric/data-model";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 

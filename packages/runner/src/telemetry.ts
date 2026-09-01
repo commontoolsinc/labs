@@ -36,6 +36,13 @@ export type SchedulerGraphNode = {
   parentId?: string; // ID of parent action if this was created during parent's execution
   childCount?: number; // Number of child actions created during this action's execution
   preview?: string; // First ~200 chars of function body for hover tooltips
+  // Where the action's implementation was authored, as
+  // `cf:module/<identity>/<path>:<line>:<col>`. The transformer records the
+  // line and column of each hoisted builder call, so this names the `lift`,
+  // `computed` or `handler` site itself rather than the module. Present for an
+  // implementation the engine verified; absent for the builtins and for host
+  // and dynamic builders, which have no authored site.
+  src?: string;
   // Diagnostic info: what cells this action reads and writes
   reads?: string[]; // space/entity paths this action reads
   shallowReads?: string[]; // non-recursive reads used for structural invalidation

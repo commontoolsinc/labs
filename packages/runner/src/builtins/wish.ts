@@ -9,7 +9,7 @@ import {
   hashSchema,
   internSchema,
 } from "@commonfabric/data-model-schema";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { LRUCache } from "@commonfabric/utils/cache";

@@ -1,6 +1,5 @@
 import type { JSONSchemaObj } from "@commonfabric/api";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf, toCompactDebugString } from "@commonfabric/data-model";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 

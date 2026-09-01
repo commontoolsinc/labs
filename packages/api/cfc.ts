@@ -6,7 +6,7 @@
  * and diagnostics in downstream packages.
  */
 
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { deepFreeze } from "@commonfabric/data-model";
 
 export type Cfc<T, Meta> = T & {
   readonly __ct_cfc__?: Meta;

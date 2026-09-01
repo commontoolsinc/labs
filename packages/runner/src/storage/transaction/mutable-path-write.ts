@@ -10,15 +10,13 @@
  */
 
 import {
-  type FabricValue,
-  isFabricPlainContainer,
-  valueEqual,
-} from "@commonfabric/data-model";
-import {
   cloneForMutation,
   CloneForMutationError,
-} from "@commonfabric/data-model/value-clone";
-import { toDebugKindString } from "@commonfabric/data-model/value-debug";
+  type FabricValue,
+  isFabricPlainContainer,
+  toDebugKindString,
+  valueEqual,
+} from "@commonfabric/data-model";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import type {
   IMemoryAddress,

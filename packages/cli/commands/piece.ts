@@ -58,8 +58,8 @@ import {
 } from "../lib/cell-selection.ts";
 import { cliCommand, cliText } from "../lib/cli-name.ts";
 import type { FabricValue } from "@commonfabric/api";
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
 import {
@@ -4706,7 +4706,8 @@ export async function applyPieceSourceCommandAction(
   (deps.hint ?? hint)(cliText(`NEXT STEPS:
   → Test in browser: ${config.apiUrl}/${config.space}/${config.piece}
   → Test a callable: cf call --cell ${config.piece} <callableName> ...
-  → Check state:     cf piece inspect --cell ${config.piece} ...`));
+  → Verify state:    cf get --cell ${config.piece} <path> ...
+  → Full inspect:    cf piece inspect --cell ${config.piece} ...`));
 }
 
 /**

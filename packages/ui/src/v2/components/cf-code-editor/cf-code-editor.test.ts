@@ -1,5 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import {
+  autocompletion,
+  CompletionContext,
+  type CompletionResult,
+  completionStatus,
+} from "@codemirror/autocomplete";
+import { EditorState, type TransactionSpec } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
 import { NAME } from "@commonfabric/runner/shared";
 import { type CellHandle, type CellRef } from "@commonfabric/runtime-client";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
@@ -360,11 +368,20 @@ describe("CFCodeEditor mention-piece resolution", () => {
   // the runtime does. Nothing here reaches a piece through a value.
   type ResolutionInternals = {
     mentionable: CellHandle<MentionableArray> | null;
+    mentioned?: CellHandle<MentionableArray>;
+    pattern: CellHandle<string>;
+    _editorView: EditorView | undefined;
     _resolvePieceIds(): Promise<void>;
     _resolvedPieceCells: Map<number, CellHandle<Mentionable>>;
+    _backlinkCompletionAwaitingResolution: boolean;
     _getPieceId(index: number): string;
     findPieceById(id: string): CellHandle<Mentionable> | null;
     getFilteredMentionable(query: string): Array<[unknown, number]>;
+    _completeBacklinkQuery(view: EditorView, text: string): void;
+    createBacklinkCompletionSource(): (
+      context: CompletionContext,
+    ) => CompletionResult | null;
+    willUpdate(changedProperties: Map<string, unknown>): void;
   };
 
   const internals = (element: CFCodeEditor): ResolutionInternals =>
@@ -373,6 +390,26 @@ describe("CFCodeEditor mention-piece resolution", () => {
   const pieceLink = {
     "$link": { id: "of:target-piece", path: [] },
   };
+
+  /** Creates the stateful part of an `EditorView` used by completion. */
+  function createBacklinkView(
+    source: (context: CompletionContext) => CompletionResult | null,
+    doc: string,
+    hasFocus = true,
+  ) {
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: doc.length },
+      extensions: [autocompletion({ override: [source] })],
+    });
+    return {
+      state,
+      hasFocus,
+      dispatch(spec: TransactionSpec) {
+        this.state = this.state.update(spec).state;
+      },
+    };
+  }
 
   it("resolves a piece-bearing entry to its piece", async () => {
     const element = internals(new CFCodeEditor());
@@ -422,6 +459,186 @@ describe("CFCodeEditor mention-piece resolution", () => {
     expect(element.getFilteredMentionable("").length).toBe(1);
     const found = element.findPieceById(element._getPieceId(0));
     expect(found?.id()).toBe(target.id());
+  });
+
+  it("defers `$mentioned` reconciliation until index rows resolve", async () => {
+    const element = internals(new CFCodeEditor());
+    const list = createMockCellHandle([
+      { [NAME]: "Row", title: "Row", piece: pieceLink },
+    ]);
+    const release = Promise.withResolvers<void>();
+    const realKey = list.key.bind(list);
+    list.key = ((key: PropertyKey) => {
+      const row = realKey(key as never);
+      if (String(key) === "0") {
+        const realRowKey = row.key.bind(row);
+        row.key = ((rowKey: PropertyKey) => {
+          const destination = realRowKey(rowKey as never);
+          if (String(rowKey) === "piece") {
+            const realResolve = destination.resolveAsCell.bind(destination);
+            destination.resolveAsCell = (async () => {
+              await release.promise;
+              return await realResolve();
+            }) as typeof destination.resolveAsCell;
+          }
+          return destination;
+        }) as unknown as typeof row.key;
+      }
+      return row;
+    }) as typeof list.key;
+    Object.defineProperty(list, "asSchema", { value: () => list });
+
+    const mentioned = createMockCellHandle<MentionableArray>([], {
+      id: "of:mentioned" as CellRef["id"],
+    });
+    let writes = 0;
+    let written: MentionableArray | undefined;
+    const realSet = mentioned.set.bind(mentioned);
+    Object.defineProperty(mentioned, "set", {
+      value: (value: MentionableArray) => {
+        writes++;
+        written = value;
+        return realSet(value);
+      },
+    });
+    element.mentionable = list as unknown as CellHandle<MentionableArray>;
+    element.mentioned = mentioned;
+    Object.defineProperty(element, "getValue", {
+      value: () => "[[Row (target-piece)]]",
+    });
+    const resolutions: Promise<void>[] = [];
+    const resolvePieceIds = element._resolvePieceIds.bind(element);
+    Object.defineProperty(element, "_resolvePieceIds", {
+      value: () => {
+        const resolution = resolvePieceIds();
+        resolutions.push(resolution);
+        return resolution;
+      },
+    });
+
+    element.willUpdate(new Map([["mentionable", null]]));
+    expect(writes).toBe(0);
+
+    release.resolve();
+    await Promise.all(resolutions);
+
+    expect(writes).toBe(1);
+    expect((written?.[0] as unknown as CellHandle<Mentionable>).id()).toBe(
+      "of:target-piece",
+    );
+  });
+
+  it("does not create a piece for an exact unresolved index row", async () => {
+    const element = internals(new CFCodeEditor());
+    element.mentionable = createMockCellHandle([
+      { [NAME]: "Existing Topic", title: "Existing Topic", piece: pieceLink },
+    ]) as unknown as CellHandle<MentionableArray>;
+    element.pattern = createMockCellHandle("pattern");
+    let creations = 0;
+    Object.defineProperty(element, "createBacklinkFromPattern", {
+      value: () => {
+        creations++;
+        return Promise.resolve();
+      },
+    });
+    const source = element.createBacklinkCompletionSource();
+    const view = createBacklinkView(source, "[[Existing Topic");
+    element._editorView = view as unknown as EditorView;
+
+    element._completeBacklinkQuery(
+      view as unknown as EditorView,
+      "Existing Topic",
+    );
+
+    expect(creations).toBe(0);
+    expect(view.state.doc.toString()).toBe("[[Existing Topic");
+    expect(element._backlinkCompletionAwaitingResolution).toBe(true);
+    await element._resolvePieceIds();
+  });
+
+  it("creates a piece when no exact row is present", () => {
+    const element = internals(new CFCodeEditor());
+    element.mentionable = createMockCellHandle<MentionableArray>([]);
+    element.pattern = createMockCellHandle("pattern");
+    let creation: [string, boolean] | undefined;
+    Object.defineProperty(element, "createBacklinkFromPattern", {
+      value: (text: string, navigate: boolean) => {
+        creation = [text, navigate];
+        return Promise.resolve();
+      },
+    });
+    const source = element.createBacklinkCompletionSource();
+    const view = createBacklinkView(source, "[[New Topic");
+
+    element._completeBacklinkQuery(
+      view as unknown as EditorView,
+      "New Topic",
+    );
+
+    expect(creation).toEqual(["New Topic", false]);
+    expect(view.state.doc.toString()).toBe("[[New Topic]]");
+  });
+
+  it("creates a piece when an unresolved row is not an exact match", () => {
+    const element = internals(new CFCodeEditor());
+    element.mentionable = createMockCellHandle([
+      { [NAME]: "Existing Topic", title: "Existing Topic", piece: pieceLink },
+    ]) as unknown as CellHandle<MentionableArray>;
+    element.pattern = createMockCellHandle("pattern");
+    let creation: [string, boolean] | undefined;
+    Object.defineProperty(element, "createBacklinkFromPattern", {
+      value: (text: string, navigate: boolean) => {
+        creation = [text, navigate];
+        return Promise.resolve();
+      },
+    });
+    const source = element.createBacklinkCompletionSource();
+    const view = createBacklinkView(source, "[[Top");
+
+    element._completeBacklinkQuery(
+      view as unknown as EditorView,
+      "Top",
+    );
+
+    expect(creation).toEqual(["Top", false]);
+    expect(view.state.doc.toString()).toBe("[[Top]]");
+  });
+
+  it("restarts a matching backlink completion after resolution", async () => {
+    const element = internals(new CFCodeEditor());
+    element.mentionable = createMockCellHandle([
+      { [NAME]: "Row", title: "Row", piece: pieceLink },
+    ]) as unknown as CellHandle<MentionableArray>;
+    const source = element.createBacklinkCompletionSource();
+    const view = createBacklinkView(source, "[[Ro");
+    element._editorView = view as unknown as EditorView;
+
+    const initial = source(new CompletionContext(view.state, 4, true));
+    expect(initial?.options).toEqual([]);
+    expect(completionStatus(view.state)).toBe(null);
+
+    await element._resolvePieceIds();
+
+    expect(completionStatus(view.state)).toBe("pending");
+    const refreshed = source(new CompletionContext(view.state, 4, true));
+    expect(refreshed?.options.length).toBe(1);
+  });
+
+  it("does not restart a backlink completion after focus leaves", async () => {
+    const element = internals(new CFCodeEditor());
+    element.mentionable = createMockCellHandle([
+      { [NAME]: "Row", title: "Row", piece: pieceLink },
+    ]) as unknown as CellHandle<MentionableArray>;
+    const source = element.createBacklinkCompletionSource();
+    const view = createBacklinkView(source, "[[Ro", false);
+    element._editorView = view as unknown as EditorView;
+
+    const initial = source(new CompletionContext(view.state, 4, true));
+    expect(initial?.options).toEqual([]);
+
+    await element._resolvePieceIds();
+
+    expect(completionStatus(view.state)).toBe(null);
   });
 
   it("keeps the newer resolution when an older pass finishes late", async () => {

@@ -8,7 +8,7 @@
  * minting a different id, vs. one client alternating between branches).
  *
  * Values are summarized as a content hash (`vhash`). The hash is the
- * **canonical `FabricValue` hash** (`@commonfabric/data-model/value-hash`) —
+ * **canonical `FabricValue` hash** (`@commonfabric/data-model`) —
  * the same identity the runtime uses for `valueEqual` — so "same vhash" means
  * "same value by the runtime's own semantics". The parsed memory operations
  * carry hydrated `FabricValue`s (`parseClientMessage` →
@@ -25,8 +25,7 @@
  * (env reads, per-connection counter, message parsing) live in the route.
  */
 
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { hashStringOf, toCompactDebugString } from "@commonfabric/data-model";
 
 /** A single operation from a parsed memory commit. */
 export interface MemWriteOp {

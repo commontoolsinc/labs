@@ -14,11 +14,10 @@
 // live runtime/Cell needed). In the encoded form embedded links are
 // `/quote`-escaped literals, so a context-less decode is inert.
 
+import { hashStringOf, toCompactDebugString } from "@commonfabric/data-model";
 import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import { fabricFromJsonValue } from "@commonfabric/data-model/codecs";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isObjectNotArray, isPlainObject } from "@commonfabric/utils/types";
 

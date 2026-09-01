@@ -7,14 +7,20 @@ import ts from "typescript";
 // a structural match only holds when the transformer actually produced the
 // node.
 
-/** Parse printed transformer output into a source file. */
-export function parseModule(source: string): ts.SourceFile {
+/**
+ * Parses printed transformer output into a source file. Defaults to TSX;
+ * callers exercising angle-bracket assertions pass {@link ts.ScriptKind.TS}.
+ */
+export function parseModule(
+  source: string,
+  scriptKind: ts.ScriptKind = ts.ScriptKind.TSX,
+): ts.SourceFile {
   return ts.createSourceFile(
     "/transformed.tsx",
     source,
     ts.ScriptTarget.ESNext,
     /*setParentNodes*/ true,
-    ts.ScriptKind.TSX,
+    scriptKind,
   );
 }
 

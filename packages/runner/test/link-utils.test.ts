@@ -1,8 +1,8 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import { deepFreeze } from "@commonfabric/data-model";
 import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 

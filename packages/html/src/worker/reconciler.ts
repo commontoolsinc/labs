@@ -4086,7 +4086,7 @@ export class WorkerReconciler {
       // `children`, say) renders as the literal text `{}` — the warn fires
       // but nothing throws. Wants a `FabricSpecialObject` test ahead of this
       // point, rendered via `toCompactDebugString()` from
-      // `@commonfabric/data-model/value-debug` (or the primitive's own
+      // `@commonfabric/data-model` (or the primitive's own
       // string form).
       console.warn("unexpected object when value was expected", value);
       return JSON.stringify(value);

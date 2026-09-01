@@ -1,8 +1,8 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 
+import { hashOf } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 
 import { MEMORY_PROTOCOL } from "../v2.ts";
 import {

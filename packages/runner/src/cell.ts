@@ -2,6 +2,7 @@ import type { ReadonlyCell } from "@commonfabric/api";
 import {
   assertValidFabricValueLayer,
   cloneIfNecessary,
+  deepFreeze,
   type FabricConvertibleValue,
   fabricFromNativeValue,
   FabricInstance,
@@ -9,6 +10,7 @@ import {
   FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
+  hashStringOf,
   shallowCleanArray,
   shallowCleanPlainObject,
   shallowFabricFromNativeObjectElseUndefined,
@@ -19,13 +21,11 @@ import {
   entityRefFromString,
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
   isInternedSchema,
 } from "@commonfabric/data-model-schema";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import {

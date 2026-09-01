@@ -15,8 +15,8 @@
  * test builds from a `MessageChannel` are the same thing here.
  */
 
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 

@@ -1,5 +1,4 @@
-import type { FabricValue } from "@commonfabric/data-model";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { type FabricValue, hashStringOf } from "@commonfabric/data-model";
 
 /**
  * Deduplicate `items` by value-model equality, keeping the first of each equal

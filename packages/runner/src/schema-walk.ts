@@ -50,7 +50,7 @@ import {
   isObjectOrArray,
 } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { toCompactDebugString } from "@commonfabric/data-model";
 
 const logger = getLogger("schema-walk", { level: "warn" });
 

@@ -19,8 +19,7 @@
  *     deno task bench
  */
 
-import type { FabricValue } from "@commonfabric/data-model";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { deepFreeze, type FabricValue } from "@commonfabric/data-model";
 
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 

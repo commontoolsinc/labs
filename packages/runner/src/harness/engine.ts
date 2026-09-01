@@ -1,4 +1,4 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model";
 import type {
   Program,
   ProgramResolver,

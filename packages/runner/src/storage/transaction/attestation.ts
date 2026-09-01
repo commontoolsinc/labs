@@ -1,6 +1,7 @@
 import {
   type FabricPlainObject,
   type FabricValue,
+  toCompactDebugString,
   valueEqual,
 } from "@commonfabric/data-model";
 import {
@@ -9,7 +10,6 @@ import {
   isFabricDataUri,
   valueFromDataUriPayloadText,
 } from "@commonfabric/data-model/data-uri-codec";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
