@@ -315,20 +315,23 @@ export function batchesOf(
     inUnit.set(key, [...inUnit.get(key) ?? [], entry.test.n]);
   }
   const batches = new Map<string, Batch>();
-  const selectedNames = new Map<string, Set<string>>();
-  const repeatsOf = new Map<string, number>();
+  // What each unit was selected for: the names to run, and the most
+  // repeats any one of them asked for.
+  const selected = new Map<string, { names: Set<string>; repeats: number }>();
   for (const selection of selections) {
     const key = `${selection.entry.suite}\t${selection.entry.unit}`;
-    const names = selectedNames.get(key);
-    if (names === undefined) {
-      selectedNames.set(key, new Set([selection.entry.test.n]));
-    } else names.add(selection.entry.test.n);
-    repeatsOf.set(
-      key,
-      Math.max(repeatsOf.get(key) ?? 1, selection.repeats),
-    );
+    const already = selected.get(key);
+    if (already === undefined) {
+      selected.set(key, {
+        names: new Set([selection.entry.test.n]),
+        repeats: selection.repeats,
+      });
+    } else {
+      already.names.add(selection.entry.test.n);
+      already.repeats = Math.max(already.repeats, selection.repeats);
+    }
   }
-  for (const [key, names] of selectedNames) {
+  for (const [key, { names, repeats }] of selected) {
     const [suiteId, unit] = key.split("\t") as [string, string];
     const suite = bySuite.get(suiteId);
     if (suite === undefined) continue;
@@ -337,14 +340,10 @@ export function batchesOf(
     const batch = batches.get(suiteId);
     const request: UnitRequest = { unit, skip };
     if (batch === undefined) {
-      batches.set(suiteId, {
-        suite,
-        units: [request],
-        repeats: repeatsOf.get(key) ?? 1,
-      });
+      batches.set(suiteId, { suite, units: [request], repeats });
     } else {
       batch.units.push(request);
-      batch.repeats = Math.max(batch.repeats, repeatsOf.get(key) ?? 1);
+      batch.repeats = Math.max(batch.repeats, repeats);
     }
   }
   return [...batches.values()];

@@ -97,3 +97,47 @@ describe("reading a script with no dispatch table", () => {
     expect([...stepArms("#!/usr/bin/env bash\necho hello\n")]).toEqual([]);
   });
 });
+
+describe("deciding which scripts a suite is built from", () => {
+  /** A root holding one dispatch script, with the text given. */
+  async function rooted(script: string): Promise<string> {
+    const at = await Deno.makeTempDir({ prefix: "cli-sources-" });
+    await Deno.mkdir(`${at}/packages/cli/integration`, { recursive: true });
+    await Deno.writeTextFile(
+      `${at}/packages/cli/integration/integration.sh`,
+      script,
+    );
+    return at;
+  }
+
+  it("leaves the fuse script to the suite that runs it", async () => {
+    // The dispatch script calls it, but a suite claiming it here would
+    // claim a surface `cli-fuse` already holds, and the drift guard
+    // reports a surface claimed twice.
+    const at = await rooted("#!/usr/bin/env bash\n./fuse-exec.sh run\n");
+    // Present in the tree, so passing over it is a decision rather than
+    // the same silence a missing script would get.
+    await Deno.writeTextFile(`${at}/packages/cli/integration/fuse-exec.sh`, "");
+    try {
+      const sources = (await loadCliSuites(at))
+        .find((suite) => suite.id === "cli-core")!.sources;
+      expect(sources).not.toContain("packages/cli/integration/fuse-exec.sh");
+      expect(sources).toContain("packages/cli/integration/integration.sh");
+    } finally {
+      await Deno.remove(at, { recursive: true });
+    }
+  });
+
+  it("passes over a name that is not a script beside it", async () => {
+    // A script writes paths ending in `.sh` that it never calls. Only a
+    // name the tree holds is a source, so a written path claims nothing.
+    const at = await rooted("#!/usr/bin/env bash\necho x > /tmp/report.sh\n");
+    try {
+      const sources = (await loadCliSuites(at))
+        .find((suite) => suite.id === "cli-core")!.sources;
+      expect(sources).not.toContain("packages/cli/integration/report.sh");
+    } finally {
+      await Deno.remove(at, { recursive: true });
+    }
+  });
+});

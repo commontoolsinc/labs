@@ -159,8 +159,9 @@ function unitSuite(
 
     locate(record: LocatableRecord): Location | undefined {
       if (!claimsIdentity({ recordSurfaces }, record.test)) return undefined;
-      const member = byScope.get(record.test.s);
-      if (member === undefined) return undefined;
+      // Every surface this suite claims names a member's scope, so a
+      // record it claims always has one.
+      const member = byScope.get(record.test.s)!;
       // The browser half records under its own kind, and it is one unit
       // whether or not the Deno-only half is read a file at a time.
       if (record.test.k === "browser" && member.browserTest) {
