@@ -28,8 +28,10 @@ export const MentionableSchema = {
   type: "object",
   properties: {
     [NAME]: { type: "string" },
-    // The `MentionRef.destination` shape: an opaque cell boundary, hydrated
-    // to a handle and never read through under this schema.
+    // The `MentionRef.destination` shape: an opaque cell boundary. The value
+    // at this position never carries a usable handle — an `asCell` position
+    // crosses the client boundary as an empty object — so a reader reaches
+    // the piece by ADDRESS and never reads through it under this schema.
     piece: { type: "object", properties: {}, asCell: ["cell"] },
   },
   required: [NAME],

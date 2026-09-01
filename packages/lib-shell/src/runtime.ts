@@ -222,15 +222,17 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   telemetry?: RuntimeTelemetrySink;
 };
 
+/** {@link fetchBuildHash}'s module-level memo. */
+let buildHashPromise: Promise<string | undefined> | undefined;
+
 /**
  * Fetch the worker bundle hash from the build manifest. This cache-busts the
  * mutable root worker URL used by local/legacy builds. Deployed shell builds
  * use their immutable `/builds/<sha>/` namespace instead.
  *
- * Cached at module level — the hash doesn't change within a page session.
+ * Cached — the hash doesn't change within a page session, so the manifest is
+ * fetched at most once.
  */
-let buildHashPromise: Promise<string | undefined> | undefined;
-
 export function fetchBuildHash(): Promise<string | undefined> {
   if (!buildHashPromise) {
     buildHashPromise = (async () => {

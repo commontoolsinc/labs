@@ -1891,7 +1891,11 @@ Deno.test("reportBaselineDistance reports an ancestry it could not read", () => 
   );
 });
 
-/** The three-run ancestry above, with one metric measured at each commit. */
+/**
+ * Two of the three runs in the ancestry above, each carrying one metric.
+ * `RUN_ONE_BACK` is deliberately absent: callers derive their run list from
+ * these readings, so leaving it out is what makes a commit unmeasured.
+ */
 function runnerReadings(): [WorkflowRun, BaselineRunReading][] {
   return [
     [RUN_AT_BASE, reading(RUN_AT_BASE, { [RUNNER_METRIC]: 5746 })],

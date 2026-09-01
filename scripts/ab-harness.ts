@@ -29,8 +29,8 @@
  * finding. Nothing here asserts -- it reports, because what counts as correct
  * is the comparison, not any single run.
  */
-const ROOT = Deno.env.get("CF_ROOT");
 
+const ROOT = Deno.env.get("CF_ROOT");
 if (!ROOT) {
   console.error("set CF_ROOT to a checkout root");
   Deno.exit(2);
