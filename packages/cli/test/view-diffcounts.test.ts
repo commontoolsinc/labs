@@ -280,6 +280,27 @@ describe("diffcounts", () => {
     expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });
   });
 
+  it("recognizes a block close after an unmatched quote", () => {
+    const diff = [
+      "diff --git a/main.rs b/main.rs",
+      "--- a/main.rs",
+      "+++ b/main.rs",
+      "@@ -1,2 +1,2 @@",
+      " /*",
+      "- * old first note",
+      "+ * new first note",
+      "@@ -20,2 +20,2 @@",
+      "- * old second note",
+      "+ * new second note",
+      ' * say "hello */',
+      "",
+    ].join("\n");
+
+    const counts = countsFor(diff);
+
+    expect(counts.comments.totals).toEqual({ adds: 0, dels: 0 });
+  });
+
   it("preserves comment markers inside Rust raw strings", () => {
     const diff = [
       "diff --git a/main.rs b/main.rs",
@@ -482,6 +503,27 @@ describe("diffcounts", () => {
     const counts = countsFor(diff);
 
     expect(counts.comments.totals).toEqual({ adds: 3, dels: 3 });
+  });
+
+  it("recognizes a raw-string close after a backslash", () => {
+    const diff = [
+      "diff --git a/main.rs b/main.rs",
+      "--- a/main.rs",
+      "+++ b/main.rs",
+      "@@ -1,2 +1,2 @@",
+      ' let text = r#"',
+      "-// old first data",
+      "+// new first data",
+      "@@ -20,2 +20,2 @@",
+      "-// old second data",
+      "+// new second data",
+      ' \\"#;',
+      "",
+    ].join("\n");
+
+    const counts = countsFor(diff);
+
+    expect(counts.comments.totals).toEqual({ adds: 2, dels: 2 });
   });
 
   it("does not start shell heredocs from quoted operators", () => {

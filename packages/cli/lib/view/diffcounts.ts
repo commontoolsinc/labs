@@ -330,9 +330,7 @@ function reconcileStateAfterGap(
     state.block = undefined;
   }
   const literalClose = state.literalClose;
-  if (
-    literalClose && !texts.some((text) => hasUnescapedToken(text, literalClose))
-  ) {
+  if (literalClose && !texts.some((text) => text.includes(literalClose))) {
     state.literalClose = undefined;
   }
   const heredocs = state.heredocs;
@@ -348,32 +346,31 @@ function reconcileStateAfterGap(
 
 function hasUnquotedToken(text: string, token: string): boolean {
   let quote = "";
+  let tokenInsideCurrentQuote = false;
   for (let i = 0; i < text.length;) {
     const ch = text[i];
     if (quote) {
-      if (ch === "\\") i += 2;
-      else {
-        if (ch === quote) quote = "";
+      if (text.startsWith(token, i)) tokenInsideCurrentQuote = true;
+      if (ch === "\\") {
+        if (text.startsWith(token, i + 1)) tokenInsideCurrentQuote = true;
+        i += 2;
+      } else {
+        if (ch === quote) {
+          quote = "";
+          tokenInsideCurrentQuote = false;
+        }
         i++;
       }
     } else if (ch === '"' || ch === "'" || ch === "`") {
       quote = ch;
+      tokenInsideCurrentQuote = false;
       i++;
     } else {
       if (text.startsWith(token, i)) return true;
       i++;
     }
   }
-  return false;
-}
-
-function hasUnescapedToken(text: string, token: string): boolean {
-  for (let i = 0; i <= text.length - token.length; i++) {
-    if (text.startsWith(token, i) && (i === 0 || text[i - 1] !== "\\")) {
-      return true;
-    }
-  }
-  return false;
+  return quote !== "" && tokenInsideCurrentQuote;
 }
 
 function isHeredocEnd(text: string, heredoc: HeredocState): boolean {
