@@ -302,7 +302,8 @@ export class MentionController implements ReactiveController {
   private _destinationOf(
     mention: CellHandle<Mentionable>,
   ): CellHandle<Mentionable> {
-    return mention.get()?.piece !== undefined
+    const value = mention.get();
+    return value != null && Object.hasOwn(value, "piece")
       ? mention.key("piece").asSchema<Mentionable>(MentionableSchema)
       : mention;
   }
@@ -323,7 +324,11 @@ export class MentionController implements ReactiveController {
       const resolved = await destination.resolveAsCell();
       return `[${name}](/${resolved.ref().id})`;
     } catch {
-      return `[${name}](${this._buildHref(destination.ref())})`;
+      // The ENTRY's href, not the destination's: decode's raw first pass
+      // matches entry refs, so this round-trips even for an index row
+      // whose piece failed to resolve — a `/…/piece` path would match
+      // neither pass.
+      return `[${name}](${this._buildHref(piece.ref())})`;
     }
   }
 

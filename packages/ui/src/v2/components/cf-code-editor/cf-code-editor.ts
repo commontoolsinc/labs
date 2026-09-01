@@ -1203,7 +1203,7 @@ export class CFCodeEditor extends BaseElement {
    */
   private _isIndexRow(index: number): boolean {
     const item = ((this.mentionable?.get() ?? []) as MentionableArray)[index];
-    return item != null && item.piece !== undefined;
+    return item != null && Object.hasOwn(item, "piece");
   }
 
   /**
@@ -1268,7 +1268,8 @@ export class CFCodeEditor extends BaseElement {
           newResolved.set(i, resolvedId);
         }
       } catch {
-        // If resolution fails, we'll fall back to the sub-cell ID
+        // If resolution fails, a direct entry falls back to the sub-cell
+        // ID; an index row stays withheld (its sub-cell names the row).
       }
     });
 
@@ -1866,11 +1867,14 @@ export class CFCodeEditor extends BaseElement {
     // delivering values to subscribers.
     const unsubscribe = this.mentionable
       .subscribe((_value) => {
-        // Clear stale resolved IDs and re-resolve asynchronously
+        // Clear stale resolved IDs and re-resolve asynchronously. The
+        // $mentioned reconciliation waits for the resolution pass (which
+        // runs it on publish): against cleared maps an index-row backlink
+        // has no id, and reconciling in that window would transiently drop
+        // its edge only to re-add it moments later.
         this._resolvedPieceIds.clear();
         this._resolvedPieceCells.clear();
         this._resolvePieceIds();
-        this._updateMentionedFromContent();
       });
     this._mentionableUnsub = unsubscribe;
   }
