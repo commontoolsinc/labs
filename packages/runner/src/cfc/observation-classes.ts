@@ -63,6 +63,17 @@ const CONSUMED_CLASSES: Record<
 };
 
 /**
+ * Every classified read shape, in the order {@link CONSUMED_CLASSES} declares
+ * them. That record is typed over the whole union, so a shape added to
+ * {@link ReadObservationShape} without an entry there does not compile, and
+ * this list cannot fall behind it — which a hand-written array can, silently,
+ * for a caller that quantifies over the shapes to prove something about all
+ * of them.
+ */
+export const readObservationShapes = (): ReadObservationShape[] =>
+  Object.keys(CONSUMED_CLASSES) as ReadObservationShape[];
+
+/**
  * The consumption class of a persisted entry; `undefined` means covering
  * (consumed by every content read class). Implements the C0 §3 carve-out: a
  * legacy `origin:"link"` entry with absent `observes` is implicitly

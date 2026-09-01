@@ -111,6 +111,7 @@ import {
   type ReadClassSelection,
   readConsumesEntry,
   type ReadObservationShape,
+  readObservationShapes,
 } from "./observation-classes.ts";
 import {
   atomsOutsideCeiling,
@@ -271,6 +272,14 @@ const labelForEntriesAtPath = (
 // label-metadata templates derived from them, accumulate for the life of the
 // collection and carry nothing a reader did not already have.
 //
+// How much of that an append sheds depends on whether the runtime attributes
+// it. An action transaction carries an implementation identity, which mints
+// §8.9.3's `TransformedBy` into the join's integrity, and the value stamp
+// carries it; no declaration states derivation provenance, so the third
+// condition below keeps that stamp and the templates derived from it. What
+// collapses on an attributed append is the confidentiality-only shape stamps,
+// leaving four entries per element where an unattributed one leaves none.
+//
 // Four conditions keep the collapse exact rather than merely fail-safe:
 // every effective label a boundary computes stays the label it computes with
 // the entry in place, rather than a wider one.
@@ -287,13 +296,23 @@ const labelForEntriesAtPath = (
 //    in for a per-value one.
 //  - The declared component covers the entry's clauses under every read
 //    selection that consumes the entry, and covers whatever the entry's own
-//    component resolves to once the entry is gone. `"all"` is one of those
-//    selections in its own right: it applies no class filter, so the
-//    declared entry it resolves to can be a classed one the classified
-//    selections filter out, carrying clauses their covers need not. The
-//    second half of the condition is what holds an entry in place while it
-//    shadows a less specific entry of its own component, whose label a read
-//    would otherwise start resolving instead.
+//    component resolves to once the entry is gone; and that residual
+//    resolution carries no integrity the resolution with the entry in place
+//    does not. `"all"` is one of those selections in its own right: it
+//    applies no class filter, so the declared entry it resolves to can be a
+//    classed one the classified selections filter out, carrying clauses
+//    their covers need not.
+//
+//    The residual half of that condition is what holds an entry in place
+//    while it shadows a less specific entry of its own component.
+//    Replace-down picks one entry per component, so dropping this one hands
+//    reads at its path the whole of the ancestor's label: its
+//    confidentiality, which the cover has to carry, and its integrity, which
+//    no other component states. Integrity arriving that way is an
+//    over-claim, and §8.9.3's hereditary meet is what it would fool — the
+//    weakest-link rule turns on a read of this path resolving no
+//    certification, and the ancestor's would survive the meet in its
+//    place.
 //
 // Past those conditions the collapse rests on the declared component not
 // shrinking, which §8.12.1 requires of it: a clause the declaration stops
@@ -314,64 +333,129 @@ const labelForEntriesAtPath = (
 // whose join the declared component does not cover mints the existence entry
 // then, carrying that write's join.
 const READ_CLASS_SELECTIONS: readonly ReadClassSelection[] = [
-  "value",
-  "shape",
-  "followRef",
+  ...readObservationShapes(),
   "all",
 ];
+
+const atomsContained = (
+  atoms: readonly unknown[],
+  within: readonly unknown[],
+): boolean =>
+  atoms.every((atom) => within.some((candidate) => deepEqual(candidate, atom)));
 
 const clausesCoveredBy = (
   clauses: readonly CfcConfClause[],
   cover: readonly CfcConfClause[],
-): boolean => {
-  const normalizedCover = cover.map((clause) => normalizeClause(clause));
-  return clauses.every((clause) => {
-    const normalized = normalizeClause(clause);
-    return normalizedCover.some((candidate) =>
-      deepEqual(candidate, normalized)
-    );
-  });
+): boolean =>
+  atomsContained(
+    clauses.map((clause) => normalizeClause(clause)),
+    cover.map((clause) => normalizeClause(clause)),
+  );
+
+/**
+ * Entries arranged so the ones bearing on a concrete path are found without
+ * walking the set. `labelForEntriesAtPath` considers exactly the entries
+ * `isPrefix(entry.path, path)` admits, and for a concrete path that is the
+ * entry's own path, one of its prefixes, or a `*` pattern matching one of
+ * them — so a keyed lookup per prefix plus a walk of the `*` entries finds
+ * every one of them. The `*` entries are a schema's `items` templates and the
+ * runtime's `*`-child class templates, whose count follows the schema and the
+ * container inventory rather than a collection's length.
+ *
+ * `descendants` answers the other direction, for the condition that refuses
+ * an entry with a declared entry strictly below it: it holds a key for each
+ * strict prefix of each concrete path, so the question is one lookup.
+ */
+type PathIndex = {
+  byPath: Map<string, LabelMapEntry[]>;
+  patterns: LabelMapEntry[];
+  descendants: Set<string>;
 };
+
+const pathIndexOf = (entries: readonly LabelMapEntry[]): PathIndex => {
+  const byPath = new Map<string, LabelMapEntry[]>();
+  const patterns: LabelMapEntry[] = [];
+  const descendants = new Set<string>();
+  for (const entry of entries) {
+    const path = canonicalizeLogicalPath(entry.path);
+    if (path.includes("*")) {
+      patterns.push(entry);
+      continue;
+    }
+    const key = pathKey(path);
+    const at = byPath.get(key);
+    if (at === undefined) {
+      byPath.set(key, [entry]);
+    } else {
+      at.push(entry);
+    }
+    for (let depth = 0; depth < path.length; depth++) {
+      descendants.add(pathKey(path.slice(0, depth)));
+    }
+  }
+  return { byPath, patterns, descendants };
+};
+
+/** The indexed entries that bear on a read at `path`. */
+const indexedEntriesAt = (
+  index: PathIndex,
+  path: readonly string[],
+): LabelMapEntry[] => {
+  const out = index.patterns.filter((entry) =>
+    isPrefix(canonicalizeLogicalPath(entry.path), path)
+  );
+  for (let depth = 0; depth <= path.length; depth++) {
+    const at = index.byPath.get(pathKey(path.slice(0, depth)));
+    if (at !== undefined) {
+      out.push(...at);
+    }
+  }
+  return out;
+};
+
+/** Whether an indexed entry sits strictly below `path`. */
+const indexedEntryBelow = (
+  index: PathIndex,
+  path: readonly string[],
+): boolean =>
+  index.descendants.has(pathKey(path)) ||
+  index.patterns.some((entry) => {
+    const entryPath = canonicalizeLogicalPath(entry.path);
+    return entryPath.length > path.length && isPrefix(path, entryPath);
+  });
 
 const isRedundantWithDeclared = (
   entry: LabelMapEntry,
-  declared: readonly LabelMapEntry[],
-  sameComponent: readonly LabelMapEntry[],
+  declared: PathIndex,
+  sameComponent: PathIndex,
 ): boolean => {
   const clauses = entry.label.confidentiality ?? [];
   if (clauses.length === 0 || (entry.label.integrity?.length ?? 0) > 0) {
     return false;
   }
   const path = canonicalizeLogicalPath(entry.path);
-  if (path.includes("*")) {
+  if (path.includes("*") || indexedEntryBelow(declared, path)) {
     return false;
   }
-  if (
-    declared.some((candidate) => {
-      const candidatePath = canonicalizeLogicalPath(candidate.path);
-      return candidatePath.length > path.length &&
-        isPrefix(path, candidatePath);
-    })
-  ) {
-    return false;
-  }
+  const declaredAt = indexedEntriesAt(declared, path);
+  const sameComponentAt = indexedEntriesAt(sameComponent, path);
   return READ_CLASS_SELECTIONS.every((selection) => {
     if (!readConsumesEntry(selection, entry)) {
       return true;
     }
     const consumes = (candidate: LabelMapEntry) =>
       readConsumesEntry(selection, candidate);
-    const cover =
-      labelForEntriesAtPath(declared.filter(consumes), path)?.confidentiality ??
-        [];
+    const consumed = sameComponentAt.filter(consumes);
+    const cover = labelForEntriesAtPath(declaredAt.filter(consumes), path)
+      ?.confidentiality ?? [];
+    const shadowed = labelForEntriesAtPath(consumed, path);
     const residual = labelForEntriesAtPath(
-      sameComponent.filter((candidate) =>
-        candidate !== entry && consumes(candidate)
-      ),
+      consumed.filter((candidate) => candidate !== entry),
       path,
-    )?.confidentiality ?? [];
+    );
     return clausesCoveredBy(clauses, cover) &&
-      clausesCoveredBy(residual, cover);
+      clausesCoveredBy(residual?.confidentiality ?? [], cover) &&
+      atomsContained(residual?.integrity ?? [], shadowed?.integrity ?? []);
   });
 };
 
@@ -387,25 +471,22 @@ const collapseRedundantEntries = (
   if (declared.length === 0) {
     return [...entries];
   }
-  const perValue = new Map<string, LabelMapEntry[]>();
-  for (const entry of entries) {
-    if (entry.origin === "derived" || entry.origin === "structure") {
-      const component = perValue.get(entry.origin);
-      if (component === undefined) {
-        perValue.set(entry.origin, [entry]);
-      } else {
-        component.push(entry);
-      }
-    }
-  }
-  return entries.filter((entry) =>
-    (entry.origin !== "derived" && entry.origin !== "structure") ||
-    !isRedundantWithDeclared(
-      entry,
-      declared,
-      perValue.get(entry.origin) ?? [],
-    )
+  const declaredIndex = pathIndexOf(declared);
+  const derivedIndex = pathIndexOf(
+    entries.filter((entry) => entry.origin === "derived"),
   );
+  const structureIndex = pathIndexOf(
+    entries.filter((entry) => entry.origin === "structure"),
+  );
+  return entries.filter((entry) => {
+    const sameComponent = entry.origin === "derived"
+      ? derivedIndex
+      : entry.origin === "structure"
+      ? structureIndex
+      : undefined;
+    return sameComponent === undefined ||
+      !isRedundantWithDeclared(entry, declaredIndex, sameComponent);
+  });
 };
 
 // Effective label of a consumed read. A recursive read materializes the

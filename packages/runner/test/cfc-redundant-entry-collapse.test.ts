@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
-import { cfcAtom } from "@commonfabric/api/cfc";
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -58,6 +58,7 @@ const seedSource = async (
   runtime: Runtime,
   name: string,
   confidentiality: readonly FabricValue[],
+  integrity: readonly FabricValue[] = [],
 ) => {
   const seed = runtime.edit();
   const source = runtime.getCell(signer.did(), name, {
@@ -80,7 +81,10 @@ const seedSource = async (
         version: 1,
         entries: [{
           path: ["secret"],
-          label: { confidentiality: [...confidentiality] },
+          label: {
+            confidentiality: [...confidentiality],
+            ...(integrity.length > 0 ? { integrity: [...integrity] } : {}),
+          },
         }],
       },
     },
@@ -211,6 +215,193 @@ describe("CFC redundant entry collapse", () => {
           cfcAtom.resource("Other"),
         );
       }
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("keeps a stamp carrying integrity where the declaration covers its clauses", async () => {
+    // Integrity is never unioned across components, so a declared entry
+    // stating the same confidentiality does not stand in for one. The
+    // confidentiality-only existence stamp beside it is covered and goes.
+
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = newRuntime(storageManager);
+    try {
+      const certified = {
+        type: CFC_ATOM_TYPE.PolicyCertified,
+        policy: "collapse-policy",
+      };
+      await seedSource(
+        runtime,
+        "collapse-certified-source",
+        [cfcAtom.resource("Shared")],
+        [certified],
+      );
+
+      // The target carries the same certification, so the write's read of
+      // its prior value does not empty the weakest-link integrity meet.
+      const targetSchema = {
+        type: "object",
+        properties: { copied: { type: "string" } },
+        ifc: { confidentiality: [cfcAtom.resource("Shared")] },
+      } as unknown as JSONSchema;
+      const targetId = runtime
+        .getCell(signer.did(), "collapse-certified-target", targetSchema)
+        .getAsNormalizedFullLink().id;
+      const seedTarget = runtime.edit();
+      writeSeedEnvelopeDoc(seedTarget, signer.did());
+      seedTarget.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: targetId,
+        path: [],
+      }, {
+        value: {},
+        cfc: {
+          version: 1,
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: {
+                confidentiality: [cfcAtom.resource("Shared")],
+                integrity: [certified],
+              },
+              origin: "declared",
+            }],
+          },
+        },
+      });
+      expect((await seedTarget.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        signer.did(),
+        "collapse-certified-source",
+        undefined,
+        tx,
+      );
+      const raw = source.getRaw() as { secret?: string };
+      runtime.getCell<{ copied?: string }>(
+        signer.did(),
+        "collapse-certified-target",
+        targetSchema,
+        tx,
+      ).set({ copied: `${raw.secret}!` });
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const entries = replicaEntries(storageManager, targetId);
+      const stamps = entries.filter((entry) => entry.origin === "derived");
+      expect(stamps.length).toBeGreaterThan(0);
+      for (const entry of stamps) {
+        expect(entry.label.integrity).toContainEqual(certified);
+      }
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("keeps a stamp whose own component carries integrity above it", async () => {
+    // Replace-down picks one entry per component, so a child stamp hides its
+    // ancestor's whole label. Dropping the child would hand reads at its path
+    // the ancestor's integrity — certification for content derived from none
+    // — which is the over-claim §8.9.3's weakest-link meet exists to refuse.
+
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = newRuntime(storageManager);
+    try {
+      const certified = {
+        type: CFC_ATOM_TYPE.PolicyCertified,
+        policy: "collapse-shadowed",
+      };
+      const mapSchema = {
+        type: "object",
+        additionalProperties: {
+          type: "string",
+          ifc: { confidentiality: [cfcAtom.resource("Shared")] },
+        },
+      } as unknown as JSONSchema;
+      const mapId = runtime
+        .getCell<Record<string, string>>(
+          signer.did(),
+          "collapse-shadowed-map",
+          mapSchema,
+        )
+        .getAsNormalizedFullLink().id;
+
+      // The state an earlier certified write over the container leaves, with
+      // a later uncertified write to one child under it.
+      const seed = runtime.edit();
+      writeSeedEnvelopeDoc(seed, signer.did());
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: mapId,
+        path: [],
+      }, {
+        value: { kept: "1" },
+        cfc: {
+          version: 1,
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: {
+            version: 1,
+            entries: [
+              {
+                path: ["*"],
+                label: { confidentiality: [cfcAtom.resource("Shared")] },
+                origin: "declared",
+              },
+              {
+                path: [],
+                label: {
+                  confidentiality: [cfcAtom.resource("Shared")],
+                  integrity: [certified],
+                },
+                origin: "derived",
+                observes: "value",
+              },
+              {
+                path: ["kept"],
+                label: { confidentiality: [cfcAtom.resource("Shared")] },
+                origin: "derived",
+                observes: "value",
+              },
+            ],
+          },
+        },
+        // deno-lint-ignore no-explicit-any
+      } as any);
+      expect((await seed.commit()).ok).toBeDefined();
+
+      // Any further persist rebuilds the entry set and runs the collapse over
+      // it, carried-forward entries included.
+      const tx = runtime.edit();
+      runtime.getCell<Record<string, string>>(
+        signer.did(),
+        "collapse-shadowed-map",
+        mapSchema,
+        tx,
+      ).key("added").set("2");
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const entries = replicaEntries(storageManager, mapId);
+      expect(
+        entries.some((entry) =>
+          entry.origin === "derived" && entry.path.join("/") === "kept"
+        ),
+      ).toBe(true);
+      expect(
+        entries.some((entry) =>
+          entry.origin === "derived" && entry.path.length === 0 &&
+          (entry.label.integrity ?? []).length > 0
+        ),
+      ).toBe(true);
     } finally {
       await runtime.dispose();
       await storageManager.close();
