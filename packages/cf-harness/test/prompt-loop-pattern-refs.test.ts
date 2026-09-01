@@ -223,7 +223,9 @@ const runDelegation = async (
 };
 
 /** Starts a fresh parent loop over a transcript whose earlier loop searched. */
-const runResumedDelegation = async (): Promise<DelegationFixture> => {
+const runResumedDelegation = async (
+  includeMalformedSearchResult = false,
+): Promise<DelegationFixture> => {
   const index = stubIndex();
   const firstRequests: unknown[] = [];
   const firstTurns = [
@@ -298,6 +300,14 @@ const runResumedDelegation = async (): Promise<DelegationFixture> => {
   const result = await resumedLoop.runTranscript({
     transcript: [
       ...firstResult.transcript,
+      ...(includeMalformedSearchResult
+        ? [{
+          role: "tool" as const,
+          toolCallId: "malformed-search",
+          toolName: "search_patterns",
+          content: "not JSON",
+        }]
+        : []),
       { role: "user", content: "Delegate using the earlier search." },
     ],
   });
@@ -384,6 +394,15 @@ Use this as available evidence; do not assume it is mandatory.`,
 
   it("rehydrates an earlier search after the parent loop resumes", async () => {
     const result = await runResumedDelegation();
+
+    expect(result.subagentRuns).toBe(1);
+    expect(result.childPrompt).toContain(SEARCH_HIT.patternId);
+    expect(result.delegateOutput.patternRefRefusals).toBeUndefined();
+    expect(result.indexCalls).toEqual(["searchPatterns", "getPattern"]);
+  });
+
+  it("ignores malformed persisted search output while restoring later hits", async () => {
+    const result = await runResumedDelegation(true);
 
     expect(result.subagentRuns).toBe(1);
     expect(result.childPrompt).toContain(SEARCH_HIT.patternId);

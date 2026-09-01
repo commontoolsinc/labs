@@ -229,6 +229,15 @@ describe("search-patterns", () => {
     })).toBe(false);
   });
 
+  it("does not trust non-object persisted successes or hits", () => {
+    expect(isSearchPatternsToolSuccessOutput(null)).toBe(false);
+    expect(isSearchPatternsToolSuccessOutput({
+      outputId: "search_patterns-1",
+      status: "ok",
+      results: [null],
+    })).toBe(false);
+  });
+
   it("describes deployed stopword-free disjunctive matching", () => {
     const schema = searchPatternsTool.descriptor.inputSchema;
     if (
