@@ -351,12 +351,20 @@ The strict-only delta is:
     outside every ceiling, so it is outside what the route may declare: a
     measurement the runtime could not take proves nothing about the
     audience, and declaring it would write a clause no reader can satisfy.
-  - **No foreign container clause.** A `Space` clause is honored by a
+  - **No foreign container clause.** A container clause is honored by a
     replica set rather than by a reader check — §4.9.3 resolves it against
     that space's ACL, the document that also decides who holds the bytes —
     so a store in this space cannot keep a promise made to another space's
     readers. That is why residency admits only the target's own space
-    clause, and the route declares no `Space` clause naming another.
+    clause, and the route declares no container clause naming another.
+    `PersonalSpace(owner)` is the second spelling of one: §4.9.4 calls the
+    two forms "the two `Space(...)` atoms", and §3.6.4 makes the named
+    principal the sole owner of the space whose id it is. The same-space
+    spelling stays admissible, because there the clause names the space the
+    bytes are already in, and if that space stops being personal its
+    audience and its replica set grow together. A person-audience clause is
+    not a container clause: `User(alice)` is honored by the reader check
+    whoever holds the bytes.
   - **Growth only.** Within the walk, the ceiling the declaration starts
     from resolves over the entries that walk is about to persist,
     carried-forward stored declared entries among them, so a later

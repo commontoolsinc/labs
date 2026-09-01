@@ -6617,6 +6617,27 @@ export const prepareBoundaryCommit = (
       // address alone: nothing in an address names a space's owner or marks
       // the space as personal, so the atom cannot be constructed here.
       const residencyCeiling: readonly CfcConfClause[] = [cfcAtom.space(space)];
+      // Whether an alternative names a CONTAINER audience — the readers of
+      // some space, resolved from that space's ACL — other than this
+      // document's own. `PersonalSpace(owner)` is the second spelling
+      // (§4.9.4 calls the two forms "the two `Space(...)` atoms"), and its
+      // space is the owner's: §3.6.4 makes that principal its sole owner,
+      // and the space's id is that principal. A person-audience clause is
+      // not one of these: `User(alice)` is honored by the reader check
+      // whoever holds the bytes, so it needs no replica set to agree.
+      const namesAnotherSpace = (alternative: unknown): boolean => {
+        if (!isObjectOrArray(alternative)) return false;
+        const atom = alternative as {
+          type?: unknown;
+          id?: unknown;
+          owner?: unknown;
+        };
+        if (atom.type === CFC_ATOM_TYPE.Space) return atom.id !== space;
+        if (atom.type === CFC_ATOM_TYPE.PersonalSpace) {
+          return atom.owner !== space;
+        }
+        return false;
+      };
       const declaredPolicyEntries = flowConfidentiality.length > 0
         ? persistedLabelEntries.filter((entry) =>
           (entry.origin === undefined || entry.origin === "declared") &&
@@ -6784,7 +6805,7 @@ export const prepareBoundaryCommit = (
             // Declaring it would both admit a poisoned measurement and
             // write a clause no reader can ever satisfy.
             !offending.some(clauseBearsReadFailedMarker) &&
-            // A `Space` clause is honored by a replica set, not by a
+            // A container clause is honored by a replica set, not by a
             // reader check: §4.9.3 resolves it against that space's ACL,
             // the document that also decides who holds the bytes. A store
             // in THIS space cannot keep a promise made to another space's
@@ -6792,12 +6813,11 @@ export const prepareBoundaryCommit = (
             // clause. Declaring a foreign one would put the bytes in front
             // of this space's members under a promise made to somebody
             // else's, so the route leaves that write to the refusal below.
+            // The space's own clause is not reachable here: residency
+            // covers it, so it is never offending.
             !offending.some((clause) =>
-              clauseAlternatives(clause as CfcConfClause).some((alternative) =>
-                isObjectOrArray(alternative) &&
-                (alternative as { type?: unknown }).type ===
-                  CFC_ATOM_TYPE.Space &&
-                (alternative as { id?: unknown }).id !== space
+              clauseAlternatives(clause as CfcConfClause).some(
+                namesAnotherSpace,
               )
             )
           ) {

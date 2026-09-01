@@ -1239,9 +1239,12 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         // rung that admits it.
         const flags = writerFitDiagnostics(tx);
         expect(flags.length).toBe(1);
-        expect(flags[0]).toContain("writer-fit(piece-substrate-declared)");
-        expect(flags[0]).toContain(`${substrateId} at /`);
-        expect(flags[0]).toContain('"secret"');
+        expect(
+          flags.some((flag) =>
+            flag.includes("writer-fit(piece-substrate-declared)") &&
+            flag.includes(`${substrateId} at /`) && flag.includes('"secret"')
+          ),
+        ).toBe(true);
       } finally {
         await runtime.dispose();
         await storageManager.close();
@@ -1542,6 +1545,111 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       }
     });
 
+    it("rejects a personal-space clause naming a space other than the target's", async () => {
+      // `PersonalSpace(owner)` is the second spelling of a container
+      // audience, so it answers to the same rule: the owner's personal
+      // space is a space of its own, and a store here cannot keep a promise
+      // made to that space's readers.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-seam-personal-source", [{
+          type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+          owner: "did:key:z6MkfZ3gV6ZKqmyWLTPYnPYRUYQBqTHTNCJgqbCkNBzYqZ4H",
+        }]);
+
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-personal-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-personal-result",
+          undefined,
+          tx,
+        );
+        const substrate = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-personal-substrate",
+          undefined,
+          tx,
+        );
+        recordPieceSubstrate(tx, result, substrate);
+        substrate.set({ copied: `${raw.secret}!` });
+        const substrateId = substrate.getAsNormalizedFullLink().id;
+        tx.prepareCfc();
+        const committed = await tx.commit();
+        expect(committed.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(storedDocument(storageManager, substrateId)).toBeUndefined();
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("declares a personal-space clause naming the target's own space", async () => {
+      // The same-space spelling is keepable, so the route takes it: the
+      // clause names the space the bytes are already in, and if that space
+      // stops being personal the audience and the replica set grow
+      // together.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        const ownPersonalSpace = {
+          type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+          owner: signer.did(),
+        };
+        await seedSecretSource(runtime, "writer-fit-seam-own-personal-source", [
+          ownPersonalSpace,
+        ]);
+
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-own-personal-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-own-personal-result",
+          undefined,
+          tx,
+        );
+        const substrate = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-own-personal-substrate",
+          undefined,
+          tx,
+        );
+        recordPieceSubstrate(tx, result, substrate);
+        substrate.set({ copied: `${raw.secret}!` });
+        const substrateId = substrate.getAsNormalizedFullLink().id;
+        tx.prepareCfc();
+        expect((await tx.commit()).ok).toBeDefined();
+
+        expect(
+          replicaEntries(storageManager, substrateId)
+            .filter((entry) => entry.origin === "declared")
+            .flatMap((entry) => entry.label.confidentiality ?? []),
+        ).toContainEqual(ownPersonalSpace);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
     it("rejects a substrate write named by a different provenance claim", async () => {
       // The claim discriminates. The seed-materialization marker records a
       // whole-document address too, so without it that unrelated runtime
@@ -1760,9 +1868,12 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         tx.prepareCfc();
         expect((await tx.commit()).ok).toBeDefined();
 
-        const flags = writerFitDiagnostics(tx);
-        expect(flags.length).toBeGreaterThan(0);
-        expect(flags[0]).toContain("writer-fit(persist-and-flag)");
+        expect(
+          writerFitDiagnostics(tx).some((flag) =>
+            flag.includes("writer-fit(persist-and-flag)") &&
+            flag.includes(`${substrateId} at /`)
+          ),
+        ).toBe(true);
         expect(
           replicaEntries(storageManager, substrateId)
             .filter((entry) => entry.origin === "declared"),
