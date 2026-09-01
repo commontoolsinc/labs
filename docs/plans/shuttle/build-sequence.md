@@ -90,11 +90,19 @@ recorded limit; the PR is whichever the review rules.
 
 ## Stage B — the shuttle package
 
-**B0 — scaffold** (after A1). `packages/shuttle` with its path in the root
-`deno.jsonc` workspace array and its own `tasks.test` entry — the two
-edits a new package needs, the second one load-bearing. Dependencies
-follow `docs/development/DEPENDENCIES.md`. No behavior; the package
-compiles and its empty test task runs.
+**B0 — scaffold** (after A1). Done. `packages/shuttle` is a workspace
+member: its path sits in the root `deno.jsonc` workspace array, and its
+own `deno.jsonc` carries the `tasks.test` entry — without which a
+`deno task test` run there resolves the root workspace task instead and
+re-runs the whole suite inside itself. The scaffold is configuration
+alone: no package name and no exports, because nothing imports shuttle
+and an export entry is a contract, and no dependency, because
+`deno task check-unused-deps` fails an alias no source file imports. It
+ships no source either. That is what the working rule below asks for —
+shuttle joins `deno task check`'s path list with B1's code — and it
+leaves `coverage-debt: packages/shuttle`, a metric group the gate
+derives from the path with no allowlist, at zero, so B1 lands its code
+and the tests covering it together.
 
 **B1 — walking skeleton** (after A1; A2 for nothing yet). The place value
 and its owner module — the whole pair, position *and* scope, because scope
