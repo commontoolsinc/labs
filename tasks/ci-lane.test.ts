@@ -15,6 +15,7 @@ import {
   runBatch,
   runInvocation,
   runLane,
+  spoolRecords,
   unknownIdentity,
 } from "./ci-lane.ts";
 import type { Suite } from "./test-topology/suite.ts";
@@ -941,5 +942,28 @@ describe("the last corners of a lane's bookkeeping", () => {
         repeats: 1,
       }]),
     ).toEqual([]);
+  });
+});
+
+describe("writing the lane's records into its spool", () => {
+  it("writes nothing when there is nothing to write", async () => {
+    // A lane that opened no capability and ran no batch has nothing to
+    // say about either, and an empty fragment would be a report of a
+    // run that did not happen.
+    const spool = await Deno.makeTempDir({ prefix: "lane-empty-" });
+    spoolRecords(spool, []);
+    expect(await Array.fromAsync(Deno.readDir(spool))).toEqual([]);
+    await Deno.remove(spool, { recursive: true });
+  });
+
+  it("says nothing where the spool cannot be written", async () => {
+    // Recording is telemetry: a spool this process cannot write costs
+    // the run its records and must not cost it the run.
+    spoolRecords("/nonexistent/spool", [{
+      line: "record",
+      test: { k: "gate", s: "ci", n: "ci-lane setup deno" },
+      outcome: "pass",
+      durationMs: 1,
+    }]);
   });
 });

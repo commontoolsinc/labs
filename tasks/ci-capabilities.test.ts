@@ -383,3 +383,22 @@ describe("opening a capability on a machine that answers", () => {
     expect(await openOn(true)).toBe(false);
   });
 });
+
+describe("a registry that cannot be opened in any order", () => {
+  it("refuses a capability built on itself", () => {
+    // A cycle has no order to open in, and the walk would otherwise
+    // recur until the stack ran out rather than saying what is wrong.
+    const registry = new Map(CAPABILITIES);
+    registry.set("jq", {
+      ...CAPABILITIES.get("jq")!,
+      needs: ["cf"],
+    });
+    registry.set("cf", {
+      ...CAPABILITIES.get("cf")!,
+      needs: ["jq"],
+    });
+    expect(() => resolveCapabilities(["jq"], registry)).toThrow(
+      "built on itself",
+    );
+  });
+});

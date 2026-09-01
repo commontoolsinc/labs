@@ -1,6 +1,6 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { loadCliSuites } from "./cli.ts";
+import { loadCliSuites, stepArms } from "./cli.ts";
 import type { Suite } from "./suite.ts";
 
 const root = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
@@ -87,5 +87,13 @@ describe("the command-line suites", () => {
       await byId("cli-core").command([{ unit: "nope", skip: [] }], context),
     )
       .toEqual([]);
+  });
+});
+
+describe("reading a script with no dispatch table", () => {
+  it("finds no arms rather than guessing at them", () => {
+    // A script that lost its table has no arms to enumerate, and
+    // inventing some would schedule work nothing can run.
+    expect([...stepArms("#!/usr/bin/env bash\necho hello\n")]).toEqual([]);
   });
 });

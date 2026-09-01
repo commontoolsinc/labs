@@ -442,7 +442,10 @@ function timingRecord(name: string, seconds: number, ok: boolean): TestRecord {
 }
 
 /** Appends records to the lane's own spool. */
-function spoolRecords(spool: string, records: readonly TestRecord[]): void {
+export function spoolRecords(
+  spool: string,
+  records: readonly TestRecord[],
+): void {
   if (records.length === 0) return;
   const writer = FragmentWriter.open(spool);
   if (writer === undefined) return;

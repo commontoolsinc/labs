@@ -181,3 +181,28 @@ describe("the parts of a suite that answer no", () => {
     ).toBeUndefined();
   });
 });
+
+describe("grouping a batch across the packages it spans", () => {
+  it("puts two files of one package in one invocation", async () => {
+    // The second file of a package joins the invocation the first
+    // opened rather than starting another, because the package's
+    // startup is what an invocation costs.
+    const suite = fileSuite({
+      id: "package-integration",
+      needs: ["deno"],
+      parts: [{
+        packageDir: "packages/oven",
+        flags: ["-A"],
+        junit: { kind: "integration", scope: "oven" },
+        files: ["packages/oven/a.test.ts", "packages/oven/b.test.ts"],
+      }],
+    });
+    const made = await suite.command([
+      { unit: "packages/oven/a.test.ts", skip: [] },
+      { unit: "packages/oven/b.test.ts", skip: [] },
+    ], { root: "/repo", outputDir: "/out" });
+    expect(made.length).toBe(1);
+    expect(made[0]!.command.filter((arg) => arg.endsWith(".test.ts")))
+      .toEqual(["a.test.ts", "b.test.ts"]);
+  });
+});

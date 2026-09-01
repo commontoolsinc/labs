@@ -357,18 +357,28 @@ export function selectScopes(
   return selected;
 }
 
-export async function main(): Promise<void> {
+/**
+ * Runs the check the way the command line runs it, and answers with the
+ * status it would exit with rather than exiting from inside itself.
+ */
+export async function main(
+  args: readonly string[] = Deno.args,
+  root: string = Deno.cwd(),
+  options: TypecheckOptions = {},
+): Promise<number> {
   const passed = await runTypecheck(
-    selectScopes(await collectPathsByScope(), Deno.args),
+    selectScopes(await collectPathsByScope(root), args),
     {
-      list: Deno.args.includes("--list"),
+      list: args.includes("--list"),
       reload: (Deno.env.get("DENO_CHECK_RELOAD") ?? "") !== "",
       recordResults: true,
+      ...options,
     },
   );
-  if (!passed) Deno.exit(1);
+  return passed ? 0 : 1;
 }
 
 if (import.meta.main) {
-  await main();
+  const status = await main();
+  if (status !== 0) Deno.exit(status);
 }

@@ -7,6 +7,7 @@ import { recordsSpooledBy } from "@commonfabric/test-support/records";
 import {
   checkGroup,
   collectPathsByScope,
+  main,
   runTypecheck,
   scopeOfPath,
   selectScopes,
@@ -229,5 +230,44 @@ describe("selectScopes()", () => {
     expect(() => selectScopes(byScope, ["--scope=nowhere"])).toThrow(
       "no such type-check scope",
     );
+  });
+});
+
+describe("main()", () => {
+  it("answers with the status the command line would exit with", async () => {
+    // Zero when every group passed and one when any did not, rather
+    // than exiting from inside itself, so what it decides can be
+    // asserted.
+    const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+    const log = console.log;
+    console.log = () => {};
+    try {
+      expect(
+        await main(["--scope=leb128"], root, {
+          check: (scope) =>
+            Promise.resolve({
+              scope,
+              durationMs: 1,
+              success: true,
+              output: "",
+            }),
+          recordResults: false,
+        }),
+      ).toBe(0);
+      expect(
+        await main(["--scope=leb128"], root, {
+          check: (scope) =>
+            Promise.resolve({
+              scope,
+              durationMs: 1,
+              success: false,
+              output: "a type error",
+            }),
+          recordResults: false,
+        }),
+      ).toBe(1);
+    } finally {
+      console.log = log;
+    }
   });
 });
