@@ -136,21 +136,50 @@ Item 1 additionally needed, before it could land, and each is in the PR:
 
 ### Stage C
 
-Each item waits on platform work rather than on this plan:
+One item is built. What remains waits on a review this plan does not own, or on
+usage:
 
-- **`removeLink`, and comment edit and removal.** References-as-arguments has
-  landed, so these are buildable. They go on the topic's own interface and need
-  no migration; the no-synthetic-ids rule is what prepared for them. The
-  decisions they turn on are settled and recorded below.
+- **`removeLink`, and comment edit and removal — built.** A retraction stamps
+  `removedAt` and `removedBy` and leaves the record in place; `editComment`
+  stamps `editedAt` and leaves `author` and `sentAt` alone. The verbs name
+  their target by reference, which is what the no-synthetic-ids rule prepared
+  for, and `removeLink` additionally takes `url` because a link record carries
+  no fid a CLI caller could name.
+
+  They sit on `TopicOutput` rather than on the `TopicPiece` projection boards
+  store, which is what makes them need no migration. That placement is the
+  interim rule below doing the work it was kept for, and it is now measured
+  rather than predicted: only `topic.tsx` needed a new baseline, because
+  `main.tsx`'s contract never moved.
+
+  What is not built is the reader's control for them. The rows filter stamped
+  records already, but they render from a filtered, sorted `computed()`, and
+  whether an element of one still carries writable identity is unproven —
+  `dropMention` binds from an unfiltered read, so it settles nothing. A control
+  bound wrongly stamps a copy no reader sees, which is a silent failure, so it
+  wants a browser test rather than an assumption.
+
 - **`AgentActor` execution provenance** replacing per-event `agentName`, when
-  the retention-and-provenance track clears its review. Required-now relaxes to
-  optional-then-deprecated, which is the compatible direction and the reason
-  item 2 above tightens rather than waits.
-- **`Demand<T>` markers** replacing the interim rule that new verbs go on the
-  topic's own output only.
+  the retention-and-provenance track clears its review. That review has not
+  happened and nothing in that plan has started, so this item cannot begin
+  here. Required-now relaxes to optional-then-deprecated, which is the
+  compatible direction and the reason Stage B tightened rather than waited.
+
+- **`Demand<T>` markers — decided against, for now.** The interim rule they
+  would have replaced therefore stands: a new verb goes on the topic's own
+  output, never into the board's demand. Item 1 is the worked example.
+
+  What the repository gives up by not having them is legibility rather than
+  capability. A holder's demand stays indistinguishable from its own state, so
+  nothing can count what a change would hit before it is attempted, and a
+  deliberate break is still acknowledged by turning the whole gate off for a
+  pattern rather than by naming the demand it breaks. The next board break
+  therefore costs what the Stage B one cost.
+
 - **Statuses, labels, assignees, and whatever else usage asks for**: optional
   fields and new verbs, compatible on the topic's own schema and invisible to
-  the board until the board widens its demand with an optional field.
+  the board until the board widens its demand with an optional field. Nothing
+  to build until a use asks for one.
 
 ## Testing the board through a narrowed demand
 
@@ -229,6 +258,21 @@ Two preconditions belong to the board rather than to the code:
   this to the author is expected to come later.
 - An edited comment carries `editedAt` beside its original `sentAt`, and the
   edit does not rewrite the author.
+- **`Demand<T>` markers are not adopted.** The interim rule they would have
+  replaced becomes the standing one: a new verb goes on the topic's own output,
+  never into the board's demand. This is a decision about legibility, not about
+  what can be built — every Stage C item remains reachable without them. What
+  it accepts is that a change's blast radius cannot be counted before the
+  change is attempted, and that a deliberate break is acknowledged for a whole
+  pattern rather than for the demand it actually breaks.
+- **A new verb goes on `TopicOutput`, not on `TopicPiece`.** The board stores
+  that projection, so it is a demand on every topic already held, and a
+  required verb added to it refuses every piece deployed before the verb
+  existed. A verb has no default to be rescued by, so there is no compatible
+  way to demand a new one — optionality would work, but the placement is what
+  `setTitle` established and what keeps the board's contract still. The tell
+  that it worked is a baseline recorded for `topic.tsx` and none for
+  `main.tsx`.
 - **`unmention` keeps removing rather than stamping**, and the pattern carries
   two removal semantics until [#6573] closes it. Not because an edge matters
   less than content, but because a mention is a bare reference with no record
