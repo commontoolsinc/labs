@@ -4203,8 +4203,8 @@ function convertOneToLinks(
 
   // At this point `value` is a non-`null` object(ish) thing.
 
-  // What `ancestors` is keyed on -- and cleared of on the way back out -- is
-  // the object as given.
+  // What goes onto `ancestors` -- and comes off again on the way back out --
+  // is the object as given.
   const original = value as object;
 
   // Only a container reaches the walk below: everything else has returned or
