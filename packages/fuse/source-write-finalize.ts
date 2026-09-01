@@ -15,9 +15,10 @@ export function committedSourceWarning(
 
 /**
  * What `error.log` says when the committed source did not reach the running
- * piece, and `undefined` when that refresh completed. A clean write clears the
- * log, so dropping this warning would report unqualified success while the
- * piece is still running its previous source.
+ * piece, and `undefined` when that refresh completed or the write made no
+ * source update. A clean write clears the log, so dropping this warning would
+ * report unqualified success while the piece is still running its previous
+ * source.
  */
 export function sourceRefreshWarning(
   receipt: PatternUpdateReceipt | undefined,
