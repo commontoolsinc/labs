@@ -10,7 +10,6 @@ import { labsCi, loomCi } from "./tiles/main-build.ts";
 import { labsCiTrust, loomCiTrust } from "./tiles/ci-trust.ts";
 import { labsCiDuration, loomCiDuration } from "./tiles/ci-duration.ts";
 import { prodUptime } from "./tiles/prod-uptime.ts";
-import { commonToolsUp } from "./tiles/common-tools-up.ts";
 import { prodErrors } from "./tiles/prod-errors.ts";
 import { gcpSpend } from "./tiles/gcp-spend.ts";
 import { githubCiSpend } from "./tiles/github-ci-spend.ts";
@@ -36,18 +35,17 @@ export const TILES: Tile[] = [
   loomCiTrust,
   loomCiDuration,
   githubCiSpend,
-  // Row 3: production health
-  commonToolsUp,
+  // Row 3: production health and flaky tests
   prodUptime,
   prodErrors,
   dau,
-  // Row 4: what the test suite is doing to itself
   testFlakes,
+  // Row 4: test selection, spend, and community
   testSelection,
   modelSpend,
   gcpSpend,
-  // Row 5: the remaining spend and community tiles
   discordOnline,
+  // Row 5: the remaining community tiles
   githubMembers,
   recentRuns, // wide — renders full-width below the grid
 ];
