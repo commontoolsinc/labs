@@ -1967,10 +1967,17 @@ reference names the piece by handle or by slug, and may carry the space
 }
 
 /**
- * A piece data command, mounted at top level: `cf cell get`, `cf cell set`, and
- * `cf piece call` — one definition per command, and one spelling for it. `name`
- * reaches the builder because a command's own help quotes the spelling a
- * caller types.
+ * One of the three data commands, built for one of its mounts.
+ *
+ * There is one definition per command and two mounts of it: blessed under the
+ * noun it acts on — `cf cell get`, `cf cell set`, `cf piece call` — and hidden
+ * at the top-level spelling it had, which warns and is dated.
+ *
+ * `name` picks the definition. `spelling` is how that mount names itself in
+ * its own help and examples, because a caller reads back the line they typed
+ * rather than the key it is registered under; it defaults to `name`, which is
+ * the spelling the top-level mounts answer at. `replacedBy` names the spelling
+ * that supersedes this mount, and is what makes it carry the step-7 notice.
  */
 // deno-lint-ignore no-explicit-any
 export function pieceDataCommand(

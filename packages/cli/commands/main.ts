@@ -43,8 +43,10 @@ function envStatus(): string {
     // would be wrong exactly where a caller is most surprised to be asked.
     //
     // `space` is named by subcommand for the same reason. Two of its six read
-    // this; the other four take a rehearsal clone's directory, so the bare
-    // noun would promise something `cf space clone` disproves in one line.
+    // this; the other four name their target themselves — two as a clone
+    // directory, two as a positional space — so an ambient default reaches
+    // none of them, and the bare noun would promise something `cf space
+    // clone` disproves in one line.
     lines.push(
       `  CF_SPACE    = ${space} (set, no need to pass --space on cell, ` +
         `piece, wish, acl, deps, space recreate-root/set-home)`,
