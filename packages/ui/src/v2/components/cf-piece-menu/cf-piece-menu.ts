@@ -329,7 +329,12 @@ export class CFPieceMenu extends BaseElement {
       white-space: nowrap;
     }
 
-    .menu-item:hover,
+    .menu-item:disabled {
+      cursor: default;
+      opacity: 0.55;
+    }
+
+    .menu-item:enabled:hover,
     .menu-item:focus-visible {
       background: var(--cf-theme-color-surface-hover, rgba(0, 0, 0, 0.06));
     }
