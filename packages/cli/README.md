@@ -42,6 +42,20 @@ A diff shows its whole-diff change totals at the top right corner of its first
 line: the added line count and the removed line count, colored like additions
 and removals.
 
+Press `i` in a diff to open its file and commit list. The list starts in browse
+mode. Press `/` to filter it by file name, commit hash, or commit subject. The
+usual `f`, `F`, `E`, `T`, and `M` file-visibility keys remain active while the
+list is in browse mode, and Space pages through the entries. Its summary reports
+added and removed lines for the complete diff and for the files that are
+currently shown.
+
+Press `D` in that list to cycle its line-count policy. Normal counts include
+every added and removed line. The second policy removes pairs within one file
+whose text differs only in whitespace. The third also removes lines containing
+only whitespace or comments. It compares the remaining lines without comments or
+whitespace across the complete diff, so code moved between files does not count
+as an addition and a removal.
+
 Markdown files can switch between the source and a rendered terminal view with
 `V`. The rendered view formats headings, emphasis, links, quotes, lists, task
 markers, tables, rules, and code. The same view is available for Markdown files
