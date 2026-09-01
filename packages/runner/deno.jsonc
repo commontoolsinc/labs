@@ -40,6 +40,7 @@
     "./storage/v2": "./src/storage/v2.ts",
     "./storage/cache.deno": "./src/storage/cache.deno.ts",
     "./local-program.deno": "./src/harness/local-program.deno.ts",
+    "./patterns-route.deno": "./src/harness/patterns-route.deno.ts",
     "./toolshed-http-auth": "./src/toolshed-http-auth.ts",
     "./cfc": "./src/cfc/mod.ts",
     "./cfc/label-view-core": "./src/cfc/label-view-core.ts",

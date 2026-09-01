@@ -96,7 +96,7 @@ during that implementation are archived at
 | `SourceReconciler` | `packages/runner/src/source-reconciler.ts` | Origin resolution, identity lookup, verified closure compile, and the guarded transition — one path for every piece |
 | Space root: `spaceCell.defaultPattern` link → root piece → `patternIdentity` | `packages/piece/src/ops/pieces-controller.ts` (`linkDefaultPattern`/`getDefaultPattern`) | What a system update rewrites |
 | `ensureDefaultPattern` (resolve → follow the origin → start) / `recreateDefaultPattern` (manual, **not** state-preserving) | `packages/piece/src/ops/pieces-controller.ts` | The root's open path and its repair ladder, and the state-losing escape hatch (recreate); both URL-based creation paths stamp `patternSource` |
-| System patterns = **raw TSX served by path**, bundled via `deno compile --include`; **no name→identity manifest** | `packages/toolshed/routes/patterns/patterns-server.ts`, `patterns.routes.ts` | Where the current system source + its identity come from |
+| System patterns = **raw TSX served by path**, bundled via `deno compile --include`; **no name→identity manifest** | `packages/runner/src/harness/patterns-route.deno.ts` defines the route; `packages/toolshed/routes/patterns/patterns-server.ts` and `patterns.routes.ts` name this deployment's directories and wire it into the server | Where the current system source + its identity come from |
 | Per-space host resolution: `mappedHostFor(space)` / `registerSpaceHost` (3-tier: seed `spaceHostMap` → learned site-table → default) | `Runtime.mappedHostFor` / `registerSpaceHost` in `packages/runner/src/runtime.ts`, `storage/v2-remote-session.ts` | Which toolshed a space's source is fetched from |
 | Identity computation: `transformInjectHelperModule` + `computeModuleIdentities` | `harness/pretransform.ts`, `sandbox/module-record-compiler.ts` | What toolshed runs to answer `?identity` |
 | Entry-doc `annotations` + `annotatePattern` | `pattern-manager.ts`, `cell-cache.ts` | **Rejected as the carrier** — see below |
@@ -535,11 +535,15 @@ binary populates from baked build metadata; the updater does not consult it.
 
 ## Build sketch (seams)
 
-- **Toolshed**: `?identity` handler + boot-time `{ name → identity }` cache in
-  the patterns route (`patterns.routes.ts` / `patterns.handlers.ts` /
-  `patterns-server.ts`); strong checksum `ETag` + mandatory revalidation for
-  identity and source responses; import `computeModuleIdentities` +
-  `transformInjectHelperModule` from the runner.
+- **Patterns route**: `?identity` handler + per-process `{ name → identity }`
+  cache, and strong checksum `ETag` + mandatory revalidation for identity and
+  source responses. All of it lives in the runner
+  (`harness/patterns-route.deno.ts`), beside `computeModuleIdentities` and
+  `transformInjectHelperModule`, because the identity it answers with is the
+  one a worker computes from the same source. A host supplies the directories
+  and mounts the route: toolshed at `patterns.routes.ts` /
+  `patterns.handlers.ts` / `patterns-server.ts`, and a self-hosted test
+  harness beside its own storage server.
 - **Runtime worker**: `SourceReconciler` owns per-space host resolution,
   conditionally revalidated `?identity` and source-closure fetches, locally
   compiled source-closure verification, and the guarded transition. The piece
