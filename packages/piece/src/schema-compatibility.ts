@@ -951,15 +951,55 @@ function objectSubsetIssue(
       if (issue) return issue;
     }
   } else {
-    for (const property of targetRequired) {
-      if (!sourceRequired.has(property)) {
-        return `${path}.${property}: result field is no longer required`;
+    // Not below a verb node, where the same reasoning runs the other way. A
+    // result field that stops being required withdraws a guarantee its
+    // readers were given. An EVENT field that stops being required widens
+    // what the verb accepts: every call already written still sent it, so
+    // every one of them still validates. The argument side permits exactly
+    // this relaxation, and a verb's event is an argument in every respect but
+    // where it is declared.
+    if (!context.verbEvent) {
+      for (const property of targetRequired) {
+        if (!sourceRequired.has(property)) {
+          return `${path}.${property}: result field is no longer required`;
+        }
       }
     }
     // The candidate pattern produces its result. A newly required field does
     // not need a migration default: the new graph materializes that output when
     // it runs. Existing required-result guarantees above still cannot weaken,
     // and existing field types remain checked covariantly below.
+    //
+    // A verb's event is the exception, and it is one of location rather than of
+    // principle. The node sits in the result, so this covariant comparison
+    // reaches it — but the pattern does not produce the event, the CALLER
+    // supplies it. Requiring a field the previous event did not is therefore a
+    // demand made of every call already written, and each one that omits it is
+    // refused at dispatch once the update has landed. Below a verb node the
+    // rule is the argument side's, stated in this comparison's direction:
+    // `source` is the candidate here, where `target` is the candidate there.
+    // The rescue turns on the field's own default and not on
+    // `allowEvolutionDefaults`, which the verb node above has already set
+    // false: `asCell` is not default-stable, so descending through one
+    // withdraws permission to introduce a default anywhere below. That
+    // withdrawal is about defaults that CHANGE, which the check above decides
+    // on its own. A field that carried the same default before and after
+    // changes nothing and still materializes for a caller that omits it, so
+    // reusing the flag here would refuse the one evolution this rule means to
+    // allow.
+    if (context.verbEvent) {
+      for (const property of sourceRequired) {
+        if (
+          !targetRequired.has(property) &&
+          !schemaProvidesValidDefault(
+            sourceProperties[property],
+            context.sourceRoot,
+          )
+        ) {
+          return `${path}.${property}: newly required verb event field has no default`;
+        }
+      }
+    }
 
     const previousAdditional = target.additionalProperties ?? true;
     for (const property of Object.keys(candidateProperties)) {
