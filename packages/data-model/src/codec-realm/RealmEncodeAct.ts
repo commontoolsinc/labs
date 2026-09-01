@@ -100,7 +100,7 @@ export class RealmEncodeAct
         }
       }
     } finally {
-      this.leave(value);
+      this.leave();
     }
 
     return result ?? (value as RealmCodecValue);
@@ -150,7 +150,7 @@ export class RealmEncodeAct
         }
       }
     } finally {
-      this.leave(value);
+      this.leave();
     }
 
     return result ?? (value as RealmCodecValue);

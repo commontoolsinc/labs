@@ -77,7 +77,7 @@ export class JsonEncodeAct extends BaseEncodeAct<JsonCodecValue, string> {
         }
       }
     } finally {
-      this.leave(value);
+      this.leave();
     }
 
     return result as JsonCodecValue;
@@ -122,7 +122,7 @@ export class JsonEncodeAct extends BaseEncodeAct<JsonCodecValue, string> {
         result[key] = this.encodeValue(value[key]!);
       }
     } finally {
-      this.leave(value);
+      this.leave();
     }
 
     if (anySlashKey) {

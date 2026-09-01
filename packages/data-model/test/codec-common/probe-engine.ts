@@ -361,7 +361,7 @@ export class ProbeEncodeAct extends BaseEncodeAct<ProbeValue> {
     try {
       return value.map((v) => this.encodeValue(v));
     } finally {
-      this.leave(value);
+      this.leave();
     }
   }
 
@@ -377,7 +377,7 @@ export class ProbeEncodeAct extends BaseEncodeAct<ProbeValue> {
       }
       return result;
     } finally {
-      this.leave(value);
+      this.leave();
     }
   }
 }
@@ -427,7 +427,7 @@ export class ProbeDecodeAct extends BaseDecodeAct<ProbeValue> {
       }
       return result;
     } finally {
-      this.leave(data);
+      this.leave();
     }
   }
 }

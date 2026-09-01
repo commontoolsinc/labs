@@ -1,3 +1,5 @@
+import { AncestorStack } from "@commonfabric/utils/ancestor-stack";
+
 import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import type { CodecEngineConfig } from "./CodecEngineConfig.ts";
 import type { CodecRegistry } from "./CodecRegistry.ts";
@@ -30,7 +32,7 @@ export abstract class BaseCodecAct<Encoded> {
    * The values whose walk is in progress, or `undefined` before the first one
    * is entered.
    */
-  #seen: Set<object> | undefined;
+  #inProgress: AncestorStack | undefined;
 
   /** Constructs an instance. */
   constructor(config: CodecEngineConfig<Encoded>, env: LiveEnvironment) {
@@ -47,9 +49,13 @@ export abstract class BaseCodecAct<Encoded> {
     return this.#env;
   }
 
-  /** Leaves a value, its walk being finished. */
-  leave(value: object): void {
-    this.#seen?.delete(value);
+  /**
+   * Leaves the value most recently entered, its walk being finished. Which
+   * value that is takes no saying: entering and leaving nest strictly, which
+   * is what the subclass contract asks for, so it is the deepest one.
+   */
+  leave(): void {
+    this.#inProgress?.pop();
   }
 
   /** The configuration of the engine that minted this act. */
@@ -70,7 +76,7 @@ export abstract class BaseCodecAct<Encoded> {
    * means is up to the caller, so each subclass wraps this with its own
    * reading: encoding refuses a cycle outright, where decoding reports one.
    *
-   * The set behind this is created here rather than in the constructor, so
+   * The chain behind this is created here rather than in the constructor, so
    * that walking a lone self-representing value -- much the commonest case,
    * and the one where a fixed cost shows up most -- allocates nothing beyond
    * the act itself.
@@ -79,13 +85,13 @@ export abstract class BaseCodecAct<Encoded> {
    *   progress.
    */
   protected tryEnter(value: object): boolean {
-    const seen = this.#seen ??= new Set();
+    const inProgress = this.#inProgress ??= new AncestorStack();
 
-    if (seen.has(value)) {
+    if (inProgress.depthOf(value) >= 0) {
       return false;
     }
 
-    seen.add(value);
+    inProgress.push(value);
     return true;
   }
 }

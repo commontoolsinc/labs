@@ -134,7 +134,7 @@ export class RealmDecodeAct
         }: not a form this format emits.`,
       );
     } finally {
-      this.leave(data);
+      this.leave();
     }
   }
 
