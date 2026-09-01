@@ -48,7 +48,7 @@ import {
   encodeFuseComponent,
   encodeFusePathSegments,
 } from "./path-codec.ts";
-import { committedSourceWarning } from "./source-write-finalize.ts";
+import { sourceRefreshWarning } from "./source-write-finalize.ts";
 import {
   buildFsProjection,
   buildJsonTree,
@@ -358,28 +358,6 @@ interface PropRebuildJob {
   propName: "input" | "result";
   resolveLink: ResolveLink;
   spaceName: string;
-}
-
-/**
- * What `error.log` says after a source write whose transaction committed and
- * whose refresh of the running piece then failed, and `undefined` when the
- * refresh completed or the write made no source update.
- *
- * A write in that state saved the source and left the piece not running it,
- * which the file has to keep saying: `error.log` is cleared on a clean write,
- * so silence there is the mount reporting an unqualified success. Held apart
- * from the reporting so the text a reader finds in the file is assertable on
- * its own.
- */
-export function sourceRefreshWarning(
-  receipt: PatternUpdateReceipt | undefined,
-): string | undefined {
-  return receipt?.refresh.status === "failed"
-    ? committedSourceWarning(
-      receipt,
-      `refreshing the running piece failed: ${receipt.refresh.warning}`,
-    )
-    : undefined;
 }
 
 export class CellBridge {
@@ -2343,8 +2321,9 @@ export class CellBridge {
       // the piece is not running it" is exactly the message a projection
       // failure must not eat, and it is the receipt's, not the rebuild's.
       // On a failed rebuild the console line still fires and the file half
-      // lands wherever a synthetic log is standing; the rebuild's own failure
-      // propagates to the caller and is reported as its own warning there.
+      // lands wherever a synthetic log is standing. The caller then retains
+      // it when the rebuild's own warning becomes the complete persistent
+      // diagnostic.
       this.reportSourceRefreshWarning(
         writePath,
         sourceRefreshWarning(receipt),

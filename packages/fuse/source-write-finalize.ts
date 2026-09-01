@@ -14,11 +14,29 @@ export function committedSourceWarning(
 }
 
 /**
+ * What `error.log` says when the committed source did not reach the running
+ * piece, and `undefined` when that refresh completed. A clean write clears the
+ * log, so dropping this warning would report unqualified success while the
+ * piece is still running its previous source.
+ */
+export function sourceRefreshWarning(
+  receipt: PatternUpdateReceipt | undefined,
+): string | undefined {
+  return receipt?.refresh.status === "failed"
+    ? committedSourceWarning(
+      receipt,
+      `refreshing the running piece failed: ${receipt.refresh.warning}`,
+    )
+    : undefined;
+}
+
+/**
  * Run local FUSE projection work after a source transaction has committed.
  *
  * A failure here cannot undo the receipt and therefore must not reject the
- * filesystem write. Returning it as a warning keeps the durable outcome and
- * the local projection outcome separate at the same boundary as Piece does.
+ * filesystem write. A failed result keeps the projection warning separate for
+ * the console and composes every post-commit failure for the persistent
+ * `error.log` diagnostic.
  */
 export async function finalizeCommittedSourceWrite(
   receipt: PatternUpdateReceipt,
@@ -29,12 +47,17 @@ export async function finalizeCommittedSourceWrite(
     return { status: "completed" as const };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const warning = committedSourceWarning(
+      receipt,
+      `refreshing the FUSE projection failed: ${message}`,
+    );
+    const refreshWarning = sourceRefreshWarning(receipt);
     return {
       status: "failed" as const,
-      warning: committedSourceWarning(
-        receipt,
-        `refreshing the FUSE projection failed: ${message}`,
-      ),
+      warning,
+      errorLogWarning: refreshWarning === undefined
+        ? warning
+        : `${refreshWarning}\n${warning}`,
       error,
     };
   }
