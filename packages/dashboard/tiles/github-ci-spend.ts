@@ -473,6 +473,7 @@ export const githubCiSpend: Tile = {
         }],
         now,
         status,
+        spend.estimateDays,
       );
       const amount = chart.chart ? "" : ` ${usd(spend.mtd)}`;
       // The ceiling shown beside the headline covers the products the headline
