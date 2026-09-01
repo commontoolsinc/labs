@@ -6653,12 +6653,14 @@ supply; OW29/OW32/OW34 closed):
     cancels only the node group that transaction installed, preserves
     the outer registration and its parent/root cancellation ownership,
     waits for retry readiness, and instantiates the still-current
-    pattern once into the next wave. A stop, runtime cycle, pointer
-    change, or newer node group wins through exact guards; a second drop
-    tears the exact registration down rather than spinning. A whole-wave
-    abort or abandon is not retried in place.
+    pattern once into the next wave. A stop/stopAll/dispose aborts that
+    readiness and any named-document pull through the outer registration's
+    cancellation signal; a runtime cycle, pointer change, or newer node
+    group wins through exact guards. A second drop tears the exact
+    registration down rather than spinning. A whole-wave abort or abandon
+    is not retried in place.
     Pinned in `executor-wave.test.ts` by a deterministic whole-document
-    conflict plus a stop-before-settlement companion. And OW46's
+    conflict plus a held-readiness teardown companion. And OW46's
     `structure-load-stuck` counter is BLIND here: it fires 6× per run
     in BOTH arms and in the reds names only the HOST's space, because
     it counts deferred structure loads of DEMANDED roots and this

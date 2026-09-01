@@ -3247,6 +3247,12 @@ export class Runner {
 
     // Create cancel group early, before wiring pattern/node sinks.
     const [cancelGroup, addCancel] = useCancelGroup();
+    // A withdrawn instantiation may be waiting for its conflict/session gate
+    // and a named-document pull before it retries. That work belongs to the
+    // OUTER registration, not the retired node group: stopping the piece must
+    // release the fire-and-forget settlement even when readiness never does.
+    const retryReadinessTeardown = new AbortController();
+    addCancel(() => retryReadinessTeardown.abort());
     const startLifecycleEpoch = this.#lifecycleEpoch;
     let active = true;
     const cancel = () => {
@@ -3401,14 +3407,18 @@ export class Runner {
             // original parent/root owner keeps the same cancellation handle.
             nodeCancel();
             if (cancelNodes === nodeCancel) cancelNodes = undefined;
-            await this.runtime.awaitCommitRetryReadiness(settled.error);
+            await this.runtime.awaitCommitRetryReadiness(
+              settled.error,
+              retryReadinessTeardown.signal,
+            );
 
-            // A stop, runtime cycle, pointer change, or newer instantiation
-            // during the readiness wait owns the key now. Otherwise retry
-            // exactly once; a second drop tears the registration down
-            // instead of spinning on a permanently conflicting write.
+            // A stop aborts the readiness/pull work above; a runtime cycle,
+            // pointer change, or newer instantiation during the wait owns the
+            // key now. Otherwise retry exactly once; a second drop tears the
+            // registration down instead of spinning on a permanent conflict.
             if (
-              !active || startLifecycleEpoch !== this.#lifecycleEpoch ||
+              retryReadinessTeardown.signal.aborted || !active ||
+              startLifecycleEpoch !== this.#lifecycleEpoch ||
               this.cancels.get(key) !== cancel ||
               currentPatternKey !== patternKeyAtInstantiation ||
               cancelNodes !== undefined

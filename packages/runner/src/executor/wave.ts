@@ -3005,7 +3005,7 @@ export class WaveAccumulator
           contribution,
           "superseded pure derivation writes dropped from the wave commit " +
             "(serving-loop.md §3d)",
-          "contribution-dropped",
+          allDropped ? "contribution-dropped" : undefined,
         );
         continue;
       }

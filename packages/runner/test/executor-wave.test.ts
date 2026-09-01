@@ -150,7 +150,10 @@ describe("stage D seal-into-wave", () => {
       sessionId: executionLeaseHolder(`service:${space}`),
     });
 
-  const stoppedWitnessPiece = async (id: string) => {
+  const stoppedWitnessPiece = async (
+    id: string,
+    options: { throwOnInstantiation?: number } = {},
+  ) => {
     let instantiations = 0;
     let lastRunInstantiation = 0;
     const pattern: Pattern = {
@@ -168,6 +171,9 @@ describe("stage D seal-into-wave", () => {
               key: (name: string) => { set: (value: number) => void };
             };
             instantiations += 1;
+            if (instantiations === options.throwOnInstantiation) {
+              throw new Error(`witness instantiation ${instantiations} failed`);
+            }
             // `parentCell` is bound to startCore's actual transaction. A
             // changing value makes every instantiation contribute a real
             // bookkeeping write instead of being optimized to a no-op.
@@ -527,6 +533,8 @@ describe("stage D seal-into-wave", () => {
     stampWaveRunContext(tx1, { actionId: "derive-x", kind: "derivation" });
     x.withTx(tx1).set({ value: 10 });
     expect((await tx1.commit()).error).toBeUndefined();
+    const tx1Settlement = waveSettlementOf(tx1);
+    expect(tx1Settlement).toBeDefined();
 
     const tx2 = runtime.edit();
     stampWaveRunContext(tx2, { actionId: "derive-z", kind: "derivation" });
@@ -554,6 +562,7 @@ describe("stage D seal-into-wave", () => {
     runtime.clearSealDestination();
     const outcome = await wave.commitWave(newSink());
     await wave.settled();
+    const tx1Settled = await tx1Settlement!;
 
     // The superseded pure write dropped (counted), and the derivation
     // that READ the withdrawn write dropped with it — nothing derived
@@ -563,6 +572,10 @@ describe("stage D seal-into-wave", () => {
     expect(outcome.dependencyDroppedWrites).toBe(1);
     expect(outcome.dispositions[0]).toEqual({ kind: "dropped" });
     expect(outcome.dispositions[1]).toEqual({ kind: "dropped" });
+    expect(
+      (tx1Settled.error as { waveWithdrawalCause?: unknown } | undefined)
+        ?.waveWithdrawalCause,
+    ).toBe("contribution-dropped");
     // No wave commit happened at all (nothing survived), and the
     // authored value stands — dropping is what makes that sound.
     expect(outcome.seq).toBeUndefined();
@@ -2219,6 +2232,8 @@ describe("stage D seal-into-wave", () => {
     x.withTx(tx).set({ value: 1 });
     keep.withTx(tx).set({ value: 2 });
     expect((await tx.commit()).error).toBeUndefined();
+    const settlement = waveSettlementOf(tx);
+    expect(settlement).toBeDefined();
     runtime.clearSealDestination();
 
     // The rival lands BETWEEN the accumulator's head query and the store
@@ -2254,6 +2269,7 @@ describe("stage D seal-into-wave", () => {
 
     const outcome = await wave.commitWave(racingSink);
     await wave.settled();
+    const settled = await settlement!;
 
     // Attempt 1 was rejected with the doc NAMED; the loop folded it in,
     // dropped the superseded write, and attempt 2 committed the rest.
@@ -2264,6 +2280,11 @@ describe("stage D seal-into-wave", () => {
       kind: "partially-dropped",
       droppedOps: 1,
     });
+    expect(settled.error).toBeDefined();
+    expect(
+      (settled.error as { waveWithdrawalCause?: unknown })
+        .waveWithdrawalCause,
+    ).toBeUndefined();
     const stored = Engine.readState(engine, { id: xLink.id });
     expect(stored?.document).toEqual({ value: { value: 99 } });
     const keepLink = keep.getAsNormalizedFullLink();
@@ -3776,7 +3797,92 @@ describe("stage D seal-into-wave", () => {
     lease.release();
   });
 
-  it("does not revive a piece stopped before its withdrawn instantiation settles", async () => {
+  it("surfaces a synchronous reinstantiation failure and tears down the registration", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-retry-throws",
+      { throwOnInstantiation: 3 },
+    );
+    const lease = liveLease();
+    const firstWave = newWave({ lease });
+    const recoveryWave = newWave({ lease });
+    const route = routePieceInstantiationWaves(firstWave, recoveryWave);
+    const failures: unknown[] = [];
+    runtime.pieceStartCommitFailureObserver = ({ error }) => {
+      failures.push(error);
+    };
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await route.firstSeal;
+    await runtime.idle();
+    await route.idleSeals();
+    route.useRecoveryWave();
+    await firstWave.commitWave(wholeDocumentConflictSink(newSink()));
+    await firstWave.settled();
+    await runtime.runner.idlePieceInstantiationSettlements();
+
+    expect(witness.instantiations()).toBe(3);
+    expect(
+      failures.some((error) =>
+        error instanceof Error && error.message ===
+          "witness instantiation 3 failed"
+      ),
+    ).toBe(true);
+    expect(route.recoverySeals()).toBe(0);
+
+    // The failed retry retired the exact outer registration, so an ordinary
+    // later start can instantiate it afresh instead of finding a dead entry.
+    runtime.clearSealDestination();
+    recoveryWave.abandon("test cleanup");
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(witness.instantiations()).toBe(4);
+    lease.release();
+  });
+
+  it("surfaces a rejected piece-instantiation commit and tears down the registration", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-commit-rejects",
+    );
+    const rejection = new Error("piece instantiate destination rejected");
+    const failures: unknown[] = [];
+    let rejections = 0;
+    runtime.pieceStartCommitFailureObserver = ({ error }) => {
+      failures.push(error);
+    };
+    runtime.installSealDestination({
+      seal: (tx) => {
+        if (
+          waveRunContextOf(tx)?.actionId.startsWith("piece-instantiate/")
+        ) {
+          rejections += 1;
+          return Promise.reject(rejection);
+        }
+        return tx.tx.commit();
+      },
+    }, {
+      runStamper: (tx, info) =>
+        stampWaveRunContext(tx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        }),
+    });
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(rejections).toBe(1);
+    expect(failures).toContain(rejection);
+
+    // Promise rejection takes the same exact-registration teardown path as a
+    // refused Result, so the next owner can start the piece normally.
+    runtime.clearSealDestination();
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(witness.instantiations()).toBe(3);
+  });
+
+  it("aborts held retry readiness when the piece stops and does not revive it", async () => {
     const { cell } = await stoppedWitnessPiece(
       "wave-piece-instantiate-stop",
     );
@@ -3784,20 +3890,35 @@ describe("stage D seal-into-wave", () => {
     const firstWave = newWave({ lease });
     const recoveryWave = newWave({ lease });
     const route = routePieceInstantiationWaves(firstWave, recoveryWave);
+    const readinessEntered = Promise.withResolvers<void>();
+    const heldReadiness = Promise.withResolvers<void>();
+    runtime.pieceStartCommitFailureObserver = ({ actionId, error }) => {
+      if (!actionId.startsWith("piece-instantiate/")) return;
+      (error as { readyToRetry?: () => Promise<void> }).readyToRetry = () => {
+        readinessEntered.resolve();
+        return heldReadiness.promise;
+      };
+    };
 
     expect(await runtime.start(cell)).toBe(true);
     await route.firstSeal;
     await runtime.idle();
     await route.idleSeals();
-    runtime.runner.stop(cell);
     route.useRecoveryWave();
-    firstWave.abandon("the stopped-start settlement gate");
+    await firstWave.commitWave(wholeDocumentConflictSink(newSink()));
     await firstWave.settled();
+    await readinessEntered.promise;
+
+    // The settlement is parked inside readyToRetry(), not merely waiting for
+    // its post-readiness exact-registration guard. Stopping must abort that
+    // wait so fire-and-forget settlement can quiesce without releasing it.
+    runtime.runner.stop(cell);
     await runtime.runner.idlePieceInstantiationSettlements();
 
     expect(route.recoverySeals()).toBe(0);
     runtime.clearSealDestination();
     recoveryWave.abandon("test cleanup");
+    heldReadiness.resolve();
     lease.release();
   });
 
