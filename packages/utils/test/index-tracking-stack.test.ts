@@ -403,9 +403,11 @@ describe("IndexTrackingStack", () => {
   }
 
   describe("special values through an index that is already live", () => {
-    // The build sweeps the whole stack, so a value pushed before it is keyed
-    // by a different piece of code from one pushed after. These are the after
-    // case, which is the one a lookup alone does not reach.
+    // Three different pieces of code key the index: the build sweeps a whole
+    // stack, `push()` keys one value onto a live index, and `pop()` keys one
+    // off. A suite that reaches only the build passes while either of the
+    // others is broken, so each gets its own group here.
+
     /** A stack tall enough to hold an index, holding it, and holding a `0`. */
     function indexedStack() {
       const stack = new IndexTrackingStack<unknown>();
@@ -417,71 +419,76 @@ describe("IndexTrackingStack", () => {
       return stack;
     }
 
-    it("finds a `NaN` pushed onto a stack that is already indexed", () => {
-      const stack = indexedStack();
+    describe("push()", () => {
+      it("keys a `NaN` pushed onto an already-indexed stack", () => {
+        const stack = indexedStack();
 
-      stack.push(NaN);
+        stack.push(NaN);
 
-      expect(stack.indexOf(NaN)).toBe(TALL + 1);
-      expect(stack.lastIndexOf(NaN)).toBe(TALL + 1);
+        expect(stack.indexOf(NaN)).toBe(TALL + 1);
+        expect(stack.lastIndexOf(NaN)).toBe(TALL + 1);
+      });
+
+      it("keys a `-0` apart from a `0` the stack already holds", () => {
+        const stack = indexedStack();
+
+        stack.push(-0);
+
+        expect(stack.indexOf(-0)).toBe(TALL + 1);
+        expect(stack.indexOf(0)).toBe(TALL);
+      });
     });
 
-    it("keeps a `-0` pushed onto an indexed stack apart from a held `0`", () => {
-      const stack = indexedStack();
+    describe("pop()", () => {
+      it("takes a `-0` off without disturbing a held `0`", () => {
+        // Keyed by the raw value it would take a position off the `0` entry
+        // instead, a `Map` reading a `-0` key as `0`.
+        const stack = indexedStack();
 
-      stack.push(-0);
+        stack.push(-0);
+        stack.pop();
 
-      expect(stack.indexOf(-0)).toBe(TALL + 1);
-      expect(stack.indexOf(0)).toBe(TALL);
+        expect(stack.indexOf(0)).toBe(TALL);
+        expect(stack.indexOf(-0)).toBe(-1);
+      });
+
+      it("takes a `NaN` off, after which it is not found", () => {
+        const stack = indexedStack();
+
+        stack.push(NaN);
+        stack.pop();
+
+        expect(stack.indexOf(NaN)).toBe(-1);
+        expect(stack.indexOf(0)).toBe(TALL);
+      });
     });
 
-    it("pops a `-0` off an indexed stack without disturbing a held `0`", () => {
-      // Popping keyed by the raw value would take a position off the `0`
-      // entry instead, since a `Map` reads a `-0` key as `0`.
-      const stack = indexedStack();
+    describe("indexOf()", () => {
+      // The build runs here, a lookup being what triggers one, so these are
+      // the cases where a value was already on the stack when it was keyed.
+      it("sweeps a `-0` and a `0` into separate entries as it builds", () => {
+        const stack = new IndexTrackingStack<unknown>();
 
-      stack.push(-0);
-      stack.pop();
+        stack.push(0);
+        stack.push(-0);
+        for (const filler of objects(TALL)) stack.push(filler);
+        stack.indexOf({});
 
-      expect(stack.indexOf(0)).toBe(TALL);
-      expect(stack.indexOf(-0)).toBe(-1);
-    });
+        expect(stack.indexOf(0)).toBe(0);
+        expect(stack.indexOf(-0)).toBe(1);
+      });
 
-    it("pops a `NaN` off an indexed stack and stops finding it", () => {
-      const stack = indexedStack();
+      it("sweeps a `NaN` into its own entry as it builds", () => {
+        const stack = new IndexTrackingStack<unknown>();
 
-      stack.push(NaN);
-      stack.pop();
+        stack.push(NaN);
+        stack.push(0);
+        for (const filler of objects(TALL)) stack.push(filler);
+        stack.indexOf({});
 
-      expect(stack.indexOf(NaN)).toBe(-1);
-      expect(stack.indexOf(0)).toBe(TALL);
-    });
-
-    it("sweeps a `-0` and a `0` into separate entries when the index is built", () => {
-      // The other side of the same coin: a value already on the stack when
-      // the index is built is keyed by the build loop rather than by `push()`,
-      // and the two have to agree about what a `-0` is.
-      const stack = new IndexTrackingStack<unknown>();
-
-      stack.push(0);
-      stack.push(-0);
-      for (const filler of objects(TALL)) stack.push(filler);
-      stack.indexOf({});
-
-      expect(stack.indexOf(0)).toBe(0);
-      expect(stack.indexOf(-0)).toBe(1);
-    });
-
-    it("sweeps a `NaN` into its own entry when the index is built", () => {
-      const stack = new IndexTrackingStack<unknown>();
-
-      stack.push(NaN);
-      stack.push(0);
-      for (const filler of objects(TALL)) stack.push(filler);
-      stack.indexOf({});
-
-      expect(stack.indexOf(NaN)).toBe(0);
-      expect(stack.indexOf(0)).toBe(1);
+        expect(stack.indexOf(NaN)).toBe(0);
+        expect(stack.indexOf(0)).toBe(1);
+      });
     });
   });
 
