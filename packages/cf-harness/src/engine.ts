@@ -87,6 +87,11 @@ import {
   type PatternIndexPublicationLedger,
 } from "./pattern-index/publish-ledger.ts";
 import {
+  cacheHarnessSkillsShAcquisitionClientFactory,
+  createHarnessSkillsShAcquisitionClientFactory,
+  type HarnessSkillsShAcquisitionClientFactory,
+} from "./skills-sh/acquisition.ts";
+import {
   cacheHarnessSkillsShSearchClientFactory,
   createHarnessSkillsShSearchClientFactory,
   type HarnessSkillsShSearchClientFactory,
@@ -129,6 +134,10 @@ import type {
   SandboxRuntime,
 } from "./sandbox/types.ts";
 import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
+import type {
+  AcquireSkillToolInput,
+  AcquireSkillToolOutput,
+} from "./tools/acquire-skill.ts";
 import {
   type BrowserToolInput,
   type BrowserToolOutput,
@@ -204,6 +213,7 @@ export interface BuiltinToolInputMap {
   search_patterns: SearchPatternsToolInput;
   record_feedback: RecordFeedbackToolInput;
   search_skills: SearchSkillsToolInput;
+  acquire_skill: AcquireSkillToolInput;
 }
 
 export interface BuiltinToolOutputMap {
@@ -223,6 +233,7 @@ export interface BuiltinToolOutputMap {
   search_patterns: SearchPatternsToolOutput;
   record_feedback: RecordFeedbackToolOutput;
   search_skills: SearchSkillsToolOutput;
+  acquire_skill: AcquireSkillToolOutput;
 }
 
 interface ToolOutputWithId {
@@ -249,8 +260,8 @@ export interface CreateHarnessEngineOptions
    * Injection seam for the `run_pattern` fabric session, mirroring how
    * `sandboxRuntime` replaces the engine-built sandbox. When absent, a
    * factory is built from `fabricSession` in the resolved config; when both
-   * are absent, `run_pattern` has no session and stays out of the parent
-   * tool surface.
+   * are absent, `run_pattern` and `acquire_skill` have no session and stay out
+   * of the parent tool surface.
    */
   fabricSessionFactory?: HarnessFabricSessionFactory;
 
@@ -266,9 +277,16 @@ export interface CreateHarnessEngineOptions
   /**
    * Injection seam for skills.sh discovery. When absent, a factory is built
    * from `skillsSh` in the resolved config; when both are absent,
-   * `search_skills` stays out of the tool surface.
+   * `search_skills` stays out of the tool surface. Pinned acquisition has its
+   * own fetch seam below because it is a separate effect.
    */
   skillsShSearchClientFactory?: HarnessSkillsShSearchClientFactory;
+
+  /**
+   * Injection seam for pinned external-skill acquisition. Production builds
+   * it whenever `skillsSh` is configured; tests may replace the host fetch.
+   */
+  skillsShAcquisitionClientFactory?: HarnessSkillsShAcquisitionClientFactory;
 
   /**
    * What this run was asked to do, in the words it was asked in — the CLI
@@ -416,6 +434,8 @@ export class CfHarnessEngine {
   readonly #fabricSessionFactory?: HarnessFabricSessionFactory;
   readonly #patternIndexClientFactory?: HarnessPatternIndexClientFactory;
   readonly #skillsShSearchClientFactory?: HarnessSkillsShSearchClientFactory;
+  readonly #skillsShAcquisitionClientFactory?:
+    HarnessSkillsShAcquisitionClientFactory;
   #patternIndexPublications?: PatternIndexPublicationLedger;
   readonly #taskText?: string;
   readonly #inputCells: readonly HarnessInputCellSpec[];
@@ -581,6 +601,17 @@ export class CfHarnessEngine {
       skillsShSearchClientFactory === undefined
         ? undefined
         : cacheHarnessSkillsShSearchClientFactory(skillsShSearchClientFactory);
+    const skillsShAcquisitionClientFactory =
+      options.skillsShAcquisitionClientFactory ??
+        (this.config.skillsSh !== undefined
+          ? createHarnessSkillsShAcquisitionClientFactory()
+          : undefined);
+    this.#skillsShAcquisitionClientFactory =
+      skillsShAcquisitionClientFactory === undefined
+        ? undefined
+        : cacheHarnessSkillsShAcquisitionClientFactory(
+          skillsShAcquisitionClientFactory,
+        );
     this.#taskText = options.taskText;
     this.#inputCells = options.inputCells ?? [];
     this.#spaceDbPath = options.spaceDbPath;
@@ -839,6 +870,18 @@ export class CfHarnessEngine {
     | HarnessSkillsShSearchClientFactory
     | undefined {
     return this.#skillsShSearchClientFactory;
+  }
+
+  /** Whether this run can acquire a pinned external skill. */
+  get skillsShAcquisitionAvailable(): boolean {
+    return this.#skillsShAcquisitionClientFactory !== undefined;
+  }
+
+  /** The run's cached pinned-acquisition factory, when configured. */
+  get skillsShAcquisitionClientFactory():
+    | HarnessSkillsShAcquisitionClientFactory
+    | undefined {
+    return this.#skillsShAcquisitionClientFactory;
   }
 
   bindRunModel(model: string): HarnessRunState {
@@ -1824,6 +1867,11 @@ export class CfHarnessEngine {
         : {}),
       ...(this.#skillsShSearchClientFactory !== undefined
         ? { getSkillsShSearchClient: this.#skillsShSearchClientFactory }
+        : {}),
+      ...(this.#skillsShAcquisitionClientFactory !== undefined
+        ? {
+          getSkillsShAcquisitionClient: this.#skillsShAcquisitionClientFactory,
+        }
         : {}),
       ...(this.#taskText !== undefined ? { taskText: this.#taskText } : {}),
       sandbox: this.sandbox,

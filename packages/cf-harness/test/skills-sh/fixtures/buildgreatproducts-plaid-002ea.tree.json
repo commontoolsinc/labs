@@ -1,0 +1,104 @@
+{
+  "_capture": {
+    "source": "https://api.github.com/repos/buildgreatproducts/plaid/git/trees/002ea93300572480789719717852dbb7e3107057?recursive=1",
+    "capturedAt": "2026-09-01",
+    "projection": "Full response tree projected to path and type; order preserved",
+    "reportedEntryCount": 23
+  },
+  "sha": "002ea93300572480789719717852dbb7e3107057",
+  "truncated": false,
+  "tree": [
+    {
+      "path": ".gitignore",
+      "type": "blob"
+    },
+    {
+      "path": "LICENSE.txt",
+      "type": "blob"
+    },
+    {
+      "path": "README.md",
+      "type": "blob"
+    },
+    {
+      "path": "SKILL.md",
+      "type": "blob"
+    },
+    {
+      "path": "assets",
+      "type": "tree"
+    },
+    {
+      "path": "assets/vision-template.json",
+      "type": "blob"
+    },
+    {
+      "path": "package.json",
+      "type": "blob"
+    },
+    {
+      "path": "references",
+      "type": "tree"
+    },
+    {
+      "path": "references/GTM-GENERATION.md",
+      "type": "blob"
+    },
+    {
+      "path": "references/INTAKE-GUIDE.md",
+      "type": "blob"
+    },
+    {
+      "path": "references/PRD-GENERATION.md",
+      "type": "blob"
+    },
+    {
+      "path": "references/ROADMAP-GENERATION.md",
+      "type": "blob"
+    },
+    {
+      "path": "references/TECH-STACK-OPTIONS.md",
+      "type": "blob"
+    },
+    {
+      "path": "references/VISION-GENERATION.md",
+      "type": "blob"
+    },
+    {
+      "path": "references/VISION-SCHEMA.md",
+      "type": "blob"
+    },
+    {
+      "path": "references/build.md",
+      "type": "blob"
+    },
+    {
+      "path": "references/design.md",
+      "type": "blob"
+    },
+    {
+      "path": "references/idea.md",
+      "type": "blob"
+    },
+    {
+      "path": "references/launch.md",
+      "type": "blob"
+    },
+    {
+      "path": "references/plan.md",
+      "type": "blob"
+    },
+    {
+      "path": "references/validate.md",
+      "type": "blob"
+    },
+    {
+      "path": "scripts",
+      "type": "tree"
+    },
+    {
+      "path": "scripts/validate-vision.js",
+      "type": "blob"
+    }
+  ]
+}

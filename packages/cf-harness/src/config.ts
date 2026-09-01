@@ -84,8 +84,9 @@ export interface HarnessPatternIndexConfig {
 }
 
 /**
- * Connection settings for skills.sh metadata discovery. When present, the run
- * offers `search_skills`; when absent, the tool is unavailable.
+ * Connection settings for skills.sh metadata discovery and external
+ * acquisition. When present, the run offers `search_skills`; a run that also
+ * has a Fabric session offers `acquire_skill`.
  */
 export interface HarnessSkillsShConfig {
   /** Registry origin serving the public `/api/search` route. */

@@ -88,6 +88,7 @@ import {
 } from "./prompt-loop.ts";
 import { loadHarnessSkillContext } from "./skills/registry.ts";
 import { persistHarnessRunSkillRegistry } from "./skills/run-registry.ts";
+import { createHarnessSkillsShAcquisitionClientFactory } from "./skills-sh/acquisition.ts";
 import {
   createHarnessSkillsShSearchClientFactory,
 } from "./skills-sh/search-client.ts";
@@ -496,10 +497,10 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback | search_skills);
-                                run_pattern and assign_slug additionally require the three --fabric-* session flags,
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback | search_skills | acquire_skill);
+                                run_pattern, assign_slug, and acquire_skill additionally require the three --fabric-* session flags,
                                 search_patterns and record_feedback require --pattern-index-url,
-                                and search_skills requires --skills-registry-url
+                                and search_skills and acquire_skill require --skills-registry-url
   --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
@@ -511,7 +512,7 @@ Options:
   --resume-run <path>           Resume from a run root or run-state.json path
   --system-prompt <text>        Optional system prompt
   --skills-root <path>          Skill root containing <name>/SKILL.md
-  --skills-registry-url <url>  Registry origin for metadata-only search_skills discovery
+  --skills-registry-url <url>  Registry origin enabling search_skills discovery and pinned acquire_skill
   --skill <name>                Preload a skill for this run (repeatable)
   --skill-script-execution-target <target>
                                 Execute skill scripts in sandbox or host (default: sandbox)
@@ -653,6 +654,7 @@ const CLI_PARENT_TOOL_IDS = [
   "search_patterns",
   "record_feedback",
   "search_skills",
+  "acquire_skill",
 ] as const satisfies readonly BuiltinToolId[];
 
 const uniqueStrings = <T extends string>(
@@ -1766,9 +1768,10 @@ export const parseCfHarnessCliArgs = async (
   // An allowlisted fabric-session tool with no session to run it against is
   // a configuration contradiction, surfaced here rather than as a tool that
   // is silently absent from the run.
-  const sessionTool = (["run_pattern", "assign_slug"] as const).find(
-    (toolId) => allowedToolIds?.includes(toolId) === true,
-  );
+  const sessionTool = (["run_pattern", "assign_slug", "acquire_skill"] as const)
+    .find(
+      (toolId) => allowedToolIds?.includes(toolId) === true,
+    );
   if (sessionTool !== undefined && fabricSession === undefined) {
     throw new Error(
       `--allow-tool ${sessionTool} requires a fabric session; missing --fabric-api-url, --fabric-identity, and --fabric-space`,
@@ -1788,6 +1791,14 @@ export const parseCfHarnessCliArgs = async (
   ) {
     throw new Error(
       "--allow-tool search_skills requires a skills registry; missing --skills-registry-url",
+    );
+  }
+  if (
+    allowedToolIds?.includes("acquire_skill") === true &&
+    skillsSh === undefined
+  ) {
+    throw new Error(
+      "--allow-tool acquire_skill requires a skills registry; missing --skills-registry-url",
     );
   }
   const apiKey = env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY;
@@ -2468,6 +2479,10 @@ const summarizeToolCallArguments = (
         ).join(" ");
         return joined === "" ? undefined : joined;
       }
+      case "acquire_skill":
+        return typeof parsed.id === "string"
+          ? `id=${JSON.stringify(parsed.id)}`
+          : undefined;
       case "record_feedback": {
         // The note is the model's prose about a run and can quote what the
         // pattern produced, so the line names the verdict and the pattern
@@ -3129,6 +3144,10 @@ export const runCfHarnessCli = async (
         deps.fetchFn,
       )
       : undefined;
+    const skillsShAcquisitionClientFactory =
+      parsed.skillsSh !== undefined && deps.fetchFn !== undefined
+        ? createHarnessSkillsShAcquisitionClientFactory(deps.fetchFn)
+        : undefined;
     const prepareSkillContextMessages = async (
       engine: CfHarnessEngine,
     ): Promise<string[]> => {
@@ -3286,6 +3305,9 @@ export const runCfHarnessCli = async (
         ...(parsed.skillsSh !== undefined ? { skillsSh: parsed.skillsSh } : {}),
         ...(skillsShSearchClientFactory !== undefined
           ? { skillsShSearchClientFactory }
+          : {}),
+        ...(skillsShAcquisitionClientFactory !== undefined
+          ? { skillsShAcquisitionClientFactory }
           : {}),
         // What the run was asked to do, in the operator's words. A pattern
         // the run publishes carries it as the request it answers.
@@ -3469,6 +3491,9 @@ export const runCfHarnessCli = async (
         ...(parsed.skillsSh !== undefined ? { skillsSh: parsed.skillsSh } : {}),
         ...(skillsShSearchClientFactory !== undefined
           ? { skillsShSearchClientFactory }
+          : {}),
+        ...(skillsShAcquisitionClientFactory !== undefined
+          ? { skillsShAcquisitionClientFactory }
           : {}),
         // What the run was asked to do, in the operator's words. A pattern
         // the run publishes carries it as the request it answers.

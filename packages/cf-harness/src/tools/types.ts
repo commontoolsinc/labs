@@ -20,6 +20,7 @@ import type { HarnessHandleTable } from "../contracts/handle-table.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
 import type { PatternIndexClient } from "../pattern-index/client.ts";
 import type { PatternIndexPublicationLedger } from "../pattern-index/publish-ledger.ts";
+import type { SkillsShAcquisitionClient } from "../skills-sh/acquisition.ts";
 import type { SkillsShSearchClient } from "../skills-sh/search-client.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
@@ -54,7 +55,7 @@ export interface HarnessToolContext {
   /**
    * The run's trusted Fabric session, lazy and cached by the engine.
    * Undefined when the run has no fabric session configured, which also
-   * keeps `run_pattern` out of the tool surface.
+   * keeps `run_pattern` and `acquire_skill` out of the tool surface.
    */
   getFabricSession?: () => Promise<HarnessFabricSession>;
 
@@ -72,6 +73,12 @@ export interface HarnessToolContext {
    * `search_skills` out of the tool surface.
    */
   getSkillsShSearchClient?: () => Promise<SkillsShSearchClient>;
+
+  /**
+   * The run's host-side pinned acquisition client. Undefined when external
+   * skill acquisition is not configured, which keeps `acquire_skill` absent.
+   */
+  getSkillsShAcquisitionClient?: () => Promise<SkillsShAcquisitionClient>;
 
   /**
    * Whether a pattern the model authored and ran successfully is published
