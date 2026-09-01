@@ -472,7 +472,6 @@ export const githubCiSpend: Tile = {
           knownMonths: spend.months,
         }],
         now,
-        status,
         spend.estimateDays,
       );
       const amount = chart.chart ? "" : ` ${usd(spend.mtd)}`;

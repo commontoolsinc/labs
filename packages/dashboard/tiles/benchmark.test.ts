@@ -2435,7 +2435,7 @@ Deno.test("benchmark: stale CPU trends stay out of the headline while their line
         pageLines.map((line) => line.pointCount).sort((a, b) => a - b),
         [2, 2, 2, 2, 2, 2, 8, 8, 8, 8],
       );
-      assertEquals(new Set(pageLines.map((line) => line.stroke)).size, 10);
+      assertEquals(new Set(pageLines.map((line) => line.stroke)).size, 8);
       const pageMarkerColors = [
         ...html.matchAll(/<circle[^>]*fill="([^"]+)"/g),
       ].map((match) => match[1]);

@@ -189,19 +189,73 @@ Deno.test("sparklines share one rendered height", () => {
   assert(labeled.includes("height:28px"));
 });
 
-Deno.test("sparkline: fadeFrom makes the base line a gradient to color at the highlight edge", () => {
-  const svg = sparkline([30, 20, 10, 11, 12, 13], "#727882", { count: 3, color: "#c7ccd4" }, "#101010");
-  assert(/<linearGradient id="[^"]+" x1="0" y1="0" x2="1" y2="0"/.test(svg), "horizontal gradient defined");
-  assert(svg.includes('<stop offset="0" stop-color="#101010"'), "far-left stop is fadeFrom");
-  assert(svg.includes('stop-color="#727882"'), "the gradient resolves to the base color");
+Deno.test("sparkline: fades to base color at the highlight edge", () => {
+  const svg = sparkline(
+    [30, 20, 10, 11, 12, 13],
+    "#727882",
+    { count: 3, color: "#c7ccd4" },
+    true,
+  );
+  assert(
+    svg.includes(
+      'gradientUnits="userSpaceOnUse" x1="0" y1="0" ' +
+        'x2="220" y2="0"',
+    ),
+    "gradient spans the chart axis",
+  );
+  assert(
+    svg.includes(
+      '<stop offset="0" stop-color="#727882" stop-opacity="0"/>',
+    ),
+    "far-left stop is the transparent line color",
+  );
+  assert(
+    svg.includes('stop-color="#727882" stop-opacity="1"'),
+    "the gradient resolves to the opaque base color",
+  );
   const id = svg.match(/id="([^"]+)"/)![1];
   assert(svg.includes(`stroke="url(#${id})"`), "the base line strokes with the gradient");
   assert(svg.includes('stroke="#c7ccd4"'), "the highlight keeps its flat color");
   // transition reaches base color by the tile midpoint (0.5), before the
   // highlight edge at (6-3)/(6-1) = 0.6
   assert(svg.includes('offset="0.500"'), "gradient reaches base color by the midpoint");
-  // no fadeFrom -> flat base stroke, no gradient
-  assert(!/<linearGradient/.test(sparkline([1, 2, 3], "#727882", { count: 2, color: "#eee" })), "no fade without fadeFrom");
+  // No fade -> flat base stroke, no gradient.
+  assert(
+    !/<linearGradient/.test(
+      sparkline([1, 2, 3], "#727882", { count: 2, color: "#eee" }),
+    ),
+    "no gradient without a fade",
+  );
+});
+
+Deno.test("sparkline: fade handoff follows the shared x axis", () => {
+  const partial = sparkline(
+    [30, 20, 10, 11, 12, 13],
+    "#727882",
+    { count: 3, color: "#c7ccd4" },
+    true,
+    [0, 0.05, 0.1, 0.2, 0.4, 0.8],
+  );
+  assert(
+    partial.includes(
+      'offset="0.200" stop-color="#727882" stop-opacity="1"',
+    ),
+    "the fade reaches full opacity where the highlighted tail starts",
+  );
+
+  const onePoint = sparkline(
+    [1, 2, 3, 4],
+    "#727882",
+    { count: 1, color: "#c7ccd4" },
+    true,
+    [0, 0.02, 0.05, 0.1],
+  );
+  assert(
+    onePoint.includes(
+      'offset="0.500" stop-color="#727882" stop-opacity="1"',
+    ),
+    "a one-point tail keeps the midpoint fade",
+  );
 });
 
 Deno.test("multiSparkline: overlaid lines on one shared scale; < 2 points is empty", () => {
@@ -262,22 +316,36 @@ Deno.test("multiSparkline: a trimmed shared scale pools series and centers a fla
   assertEquals(flatYs.filter((y) => y === 17).length, 16);
 });
 
-Deno.test("multiSparkline: fadeFrom gradients each line", () => {
+Deno.test("multiSparkline: fades each line from its transparent color", () => {
   const svg = multiSparkline(
     [
       { vals: [1, 2, 3], color: "#0a0", label: "3" },
       { vals: [4, 5, 6], color: "#00a", label: "6" },
     ],
-    { fadeFrom: "#111" },
+    { fade: true },
   );
-  // each line fades from fadeFrom (left) to its own color at the midpoint
-  assert(svg.includes('stop-color="#111"/><stop offset="0.5" stop-color="#0a0"'), "team line fades to its color");
-  assert(svg.includes('stop-color="#111"/><stop offset="0.5" stop-color="#00a"'), "visitor line fades to its color");
-  assert(/stroke="url\(#mspk-[0-9a-fA-F]+-[0-9a-fA-F]+-\d+\)"/.test(svg), "lines stroke via their gradient");
-  // no fadeFrom -> flat strokes, no gradient defs
+  assert(
+    svg.includes(
+      'stop-color="#0a0" stop-opacity="0"/><stop offset="0.5" ' +
+        'stop-color="#0a0" stop-opacity="1"',
+    ),
+    "team line fades from transparent to opaque",
+  );
+  assert(
+    svg.includes(
+      'stop-color="#00a" stop-opacity="0"/><stop offset="0.5" ' +
+        'stop-color="#00a" stop-opacity="1"',
+    ),
+    "visitor line fades from transparent to opaque",
+  );
+  assert(
+    /stroke="url\(#mspk-[0-9a-fA-F]+-\d+\)"/.test(svg),
+    "lines stroke via their gradient",
+  );
+  // No fade -> flat strokes, no gradient definitions.
   assert(
     !/<linearGradient/.test(multiSparkline([{ vals: [1, 2], color: "#0a0" }, { vals: [3, 4], color: "#00a" }])),
-    "no gradient without fadeFrom",
+    "no gradient without a fade",
   );
 });
 
@@ -325,7 +393,7 @@ Deno.test("lighten: blends a color toward white; non-hex is left alone", () => {
 Deno.test("multiSparkline: highlight redraws the trailing slice in a lighter tint", () => {
   const svg = multiSparkline(
     [{ vals: [1, 2, 3, 4, 5], color: "#10a37f", label: "5" }],
-    { highlight: { count: 2 }, fadeFrom: "#111111" },
+    { highlight: { count: 2 }, fade: true },
   );
   // The base line plus the lighter trailing slice drawn over it.
   assertEquals([...svg.matchAll(/<polyline/g)].length, 2);
@@ -334,7 +402,10 @@ Deno.test("multiSparkline: highlight redraws the trailing slice in a lighter tin
   assert(svg.includes('stop offset="0.5" stop-color="#10a37f"'), "gradient handoff at the midpoint");
   assert(!svg.includes("stroke-opacity"), "a lighter tint, not a flat dim");
   // No highlight -> just the one line, no tint.
-  const plain = multiSparkline([{ vals: [1, 2, 3], color: "#10a37f", label: "3" }], { fadeFrom: "#111111" });
+  const plain = multiSparkline(
+    [{ vals: [1, 2, 3], color: "#10a37f", label: "3" }],
+    { fade: true },
+  );
   assertEquals([...plain.matchAll(/<polyline/g)].length, 1);
 });
 
@@ -355,21 +426,40 @@ Deno.test("a slice covering the whole series leaves the line in its own color", 
   // repaint the whole line in the tint and lose the line's own color.
   const whole = multiSparkline(
     [{ vals: [1, 2, 3, 4], color: "#10a37f", label: "4" }],
-    { highlight: { count: 4 }, fadeFrom: "#111111" },
+    { highlight: { count: 4 }, fade: true },
   );
   assertEquals([...whole.matchAll(/<polyline/g)].length, 1, "base only, no tint over it");
   assert(!whole.includes(lighten("#10a37f")), "the line keeps its own color");
   assert(
-    whole.includes('<stop offset="0" stop-color="#10a37f"'),
-    "the line uses its own color from the left edge",
+    whole.includes(
+      '<stop offset="0" stop-color="#10a37f" stop-opacity="0"/>' +
+        '<stop offset="0.5" stop-color="#10a37f" stop-opacity="1"',
+    ),
+    "the whole window retains the shared fade",
   );
   // Same for a count past the end of the series.
-  const over = multiSparkline([{ vals: [1, 2, 3, 4], color: "#10a37f" }], { highlight: { count: 9 } });
+  const over = multiSparkline(
+    [{ vals: [1, 2, 3, 4], color: "#10a37f" }],
+    { highlight: { count: 9 }, fade: true },
+  );
   assertEquals([...over.matchAll(/<polyline/g)].length, 1);
+  assert(
+    over.includes('offset="0.5" stop-color="#10a37f" stop-opacity="1"'),
+    "a past-the-end window retains the shared fade",
+  );
   // The single-color sparkline behaves the same way.
-  const one = sparkline([1, 2, 3, 4], "#727882", { count: 4, color: "#c7ccd4" }, "#111111");
+  const one = sparkline(
+    [1, 2, 3, 4],
+    "#727882",
+    { count: 4, color: "#c7ccd4" },
+    true,
+  );
   assertEquals([...one.matchAll(/<polyline/g)].length, 1, "base only");
   assert(!one.includes("#c7ccd4"), "the line keeps its own color");
+  assert(
+    one.includes('offset="0.500" stop-color="#727882" stop-opacity="1"'),
+    "the whole window retains the shared fade",
+  );
 });
 
 Deno.test("multiSparkline: every base is drawn before any tint", () => {
@@ -397,7 +487,7 @@ Deno.test("multiSparkline: shared axes and per-line highlights", () => {
       xs: [0.6, 0.8, 1],
       highlightCount: 0,
     },
-  ], { fadeFrom: "#111111" });
+  ], { fade: true });
   const lines = [
     ...svg.matchAll(
       /<polyline points="([^"]*)"[^>]*stroke="([^"]*)"/g,
@@ -421,8 +511,22 @@ Deno.test("multiSparkline: shared axes and per-line highlights", () => {
     [44, 88],
   );
   assert(!svg.includes("<mask"));
-  assert(svg.includes('<stop offset="0.2" stop-color="#10a37f"'));
-  assert(svg.includes('<stop offset="0.5" stop-color="#d97757"'));
+  assert(
+    svg.includes(
+      'gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="220" y2="0"',
+    ),
+    "partial lines fade over the shared chart axis",
+  );
+  assert(
+    svg.includes(
+      '<stop offset="0.2" stop-color="#10a37f" stop-opacity="1"',
+    ),
+  );
+  assert(
+    svg.includes(
+      '<stop offset="0.5" stop-color="#d97757" stop-opacity="1"',
+    ),
+  );
 });
 
 Deno.test("multiSparkline: one-point markers are explicit", () => {
@@ -488,6 +592,33 @@ Deno.test("multiSparkline: large horizontal gaps split paths without losing poin
   }]);
   assertEquals([...offsetBoundary.matchAll(/<polyline/g)].length, 1);
   assertEquals([...offsetBoundary.matchAll(/<circle/g)].length, 0);
+});
+
+Deno.test("multiSparkline: disconnected paths share one chart-axis fade", () => {
+  const svg = multiSparkline([{
+    vals: [1, 2, 3, 4],
+    color: "#d97757",
+    xs: [0, 0.1, 0.7, 0.8],
+    highlightCount: 4,
+    maxXGap: 0.2,
+  }], { fade: true });
+  const strokes = [
+    ...svg.matchAll(/<polyline[^>]*stroke="([^"]+)"/g),
+  ].map((match) => match[1]);
+  assertEquals(strokes.length, 2);
+  assertEquals(new Set(strokes).size, 1);
+  assertEquals([...svg.matchAll(/<linearGradient/g)].length, 1);
+  assert(strokes[0].startsWith("url(#mspk-"));
+  assert(
+    svg.includes(
+      'gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="220" y2="0"',
+    ),
+  );
+  assert(
+    svg.includes(
+      '<stop offset="0.5" stop-color="#d97757" stop-opacity="1"',
+    ),
+  );
 });
 
 Deno.test("multiSparkline: isolated markers use the tint only inside the highlighted tail", () => {

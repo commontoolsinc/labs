@@ -429,31 +429,39 @@ become suites. They are not tests; they are setup, and they become
 capability providers. The deploy and attestation jobs stay exactly as they
 are, since they only ever ran on `main`.
 
-**`cli-fuse` must gain fine granularity, and this is not optional.**
-`packages/cli/integration/fuse-exec.sh` is 1,062 lines that record a
-single identity for the entire run, through one
-`cf_test_record_with_status` at the end. Twenty-three `success` markers
-inside it name the phases it goes through, and not one of them reaches the
-store. So the suite's whole cost — a FUSE mount, a Toolshed server and
-everything the script does with them — hangs off one identity that can
-only be scored as a unit, run as a unit, and skipped as a unit. That is
-the worst shape in the topology, and leaving it would mean a single record
-deciding whether several minutes of work runs.
+**`cli-fuse` carries the fine granularity the rest of this depends on.**
+`packages/cli/integration/fuse-exec.sh` records 25 identities, one for each
+phase it goes through, through the `cf_test_step_begin` markers
+`integration.sh` also uses. Each marker leads the phase it names, so a
+phase that fails is the record that carries the failure, and the two
+phases that bring the mount up and wait for it to hydrate record like the
+rest, so a mount that never comes up is reported as the mount. Scoring, the flake rate and the
+60-second ratchet each get a number per phase where they had one covering
+a FUSE mount, a Toolshed server and everything the script does with them.
 
-The change has two halves and they are not equally hard. The cheap half is
-step records: the 23 `success` markers become `cf_test_step_begin`
-markers, exactly as `integration.sh` already uses, and the suite goes from
-one identity to 23 without changing what runs. That is worth doing on its
-own, because scoring, the flake rate and the 60-second ratchet all get
-something to work with where today they get one number.
+The script also takes a section, so a lane can be pointed at part of it.
+Which phases can stand alone was a question about the script rather than
+about selection — the same independence question [asked of unit
+tests](#skipping-assumes-tests-do-not-lean-on-each-other) — and the answer
+is four sections rather than one per phase. A section is a group of phases over one
+mount rather than a phase on its own, because the mount, the daemon and
+the piece cost more than every phase together and each section needs all
+three. Four phases therefore run whichever section was asked for, and are
+not selectable.
 
-The second half is section dispatch, so the script can be asked for a
-subset the way `integration.sh` can. That one is not purely mechanical: a
-linear script builds up a mount, a daemon and a set of pieces, so which
-phases can stand alone is a question about the script rather than about
-selection, and it is the same independence question [asked of unit
-tests](#skipping-assumes-tests-do-not-lean-on-each-other). The answer may
-well be a handful of sections rather than 23, and a handful is enough.
+Two dependencies decide where the boundaries fall, and both are about
+state a phase leaves behind. The handler phases assert `messageCount` as
+an absolute count up from the piece's initial zero, so they stay together
+and in order. The source update ends by asserting `lastMessage` is the
+empty string the truncate phase left, so it sits in the section holding
+that phase. A third ordering is why the entity listing is one of the
+phases that always runs: its assertion is that no entity payload has
+crossed the memory proxy, read from a trace that accumulates over the
+whole run, so nothing may hydrate the piece before it.
+
+`packages/cli/test/fuse-sections.test.ts` holds the dispatch table to
+those orderings, and to every phase being reachable — from `all`, from a
+section smaller than `all`, and from what the workflow dispatches.
 
 `pattern-reload` needs nothing done to it, and is not a special case
 either. `packages/patterns/integration/reload/` holds a single file with a
@@ -635,8 +643,8 @@ mechanism is a skip list rather than a selection list.
 
 ### Every invocation unit, and the identities inside it
 
-There are eight kinds of invocation unit across the topology, and only one
-of them holds more than one identity today. That one holds almost everything:
+There are eight kinds of invocation unit across the topology, and two of
+them hold more than one identity. One of the two holds almost everything:
 the workspace and runner unit shards alone carry 15,997 of the reference
 build's 17,999 executions.
 
@@ -649,14 +657,15 @@ build's 17,999 executions.
 | One gate command | `repo-gates` | One, named for the gate that ran | Nothing to reach. |
 | One `deno check` invocation | `typecheck` | One, named for the path group it checked, which the task records itself | Nothing to reach. |
 | A whole task carrying one record | `cfcheck`, `pattern-vintage` | One, for everything the task did | Nothing to reach, and nothing finer exists: the suite is its own identity. |
-| A script recording one identity for its whole run | `cli-fuse` | One today, 23 once its `success` markers become step markers | Not reachable until the script is split, which [it must be](#todays-jobs-as-suites). This is the one row the topology is not allowed to leave as it is. |
+| A section of `fuse-exec.sh` | `cli-fuse` | The four phases every section runs, and the phases that section selects | Nothing to reach below the section. A mount comes up for the section, not for the phase, so its phases run or are skipped together. |
 
-Six of the eight rows are already one identity per invocation, which is
-why this change is smaller than removing a concept sounds. The topology
-does not gain a mechanism for them; they simply stop being described as
-items holding one identity each and start being described as identities.
-The seventh, `cli-fuse`, is one identity only because nothing finer was
-ever recorded, and it is the row this plan requires somebody to fix.
+Six of the eight rows are one identity per invocation, which is why this
+change is smaller than removing a concept sounds. The topology does not
+gain a mechanism for them; they simply stop being described as items
+holding one identity each and start being described as identities. The
+seventh, `cli-fuse`, holds the phases of whichever section ran, and there
+is nothing finer for the topology to reach, since a mount comes up for the
+section rather than for the phase.
 
 `pattern-reload` is in the first row and not in a row of its own, which is
 worth saying because the plan used to treat it as a special case. It runs
@@ -774,9 +783,9 @@ What the enum was reaching for does survive, one level down. Whether the
 identities inside an invocation unit can be skipped is a property of that
 unit rather than of the suite around it, and the [table
 above](#every-invocation-unit-and-the-identities-inside-it) is where it is
-written down. `cli-fuse` is the illustration: once its 23 phases record
-separately, a section holding four of them will not be able to skip one of
-the four, while a `deno test` file with 23 tests will. Those two suites
+written down. `cli-fuse` is the illustration: its phases record
+separately, and a section holding four of them cannot skip one of the
+four, while a `deno test` file with four tests can. Those two suites
 would have carried the same declaration under the old field and behaved
 differently, which is the sign the field was in the wrong place.
 
@@ -3032,18 +3041,21 @@ exercised on the branch on its own.
       `tasks/server-execution-on-skips.ts`: whole-file entries are declared
       unavailable and omitted from enumeration, while step entries exclude
       only the named leaf identity from unknown and coverage rules.
-- [ ] Give `packages/cli/integration/fuse-exec.sh` fine granularity.
-  - [x] Its 23 `success` markers record, so the suite records 23
-        identities rather than one. The markers trail their phases where
-        `integration.sh`'s lead theirs, so they close a step rather than
-        opening one, through a `cf_test_step_done` beside
-        `cf_test_step_begin`. What that leaves is failure attribution: a
-        phase that fails never reaches its marker, so the failure is
-        carried by the script's own record rather than by a step. Moving
-        each marker ahead of its phase is what buys that back, and is the
-        same reading of the script the dispatch needs.
-  - [ ] It gains a section dispatch over whichever groups of phases can
+- [x] Give `packages/cli/integration/fuse-exec.sh` fine granularity.
+  - [x] Every phase records, so the suite records 25 identities rather
+        than one. Each marker leads the phase it names, through the same
+        `cf_test_step_begin` `integration.sh` uses, so a phase that fails
+        is the record that carries the failure rather than the script's own
+        record carrying it. The two phases that bring the mount up are the
+        identities this adds beyond the 23 the phases already named.
+  - [x] It gains a section dispatch over the four groups of phases that
         stand alone, so `cli-fuse` becomes an item suite like its sibling.
+        A section is a group of phases over one mount, and the
+        dependencies deciding where the boundaries fall are named in
+        [today's jobs as suites](#todays-jobs-as-suites).
+        `packages/cli/test/fuse-sections.test.ts` holds the dispatch table
+        to the properties that make a section schedulable, the way
+        `integration-sections.test.ts` holds its sibling's.
 - [x] Split the `piece-call` CLI integration dispatch into its eight
       recorded steps. Seven already had an arm of their own; the missing
       one for `run_piece_call` is added, and so are the two the

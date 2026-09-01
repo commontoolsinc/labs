@@ -15,7 +15,7 @@ import {
   type Tile,
   type TileView,
 } from "../types.ts";
-import { escapeHtml, friendlyError, SPARK_FADE, sparkline } from "../lib.ts";
+import { escapeHtml, friendlyError, sparkline } from "../lib.ts";
 import {
   CI_WORKFLOW,
   DUR_GOOD,
@@ -747,7 +747,7 @@ function makeCiDuration(
         extra: sparkline(series, CHART_LINE, {
           count: window.length,
           color: CHART_HIGHLIGHT,
-        }, SPARK_FADE[s]),
+        }, true),
         duration: spanMs,
         href: opts.href,
         hint: opts.hint,

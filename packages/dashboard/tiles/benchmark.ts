@@ -91,7 +91,6 @@ import {
   multiSparkline,
   performanceGithub,
   performanceGithubDownload,
-  SPARK_FADE,
 } from "../lib.ts";
 import {
   BENCH_HEADLINE_MAX_AGE_HOURS,
@@ -1220,7 +1219,7 @@ function benchmarkIndexView(
       maxXGap: CPU_LINE_MAX_X_GAP,
       showSinglePoint: true,
     })),
-    { fadeFrom: SPARK_FADE[status] },
+    { fade: true },
   );
   return {
     ...benchmarkDrill,
@@ -1928,7 +1927,7 @@ export function benchPage(
           showSinglePoint: true,
         })),
         {
-          fadeFrom: SPARK_FADE[status],
+          fade: true,
           scale: {
             trim: PERFORMANCE_HISTORY_SCALE_TRIM,
             minValues: PERFORMANCE_HISTORY_SCALE_MIN_VALUES,
