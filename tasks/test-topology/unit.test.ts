@@ -306,3 +306,37 @@ describe("running a member that cannot be handed a subset", () => {
     ).toEqual([]);
   });
 });
+
+describe("what the unit suites decline to claim", () => {
+  it("declines a record from a scope no member covers", async () => {
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: { test: "deno test test/glaze.test.ts" },
+        files: ["test/glaze.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    expect(
+      suite.locate({ test: { k: "unit", s: "elsewhere", n: "bakes" } }),
+    ).toBeUndefined();
+  });
+
+  it("declines a record from a member with no Deno-only half", async () => {
+    // Its unit-kind records would have nowhere to go: the member runs
+    // only a browser half, and that half records under `browser`.
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: {
+          "browser-test": "deno run -A ../deno-web-test/cli.ts a.test.ts",
+        },
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    expect(
+      suite.locate({ test: { k: "unit", s: "bakery", n: "bakes" } }),
+    ).toBeUndefined();
+    expect(
+      suite.locate({ test: { k: "browser", s: "bakery", n: "bakes" } }),
+    ).toEqual({ level: "unit", unit: "packages/bakery#browser-test" });
+  });
+});

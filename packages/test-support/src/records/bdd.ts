@@ -50,7 +50,7 @@ registerFrameworkModule(import.meta.url);
 const chain: string[] = [];
 
 /** The name a bdd call was given, whichever way it was called. */
-function nameOf(args: readonly unknown[]): string | undefined {
+export function nameOf(args: readonly unknown[]): string | undefined {
   for (const arg of args) {
     if (typeof arg === "string") return arg;
     if (typeof arg === "object" && arg !== null) {
@@ -66,7 +66,7 @@ function nameOf(args: readonly unknown[]): string | undefined {
 type AnyFunction = (...args: any[]) => any;
 
 /** Where the body sits in a call, and what it is. */
-function bodyOf(
+export function bodyOf(
   args: readonly unknown[],
 ): { index: number; body: AnyFunction } | undefined {
   for (let index = 0; index < args.length; index++) {

@@ -391,6 +391,30 @@ describe("running the check and saying what it found", () => {
     expect(err[1]).toContain("1 test surface(s)");
   });
 
+  it("runs the store half against the records it is given", async () => {
+    const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+    const at = await Deno.makeTempFile({ suffix: ".ndjson" });
+    await Deno.writeTextFile(
+      at,
+      JSON.stringify({
+        line: "record",
+        test: { k: "gate", s: "repo", n: "a gate nobody declares" },
+        outcome: "pass",
+        durationMs: 1,
+      }) + "\n",
+    );
+    try {
+      const { findings } = await check({ root, records: [at] });
+      expect(
+        findings.some((finding) =>
+          finding.fails && finding.message.includes("no suite claims")
+        ),
+      ).toBe(true);
+    } finally {
+      await Deno.remove(at);
+    }
+  });
+
   it("accounts for this repository's own tree", async () => {
     // The check the repository runs on itself, run the way it runs it.
     const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");

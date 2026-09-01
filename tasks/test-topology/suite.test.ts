@@ -6,6 +6,7 @@ import {
   unavailableFrom,
   unavailableLeaves,
   unavailableUnits,
+  writeSkipList,
 } from "./suite.ts";
 
 /** A suite over two packages, one of which skips a leaf. */
@@ -146,5 +147,37 @@ describe("a suite of deno test files over several packages", () => {
   it("builds nothing for a unit it does not hold", async () => {
     expect(await twoParts().command([{ unit: "elsewhere", skip: [] }], context))
       .toEqual([]);
+  });
+});
+
+describe("the parts of a suite that answer no", () => {
+  it("holds no leaf for a configuration that skips whole files only", () => {
+    const whole = {
+      unavailable: [{ unit: "a.test.ts", reason: "not landed yet" }],
+    };
+    expect([...unavailableLeaves(whole)]).toEqual([]);
+    expect([...unavailableUnits(whole)]).toEqual(["a.test.ts"]);
+  });
+
+  it("writes no skip list where nothing inside a unit is skipped", async () => {
+    // The absence of the file is what tells the invocation to run
+    // everything, so writing an empty one would be a different
+    // instruction.
+    const at = `${await Deno.makeTempDir({ prefix: "skip-" })}/skips.json`;
+    await writeSkipList(at, {});
+    await expect(Deno.readTextFile(at)).rejects.toThrow();
+  });
+
+  it("declines a record whose kind is not the part's own", () => {
+    // A part is a kind and a scope together: a `browser` record under a
+    // scope some part covers still belongs to whatever suite runs the
+    // browser half, not to this one.
+    const suite = twoParts();
+    expect(
+      suite.locate({
+        test: { k: "browser", s: "oven", n: "bakes", v: "server-execution" },
+        file: "packages/oven/integration/bake.test.ts",
+      }),
+    ).toBeUndefined();
   });
 });

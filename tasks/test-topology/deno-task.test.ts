@@ -214,3 +214,40 @@ describe("resolving which task a member's tests run through", () => {
     expect((await memberTasks(dir)).present).toBe(false);
   });
 });
+
+describe("a member whose manifest says less than usual", () => {
+  it("excludes nothing where the member has no manifest", async () => {
+    const dir = await Deno.makeTempDir({ prefix: "deno-task-" });
+    made.push(dir);
+    await Deno.mkdir(`${dir}/test`, { recursive: true });
+    await Deno.writeTextFile(`${dir}/test/one.test.ts`, "");
+    const files = await memberTestFiles(dir, parseTestTask("deno test .")!);
+    expect(files).toEqual(["test/one.test.ts"]);
+  });
+
+  it("reports no task at all as no test surface", async () => {
+    const dir = await member({});
+    const tasks = await memberTasks(dir);
+    expect(tasks.present).toBe(false);
+    expect(tasks.browserTest).toBe(false);
+  });
+
+  it("passes over the directories that hold no test of their own", async () => {
+    const dir = await member({}, [
+      "node_modules/dep/a.test.ts",
+      "dist/b.test.ts",
+      "test/c.test.ts",
+    ]);
+    const files = await memberTestFiles(dir, parseTestTask("deno test .")!);
+    expect(files).toEqual(["test/c.test.ts"]);
+  });
+
+  it("excludes a file by a glob as well as by a directory", async () => {
+    const dir = await member({}, ["test/a.test.ts", "test/b.browser.test.ts"]);
+    const files = await memberTestFiles(
+      dir,
+      parseTestTask("deno test --ignore='**/*.browser.test.ts' .")!,
+    );
+    expect(files).toEqual(["test/a.test.ts"]);
+  });
+});

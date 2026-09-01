@@ -9,6 +9,7 @@ import {
   collectPathsByScope,
   runTypecheck,
   scopeOfPath,
+  selectScopes,
 } from "./typecheck.ts";
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
@@ -200,5 +201,33 @@ describe("typecheck", () => {
         true,
       );
     });
+  });
+});
+
+describe("selectScopes()", () => {
+  const byScope = new Map([
+    ["memory", ["packages/memory/mod.ts"]],
+    ["runner", ["packages/runner/mod.ts"]],
+  ]);
+
+  it("returns every scope when the command line names none", () => {
+    // A person running the task checks the whole tree; a lane names the
+    // groups its change touched.
+    expect([...selectScopes(byScope, []).keys()]).toEqual(["memory", "runner"]);
+    expect([...selectScopes(byScope, ["--list"]).keys()].length).toBe(2);
+  });
+
+  it("returns only the scopes the command line names", () => {
+    const selected = selectScopes(byScope, ["--scope=runner"]);
+    expect([...selected.keys()]).toEqual(["runner"]);
+    expect(selected.get("runner")).toEqual(["packages/runner/mod.ts"]);
+  });
+
+  it("refuses a scope that no group covers", () => {
+    // Silently checking nothing would report success over a group the
+    // caller believed it had checked.
+    expect(() => selectScopes(byScope, ["--scope=nowhere"])).toThrow(
+      "no such type-check scope",
+    );
   });
 });
