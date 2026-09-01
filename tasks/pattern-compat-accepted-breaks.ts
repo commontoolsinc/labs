@@ -63,11 +63,13 @@ export interface AcceptedContractBreak {
 
 export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
   {
-    // ONE entry per pattern, and that is a requirement rather than tidiness:
-    // the gate keys accepted pairs into a Map, so a second entry naming a
-    // baseline this one also names REPLACES its path set rather than adding to
-    // it. Two breaks on one pattern therefore share an entry, and share its
-    // single `record`; the other is named in the reason.
+    // One entry per (pattern, BASELINE) pair, and that is a requirement
+    // rather than tidiness: the gate keys accepted pairs into a Map, so a
+    // second entry naming a baseline this one also names REPLACES its path
+    // set rather than adding to it. Breaks that share baselines therefore
+    // share an entry — and its single `record`, the other break named in
+    // the reason — while a later break against baselines no earlier entry
+    // names gets its own entry, with the pairs kept disjoint.
     //
     // Carried here: the reference graph rebuilt on cell identity, and the
     // board's demand narrowed to the eight members it reads — which narrows
@@ -140,11 +142,13 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     record: "docs/history/topics-mentionable-index-break.md",
   },
   {
-    // ONE entry per pattern, and that is a requirement rather than tidiness:
-    // the gate keys accepted pairs into a Map, so a second entry naming a
-    // baseline this one also names REPLACES its path set rather than adding to
-    // it. Two breaks on one pattern therefore share an entry, and share its
-    // single `record`; the other is named in the reason.
+    // One entry per (pattern, BASELINE) pair, and that is a requirement
+    // rather than tidiness: the gate keys accepted pairs into a Map, so a
+    // second entry naming a baseline this one also names REPLACES its path
+    // set rather than adding to it. Breaks that share baselines therefore
+    // share an entry — and its single `record`, the other break named in
+    // the reason — while a later break against baselines no earlier entry
+    // names gets its own entry, with the pairs kept disjoint.
     //
     // Carried here: the reference graph rebuilt on cell identity, and the
     // board's demand narrowed to the eight members it reads — which narrows
