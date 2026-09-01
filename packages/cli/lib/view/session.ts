@@ -4585,19 +4585,23 @@ export class Session {
   #handleJumpList(key: Key): void {
     this.#message = "";
     const last = Math.max(0, this.#jumpEntries.length - 1);
-    switch (key.name) {
-      case "escape":
-        if (this.#jumpSearching) {
-          this.#jumpSearching = false;
-          this.#jumpFilter = "";
-          this.#jumpSel = 0;
-          this.#refreshJump();
-          return;
-        }
-        this.#mode = "normal";
-        this.#overlayScroll = 0;
-        this.#message = "Cancelled";
+    if (
+      key.name === "escape" ||
+      (key.name === "q" && !this.#jumpSearching)
+    ) {
+      if (this.#jumpSearching) {
+        this.#jumpSearching = false;
+        this.#jumpFilter = "";
+        this.#jumpSel = 0;
+        this.#refreshJump();
         return;
+      }
+      this.#mode = "normal";
+      this.#overlayScroll = 0;
+      this.#message = "Cancelled";
+      return;
+    }
+    switch (key.name) {
       case "down":
       case "ctrl-n":
         this.#jumpSel = clamp(this.#jumpSel + 1, 0, last);

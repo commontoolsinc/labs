@@ -296,6 +296,13 @@ Deno.test("jumplist: spaces are entered in a filter", () => {
   assertEquals(s.view().inputLine, "jump to: widget alignment");
 });
 
+Deno.test("jumplist: q is entered in a filter", () => {
+  const s = diffSession(SHOW);
+  press(s, "i", "/", "q");
+  assertEquals(s.view().inputLine, "jump to: q");
+  assert(s.view().overlay !== null, "list remains open");
+});
+
 Deno.test("jumplist: enter with no match leaves the list open", () => {
   const s = diffSession(SHOW);
   press(s, "down", "down"); // scroll off the top so "unmoved" is meaningful
@@ -532,6 +539,16 @@ Deno.test("jumplist: escape cancels and leaves the viewport put", () => {
   const top = s.view().top;
   press(s, "i", "down", "down"); // open and move the selection
   press(s, "escape");
+  assertEquals(s.view().overlay, null);
+  assertEquals(s.view().message, "Cancelled");
+  assertEquals(s.view().top, top, "the view did not move");
+});
+
+Deno.test("jumplist: q cancels and leaves the viewport put", () => {
+  const s = diffSession(SHOW);
+  press(s, "down");
+  const top = s.view().top;
+  press(s, "i", "down", "down", "q");
   assertEquals(s.view().overlay, null);
   assertEquals(s.view().message, "Cancelled");
   assertEquals(s.view().top, top, "the view did not move");
