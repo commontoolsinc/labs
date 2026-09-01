@@ -3567,6 +3567,43 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
+    "does not claim a map chained after a filter on a provenance receiver",
+    async () => {
+      // The closure stage rewrites the chain inside out — the inner link
+      // lowers first and registers its result — so the outer map's receiver
+      // is a reactive collection by the time its turn comes. The provenance
+      // guard mirrors that walk through unlowered chain links.
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      interface Row { a: string }
+
+      export default pattern<
+        { rows: Writable<Row[]>; target: Writable<string> },
+        { flags: unknown }
+      >(({ rows, target }) => {
+        const items: Row[] = rows.get();
+        const flags = items.filter((row) => row.a !== "").map((row) =>
+          row.a === target
+        );
+        return { flags };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (error) => error.type === "pattern-context:computation",
+      );
+      assertEquals(
+        errors.length,
+        0,
+        "an unlowered chain link inherits its receiver's provenance, so " +
+          "the escaping-map diagnostic must not claim the outer map",
+      );
+    },
+  );
+
+  await t.step(
     "errors on a reactive value passed as a map thisArg",
     async () => {
       const source = `      import { pattern, Writable } from "commonfabric";

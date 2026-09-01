@@ -2182,7 +2182,22 @@ function mapReceiverHasReactiveCollectionProvenance(
   }
   // A binding whose initializer is site-lifted holds a Reactive at runtime,
   // which is the other half of what the closure stage admits.
-  return getSiteLiftedCollectionLocalSymbol(receiver, context) !== undefined;
+  if (getSiteLiftedCollectionLocalSymbol(receiver, context) !== undefined) {
+    return true;
+  }
+  // A chained receiver — `items.filter(...).map(...)` — reads as a call,
+  // not a binding. The closure stage rewrites such a chain inside out: the
+  // inner link lowers first and registers its result as a reactive
+  // collection, so the outer call sees provenance when its turn comes.
+  // Mirror that walk: an unlowered array-method link inherits the
+  // provenance of its own receiver.
+  if (ts.isCallExpression(receiver)) {
+    const chainLink = classifyArrayMethodCall(receiver);
+    if (chainLink && !chainLink.lowered) {
+      return mapReceiverHasReactiveCollectionProvenance(receiver, context);
+    }
+  }
+  return false;
 }
 
 /**
