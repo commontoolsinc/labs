@@ -214,6 +214,72 @@ describe("diffcounts", () => {
     expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });
   });
 
+  it("carries fallback comments through contiguous hunks", () => {
+    const diff = [
+      "diff --git a/main.rs b/main.rs",
+      "--- a/main.rs",
+      "+++ b/main.rs",
+      "@@ -1,2 +1,2 @@",
+      " /*",
+      "- * old first note",
+      "+ * new first note",
+      "@@ -3,2 +3,2 @@",
+      "- * old second note",
+      "+ * new second note",
+      "  */",
+      "",
+    ].join("\n");
+
+    const counts = countsFor(diff);
+
+    expect(counts.comments.totals).toEqual({ adds: 0, dels: 0 });
+  });
+
+  it("carries fallback comments through several diff gaps", () => {
+    const diff = [
+      "diff --git a/main.rs b/main.rs",
+      "--- a/main.rs",
+      "+++ b/main.rs",
+      "@@ -1,2 +1,2 @@",
+      " /*",
+      "- * old first note",
+      "+ * new first note",
+      "@@ -20 +20 @@",
+      "- * old second note",
+      "+ * new second note",
+      "@@ -40,2 +40,2 @@",
+      "- * old third note",
+      "+ * new third note",
+      "  */",
+      "",
+    ].join("\n");
+
+    const counts = countsFor(diff);
+
+    expect(counts.comments.totals).toEqual({ adds: 0, dels: 0 });
+  });
+
+  it("ignores quoted block closers after an omitted close", () => {
+    const diff = [
+      "diff --git a/main.rs b/main.rs",
+      "--- a/main.rs",
+      "+++ b/main.rs",
+      "@@ -1,2 +1,2 @@",
+      " /*",
+      "- * old note",
+      "+ * new note",
+      "@@ -20,2 +20,2 @@",
+      "-run_old();",
+      "+run_new();",
+      ' let marker = "*/";',
+      "",
+    ].join("\n");
+
+    const counts = countsFor(diff);
+
+    expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });
+  });
+
   it("preserves comment markers inside Rust raw strings", () => {
     const diff = [
       "diff --git a/main.rs b/main.rs",
@@ -328,6 +394,94 @@ describe("diffcounts", () => {
     const counts = countsFor(diff);
 
     expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });
+  });
+
+  it("tracks multiple shell heredocs in declaration order", () => {
+    const diff = [
+      "diff --git a/run.sh b/run.sh",
+      "--- a/run.sh",
+      "+++ b/run.sh",
+      "@@ -1,5 +1,5 @@",
+      " cat <<A <<B",
+      " first body",
+      " A",
+      "-# old second body",
+      "+# new second body",
+      " B",
+      "",
+    ].join("\n");
+
+    const counts = countsFor(diff);
+
+    expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });
+  });
+
+  it("carries shell heredocs through several diff gaps", () => {
+    const diff = [
+      "diff --git a/run.sh b/run.sh",
+      "--- a/run.sh",
+      "+++ b/run.sh",
+      "@@ -1,2 +1,2 @@",
+      " cat <<EOF",
+      "-# old first body",
+      "+# new first body",
+      "@@ -20 +20 @@",
+      "-# old second body",
+      "+# new second body",
+      "@@ -40,2 +40,2 @@",
+      "-# old third body",
+      "+# new third body",
+      " EOF",
+      "",
+    ].join("\n");
+
+    const counts = countsFor(diff);
+
+    expect(counts.comments.totals).toEqual({ adds: 3, dels: 3 });
+  });
+
+  it("does not carry shell heredocs past an omitted terminator", () => {
+    const diff = [
+      "diff --git a/run.sh b/run.sh",
+      "--- a/run.sh",
+      "+++ b/run.sh",
+      "@@ -1,2 +1,2 @@",
+      " cat <<EOF",
+      "-old data",
+      "+new data",
+      "@@ -20 +20 @@",
+      "-# old comment",
+      "+# new comment",
+      "",
+    ].join("\n");
+
+    const counts = countsFor(diff);
+
+    expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });
+  });
+
+  it("carries Rust raw strings through several diff gaps", () => {
+    const diff = [
+      "diff --git a/main.rs b/main.rs",
+      "--- a/main.rs",
+      "+++ b/main.rs",
+      "@@ -1,2 +1,2 @@",
+      ' let text = r#"',
+      "-// old first data",
+      "+// new first data",
+      "@@ -20 +20 @@",
+      "-// old second data",
+      "+// new second data",
+      "@@ -40,2 +40,2 @@",
+      "-// old third data",
+      "+// new third data",
+      ' "#;',
+      "",
+    ].join("\n");
+
+    const counts = countsFor(diff);
+
+    expect(counts.comments.totals).toEqual({ adds: 3, dels: 3 });
   });
 
   it("does not start shell heredocs from quoted operators", () => {

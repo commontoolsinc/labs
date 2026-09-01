@@ -218,6 +218,11 @@ interface CommentSyntax {
   readonly heredocs: boolean;
 }
 
+interface HeredocState {
+  readonly end: string;
+  readonly stripTabs: boolean;
+}
+
 interface CommentState {
   block?: {
     readonly open: string;
@@ -226,7 +231,7 @@ interface CommentState {
     readonly nested: boolean;
   };
   literalClose?: string;
-  heredoc?: { readonly end: string; readonly stripTabs: boolean };
+  heredocs?: HeredocState[];
 }
 
 /** Scans each file side so multiline syntax carries across diff hunks. */
@@ -245,8 +250,24 @@ function fallbackCommentLines(
   const newState: CommentState = {};
   for (const [hunkIndex, hunk] of file.hunks.entries()) {
     if (hunkIndex > 0) {
-      reconcileStateAfterGap(raw, diffLines, hunk, oldState, "old");
-      reconcileStateAfterGap(raw, diffLines, hunk, newState, "new");
+      const previous = file.hunks[hunkIndex - 1];
+      const remaining = file.hunks.slice(hunkIndex);
+      reconcileStateAfterGap(
+        raw,
+        diffLines,
+        previous,
+        remaining,
+        oldState,
+        "old",
+      );
+      reconcileStateAfterGap(
+        raw,
+        diffLines,
+        previous,
+        remaining,
+        newState,
+        "new",
+      );
     }
     for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
       const kind = diffLines[i]?.kind;
@@ -280,37 +301,84 @@ function fallbackCommentLines(
 function reconcileStateAfterGap(
   raw: readonly string[],
   diffLines: readonly DiffLine[],
-  hunk: DiffFile["hunks"][number],
+  previous: DiffFile["hunks"][number],
+  remaining: readonly DiffFile["hunks"][number][],
   state: CommentState,
   side: "old" | "new",
 ): void {
+  const current = remaining[0];
+  const previousEnd = side === "old"
+    ? previous.oldStart + previous.oldCount
+    : previous.newStart + previous.newCount;
+  const currentStart = side === "old" ? current.oldStart : current.newStart;
+  if (previousEnd === currentStart) return;
+
   const texts: string[] = [];
-  for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
-    const kind = diffLines[i]?.kind;
-    if (
-      kind === "ctx" || side === "old" && kind === "del" ||
-      side === "new" && kind === "add"
-    ) {
-      texts.push((raw[i] ?? "").slice(1));
+  for (const hunk of remaining) {
+    for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
+      const kind = diffLines[i]?.kind;
+      if (
+        kind === "ctx" || side === "old" && kind === "del" ||
+        side === "new" && kind === "add"
+      ) {
+        texts.push((raw[i] ?? "").slice(1));
+      }
     }
   }
   const block = state.block;
-  if (block && !texts.some((text) => text.includes(block.close))) {
+  if (block && !texts.some((text) => hasUnquotedToken(text, block.close))) {
     state.block = undefined;
   }
   const literalClose = state.literalClose;
-  if (literalClose && !texts.some((text) => text.includes(literalClose))) {
+  if (
+    literalClose && !texts.some((text) => hasUnescapedToken(text, literalClose))
+  ) {
     state.literalClose = undefined;
   }
-  const heredoc = state.heredoc;
-  if (
-    heredoc && !texts.some((text) => {
-      const candidate = heredoc.stripTabs ? text.replace(/^\t+/u, "") : text;
-      return candidate === heredoc.end;
-    })
-  ) {
-    state.heredoc = undefined;
+  const heredocs = state.heredocs;
+  if (heredocs) {
+    const firstVisibleEnd = heredocs.findIndex((heredoc) =>
+      texts.some((text) => isHeredocEnd(text, heredoc))
+    );
+    state.heredocs = firstVisibleEnd < 0
+      ? undefined
+      : heredocs.slice(firstVisibleEnd);
   }
+}
+
+function hasUnquotedToken(text: string, token: string): boolean {
+  let quote = "";
+  for (let i = 0; i < text.length;) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === "\\") i += 2;
+      else {
+        if (ch === quote) quote = "";
+        i++;
+      }
+    } else if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      i++;
+    } else {
+      if (text.startsWith(token, i)) return true;
+      i++;
+    }
+  }
+  return false;
+}
+
+function hasUnescapedToken(text: string, token: string): boolean {
+  for (let i = 0; i <= text.length - token.length; i++) {
+    if (text.startsWith(token, i) && (i === 0 || text[i - 1] !== "\\")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isHeredocEnd(text: string, heredoc: HeredocState): boolean {
+  const candidate = heredoc.stripTabs ? text.replace(/^\t+/u, "") : text;
+  return candidate === heredoc.end;
 }
 
 function shouldScanFallback(
@@ -356,11 +424,13 @@ function stripCommonComments(
   syntax: CommentSyntax,
   state: CommentState,
 ): string {
-  if (state.heredoc) {
-    const candidate = state.heredoc.stripTabs
-      ? text.replace(/^\t+/u, "")
-      : text;
-    if (candidate === state.heredoc.end) state.heredoc = undefined;
+  const activeHeredocs = state.heredocs;
+  const activeHeredoc = activeHeredocs?.[0];
+  if (activeHeredoc) {
+    if (isHeredocEnd(text, activeHeredoc)) {
+      activeHeredocs.shift();
+      if (activeHeredocs.length === 0) state.heredocs = undefined;
+    }
     return text;
   }
 
@@ -375,7 +445,7 @@ function stripCommonComments(
   }
 
   let quote = "";
-  let heredoc: CommentState["heredoc"];
+  const heredocs: HeredocState[] = [];
   for (let i = start; i < text.length;) {
     if (state.block) {
       if (state.block.nested && text.startsWith(state.block.open, i)) {
@@ -423,10 +493,10 @@ function stripCommonComments(
       i = after;
       continue;
     }
-    if (syntax.heredocs && !heredoc) {
+    if (syntax.heredocs) {
       const match = /^<<(-)?\s*(['"]?)([A-Za-z_]\w*)\2/u.exec(text.slice(i));
       if (match) {
-        heredoc = { end: match[3], stripTabs: match[1] === "-" };
+        heredocs.push({ end: match[3], stripTabs: match[1] === "-" });
       }
     }
     const block = syntax.blocks.find(([open]) => text.startsWith(open, i));
@@ -446,7 +516,7 @@ function stripCommonComments(
     result += ch;
     i++;
   }
-  if (heredoc) state.heredoc = heredoc;
+  if (heredocs.length > 0) state.heredocs = heredocs;
   return result;
 }
 
