@@ -22,6 +22,7 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { JSONSchema } from "./builder/types.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import {
+  ALL_META_RAILS,
   type BaseMemoryAddress,
   CompoundCycleTracker,
   createSchemaMemo,
@@ -32,6 +33,7 @@ import {
   loadMetaLinkedDocs,
   ManagedStorageTransaction,
   MapSetStringToPathSelectors,
+  type MetaRail,
   type ObjectStorageManager,
   type SchemaMemo,
   SchemaObjectTraverser,
@@ -66,6 +68,16 @@ export type GraphQueryWalkStats = {
   getDocAtPathCalls: number;
   schemaMemoHits: number;
 };
+
+/**
+ * The rails a crossing-reached document still chases: the ones computed
+ * values are supplied through. A plain subscriber whose walk crosses into
+ * a piece reads what the piece computes off `result`, and `internal`
+ * carries the sub-piece manifests those computations hang off. The
+ * remaining rails — pattern, argument, cfc — serve loading and running a
+ * piece, which is the intent of naming one, not of reaching one.
+ */
+const CROSSING_META_RAILS: readonly MetaRail[] = ["result", "internal"];
 
 export const createGraphQueryWalkStats = (): GraphQueryWalkStats => ({
   coveredSelectorSkips: 0,
@@ -196,16 +208,17 @@ export class GraphQueryWalk {
       },
       undefined,
       undefined,
-      // Documents this walk loads through link crossings do not chase
-      // their metadata families; only the document a `visit()` call names
-      // does, through the loadMetaLinkedDocs call in `visit()` itself. A
-      // caller that intends to load and run what it named — a piece
-      // resume, a setsrc staging read — names it as a root, so a root's
-      // pattern/source/cfc family still arrives with it. A crossing-
-      // reached document is one the query did not name, and chasing its
-      // family multiplies a wide walk by every visited piece's whole doc
-      // set while delivering documents nothing asked to interpret.
-      false,
+      // A document this walk loads through a link crossing chases only the
+      // rails computed values arrive through — `result` and `internal` —
+      // so a subscriber reading THROUGH a piece still receives and stays
+      // subscribed to what the piece computes. The full family belongs to
+      // the documents a query names: `visit()` chases every rail for its
+      // named document, which is what a caller that intends to load and
+      // run one — a piece resume, a setsrc staging read — relies on.
+      // Chasing every rail at every crossing instead multiplies a wide
+      // walk by each visited piece's whole doc set (pattern, argument,
+      // cfc and their recursion) for documents nothing asked to run.
+      CROSSING_META_RAILS,
     );
     this.#memo = options.memo ?? createSchemaMemo();
     this.stats = options.stats ?? createGraphQueryWalkStats();
@@ -292,14 +305,13 @@ export class GraphQueryWalk {
       }
     }
 
-    // The named document's family, chased even when selector coverage skips
-    // the traversal above: a crossing may have covered this document before
-    // a root named it, and coverage proves reach, not family. Chased here
-    // regardless of the context's includeMeta — that flag governs the
-    // traverser's link crossings, and it is off so a crossing-reached
-    // document is delivered without its family. What a caller names, it may
-    // intend to load; what a walk merely reaches, it does not. The chase
-    // dedupes through `metaDocsVisited`, so a repeat visit re-reads nothing.
+    // The named document's FULL family — every rail, not the crossing
+    // subset the context grants mid-walk loads — chased even when selector
+    // coverage skips the traversal above: a crossing may have covered this
+    // document before a root named it, and coverage proves reach, not
+    // family. What a caller names, it may intend to load; what a walk
+    // merely reaches, it does not. The chase dedupes through
+    // `metaDocsVisited`, so a repeat visit re-reads nothing new.
     loadMetaLinkedDocs(
       tx,
       {
@@ -307,6 +319,7 @@ export class GraphQueryWalk {
         value: document.value,
       },
       this.#context,
+      ALL_META_RAILS,
     );
   }
 

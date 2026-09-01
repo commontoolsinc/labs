@@ -83,6 +83,14 @@ export type TrackedGraphState = {
   entities: Map<QueryDocKey, EntitySnapshot>;
   memo: SchemaMemo;
   manager: EngineObjectManager;
+
+  /** Root doc keys whose FULL metadata family this state has chased —
+   * recorded when a query NAMES a document and its walk visits it. A
+   * crossing records reach in the tracker but only the crossing rails of
+   * the family, so coverage of a later query that names the document
+   * requires this record too: reach without family is not coverage for a
+   * root (see isGraphQueryCoveredByState). */
+  rootFamilies: Set<string>;
 };
 
 /**
@@ -843,6 +851,7 @@ export const cloneTrackedGraphState = (
     entities: new Map(state.entities),
     memo: new Map(state.memo),
     manager,
+    rootFamilies: new Set(state.rootFamilies),
   };
 };
 
@@ -1385,6 +1394,7 @@ export const trackGraph = (
   };
   const sharedMemo = createSchemaMemo();
   const stats = createQueryTraversalStats();
+  const rootFamilies = new Set<string>();
   const readCountBefore = manager.readCount;
   const walk = new GraphQueryWalk({
     manager,
@@ -1415,17 +1425,14 @@ export const trackGraph = (
           : { scopeKey: root.entityScopeKey }),
         type: "application/json",
       });
+      const rootKey = rootDocKey(space, root, identityOf(manager));
       if (loaded !== null) {
-        walk.visit(
-          loaded,
-          selector,
-          rootDocKey(space, root, identityOf(manager)),
-        );
+        walk.visit(loaded, selector, rootKey);
+        // The visit chased the named document's full family; an absent
+        // root records nothing, so its later creation re-evaluates it.
+        rootFamilies.add(rootKey);
       } else {
-        schemaTracker.add(
-          rootDocKey(space, root, identityOf(manager)),
-          selector,
-        );
+        schemaTracker.add(rootKey, selector);
       }
     });
   }
@@ -1456,6 +1463,7 @@ export const trackGraph = (
     entities,
     memo: sharedMemo,
     manager,
+    rootFamilies,
   };
   if (
     cache !== undefined && cacheKeys !== undefined &&
@@ -1509,7 +1517,7 @@ export const extendTrackedGraph = (
       const rootScope = root.scope ?? DEFAULT_SCOPE;
       const rootKey = rootDocKey(space, root, identityOf(manager));
       touched.add(rootKey);
-      evaluateTrackedDocument(
+      const visited = evaluateTrackedDocument(
         space,
         manager,
         {
@@ -1525,6 +1533,9 @@ export const extendTrackedGraph = (
         state.memo,
         stats,
       );
+      // The visit chased the named document's full family; an absent
+      // root records nothing, so its later creation re-evaluates it.
+      if (visited) state.rootFamilies.add(rootKey);
     });
   }
 
@@ -1591,7 +1602,13 @@ export const isGraphQueryCoveredByState = (
   query.roots.every((root) => {
     const selector = toDocumentSelector(root.selector);
     const rootKey = rootDocKey(space, root, identityOf(state.manager));
-    return schemaTrackerCoversSelector(state.tracker, rootKey, selector);
+    // Reach without family is not coverage for a NAMED root: a crossing
+    // may have recorded the selector while chasing only the crossing
+    // rails, and naming the document entitles the caller to its full
+    // family (extendTrackedGraph's visit supplies it, cheaply, when the
+    // selector itself is already covered).
+    return schemaTrackerCoversSelector(state.tracker, rootKey, selector) &&
+      state.rootFamilies.has(rootKey);
   });
 
 export const queryGraph = (
@@ -1844,7 +1861,7 @@ const evaluateTrackedDocument = (
   // into one batch, say) keeps waiting for a real arrival, so its
   // caller passes a sink the wire never sees.
   absentSink: MapSetStringToPathSelectors = schemaTracker,
-) => {
+): boolean => {
   const docKey: QueryDocKey = address.scopeKey !== undefined
     ? `${space}/${address.scopeKey}/${address.id}`
     : toDocKey(
@@ -1856,7 +1873,7 @@ const evaluateTrackedDocument = (
   const loaded = manager.load(address);
   if (loaded === null || loaded.value === undefined) {
     absentSink.add(docKey, internPathSelector(selector));
-    return;
+    return false;
   }
   // A fresh walk per document, so each starts with an empty pointer-cycle
   // tracker while sharing the query's reach and its memoized schema results.
@@ -1869,6 +1886,7 @@ const evaluateTrackedDocument = (
     memo: sharedMemo,
     stats,
   }).visit(loaded, selector, docKey);
+  return true;
 };
 
 export const toDocKey = (

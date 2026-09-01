@@ -2350,10 +2350,15 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
           value: { value: { kind: "target pattern" } },
         }, {
           op: "set",
+          id: "of:target-result",
+          value: { value: { computed: "target result" } },
+        }, {
+          op: "set",
           id: "of:crossing-target",
           value: {
             value: { name: "target" },
             pattern: link("of:target-family"),
+            result: link("of:target-result"),
           },
         }, {
           op: "set",
@@ -2392,12 +2397,14 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
     );
 
     const ids = new Set(rooted.entities.map((entity) => entity.id));
-    // The named root arrives with its metadata family; the document the
-    // walk reaches through the `child` crossing arrives under the reader's
-    // narrowing, without its own family.
+    // The named root arrives with its full metadata family; the document
+    // the walk reaches through the `child` crossing arrives with the rails
+    // computed values ride — its result — and without the rails that
+    // serve loading it: its pattern.
     assert(ids.has("of:meta-root"));
     assert(ids.has("of:crossing-target"));
     assert(ids.has("of:root-family"));
+    assert(ids.has("of:target-result"));
     assert(!ids.has("of:target-family"));
 
     const targetRooted = queryGraph(
@@ -2463,6 +2470,53 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
     // root's document before it is visited, and coverage skips the second
     // root's traversal — but a named root's family arrives regardless.
     assert(bothIds.has("of:target-family"));
+
+    // The same guarantee across INCREMENTAL adds: a first query's crossing
+    // covers the target's selector, and a later query naming the target is
+    // not covered until its family has been chased — the extension supplies
+    // it, and only then does coverage hold.
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:meta-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              child: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    const laterQuery: Parameters<typeof extendTrackedGraph>[3] = {
+      roots: [{
+        id: "of:crossing-target",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: { name: { type: "string" } },
+          },
+        },
+      }],
+    };
+    assert(!isGraphQueryCoveredByState(space, tracked.state, laterQuery));
+    const familyExtended = extendTrackedGraph(
+      space,
+      engine,
+      tracked.state,
+      laterQuery,
+    );
+    assert(
+      [...familyExtended.updates.values()].some((entity) =>
+        entity.id === "of:target-family"
+      ),
+    );
+    assert(isGraphQueryCoveredByState(space, tracked.state, laterQuery));
   } finally {
     close(engine);
     await Deno.remove(path);
