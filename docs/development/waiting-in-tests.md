@@ -738,13 +738,14 @@ either way — the assertion never depends on the wait having been long enough.
 Send something that must arrive after the thing being ruled out, wait for that,
 then assert the thing never came. Any channel that preserves order carries this.
 A `postMessage` between a fixed pair of windows does, and so does a chain of
-them: `packages/iframe-sandbox/test/iframe-csp.browser.test.ts` has each guest document
-write a marker back to the host once its load event fires, and a CSP error from
-the same guest travels the same two hops — guest to outer frame, outer frame to
-host — so a test holding the marker holds any error that fired. The "subscribes"
+them: `packages/iframe-sandbox/test/iframe-csp.browser.test.ts` has each
+guest document write a marker back to the host once its load event fires, and
+a CSP error from the same guest travels the same two hops — guest to outer
+frame, outer frame to host — so a test holding the marker holds any error that
+fired. The "subscribes"
 and "cancels subscriptions between documents" tests in
-`packages/iframe-sandbox/test/iframe.browser.test.ts` use the same idea against the
-update stream: write to a key that is still subscribed, and once the guest
+`packages/iframe-sandbox/test/iframe.browser.test.ts` use the same idea against
+the update stream: write to a key that is still subscribed, and once the guest
 reports it, an update for the unsubscribed key would already have arrived had
 one been sent.
 

@@ -13,7 +13,9 @@ import { describe, it } from "@std/testing/bdd";
 import { footerFades } from "./cf-screen.ts";
 import { CFScreen } from "./index.ts";
 
-/** A stand-in for a slotted element, carrying the two things the decision reads. */
+/**
+ * A stand-in for a slotted element, carrying the two things the decision reads.
+ */
 function slotted(
   localName: string,
   attributes: Record<string, string> = {},
