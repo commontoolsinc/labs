@@ -462,6 +462,28 @@ describe("FormFieldController registration behavior", () => {
     await flushing;
     expect(serverDraftBody!.trim()).toBe(value);
   });
+
+  it("rejects when a registered field write fails", async () => {
+    const host = new MockHost() as unknown as MockHost & HTMLElement;
+    const cellController: CellControllerLike<string> = {
+      getValue: () => "Launch checklist",
+      setValue: () => {},
+      getCell: () => ({
+        setStrict: () => Promise.reject(new Error("Network error")),
+      }),
+    };
+    const formContext = new MockFormContext();
+    const formField = new FormFieldController(host, { cellController });
+    const internals = formField as unknown as {
+      _formContextConsumer: { value: FormContext };
+    };
+    internals._formContextConsumer = { value: formContext };
+    formField.register("draftBody");
+
+    await expect(formContext.getLastRegistration()!.flush()).rejects.toThrow(
+      "Network error",
+    );
+  });
 });
 
 describe("captureOriginalValue", () => {
