@@ -167,38 +167,6 @@ const UNREGISTERED_SURFACES: ReadonlyArray<{ path: string; reason: string }> = [
       "reached only by the package's own `test:integration` task, which " +
       "nothing dispatches",
   },
-  {
-    path: "packages/runner/integration/array_push.test.tsx",
-    reason: "the package integration command enumerates .test.ts only",
-  },
-  {
-    path: "packages/runner/integration/derive_array_leak.test.tsx",
-    reason: "the package integration command enumerates .test.ts only",
-  },
-  {
-    path: "packages/runner/integration/sqlite-cfc-commit-eval.test.tsx",
-    reason: "the package integration command enumerates .test.ts only",
-  },
-  {
-    path: "packages/runner/integration/sqlite-cfc-label-link.test.tsx",
-    reason: "the package integration command enumerates .test.ts only",
-  },
-  {
-    path: "packages/runner/integration/sqlite-cfc-label.test.tsx",
-    reason: "the package integration command enumerates .test.ts only",
-  },
-  {
-    path: "packages/runner/integration/sqlite-cfc-row-label.test.tsx",
-    reason: "the package integration command enumerates .test.ts only",
-  },
-  {
-    path: "packages/runner/integration/sqlite-db-query-decode.test.tsx",
-    reason: "the package integration command enumerates .test.ts only",
-  },
-  {
-    path: "packages/runner/scripts/profile-memory-regressions-lib.test.ts",
-    reason: "the runner's test task runs test/ and this sits beside it",
-  },
 ];
 
 /** One thing the check found. */
