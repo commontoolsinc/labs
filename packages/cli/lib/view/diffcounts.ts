@@ -229,7 +229,7 @@ interface CommentState {
   heredoc?: { readonly end: string; readonly stripTabs: boolean };
 }
 
-/** Scans each hunk side so block comments carry across changed lines. */
+/** Scans each file side so multiline syntax carries across diff hunks. */
 function fallbackCommentLines(
   raw: readonly string[],
   diffLines: readonly DiffLine[],
@@ -241,9 +241,9 @@ function fallbackCommentLines(
   if (!oldSyntax && !newSyntax) return new Map();
 
   const result = new Map<number, string>();
+  const oldState: CommentState = {};
+  const newState: CommentState = {};
   for (const hunk of file.hunks) {
-    const oldState: CommentState = {};
-    const newState: CommentState = {};
     for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
       const kind = diffLines[i]?.kind;
       const text = (raw[i] ?? "").slice(1);
@@ -334,6 +334,7 @@ function stripCommonComments(
   }
 
   let quote = "";
+  let heredoc: CommentState["heredoc"];
   for (let i = start; i < text.length;) {
     if (state.block) {
       if (state.block.nested && text.startsWith(state.block.open, i)) {
@@ -381,6 +382,12 @@ function stripCommonComments(
       i = after;
       continue;
     }
+    if (syntax.heredocs && !heredoc) {
+      const match = /^<<(-)?\s*(['"]?)([A-Za-z_]\w*)\2/u.exec(text.slice(i));
+      if (match) {
+        heredoc = { end: match[3], stripTabs: match[1] === "-" };
+      }
+    }
     const block = syntax.blocks.find(([open]) => text.startsWith(open, i));
     if (block) {
       state.block = {
@@ -398,12 +405,7 @@ function stripCommonComments(
     result += ch;
     i++;
   }
-  if (syntax.heredocs && !state.heredoc) {
-    const heredoc = /<<(-)?\s*(['"]?)([A-Za-z_]\w*)\2/.exec(result);
-    if (heredoc) {
-      state.heredoc = { end: heredoc[3], stripTabs: heredoc[1] === "-" };
-    }
-  }
+  if (heredoc) state.heredoc = heredoc;
   return result;
 }
 

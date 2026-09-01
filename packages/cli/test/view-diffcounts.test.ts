@@ -172,6 +172,28 @@ describe("diffcounts", () => {
     expect(counts.comments.totals).toEqual({ adds: 0, dels: 0 });
   });
 
+  it("tracks multiline fallback comments across diff hunks", () => {
+    const diff = [
+      "diff --git a/main.rs b/main.rs",
+      "--- a/main.rs",
+      "+++ b/main.rs",
+      "@@ -1,3 +1,3 @@",
+      " /*",
+      "- * old nearby note",
+      "+ * new nearby note",
+      "  * unchanged note",
+      "@@ -20,2 +20,2 @@",
+      "- * old distant note",
+      "+ * new distant note",
+      "  */",
+      "",
+    ].join("\n");
+
+    const counts = countsFor(diff);
+
+    expect(counts.comments.totals).toEqual({ adds: 0, dels: 0 });
+  });
+
   it("preserves comment markers inside Rust raw strings", () => {
     const diff = [
       "diff --git a/main.rs b/main.rs",
@@ -286,6 +308,23 @@ describe("diffcounts", () => {
     const counts = countsFor(diff);
 
     expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });
+  });
+
+  it("does not start shell heredocs from quoted operators", () => {
+    const diff = [
+      "diff --git a/run.sh b/run.sh",
+      "--- a/run.sh",
+      "+++ b/run.sh",
+      "@@ -1,2 +1,2 @@",
+      ' echo "example: <<EOF"',
+      "-# old comment",
+      "+# new comment",
+      "",
+    ].join("\n");
+
+    const counts = countsFor(diff);
+
+    expect(counts.comments.totals).toEqual({ adds: 0, dels: 0 });
   });
 
   it("tracks nested block comments in Rust", () => {
