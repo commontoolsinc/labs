@@ -6,38 +6,15 @@
  *
  * Values are compared as `Object.is` compares them: by identity for an object,
  * by value for a primitive, `NaN` matching itself, and `-0` distinct from `0`.
- * Neither structure beneath does that on its own -- `Array.prototype.indexOf`
- * compares strictly, so it finds a `0` for a `-0` and never finds a `NaN`, and
- * a `Map` normalizes a `-0` key to `0`. Both are given the comparison instead:
- * the scan through {@link #same}, and the index through {@link #keyFor}, which
- * stands a symbol in for each of the two values a `Map` cannot key as
- * `Object.is` would have it. Two values take the same key exactly when
- * `Object.is` calls them the same value.
- *
- * `===` and `Object.is` part company on numbers alone, so a `typeof` check is
- * all an ordinary stack pays for any of it.
- *
- * Both lookups are answered by scanning while the stack is short, and by an
- * index once it has reached {@link #ADD_INDEX_AT} values. Which one is used
- * is not observable beyond the cost: a scan is linear in the stack's height
- * where a keyed lookup is not, and the two are within reach of each other only
- * over a range that a short stack sits well below.
- *
- * What the marks weigh is the whole of a stack's use, maintenance included,
- * rather than a lookup on its own. Where an index exists it is used, at any
- * height: maintaining it is what a short stack is being spared, and that is
- * already spent by the time a lookup asks.
- *
- * The index is dropped again once the stack falls below
- * {@link #DROP_INDEX_BELOW}, so a stack that grew tall once and came back down
- * goes back to scanning rather than paying for a height it no longer has. The
- * two marks are kept apart so that ordinary movement does not build and drop
- * repeatedly: only a stack swinging across the whole gap between them
- * rebuilds, and one hovering near either mark does not.
  *
  * A value may be pushed more than once, and then occupies as many positions as
- * it was pushed at. That is what makes the two lookups differ, and what the
- * index has to record per value rather than as a single number.
+ * it was pushed at. {@link #indexOf} names the lowest of them and {@link
+ * #lastIndexOf} the highest, and a pop takes the highest away.
+ *
+ * A lookup does not get slower as the stack grows: past {@link #ADD_INDEX_AT}
+ * values it keeps an index, and drops it again below
+ * {@link #DROP_INDEX_BELOW}. Where an answer came from is not observable
+ * beyond what it cost.
  */
 export class IndexTrackingStack<T> {
   /** The values, in order, so a value's position is its index. */
@@ -45,8 +22,14 @@ export class IndexTrackingStack<T> {
 
   /**
    * The positions each value occupies, ascending, while the stack is tall
-   * enough to want them, and `undefined` otherwise. Keyed by
-   * {@link #keyFor}, not by the value itself.
+   * enough to want them, and `undefined` otherwise. Keyed by {@link #keyFor},
+   * not by the value itself.
+   *
+   * Kept once built until the stack falls below {@link #DROP_INDEX_BELOW}, and
+   * used at every height while it exists: what a short stack is spared is
+   * maintaining this, and that is already spent by the time a lookup asks.
+   * The two marks are far enough apart that ordinary movement does not build
+   * and drop repeatedly -- a stack has to swing across the whole gap.
    */
   #positions: Map<unknown, number[]> | undefined;
 
@@ -238,6 +221,12 @@ export class IndexTrackingStack<T> {
 
   /**
    * Whether two values are the same one, which is what this class compares by.
+   *
+   * `Array.prototype.indexOf` will not do it: it compares strictly, so it
+   * finds a `0` for a `-0` and never finds a `NaN`. `===` and `Object.is` part
+   * company on numbers and only on numbers, so the `typeof` here is not a
+   * heuristic -- it is exactly the set that needs the slower answer, and a
+   * stack of anything else pays one check for all of it.
    */
   static #same(a: unknown, b: unknown): boolean {
     return (typeof a === "number") ? Object.is(a, b) : (a === b);
@@ -245,9 +234,13 @@ export class IndexTrackingStack<T> {
 
   /**
    * The index key for the given value: the value itself, except for the two a
-   * `Map` does not key as {@link #same} would have it. A `NaN` needs no
-   * standing in as `Map` is written today, and gets one anyway, so that the
-   * pair is read as one rule rather than as one rule and one coincidence.
+   * `Map` does not key as {@link #same} would have it. A `Map` normalizes a
+   * `-0` key to `0`, so those two would otherwise share an entry. Two values
+   * take the same key exactly when {@link #same} calls them the same value.
+   *
+   * A `NaN` needs no standing in as `Map` is written today, and gets one
+   * anyway, so that the pair is read as one rule rather than as one rule and
+   * one coincidence. Nothing tests the difference, there being none to see.
    *
    * The `typeof` runs first and settles it for everything that is not a
    * number, which is what keeps this off the cost of an ordinary stack.
