@@ -1,6 +1,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import {
+  BINARY_CACHE_DIR,
   CAPABILITIES,
   type CapabilityId,
   openCapabilities,
@@ -92,6 +93,13 @@ describe("ci capabilities", () => {
       }, registry),
     ).rejects.toThrow("no jq here");
     expect(closed).toEqual(["cf"]);
+  });
+
+  it("keeps a built binary where the workflow's cache step looks", () => {
+    // The lane's own working directory is made fresh every run, so a
+    // binary kept there would be rebuilt every time however well the
+    // cache step worked. The path has to be one the workflow also names.
+    expect(BINARY_CACHE_DIR).toBe(".ci-cache/binaries");
   });
 
   it("reads the process a background launch detached", () => {

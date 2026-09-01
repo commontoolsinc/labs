@@ -75,6 +75,15 @@ export interface Capability {
   open(context: CapabilityContext): Promise<OpenCapability>;
 }
 
+/**
+ * Where a built binary is kept between runs, relative to the repository
+ * root. The lane's workflow carries one fixed cache step covering this
+ * directory, so it has to be a path both of them name and a path that
+ * outlives the lane: a directory the lane made for itself would be empty
+ * on every run, and the binary would be rebuilt every time.
+ */
+export const BINARY_CACHE_DIR = ".ci-cache/binaries";
+
 /** Nothing to undo. */
 const NOTHING = () => Promise.resolve();
 
@@ -346,13 +355,16 @@ const toolshedBakedOn: Capability = {
     "a Toolshed server with the server-execution define baked into its shell",
   needs: ["deno"],
   async open(context) {
-    const binary = path.join(context.workDir, "binaries", "toolshed-on");
+    const binary = path.join(context.root, BINARY_CACHE_DIR, "toolshed-on");
     if (!context.dryRun) {
       let present = true;
       try {
         await Deno.stat(binary);
       } catch {
-        // Not in the cache the workflow restored, so it is built here.
+        // The workflow's cache step found nothing to restore, so the
+        // binary is built here instead. That is the slow path — about
+        // forty seconds against seventeen for a restore — and it is what
+        // the first run after a change to the sources pays.
         present = false;
       }
       if (!present) {
