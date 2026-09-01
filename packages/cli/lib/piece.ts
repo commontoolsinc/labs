@@ -4477,14 +4477,21 @@ export async function setCellValue(
 
 /**
  * What a {@link callPieceHandler} call supplies: the connection its
- * resolution runs over, and the execution deps its dispatch reads.
+ * resolution runs over, and the three execution deps a handling can observe
+ * through a call that returns nothing.
  *
- * Narrower than {@link PieceCallableDependencies} by the fields that have no
- * bearing here — the stdin readers, because the payload arrives decoded as an
- * argument, and the help prefix, because nothing on this path renders a page.
+ * Narrower than {@link PieceCallableDependencies} by the fields this path
+ * cannot keep. The input readers and the help prefix have no bearing on it —
+ * the payload arrives decoded as an argument, and nothing here renders a
+ * page. The result-shaping deps are excluded for a sharper reason: a
+ * selection makes the dispatch derive a value that this signature then
+ * discards, so admitting one would spend a settle and a sync on an answer
+ * nobody receives, and could raise where the handling itself committed
+ * cleanly. A call that wants a result wants
+ * {@link executePieceCallable}, which returns one.
  */
 export type PieceHandlerCallDeps =
-  & CallableExecutionDeps
+  & Pick<CallableExecutionDeps, "invocation" | "onPhase" | "skipReadback">
   & Pick<PieceCallableDependencies, "loadPieces" | "loadPiece">;
 
 /**

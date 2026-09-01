@@ -190,9 +190,9 @@ Each of these is small and lands on its own; together they are what decision
    lib module a sibling calls, beside `.` → `mod.ts`, whose import runs CLI
    startup.
 2. **Thread `deps.loadPieces` through the functions that still hardcode
-   it.** Everything a v1 verb reaches takes it; what is left is the set the
-   inventory above names, each converting for the milestone that first
-   calls it.
+   it.** Everything a shuttle-v1 verb reaches takes it; what is left is the
+   set the inventory above names, each converting for the milestone that
+   first calls it.
 3. **Extract `callFromCommand`** from `buildCallCommand`'s inline action.
 4. **Exit discipline.** `exitWithDataError` and `exitPieceCallFailure` call
    `Deno.exit(1)` (typed `never`); `getCellValueFromCommand` reaches the
