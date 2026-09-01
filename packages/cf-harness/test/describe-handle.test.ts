@@ -45,23 +45,27 @@ const signer = await Identity.fromPassphrase("cf-harness describe-handle");
 const HASH_A = "A".repeat(43);
 const REF_A = `/of:fid1:${HASH_A}/summary`;
 
-/**
- * A tagged hash and a DID, each in the position a schema's author controls
- * outright: the name of a property. Neither is a schemed link form, so the
- * handle boundary does not swap them — the scrub is what keeps them out.
- */
+/** The raw hash the hostile tagged property name below is built from. */
 const SCRUB_HASH = "C".repeat(43);
 
+/**
+ * A tagged hash in the position a schema's author controls outright: the name
+ * of a property. Not a schemed link form, so the handle boundary does not swap
+ * it — the scrub is what keeps it out.
+ */
 const HOSTILE_HASH_NAME = `fid1:${SCRUB_HASH}`;
+
+/** A DID in that same position, kept out the same way. */
 const HOSTILE_DID_NAME = "did:key:z6MkfffDescribeHandleScrubbing";
+
+/** The raw hash the linked property name below is built from. */
+const LINKED_NAME_HASH = "E".repeat(43);
 
 /**
  * A property name that is a link rather than a bare identifier. The scrub
  * deliberately leaves the schemed forms alone, because they are the handle
  * boundary's business: a link is swapped for a token, wherever it sits.
  */
-const LINKED_NAME_HASH = "E".repeat(43);
-
 const LINK_PROPERTY_NAME = `/of:fid1:${LINKED_NAME_HASH}/total`;
 
 /** The sandbox members the prompt loop reaches on a run with no shell work. */
