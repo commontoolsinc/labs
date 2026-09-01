@@ -2,7 +2,7 @@
  * Rejection-path tests for the Topics mutating verbs (verb contract rule 4,
  * docs/plans/pattern-verb-contract.md: rejection is a value, never a silent
  * no-op). Every action here makes a verb throw, so the runtime errors are
- * required (`expectRuntimeErrors: 19` — exact count, so a rejection quietly
+ * required (`expectRuntimeErrors: 25` — exact count, so a rejection quietly
  * reverting to a silent return fails the suite); each assertion then verifies
  * the write did NOT land. Happy and legacy paths live in topics.test.tsx — including the UI
  * composer wrappers, whose silent guards are correct behavior (an empty draft
@@ -11,7 +11,7 @@
 import { action, assert, TESTS, Writable } from "commonfabric";
 import { pattern } from "commonfabric";
 import Topics from "./main.tsx";
-import Topic, { type TopicComment } from "./topic.tsx";
+import Topic, { type TopicComment, type TopicLink } from "./topic.tsx";
 
 export default pattern(() => {
   const board = Topics({});
@@ -141,6 +141,11 @@ export default pattern(() => {
     body: "elsewhere",
     sentAt: 1,
   });
+  const foreignLink = new Writable<TopicLink>({
+    kind: "web",
+    url: "https://example.com/elsewhere",
+    label: "elsewhere",
+  });
   const action_remove_foreign_comment = action(() => {
     seedTopic.removeComment.send({
       comment: foreignComment,
@@ -157,6 +162,45 @@ export default pattern(() => {
   const assert_foreign_comment_untouched = assert(() =>
     foreignComment.get().removedAt === undefined &&
     foreignComment.get().body === "elsewhere"
+  );
+
+  // The retraction verbs' own refusal arms. Each is a path the Coverage Check
+  // named as unexercised, and each is a way a caller can be wrong that must
+  // produce a value rather than a silent no-op.
+  const action_remove_comment_unsigned = action(() => {
+    seedTopic.removeComment.send({
+      comment: foreignComment,
+      agentName: "   ",
+    });
+  });
+  const action_edit_comment_blank_body = action(() => {
+    seedTopic.editComment.send({
+      comment: foreignComment,
+      body: "   ",
+      agentName: "Sol",
+    });
+  });
+  const action_remove_link_both_spellings = action(() => {
+    seedTopic.removeLink.send({
+      link: foreignLink,
+      url: "https://example.com/a",
+      agentName: "Sol",
+    });
+  });
+  const action_remove_link_neither_spelling = action(() => {
+    seedTopic.removeLink.send({ agentName: "Sol" });
+  });
+  const action_remove_link_unknown_url = action(() => {
+    seedTopic.removeLink.send({
+      url: "https://example.com/never-added",
+      agentName: "Sol",
+    });
+  });
+  const action_remove_foreign_link = action(() => {
+    seedTopic.removeLink.send({ link: foreignLink, agentName: "Sol" });
+  });
+  const assert_foreign_link_untouched = assert(() =>
+    foreignLink.get().removedAt === undefined
   );
 
   const action_rename_blank_title = action(() => {
@@ -202,7 +246,7 @@ export default pattern(() => {
     // means a
     // single verb quietly reverting to a silent early-return fails this suite;
     // the no-write assertions then prove the throw also blocked the write.
-    expectRuntimeErrors: 19,
+    expectRuntimeErrors: 25,
     [TESTS]: [
       { action: action_seed_topic },
       { assertion: assert_seeded },
@@ -244,6 +288,18 @@ export default pattern(() => {
       { assertion: assert_foreign_comment_untouched },
       { action: action_edit_foreign_comment },
       { assertion: assert_foreign_comment_untouched },
+      { action: action_remove_comment_unsigned },
+      { assertion: assert_foreign_comment_untouched },
+      { action: action_edit_comment_blank_body },
+      { assertion: assert_foreign_comment_untouched },
+      { action: action_remove_link_both_spellings },
+      { assertion: assert_foreign_link_untouched },
+      { action: action_remove_link_neither_spelling },
+      { assertion: assert_foreign_link_untouched },
+      { action: action_remove_link_unknown_url },
+      { assertion: assert_foreign_link_untouched },
+      { action: action_remove_foreign_link },
+      { assertion: assert_foreign_link_untouched },
     ],
   };
 });

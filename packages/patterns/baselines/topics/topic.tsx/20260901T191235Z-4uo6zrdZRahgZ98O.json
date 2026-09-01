@@ -437,7 +437,7 @@
             "type": "object"
           },
           "url": {
-            "description": "The link's URL, for a caller that cannot pass a reference. Retracts the\nmost recently added link still present with this URL, so retracting twice\nretracts two rather than re-stamping one.",
+            "description": "The link's URL, for a caller that cannot pass a reference. Retracts the\nmost recently added link still present with this URL, so retracting twice\nretracts two rather than re-stamping one.\n\nSequentially. Two concurrent retractions naming the same URL both resolve\nthe same newest-present element and merge into one stamped record, so\nthey retract one link between them rather than two. Naming the link by\nreference is what makes a caller's target unambiguous under concurrency;\nthis spelling trades that for being reachable at all.",
             "type": "string"
           }
         },
@@ -658,7 +658,7 @@
         "type": "object"
       }
     },
-    "description": "A #topic — one durable unit of shared attention: a title, a living body\ndocument, a flat chronological comment thread, typed links out to other\ncore objects (PRs, agent sessions, web pages), and the references it makes\nto sibling pieces.\n\nDurable conclusions get folded up into the body — revise it whole with\n`setBody`; the thread holds the deliberation as append-only, point-in-time\n`addComment` records. Sign every authored-content mutation with `agentName`:\nFabric records the human principal behind the key; the name says which\nagent acted under it. Reference-only `mention` and `unmention` calls carry\nno content signature. The session-draft cells and `submit*` streams below\nbelong to the rendered page, not the headless contract — they read state\nonly this session holds.",
+    "description": "A #topic — one durable unit of shared attention: a title, a living body\ndocument, a flat chronological comment thread, typed links out to other\ncore objects (PRs, agent sessions, web pages), and the references it makes\nto sibling pieces.\n\nDurable conclusions get folded up into the body — revise it whole with\n`setBody`; the thread holds the deliberation as point-in-time `addComment`\nrecords. The thread only ever grows: `removeComment` and `removeLink` stamp\na record as retracted and leave it where it is, and `editComment` revises a\nbody in place, so what a reader shows is the array filtered rather than the\narray itself. Sign every authored-content mutation with `agentName`:\nFabric records the human principal behind the key; the name says which\nagent acted under it. Reference-only `mention` and `unmention` calls carry\nno content signature. The session-draft cells and `submit*` streams below\nbelong to the rendered page, not the headless contract — they read state\nonly this session holds.",
     "properties": {
       "$NAME": {
         "default": "",
@@ -737,7 +737,7 @@
         "type": "string"
       },
       "comments": {
-        "description": "The thread, in arrival order: append-only point-in-time records, each\ncarrying its author snapshot and `sentAt`.",
+        "description": "The thread, in arrival order, each record carrying its author snapshot\nand `sentAt`.\n\nMEMBERSHIP is append-only; a record is not. Nothing is ever removed from\nthis array — `removeComment` stamps `removedAt` and leaves the record in\nplace, and `editComment` revises a body and stamps `editedAt` — so a\nreader that wants the live thread filters on `removedAt` rather than\ntaking the array as it stands. `commentCount` is that filtered count.",
         "items": {
           "$ref": "#/$defs/TopicComment"
         },
@@ -793,7 +793,7 @@
         "type": "string"
       },
       "links": {
-        "description": "Typed outbound links, in arrival order, each carrying its author\nsnapshot and `addedAt`.",
+        "description": "Typed outbound links, in arrival order, each carrying its author snapshot\nand `addedAt`. Append-only in membership on the same terms as `comments`:\n`removeLink` stamps rather than removes, and a stamped link additionally\nstops resolving into `mentions`.",
         "items": {
           "$ref": "#/$defs/TopicLink"
         },

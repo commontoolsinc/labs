@@ -838,6 +838,18 @@ export default pattern(() => {
     retractionSubject.comments?.[0]?.removedAt === undefined
   );
 
+  // What the view projection actually carries, which reading the stored
+  // records cannot tell you. `commentsView` filters inside `computed()` and
+  // its lambda touches only `removedAt`, so if this family's demand is
+  // usage-lowered all the way down, the rendered rows would come back with
+  // their bodies absent and every assertion above would still pass. Asserting
+  // through the render is the only place that shows.
+  const assert_rendered_thread_carries_bodies = assert(() => {
+    const serialized = JSON.stringify(retractionSubject[UI]);
+    return serialized.includes("first thought, revised") &&
+      serialized.includes("Sol");
+  });
+
   const action_remove_comment = action(() => {
     retractionSubject.removeComment.send({
       comment: retractionComments.key(0),
@@ -867,6 +879,13 @@ export default pattern(() => {
     retractionSubject.lastActivityAt ===
       retractionSubject.comments?.[0]?.removedAt
   );
+
+  // And the other direction: a retracted comment leaves the rendered thread,
+  // so the filter that `commentCount` applies is the same one the reader sees.
+  const assert_retracted_comment_leaves_the_render = assert(() => {
+    const serialized = JSON.stringify(retractionSubject[UI]);
+    return !serialized.includes("first thought, revised");
+  });
 
   const action_remove_link_by_url = action(() => {
     retractionSubject.removeLink.send({
@@ -1102,9 +1121,13 @@ export default pattern(() => {
       { action: action_retraction_setup },
       { action: action_edit_comment },
       { assertion: assert_comment_edited },
+      { render: retractionSubject[UI] },
+      { assertion: assert_rendered_thread_carries_bodies },
       { action: action_remove_comment },
       { assertion: assert_comment_retracted },
       { assertion: assert_retraction_moved_activity_forward },
+      { render: retractionSubject[UI] },
+      { assertion: assert_retracted_comment_leaves_the_render },
       { action: action_remove_link_by_url },
       { assertion: assert_link_retracted },
       { action: action_add_second_topic },

@@ -191,7 +191,13 @@ export interface RemoveLinkEvent extends AgentAuthoredEvent {
 
   /** The link's URL, for a caller that cannot pass a reference. Retracts the
    * most recently added link still present with this URL, so retracting twice
-   * retracts two rather than re-stamping one. */
+   * retracts two rather than re-stamping one.
+   *
+   * Sequentially. Two concurrent retractions naming the same URL both resolve
+   * the same newest-present element and merge into one stamped record, so
+   * they retract one link between them rather than two. Naming the link by
+   * reference is what makes a caller's target unambiguous under concurrency;
+   * this spelling trades that for being reachable at all. */
   url?: string;
 }
 
@@ -313,6 +319,14 @@ export interface TopicLink {
  * verb that then stamps it writes into a document this topic does not own. So
  * membership is proved by identity against the stored positions, which is the
  * `equals()` addressing `TopicComment` names in place of a synthetic key.
+ *
+ * This is a tightening rather than a privilege boundary, and it was argued
+ * both ways before landing. A caller gains no authority here they lack
+ * calling the other topic's own verb under the same principal, and
+ * `MentionEvent.topic` accepts a foreign reference by design. What the check
+ * buys is that a wrong argument fails loudly instead of succeeding against
+ * something the caller did not mean to name — the write would otherwise land,
+ * report success, and move a count on a topic nobody was looking at.
  */
 const isElementOf = (
   array: {
@@ -330,8 +344,10 @@ const isElementOf = (
 
 /** Whether a stamped record is still live.
  *
- * Exported for readers outside a reactive read — a test, a script. Inside a
- * `computed()` the predicate is written out instead, and that is not a style
+ * Used where the read is not reactive: `removeLink`'s own body scans the
+ * stored links for the url spelling, and callers outside the pattern — a
+ * test, a script — ask the same question. Inside a `computed()` the predicate
+ * is written out instead, and that is not a style
  * choice: the schema a reactive read declares is what it can SEE, and a
  * property tested behind a helper call is not named in it. Filtering through
  * this function there yields a count that never changes, because `removedAt`
