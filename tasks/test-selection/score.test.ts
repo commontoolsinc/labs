@@ -876,3 +876,27 @@ describe("a commit the window has already let go of", () => {
     expect(context.outcomesAtCommit.has("gone")).toBe(false);
   });
 });
+
+describe("a rerun that lands after the window would have let go", () => {
+  it("still reads as the test disagreeing with itself", () => {
+    // Aging happens once per batch and after it, so an entry past the
+    // span survives until the next batch arrives. A pass and a failure
+    // at one commit is disagreement however far apart they land, and
+    // there is no change between them for a catch to be about, so the
+    // later answer is the better one and is left as it is.
+    const context = emptyContext();
+    const first = foldObservations([saw("pass", { commit: "c0" })], {
+      context,
+    });
+    const late = foldObservations([
+      saw("fail", {
+        commit: "c0",
+        day: "2026-08-30",
+        startedAt: "2026-08-30T00:00:00.000Z",
+      }),
+    ], { context, prior: first.states });
+    const state = late.states.get(KEY)!;
+    expect(state.flakesByDay["2026-08-30"]).toBe(1);
+    expect(state.mainCatches).toBe(0);
+  });
+});

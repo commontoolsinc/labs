@@ -155,6 +155,13 @@ export const CATCH_BREADTH_WINDOW_DAYS = 2;
  * days of the store that is 63.8 million pairs, past what a `Map` can
  * hold at all. Keeping only the identities the failure witness names
  * brings 21 days to 4.2 million, and two days to 40 thousand.
+ *
+ * A floor rather than an exact span. Aging happens once per batch, after
+ * the batch has been judged, so an entry older than this survives until
+ * the next batch arrives and can still answer for a rerun that lands
+ * late. That is the more accurate answer — a pass and a failure at one
+ * commit is the test disagreeing with itself however far apart they
+ * arrive — so the lateness is left alone rather than tightened.
  */
 export const SAME_COMMIT_REACH_DAYS = 2;
 
