@@ -10,17 +10,21 @@ const SUPERSEDED_SOURCE_MARKER_PREFIX =
   "[cf-harness: superseded run_pattern source collapsed";
 
 interface SupersededSource {
-  messageIndex: number;
   toolCallId: string;
   attempt: number;
   arguments: Record<string, unknown>;
   source: string;
 }
 
+/**
+ * The arguments of a `run_pattern` call and the source they carry, or
+ * `undefined` where the call carries none to collapse: arguments that are not
+ * a JSON object, a call naming a `patternId` instead, and one whose source is
+ * already a marker. Called for a `run_pattern` call.
+ */
 const runPatternSourceCall = (
   toolCall: HarnessToolCall,
 ): { arguments: Record<string, unknown>; source: string } | undefined => {
-  if (toolCall.function.name !== "run_pattern") return undefined;
   let parsed: unknown;
   try {
     parsed = JSON.parse(toolCall.function.arguments);
@@ -82,15 +86,18 @@ const marker = (
  * the tool output that holds the text.
  *
  * A call naming a `patternId` carries no source and is left alone, as is one
- * whose source is shorter than the marker would be, and one whose result
- * reported no `outputId` — the marker names an artifact, so it is written
- * only where that artifact exists.
+ * whose source is shorter than the marker would be. The marker names an
+ * artifact, so a source is replaced only where the artifact holding it
+ * exists: the call's result must report an `outputId`, and that id must be in
+ * `preservedOutputIds`, which the caller fills as it writes each source. A run
+ * that preserves nothing collapses nothing, and keeps every draft it holds.
  *
  * Collapsing is idempotent: a marker is recognized by its opening and a call
  * carrying one is left as it stands.
  */
 export const collapseSupersededRunPatternSources = (
   transcript: HarnessTranscriptMessage[],
+  preservedOutputIds: ReadonlySet<string>,
 ): void => {
   const outputIds = resultOutputIds(transcript);
   const sources: SupersededSource[] = [];
@@ -98,7 +105,7 @@ export const collapseSupersededRunPatternSources = (
   // number it had once its own source is collapsed, and carries the number
   // its diagnostic carries.
   let attempts = 0;
-  for (const [messageIndex, message] of transcript.entries()) {
+  for (const message of transcript) {
     if (message.role !== "assistant") continue;
     for (const toolCall of message.toolCalls ?? []) {
       if (toolCall.function.name !== "run_pattern") continue;
@@ -106,7 +113,6 @@ export const collapseSupersededRunPatternSources = (
       const call = runPatternSourceCall(toolCall);
       if (call === undefined) continue;
       sources.push({
-        messageIndex,
         toolCallId: toolCall.id,
         attempt: attempts,
         arguments: call.arguments,
@@ -117,7 +123,7 @@ export const collapseSupersededRunPatternSources = (
   const collapsed = new Map<string, string>();
   for (const superseded of sources.slice(0, -1)) {
     const outputId = outputIds.get(superseded.toolCallId);
-    if (outputId === undefined) continue;
+    if (outputId === undefined || !preservedOutputIds.has(outputId)) continue;
     const text = marker(superseded, outputId);
     if (text.length >= superseded.source.length) continue;
     collapsed.set(
@@ -126,8 +132,7 @@ export const collapseSupersededRunPatternSources = (
     );
   }
   if (collapsed.size === 0) return;
-  for (const messageIndex of new Set(sources.map((one) => one.messageIndex))) {
-    const message = transcript[messageIndex];
+  for (const [messageIndex, message] of transcript.entries()) {
     if (message.role !== "assistant" || message.toolCalls === undefined) {
       continue;
     }

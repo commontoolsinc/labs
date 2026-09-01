@@ -2511,6 +2511,13 @@ export class CfHarnessPromptLoop {
     SearchPatternsToolResult
   >();
 
+  /**
+   * The `outputId` of every `run_pattern` call whose source this loop wrote to
+   * an artifact. A source is collapsed only where its id is here, so a run
+   * with no artifact store keeps every draft it was given.
+   */
+  readonly #persistedRunPatternSources = new Set<string>();
+
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
     this.engine = options.engine ?? new CfHarnessEngine(options);
     if (this.engine.config.modelProvider === "openai-compatible-gateway") {
@@ -2917,13 +2924,6 @@ export class CfHarnessPromptLoop {
         }
         const assistantMessage = response.assistant;
         transcript.push(assistantMessage);
-        if (
-          assistantMessage.toolCalls?.some((toolCall) =>
-            toolCall.function.name === "run_pattern"
-          ) === true
-        ) {
-          collapseSupersededRunPatternSources(transcript);
-        }
         await this.engine.persistTranscript(transcript);
         reportTimeline.push(transcriptTimelineEntry(
           assistantMessage,
@@ -2982,8 +2982,17 @@ export class CfHarnessPromptLoop {
           );
           const toolMessage = invokedToolCall.toolMessage;
           transcript.push(toolMessage);
+          // After the result rather than after the call that asked for it: a
+          // marker names the artifact holding what it replaced, and both the
+          // result's `outputId` and the source artifact under it exist only
+          // once the call has run. One assistant message may carry several
+          // calls, and each result collapses what it supersedes.
           if (toolMessage.toolName === "run_pattern") {
             collapseSupersededRunPatternDiagnostics(transcript);
+            collapseSupersededRunPatternSources(
+              transcript,
+              this.#persistedRunPatternSources,
+            );
           }
           await this.engine.persistTranscript(transcript);
           reportTimeline.push(transcriptTimelineEntry(
@@ -3116,10 +3125,14 @@ export class CfHarnessPromptLoop {
     input: Record<string, unknown>,
     resultRef: ToolResultRef,
   ): Promise<void> {
-    if (toolId !== "run_pattern" || typeof input.sourceText !== "string") {
+    const store = this.engine.artifactStore;
+    if (
+      store === undefined || toolId !== "run_pattern" ||
+      typeof input.sourceText !== "string"
+    ) {
       return;
     }
-    await this.engine.artifactStore?.persistToolOutput(
+    await store.persistToolOutput(
       "run-pattern-source",
       resultRef.outputId,
       {
@@ -3128,6 +3141,7 @@ export class CfHarnessPromptLoop {
         sourceText: input.sourceText,
       },
     );
+    this.#persistedRunPatternSources.add(resultRef.outputId);
   }
 
   /** Restores successful search hits already present in parent history. */
