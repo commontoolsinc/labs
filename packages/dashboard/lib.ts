@@ -499,8 +499,6 @@ export function memo<T>(ttlMs: number, fn: () => Promise<T>): () => Promise<T> {
   };
 }
 
-export { SPARK_FADE_CSS as SPARK_FADE } from "./palette.ts";
-
 export function humanDur(ms: number): string {
   const m = Math.floor(ms / 60000);
   if (m < 60) return `${m}m`;
@@ -586,13 +584,14 @@ function scaleValues(
 // trailing `count` points are overdrawn in a second color (e.g. to pick out the
 // most recent runs against a longer trend). The vertical scale is normalized to
 // those recent points' range plus 25% headroom, so older outliers clip off the
-// edges instead of flattening the recent detail into a useless line. `fadeFrom`
-// makes the base line a horizontal gradient from that color on the far left up to
-// `color` by the tile's midpoint. `xs` gives each point's horizontal position as a
-// fraction 0..1 of the width (for placing several sparklines on one shared axis —
-// e.g. a real time axis); a series that doesn't reach the ends occupies only part
-// of the width. Without it, points are spaced evenly. The line has no label of its
-// own — a tile's `duration` slot draws the span in the corner. `scale.trim`
+// edges instead of flattening the recent detail into a useless line. `fade`
+// makes the base line a horizontal gradient from transparent on the far left up
+// to `color` by the tile's midpoint. `xs` gives each point's horizontal
+// position as a fraction 0..1 of the width (for placing several sparklines on
+// one shared axis — e.g. a real time axis); a series that doesn't reach the
+// ends occupies only part of the width. Without it, points are spaced evenly.
+// The line has no label of its own. A tile's `duration` slot draws the span in
+// the corner. `scale.trim`
 // excludes that many values from each end of the sorted scale inputs without
 // removing the points themselves. A series below `scale.minValues`, or too short
 // to leave two scale values, keeps its full range.
@@ -600,7 +599,7 @@ export function sparkline(
   vals: number[],
   color: string,
   highlight?: { count: number; color: string; scaleAll?: boolean },
-  fadeFrom?: string,
+  fade = false,
   xs?: number[],
   scale?: { trim?: number; minValues?: number },
 ): string {
@@ -619,21 +618,35 @@ export function sparkline(
   const pts = vals.map((v, i) =>
     `${xAt(i).toFixed(1)},${(h - 3 - ((v - min) / rng) * (h - 6)).toFixed(1)}`
   );
-  // The base line fades from `fadeFrom` on the far left to `color`, then holds
-  // `color` (SVG extends the last stop). objectBoundingBox units keep the
-  // transition placed regardless of the preserveAspectRatio stretch.
+  // The base line fades from transparent on the far left to `color`, then holds
+  // `color` (SVG extends the last stop). userSpaceOnUse keeps the transition at
+  // the same screen x when `xs` places the line on only part of the chart.
   let defs = "", baseStroke = color;
-  if (fadeFrom) {
+  if (fade) {
     // Reach `color` by the tile's midpoint — or sooner, if the highlight starts
     // before halfway (so the base is fully `color` before the handoff).
-    const edge = highlight
-      ? Math.max(0, Math.min(1, (vals.length - highlight.count) / (vals.length - 1)))
+    const edge = highlight && highlight.count >= 2 && highlight.count < vals.length
+      ? Math.max(
+        0,
+        Math.min(
+          1,
+          xs?.length === vals.length
+            ? xs[vals.length - highlight.count]
+            : (vals.length - highlight.count) / (vals.length - 1),
+        ),
+      )
       : 1;
     const tf = Math.min(0.5, edge);
     if (tf > 0) {
-      const id = `spk-${fadeFrom.replace(/[^0-9a-fA-F]/g, "")}-${color.replace(/[^0-9a-fA-F]/g, "")}-${Math.round(tf * 100)}`;
-      defs = `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="0">` +
-        `<stop offset="0" stop-color="${fadeFrom}"/><stop offset="${tf.toFixed(3)}" stop-color="${color}"/>` +
+      const id = `spk-${
+        color.replace(/[^0-9a-fA-F]/g, "")
+      }-${Math.round(tf * 100)}`;
+      defs = `<defs><linearGradient id="${id}" ` +
+        `gradientUnits="userSpaceOnUse" x1="0" y1="0" ` +
+        `x2="${w}" y2="0">` +
+        `<stop offset="0" stop-color="${color}" stop-opacity="0"/>` +
+        `<stop offset="${tf.toFixed(3)}" stop-color="${color}" ` +
+        `stop-opacity="1"/>` +
         `</linearGradient></defs>`;
       baseStroke = `url(#${id})`;
     }
@@ -654,11 +667,11 @@ export function sparkline(
 // Overlaid trend lines (each oldest -> newest) sharing one vertical scale, each
 // in its own color. With a per-series `label`, that series' value is placed in a
 // right-hand gutter at the line's end height, in the line color. With
-// `opts.fadeFrom`, each line fades from that color on the far left up to its own
-// color, reaching full color by the midpoint (or by the start of the highlight,
-// if that comes sooner) — like the ci-duration sparkline. A series' `xs`
-// places its points on a shared horizontal axis. Its `highlightCount` redraws
-// its trailing points, including explicit markers, in a lighter tint.
+// `opts.fade`, each line fades from transparent on the far left up to its own
+// color, reaching full opacity by the midpoint (or by the start of the
+// highlight, if that comes sooner) — like the ci-duration sparkline. The `xs`
+// field positions points on a shared horizontal axis. The `highlightCount`
+// field redraws trailing points, including explicit markers, in a lighter tint.
 // `opts.highlight` supplies the count for series that do not set one. `maxXGap`
 // breaks a path when adjacent horizontal positions are farther apart than that
 // fraction of the chart. `showSinglePoint` draws explicit markers for a
@@ -678,7 +691,7 @@ export function multiSparkline(
     showSinglePoint?: boolean;
   }[],
   opts: {
-    fadeFrom?: string;
+    fade?: boolean;
     highlight?: { count: number };
     scale?: { trim?: number; minValues?: number };
   } = {},
@@ -696,11 +709,11 @@ export function multiSparkline(
   const w = 220, h = 34, min = lo - pad, max = hi + pad, rng = (max - min) || 1;
   const yv = (v: number) => h - 3 - ((v - min) / rng) * (h - 6);
 
-  // Each line fades from `fadeFrom` on the left up to its own color, reaching full
-  // color at the handoff `tf`: the midpoint, or the start of the highlight when
-  // that comes sooner (so the base is solid before the handoff). userSpaceOnUse
-  // keeps the transition at the same screen x for every line and avoids the
-  // zero-bbox quirk when a line is flat.
+  // Each line fades from transparent on the left up to its own color, reaching
+  // full opacity at the handoff `tf`: the midpoint, or the start of the
+  // highlight when that comes sooner (so the base is solid before the handoff).
+  // userSpaceOnUse keeps the transition at the same screen x for every line and
+  // avoids the zero-bbox quirk when a line is flat.
   const defs: string[] = [];
   const highlightCount = (
     line: (typeof series)[number],
@@ -708,7 +721,7 @@ export function multiSparkline(
   const highlightEdge = (line: (typeof series)[number]): number => {
     const count = highlightCount(line);
     if (count < 2) return 1;
-    if (count >= line.vals.length) return 0;
+    if (count >= line.vals.length) return 1;
     const index = line.vals.length - count;
     return line.xs?.length === line.vals.length
       ? line.xs[index]
@@ -716,14 +729,17 @@ export function multiSparkline(
   };
   const strokeFor = (line: (typeof series)[number]): string => {
     const color = line.color;
-    if (!opts.fadeFrom) return color;
+    if (!opts.fade) return color;
     const tf = Math.min(0.5, Math.max(0, highlightEdge(line)));
     const off = String(+tf.toFixed(3));
-    const id = `mspk-${opts.fadeFrom.replace(/[^0-9a-fA-F]/g, "")}-${color.replace(/[^0-9a-fA-F]/g, "")}-${Math.round(tf * 100)}`;
+    const id = `mspk-${
+      color.replace(/[^0-9a-fA-F]/g, "")
+    }-${Math.round(tf * 100)}`;
     if (!defs.some((d) => d.includes(`"${id}"`))) {
       defs.push(
         `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="${w}" y2="0">` +
-          `<stop offset="0" stop-color="${opts.fadeFrom}"/><stop offset="${off}" stop-color="${color}"/>` +
+          `<stop offset="0" stop-color="${color}" stop-opacity="0"/>` +
+          `<stop offset="${off}" stop-color="${color}" stop-opacity="1"/>` +
           `</linearGradient>`,
       );
     }

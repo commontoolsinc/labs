@@ -14,8 +14,7 @@
  * dry further back than its lag allows.
  */
 
-import type { Status } from "./types.ts";
-import { multiSparkline, SPARK_FADE } from "./lib.ts";
+import { multiSparkline } from "./lib.ts";
 import { themedChartSeries } from "./theme.ts";
 
 export const DAY_MS = 86_400_000;
@@ -220,7 +219,6 @@ export function summarizeDailySpend(
 export function spendChart(
   sources: SpendChartSource[],
   now: Date,
-  status: Status,
   estimateDays?: number,
 ): { chart: string; duration: number } {
   const allDays = new Set<string>();
@@ -312,7 +310,7 @@ export function spendChart(
   });
   return {
     chart: multiSparkline(lines, {
-      fadeFrom: SPARK_FADE[status],
+      fade: true,
       highlight: { count: highlightDays },
     }),
     duration: end - start + DAY_MS,

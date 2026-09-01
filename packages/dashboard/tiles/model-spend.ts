@@ -210,7 +210,6 @@ export const modelSpend: Tile = {
         chartSource(anMap, ANTHROPIC_COLOR, an ? usd(an.mtd) : undefined),
       ],
       now,
-      status,
     );
 
     // The key line. Charted providers show a swatch (their own MTD sits at the line

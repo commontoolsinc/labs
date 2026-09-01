@@ -13,7 +13,7 @@
  */
 
 import type { Status, Tile, TileView } from "../types.ts";
-import { escapeHtml, multiSparkline, SPARK_FADE, thin } from "../lib.ts";
+import { escapeHtml, multiSparkline, thin } from "../lib.ts";
 import { dashboardCacheFile } from "../history-files.ts";
 import { themedChartSeries } from "../theme.ts";
 
@@ -271,7 +271,7 @@ export const discordOnline: Tile = {
         { vals: plot.map((h) => h.team), ...teamSeries, label: String(snap.team) },
         { vals: plot.map((h) => h.visitors), ...visitorSeries, label: String(snap.visitors) },
       ],
-      { fadeFrom: SPARK_FADE.good },
+      { fade: true },
     );
     const swatch = (c: string) => `<span class="swatch" style="background:${escapeHtml(c)}"></span>`;
     // With the chart drawn, the counts sit at each line's end; until there are
