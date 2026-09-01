@@ -243,7 +243,11 @@ function fallbackCommentLines(
   const result = new Map<number, string>();
   const oldState: CommentState = {};
   const newState: CommentState = {};
-  for (const hunk of file.hunks) {
+  for (const [hunkIndex, hunk] of file.hunks.entries()) {
+    if (hunkIndex > 0) {
+      reconcileStateAfterGap(raw, diffLines, hunk, oldState, "old");
+      reconcileStateAfterGap(raw, diffLines, hunk, newState, "new");
+    }
     for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
       const kind = diffLines[i]?.kind;
       const text = (raw[i] ?? "").slice(1);
@@ -270,6 +274,43 @@ function fallbackCommentLines(
     }
   }
   return result;
+}
+
+/** Keeps multiline state only when this hunk proves the construct stayed open. */
+function reconcileStateAfterGap(
+  raw: readonly string[],
+  diffLines: readonly DiffLine[],
+  hunk: DiffFile["hunks"][number],
+  state: CommentState,
+  side: "old" | "new",
+): void {
+  const texts: string[] = [];
+  for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
+    const kind = diffLines[i]?.kind;
+    if (
+      kind === "ctx" || side === "old" && kind === "del" ||
+      side === "new" && kind === "add"
+    ) {
+      texts.push((raw[i] ?? "").slice(1));
+    }
+  }
+  const block = state.block;
+  if (block && !texts.some((text) => text.includes(block.close))) {
+    state.block = undefined;
+  }
+  const literalClose = state.literalClose;
+  if (literalClose && !texts.some((text) => text.includes(literalClose))) {
+    state.literalClose = undefined;
+  }
+  const heredoc = state.heredoc;
+  if (
+    heredoc && !texts.some((text) => {
+      const candidate = heredoc.stripTabs ? text.replace(/^\t+/u, "") : text;
+      return candidate === heredoc.end;
+    })
+  ) {
+    state.heredoc = undefined;
+  }
 }
 
 function shouldScanFallback(

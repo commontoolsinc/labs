@@ -194,6 +194,26 @@ describe("diffcounts", () => {
     expect(counts.comments.totals).toEqual({ adds: 0, dels: 0 });
   });
 
+  it("does not carry fallback comments past an omitted close", () => {
+    const diff = [
+      "diff --git a/main.rs b/main.rs",
+      "--- a/main.rs",
+      "+++ b/main.rs",
+      "@@ -1,2 +1,2 @@",
+      " /*",
+      "- * old note",
+      "+ * new note",
+      "@@ -20 +20 @@",
+      "-run_old();",
+      "+run_new();",
+      "",
+    ].join("\n");
+
+    const counts = countsFor(diff);
+
+    expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });
+  });
+
   it("preserves comment markers inside Rust raw strings", () => {
     const diff = [
       "diff --git a/main.rs b/main.rs",
