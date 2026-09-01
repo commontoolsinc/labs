@@ -549,16 +549,19 @@ describe("stage G SpaceServer recovery seams", () => {
       getLogger("space-server").countsByKey["watermark-seal-failed"]?.warn ??
         0;
     const failuresBefore = watermarkFailureCount();
-    let failedWatermarkCommits = 0;
+    const retryCommitGate = Promise.withResolvers<void>();
+    let watermarkCommitAttempts = 0;
     runtime.edit = (options) => {
       const tx = edit(options);
       const commit = tx.commit.bind(tx);
       tx.commit = () => {
         if (
-          failedWatermarkCommits === 0 &&
-          waveRunContextOf(tx)?.actionId === "server-execution/watermark"
+          waveRunContextOf(tx)?.actionId !== "server-execution/watermark"
         ) {
-          failedWatermarkCommits += 1;
+          return commit();
+        }
+        watermarkCommitAttempts += 1;
+        if (watermarkCommitAttempts === 1) {
           const reason = new Error("injected watermark commit failure");
           return Promise.resolve({
             error: {
@@ -567,6 +570,9 @@ describe("stage G SpaceServer recovery seams", () => {
               reason,
             },
           });
+        }
+        if (watermarkCommitAttempts === 2) {
+          return retryCommitGate.promise.then(() => commit());
         }
         return commit();
       };
@@ -589,24 +595,32 @@ describe("stage G SpaceServer recovery seams", () => {
       () => watermarkFailureCount() > failuresBefore,
       "the failed watermark transaction to be reported",
     );
-    expect(failedWatermarkCommits).toBe(1);
-    expect(created.watermark).toBeLessThan(first.seq);
+    expect(watermarkCommitAttempts).toBe(1);
 
     const second = await server.writeDocument(
       space,
       "of:watermark-failure-second",
       { n: 2 },
     );
-    created.enqueueCommit({
-      space,
-      seq: second.seq,
-      class: "authored",
-      sessionId: "session:watermark-failure",
-      writes: [{ id: "of:watermark-failure-second", scopeKey: "space" }],
-    });
+    try {
+      created.enqueueCommit({
+        space,
+        seq: second.seq,
+        class: "authored",
+        sessionId: "session:watermark-failure",
+        writes: [{ id: "of:watermark-failure-second", scopeKey: "space" }],
+      });
+      await waitUntil(
+        () => watermarkCommitAttempts === 2,
+        "the fresh input to start the retry transaction",
+      );
+      expect(created.watermark).toBeLessThan(first.seq);
+    } finally {
+      retryCommitGate.resolve();
+    }
     await waitUntil(
       () => created.watermark >= second.seq,
-      "the watermark to advance after fresh input",
+      "the watermark to advance after the retry commits",
     );
   });
 
