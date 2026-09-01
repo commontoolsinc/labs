@@ -399,6 +399,32 @@ export default pattern(() => {
     poll.options[0]?.addedByName === "Alex"
   );
 
+  // The empty state is the only thing on the board before anyone adds an
+  // option, and its job is to say who can do something about that. It reads
+  // differently to a viewer with no host to wait for than to the host
+  // themselves, so both are checked; between them they are every branch the
+  // hint has except the one naming somebody else, which needs a second
+  // identity and belongs to multi-user.test.tsx.
+  const assert_empty_state_awaits_a_host = assert(() =>
+    poll.optionCount === 0 &&
+    findNode(poll[UI], (node) => hasExactText(node, "No options yet")) !==
+      undefined &&
+    findNode(
+        poll[UI],
+        (node) => hasExactText(node, "Waiting for a host to join."),
+      ) !== undefined
+  );
+
+  const assert_empty_state_prompts_the_host = assert(() =>
+    poll.optionCount === 0 &&
+    findNode(poll[UI], (node) => hasExactText(node, "No options yet")) !==
+      undefined &&
+    findNode(
+        poll[UI],
+        (node) => hasExactText(node, "Add the first one above."),
+      ) !== undefined
+  );
+
   const assert_two_options = assert(() => poll.options.length === 2);
 
   const assert_green_vote_recorded = assert(() => {
@@ -722,6 +748,8 @@ export default pattern(() => {
       { action: action_try_log_before_join },
       { action: action_try_vote_before_join },
       { assertion: assert_no_vote_without_membership },
+      // Nobody has joined, so the board has no host to name.
+      { assertion: assert_empty_state_awaits_a_host },
 
       // First join → claims admin
       { action: action_join_as_alex },
@@ -734,6 +762,9 @@ export default pattern(() => {
       // claimHost is a harmless no-op when the caller is already host.
       { action: action_claim_host },
       { assertion: assert_still_alex_host },
+
+      // Alex hosts now, so the same empty board asks him for the first option.
+      { assertion: assert_empty_state_prompts_the_host },
 
       // Admin adds options
       { action: action_add_chipotle },
