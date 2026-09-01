@@ -49,28 +49,40 @@ export interface ResolveSkillsShHitPinOptions {
   readonly now?: () => string;
 }
 
-interface ParsedHitId {
-  owner: string;
-  repo: string;
-  slug: string;
+/** Validated path segments carried by a skills.sh discovery id. */
+export interface SkillsShAddressSegments {
+  readonly owner: string;
+  readonly repo: string;
+  readonly slug: string;
 }
 
 /** Returns the three trusted path segments, or refuses before any request. */
-const parseHitId = (hit: SkillsShSearchHit): ParsedHitId => {
-  const [owner, repo, slug, extra] = hit.id.split("/");
+export const parseSkillsShSkillId = (id: string): SkillsShAddressSegments => {
+  const [owner, repo, slug, extra] = id.split("/");
   if (
     extra !== undefined || owner === undefined || repo === undefined ||
     slug === undefined || !OWNER_PATTERN.test(owner) ||
     !REPO_PATTERN.test(repo) || !SLUG_PATTERN.test(slug) ||
-    DOT_ONLY_SEGMENT.test(repo) || DOT_ONLY_SEGMENT.test(slug) ||
-    hit.source !== `${owner}/${repo}`
+    DOT_ONLY_SEGMENT.test(repo) || DOT_ONLY_SEGMENT.test(slug)
   ) {
+    throw new SkillsShPinResolutionError(
+      "invalid_hit",
+      "skills.sh pin resolution requires an id with owner, repository, and skill segments",
+    );
+  }
+  return { owner, repo, slug };
+};
+
+/** Adds the discovery hit's redundant source agreement to the id check. */
+const parseHitId = (hit: SkillsShSearchHit): SkillsShAddressSegments => {
+  const parsed = parseSkillsShSkillId(hit.id);
+  if (hit.source !== `${parsed.owner}/${parsed.repo}`) {
     throw new SkillsShPinResolutionError(
       "invalid_hit",
       "skills.sh pin resolution requires an id whose owner and repository match its source",
     );
   }
-  return { owner, repo, slug };
+  return parsed;
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
@@ -125,16 +137,13 @@ const fetchGithubObject = async (
   return object;
 };
 
-/**
- * Resolves `hit` to the full commit SHA at its source repository's default
- * branch head. The registry's own served hash is not consulted or stored: it
- * is an unverified change detector, not a pin.
- */
-export const resolveSkillsShHitPin = async (
-  hit: SkillsShSearchHit,
+/** Shared GitHub resolution after the discovery address has been validated. */
+const resolveSkillsShParsedPin = async (
+  id: string,
+  parsed: SkillsShAddressSegments,
   options: ResolveSkillsShHitPinOptions = {},
 ): Promise<SkillsShPinnedAddress> => {
-  const { owner, repo, slug } = parseHitId(hit);
+  const { owner, repo, slug } = parsed;
   const fetch = options.fetch ?? defaultHarnessFetch;
   const repositoryUrl = `${GITHUB_API_BASE_URL}/repos/${owner}/${repo}`;
   const repository = await fetchGithubObject(fetch, repositoryUrl);
@@ -165,7 +174,7 @@ export const resolveSkillsShHitPin = async (
   }
 
   return {
-    id: hit.id,
+    id,
     owner,
     repo,
     slug,
@@ -173,3 +182,24 @@ export const resolveSkillsShHitPin = async (
     resolvedAt: (options.now ?? (() => new Date().toISOString()))(),
   };
 };
+
+/**
+ * Resolves a validated discovery id without asking the registry for anything
+ * else. The repository mapping is derived from the id's own path segments.
+ */
+export const resolveSkillsShSkillIdPin = async (
+  id: string,
+  options: ResolveSkillsShHitPinOptions = {},
+): Promise<SkillsShPinnedAddress> =>
+  await resolveSkillsShParsedPin(id, parseSkillsShSkillId(id), options);
+
+/**
+ * Resolves `hit` to the full commit SHA at its source repository's default
+ * branch head. The registry's own served hash is not consulted or stored: it
+ * is an unverified change detector, not a pin.
+ */
+export const resolveSkillsShHitPin = async (
+  hit: SkillsShSearchHit,
+  options: ResolveSkillsShHitPinOptions = {},
+): Promise<SkillsShPinnedAddress> =>
+  await resolveSkillsShParsedPin(hit.id, parseHitId(hit), options);

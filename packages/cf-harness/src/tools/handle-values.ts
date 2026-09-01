@@ -27,6 +27,7 @@ import {
 } from "../handle-table.ts";
 import { ADDRESS_HANDLE_TOKEN_PREFIX } from "../contracts/handle-table.ts";
 import type { HarnessToolContext } from "./types.ts";
+import type { HarnessHandleCapability } from "../contracts/handle-table.ts";
 
 export type HandleValueResolution =
   | { value: string; error?: undefined }
@@ -81,6 +82,7 @@ export const resolveHandleValue = async (
   context: HandleValueResolutionContext,
   handle: string,
   label: string,
+  options: { capability?: HarnessHandleCapability } = {},
 ): Promise<HandleValueResolution> => {
   const trimmed = handle.trim();
   if (trimmed === "") {
@@ -106,6 +108,15 @@ export const resolveHandleValue = async (
       : resolveHandleRef(context.handleTable, trimmed));
   if (entry === undefined) {
     return { error: `${label} does not name a handle this run holds` };
+  }
+  if (
+    entry.capability === "skill-context" &&
+    options.capability !== "skill-context"
+  ) {
+    return {
+      error:
+        `${label} cannot consume a skill-context handle; only delegate_task skillHandle can`,
+    };
   }
   const ref = entry.ref;
   let pieces;

@@ -110,16 +110,14 @@ it above.
 **The ranking signal is not imported.** See below; this is load-bearing enough
 to have its own section.
 
-**Egress.** Stage 1 discovery runs on the configured parent surface and returns
-metadata only. Stage 3 moves discovery and acquisition together into a
-dedicated child with web reach and no secrets, using
-`WEB_FETCH_SUBAGENT_PROFILE_CONFIG` as its constrained shape rather than adding
-registry search to the existing hostile-web-text profile. The decomposition is
-the one CT-2078 proved: the acquirer has web reach and no task data, the user
-has task data and no acquisition surface. The residual channel is real and
-unclosed: **a search query can encode anything the searcher knows**, so a parent
-that has read a secret and then chooses what to search for is a channel by
-construction. CT-2068 names this; this plan does not solve it, and the mirror
+**Egress.** Discovery and acquisition are host effects on the configured parent
+surface. Discovery returns metadata only. Acquisition resolves and fetches a
+pinned source, applies the complete-payload refusal, writes the admitted text
+behind a capability-typed handle, and returns that handle without returning the
+text. No model with web reach performs either fetch. The residual channel is
+real and unclosed: **a search query can encode anything the searcher knows**, so
+a parent that has read a secret and then chooses what to search for is a channel
+by construction. CT-2068 names this; this plan does not solve it, and the mirror
 below is what eventually does.
 
 ## Part 2 — Handle-load: the text never reaches the chooser
@@ -129,6 +127,10 @@ below is what eventually does.
 
 - `delegate_task` takes `skillHandle`, a token naming a cell whose value is
   skill text (`packages/cf-harness/src/prompt-loop.ts`).
+- An acquired token carries the `skill-context` handle capability. Exactly the
+  `delegate_task.skillHandle` slot may consume it; browser value bindings,
+  `describe_handle`, generic tool-input swapping, delegation prose, and child
+  returns refuse it or keep it opaque.
 - `resolveHandleValue` materializes it trusted-side
   (`packages/cf-harness/src/tools/handle-values.ts`): handle-table membership
   is mandatory, only a `string` resolves — a number or object is refused
@@ -147,11 +149,12 @@ below is what eventually does.
 
 So the load path is done. What this plan adds is only what fills the cell.
 
-**The acquisition step.** An acquiring child — web reach, no secrets — fetches
-a skill from a **pinned** address, verifies it, and writes the text into a
-cell via `run_pattern`. It returns a handle. The parent can describe that
-handle and cannot read it. The using child receives it as `skillHandle` and
-the text materializes trusted-side at spawn, never passing through the parent.
+**The acquisition step.** The host-side `acquire_skill` effect resolves a
+discovery id, fetches a skill from a **pinned** address, verifies its complete
+payload inventory, and writes the text into a cell. It returns a handle. The
+parent receives the handle and inert load or refusal metadata, never the skill
+text. The using child receives it later as `skillHandle`, and the text
+materializes trusted-side at spawn without passing through the parent.
 
 **Pinned means one of exactly two things**, and a fetch that is neither is
 refused:
@@ -164,11 +167,12 @@ refused:
    us.
 
 A skills.sh id alone is **not** a pinned address. Resolving one into a pinned
-address — reading the source repository, choosing a commit — is a discovery-side
-step whose output is an address, and the acquiring child fetches only the
-address, never the id.
+address — reading the source repository, choosing a commit — is a host-side
+step whose output is an address, and pinned acquisition fetches only that
+address.
 
-That resolution is host-side machinery rather than a model-facing tool. It
+That resolution is host-side machinery inside acquisition rather than a
+separate model-facing tool. It
 reads the source repository's default branch through the GitHub API, records
 the full commit SHA at the branch head and the resolution time, and returns
 `{id, owner, repo, slug, commitSha, resolvedAt}`. The registry's served hash is
@@ -193,7 +197,7 @@ with optional `scripts/` (executable code), `references/`, and `assets/` — and
 the registry's download endpoint returns whatever files the snapshot holds. An
 unenforced assumption about what arrives is not a boundary.
 
-Enforcement lives in the acquiring child's write step, at the single point
+Enforcement lives in the host acquisition write step, at the single point
 where fetched bytes become a cell value, and it is a **whitelist on paths, not
 a blacklist on names**:
 
@@ -208,6 +212,16 @@ a blacklist on names**:
   reference `scripts/foo.py` is not the same skill without it. Admitting the
   prose alone yields a skill that will instruct the model to run something
   that is not there.
+
+For GitHub commit acquisition, the inventory is the recursive tree API at the
+pinned SHA. A response marked `truncated` refuses with its own reason: an unread
+listing is unknown, not an empty tail. Candidate roots are directories whose
+root `SKILL.md` has a final directory segment exactly byte-equal to the
+discovery slug, plus repository root when the repository name itself equals the
+slug. No normalization or case folding participates. Zero and multiple
+candidates refuse separately. The path whitelist then judges only the selected
+candidate root's subtree; sibling skills and repository files outside that
+subtree are not part of the acquired payload.
 
 Two structural properties back this up rather than duplicating it. A
 handle-delivered skill **bypasses the registry entirely**, and
@@ -226,7 +240,7 @@ Checked in code, that is wrong in a way worth stating precisely, because it
 changes what this plan has to build.
 
 **The labeling half exists.** `packages/runner/src/cfc/external-ingest.ts`
-mints an `ExternalIngest` provenance mark on a durably-appended value.
+mints an `ExternalIngest` provenance mark on a durably-written value.
 `CFC_ATOM_TYPE.ExternalIngest` is classified as `provenance` in
 `atom-classes.ts`. The design is a **split-mint**: every field of the mark
 comes from the trusted operator-side helper and none from the presenter's
@@ -238,10 +252,11 @@ forge oracle — any pattern reaching `cell.tx` could stamp a trusted "arrived
 via channel X" mark on its own writes. It is documented in
 [`../features/vouched-ingest-channel-mint.md`](../features/vouched-ingest-channel-mint.md).
 
-That is exactly the shape this part needs, and the reason is the same one: the
-metadata we want on a fetched skill — which registry, which pinned address,
-which digest, when — is all known to the trusted fetcher and none of it should
-be read out of the fetched bytes.
+That is exactly the shape this part needs. The fetch variant is explicitly the
+weaker claim: nobody vouched for a presenter, so it carries no channel or
+audience. It records only the exact pinned source URL and commit SHA, fetch
+time, and the digest the trusted host computed over the fetched bytes. None of
+those fields is read out of the fetched text.
 
 **What is missing is the declassification direction**, not the labeling.
 CT-2068's proposal is that an integrity fact ("this came from a static,
@@ -260,10 +275,9 @@ integrity fact that *permits* something — that is CT-2068's declassification
 work and it should be built deliberately, with this as its driving use case
 rather than its first quiet exception.
 
-Recorded alongside the mark, because they are what a later reader will want:
-the pinned address fetched, the verified digest, the verification method
-(`well-known-digest` or `git-commit-sha`), the discovery id that led here if
-any, and the fetch time. The digest is the verified one, not the registry's
+The tool result records the verification method (`well-known-digest` or
+`git-commit-sha`) and the discovery id separately as inert acquisition
+metadata. The provenance digest is the host-computed one, not the registry's
 `hash` — which is not recorded as a digest at all, because recording an
 unverified server assertion in a provenance field is how it later gets read as
 a verified one.
@@ -338,11 +352,12 @@ there.
    source repository's full default-branch commit SHA, or refusal. The output
    is an immutable pinned address for a later acquisition step, never the
    registry's unverified hash.
-3. **Isolated verified acquisition.** Move discovery into a dedicated
-   no-secrets child alongside the `.well-known` digest path and commit-SHA
-   acquisition path, both fail-closed, with the single-file payload whitelist
-   and its refusal. Write into a cell, return a handle, and prove with an
-   adversarial canary that skill text never reached the parent's context.
+3. **Isolated verified acquisition.** The parent-facing `acquire_skill` effect
+   resolves and fetches host-side, with commit-SHA acquisition fail-closed, the
+   recursive single-file payload whitelist, and first-class refusal. It writes
+   into a cell, returns a handle, and proves with an adversarial canary that the
+   parent never received the skill text. A `.well-known` digest route can join
+   the same boundary when a source publishes one.
 4. **The provenance mark**, minted split-mint style on the acquiring write.
 5. **The mirror.** The registry's terms explicitly encourage it —
    *"caching results on your own infrastructure, is encouraged and not

@@ -3,6 +3,14 @@ import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CellScope } from "../builder/types.ts";
 
+/** Durable cell location where an external-ingest mark is anchored. */
+export type CfcExternalIngestTarget = {
+  readonly space: MemorySpace;
+  readonly id: URI;
+  readonly scope: CellScope;
+  readonly path: readonly string[];
+};
+
 /**
  * The verified channel metadata a vouched ingest channel stamps onto a
  * transaction so the commit pipeline can mint an `ExternalIngest` provenance
@@ -32,13 +40,28 @@ export type CfcExternalIngestMeta = {
    * lands at the cell root for both a whole-object `set` and an element-wise
    * array append, where the diffed writes never touch the array path itself.
    */
-  readonly target: {
-    readonly space: MemorySpace;
-    readonly id: URI;
-    readonly scope: CellScope;
-    readonly path: readonly string[];
-  };
+  readonly target: CfcExternalIngestTarget;
 };
+
+/**
+ * Trusted metadata for a pinned fetch. The claim is weaker than a vouched
+ * channel: it identifies the immutable source the host read and carries no
+ * presenter or audience.
+ */
+export type CfcExternalFetchIngestMeta = {
+  readonly pinnedSource: {
+    readonly url: string;
+    readonly commitSha: string;
+  };
+  readonly receivedAt: string;
+  readonly valueDigest: string;
+  readonly target: CfcExternalIngestTarget;
+};
+
+/** The private split-mint input selected for one transaction. */
+type CfcExternalIngestStamp =
+  | ({ readonly kind: "vouched-channel" } & CfcExternalIngestMeta)
+  | ({ readonly kind: "fetch" } & CfcExternalFetchIngestMeta);
 
 /**
  * Per-transaction external-ingest stamps. Deliberately a module-private
@@ -53,7 +76,7 @@ export type CfcExternalIngestMeta = {
  */
 const ingestStamps = new WeakMap<
   IExtendedStorageTransaction,
-  CfcExternalIngestMeta
+  CfcExternalIngestStamp
 >();
 
 /**
@@ -71,11 +94,43 @@ export const stampExternalIngest = (
   meta: CfcExternalIngestMeta,
 ): void => {
   if (ingestStamps.has(tx)) return;
-  ingestStamps.set(tx, deepFreeze({ ...meta, target: { ...meta.target } }));
+  ingestStamps.set(
+    tx,
+    deepFreeze({
+      kind: "vouched-channel",
+      ...meta,
+      target: { ...meta.target },
+    }),
+  );
+  tx.markCfcRelevant("external-ingest");
+};
+
+/**
+ * Stamps a transaction with pinned-fetch provenance from trusted host
+ * metadata. No field is accepted from fetched payload bytes; `valueDigest` is
+ * computed over those bytes by the trusted host.
+ *
+ * PRIVILEGED: only call from trusted host code. The stamp it sets is honored
+ * unconditionally by the mint.
+ */
+export const stampExternalFetchIngest = (
+  tx: IExtendedStorageTransaction,
+  meta: CfcExternalFetchIngestMeta,
+): void => {
+  if (ingestStamps.has(tx)) return;
+  ingestStamps.set(
+    tx,
+    deepFreeze({
+      kind: "fetch",
+      ...meta,
+      pinnedSource: { ...meta.pinnedSource },
+      target: { ...meta.target },
+    }),
+  );
   tx.markCfcRelevant("external-ingest");
 };
 
 /** The external-ingest stamp for this transaction, if any. */
 export const externalIngestStamp = (
   tx: IExtendedStorageTransaction,
-): CfcExternalIngestMeta | undefined => ingestStamps.get(tx);
+): CfcExternalIngestStamp | undefined => ingestStamps.get(tx);

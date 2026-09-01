@@ -20,6 +20,7 @@ import type { HarnessHandleTable } from "../contracts/handle-table.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
 import type { PatternIndexClient } from "../pattern-index/client.ts";
 import type { PatternIndexPublicationLedger } from "../pattern-index/publish-ledger.ts";
+import type { SkillsShAcquisitionClient } from "../skills-sh/acquisition.ts";
 import type { SkillsShSearchClient } from "../skills-sh/search-client.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
@@ -45,16 +46,17 @@ export interface HarnessToolContext {
 
   /**
    * The run's handle table, as it stands at the invocation. Undefined until
-   * the run mints its first handle. `describe_handle` is the only tool that
-   * reads it: every other tool sees its input with tokens already resolved to
-   * addresses by the prompt loop.
+   * the run mints its first handle. `describe_handle` reads it directly, and
+   * value-handle consumers use it to prove membership and enforce entry
+   * capabilities. Ordinary tool inputs see general tokens resolved to
+   * addresses by the prompt loop; restricted tokens remain opaque.
    */
   handleTable?: HarnessHandleTable;
 
   /**
    * The run's trusted Fabric session, lazy and cached by the engine.
    * Undefined when the run has no fabric session configured, which also
-   * keeps `run_pattern` out of the tool surface.
+   * keeps `run_pattern` and `acquire_skill` out of the tool surface.
    */
   getFabricSession?: () => Promise<HarnessFabricSession>;
 
@@ -72,6 +74,15 @@ export interface HarnessToolContext {
    * `search_skills` out of the tool surface.
    */
   getSkillsShSearchClient?: () => Promise<SkillsShSearchClient>;
+
+  /**
+   * The run's host-side pinned acquisition client. Undefined when external
+   * skill acquisition is not configured, which keeps `acquire_skill` absent.
+   */
+  getSkillsShAcquisitionClient?: () => Promise<SkillsShAcquisitionClient>;
+
+  /** Mints the sole capability that may enter delegate_task.skillHandle. */
+  mintSkillContextHandle?(ref: string): Promise<string>;
 
   /**
    * Whether a pattern the model authored and ran successfully is published

@@ -252,8 +252,11 @@ export type {
 } from "./harness-write-policy.ts";
 export { evaluateHarnessWriteFileAuthorization } from "./harness-write-policy.ts";
 export {
+  type CfcExternalFetchIngestMeta,
   type CfcExternalIngestMeta,
+  type CfcExternalIngestTarget,
   externalIngestStamp,
+  stampExternalFetchIngest,
   stampExternalIngest,
 } from "./external-ingest.ts";
 export {

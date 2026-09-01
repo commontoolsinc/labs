@@ -75,6 +75,32 @@ Deno.test("cfcAtom.externalIngest builds an external-ingest atom", () => {
   );
 });
 
+Deno.test("cfcAtom.externalFetchIngest builds fetch provenance without an audience", () => {
+  const atom = cfcAtom.externalFetchIngest(
+    {
+      url:
+        "https://raw.githubusercontent.com/owner/repo/0123456789abcdef0123456789abcdef01234567/skills/plaid/SKILL.md",
+      commitSha: "0123456789abcdef0123456789abcdef01234567",
+    },
+    "2026-09-01T12:00:00.000Z",
+    "sha256:payload",
+  );
+
+  assertEquals(atom, {
+    type: CFC_ATOM_TYPE.ExternalIngest,
+    kind: "fetch",
+    pinnedSource: {
+      url:
+        "https://raw.githubusercontent.com/owner/repo/0123456789abcdef0123456789abcdef01234567/skills/plaid/SKILL.md",
+      commitSha: "0123456789abcdef0123456789abcdef01234567",
+    },
+    receivedAt: "2026-09-01T12:00:00.000Z",
+    valueDigest: "sha256:payload",
+  });
+  assertEquals(Object.hasOwn(atom, "channel"), false);
+  assertEquals(Object.hasOwn(atom, "audience"), false);
+});
+
 Deno.test("cfcAtom.promptSlotBound builds a prompt-slot-bound atom", () => {
   const source = cfcAtom.userSurfaceInput("did:key:user", "chat", "digest123");
   assertEquals(

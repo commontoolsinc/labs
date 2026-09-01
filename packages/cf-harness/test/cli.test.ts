@@ -2097,6 +2097,7 @@ Deno.test("runCfHarnessCli prints machine-readable capabilities", async () => {
   assertEquals(capabilities.parentToolIds.includes("browser"), false);
   assertEquals(capabilities.builtinToolIds.includes("run_pattern"), true);
   assertEquals(capabilities.builtinToolIds.includes("search_skills"), true);
+  assertEquals(capabilities.builtinToolIds.includes("acquire_skill"), true);
   assertEquals(capabilities.features.runPattern, true);
   assertEquals(capabilities.builtinToolIds.includes("browser"), true);
   assertEquals(capabilities.subagentProfiles.includes("web_search"), true);
@@ -4082,6 +4083,39 @@ Deno.test("resolveCfHarnessCliSystemPrompt includes enabled skill guidance", () 
 });
 
 Deno.test("formatCfHarnessTranscriptEvent formats assistant tool calls and tool results", () => {
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-acquire-1",
+          type: "function",
+          function: {
+            name: "acquire_skill",
+            arguments: '{"id":"membranedev/application-skills/plaid"}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: acquire_skill(id="membranedev/application-skills/plaid")\n',
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-acquire-2",
+          type: "function",
+          function: { name: "acquire_skill", arguments: '{"id":42}' },
+        }],
+      },
+      transcript: [],
+    }),
+    "assistant -> tools: acquire_skill\n",
+  );
   assertEquals(
     formatCfHarnessTranscriptEvent({
       message: {
@@ -6655,6 +6689,61 @@ Deno.test("parseCfHarnessCliArgs rejects --allow-tool search_skills without a sk
     Error,
     "missing --skills-registry-url",
   );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects --allow-tool acquire_skill without both backings", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--allow-tool", "acquire_skill"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "requires a fabric session",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--allow-tool",
+          "acquire_skill",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "missing --skills-registry-url",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs accepts --allow-tool acquire_skill with both backings", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--allow-tool",
+      "acquire_skill",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--skills-registry-url",
+      "https://registry.example",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(parsed.allowedToolIds, ["acquire_skill"]);
 });
 
 Deno.test("parseCfHarnessCliArgs reads the pattern index URL from the environment", async () => {

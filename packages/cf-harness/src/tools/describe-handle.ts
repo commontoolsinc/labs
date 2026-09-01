@@ -23,6 +23,9 @@ export interface DescribeHandleToolOutput {
   /** Whether a schema was found to report, from either source. */
   hasSchema: boolean;
 
+  /** Named capability refusal for a known but non-describable handle. */
+  error?: string;
+
   /**
    * The reported schema: fabric-declared, or harness-derived, whichever
    * answered first in that order.
@@ -85,7 +88,7 @@ export const describeHandleToolDescriptor: HarnessToolDescriptor = {
   toolId: "describe_handle",
   title: "Describe Handle",
   description:
-    "Report the shape of the referent behind a handle token: its recorded schema and path, never its value. Use it to check that a reference is the kind of thing a step expects before passing it on.",
+    "Report the shape of a general handle's referent: its recorded schema and path, never its value. A capability-restricted handle returns a named refusal. Use it to check that a reference is the kind of thing a step expects before passing it on.",
   effectClass: "read",
   inputSchema: {
     type: "object",
@@ -107,6 +110,7 @@ export const describeHandleToolDescriptor: HarnessToolDescriptor = {
       hasSchema: { type: "boolean" },
       schema: {},
       path: { type: "array", items: { type: "string" } },
+      error: { type: "string" },
     },
     required: ["outputId", "token", "known", "hasSchema"],
     additionalProperties: false,
@@ -205,6 +209,16 @@ export const describeHandleTool: HarnessToolDefinition<
         token,
         known: false,
         hasSchema: false,
+      };
+    }
+    if (entry.capability === "skill-context") {
+      return {
+        outputId,
+        token: entry.token,
+        known: true,
+        hasSchema: false,
+        error:
+          "describe_handle cannot consume a skill-context handle; only delegate_task skillHandle can",
       };
     }
     const path = pathSegmentsOf(entry.ref);

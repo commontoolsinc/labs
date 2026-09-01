@@ -941,7 +941,7 @@ const subagentProfileConfigForRun = (
  * rather than present-but-failing, even when an explicit allowlist names it.
  */
 const FABRIC_SESSION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
-  ["run_pattern", "assign_slug"] as const,
+  ["run_pattern", "assign_slug", "acquire_skill"] as const,
 );
 
 /**
@@ -953,8 +953,13 @@ const PATTERN_INDEX_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
 );
 
 /** The metadata-only tool gated on configured skills.sh discovery. */
-const SKILLS_SH_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+const SKILLS_SH_SEARCH_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
   ["search_skills"] as const,
+);
+
+/** The pinned acquisition tool gated separately from discovery. */
+const SKILLS_SH_ACQUISITION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+  ["acquire_skill"] as const,
 );
 
 /**
@@ -973,6 +978,7 @@ interface HarnessToolBackingAvailability {
   fabricSessionAvailable: boolean;
   patternIndexAvailable: boolean;
   skillsShSearchAvailable: boolean;
+  skillsShAcquisitionAvailable: boolean;
   skillRegistryAvailable: boolean;
 }
 
@@ -983,7 +989,10 @@ const withheldToolIds = (
   new Set([
     ...(availability.fabricSessionAvailable ? [] : FABRIC_SESSION_TOOL_IDS),
     ...(availability.patternIndexAvailable ? [] : PATTERN_INDEX_TOOL_IDS),
-    ...(availability.skillsShSearchAvailable ? [] : SKILLS_SH_TOOL_IDS),
+    ...(availability.skillsShSearchAvailable ? [] : SKILLS_SH_SEARCH_TOOL_IDS),
+    ...(availability.skillsShAcquisitionAvailable
+      ? []
+      : SKILLS_SH_ACQUISITION_TOOL_IDS),
     ...(availability.skillRegistryAvailable ? [] : SKILL_REGISTRY_TOOL_IDS),
   ]);
 
@@ -1013,7 +1022,7 @@ const seedSubagentHandleTable = (
   for (const text of [input.goal, input.context ?? ""]) {
     for (const match of text.matchAll(new RegExp(HANDLE_TOKEN_PATTERN))) {
       const entry = resolveHandleToken(parentTable, match[0]);
-      if (entry !== undefined) {
+      if (entry !== undefined && entry.capability === undefined) {
         seeded.set(entry.token, entry);
       }
     }
@@ -1126,10 +1135,70 @@ const resolveChildHandleTokens = (
   const table = childEngine.handleTable;
   return text.replace(
     new RegExp(HANDLE_TOKEN_PATTERN.source, "g"),
-    (token) =>
-      (table === undefined ? undefined : resolveHandleToken(table, token))
-        ?.ref ?? SCRUBBED_CHILD_HANDLE_TOKEN,
+    (token) => {
+      const entry = table === undefined
+        ? undefined
+        : resolveHandleToken(table, token);
+      return entry !== undefined && entry.capability === undefined
+        ? entry.ref
+        : SCRUBBED_CHILD_HANDLE_TOKEN;
+    },
   );
+};
+
+/**
+ * Finds the first skill-context token used outside the one slot authorized to
+ * consume it. Keys count as input too. `describe_handle` is allowed to see
+ * the token so that it can return its own named, value-free refusal.
+ */
+const restrictedSkillContextToken = (
+  table: HarnessHandleTable | undefined,
+  toolId: string,
+  value: unknown,
+  path: readonly string[] = [],
+): string | undefined => {
+  if (table === undefined) return undefined;
+  if (typeof value === "string") {
+    for (const match of value.matchAll(new RegExp(HANDLE_TOKEN_PATTERN))) {
+      const entry = resolveHandleToken(table, match[0]);
+      if (entry?.capability !== "skill-context") continue;
+      const authorized = toolId === "delegate_task" && path.length === 1 &&
+        path[0] === "skillHandle";
+      if (!authorized && toolId !== "describe_handle") return entry.token;
+    }
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const found = restrictedSkillContextToken(
+        table,
+        toolId,
+        value[index],
+        [...path, String(index)],
+      );
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, entry] of Object.entries(value)) {
+      const keyMatch = restrictedSkillContextToken(
+        table,
+        toolId,
+        key,
+        [...path, key],
+      );
+      if (keyMatch !== undefined) return keyMatch;
+      const found = restrictedSkillContextToken(
+        table,
+        toolId,
+        entry,
+        [...path, key],
+      );
+      if (found !== undefined) return found;
+    }
+  }
+  return undefined;
 };
 
 /**
@@ -2492,7 +2561,12 @@ export class CfHarnessPromptLoop {
       ...DEFAULT_PROMPT_LOOP_TOOL_IDS,
       ...(availability.fabricSessionAvailable ? FABRIC_SESSION_TOOL_IDS : []),
       ...(availability.patternIndexAvailable ? PATTERN_INDEX_TOOL_IDS : []),
-      ...(availability.skillsShSearchAvailable ? SKILLS_SH_TOOL_IDS : []),
+      ...(availability.skillsShSearchAvailable
+        ? SKILLS_SH_SEARCH_TOOL_IDS
+        : []),
+      ...(availability.skillsShAcquisitionAvailable
+        ? SKILLS_SH_ACQUISITION_TOOL_IDS
+        : []),
     ];
     const withheld = withheldToolIds(availability);
     this.#allowedToolIds = new Set(
@@ -2530,6 +2604,7 @@ export class CfHarnessPromptLoop {
       fabricSessionAvailable: this.engine.fabricSessionAvailable,
       patternIndexAvailable: this.engine.patternIndexAvailable,
       skillsShSearchAvailable: this.engine.skillsShSearchAvailable,
+      skillsShAcquisitionAvailable: this.engine.skillsShAcquisitionAvailable,
       // A configured skills root is what a run scans into the registry the
       // skill tools read, so its presence is the tools' backing — a run that
       // has yet to scan still knows it will, and one that never will offers
@@ -3291,6 +3366,28 @@ export class CfHarnessPromptLoop {
       });
     }
     const parsedAllowedInput = toolInput.input;
+    const restrictedToken = restrictedSkillContextToken(
+      this.engine.handleTable,
+      toolId,
+      parsedAllowedInput,
+    );
+    if (restrictedToken !== undefined) {
+      return await this.#rejectInvalidToolCall({
+        toolCall,
+        invalid: {
+          reason: "invalid-argument",
+          toolId,
+          expected:
+            "skill-context handles can be consumed only by delegate_task skillHandle",
+        },
+        sequence,
+        startedAt: activityStartedAt,
+        effectClass: tool.descriptor.effectClass,
+        ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
+        policyEventIndexes,
+        recordActivity,
+      });
+    }
     // Handle tokens resolve to their referents here, so policy evaluation,
     // summarization, and the tool itself all see the real addresses. Denial
     // summaries recorded above keep the tokens the model wrote. A
@@ -3457,6 +3554,7 @@ export class CfHarnessPromptLoop {
           this.engine.handleValueResolutionContext,
           delegateInput.skillHandle,
           "skillHandle",
+          { capability: "skill-context" },
         );
         if (resolution.error !== undefined) {
           return await this.#rejectInvalidToolCall({

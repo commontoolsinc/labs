@@ -132,6 +132,10 @@ What works today:
     identifiers, names, sources, registry-reported install counts, and the
     number of refused hits, never skill text. Install counts are unauthenticated
     and unverifiable telemetry, not a trust signal)
+  - `acquire_skill` (present only on the parent surface when both the skills
+    registry and a Fabric session are configured; resolves a discovery id to a
+    full GitHub commit, checks the complete recursive tree, and returns a handle
+    or a first-class refusal, never skill text)
 - composing published patterns: source the model authors may
   `import Sub from "cf:pattern:<patternId>"`, and `run_pattern` fetches and
   compiles each named pattern into the space before compiling the source that
@@ -299,9 +303,11 @@ From [packages/cf-harness](.):
   one thing here that calls the live registry, which is why it is a script you
   run rather than a test that runs itself; the committed tests use a captured
   response. It uses the same guarded client as the parent-only `search_skills`
-  tool and prints no skill text. Configure that tool with
+  tool and prints no skill text. Configure discovery and pinned acquisition with
   `--skills-registry-url` or `CF_HARNESS_SKILLS_REGISTRY_URL`; without either,
-  the tool is absent. The discovery half of
+  both tools are absent. `acquire_skill` additionally requires the three Fabric
+  session flags because its successful result is a durable cell handle. The
+  discovery half of
   [`../../docs/plans/external-skill-acquisition.md`](../../docs/plans/external-skill-acquisition.md)
   is what it exists to exercise.
 
@@ -944,12 +950,41 @@ do not offer it.
 
 #### Skill by handle
 
+`acquire_skill` fills this path without exposing its payload to the chooser. It
+takes an exact id returned by `search_skills`, resolves the source repository's
+default branch to a full commit SHA, reads GitHub's recursive tree at that
+commit, and derives the candidate root from exact path-segment equality with the
+discovery slug. No case folding or path normalization participates. Zero or
+multiple candidates refuse, and a tree response marked `truncated` refuses
+because an unread inventory is not evidence of absence.
+
+The instructions-only whitelist is scoped to the selected candidate root's
+subtree, so sibling skills and repository files outside that root do not leak
+into the payload decision. Within the subtree, exactly root `SKILL.md` is
+admitted. Every other path — including a directory, script, reference, asset, or
+package file — refuses the whole acquisition and is returned as sanitized, inert
+refusal metadata. Nothing is silently stripped: prose referring to a missing
+script would be a different and misleading skill. Only after this check does the
+host require root `SKILL.md` to be a regular Git tree file, stream at most 256
+KiB of pinned raw bytes, require non-empty UTF-8, and write them to a cell.
+
+The successful write carries the weaker `kind: "fetch"` `ExternalIngest`
+provenance variant. It records the exact pinned raw URL, commit SHA, fetch time,
+and the harness-computed SHA-256 of the fetched bytes. It has no channel or
+audience claim, grants no permission, and declassifies nothing. A registry hash
+is not a pin and never enters provenance. The tool returns the handle and this
+inert acquisition metadata; loading the handle remains a separate
+`delegate_task` decision.
+
 `delegate_task` takes an optional `skillHandle`: a handle the parent holds,
 naming a cell whose string value is skill text for the child. The text is
-materialized on the trusted host side at child spawn — through the same
-resolution contract as every other handle value: table membership mandatory,
-string-only, same-space-only, with a structured refusal naming the reference on
-any miss, delivered before any child exists — and injected into the child's
+materialized on the trusted host side at child spawn. Acquired handles carry the
+`skill-context` capability and only this exact slot can consume one:
+`describe_handle`, browser value binding, ordinary tool-input resolution,
+delegation goal/context seeding, and child-return resolution all refuse or keep
+it opaque. The authorized resolution still requires table membership, a string
+value, and the same Fabric space, with a structured refusal naming the reference
+on any miss before any child exists. The text is injected into the child's
 context as a `<skill_context source="handle:<token>">` block beside the
 profile's registry preload. The parent never reads the text, and the child never
 holds the handle. The return path is mediated too: every parent-facing return of
