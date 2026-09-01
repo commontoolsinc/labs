@@ -34,6 +34,7 @@
  * too much — and is fixed differently from a caller with many parent spans
  * doing a little each, which is a frequency problem.
  */
+
 import {
   ancestors,
   buildForest,

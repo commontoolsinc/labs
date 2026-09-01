@@ -31,6 +31,7 @@
  * never meets a refusal does not re-run on a metadata change either — so it
  * is documented here rather than pinned as a test.
  */
+
 import { describe, it } from "@std/testing/bdd";
 
 import { expect } from "@std/expect";

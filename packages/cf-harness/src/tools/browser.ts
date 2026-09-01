@@ -5,6 +5,7 @@
  * argument list, and the invocation that attaches the Browser Access lease
  * and keeps its endpoint out of everything the model reads.
  */
+
 import type { JSONSchema } from "@commonfabric/api";
 
 import {

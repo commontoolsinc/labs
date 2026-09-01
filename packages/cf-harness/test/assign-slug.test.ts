@@ -5,6 +5,7 @@
  * token that is not a piece, a position inside one, another space's
  * reference.
  */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { expect } from "@std/expect";

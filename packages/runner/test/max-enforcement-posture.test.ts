@@ -15,6 +15,7 @@
  *   terminal and reaches the scheduler's error channel with its reasons,
  *   rather than reading as a healthy, quietly empty piece.
  */
+
 import { describe, it } from "@std/testing/bdd";
 
 import { expect } from "@std/expect";

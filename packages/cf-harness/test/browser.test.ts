@@ -4,6 +4,7 @@
  * and the invocation path where a bound handle becomes a value trusted-side
  * and stays out of everything the model reads afterwards.
  */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { expect } from "@std/expect";

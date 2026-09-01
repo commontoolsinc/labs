@@ -4,6 +4,7 @@
  * announcement text — which must carry tokens and harness-authored prose
  * only, never the address behind a token.
  */
+
 import { describe, it } from "@std/testing/bdd";
 
 import { expect } from "@std/expect";

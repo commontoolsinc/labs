@@ -4,6 +4,7 @@
  * everything else — including a caller-provided opaque link the sanitizer
  * preserved, which `sealedPaths` never lists — passes through untouched.
  */
+
 import { describe, it } from "@std/testing/bdd";
 
 import { expect } from "@std/expect";

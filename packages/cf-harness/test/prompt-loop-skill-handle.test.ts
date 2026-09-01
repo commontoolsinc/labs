@@ -6,6 +6,7 @@
  * the child never holds the handle, and selection is by table membership
  * rather than by registry name.
  */
+
 import { describe, it } from "@std/testing/bdd";
 
 import { expect } from "@std/expect";

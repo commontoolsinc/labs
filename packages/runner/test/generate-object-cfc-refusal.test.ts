@@ -8,6 +8,7 @@
  * builtin does with one: it settles, once, with the refusal as its error, and
  * the request it could not send is staged once rather than once per retry.
  */
+
 import { expect } from "@std/expect";
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";

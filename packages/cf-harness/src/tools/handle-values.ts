@@ -18,6 +18,7 @@
  * only the first resolves. Without that check a handle field is a general read
  * of every cell in the run's space.
  */
+
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
 
 import {

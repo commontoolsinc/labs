@@ -18,6 +18,7 @@
  * shebang a lie. That half lives in `topics-snapshot-lib.ts`, which only the
  * export imports, and the test file holds a check that it stayed there.
  */
+
 export const repoRoot = new URL("..", import.meta.url).pathname;
 
 /** Run `cf` from the repository root and return stdout; throw on failure. */
