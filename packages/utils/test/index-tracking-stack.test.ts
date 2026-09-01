@@ -285,6 +285,65 @@ describe("IndexTrackingStack", () => {
     }
   });
 
+  describe("has()", () => {
+    for (const [where, height] of ARMS) {
+      describe(where, () => {
+        it("is true for a value the stack holds", () => {
+          const held = objects(2);
+          const stack = stackOf(height, held);
+
+          expect(stack.has(held[0]!)).toBe(true);
+          expect(stack.has(held[1]!)).toBe(true);
+        });
+
+        it("is false for a value the stack does not hold", () => {
+          const stack = stackOf(height, objects(2));
+
+          expect(stack.has({})).toBe(false);
+        });
+
+        it("is false once the value has been popped", () => {
+          const [kept, dropped] = objects(2) as [object, object];
+          const stack = stackOf(height, [kept, dropped]);
+
+          stack.pop();
+
+          expect(stack.has(kept)).toBe(true);
+          expect(stack.has(dropped)).toBe(false);
+        });
+
+        it("is true for a value held at more than one position", () => {
+          const twice = {};
+          const stack = stackOf(height, [twice, {}, twice]);
+
+          expect(stack.has(twice)).toBe(true);
+
+          stack.pop();
+          expect(stack.has(twice)).toBe(true);
+        });
+
+        it("is true for an `undefined` the stack holds", () => {
+          const stack = stackOf(height, [undefined]);
+
+          expect(stack.has(undefined)).toBe(true);
+        });
+
+        it("is true for a `NaN`, which strict comparison never finds", () => {
+          const stack = stackOf(height, [NaN]);
+
+          expect(stack.has(NaN)).toBe(true);
+        });
+
+        it("tells a held `-0` from a `0` the stack does not hold", () => {
+          const stack = stackOf(height, [-0]);
+
+          expect(stack.has(-0)).toBe(true);
+          expect(stack.has(0)).toBe(false);
+        });
+      });
+    }
+  });
+
   for (const lookup of LOOKUPS) {
     describe(`${lookup.name}()`, () => {
       /** The position of a repeated value this lookup reports, of two. */
