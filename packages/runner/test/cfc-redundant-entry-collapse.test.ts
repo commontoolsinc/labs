@@ -408,6 +408,87 @@ describe("CFC redundant entry collapse", () => {
     }
   });
 
+  it("keeps a wildcard-path stamp a declaration at the same pattern covers", async () => {
+    // A `*` path stands for many concrete paths, and the declared component
+    // can resolve differently at some of them, so the resolution computed at
+    // the pattern itself does not settle the question the collapse asks.
+
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = newRuntime(storageManager);
+    try {
+      const mapSchema = {
+        type: "object",
+        additionalProperties: {
+          type: "string",
+          ifc: { confidentiality: [cfcAtom.resource("Shared")] },
+        },
+      } as unknown as JSONSchema;
+      const mapId = runtime
+        .getCell<Record<string, string>>(
+          signer.did(),
+          "collapse-template-map",
+          mapSchema,
+        )
+        .getAsNormalizedFullLink().id;
+
+      // A `*`-child class template of the kind a declared coordinator
+      // container is stamped with, carrying exactly what the declaration
+      // beside it carries.
+      const seed = runtime.edit();
+      writeSeedEnvelopeDoc(seed, signer.did());
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: mapId,
+        path: [],
+      }, {
+        value: { kept: "1" },
+        cfc: {
+          version: 1,
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: {
+            version: 1,
+            entries: [
+              {
+                path: ["*"],
+                label: { confidentiality: [cfcAtom.resource("Shared")] },
+                origin: "declared",
+              },
+              {
+                path: ["*"],
+                label: { confidentiality: [cfcAtom.resource("Shared")] },
+                origin: "structure",
+                observes: "shape",
+              },
+            ],
+          },
+        },
+        // deno-lint-ignore no-explicit-any
+      } as any);
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      runtime.getCell<Record<string, string>>(
+        signer.did(),
+        "collapse-template-map",
+        mapSchema,
+        tx,
+      ).key("added").set("2");
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const entries = replicaEntries(storageManager, mapId);
+      expect(
+        entries.some((entry) =>
+          entry.origin === "structure" && entry.path.join("/") === "*"
+        ),
+      ).toBe(true);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("keeps the root stamps a wildcard child declaration does not reach", async () => {
     // A declared entry at `["*"]` covers the children and not the container
     // node they hang off, so the stamps recording what the container's own
