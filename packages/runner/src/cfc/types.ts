@@ -73,6 +73,10 @@ export interface RuntimeWritePolicyAuthorization {
  * It travels as an argument of the one call that carries it, so it marks that
  * input and no other — including no input recorded on the same transaction in
  * the meantime.
+ *
+ * In-package callers only: `cfc/mod.ts` re-exports the type and not this
+ * value, so it stays out of the package's public entry points, and holding it
+ * is what naming a piece's substrate takes.
  */
 export const runtimeWritePolicyAuthorization: RuntimeWritePolicyAuthorization =
   Object.freeze(
