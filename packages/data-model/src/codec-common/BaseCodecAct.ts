@@ -32,7 +32,7 @@ export abstract class BaseCodecAct<Encoded> {
    * The values whose walk is in progress, or `undefined` before the first one
    * is entered.
    */
-  #inProgress: IndexTrackingStack | undefined;
+  #inProgress: IndexTrackingStack<object> | undefined;
 
   /** Constructs an instance. */
   constructor(config: CodecEngineConfig<Encoded>, env: LiveEnvironment) {
@@ -57,18 +57,7 @@ export abstract class BaseCodecAct<Encoded> {
    * @throws If the value is not the one most recently entered.
    */
   leave(value: object): void {
-    const left = this.#inProgress?.pop();
-
-    // Shouldn't happen; a subclass that keeps the contract cannot get here. It
-    // is checked because the stack beneath answers by position: a walk that
-    // left a value it had not entered would go on answering, with every
-    // position after it wrong by one.
-    //
-    // One line, and ignored as one: the condition runs on every call, but a
-    // guard whose branch is never taken is reported as an uncovered line
-    // whole, so a block form would leave its closing brace uncovered too.
-    // deno-coverage-ignore
-    if (left !== value) throw new Error("Shouldn't happen: mismatched leave.");
+    this.#inProgress?.popExpect(value);
   }
 
   /** The configuration of the engine that minted this act. */
@@ -98,7 +87,7 @@ export abstract class BaseCodecAct<Encoded> {
    *   progress.
    */
   protected tryEnter(value: object): boolean {
-    const inProgress = this.#inProgress ??= new IndexTrackingStack();
+    const inProgress = this.#inProgress ??= new IndexTrackingStack<object>();
 
     if (inProgress.indexOf(value) >= 0) {
       return false;

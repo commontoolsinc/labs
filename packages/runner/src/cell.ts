@@ -4151,7 +4151,12 @@ export function convertCellsToLinks(
   value: CellLinkInput,
   options: CellLinkOptions = {},
 ): FabricValue {
-  return convertOneToLinks(value, options, [], new IndexTrackingStack());
+  return convertOneToLinks(
+    value,
+    options,
+    [],
+    new IndexTrackingStack<object>(),
+  );
 }
 
 /**
@@ -4182,7 +4187,7 @@ function convertOneToLinks(
   value: CellLinkInput,
   options: CellLinkOptions,
   stack: string[],
-  ancestors: IndexTrackingStack,
+  ancestors: IndexTrackingStack<object>,
 ): FabricValue {
   if (isObjectOrArray(value)) {
     const depth = ancestors.indexOf(value);
