@@ -178,6 +178,26 @@ describe("spend", () => {
     expect(december[0]).toBeGreaterThan(lines[0][10][1]);
   });
 
+  it("starts at known quiet days before the first spend row", () => {
+    const github = source(
+      run("2026-08-18", 15, 1),
+      2,
+      "#58a6ff",
+      ["2026-07", "2026-08", "2026-09"],
+    );
+    const { chart, duration } = spendChart(
+      [github],
+      new Date("2026-09-02T09:00:00Z"),
+      "good",
+      14,
+    );
+    expect(duration).toBe(45 * DAY);
+    const lines = polylines(chart);
+    expect(lines.length).toBe(2);
+    expect(lines[0].length).toBe(45);
+    expect(lines[1].length).toBe(14);
+  });
+
   it("holds a highlight to the days its source reports on", () => {
     const github = source(
       [...NOVEMBER, ...JANUARY],
@@ -222,7 +242,8 @@ describe("spend", () => {
 
   it("marks a day both its neighbors are missing", () => {
     // On 3 January a 2-day lag reaches 1 January, so the January side of the
-    // hole is a single day with nothing to join it to.
+    // hole is a single day with nothing to join it to. The 45-day window opens
+    // on 18 November, whose report makes its first two quiet days real zeros.
     const github = source(
       [...NOVEMBER, ...run("2026-01-01", 1, 2)],
       2,
@@ -237,12 +258,12 @@ describe("spend", () => {
     const lines = polylines(chart);
     // November is the only run of days long enough to draw a line through.
     expect(lines.length).toBe(1);
-    expect(lines[0].length).toBe(11);
+    expect(lines[0].length).toBe(13);
     // 1 January is drawn as a point of its own at the chart's right edge.
     const points = markers(chart);
     expect(points.length).toBe(1);
     expect(points[0][0]).toBe(220);
     // It sits above the $1 November days, at its own $2.
-    expect(points[0][1]).toBeLessThan(lines[0][10][1]);
+    expect(points[0][1]).toBeLessThan(lines[0][12][1]);
   });
 });

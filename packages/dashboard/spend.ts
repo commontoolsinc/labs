@@ -227,6 +227,9 @@ export function spendChart(
   for (const source of sources) {
     if (source.spend) {
       for (const day of source.spend.byDay.keys()) allDays.add(day);
+      if (source.spend.byDay.size > 0 && source.knownMonths) {
+        for (const month of source.knownMonths) allDays.add(`${month}-01`);
+      }
     }
   }
   if (allDays.size < 2) return { chart: "", duration: 0 };
