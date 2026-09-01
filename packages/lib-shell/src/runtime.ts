@@ -6,6 +6,7 @@ import { navigate } from "@commonfabric/navigation";
 import { slugIdForSpace } from "@commonfabric/runner/slugs";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import {
+  attachOptionsFrom,
   CellHandle,
   FavoritesManager,
   PageHandle,
@@ -782,7 +783,10 @@ export class RuntimeInternals extends EventTarget {
       concurrentWatchRefresh,
     });
     const client = attach
-      ? await RuntimeClient.attach(connection, clientOptions)
+      ? await RuntimeClient.attach(
+        connection,
+        attachOptionsFrom(clientOptions),
+      )
       : await RuntimeClient.initialize(connection, clientOptions);
 
     // Expose a usable RuntimeInternals immediately. Callers that need

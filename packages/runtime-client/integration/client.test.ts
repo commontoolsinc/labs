@@ -16,9 +16,11 @@ import { Program } from "@commonfabric/js-compiler";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import {
   $conn,
+  attachOptionsFrom,
   CellHandle,
   type JSONSchema,
   RequestType,
+  type RuntimeAttachOptions,
   RuntimeClient,
   type RuntimeClientOptions,
   type VNode,
@@ -1784,12 +1786,13 @@ export default pattern<Record<string, never>>(() => {
     async function attachingClient(
       owner: { transport: WebWorkerRuntimeTransport },
       options: RuntimeClientOptions,
+      overrides: Partial<RuntimeAttachOptions> = {},
     ) {
       const channel = new MessageChannel();
       owner.transport.attachClientPort(channel.port2);
       return await RuntimeClient.attach(
         new MessagePortRuntimeTransport({ port: channel.port1 }),
-        options,
+        { ...attachOptionsFrom(options), ...overrides },
       );
     }
 
@@ -1922,14 +1925,11 @@ export default pattern<Record<string, never>>(() => {
           "a different operator",
           keyConfig,
         );
-        const channel = new MessageChannel();
-        owner.transport.attachClientPort(channel.port2);
         await assertRejects(
           () =>
-            RuntimeClient.attach(
-              new MessagePortRuntimeTransport({ port: channel.port1 }),
-              { ...owner.options, identity: stranger },
-            ),
+            attachingClient(owner, owner.options, {
+              identity: stranger.did(),
+            }),
           Error,
           "Attach refused",
         );

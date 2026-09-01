@@ -15,7 +15,7 @@ import { RuntimeClients } from "@/backends/client-registry.ts";
 import type { WorkerClient } from "@/backends/worker-client.ts";
 import { MessagePortRuntimeTransport } from "@/client/transports/message-port/transport-message-port.ts";
 import type { MessagePortLike } from "@/shared/message-port-like.ts";
-import { RuntimeClient, type RuntimeClientOptions } from "@/runtime-client.ts";
+import { type RuntimeAttachOptions, RuntimeClient } from "@/runtime-client.ts";
 
 // The two halves of an attachment, joined over a real channel: a worker's
 // client registry at one end and the `RuntimeClient` a joining document holds
@@ -39,10 +39,10 @@ const keyPair = new FabricKeyPair(
   new Uint8Array(32),
 );
 
-function clientOptions(as: Identity): RuntimeClientOptions {
+function clientOptions(as: Identity): RuntimeAttachOptions {
   return {
     apiUrl: new URL("http://attach-round-trip.test/"),
-    identity: as,
+    identity: as.did(),
     spaceDid,
     cfcEnforcementMode: "enforce-strict",
   };
@@ -57,6 +57,7 @@ function workerSide() {
   const requests: Array<{ type: RequestType; client: WorkerClient }> = [];
   const running: RuntimeSecurityContext = {
     identity: identity.did(),
+    apiUrl: "http://attach-round-trip.test/",
     spaceDid,
     cfcEnforcementMode: "enforce-strict",
   };
@@ -175,7 +176,7 @@ describe("attach-round-trip", () => {
             trustSnapshot: {
               id: "principal",
               signer: keyPair,
-            } as unknown as RuntimeClientOptions["trustSnapshot"],
+            } as unknown as RuntimeAttachOptions["trustSnapshot"],
           },
         ),
       ).rejects.toThrow("no key material");

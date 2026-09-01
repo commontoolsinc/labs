@@ -73,6 +73,10 @@ import {
   type UploadBlobResponse,
 } from "./protocol/mod.ts";
 import { assertNoKeyMaterial } from "./shared/key-material.ts";
+import {
+  normalizeOrigin,
+  normalizeSpaceHostMap,
+} from "./shared/security-context.ts";
 import { cellRefToInstanceId } from "./shared/utils.ts";
 
 export interface RuntimeClientOptions
@@ -80,6 +84,35 @@ export interface RuntimeClientOptions
   apiUrl: URL;
   identity: Identity;
   spaceIdentity?: Identity;
+}
+
+/**
+ * What a client needs to join a runtime someone else stood up.
+ *
+ * Its own type rather than {@link RuntimeClientOptions} because of one field:
+ * `identity` is a DID here, never an `Identity`. An attaching client states
+ * which principal the runtime acts as and supplies no signer, so a document
+ * holding one of these structurally cannot hand a key across -- there is no
+ * key in it to hand. `RuntimeClientOptions` keeps the `Identity`, and is what
+ * initialization takes.
+ *
+ * The rest is the security posture this client asserts. Nothing here is
+ * declared to the runtime: the runtime is running under a posture of its own,
+ * and an assertion that differs anywhere is refused.
+ */
+export interface RuntimeAttachOptions extends
+  Omit<
+    RuntimeSecurityContext,
+    "apiUrl" | "spaceHostMap" | "identity"
+  > {
+  /** The backend this client believes the runtime reads from. */
+  apiUrl: URL;
+
+  /** The per-space hosts this client believes the runtime resolves against. */
+  spaceHostMap?: Record<string, string>;
+
+  /** The principal this client believes the runtime acts as. */
+  identity: DID;
 }
 
 export type RuntimeClientEvents = {
@@ -90,6 +123,32 @@ export type RuntimeClientEvents = {
   pendingwriteschange: [{ pending: boolean }];
   eventneedsattention: [EventAttentionNotice];
 };
+
+/**
+ * The same posture, in the form a client that joins a runtime states it.
+ *
+ * Written out field by field rather than spread, because what is dropped is
+ * the point: the acting principal becomes the DID it derives to, and both
+ * `Identity` values -- the signer and the space identity -- are left behind.
+ * A client that attaches asserts which principal the runtime acts as and
+ * supplies no key, and this is where a page's signer stops.
+ */
+export function attachOptionsFrom(
+  options: RuntimeClientOptions,
+): RuntimeAttachOptions {
+  return {
+    apiUrl: options.apiUrl,
+    spaceHostMap: options.spaceHostMap,
+    identity: options.identity.did(),
+    spaceDid: options.spaceDid,
+    experimental: options.experimental,
+    cfcEnforcementMode: options.cfcEnforcementMode,
+    cfcFlowLabels: options.cfcFlowLabels,
+    renderDeclassificationPolicy: options.renderDeclassificationPolicy,
+    renderConfidentialityCeiling: options.renderConfidentialityCeiling,
+    trustSnapshot: options.trustSnapshot,
+  };
+}
 
 export const $conn = Symbol("$request");
 
@@ -126,11 +185,11 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   private constructor(
     conn: InitializedRuntimeConnection,
-    _options: RuntimeClientOptions,
+    principal: DID | undefined,
   ) {
     super();
     this.#conn = conn;
-    this.#principal = _options.identity?.did();
+    this.#principal = principal;
     this.#conn.on("console", this.#onConsole);
     this.#conn.on("navigaterequest", this.#onNavigateRequest);
     this.#conn.on("error", this.#onError);
@@ -306,13 +365,16 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    */
   static async attach(
     transport: RuntimeTransport,
-    options: RuntimeClientOptions,
+    options: RuntimeAttachOptions,
   ): Promise<RuntimeClient> {
     assertRenderDeclassificationPolicy(options.renderDeclassificationPolicy);
     const context: RuntimeSecurityContext = {
-      // The acting principal as a DID: an attach states which principal the
-      // runtime acts as and supplies no signer of its own.
-      identity: options.identity.did(),
+      identity: options.identity,
+      // Normalized as the runtime normalizes what it was initialized with, so
+      // that agreeing on a backend does not depend on agreeing on how to spell
+      // one.
+      apiUrl: normalizeOrigin(options.apiUrl.toString()),
+      spaceHostMap: normalizeSpaceHostMap(options.spaceHostMap),
       spaceDid: options.spaceDid,
       experimental: options.experimental,
       cfcEnforcementMode: options.cfcEnforcementMode,
@@ -328,7 +390,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     // port, so that failure has nothing to happen to.
     assertNoKeyMaterial(context);
     const attached = await (new RuntimeConnection(transport)).attach(context);
-    return new RuntimeClient(attached, options);
+    return new RuntimeClient(attached, options.identity);
   }
 
   static async initialize(
@@ -353,7 +415,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       patternCoverage: options.patternCoverage,
       concurrentWatchRefresh: options.concurrentWatchRefresh,
     });
-    return new RuntimeClient(initialized, options);
+    return new RuntimeClient(initialized, options.identity?.did());
   }
 
   getCellFromRef<T>(

@@ -90,7 +90,6 @@ import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { linkRefPayload } from "@commonfabric/runner/shared";
 import { RemoteResponse } from "@commonfabric/runtime-client";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   getLogger,
   getLoggerCountsBreakdown,
@@ -223,6 +222,11 @@ import {
 } from "@/protocol/mod.ts";
 
 import type { VDomOp } from "@/protocol/types.ts";
+import {
+  normalizeOrigin,
+  normalizeSpaceHostMap,
+  securityContextDifferences,
+} from "@/shared/security-context.ts";
 import { cellRefToKey, describeFailure } from "@/shared/utils.ts";
 import { postToClient } from "./post-to-client.ts";
 import {
@@ -230,6 +234,7 @@ import {
   runtimeErrorPost,
 } from "./runtime-error.ts";
 import {
+  type ClientId,
   clientKeyPrefix,
   clientScopedKey,
   ownerClient,
@@ -634,37 +639,14 @@ export const hasExplicitSubscriptionSchema = (schema: unknown): boolean =>
     typeof schema === "object" && schema !== null &&
     Object.keys(schema).length > 0);
 
-/**
- * Every field a {@link RuntimeSecurityContext} carries, as a record so that a
- * field added to that type and not to this one is a type error. What an attach
- * is checked against has to be the whole context: a field nobody compares is a
- * posture a second document can hold while the first believes otherwise.
- */
-const SECURITY_CONTEXT_FIELDS: Record<
-  keyof Required<RuntimeSecurityContext>,
-  true
-> = {
-  cfcEnforcementMode: true,
-  cfcFlowLabels: true,
-  experimental: true,
-  identity: true,
-  renderConfidentialityCeiling: true,
-  renderDeclassificationPolicy: true,
-  spaceDid: true,
-  trustSnapshot: true,
-};
-
-/**
- * The security context a runtime stood up from this data runs under. The
- * acting principal arrives as a key pair and is recorded here as the DID it
- * derives to, which is what an attach states and all an attach may state.
- */
 export function securityContextFrom(
   data: InitializationData,
   identity: DID,
 ): RuntimeSecurityContext {
   return {
     identity,
+    apiUrl: normalizeOrigin(data.apiUrl),
+    spaceHostMap: normalizeSpaceHostMap(data.spaceHostMap),
     spaceDid: data.spaceDid,
     experimental: data.experimental,
     cfcEnforcementMode: data.cfcEnforcementMode,
@@ -673,25 +655,6 @@ export function securityContextFrom(
     renderConfidentialityCeiling: data.renderConfidentialityCeiling,
     trustSnapshot: data.trustSnapshot,
   };
-}
-
-/**
- * The fields on which `asserted` and `running` disagree, in a fixed order, or
- * an empty list where they agree throughout.
- *
- * Compared field by field rather than as two whole objects: the two are built
- * in different documents and one of them crossed an encoding, so a posture
- * carried as an absent property in one and as an explicit `undefined` in the
- * other is the same posture and compares equal here.
- */
-export function securityContextDifferences(
-  asserted: RuntimeSecurityContext,
-  running: RuntimeSecurityContext,
-): string[] {
-  const fields = Object.keys(SECURITY_CONTEXT_FIELDS).sort() as (
-    keyof RuntimeSecurityContext
-  )[];
-  return fields.filter((field) => !deepEqual(asserted[field], running[field]));
 }
 
 type RuntimeOperationTarget = {
@@ -703,6 +666,12 @@ type RuntimeOperationSession = {
   cellKey: string;
   target: RuntimeOperationTarget;
   subscriptions: Set<string>;
+  /**
+   * The client that opened this session. A session id is a UUID its client
+   * minted, which keeps two clients from colliding but does not stop one
+   * naming another's -- so who may close it is recorded rather than assumed.
+   */
+  clientId: ClientId;
 };
 
 export class RuntimeProcessor {
@@ -1135,10 +1104,15 @@ export class RuntimeProcessor {
    * came to leave. Only {@link dispose} ends a runtime, and only the client
    * that stood it up asks for that.
    *
-   * One residue is left behind on purpose: an operation session the departing
-   * client opened and never subscribed on. A session is reaped when its last
-   * subscription goes, which the unsubscribes below do, and one with no
-   * subscription at all is a target address holding nothing live.
+   * `pieceSourceConfirmations` is deliberately not swept. It holds a two-phase
+   * confirmation for a PIECE, keyed by the piece rather than by a client, and
+   * its token is a UUID handed to whoever prepared the change -- so a
+   * departing client takes the only means of confirming its pending entry with
+   * it, and what is left is a token nobody holds, replaced the next time
+   * anyone prepares a change to that piece. Two clients preparing one piece's
+   * change do collide there, the second prepare invalidating the first's
+   * token; that is a refusal rather than a lost write, and it is the same
+   * collision two tabs have today.
    */
   disposeClient(client: WorkerClient): void {
     const prefix = clientKeyPrefix(client);
@@ -1158,7 +1132,7 @@ export class RuntimeProcessor {
       this.handleOperationUnsubscribe({
         type: RequestType.OperationUnsubscribe,
         subscriptionId,
-      });
+      }, client);
     }
 
     for (const [key, mount] of [...this.vdomMounts]) {
@@ -1166,6 +1140,11 @@ export class RuntimeProcessor {
       mount.cancel();
       mount.reconciler.unmount();
       this.vdomMounts.delete(key);
+    }
+
+    for (const [sessionId, session] of [...this.operationSessions]) {
+      if (session.clientId !== client.id) continue;
+      this.operationSessions.delete(sessionId);
     }
   }
 
@@ -1383,7 +1362,8 @@ export class RuntimeProcessor {
 
   private operationTarget(
     cell: CellGetRequest["cell"],
-    operationSessionId?: string,
+    operationSessionId: string | undefined,
+    client: WorkerClient,
   ) {
     if (
       operationSessionId !== undefined &&
@@ -1432,6 +1412,7 @@ export class RuntimeProcessor {
       cellKey,
       target,
       subscriptions: new Set<string>(),
+      clientId: client.id,
     };
     this.operationSessions.set(sessionKey, session);
     return { ...target, sessionKey, session };
@@ -1439,20 +1420,24 @@ export class RuntimeProcessor {
 
   async handleOperationCapabilities(
     request: OperationCapabilitiesRequest,
+    client: WorkerClient = ownerClient,
   ): Promise<OperationCapabilitiesResponse> {
     const { capability } = this.operationTarget(
       request.cell,
       request.operationSessionId,
+      client,
     );
     return { codecs: [...await capability.operationCodecs()] };
   }
 
   async handleOperationQuery(
     request: OperationQueryRequest,
+    client: WorkerClient = ownerClient,
   ): Promise<OperationFieldResponse> {
     const { capability, address } = this.operationTarget(
       request.cell,
       request.operationSessionId,
+      client,
     );
     const field = await capability.queryOperationField({
       ...address,
@@ -1463,10 +1448,12 @@ export class RuntimeProcessor {
 
   async handleOperationApply(
     request: OperationApplyRequest,
+    client: WorkerClient = ownerClient,
   ): Promise<OperationApplyResponse> {
     const { capability, address } = this.operationTarget(
       request.cell,
       request.operationSessionId,
+      client,
     );
     const resolution = await capability.applyOperation({
       op: "apply-op",
@@ -1492,6 +1479,7 @@ export class RuntimeProcessor {
     const { capability, address, sessionKey, session } = this.operationTarget(
       request.cell,
       request.operationSessionId,
+      client,
     );
     // A subscription id is a UUID the client mints, so two clients never
     // collide on one. What the owning client settles is where an update goes,
@@ -1554,10 +1542,12 @@ export class RuntimeProcessor {
 
   async handleOperationRelease(
     request: OperationReleaseRequest,
+    client: WorkerClient = ownerClient,
   ): Promise<BooleanResponse> {
     const { capability, address } = this.operationTarget(
       request.cell,
       request.operationSessionId,
+      client,
     );
     await capability.releaseOperationField({
       op: "release-op-field",
@@ -1570,11 +1560,18 @@ export class RuntimeProcessor {
 
   handleOperationUnsubscribe(
     request: OperationUnsubscribeRequest,
+    client: WorkerClient = ownerClient,
   ): BooleanResponse {
     const subscription = this.operationSubscriptions.get(
       request.subscriptionId,
     );
-    if (subscription === undefined) return { value: false };
+    // A subscription is its subscriber's to stop, and no one else's. The id
+    // is a UUID, so another client naming it is a client that came by it
+    // somehow rather than one that guessed it -- which is the case worth
+    // refusing.
+    if (subscription === undefined || subscription.client.id !== client.id) {
+      return { value: false };
+    }
     this.operationSubscriptions.delete(request.subscriptionId);
     subscription.cancelled = true;
     subscription.cancel?.();
@@ -1590,9 +1587,14 @@ export class RuntimeProcessor {
 
   handleOperationSessionClose(
     request: OperationSessionCloseRequest,
+    client: WorkerClient = ownerClient,
   ): BooleanResponse {
+    const session = this.operationSessions?.get(request.operationSessionId);
+    if (session === undefined || session.clientId !== client.id) {
+      return { value: false };
+    }
     return {
-      value: this.operationSessions?.delete(request.operationSessionId),
+      value: this.operationSessions.delete(request.operationSessionId),
     };
   }
 
@@ -2704,19 +2706,19 @@ export class RuntimeProcessor {
       case RequestType.CellGetCfcLabel:
         return await this.handleCellGetCfcLabel(request);
       case RequestType.OperationQuery:
-        return await this.handleOperationQuery(request);
+        return await this.handleOperationQuery(request, client);
       case RequestType.OperationCapabilities:
-        return await this.handleOperationCapabilities(request);
+        return await this.handleOperationCapabilities(request, client);
       case RequestType.OperationApply:
-        return await this.handleOperationApply(request);
+        return await this.handleOperationApply(request, client);
       case RequestType.OperationRelease:
-        return await this.handleOperationRelease(request);
+        return await this.handleOperationRelease(request, client);
       case RequestType.OperationSubscribe:
         return await this.handleOperationSubscribe(request, client);
       case RequestType.OperationUnsubscribe:
-        return this.handleOperationUnsubscribe(request);
+        return this.handleOperationUnsubscribe(request, client);
       case RequestType.OperationSessionClose:
-        return this.handleOperationSessionClose(request);
+        return this.handleOperationSessionClose(request, client);
       case RequestType.SqliteQuery:
         return await this.handleSqliteQuery(request);
       case RequestType.SqliteExec:

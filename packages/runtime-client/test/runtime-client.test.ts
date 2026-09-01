@@ -2,7 +2,8 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
-import { RuntimeClient } from "@/runtime-client.ts";
+import { attachOptionsFrom, RuntimeClient } from "@/runtime-client.ts";
+import { findKeyMaterial } from "@/shared/key-material.ts";
 import {
   type CellRef,
   NotificationType,
@@ -49,7 +50,7 @@ describe("RuntimeClient", () => {
       const conn = { on: () => {}, signal } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       expect(client.signal).toBe(signal);
     });
   });
@@ -64,9 +65,11 @@ describe("RuntimeClient", () => {
 
     function clientWith(identity?: Identity): RuntimeClient {
       const conn = { on: () => {} } as unknown as never;
+      // The constructor takes the acting principal itself, an attaching
+      // client having only a DID to give it.
       return new (RuntimeClient as unknown as {
-        new (conn: never, options: unknown): RuntimeClient;
-      })(conn, identity === undefined ? {} : { identity });
+        new (conn: never, principal: unknown): RuntimeClient;
+      })(conn, identity?.did());
     }
 
     it("identifies space, user, and session instances at their scopes", async () => {
@@ -117,7 +120,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       return { client, requests };
     }
 
@@ -150,7 +153,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
 
       await client.setMemoryMessageCompression(false);
 
@@ -179,7 +182,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
 
       const result = await client.getPieceSource(
         "of:fid1:piece",
@@ -212,7 +215,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
 
       const result = await client.getPieceSourceRevision(
         "of:fid1:piece",
@@ -248,7 +251,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
 
       const response = await client.updatePieceSource(
         "of:fid1:piece",
@@ -286,7 +289,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       const space = access.space as never;
 
       expect(await client.getSpaceAcl(space)).toBe(access);
@@ -343,7 +346,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       const clone = await client.clonePiece(
         "of:fid1:piece",
         sourceSpace as never,
@@ -380,7 +383,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
 
       await client.clonePiece(
         "of:fid1:piece",
@@ -412,7 +415,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
 
       expect(await client.resolveSpaceName("notebook")).toBe(space);
       expect(requests).toEqual([{
@@ -437,7 +440,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       return { client, handlers };
     }
 
@@ -500,7 +503,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
 
       expect(await client.listEventAttention(notice.space)).toEqual([notice]);
       expect(await client.resolveEventAttention(notice, "retry")).toEqual({
@@ -529,7 +532,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       const observed: unknown[] = [];
       client.on("eventneedsattention", (value) => observed.push(value));
 
@@ -558,7 +561,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       return { client, requests };
     }
 
@@ -595,7 +598,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       expect(client.getPendingRequests()).toEqual(pending);
       expect(client.getRequestTimeline()).toEqual(timeline);
     });
@@ -613,7 +616,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       const body = new Uint8Array([1, 2, 3]);
 
       const upload = client.uploadBlob({
@@ -647,5 +650,48 @@ describe("RuntimeClient", () => {
       expect(request.body).toBeInstanceOf(FabricBytes);
       expect(request.body.slice()).toEqual(new Uint8Array([1, 2, 3]));
     });
+  });
+});
+
+describe("attachOptionsFrom()", () => {
+  // What it drops is the point: a document that attaches holds no signer, so
+  // neither `Identity` survives the mapping. `findKeyMaterial` refuses a frame
+  // holding one; this is what keeps one from being built.
+
+  it("returns the acting principal as a DID and keeps no `Identity`", async () => {
+    const identity = await Identity.fromPassphrase("attach-options-signer");
+    const spaceIdentity = await Identity.fromPassphrase("attach-options-space");
+    const attach = attachOptionsFrom({
+      apiUrl: new URL("http://backend.test/"),
+      identity,
+      spaceIdentity,
+      spaceDid: identity.did(),
+      cfcEnforcementMode: "enforce-strict",
+    });
+
+    expect(attach.identity).toBe(identity.did());
+    expect(Object.values(attach)).not.toContain(identity);
+    expect(Object.values(attach)).not.toContain(spaceIdentity);
+    expect("spaceIdentity" in attach).toBe(false);
+    expect(findKeyMaterial(attach)).toBeUndefined();
+  });
+
+  it("carries the posture fields an attach asserts", async () => {
+    const identity = await Identity.fromPassphrase("attach-options-posture");
+    const attach = attachOptionsFrom({
+      apiUrl: new URL("http://backend.test/"),
+      identity,
+      spaceDid: identity.did(),
+      spaceHostMap: { [identity.did()]: "http://memory.test/" },
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "persist",
+    });
+
+    expect(attach.apiUrl.toString()).toBe("http://backend.test/");
+    expect(attach.spaceHostMap).toEqual({
+      [identity.did()]: "http://memory.test/",
+    });
+    expect(attach.cfcEnforcementMode).toBe("observe");
+    expect(attach.cfcFlowLabels).toBe("persist");
   });
 });

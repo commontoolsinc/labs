@@ -875,10 +875,28 @@ export type InitializeRequest = BaseRequest & {
  * it believes the runtime acts as and never supplies a signer of its own.
  * Every other field is the initialization field of the same name, so what an
  * attach asserts and what initialization declared compare directly.
+ *
+ * `apiUrl` and `spaceHostMap` are here as posture rather than as routing: a
+ * document believing it reads from a different backend than the runtime does
+ * is as wrong about what it is joined to as one believing a different
+ * enforcement mode, and the reads would silently go to the runtime's hosts.
+ * Both are normalized before they are stored or asserted, so two spellings of
+ * one origin are one posture.
+ *
+ * **Every field here holds plain JSON-shaped values only.** They are compared
+ * with `deepEqual`, which compares a class instance by its enumerable own
+ * properties -- so a `FabricValue`-carrying field would compare EQUAL between
+ * two different values whose state lives in private fields, and an attach
+ * asserting a different one would be accepted. A field that must carry such a
+ * value needs `valueEqual` from `data-model` and a deliberate decision about
+ * what equality means for it; adding one without that is a false accept, not
+ * a missing check.
  */
 export type RuntimeSecurityContext =
   & Pick<
     InitializationData,
+    | "apiUrl"
+    | "spaceHostMap"
     | "spaceDid"
     | "experimental"
     | "cfcEnforcementMode"

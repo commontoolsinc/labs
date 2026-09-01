@@ -1015,6 +1015,14 @@ describe("RuntimeInternals", () => {
         expect(transport.sent[0].data?.cfcEnforcementMode).toBe(
           "enforce-explicit",
         );
+        // The backend is posture, not routing: a document believing it reads
+        // from somewhere else is as wrong about what it joined as one
+        // believing another enforcement mode.
+        expect(transport.sent[0].data?.apiUrl).toBe("http://shell.test/");
+        // And no signer went with it. The initialize frame carries the key
+        // pair; an attach carries a DID and nothing else of the identity.
+        expect(transport.sent[0].data?.spaceIdentity).toBeUndefined();
+        expect(typeof transport.sent[0].data?.identity).toBe("string");
       } finally {
         await runtime.dispose();
       }

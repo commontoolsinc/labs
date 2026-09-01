@@ -15,7 +15,7 @@ import {
 import { isValidFabricValue } from "@commonfabric/data-model/fabric-value";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { getLogger } from "@commonfabric/utils/logger";
-import { type DID, Identity } from "@commonfabric/identity";
+import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import {
   decodeMemoryBoundary,
@@ -54,7 +54,6 @@ import {
   type GetPatternSourcesRequest,
   NotificationType,
   RequestType,
-  type RuntimeSecurityContext,
 } from "@/protocol/mod.ts";
 import {
   assertServerExecutionPostureAgreement,
@@ -62,7 +61,6 @@ import {
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
   RuntimeProcessor,
-  securityContextDifferences,
   subscribeEventAttentionNotifications,
   toConsoleDebugValue,
 } from "@/backends/runtime-processor.ts";
@@ -6405,6 +6403,86 @@ describe("runtime-processor", () => {
       });
     });
 
+    describe("operation sessions and subscriptions", () => {
+      // A subscription id and a session id are UUIDs the client mints, which
+      // is convention rather than protocol: nothing on the wire stops one
+      // client naming another's. Each of these hands a client the other's id.
+
+      function operationState() {
+        const cancelled: string[] = [];
+        const processor = Object.create(
+          RuntimeProcessor.prototype,
+        ) as RuntimeProcessor;
+        const state = processor as unknown as {
+          operationSubscriptions: Map<string, unknown>;
+          operationSessions: Map<string, unknown>;
+        };
+        state.operationSubscriptions = new Map([
+          ["sub-of-first", {
+            cancelled: false,
+            cancel: () => cancelled.push("first"),
+            client: testClient(1).client,
+            sessionKey: "session-of-first",
+          }],
+        ]);
+        state.operationSessions = new Map([
+          ["session-of-first", {
+            cellKey: "cell",
+            target: {},
+            subscriptions: new Set(["sub-of-first"]),
+            clientId: 1,
+          }],
+        ]);
+        return { processor, state, cancelled };
+      }
+
+      it("returns `false` when a client unsubscribes another client's subscription", () => {
+        const { processor, state, cancelled } = operationState();
+        expect(
+          processor.handleOperationUnsubscribe({
+            type: RequestType.OperationUnsubscribe,
+            subscriptionId: "sub-of-first",
+          }, testClient(2).client),
+        ).toEqual({ value: false });
+        expect(cancelled).toEqual([]);
+        expect(state.operationSubscriptions.has("sub-of-first")).toBe(true);
+      });
+
+      it("returns `true` when the subscribing client unsubscribes its own", () => {
+        const { processor, state, cancelled } = operationState();
+        expect(
+          processor.handleOperationUnsubscribe({
+            type: RequestType.OperationUnsubscribe,
+            subscriptionId: "sub-of-first",
+          }, testClient(1).client),
+        ).toEqual({ value: true });
+        expect(cancelled).toEqual(["first"]);
+        expect(state.operationSubscriptions.has("sub-of-first")).toBe(false);
+      });
+
+      it("returns `false` when a client closes another client's session", () => {
+        const { processor, state } = operationState();
+        expect(
+          processor.handleOperationSessionClose({
+            type: RequestType.OperationSessionClose,
+            operationSessionId: "session-of-first",
+          }, testClient(2).client),
+        ).toEqual({ value: false });
+        expect(state.operationSessions.has("session-of-first")).toBe(true);
+      });
+
+      it("returns `true` when the owning client closes its own session", () => {
+        const { processor, state } = operationState();
+        expect(
+          processor.handleOperationSessionClose({
+            type: RequestType.OperationSessionClose,
+            operationSessionId: "session-of-first",
+          }, testClient(1).client),
+        ).toEqual({ value: true });
+        expect(state.operationSessions.has("session-of-first")).toBe(false);
+      });
+    });
+
     describe("disposeClient()", () => {
       function departureState() {
         const cancelled: string[] = [];
@@ -6457,83 +6535,6 @@ describe("runtime-processor", () => {
         expect(() => processor.disposeClient(testClient(1).client)).not
           .toThrow();
       });
-    });
-  });
-
-  describe("securityContextDifferences()", () => {
-    // A runtime is one signer under one enforcement configuration, and an
-    // attach states which it believes it is joining. What this returns is
-    // what an attach is refused by name for.
-
-    const running: RuntimeSecurityContext = {
-      identity: cfcSigner.did(),
-      spaceDid: cfcSigner.did(),
-      cfcEnforcementMode: "enforce-strict",
-      cfcFlowLabels: "persist",
-      renderDeclassificationPolicy: "deny",
-      renderConfidentialityCeiling: { atoms: [], caveatKinds: ["influence"] },
-      trustSnapshot: { id: `principal:${cfcSigner.did()}` },
-    };
-
-    it("returns an empty list for the same context", () => {
-      expect(securityContextDifferences({ ...running }, running)).toEqual([]);
-    });
-
-    it("returns an empty list when a field is absent on one side and `undefined` on the other", () => {
-      // The two contexts are built in different documents and one of them
-      // crossed an encoding, so these are the same posture.
-      const asserted = { ...running, experimental: undefined };
-      expect(securityContextDifferences(asserted, running)).toEqual([]);
-    });
-
-    it("names the acting principal when it differs", () => {
-      expect(
-        securityContextDifferences(
-          { ...running, identity: "did:key:z6Mk-someone-else" as DID },
-          running,
-        ),
-      ).toEqual(["identity"]);
-    });
-
-    it("names the enforcement mode when it differs", () => {
-      expect(
-        securityContextDifferences(
-          { ...running, cfcEnforcementMode: "observe" },
-          running,
-        ),
-      ).toEqual(["cfcEnforcementMode"]);
-    });
-
-    it("names a ceiling that differs deep inside", () => {
-      expect(
-        securityContextDifferences(
-          {
-            ...running,
-            renderConfidentialityCeiling: {
-              atoms: [],
-              caveatKinds: ["influence", "and-one-more"],
-            },
-          },
-          running,
-        ),
-      ).toEqual(["renderConfidentialityCeiling"]);
-    });
-
-    it("names an absent field the running context declares", () => {
-      const { trustSnapshot: _dropped, ...asserted } = running;
-      expect(securityContextDifferences(asserted, running)).toEqual([
-        "trustSnapshot",
-      ]);
-    });
-
-    it("names every differing field, in a fixed order", () => {
-      expect(
-        securityContextDifferences({
-          ...running,
-          identity: "did:key:z6Mk-someone-else" as DID,
-          cfcFlowLabels: "off",
-        }, running),
-      ).toEqual(["cfcFlowLabels", "identity"]);
     });
   });
 });

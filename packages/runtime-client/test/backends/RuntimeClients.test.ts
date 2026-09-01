@@ -32,6 +32,7 @@ const identityDid = "did:key:z6Mk-runtime-clients-identity" as DID;
 
 const runningContext: RuntimeSecurityContext = {
   identity: identityDid,
+  apiUrl: "http://runtime-clients.test/",
   spaceDid,
   cfcEnforcementMode: "enforce-strict",
 };
@@ -66,8 +67,9 @@ function fakeProcessor() {
   const notifications: Array<{ type: string; clientId: number }> = [];
   const disposedClients: number[] = [];
   let runtimeDisposals = 0;
+  let disposed = false;
   const processor = {
-    isDisposed: () => false,
+    isDisposed: () => disposed,
     assertAttachable: (asserted: RuntimeSecurityContext) => {
       if (asserted.identity === runningContext.identity) return;
       throw new Error(
@@ -102,17 +104,28 @@ function fakeProcessor() {
     notifications,
     disposedClients,
     runtimeDisposals: () => runtimeDisposals,
+    setDisposed: (value: boolean) => (disposed = value),
   };
 }
 
-function harness() {
+function harness(
+  options: { initializeSlowly?: boolean; failInitialization?: boolean } = {},
+) {
   const fake = fakeProcessor();
   const owner = testClient(0);
   const consoleBridge: boolean[] = [];
+  let release: (() => void) | undefined;
+  const held = options.initializeSlowly
+    ? new Promise<void>((resolve) => (release = resolve))
+    : Promise.resolve();
   const clients = new RuntimeClients({
     owner: owner.client,
     setConsoleBridge: (enabled) => consoleBridge.push(enabled),
-    initializeRuntime: () => Promise.resolve(fake.processor),
+    initializeRuntime: async () => {
+      await held;
+      if (options.failInitialization) throw new Error("init exploded");
+      return fake.processor;
+    },
   });
   const deliver = (client: WorkerClient, message: unknown, ports?: unknown[]) =>
     clients.handleMessage(
@@ -131,7 +144,15 @@ function harness() {
       msgId,
       data: { type: RequestType.Initialize, data: initializationData },
     });
-  return { ...fake, clients, owner, consoleBridge, deliver, initialize };
+  return {
+    ...fake,
+    clients,
+    owner,
+    consoleBridge,
+    deliver,
+    initialize,
+    releaseInitialization: () => release?.(),
+  };
 }
 
 /**
@@ -153,6 +174,21 @@ function portReader(port: MessagePort) {
     /** Settles on the next message to arrive. Called before what prompts it. */
     next: () => new Promise<void>((resolve) => (arrived = resolve)),
   };
+}
+
+/**
+ * Registers a client over a duplex the test drives by hand, so that a message
+ * reaches the loop when the test says rather than on the port's next task.
+ */
+function attachDirect(h: ReturnType<typeof harness>) {
+  const posted: Posted[] = [];
+  const client = h.clients.attach({
+    postMessage: (message) => {
+      posted.push(fabricFromRealmValue(message as never) as Posted);
+    },
+    addEventListener: () => {},
+  });
+  return { client, posted };
 }
 
 /** Hands the worker a port and returns this end of it. */
@@ -344,6 +380,97 @@ describe("RuntimeClients", () => {
         channel.port1.close();
         expect(received).toHaveLength(1);
         expect(received[0].error).toContain("acting principal");
+      });
+
+      it("refuses an attach to a runtime that has been disposed", async () => {
+        // The worst failure this could have: a client joining a
+        // runtime-shaped void and finding out only when nothing answers.
+        const h = harness();
+        await h.initialize(1);
+        h.setDisposed(true);
+        const { received, channel } = await attachedClient(h);
+        channel.port1.close();
+        expect(received).toHaveLength(1);
+        expect(received[0].error).toContain("disposed");
+      });
+
+      it("waits for an initialization already under way", async () => {
+        // Pipelining: the owner's page transfers a port and the joining
+        // document attaches before the runtime has finished standing up.
+        // Attaching waits for that rather than reading the absent runtime
+        // and refusing. Delivered by hand so the attach is provably in
+        // flight while the initialization is -- through a port it would
+        // arrive on a later task, by which time there is nothing to race.
+        const h = harness({ initializeSlowly: true });
+        const initialized = h.initialize(1);
+        const joiner = attachDirect(h);
+        const attaching = h.deliver(joiner.client, {
+          msgId: 1,
+          data: { type: RequestType.Attach, data: runningContext },
+        });
+        h.releaseInitialization();
+        await initialized;
+        await attaching;
+        expect(joiner.posted).toEqual([{ msgId: 1 }]);
+      });
+
+      it("refuses an attach when the initialization it waited for failed", async () => {
+        const h = harness({ initializeSlowly: true, failInitialization: true });
+        const initialized = h.initialize(1);
+        const joiner = attachDirect(h);
+        const attaching = h.deliver(joiner.client, {
+          msgId: 1,
+          data: { type: RequestType.Attach, data: runningContext },
+        });
+        h.releaseInitialization();
+        await initialized;
+        await attaching;
+        expect(joiner.posted).toHaveLength(1);
+        expect(joiner.posted[0].error).toBe("WorkerRuntime not initialized.");
+      });
+
+      it("drops a refused client's registration, so a retry loop cannot grow the worker", async () => {
+        const h = harness();
+        await h.initialize(1);
+        const before = h.clients.attachedClientCount;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const { channel } = await attachedClient(h, {
+            ...runningContext,
+            identity: "did:key:z6Mk-someone-else" as DID,
+          });
+          channel.port1.close();
+        }
+        expect(h.clients.attachedClientCount).toBe(before);
+      });
+
+      it("acks rather than refuses traffic from a client that has departed", async () => {
+        // The owner's stragglers are silently acked after disposal; an
+        // attached client's teardown traffic reads the same way.
+        const h = harness();
+        await h.initialize(1);
+        const port = await attachedClient(h);
+        try {
+          const departed = port.next();
+          port.channel.port1.postMessage(
+            realmFromFabricValue(
+              { msgId: 2, data: { type: RequestType.Dispose } } as never,
+            ),
+          );
+          await departed;
+          expect(h.clients.attachedClientCount).toBe(0);
+
+          // Delivered by hand: the registry drops its side of a departed
+          // client's channel, so nothing could arrive over the port itself.
+          const straggler = testClient(1);
+          await h.deliver(straggler.client, {
+            msgId: 3,
+            data: { type: RequestType.Idle },
+          });
+          expect(straggler.posted).toEqual([{ msgId: 3 }]);
+          expect(h.requests).toEqual([]);
+        } finally {
+          port.channel.port1.close();
+        }
       });
 
       it("refuses a request from a client that has not attached", async () => {

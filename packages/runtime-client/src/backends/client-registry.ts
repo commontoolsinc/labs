@@ -97,9 +97,11 @@ export interface RuntimeClientsOptions {
   initializeRuntime?: (data: InitializationData) => Promise<RuntimeProcessor>;
 }
 
-/** One connected client and whether its attach has been settled. */
+/** One connected client, its channel, and whether its attach is settled. */
 type RegisteredClient = {
   client: WorkerClient;
+  duplex: MessagePortLike;
+  listener: (event: MessageEvent) => void;
   attached: boolean;
 };
 
@@ -139,12 +141,40 @@ export class RuntimeClients {
       post: (message) =>
         postThrough((encoded) => duplex.postMessage(encoded), message),
     };
-    this.#attachedClients.set(id, { client, attached: false });
-    duplex.addEventListener("message", (event: MessageEvent) => {
+    const listener = (event: MessageEvent) => {
       void this.handleMessage(client, event);
+    };
+    this.#attachedClients.set(id, {
+      client,
+      duplex,
+      listener,
+      attached: false,
     });
+    duplex.addEventListener("message", listener);
     duplex.start?.();
     return client;
+  }
+
+  /** How many clients this worker is serving besides its owner. */
+  get attachedClientCount(): number {
+    return this.#attachedClients.size;
+  }
+
+  /**
+   * Forgets a client and lets go of its channel.
+   *
+   * Both ways a client ends here -- refused, or departed -- end the same way,
+   * and both have to end: a page that reloads into a refusal would otherwise
+   * leave a listener and a registration behind on every attempt, and a worker
+   * that outlives many panes would accumulate one per pane. A retry mints a
+   * fresh client through the owner, so nothing is lost by letting this one go.
+   */
+  #drop(id: ClientId): void {
+    const registered = this.#attachedClients.get(id);
+    if (!registered) return;
+    this.#attachedClients.delete(id);
+    registered.duplex.removeEventListener?.("message", registered.listener);
+    registered.duplex.close?.();
   }
 
   /**
@@ -266,11 +296,29 @@ export class RuntimeClients {
               "than attaching to it.",
           );
         }
+        // A page may transfer a port and let the document at its far end
+        // attach while the runtime is still standing up, so an attach waits
+        // for an initialization already under way rather than reading the
+        // runtime that is not there yet. A failed initialization settles this
+        // and leaves no runtime, which the check below then refuses -- the
+        // wait cannot turn a failure into an attach.
+        if (this.#initialization) {
+          await this.#initialization.catch(() => undefined);
+        }
         // An attach joins a runtime; it never stands one up. Answered with
         // the same words an ordinary request gets before initialization,
         // because it is the same fact about the worker.
         if (!this.#runtime) {
           throw new Error("WorkerRuntime not initialized.");
+        }
+        // A disposed runtime is the one thing worse than no runtime: a client
+        // that joined one would hold a live-looking connection to something
+        // that answers nothing, and learn of it only by waiting forever.
+        if (this.#runtime.isDisposed()) {
+          throw new Error(
+            "WorkerRuntime has been disposed; there is no runtime to attach " +
+              "to.",
+          );
         }
         assertNoKeyMaterial(request.data);
         // The acting principal is stated, never supplied. A frame naming it
@@ -287,6 +335,17 @@ export class RuntimeClients {
         this.#runtime.assertAttachable(request.data);
         const registered = this.#attachedClients.get(client.id);
         if (registered) registered.attached = true;
+        this.#reply({ msgId }, request.type, client);
+        return;
+      }
+
+      // A client that has departed is gone rather than wrong. Its channel is
+      // dropped on the way out, so this is reached only by a message already
+      // in flight -- and the owner's own post-disposal stragglers are acked
+      // in silence, which is what this is.
+      if (
+        client.id !== this.#owner.id && !this.#attachedClients.has(client.id)
+      ) {
         this.#reply({ msgId }, request.type, client);
         return;
       }
@@ -330,8 +389,8 @@ export class RuntimeClients {
         request.type === RequestType.Dispose && client.id !== this.#owner.id
       ) {
         runtime.disposeClient(client);
-        this.#attachedClients.delete(client.id);
         this.#reply({ msgId }, request.type, client);
+        this.#drop(client.id);
         return;
       }
 
@@ -382,6 +441,13 @@ export class RuntimeClients {
         error: describeFailure(error),
         ...(code ? { code } : {}),
       });
+
+      // A refused attach is terminal for this client: the reply has gone, and
+      // what is let go of here is the registration and the channel. See
+      // `#drop`.
+      if (type === RequestType.Attach && client.id !== this.#owner.id) {
+        this.#drop(client.id);
+      }
     }
   }
 

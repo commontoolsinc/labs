@@ -24,6 +24,15 @@ export interface MessagePortLike {
   start?(): void;
 
   /**
+   * Stops delivery to `listener`. Absent from a duplex that cannot be
+   * detached from, in which case letting go of it is `close`'s job alone.
+   */
+  removeEventListener?(
+    type: "message",
+    listener: (event: MessageEvent) => void,
+  ): void;
+
+  /**
    * Releases the channel. Absent from a duplex whose lifetime is not its
    * holder's to end.
    */

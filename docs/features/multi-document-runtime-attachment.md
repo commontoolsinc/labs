@@ -40,9 +40,11 @@ documents mint the same ones:
   a counter that starts at 1 in every document, so the id alone names a mount
   only while there is one client. A DOM event and a batch acknowledgement reach
   the sending client's own mount, and a batch reaches the client that mounted.
-- **Operation subscriptions.** The subscription id is a UUID, so two clients
-  never collide on one; what the owning client settles is where an update goes
-  and what a departure takes down.
+- **Operation subscriptions and sessions.** The subscription and session ids
+  are UUIDs, so two clients do not collide on one — but that is convention
+  rather than protocol, and nothing on the wire stops one client naming
+  another's. Each records the client that opened it, and only that client can
+  unsubscribe it, close it, or have it torn down with its departure.
 
 Shared, because they are the runtime's rather than any document's: the identity
 the runtime signs as, the storage manager and its memory session, the compile
@@ -51,9 +53,15 @@ cache, and the security context below.
 ## The security context, and why an attach is refused rather than merged
 
 `InitializationData` carries the CFC enforcement mode, the flow-label dial, the
-render declassification policy, the render confidentiality ceiling, and the
-trust snapshot. They are per-runtime, not per-request: there is one signer and
-one posture, and every attached document acts under both.
+render declassification policy, the render confidentiality ceiling, the trust
+snapshot, and the backend and per-space hosts the runtime reads from. They are
+per-runtime, not per-request: there is one signer and one posture, and every
+attached document acts under both. The backend and host map are compared for
+the same reason as the rest — a document believing it reads from somewhere else
+is as wrong about what it has joined as one believing another enforcement mode,
+and its reads would silently go to the runtime's hosts. Both are normalized
+first, so two spellings of one origin are one posture and do not refuse each
+other.
 
 So an attach states the
 [`RuntimeSecurityContext`](../../packages/runtime-client/src/protocol/types.ts)
@@ -110,7 +118,10 @@ replaced existed to prevent.
    arrived over a port does not get to enlarge the family it joined.
 2. The joining document speaks over its end of that port and sends `Attach`,
    carrying its asserted security context. Until that is accepted it may ask
-   for nothing else.
+   for nothing else. An attach that arrives while the runtime is still standing
+   up waits for that rather than refusing; one that arrives after the runtime
+   has been disposed is refused by name, a client joining a runtime-shaped void
+   being the one failure it could not otherwise detect.
 3. Every later request on that duplex carries the attached client, and the
    runtime files what it creates under it.
 
@@ -141,6 +152,12 @@ operation subscriptions stop, its VDOM trees unmount, and the runtime and every
 other client's work keep running. Only the owner's `Dispose` reaches the
 runtime's own, the worker being the owner's page's to end.
 
+Both ways a client ends — refused, or departed — the worker forgets it and lets
+go of its channel, so a page that reloads into a refusal cannot grow the worker
+one listener at a time. A message already in flight from a client that has
+departed is acked in silence, which is how the owner's own post-disposal
+stragglers read.
+
 A dead `MessagePort` emits no event, so a departure is something a client says
 rather than something the worker observes. A document that vanishes without
 sending `Dispose` leaves its subscriptions and mounts behind until the worker
@@ -158,11 +175,23 @@ still goes to the client that initialized it:
 - telemetry markers and terminal event-delivery notices.
 
 For a single document that is every notification it ever had. For an attached
-one it means those four are not delivered: an attached document does not see
-runtime-level console output and is not told about unconfirmed writes. Routing
-them is a question of policy rather than of plumbing — a navigation broadcast
-to every attached document would navigate all of them — and is deliberately
-left until a host needs an answer.
+one, three of the four are a matter of policy and are deliberately left until a
+host needs an answer: console output has no obvious single destination, and
+pending writes are the owner's business anyway — the worker lives in the
+owner's page, so it is the owner's unload that can lose them and the owner's
+handler that gates it.
+
+**The navigation is different, and is a known gap rather than a policy
+choice.** A navigation a pattern asks for belongs to the document whose mount
+raised it, and delivering it to the owner makes one document's intent move
+another's view. Routing it is not possible at this seam: `NavigateCallback` is
+`(target: Cell) => void`, and it is invoked from a post-commit effect flush
+(`packages/runner/src/builtins/navigate-to.ts`), decoupled by then from the
+event dispatch that caused it — so nothing in hand names a mount, and the
+mounts this worker holds cannot be asked which one is responsible. Closing it
+means the runner carrying the raising context to the callback. Until it is
+closed, a host with more than one document should treat pattern-driven
+navigation as reaching the family root.
 
 Console forwarding itself is the owner's for the same reason: the bridge posts
 on the worker's own global, which is the owner's end of the IPC.
