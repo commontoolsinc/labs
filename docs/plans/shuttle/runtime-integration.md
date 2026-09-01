@@ -214,22 +214,27 @@ Each of these is small and lands on its own; together they are what decision
    rendering. `callFromCommand` reports its payload rejection from inside
    the dispatch's promise chain, so it records that an exit ran and rethrows
    rather than describing the shim's own throw as a second failure.
-5. **Output capture.** What a caller captures today is the seam's own
-   output: for every seam a v1 verb reaches, the value or page goes to
-   `render`, the next steps to `hint`, and a failure's report to
-   `printError`. What the seam prints, the caller decides where.
+5. **Output capture.** What a caller captures is the seam's own output:
+   for every seam a v1 verb reaches, the value or page goes to `render`,
+   the next steps to `hint`, a failure's report to `printError`, and the
+   lines a call publishes while it is in flight — the invocation pair as
+   the dispatch happens, and the spans under `--verbose` — to `announce`.
+   What the seam prints, the caller decides where.
 
-   Three streams reach the process's stderr regardless, and a caller
-   holding one of its own cannot redirect them. The **write receipt**,
+   `announce` is one sink rather than two because no caller wants half of
+   that pair captured, and it is separate from `printError` because both
+   its streams are published whether or not the call goes on to fail. Raw
+   stderr, which a caller supplying nothing still gets, suits a command
+   that owns the terminal for one invocation; a caller drawing its own
+   screen is corrupted by a line written behind the frame, so the views
+   the pager substrate carries need these as events they can place.
+
+   One stream reaches the process's stderr regardless, and a caller
+   holding one of its own cannot redirect it: the **write receipt**,
    `noteWroteTo` (`lib/write-receipt.ts`), which `set`, `link` and `call`
-   all reach: it wants a sink of its own rather than the hint stream,
+   all reach. It wants a sink of its own rather than the hint stream,
    because `--quiet` deliberately does not silence it, and a memo per
-   connection rather than per process, which is item 6's subject. The
-   **invocation announcement** and the **`--verbose` span stream** from
-   `callFromCommand`: each names a fact about this process — the pair to
-   retry with, the wall clock — rather than the call's outcome, so
-   neither is the failure report `printError` carries, and capturing them
-   wants a sink named for what they are.
+   connection rather than per process, which is item 6's subject.
 
    The `console.error` calls in `lib/piece.ts` are outside a v1 verb's
    path or outside a seam's reach. The navigate wiring sits inside

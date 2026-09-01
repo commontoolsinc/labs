@@ -68,8 +68,12 @@ describing the shell's exit as a second failure of the call.
 and next steps land where the caller puts them, and the confirmation
 `cf call` puts on stderr for a JSON payload — so that stdout stays the
 machine surface — rides the caller's `printError` rather than the
-process's. The bulk seams — survey, repair, retarget, `setsrc --check` —
-are on no v1 verb's path and keep the exits they have. Each threaded
+process's. `announce` beside those carries what a call publishes in
+flight — the invocation pair, and the spans under `--verbose` — which
+raw stderr serves for a one-shot command and corrupts for a caller
+drawing its own screen. The bulk seams — survey, repair, retarget,
+`setsrc --check` — are on no v1 verb's path and keep the exits they
+have. Each threaded
 seam carries the test the override makes possible: an injected exit that
 throws, and the report read back as a value.
 

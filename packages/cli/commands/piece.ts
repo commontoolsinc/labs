@@ -3178,6 +3178,17 @@ export interface PieceCallCommandDependencies {
   printError?: (message: string) => void;
 
   /**
+   * Where the call's in-flight lines go, stderr unless the caller says
+   * otherwise: the invocation pair as the dispatch happens, and the spans
+   * under `--verbose`. One sink rather than two, because no caller wants
+   * one of the pair captured and the other left writing behind its screen.
+   *
+   * Distinct from `printError` because these are published while the call
+   * is in flight and whether or not it goes on to fail.
+   */
+  announce?: (message: string) => void;
+
+  /**
    * How a failed call ends the caller. `Deno.exit` by default, which a shell
    * replaces with a shim that throws, so the failure arrives as a value.
    */
@@ -3242,14 +3253,19 @@ export async function callFromCommand(
   const invocationId = identity.id;
   const waitControl = resolveWaitControl({ ...options, ...readback });
   let phase: InvocationPhase = "initial_sync";
-  // The span stream keeps the process's stderr rather than taking a sink from
-  // `deps`. The three the caller supplies carry the call's outcome — its
-  // value, its next steps, its failure — and a wall-clock span is a fact
-  // about this process instead, so `printError` would be reporting a failure
-  // that has not happened. Capturing spans wants a sink named for them.
+  // The in-flight lines — the invocation pair as the dispatch happens, and
+  // the spans under --verbose — go where `announce` puts them. Raw stderr
+  // suits a command that owns the terminal for the length of one
+  // invocation; a caller drawing its own screen is corrupted by a line
+  // written behind the frame, and it needs these as events it can place.
+  //
+  // They stay apart from `printError` for all that: both are published
+  // while the call is in flight and whether or not it goes on to fail, so a
+  // failure sink would be naming a failure that has not happened.
   const observer = pieceCallPhaseObserver(
     !!options.verbose,
     (next) => phase = next,
+    deps.announce,
   );
   setQuietMode(!!options.quiet);
   // Both data-error reports below end the caller, so each goes to the
@@ -3312,15 +3328,10 @@ export async function callFromCommand(
           skipReadback: waitControl.mode === "commit",
           showLinks: !!options.showLinks,
           ...(selection === undefined ? {} : { selection }),
-          // The announcement keeps the process's stderr for the reason the
-          // span stream does: the pair it names is what a caller retries
-          // with, published as the dispatch happens and whether or not the
-          // call goes on to fail, so it is not the failure report
-          // `printError` is the sink for.
           onPhase: invocationPhaseReporter(
             identity,
             observer.onPhase,
-            undefined,
+            deps.announce,
             Boolean(Deno.env.get("CF_TEST_ANNOUNCE_INVOCATION_PHASES")),
           ),
         },

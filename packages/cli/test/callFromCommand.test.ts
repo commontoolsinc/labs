@@ -658,6 +658,71 @@ describe("callFromCommand()", () => {
       );
       expect(lines.filter((line) => line.startsWith("timing: "))).toEqual([]);
     });
+
+    it("hands the invocation pair to the caller's `announce`, and writes none of it to the process", async () => {
+      // Raw stderr is fine for a command that owns the terminal, and wrong
+      // for a caller drawing its own screen: a line written behind the frame
+      // corrupts it. The captured stderr is what says the announcement went
+      // to the sink rather than past it.
+
+      const dispatches: Dispatch[] = [];
+      const announced: string[] = [];
+      const escaped = await captureStderr(() =>
+        callFromCommand(
+          options,
+          "call",
+          "addItem",
+          [],
+          ["--cell", PIECE, "addItem"],
+          [],
+          {
+            ...discard,
+            announce: (message: string) => {
+              announced.push(message);
+            },
+            executePieceCallable: stubExecutor(dispatches, {}, ["dispatched"]),
+          },
+        )
+      );
+      expect(announced).toEqual([
+        `invocation: ${INVOCATION}`,
+        `session: ${SESSION}`,
+      ]);
+      expect(escaped).toEqual([]);
+    });
+
+    it("hands the `--verbose` spans to the caller's `announce`, and writes none of them to the process", async () => {
+      const dispatches: Dispatch[] = [];
+      const announced: string[] = [];
+      const escaped = await captureStderr(() =>
+        callFromCommand(
+          { ...options, verbose: true },
+          "call",
+          "addItem",
+          [],
+          ["--cell", PIECE, "--verbose", "addItem"],
+          [],
+          {
+            ...discard,
+            announce: (message: string) => {
+              announced.push(message);
+            },
+            executePieceCallable: stubExecutor(dispatches, {}, [
+              "dispatched",
+              "committed",
+            ]),
+          },
+        )
+      );
+      const spans = announced.filter((line) => line.startsWith("timing: "))
+        .map((line) => line.replace(/ [\d.]+ms$/, ""));
+      expect(spans).toEqual([
+        "timing: initial_sync → dispatched",
+        "timing: dispatched → committed",
+        "timing: committed → settled",
+      ]);
+      expect(escaped).toEqual([]);
+    });
   });
 
   describe("the failure exits", () => {
