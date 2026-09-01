@@ -57,6 +57,7 @@ describe("link-utils", () => {
   });
 
   afterEach(async () => {
+    resetContentAddressedSchemasConfig();
     tx.abort();
     await runtime?.dispose();
     await storageManager?.close();
