@@ -113,8 +113,15 @@ export function diffSource(
     fileText: expectedFiles,
     hunks: saveHunks,
   };
-  const diffCountContexts = (text: string) =>
-    buildDiffCountContexts(edit, text);
+  let countContextText: string | undefined;
+  let countContexts: readonly DiffCountFileContext[] = [];
+  const diffCountContexts = (text: string) => {
+    if (text !== countContextText) {
+      countContextText = text;
+      countContexts = buildDiffCountContexts(edit, text);
+    }
+    return countContexts;
+  };
 
   // No file on disk backs this diff (nothing resolved or verified): read-only.
   // A deletion of an entire file has no new-side lines, but its empty workspace

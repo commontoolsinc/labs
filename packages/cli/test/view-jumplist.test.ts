@@ -424,7 +424,9 @@ Deno.test("jumplist: complete count context rebuilds after an edit", () => {
   const { edit } = buildDiffDocument(diff, model, ws);
   const source = diffSource(ws, edit);
 
-  assert(source.diffCountContexts?.(diff) !== undefined);
+  const initial = source.diffCountContexts?.(diff);
+  assert(initial !== undefined);
+  assert(source.diffCountContexts?.(diff) === initial);
   const edited = diff.replace("+ * new note", "+ * newer note");
   const context = source.diffCountContexts?.(edited);
   assert(context !== undefined);

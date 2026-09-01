@@ -4723,7 +4723,9 @@ export class Session {
           this.#sourceDoc.text,
           this.#sourceDoc.lines,
           this.#jumpCountMode,
-          this.#source?.diffCountContexts?.(this.#sourceDoc.text),
+          this.#jumpCountMode === "comments"
+            ? this.#source?.diffCountContexts?.(this.#sourceDoc.text)
+            : undefined,
         ),
       };
     }

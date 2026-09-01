@@ -82,13 +82,15 @@ export function diffCounts(
   const byFile: ChangedLine[][] = model.files.map(() => []);
   const changed: ChangedLine[] = [];
   for (const [fileIndex, file] of model.files.entries()) {
-    const fallback = fallbackCommentLines(
-      raw,
-      model.lines,
-      lines,
-      file,
-      contexts?.[fileIndex],
-    );
+    const fallback = mode === "comments"
+      ? fallbackCommentLines(
+        raw,
+        model.lines,
+        lines,
+        file,
+        contexts?.[fileIndex],
+      )
+      : new Map<number, string>();
     for (let i = file.headerLine; i <= file.endLine; i++) {
       const kind = model.lines[i]?.kind;
       if (kind !== "add" && kind !== "del") continue;
