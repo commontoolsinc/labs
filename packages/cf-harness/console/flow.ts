@@ -97,10 +97,15 @@ export interface ConsoleFlowNode {
 
   /**
    * How far this call let across as a plain value, for a call whose result
-   * carried one. A long numeric run is the shape of a channel.
+   * carried one.
    */
   valueBytes?: number;
 
+  /**
+   * The longest run of numbers that value carries, for the same call. An array
+   * of integers is an array of values none of which is sealed, so a long one is
+   * a channel wide enough for arbitrary content.
+   */
   longestNumericRun?: number;
 
   /** The child run this call delegated to, drawn beneath it. */
