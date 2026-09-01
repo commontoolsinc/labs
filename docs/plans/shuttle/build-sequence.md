@@ -41,19 +41,18 @@ standalone value.
 
 **A3 — extract `callFromCommand`.** Done (#6682). `call` carries the
 named-export shape its siblings have: the mount's spelling and the two
-arrays Cliffy
-splits the argv into — this command's own arguments, the line past
-`cf call`, which a grammar refusal reprints, and the words past `--`,
-which the read step parses — are parameters beside the options and the
-positionals, so nothing under the action line needs the binding. The
+arrays Cliffy splits the argv into — this command's own arguments, the
+line past `cf call`, which a grammar refusal reprints, and the words past
+`--`, which the read step parses — are parameters beside the options and
+the positionals, so nothing under the action line needs the binding. The
 dispatch and the `render`/`hint` sinks ride a deps bag, which holds
 collaborators and no data. Its unit tests drive the whole action over a
 stub dispatcher and reach the success tail, which is what the extraction
-is worth in coverage: seven lines of `commands/piece.ts`, measured, and
-no other tracked file moves. The package's coverage shadow is real and
-lies elsewhere — it opens inside the chained `piece` command expression,
-around its first inline action, and `buildCallCommand` is a standalone
-function well before it.
+is worth in coverage: seven lines of `commands/piece.ts`, measured, and no
+other tracked file moves. The package's coverage shadow is real and lies
+elsewhere — it opens inside the chained `piece` command expression, around
+its first inline action, and `buildCallCommand` is a standalone function
+well before it.
 
 **A4 — exit and output seams audit.** Every seam shuttle calls must accept
 an exit override (`exitWithDataError` / `exitPieceCallFailure` call

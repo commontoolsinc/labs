@@ -184,10 +184,10 @@ is the two reads that hand them on. The constituents underneath are
 exported and library-grade (`executePieceCallable`, `pieceCallRawArgs`,
 `pieceCallInvocation`, `resolveInvocationIdentity`,
 `pieceCallPhaseObserver`, `resolveWaitControl`, `parsePieceCallSelection`,
-`boundedSettlement`, `renderPieceCallOutcome`).
-Its deps bag holds collaborators only — the `render`/`hint` sinks and the
-dispatch itself — so a caller holding a connection passes an
-`executePieceCallable` bound to it rather than opening one per call.
+`boundedSettlement`, `renderPieceCallOutcome`). Its deps bag holds
+collaborators only — the `render`/`hint` sinks and the dispatch itself —
+so a caller holding a connection passes an `executePieceCallable` bound to
+it rather than opening one per call.
 
 ## Prerequisite work in `packages/cli`
 

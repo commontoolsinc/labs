@@ -1055,9 +1055,14 @@ export function pieceCallPhaseObserver(
 }
 
 /**
- * The success tail of `cf call`, extracted from the command action so
- * it is unit-coverable — command action bodies never execute under the unit
- * suite, the same convention that keeps `cf test` out of its action body
+ * The success tail of `cf call`: a settled invocation's JSON, a tool's
+ * output, or a help page, through the `render`/`hint` sinks a caller
+ * supplies. Standing apart from the action is what lets a test drive each
+ * outcome shape directly rather than through argv and a dispatch; the action
+ * body does run under the unit suite, so what that buys is reaching the
+ * cases, not reaching the lines. `cf test` sits in
+ * `commands/test-command.ts` for a different reason — `deno coverage` drops
+ * a source file whose path ends in `test.ts` from the report
  * (docs/development/COVERAGE.md). Help output returns BEFORE the observer
  * finishes: no invocation ran, so there is no span to close.
  */
@@ -1858,10 +1863,11 @@ reference names the piece by handle or by slug, and may carry the space
       callableArg: string,
       ...tailArgs: string[]
     ) {
-      // Both argv-derived arrays are methods on the command Cliffy binds as
-      // this action's `this`, so they are read here and handed on as values:
-      // the raw arguments a grammar refusal quotes back, and the words past
-      // `--` the read step parses. Nothing below this line needs the binding.
+      // Both argv-derived arrays are returned by methods on the command
+      // Cliffy binds as this action's `this`, so they are read here and
+      // handed on as values: the raw arguments a grammar refusal quotes
+      // back, and the words past `--` the read step parses. Nothing below
+      // this line needs the binding.
       return callFromCommand(
         options,
         spelling,

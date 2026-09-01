@@ -383,7 +383,7 @@ describe("callFromCommand()", () => {
           ...discard,
           executePieceCallable: stubExecutor(dispatches, {
             invocation: { id: INVOCATION, status: "committed" },
-          } as Partial<ExecutedPieceCallable>),
+          }),
         },
       );
       expect(dispatches[0].deps.skipReadback).toBe(true);
@@ -425,7 +425,7 @@ describe("callFromCommand()", () => {
               status: "settled",
               result: { title: "Milk" },
             },
-          } as Partial<ExecutedPieceCallable>),
+          }),
         },
       );
       expect(JSON.parse(rendered[0])).toEqual({
@@ -454,7 +454,7 @@ describe("callFromCommand()", () => {
               status: "committed",
               receipt: "/of:receipt-1",
             },
-          } as Partial<ExecutedPieceCallable>),
+          }),
         },
       );
       expect(JSON.parse(rendered[0]).status).toBe("committed");
