@@ -1157,6 +1157,7 @@ export class Session {
     this.pendingPush = null;
     this.expireMessage();
     if (key.name === "wheel-up" || key.name === "wheel-down") {
+      this.#chord = null;
       this.#handleWheel(key.name === "wheel-up" ? -1 : 1);
       return;
     }

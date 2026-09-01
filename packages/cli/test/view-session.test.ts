@@ -90,6 +90,8 @@ Deno.test("session: the mouse wheel scrolls without moving the edit cursor", () 
   assertEquals(session.view().cursor, cursor);
   press(session, "wheel-up", "wheel-up");
   assertEquals(session.view().top, 0);
+  press(session, "ctrl-x", "wheel-down", "z");
+  assertEquals(session.view().message, "", "the wheel cancelled the C-x chord");
 });
 
 Deno.test("session: the mouse wheel scrolls an overlay", () => {

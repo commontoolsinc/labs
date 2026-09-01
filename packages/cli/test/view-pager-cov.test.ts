@@ -48,6 +48,7 @@ interface FakeOpts {
   closeThrows?: boolean;
   consoleSizeThrows?: boolean;
   consoleSize?: { columns: number; rows: number };
+  writeThrowsFrom?: number;
   addSignalThrowsFor?: Deno.Signal;
   removeSignalThrows?: boolean;
   env?: Record<string, string>;
@@ -59,7 +60,9 @@ function makeFake(opts: FakeOpts = {}) {
   const removed: string[] = [];
   const timers = new Map<number, () => void>();
   const exited: number[] = [];
+  const ttyState = { rawModes: [] as boolean[], closes: 0 };
   let nextTimer = 1;
+  let writeCount = 0;
   const steps = (opts.steps ?? []).slice();
 
   const tty: PagerTty = {
@@ -82,11 +85,13 @@ function makeFake(opts: FakeOpts = {}) {
       }
     },
     setRaw(mode) {
+      ttyState.rawModes.push(mode);
       // Throw only on the cleanup setRaw(false); the startup setRaw(true) is
       // not guarded, so a startup throw would escape.
       if (opts.setRawThrows && !mode) throw new Error("setRaw failed");
     },
     close() {
+      ttyState.closes++;
       if (opts.closeThrows) throw new Error("close failed");
     },
   };
@@ -96,7 +101,15 @@ function makeFake(opts: FakeOpts = {}) {
       if (opts.openThrows) throw new Error("no controlling terminal");
       return tty;
     },
-    write: (t) => writes.push(t),
+    write: (t) => {
+      writes.push(t);
+      writeCount++;
+      if (
+        opts.writeThrowsFrom !== undefined && writeCount >= opts.writeThrowsFrom
+      ) {
+        throw new Error("write failed");
+      }
+    },
     consoleSize: () => {
       if (opts.consoleSizeThrows) throw new Error("no console");
       return opts.consoleSize ?? { columns: 80, rows: 24 };
@@ -123,7 +136,7 @@ function makeFake(opts: FakeOpts = {}) {
     // here would only stall the run.
     delay: () => Promise.resolve(),
   };
-  return { deps, writes, signals, removed, timers, exited };
+  return { deps, writes, signals, removed, timers, exited, ttyState };
 }
 
 Deno.test("pager: a missing /dev/tty raises a ViewError", async () => {
@@ -149,6 +162,17 @@ Deno.test("pager: draws the document and quits on q", async () => {
   );
 });
 
+Deno.test("pager: restores the terminal when the initial write fails", async () => {
+  const { deps, ttyState } = makeFake({ writeThrowsFrom: 1 });
+  await assertRejects(
+    () => runPager(DOC, OPTS, undefined, undefined, deps),
+    Error,
+    "write failed",
+  );
+  assertEquals(ttyState.rawModes, [true, false]);
+  assertEquals(ttyState.closes, 1);
+});
+
 Deno.test("pager: an SGR mouse-wheel report scrolls the document", async () => {
   const doc = parseDocument(
     Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n"),
@@ -164,7 +188,10 @@ Deno.test("pager: an SGR mouse-wheel report scrolls the document", async () => {
   const frames = writes.filter((write) => write.includes("\x1b[?7l"));
   const wheelFrame = frames.at(-1)!;
   assert(
-    wheelFrame.includes("line 3") && !wheelFrame.includes("line 0"),
+    wheelFrame.includes("line 3") &&
+      !wheelFrame.includes("line 0") &&
+      !wheelFrame.includes("line 1") &&
+      !wheelFrame.includes("line 2"),
     "the wheel redraw starts three lines down",
   );
 });
