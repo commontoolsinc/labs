@@ -152,3 +152,39 @@ describe("the pattern and package suites", () => {
     }
   });
 });
+
+describe("enumerating a tree that cannot be read", () => {
+  /** A root where a directory the suites walk is a file instead. */
+  async function obstructed(at: string): Promise<string> {
+    const root = await Deno.makeTempDir({ prefix: "obstructed-" });
+    const parent = at.slice(0, at.lastIndexOf("/"));
+    await Deno.mkdir(`${root}/${parent}`, { recursive: true });
+    await Deno.writeTextFile(`${root}/${at}`, "not a directory");
+    return root;
+  }
+
+  it("raises rather than reporting a suite with no files", async () => {
+    // Passing over a missing directory is right; passing over one that
+    // cannot be read would take tests out of the topology without a
+    // word, and the drift guard would then report success over a
+    // shorter list than the tree holds.
+    const root = await obstructed("packages/patterns/integration");
+    await expect(loadPatternSuites(root)).rejects.toThrow();
+    await Deno.remove(root, { recursive: true });
+  });
+
+  it("raises for a package integration directory it cannot read", async () => {
+    const root = await obstructed("packages/runner/integration");
+    await expect(loadPackageIntegrationSuites(root)).rejects.toThrow();
+    await Deno.remove(root, { recursive: true });
+  });
+
+  it("reports no files for a directory the tree does not hold", async () => {
+    // The other half of the same judgement: a package without
+    // integration tests contributes nothing and fails nothing.
+    const root = await Deno.makeTempDir({ prefix: "bare-" });
+    const suites = await loadPackageIntegrationSuites(root);
+    expect(suites.flatMap((suite) => suite.units)).toEqual([]);
+    await Deno.remove(root, { recursive: true });
+  });
+});

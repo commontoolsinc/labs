@@ -254,3 +254,19 @@ describe("a member whose manifest says less than usual", () => {
     expect(files).toEqual(["test/a.test.ts"]);
   });
 });
+
+describe("a member holding a file where a directory would go", () => {
+  it("keeps walking past it, and finds the tests beside it", async () => {
+    // The walk descends into directories and reads files; a file called
+    // `test` is neither a directory to descend into nor a name the test
+    // rule matches, so it is passed over rather than being read as
+    // either.
+    const dir = await Deno.makeTempDir({ prefix: "deno-task-" });
+    made.push(dir);
+    await Deno.writeTextFile(`${dir}/test`, "not a directory");
+    await Deno.mkdir(`${dir}/src`);
+    await Deno.writeTextFile(`${dir}/src/a.test.ts`, "");
+    const files = await memberTestFiles(dir, parseTestTask("deno test .")!);
+    expect(files).toEqual(["src/a.test.ts"]);
+  });
+});

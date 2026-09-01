@@ -456,3 +456,21 @@ describe("running the check and saying what it found", () => {
     expect(suites).toBeGreaterThan(0);
   });
 });
+
+describe("walking a tree that cannot be read", () => {
+  it("raises rather than checking against a shorter list", async () => {
+    // A directory that cannot be read is not a directory that holds
+    // nothing. Treating the two alike would let the guard report success
+    // over whatever it managed to reach.
+    const root = await Deno.makeTempDir({ prefix: "obstructed-" });
+    await Deno.writeTextFile(`${root}/packages`, "not a directory");
+    await expect(candidateSurfaces(root)).rejects.toThrow();
+    await Deno.remove(root, { recursive: true });
+  });
+
+  it("finds nothing in a tree that holds none of its roots", async () => {
+    const root = await Deno.makeTempDir({ prefix: "bare-" });
+    expect(await candidateSurfaces(root)).toEqual([]);
+    await Deno.remove(root, { recursive: true });
+  });
+});
