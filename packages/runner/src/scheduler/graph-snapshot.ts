@@ -1,5 +1,6 @@
 import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { resolveScopeKey } from "@commonfabric/memory/v2";
+import { getAuthoredDebugSource } from "../harness/authored-debug-source.ts";
 import { arraysOverlap } from "../reactive-dependencies.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
@@ -72,6 +73,11 @@ export function buildSchedulerGraphSnapshot(
       formatAddress(write, identity)
     );
 
+    // The authored implementation, for the two debug-only labels below.
+    const implementation = (action as Action & {
+      module?: { implementation?: unknown };
+    }).module?.implementation;
+
     // Get timing controls
     const debounceMs = state.getDebounce(action);
     const throttleMs = state.getThrottle(action);
@@ -98,9 +104,8 @@ export function buildSchedulerGraphSnapshot(
         : undefined,
       parentId,
       childCount: childCount && childCount > 0 ? childCount : undefined,
-      preview: (action as Action & {
-        module?: { implementation?: { preview?: string } };
-      }).module?.implementation?.preview,
+      preview: (implementation as { preview?: string } | undefined)?.preview,
+      src: getAuthoredDebugSource(implementation)?.src,
       reads,
       shallowReads,
       writes,
