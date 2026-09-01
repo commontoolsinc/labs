@@ -684,7 +684,7 @@ export function securityContextFrom(
  * carried as an absent property in one and as an explicit `undefined` in the
  * other is the same posture and compares equal here.
  */
-function securityContextDifferences(
+export function securityContextDifferences(
   asserted: RuntimeSecurityContext,
   running: RuntimeSecurityContext,
 ): string[] {

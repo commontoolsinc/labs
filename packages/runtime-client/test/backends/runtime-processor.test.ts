@@ -15,7 +15,7 @@ import {
 import { isValidFabricValue } from "@commonfabric/data-model/fabric-value";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { getLogger } from "@commonfabric/utils/logger";
-import { Identity } from "@commonfabric/identity";
+import { type DID, Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import {
   decodeMemoryBoundary,
@@ -54,6 +54,7 @@ import {
   type GetPatternSourcesRequest,
   NotificationType,
   RequestType,
+  type RuntimeSecurityContext,
 } from "@/protocol/mod.ts";
 import {
   assertServerExecutionPostureAgreement,
@@ -61,6 +62,7 @@ import {
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
   RuntimeProcessor,
+  securityContextDifferences,
   subscribeEventAttentionNotifications,
   toConsoleDebugValue,
 } from "@/backends/runtime-processor.ts";
@@ -6455,6 +6457,83 @@ describe("runtime-processor", () => {
         expect(() => processor.disposeClient(testClient(1).client)).not
           .toThrow();
       });
+    });
+  });
+
+  describe("securityContextDifferences()", () => {
+    // A runtime is one signer under one enforcement configuration, and an
+    // attach states which it believes it is joining. What this returns is
+    // what an attach is refused by name for.
+
+    const running: RuntimeSecurityContext = {
+      identity: cfcSigner.did(),
+      spaceDid: cfcSigner.did(),
+      cfcEnforcementMode: "enforce-strict",
+      cfcFlowLabels: "persist",
+      renderDeclassificationPolicy: "deny",
+      renderConfidentialityCeiling: { atoms: [], caveatKinds: ["influence"] },
+      trustSnapshot: { id: `principal:${cfcSigner.did()}` },
+    };
+
+    it("returns an empty list for the same context", () => {
+      expect(securityContextDifferences({ ...running }, running)).toEqual([]);
+    });
+
+    it("returns an empty list when a field is absent on one side and `undefined` on the other", () => {
+      // The two contexts are built in different documents and one of them
+      // crossed an encoding, so these are the same posture.
+      const asserted = { ...running, experimental: undefined };
+      expect(securityContextDifferences(asserted, running)).toEqual([]);
+    });
+
+    it("names the acting principal when it differs", () => {
+      expect(
+        securityContextDifferences(
+          { ...running, identity: "did:key:z6Mk-someone-else" as DID },
+          running,
+        ),
+      ).toEqual(["identity"]);
+    });
+
+    it("names the enforcement mode when it differs", () => {
+      expect(
+        securityContextDifferences(
+          { ...running, cfcEnforcementMode: "observe" },
+          running,
+        ),
+      ).toEqual(["cfcEnforcementMode"]);
+    });
+
+    it("names a ceiling that differs deep inside", () => {
+      expect(
+        securityContextDifferences(
+          {
+            ...running,
+            renderConfidentialityCeiling: {
+              atoms: [],
+              caveatKinds: ["influence", "and-one-more"],
+            },
+          },
+          running,
+        ),
+      ).toEqual(["renderConfidentialityCeiling"]);
+    });
+
+    it("names an absent field the running context declares", () => {
+      const { trustSnapshot: _dropped, ...asserted } = running;
+      expect(securityContextDifferences(asserted, running)).toEqual([
+        "trustSnapshot",
+      ]);
+    });
+
+    it("names every differing field, in a fixed order", () => {
+      expect(
+        securityContextDifferences({
+          ...running,
+          identity: "did:key:z6Mk-someone-else" as DID,
+          cfcFlowLabels: "off",
+        }, running),
+      ).toEqual(["cfcFlowLabels", "identity"]);
     });
   });
 });
