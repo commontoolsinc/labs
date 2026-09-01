@@ -221,7 +221,7 @@ LOG_NAME=$(cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c \
 "MOUNT/SPACE/pieces/$LOG_NAME/result/logEvent.handler" \
   --agent "deployer" \
   --action "deployed" \
-  --cell-name "Contact Book" \
+  --piece-name "Contact Book" \
   --note "Contacts mentioned in standup notes with no structured tracking"
 
 # Note: handler CLIs expose object fields as kebab-case flags (`piece-name`),

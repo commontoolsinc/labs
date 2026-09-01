@@ -469,8 +469,12 @@ describe("cli piece parsing", () => {
       callableName: "addItem",
       tail: ["{}"],
     });
-    expect(() => readCallTarget({ cell: PIECE }, `/${LLM_HANDLE}`, ["addItem"]))
-      .toThrow(/"--cell" \(or "--piece"\) cannot be provided/);
+    // The flag does not collide here, it disambiguates: a callable name may
+    // begin with "/", so a written flag makes the positional the callable.
+    // `readTargetPositionals` refuses the same pair, because there the other
+    // reading is a path and a path is never rooted.
+    expect(readCallTarget({ cell: PIECE }, `/${LLM_HANDLE}`, ["addItem"]))
+      .toEqual({ callableName: `/${LLM_HANDLE}`, tail: ["addItem"] });
     expect(() => readCallTarget({}, `/${LLM_HANDLE}`, []))
       .toThrow(/callable name/);
   });
@@ -541,6 +545,49 @@ describe("cli piece parsing", () => {
       piece: PIECE,
       pieceScope: "user",
       piecePath: ["items", 0],
+    });
+  });
+
+  it("parseSpaceOptions() takes both URL encodings off a path segment", () => {
+    // A URL escapes with percent-encoding and a cell path is a JSON Pointer,
+    // so a key holding "/" or "~" arrives doubly escaped and a segment taken
+    // verbatim names a key nothing has.
+    expect(parsePieceOptions(
+      { url: `${FULL_URL}/foo~1bar/~0tilde`, identity: ID },
+      { acceptsPath: true },
+    )).toMatchObject({ piecePath: ["foo/bar", "~tilde"] });
+    expect(parsePieceOptions(
+      {
+        url: `${API_URL}/${SPACE}/of%3Afid1%3A${"a".repeat(43)}`,
+        identity: ID,
+      },
+    )).toMatchObject({ piece: `of:fid1:${"a".repeat(43)}` });
+  });
+
+  it("parseSpaceOptions() refuses a URL part holding the reference terminator", () => {
+    // Folded into the reference this decomposes to, "#" would read as the
+    // suffix and silently address the arguments cell instead.
+    expect(() =>
+      parsePieceOptions(
+        { url: `${FULL_URL}/foo%23argument`, identity: ID },
+        { acceptsPath: true, acceptsArgument: true },
+      )
+    ).toThrow(/"#" closes a reference/);
+  });
+
+  it("readCallTarget() lets the flag name the target for a rooted callable", () => {
+    // Nothing reserves the shape of a callable name, so a verb may be called
+    // "/archive". The flag is what reaches it: written, it names the target
+    // and the positional is the callable.
+    expect(readCallTarget({ cell: "board" }, "/archive", ["{}"])).toEqual({
+      callableName: "/archive",
+      tail: ["{}"],
+    });
+    // With no flag the rooted word is still the target, as before.
+    expect(readCallTarget({}, `/${LLM_HANDLE}`, ["archive"])).toEqual({
+      cell: `/${LLM_HANDLE}`,
+      callableName: "archive",
+      tail: [],
     });
   });
 

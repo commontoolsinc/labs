@@ -2322,7 +2322,7 @@ export const piece = targetOptions(
   .option(
     "--list <piece:string>",
     "Survey this piece instead of a collection. Repeatable.",
-    { collect: true, conflicts: ["piece", "path", "side"] },
+    { collect: true, conflicts: ["cell", "path", "side"] },
   )
   .option(
     "--retarget <spec:string>",
@@ -2393,7 +2393,7 @@ export const piece = targetOptions(
   .option(
     "--list <piece:string>",
     "Repair this piece instead of a collection. Repeatable.",
-    { collect: true, conflicts: ["piece", "path", "side"] },
+    { collect: true, conflicts: ["cell", "path", "side"] },
   )
   .option(
     "--fixer <path:string>",
@@ -4585,23 +4585,25 @@ export function readTargetPositionals(
 
 /**
  * `cf call`'s positional intake: when the first positional is a reference it
- * replaces the flag, and the callable name follows it. The same `/`-leading
- * grammar decides as in {@link readTargetPositionals}; a bare callable name
- * can never match it.
+ * replaces the flag, and the callable name follows it.
+ *
+ * The `/`-leading grammar decides, as in {@link readTargetPositionals}, but
+ * what it decides against differs and so the tie-break does too. There the
+ * other reading is a cell path, which never begins with `/`, so a rooted
+ * positional can only be a target and the flag beside it is a target named
+ * twice. Here the other reading is a callable name, and nothing reserves the
+ * shape of one — a verb may be named `/archive`. So the flag disambiguates
+ * rather than collides: written, it names the target and the positional is
+ * the callable, which is the only spelling that reaches a verb whose name
+ * begins with `/`.
  */
 export function readCallTarget(
   options: { cell?: string },
   callableName: string,
   tail: string[],
 ): { cell?: string; callableName: string; tail: string[] } {
-  if (!isReference(callableName)) {
+  if (options.cell || !isReference(callableName)) {
     return { callableName, tail };
-  }
-  if (options.cell) {
-    throw new ValidationError(
-      `${CELL_FLAG} cannot be provided when the address is positional.`,
-      { exitCode: 1 },
-    );
   }
   const [nextCallable, ...rest] = tail;
   if (nextCallable === undefined) {
@@ -4844,7 +4846,7 @@ export function parseLink(
   };
 }
 
-/** A URL path segment as the word it stands for. */
+/** A URL segment with its percent-encoding removed. */
 function decodeUrlSegment(segment: string): string {
   try {
     return decodeURIComponent(segment);
@@ -4854,6 +4856,22 @@ function decodeUrlSegment(segment: string): string {
       { exitCode: 1 },
     );
   }
+}
+
+/**
+ * A URL path segment as the cell key it stands for.
+ *
+ * Two encodings sit on one segment and both have to come off. A URL escapes
+ * with percent-encoding; a path within a cell is a JSON Pointer, which
+ * `createLLMFriendlyLink` writes and which escapes `/` as `~1` and `~` as
+ * `~0` — so a key holding either arrives doubly escaped, and a segment taken
+ * verbatim names a key nothing has. This is the reading `parseFabricUrl`
+ * already gives a page URL of this shape.
+ */
+function decodeUrlPathSegment(segment: string): string {
+  return decodeUrlSegment(segment)
+    .replace(/~1/g, "/")
+    .replace(/~0/g, "~");
 }
 
 /**
@@ -4884,21 +4902,37 @@ function decomposeUrl(
     );
   }
   const apiUrl = `${url.protocol}//${url.host}`;
-  const [space, ...rest] = url.pathname
-    .split("/")
-    .filter(Boolean)
-    .map(decodeUrlSegment);
+  const segments = url.pathname.split("/").filter(Boolean);
+  const space = segments[0] === undefined
+    ? undefined
+    : decodeUrlSegment(segments[0]);
   if (!space) {
     throw new ValidationError(
       `"--url" does not contain a space.`,
       { exitCode: 1 },
     );
   }
-  if (rest.length === 0) return { apiUrl, space };
+  if (segments.length === 1) return { apiUrl, space };
+  // The space and the piece are words, not paths, so only percent-encoding
+  // sits on them; everything after the piece is a cell path and carries the
+  // JSON Pointer escaping too.
+  const piece = decodeUrlSegment(segments[1]);
+  const path = segments.slice(2).map(decodeUrlPathSegment);
+  // `#` is what closes a reference, so a part holding one cannot be written
+  // into the reference this decomposes to. Refused rather than folded in:
+  // read as the suffix, it would silently address the arguments cell.
+  const holdsHash = [space, piece, ...path].find((part) => part.includes("#"));
+  if (holdsHash !== undefined) {
+    throw new ValidationError(
+      `The "--url" names "${holdsHash}", and "#" closes a reference, so it ` +
+        `cannot ride one. Write the path as an argument instead.`,
+      { exitCode: 1 },
+    );
+  }
   return {
     apiUrl,
     space,
-    reference: encodeJsonPointer(["", `@${space}`, ...rest]),
+    reference: encodeJsonPointer(["", `@${space}`, piece, ...path]),
   };
 }
 

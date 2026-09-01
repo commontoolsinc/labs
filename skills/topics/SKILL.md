@@ -124,9 +124,9 @@ project the returned Topic to its address:
 export CF_INVOCATION_SESSION="$(cf invocation-session new)"
 CREATE="$(cf call --cell "$TOPICS_BOARD" \
   --invocation '<unique-topic-create-id>' \
-  --schema '{"properties":{"topic":{"$link":true}}}' \
   addTopic \
-  '{"title":"<title>","body":"<initial living document>","agentName":"Sol"}')"
+  '{"title":"<title>","body":"<initial living document>","agentName":"Sol"}' \
+  -- --schema '{"properties":{"topic":{"$link":true}}}')"
 TOPIC="$(printf '%s\n' "$CREATE" | jq -r '.result.topic["$link"] // empty')"
 ```
 

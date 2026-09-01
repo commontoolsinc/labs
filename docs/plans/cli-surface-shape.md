@@ -330,8 +330,14 @@ not introduce the first thing that does.
 reference had the right structure and a narrower vocabulary than the alias
 beside it. Closing the gap means the reference accepts a space by name and a
 piece by slug — `did:key:…` and `fid1:…` are both self-identifying, so neither
-can be mistaken for a name — and that a reference may be written positionally
-wherever the target flag is accepted.
+can be mistaken for a name — and that a reference may be written positionally.
+
+Positionally means the commands that have a position for it: `get`, `set` and
+`call`. The flag carries a reference on every command that takes a target, but
+a position for one exists only where nothing else owns the first positional —
+`piece setsrc <main>` and `piece getsrc <outpath>` already spend theirs — so
+opening a target position elsewhere would be taking one away rather than
+adding one.
 
 The reference carries cells and stops there. A verb is not one, so it stays the
 word after the reference rather than a segment inside it — which is where a

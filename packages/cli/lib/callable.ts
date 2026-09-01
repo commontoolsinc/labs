@@ -14,6 +14,7 @@ import {
 } from "@commonfabric/runner/cfc/schema-refs";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import {
+  namesResolvedParts,
   type NormalizedLLMFriendlyRef,
   normalizeLLMFriendlyRef,
 } from "./llm-friendly-ref.ts";
@@ -914,7 +915,14 @@ export function resolveEmittedAddressArguments(
       } catch {
         parsed = undefined;
       }
-      if (parsed === undefined || parsed.input) {
+      // A slug and a space name are refused here as firmly as a non-address
+      // is. This value becomes a stored link, which holds the id and the
+      // space verbatim and has no session behind it to resolve a name with —
+      // so the wider vocabulary `cf`'s own intake takes would land a durable
+      // edge pointing at nothing.
+      if (
+        parsed === undefined || parsed.input || !namesResolvedParts(parsed)
+      ) {
         return {
           value,
           refusal: `${JSON.stringify(value)} at ${path} is not an address — ` +
