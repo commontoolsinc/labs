@@ -159,6 +159,15 @@ usage:
   bound wrongly stamps a copy no reader sees, which is a silent failure, so it
   wants a browser test rather than an assumption.
 
+  Two other gaps are open against this item. An agent can add a comment and
+  cannot retract one, because these verbs name their target by reference and a
+  comment carries no fid an inline JSON event could name — [#6713], where the
+  candidate keys are set out. And the rule that a retracted link stops
+  resolving into `mentions` is carried by reading rather than by a test: it
+  needs a link whose URL names a real piece, and `cellFromUrl` answers with no
+  cell for any URL a pattern test can build, so a retracted link and a plain
+  web link are indistinguishable to the suite.
+
 - **`AgentActor` execution provenance** replacing per-event `agentName`, when
   the retention-and-provenance track clears its review. That review has not
   happened and nothing in that plan has started, so this item cannot begin
@@ -268,11 +277,13 @@ Two preconditions belong to the board rather than to the code:
 - **A new verb goes on `TopicOutput`, not on `TopicPiece`.** The board stores
   that projection, so it is a demand on every topic already held, and a
   required verb added to it refuses every piece deployed before the verb
-  existed. A verb has no default to be rescued by, so there is no compatible
-  way to demand a new one — optionality would work, but the placement is what
-  `setTitle` established and what keeps the board's contract still. The tell
-  that it worked is a baseline recorded for `topic.tsx` and none for
-  `main.tsx`.
+  existed. No pattern in the tree writes a verb with a default, so in practice
+  a newly demanded verb has nothing to rescue it — but that is a fact about
+  what patterns emit, not a rule the gate enforces: a stream node carrying a
+  `default` is ACCEPTED, which is [#6673]. Optionality would also work; the
+  placement is what `setTitle` established and what keeps the board's contract
+  still. The tell that it worked is a baseline recorded for `topic.tsx` and
+  none for `main.tsx`.
 - **`unmention` keeps removing rather than stamping**, and the pattern carries
   two removal semantics until [#6573] closes it. Not because an edge matters
   less than content, but because a mention is a bare reference with no record
@@ -287,3 +298,5 @@ Two preconditions belong to the board rather than to the code:
   fields from the board's published projection is accepted.
 
 [#6573]: https://github.com/commontoolsinc/labs/issues/6573
+[#6673]: https://github.com/commontoolsinc/labs/issues/6673
+[#6713]: https://github.com/commontoolsinc/labs/issues/6713
