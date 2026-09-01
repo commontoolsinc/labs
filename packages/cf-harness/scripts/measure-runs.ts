@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read
+
 /**
  * Count what console runs did with the pattern index.
  *
@@ -262,6 +263,7 @@ export interface MeasurementTotals {
   delegations: number;
   delegationProfiles: Readonly<Record<string, number>>;
   delegationProfilesUnread: number;
+
   /** `assign_slug` calls. The three counts below partition this one. */
   slugs: number;
 
@@ -274,6 +276,11 @@ export interface MeasurementTotals {
   /** Of those, the ones whose outcome could not be read. */
   slugsUnread: number;
 
+  /**
+   * The slug names themselves, from the assigned calls alone: a refused or
+   * unread call contributes none, and neither does an assigned call whose name
+   * could not be read.
+   */
   slugNames: readonly string[];
 
   /**
@@ -537,6 +544,7 @@ export const totalsOf = (run: RunMeasurement): MeasurementTotals => {
 const BLOCK_COMMENT = /\/\*[\s\S]*?\*\//g;
 const LINE_COMMENT = /(^|[^:])\/\/[^\n]*/g;
 const IMPORT_STATEMENT = /\bimport\s+[\s\S]*?\s+from\s*(['"])([^'"]+)\1\s*;?/g;
+
 /** `import "cf:pattern:…"`, which binds nothing and so carries no `from`. */
 const BARE_IMPORT_STATEMENT = /\bimport\s*(['"])([^'"]+)\1\s*;?/g;
 

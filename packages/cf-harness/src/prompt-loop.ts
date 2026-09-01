@@ -1753,6 +1753,7 @@ const MODEL_FACING_READ_FILE_BOUNDS: ModelFacingTextBounds = {
   head: 8_000,
   tail: 2_000,
 };
+
 const REDACTED_READ_FILE_ERROR_PATH = "[redacted]";
 const REDACTED_READ_FILE_ERROR_MESSAGE =
   "read_file failed: filesystem status not observable under CFC policy";

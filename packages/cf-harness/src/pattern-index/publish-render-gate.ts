@@ -154,7 +154,6 @@ export type PatternPublicationReason =
  * `syntheticInputsComplete` reach the tool result; `html` goes only to the
  * run artifact — see the module comment on what that does and does not mean.
  */
-
 export interface PatternRenderVerdict {
   readonly status: PatternPublicationStatus;
   readonly reason: PatternPublicationReason;

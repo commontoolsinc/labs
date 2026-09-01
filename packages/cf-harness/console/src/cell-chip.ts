@@ -243,13 +243,16 @@ export class ConsoleCell extends LitElement {
   };
 
   #showing = false;
+
   /**
-   * Hover and focus each keep the card up on their own — `:hover, :focus-within`
-   * is an or — so tracking stops only when neither is left. Closing on
-   * `mouseleave` alone strands a card the keyboard is still holding open.
+   * Whether the pointer is over the chip. Hover and focus each keep the card up
+   * on their own — `:hover, :focus-within` is an or — so tracking stops only
+   * when neither is left. Closing on `mouseleave` alone strands a card the
+   * keyboard is still holding open.
    */
   #hovered = false;
 
+  /** Whether focus is inside the chip, which holds the card up the same way. */
   #focused = false;
 
   #open(by: "hover" | "focus"): void {

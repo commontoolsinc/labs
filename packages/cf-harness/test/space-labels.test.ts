@@ -51,12 +51,13 @@ const COMMITTED = entity("committed");
 const NEVER_WRITTEN = entity("neverWritten");
 
 /**
- * The space the DID-named database holds, and one this host never opened. The
- * store names its file after its space, so a file named for {@link OWN_DID} is
- * the only proof this reader has of which space its ids belong to.
+ * The space the DID-named database holds. The store names its file after its
+ * space, so a file named for {@link OWN_DID} is the only proof this reader has
+ * of which space its ids belong to.
  */
 const OWN_DID = "did:key:z6MkfrQ3tCDZgvJcLwPTvxNsFR8RgTsHTa5JzmnW9pQrUvNq";
 
+/** A space this host never opened, for the same reason. */
 const FOREIGN_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 
 /**
@@ -236,16 +237,19 @@ const documents: Record<string, unknown> = {
 };
 
 /**
- * Bounds narrower than the ones a run records under, each stopping at a place
+ * Bounds narrower than the ones a run records under, stopping at a place
  * {@link DEEPER} reaches: {@link SHALLOW} descends one level, so the link
- * below that is a path it refuses; {@link SPENT} has two values to spend, so
- * it runs out with the rest of the document unenumerated.
+ * below that is a path it refuses.
  */
 const SHALLOW: LinkWalkBounds = {
   maxDepth: 1,
   maxNodes: Number.POSITIVE_INFINITY,
 };
 
+/**
+ * The other such bound: {@link SPENT} has two values to spend, so it runs out
+ * with the rest of the document unenumerated.
+ */
 const SPENT: LinkWalkBounds = { maxDepth: 64, maxNodes: 2 };
 
 /** The documents written as plain JSON rather than through the codec. */
