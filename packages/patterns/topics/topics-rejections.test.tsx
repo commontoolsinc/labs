@@ -173,13 +173,7 @@ export default pattern(() => {
       agentName: "   ",
     });
   });
-  const action_edit_comment_blank_body = action(() => {
-    seedTopic.editComment.send({
-      comment: foreignComment,
-      body: "   ",
-      agentName: "Sol",
-    });
-  });
+
   const action_remove_link_both_spellings = action(() => {
     seedTopic.removeLink.send({
       link: foreignLink,
@@ -256,6 +250,21 @@ export default pattern(() => {
       agentName: "Sol",
     });
   });
+  // Blank body, on a comment this topic OWNS and has not retracted. Sent at a
+  // foreign comment it would reject on membership three checks earlier and
+  // never reach the guard it is named for — which line coverage cannot tell
+  // you, because the condition is evaluated on every successful edit.
+  const action_edit_blank_body = action(() => {
+    retractedTopic.editComment.send({
+      comment: retractedComments.key(0),
+      body: "   ",
+      agentName: "Sol",
+    });
+  });
+  const assert_body_survived_blank_edit = assert(() =>
+    retractedComments.get()[0]?.body === "once"
+  );
+
   const action_retract_both = action(() => {
     retractedTopic.removeComment.send({
       comment: retractedComments.key(0),
@@ -331,7 +340,7 @@ export default pattern(() => {
 
   return {
     // Every rejection below MUST surface as a thrown handler error —
-    // seventeen throwing actions, seventeen runtime errors. The exact count
+    // thirty-three throwing actions, thirty-three runtime errors. The exact count
     // means a
     // single verb quietly reverting to a silent early-return fails this suite;
     // the no-write assertions then prove the throw also blocked the write.
@@ -379,8 +388,6 @@ export default pattern(() => {
       { assertion: assert_foreign_comment_untouched },
       { action: action_remove_comment_unsigned },
       { assertion: assert_foreign_comment_untouched },
-      { action: action_edit_comment_blank_body },
-      { assertion: assert_foreign_comment_untouched },
       { action: action_remove_link_both_spellings },
       { assertion: assert_foreign_link_untouched },
       { action: action_remove_link_neither_spelling },
@@ -400,6 +407,8 @@ export default pattern(() => {
       { action: action_remove_link_unsigned },
       { assertion: assert_foreign_link_untouched },
       { action: action_seed_retractable },
+      { action: action_edit_blank_body },
+      { assertion: assert_body_survived_blank_edit },
       { action: action_retract_both },
       { assertion: assert_one_retraction_each },
       { action: action_retract_comment_again },
