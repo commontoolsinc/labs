@@ -11,9 +11,7 @@
  * it was pushed at. {@link #indexOf} names the lowest of them and {@link
  * #lastIndexOf} the highest, and a pop takes the highest away.
  *
- * A lookup does not get slower as the stack grows. How that is arranged, and
- * the heights it is arranged around, are this class's own business and not
- * something to write code against.
+ * A lookup does not get slower as the stack grows.
  */
 export class IndexTrackingStack<T> {
   /** The values, in order, so a value's position is its index. */
