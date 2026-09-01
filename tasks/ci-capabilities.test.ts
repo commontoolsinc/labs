@@ -45,10 +45,23 @@ describe("ci capabilities", () => {
     }
   });
 
-  it("keys every capability by its own identifier", () => {
-    for (const [id, capability] of CAPABILITIES) {
-      expect(capability.id).toBe(id);
-    }
+  it("holds one capability for every name a suite may ask for", () => {
+    // The registry is keyed by each entry's own identifier, so comparing
+    // the two says nothing. What can go wrong is a name added to the
+    // type and not to the registry, or the other way round, and a suite
+    // asking for one that is not there fails the lane before it starts.
+    expect([...CAPABILITIES.keys()].toSorted()).toEqual([
+      "browser",
+      "cf",
+      "compile-cache",
+      "deno",
+      "fuse",
+      "git-history",
+      "jq",
+      "local-dev-servers",
+      "toolshed",
+      "toolshed-baked-on",
+    ]);
   });
 
   it("exports the environment a dry run's batches would see", async () => {
