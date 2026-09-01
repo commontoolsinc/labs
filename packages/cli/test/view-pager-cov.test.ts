@@ -187,13 +187,13 @@ Deno.test("pager: an SGR mouse-wheel report scrolls the document", async () => {
   await runPager(doc, OPTS, undefined, undefined, deps);
   const frames = writes.filter((write) => write.includes("\x1b[?7l"));
   const wheelFrame = frames.at(-1)!;
-  assert(
-    wheelFrame.includes("line 3") &&
-      !wheelFrame.includes("line 0") &&
-      !wheelFrame.includes("line 1") &&
-      !wheelFrame.includes("line 2"),
-    "the wheel redraw starts three lines down",
-  );
+  assert(wheelFrame.includes("line 3"), "the wheel frame contains line 3");
+  for (const skippedLine of ["line 0", "line 1", "line 2"]) {
+    assert(
+      !wheelFrame.includes(skippedLine),
+      `the wheel frame starts after ${skippedLine}`,
+    );
+  }
 });
 
 Deno.test("pager: unknown named files schedule no semantic work", async () => {
