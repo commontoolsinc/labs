@@ -74,8 +74,8 @@ describe("convertCellsToLinks() with runtime-annotated arrays", () => {
 
   it("returns a plain array from an annotated `Array` subclass", () => {
     // An annotated container is rebuilt through its own `map()`, which on a
-    // subclass would answer with a subclass instance. The prototype guard is
-    // what keeps such a value on the cleaning path instead.
+    // subclass would return a subclass instance. The prototype guard is what
+    // keeps such a value on the cleaning path instead.
     class Tagged extends Array<number> {}
     const tagged = Tagged.from([1, 2]);
     Object.defineProperty(tagged, toCell, {
@@ -93,8 +93,8 @@ describe("convertCellsToLinks() with runtime-annotated arrays", () => {
   });
 
   it("converts a schemaless read, which is a proxy, under `doNotConvertCellResults`", () => {
-    // A schemaless read answers the annotation from a trap rather than an own
-    // property, and its `map()` is the proxy's. Its content still comes
+    // A schemaless read serves the annotation from a trap rather than as an
+    // own property, and its `map()` is the proxy's. Its content still comes
     // through as plain containers.
     const cell = runtime.getCell<unknown>(
       space,

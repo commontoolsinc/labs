@@ -4241,11 +4241,11 @@ function convertOneToLinks(
   // the walk, and the next position holding it would be taken for a cycle.
   try {
     // A schema-bearing read hangs a non-enumerable `toCell` symbol on the
-    // arrays it returns. That symbol is machinery, not content, and an array
-    // carrying it is not a `FabricValue`, so drop it before the vetting below
-    // would reject it. Only annotated arrays are cleaned: an array carrying
-    // anything else non-index is genuinely unrepresentable and must still be
-    // rejected.
+    // containers it returns. That symbol is machinery, not content, and a
+    // container carrying it is not a `FabricValue`, so it is kept away from
+    // the vetting below, which would refuse it. Whatever else a container
+    // carries that is neither an index nor an enumerable string key is
+    // dropped along with the symbol.
     if (isCellResultForDereferencing(value) && isPlainContainer(value)) {
       const isArray = Array.isArray(value);
 
@@ -4255,18 +4255,17 @@ function convertOneToLinks(
           (isArray ? Array.prototype : Object.prototype)
       ) {
         // An annotated container: a plain array or object carrying the
-        // symbol as its own property, and content otherwise. The rebuild
-        // below reads only index and enumerable string keys, so the symbol
-        // does not reach the result and a cleaned copy would be a second
-        // copy of the same content. The prototype check is what lets the
-        // rebuild use the container's own `map()`: a subclass would answer
-        // with a subclass instance.
+        // symbol as its own property. The rebuild below reads only index and
+        // enumerable string keys, so it sheds the symbol on its own, and the
+        // container goes to it as it stands. The prototype check is what
+        // lets the rebuild use the container's own `map()`, which on a
+        // subclass would return a subclass instance.
         container = value as unknown[] | Record<string, unknown>;
       } else {
-        // A query-result proxy answers the symbol from a trap rather than an
-        // own property, and its `map()` is the proxy's, not `Array`'s, so it
-        // is read out into a plain copy first. What these produce is a valid
-        // `FabricValueLayer` already, so it wants no further conversion.
+        // A query-result proxy serves the symbol from a trap rather than as
+        // an own property, and a subclass fails the prototype check. Either
+        // is read out into a plain copy first, which is a valid
+        // `FabricValueLayer` already and so wants no further conversion.
         // Objects need this as much as arrays do -- the annotation goes on
         // either (see `schema.ts`).
         container = (isArray

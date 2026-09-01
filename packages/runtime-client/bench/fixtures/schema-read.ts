@@ -4,7 +4,7 @@
  * back-to-cell annotation and is deeply frozen, and each record's `source` is
  * a `Cell` where the synthetic lists beside this fixture hold a link already.
  * The conversion takes a different branch on each, so a benchmark over the
- * synthetic list alone measures the branch a real message never takes.
+ * synthetic list alone measures the branch no read result takes.
  */
 
 import { Identity } from "@commonfabric/identity";
@@ -76,5 +76,12 @@ export async function readRecordList(items: number): Promise<unknown> {
     await tx.commit();
   }
 
-  return runtime.getCell(space, cause, LIST_SCHEMA, runtime.edit()).get();
+  const tx = runtime.edit();
+  const value = runtime.getCell(space, cause, LIST_SCHEMA, tx).get();
+
+  // The read is what the transaction was for, so it is settled here rather
+  // than left open behind the value, which converts the same either way.
+  await tx.commit();
+
+  return value;
 }
