@@ -51,11 +51,12 @@ here is what it does to a verb's author:
 | Mark a verb `@deprecated` | allowed, and it disappears from listings |
 | Turn a verb into data, or data into a verb | refused |
 | Add an optional field to a verb's input | allowed |
-| Add a required field to a verb's input | allowed, **and breaks callers** |
+| Add a required field to a verb's input | refused, unless the field already carried a default |
+| Make a field of a verb's input optional | allowed |
 | Remove or retype a field of a verb's input | refused |
 | Change anything about a verb's **output** | allowed, and nothing checks it |
 
-Three rows are bad outcomes, and they pull in different directions.
+Two rows are bad outcomes, and they pull in opposite directions.
 
 **Ordinary changes are refused.** If a board keeps a list of notes and you
 add one new action to notes, updating the board is refused outright:
@@ -68,12 +69,14 @@ Nothing is wrong with that change — it adds an action and takes nothing
 away. It is refused because of how verbs are declared, not because of what
 the change does.
 
-Adding a newly required field to a verb's input is refused, and needs a
-default to pass — the rule an argument has, stated in the result comparison's
-direction ([#5663]). The default has to be one the field already carried:
-descending through a stream marker withdraws permission to introduce a default
-below it, so a field made required and given a default in the same update is
-refused on the second count.
+**Required-ness of a verb's input is settled** ([#5663]). It reads as the
+argument side's rule, stated in the result comparison's direction, because a
+verb's event is an argument in every respect but where it is declared. Adding
+a newly required field is refused; the default that would rescue it has to be
+one the field already carried, since descending through a stream marker
+withdraws permission to introduce a default below it. Relaxing a field to
+optional is allowed for the same reason it is allowed of an argument: every
+call already written still sent it, so every one still validates.
 
 **A verb's output is not checked at all.** The shape records a verb's input
 and discards its output, so renaming a field of what a verb hands back
@@ -127,7 +130,7 @@ required field to its own *result*, because the new code materializes it
 when it runs. A demand has no such escape — the piece it points at already
 exists.)
 
-Behind all three outcomes is the fact that makes this hard: **pieces
+Behind both outcomes is the fact that makes this hard: **pieces
 persist.** Each carries the interface it was created with while the code
 around it moves on. Sooner or later some caller holds a piece older than the
 interface it wants, and no declaration style makes that impossible.

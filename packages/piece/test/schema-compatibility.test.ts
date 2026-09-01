@@ -2808,6 +2808,40 @@ describe("verb event required-field transitions", () => {
     ).toThrow(/newly required verb event field has no default/);
   });
 
+  it("accepts an event field that stops being required", () => {
+    const twoRequired: JSONSchema = {
+      type: "object",
+      properties: { label: { type: "string" }, color: { type: "string" } },
+      required: ["label", "color"],
+    };
+    const oneOfTwo: JSONSchema = {
+      type: "object",
+      properties: { label: { type: "string" }, color: { type: "string" } },
+      required: ["label"],
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(twoRequired),
+        verbInResult(oneOfTwo),
+      )
+    ).not.toThrow();
+  });
+
+  it("still refuses an ordinary result field that stops being required", () => {
+    const result = (required: string[]): Pattern =>
+      pattern({ type: "object", properties: {} }, {
+        type: "object",
+        properties: { total: { type: "number" }, label: { type: "string" } },
+        required,
+      });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        result(["total", "label"]),
+        result(["total"]),
+      )
+    ).toThrow(/result field is no longer required/);
+  });
+
   it("still lets an ordinary result field become newly required", () => {
     const result = (required: string[]): Pattern =>
       pattern({ type: "object", properties: {} }, {

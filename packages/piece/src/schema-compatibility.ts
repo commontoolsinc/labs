@@ -951,9 +951,18 @@ function objectSubsetIssue(
       if (issue) return issue;
     }
   } else {
-    for (const property of targetRequired) {
-      if (!sourceRequired.has(property)) {
-        return `${path}.${property}: result field is no longer required`;
+    // Not below a verb node, where the same reasoning runs the other way. A
+    // result field that stops being required withdraws a guarantee its
+    // readers were given. An EVENT field that stops being required widens
+    // what the verb accepts: every call already written still sent it, so
+    // every one of them still validates. The argument side permits exactly
+    // this relaxation, and a verb's event is an argument in every respect but
+    // where it is declared.
+    if (!context.verbEvent) {
+      for (const property of targetRequired) {
+        if (!sourceRequired.has(property)) {
+          return `${path}.${property}: result field is no longer required`;
+        }
       }
     }
     // The candidate pattern produces its result. A newly required field does
