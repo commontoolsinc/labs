@@ -893,7 +893,6 @@ export interface IKeyable<out T, Wrap extends HKT> {
     k1: K1,
     k2: K2,
   ): Apply<Wrap, T[K1][K2]>;
-
   // Three keys
   key<
     K1 extends keyof T,
@@ -1116,7 +1115,6 @@ export interface IKeyableOpaque<T> {
     k1: K1,
     k2: K2,
   ): OpaqueCell<UnwrapCell<T>[K1][K2]>;
-
   key<
     K1 extends keyof UnwrapCell<T>,
     K2 extends keyof UnwrapCell<T>[K1],

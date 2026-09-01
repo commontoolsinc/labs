@@ -500,10 +500,11 @@ export interface Donut {
 }
 ```
 
-Two constructs are exempt because the formatter overrules the rule there.
-`deno fmt` removes a blank line between two items of a parenthesized list, and
-between two arms of a union or intersection type, so a documented parameter
-list, argument list, or union runs unbroken:
+Three constructs are exempt because the formatter overrules the rule there.
+`deno fmt` removes a blank line between two items of a parenthesized list,
+between two items of a type parameter list, and between two arms of a union or
+intersection type, so a documented parameter list, argument list, type parameter
+list, or union runs unbroken:
 
 ```ts
 // Shown at module scope.
@@ -570,9 +571,10 @@ treatment.
 The exemptions mirror the ones above. A declaration with nothing after it in
 its file or bracketed block takes no blank line: the closing bracket, or the
 end of the file, is the separator, exactly as the opening bracket is on the
-other side. And the two constructs `deno fmt` will not keep a blank line in are
-exempt here for the reason they are exempt there — the formatter strips one
-after a documented parameter or union arm just as it strips one before.
+other side. And the three constructs `deno fmt` will not keep a blank line in
+are exempt here for the reason they are exempt there — the formatter strips one
+after a documented parameter, type parameter, or union arm just as it strips one
+before.
 
 The rule reaches documented declarations only. Two adjacent members carrying no
 doc comment between them leave no comment's scope in doubt, and stay as they
@@ -580,9 +582,15 @@ are.
 
 For this rule an overload set is one declaration. Its signatures and the
 implementation carrying the code are a single thing to a caller and a single
-thing to the doc comment above them, so no blank line falls between them; the
-one that closes the set goes after the implementation. `deno fmt` keeps a blank
-line between two signatures, so this is a convention no gate will raise.
+thing to the doc comment above them, so no blank line falls between one part of
+the set and the next; the one that closes the set goes after the implementation.
+The blank lines inside the implementation's own body are statement spacing and
+are not what this means.
+
+A set with no implementation to close it — in an interface, or in ambient
+`declare` form — is an overload set all the same, and closes after its last
+signature. `deno fmt` keeps a blank line between two signatures, so this is a
+convention no gate will raise.
 
 ### What gets one
 
