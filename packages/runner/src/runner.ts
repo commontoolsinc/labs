@@ -1791,6 +1791,13 @@ export class Runner {
   // cancelled ownership already tombstones the work. Tracked solely so tests
   // can synchronize deterministically.
   #pendingDeferredStartCatchUps = new Set<Promise<unknown>>();
+  // Self-minted piece instantiations seal asynchronously into the serving
+  // wave. Their local graph is speculative until that wave settles, so a
+  // contribution drop tears down that exact node group and re-instantiates it
+  // once against the rolled-back view. This set is a deterministic test seam:
+  // disposal relies on the registration and lifecycle guards rather than
+  // waiting for a wave that a closing serving loop may abandon.
+  #pendingPieceInstantiationSettlements = new Set<Promise<unknown>>();
   // Both maps record that this runner prepared or stopped a result, so a later
   // start of the same result can reuse the cells it already assembled instead
   // of re-syncing dependencies and rehydrating a snapshot. They are shortcuts:
@@ -3324,6 +3331,12 @@ export class Runner {
 
     // Create cancel group early, before wiring pattern/node sinks.
     const [cancelGroup, addCancel] = useCancelGroup();
+    // A withdrawn instantiation may be waiting for its conflict/session gate
+    // and a named-document pull before it retries. That work belongs to the
+    // OUTER registration, not the retired node group: stopping the piece must
+    // release the fire-and-forget settlement even when readiness never does.
+    const retryReadinessTeardown = new AbortController();
+    addCancel(() => retryReadinessTeardown.abort());
     const startLifecycleEpoch = this.#lifecycleEpoch;
     let active = true;
     const cancel = () => {
@@ -3367,6 +3380,7 @@ export class Runner {
     const instantiatePattern = (
       pattern: Pattern,
       useTx?: IExtendedStorageTransaction,
+      recoverDroppedContribution = true,
     ) => {
       if (!active || startLifecycleEpoch !== this.#lifecycleEpoch) return;
       // Create new cancel group for nodes
@@ -3430,13 +3444,99 @@ export class Runner {
           // and, on a serving runtime, counted.
           const instantiateActionId =
             `piece-instantiate/${resultCell.sourceURI}`;
-          actualTx.commit().then(({ error }) => {
+          const patternKeyAtInstantiation = currentPatternKey;
+          const teardownRegistrationIfCurrent = () => {
+            if (this.cancels.get(key) !== cancel) return;
+            this.cancels.delete(key);
+            this.#allCancels.delete(cancel);
+            cancel();
+          };
+          const exactNodesAreCurrent = () =>
+            active && startLifecycleEpoch === this.#lifecycleEpoch &&
+            this.cancels.get(key) === cancel && cancelNodes === nodeCancel &&
+            currentPatternKey === patternKeyAtInstantiation;
+          const commitWork = actualTx.commit().then(async ({ error }) => {
             if (error !== undefined) {
               this.#reportPieceStartCommitFailure(instantiateActionId, error);
+              if (exactNodesAreCurrent()) teardownRegistrationIfCurrent();
+              return;
+            }
+            const settlement = waveSettlementOf(actualTx);
+            if (settlement === undefined) return;
+            const settled = await settlement;
+            if (settled.error === undefined) return;
+
+            const waveWithdrawalCause = (settled.error as {
+              waveWithdrawalCause?: unknown;
+            }).waveWithdrawalCause;
+            if (waveWithdrawalCause === "wave-abandoned") {
+              // Explicit abandon is clean enclosing-lifecycle teardown, not a
+              // structure-load failure. Keep it visible without incrementing
+              // the serving runtime's failure observer/health counter.
+              logger.warn("piece-start-commit-abandoned", () => [
+                `piece-start commit ${instantiateActionId} was withdrawn by ` +
+                "wave abandon; the enclosing lifecycle owns any restart",
+                settled.error,
+              ]);
+            } else {
+              this.#reportPieceStartCommitFailure(
+                instantiateActionId,
+                settled.error,
+              );
+            }
+            if (!exactNodesAreCurrent()) return;
+            if (waveWithdrawalCause !== "contribution-dropped") {
+              teardownRegistrationIfCurrent();
+              return;
+            }
+            if (!recoverDroppedContribution) {
+              teardownRegistrationIfCurrent();
+              return;
+            }
+
+            // The graph reads its own pending setup and internal-cell writes
+            // while it is installed. Once the wave withdraws those writes,
+            // keeping that graph would leave a registration whose substrate
+            // never became durable. Retire only the nodes this transaction
+            // installed; the outer registration remains in place so its
+            // original parent/root owner keeps the same cancellation handle.
+            nodeCancel();
+            if (cancelNodes === nodeCancel) cancelNodes = undefined;
+            await this.runtime.awaitCommitRetryReadiness(
+              settled.error,
+              retryReadinessTeardown.signal,
+            );
+
+            // A stop aborts the readiness/pull work above; a runtime cycle,
+            // pointer change, or newer instantiation during the wait owns the
+            // key now. Otherwise retry exactly once; a second drop tears the
+            // registration down instead of spinning on a permanent conflict.
+            if (
+              retryReadinessTeardown.signal.aborted || !active ||
+              startLifecycleEpoch !== this.#lifecycleEpoch ||
+              this.cancels.get(key) !== cancel ||
+              currentPatternKey !== patternKeyAtInstantiation ||
+              cancelNodes !== undefined
+            ) {
+              return;
+            }
+            try {
+              instantiatePattern(pattern, undefined, false);
+            } catch (retryError) {
+              this.#reportPieceStartCommitFailure(
+                instantiateActionId,
+                retryError,
+              );
+              teardownRegistrationIfCurrent();
             }
           }).catch((error) => {
             this.#reportPieceStartCommitFailure(instantiateActionId, error);
+            if (exactNodesAreCurrent()) teardownRegistrationIfCurrent();
           });
+          this.#pendingPieceInstantiationSettlements.add(commitWork);
+          commitWork.finally(() =>
+            this.#pendingPieceInstantiationSettlements.delete(commitWork)
+          );
         }
       }
     };
@@ -6247,6 +6347,20 @@ export class Runner {
   async idleDeferredStartCatchUps(): Promise<void> {
     while (this.#pendingDeferredStartCatchUps.size > 0) {
       await Promise.allSettled([...this.#pendingDeferredStartCatchUps]);
+    }
+  }
+
+  /**
+   * TESTS ONLY: settle self-minted piece-instantiation commits and any
+   * withdrawal recovery they schedule. Never called from dispose(): a serving
+   * wave can remain open until its host closes or abandons it, while lifecycle
+   * guards already prevent a settled continuation from reviving stopped work.
+   */
+  async idlePieceInstantiationSettlements(): Promise<void> {
+    while (this.#pendingPieceInstantiationSettlements.size > 0) {
+      await Promise.allSettled([
+        ...this.#pendingPieceInstantiationSettlements,
+      ]);
     }
   }
 
