@@ -11,7 +11,9 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { isLinkRef, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import type { FabricConvertibleValue } from "@commonfabric/data-model/fabric-value";
 import {
   FabricBytes,
   FabricEpochNsec,
@@ -21,6 +23,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { type CellLinkInput, convertCellsToLinks } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { CellLinkRefPayload } from "../src/sigil-types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -60,6 +63,17 @@ function reachableObjects(
   for (const member of Object.values(value)) reachableObjects(member, found);
 
   return found;
+}
+
+/**
+ * The payload riding a link, read through the accessor rather than by reaching
+ * into an envelope shape: which shape a link has is the cell-representation
+ * regime's business, and these assertions are about frozenness in either.
+ */
+function payloadOf(link: unknown): CellLinkRefPayload {
+  return linkRefPayload(
+    link as Parameters<typeof linkRefPayload>[0],
+  ) as CellLinkRefPayload;
 }
 
 describe("convert-cells-to-links-frozenness", () => {
@@ -113,27 +127,30 @@ describe("convert-cells-to-links-frozenness", () => {
     const cell = runtime.getCell(space, "frozen-link", undefined, tx);
     cell.set({ n: 1 });
 
-    const result = convertCellsToLinks({ ref: cell }) as { ref: object };
-    const payload = Object.values(Object.values(result.ref)[0] as object)[0];
+    const result = convertCellsToLinks({ ref: cell }) as { ref: unknown };
+    const link = result.ref;
 
-    expect(Object.isFrozen(result.ref)).toBe(true);
-    expect(Object.isFrozen(payload)).toBe(true);
-    expect(Object.isFrozen((payload as { path: unknown[] }).path)).toBe(true);
+    expect(isLinkRef(link)).toBe(true);
+    expect(Object.isFrozen(link)).toBe(true);
+    expect(Object.isFrozen(payloadOf(link))).toBe(true);
+    expect(Object.isFrozen(payloadOf(link).path)).toBe(true);
   });
 
   it("returns a frozen back-link where a cycle was", () => {
     // A cycle's back-link is the walk's other minted value, and it carries a
     // `path` array of its own.
-    const cyclic: Record<string, unknown> = { inner: {} };
-    (cyclic.inner as Record<string, unknown>).back = cyclic;
+    const inner: Record<string, FabricConvertibleValue> = {};
+    const cyclic: Record<string, FabricConvertibleValue> = { inner };
 
-    const result = convertCellsToLinks(cyclic) as { inner: { back: object } };
+    inner.back = cyclic;
+
+    const result = convertCellsToLinks(cyclic) as { inner: { back: unknown } };
     const back = result.inner.back;
-    const payload = Object.values(Object.values(back)[0] as object)[0];
 
+    expect(isLinkRef(back)).toBe(true);
     expect(Object.isFrozen(back)).toBe(true);
-    expect(Object.isFrozen(payload)).toBe(true);
-    expect(Object.isFrozen((payload as { path: unknown[] }).path)).toBe(true);
+    expect(Object.isFrozen(payloadOf(back))).toBe(true);
+    expect(Object.isFrozen(payloadOf(back).path)).toBe(true);
   });
 
   it("returns containers that are none of the input's, given an unfrozen input", () => {
