@@ -21,7 +21,7 @@ const DATA_MODEL_API = join(REPO_ROOT, "packages/data-model/src/api.ts");
  * surface, so they resolve to the real module.
  */
 const WORKSPACE_MODULES: ReadonlyMap<string, ts.ResolvedModuleFull> = new Map([
-  ["@commonfabric/data-model/deep-freeze", {
+  ["@commonfabric/data-model", {
     resolvedFileName: DEEP_FREEZE_STUB,
     extension: ts.Extension.Dts,
     isExternalLibraryImport: false,

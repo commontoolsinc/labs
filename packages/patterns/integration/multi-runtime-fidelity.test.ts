@@ -15,8 +15,8 @@ import { assert, assertEquals } from "@std/assert";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { Identity } from "@commonfabric/identity";
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
   MultiRuntimeHarness,
   type MultiRuntimeSession,

@@ -1,4 +1,4 @@
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 

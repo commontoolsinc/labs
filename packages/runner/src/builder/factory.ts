@@ -6,6 +6,8 @@ import {
   FabricInstance,
   FabricPrimitive,
   FabricSpecialObject,
+  toCompactDebugString,
+  toIndentedDebugString,
   valueEqual,
 } from "@commonfabric/data-model";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
@@ -21,10 +23,6 @@ import {
   FabricKeyPair,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
-import {
-  toCompactDebugString,
-  toIndentedDebugString,
-} from "@commonfabric/data-model/value-debug";
 import {
   all as rowLabelAll,
   any as rowLabelAny,

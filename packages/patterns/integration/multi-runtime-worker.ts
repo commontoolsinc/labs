@@ -11,13 +11,16 @@
  * what the protocol module is for.
  */
 
-import { type FabricValue, isValidFabricValue } from "@commonfabric/data-model";
+import {
+  type FabricValue,
+  isValidFabricValue,
+  toCompactDebugString,
+} from "@commonfabric/data-model";
 import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import type { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type { Cell } from "@commonfabric/runner";
 import {
   markUiInputBlindWriteTx,

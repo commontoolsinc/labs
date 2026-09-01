@@ -17,6 +17,7 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import { hashOf } from "@commonfabric/data-model";
 import {
   linkRefFrom,
   linkRefPayload,
@@ -27,7 +28,6 @@ import { UnknownValue } from "@commonfabric/data-model/codec-common";
 import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import { valueFromDataUri } from "@commonfabric/data-model/data-uri-codec";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { fromBase64url } from "@commonfabric/utils/base64url";

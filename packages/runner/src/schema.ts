@@ -8,9 +8,9 @@ import {
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
+  isDeepFrozen,
   shallowMutableClone,
 } from "@commonfabric/data-model";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   internSchema,
   isNontrivialSchema,

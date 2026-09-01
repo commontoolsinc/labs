@@ -41,7 +41,7 @@ export { valueEqual };
 export {
   toCompactDebugString,
   toIndentedDebugString,
-} from "@commonfabric/data-model/value-debug";
+} from "@commonfabric/data-model";
 
 //
 // Stubs

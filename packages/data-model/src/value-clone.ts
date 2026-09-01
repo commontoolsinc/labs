@@ -181,6 +181,11 @@ export function shallowMutableClone<T extends FabricValue>(
  *
  * Deep mode uses `isValidDeepFrozenFabricValue()` for identity optimization;
  * shallow mode uses `Object.isFrozen(value) === frozen`.
+ *
+ * This is exported for the package's own use -- `native-conversion.ts` calls it
+ * -- and deliberately not re-exported from `index.ts`. Its five positional
+ * parameters are the internal shape the named clone functions above are the
+ * public spelling of; an outside caller wants one of those.
  */
 export function cloneHelper(
   value: FabricValue,

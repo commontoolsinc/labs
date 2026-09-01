@@ -1,11 +1,11 @@
 import type { JSONSchema as SchemaDocJSONSchema } from "@commonfabric/api";
 import {
+  deepFreeze,
   type FabricPlainObject,
   type FabricValue,
   type MutableFabricPlainObjectLayer,
   shallowMutableClone,
 } from "@commonfabric/data-model";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";

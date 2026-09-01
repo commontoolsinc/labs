@@ -3,7 +3,7 @@ import type { CfcAtom } from "@commonfabric/api/cfc";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectOrArray } from "@commonfabric/utils/types";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import {
   cfcLabelPathPrefixMatches,
   type CfcLabelView,

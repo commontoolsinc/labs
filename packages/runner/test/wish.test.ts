@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { createBuilder } from "../src/builder/factory.ts";

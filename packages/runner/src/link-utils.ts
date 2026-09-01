@@ -1,11 +1,14 @@
-import type { FabricValue } from "@commonfabric/data-model";
+import {
+  deepFreeze,
+  type FabricValue,
+  isDeepFrozen,
+  toCompactDebugString,
+} from "@commonfabric/data-model";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   internSchema,
   isNontrivialSchema,
 } from "@commonfabric/data-model-schema";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import {
   decomposeSchema,

@@ -2,8 +2,7 @@
 
 import type { JSONSchema, MutableJSONSchemaObj } from "@commonfabric/api";
 
-import { cloneIfNecessary } from "@commonfabric/data-model";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { cloneIfNecessary, deepFreeze } from "@commonfabric/data-model";
 
 /**
  * Returns a deep-frozen copy of (or reference to) a JSONSchema, returning

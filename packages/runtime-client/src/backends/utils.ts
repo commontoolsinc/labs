@@ -3,8 +3,8 @@ import {
   FabricPrimitive,
   type FabricValue,
   isValidFabricValue,
+  toCompactDebugString,
 } from "@commonfabric/data-model";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
   Cell,
   JSONSchema,

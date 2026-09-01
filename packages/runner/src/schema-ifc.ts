@@ -9,7 +9,7 @@
 import { getLogger } from "@commonfabric/utils/logger";
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { isDeepFrozen } from "@commonfabric/data-model";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import { ContextualFlowControl } from "./cfc.ts";

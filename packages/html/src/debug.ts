@@ -7,8 +7,10 @@
  */
 
 import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
-import { FabricSpecialObject } from "@commonfabric/data-model";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import {
+  FabricSpecialObject,
+  toCompactDebugString,
+} from "@commonfabric/data-model";
 import { debugVDOMSchema } from "@commonfabric/runner/schemas";
 import { type ActiveRender, getActiveRenders } from "./render.ts";
 

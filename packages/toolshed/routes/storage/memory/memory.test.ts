@@ -1,8 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 
-import type { FabricValue } from "@commonfabric/data-model";
+import { type FabricValue, hashOf } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   decodeMemoryBoundary,

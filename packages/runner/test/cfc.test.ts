@@ -20,7 +20,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import type { JSONSchemaObj } from "@commonfabric/api";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { deepFreeze } from "@commonfabric/data-model";
 
 import type { JSONSchema } from "../src/builder/types.ts";
 import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";

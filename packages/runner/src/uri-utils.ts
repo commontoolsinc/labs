@@ -1,11 +1,10 @@
+import { hashOf, toCompactDebugString } from "@commonfabric/data-model";
 import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
 import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 
 import {
   type EntityKind,

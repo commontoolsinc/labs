@@ -57,8 +57,8 @@ import {
 } from "../lib/cell-selection.ts";
 import { cliCommand, cliText } from "../lib/cli-name.ts";
 import type { FabricValue } from "@commonfabric/api";
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
 import {

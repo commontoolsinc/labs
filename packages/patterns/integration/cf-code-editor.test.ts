@@ -38,7 +38,7 @@ import {
 } from "./pieces-controller.ts";
 import { waitForRuntimeSynced } from "./cfc-browser-helpers.ts";
 import { defer, type Deferred } from "@commonfabric/utils/defer";
-import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
+import { toIndentedDebugString } from "@commonfabric/data-model";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 

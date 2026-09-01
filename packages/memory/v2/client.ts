@@ -1,5 +1,5 @@
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { unsafeObjectKeyIn } from "@commonfabric/utils/types";
 
 import {

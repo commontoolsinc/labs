@@ -2,7 +2,7 @@ import { CFC_ATOM_TYPE, type CfcAtom } from "@commonfabric/api/cfc";
 import { isDID } from "@commonfabric/identity";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray } from "@commonfabric/utils/types";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import { atomEntails } from "./atom-pattern.ts";
 import { isCfcFieldCommitment } from "./label-representation.ts";
 import { uniqueCfcAtoms } from "./observation.ts";

@@ -25,7 +25,7 @@
 
 import type { SpaceDb } from "./db.ts";
 import { resolveScopeKey } from "@commonfabric/memory/v2";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 
 import { annotate, summarize } from "./decode.ts";
 import {

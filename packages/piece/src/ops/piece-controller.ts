@@ -1,5 +1,5 @@
 import type { CellKind, LinkScope } from "@commonfabric/api";
-import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import { taggedHashStringOf } from "@commonfabric/data-model";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   applyPieceSourceTransition,

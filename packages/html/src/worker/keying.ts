@@ -5,8 +5,7 @@
  * enabling efficient diffing and reuse of DOM nodes.
  */
 
-import type { FabricValue } from "@commonfabric/data-model";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { type FabricValue, hashStringOf } from "@commonfabric/data-model";
 import { isCell } from "@commonfabric/runner";
 
 /**

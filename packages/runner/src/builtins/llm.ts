@@ -10,7 +10,7 @@ import {
   internSchema,
   toDeepFrozenSchema,
 } from "@commonfabric/data-model-schema";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model";
 import {
   DEFAULT_GENERATE_OBJECT_MODELS,
   DEFAULT_MODEL_NAME,
