@@ -129,8 +129,14 @@ describe("diffcounts", () => {
     const cases = [
       ["style.css", "/* old */", "/* new */"],
       ["query.sql", "-- old", "-- new"],
+      ["query-block.sql", "/* old */", "/* new */"],
       ["script.lua", "-- old", "-- new"],
-      ["module.hs", "{- old -}", "{- new -}"],
+      ["module-line.hs", "-- old", "-- new"],
+      [
+        "module-nested.hs",
+        "{- outer {- inner -} old -}",
+        "{- outer {- inner -} new -}",
+      ],
       ["code.lisp", "; old", "; new"],
     ];
     const diff = cases.flatMap(([path, oldLine, newLine]) => [
