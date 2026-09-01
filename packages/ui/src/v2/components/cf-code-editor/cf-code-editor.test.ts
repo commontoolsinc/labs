@@ -579,6 +579,31 @@ describe("CFCodeEditor mention-piece resolution", () => {
     expect(view.state.doc.toString()).toBe("[[New Topic]]");
   });
 
+  it("creates a piece when an unresolved row is not an exact match", () => {
+    const element = internals(new CFCodeEditor());
+    element.mentionable = createMockCellHandle([
+      { [NAME]: "Existing Topic", title: "Existing Topic", piece: pieceLink },
+    ]) as unknown as CellHandle<MentionableArray>;
+    element.pattern = createMockCellHandle("pattern");
+    let creation: [string, boolean] | undefined;
+    Object.defineProperty(element, "createBacklinkFromPattern", {
+      value: (text: string, navigate: boolean) => {
+        creation = [text, navigate];
+        return Promise.resolve();
+      },
+    });
+    const source = element.createBacklinkCompletionSource();
+    const view = createBacklinkView(source, "[[Top");
+
+    element._completeBacklinkQuery(
+      view as unknown as EditorView,
+      "Top",
+    );
+
+    expect(creation).toEqual(["Top", false]);
+    expect(view.state.doc.toString()).toBe("[[Top]]");
+  });
+
   it("restarts a matching backlink completion after resolution", async () => {
     const element = internals(new CFCodeEditor());
     element.mentionable = createMockCellHandle([
