@@ -191,16 +191,20 @@ export class IndexTrackingStack<T> {
     // index -- which is the whole of what a short stack does here.
     if (positions !== undefined) {
       const key = IndexTrackingStack.#keyFor(value);
-      const found = positions.get(key);
 
-      if (found !== undefined) {
-        // The positions of one value ascend, and what came off the stack is
-        // the highest of them, so it is the last of these.
-        found.pop();
+      // Not an optional lookup: while an index exists, every value in the
+      // stack has an entry in it. The build takes the whole stack, and the
+      // only two places that change the stack are this one and `push()`, both
+      // of which maintain it. Asserting rather than testing is deliberate --
+      // a test here would skip silently, and leave a corrupt index behind.
+      const found = positions.get(key)!;
 
-        if (found.length === 0) {
-          positions.delete(key);
-        }
+      // The positions of one value ascend, and what came off the stack is the
+      // highest of them, so it is the last of these.
+      found.pop();
+
+      if (found.length === 0) {
+        positions.delete(key);
       }
 
       if (this.#stack.length < IndexTrackingStack.#DROP_INDEX_BELOW) {
