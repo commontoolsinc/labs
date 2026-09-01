@@ -381,7 +381,7 @@ describe("cf exec read options", () => {
     // command name no `--space` at all.
     expect(err[0]).not.toContain("--space");
     expect(err[0]).toContain(
-      "cf get --piece /@did:key:test-home/of:tool-result@user",
+      "cf get /@did:key:test-home/of:tool-result@user",
     );
   });
 
@@ -401,7 +401,7 @@ describe("cf exec read options", () => {
     );
 
     expect(err[0]).toContain(
-      "cf get --piece /@did:key:test-home/of:tool-result`)",
+      "cf get /@did:key:test-home/of:tool-result`)",
     );
     expect(err[0]).not.toContain("@space");
   });

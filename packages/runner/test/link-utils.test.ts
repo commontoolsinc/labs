@@ -26,6 +26,7 @@ import {
   parseLink,
   parseLinkOrThrow,
   parseLLMFriendlyLink,
+  parseReferenceParts,
   sanitizeSchemaForLinks,
 } from "../src/link-utils.ts";
 import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
@@ -1656,6 +1657,44 @@ describe("link-utils", () => {
     it("should throw if handle is too short (human name)", () => {
       expect(() => parseLLMFriendlyLink("/of:short/path", space)).toThrow(
         /Piece references must use handles.*"of:short"/,
+      );
+    });
+
+    it("should throw if the embedded space is a name rather than a DID", () => {
+      // A link resolves from the string alone, so a space that needs looking
+      // up is refused here even though the grammar admits it.
+      expect(() => parseLLMFriendlyLink(`/@my:space/${longId}`, space))
+        .toThrow(/Link spaces must be DIDs.*"my:space"/);
+    });
+  });
+
+  describe("parseReferenceParts", () => {
+    const longId = "of:bafyabc12345678901234567890";
+
+    it("splits the parts without holding either to a form", () => {
+      // The wider vocabulary a session can resolve: a space by name and a
+      // piece by slug, in the positions a DID and a handle occupy.
+      expect(parseReferenceParts("/@my-space/tracker@user/items/0")).toEqual({
+        id: "tracker",
+        scope: "user",
+        space: "my-space",
+        path: ["items", "0"],
+      });
+      expect(parseReferenceParts(`/${longId}/path`)).toEqual({
+        id: longId,
+        path: ["path"],
+      });
+    });
+
+    it("throws for a string that is not a reference at all", () => {
+      expect(() => parseReferenceParts(`${longId}/path`)).toThrow(
+        "Target must start with a slash",
+      );
+      expect(() => parseReferenceParts(`/@${space}`)).toThrow(
+        "Target must include a piece handle",
+      );
+      expect(() => parseReferenceParts("/@/tracker")).toThrow(
+        'Target must name a space after "@"',
       );
     });
   });

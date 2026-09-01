@@ -127,7 +127,7 @@ Deno.test("resolve: options already typed are captured for provider context", ()
   assertEquals(line.options.get("identity"), "./k.key");
   assertEquals(line.options.get("api-url"), "http://localhost:8000");
   assertEquals(line.options.get("space"), "team");
-  assertEquals(line.options.get("piece"), "fid1:x");
+  assertEquals(line.options.get("cell"), "fid1:x");
 });
 
 Deno.test("resolve: bundled short flags do not shift the argument index", () => {
@@ -184,7 +184,7 @@ Deno.test("resolve: a flag past that boundary does not shift the positional inde
   const line = resolve("cf call --piece x addItem --title x ");
   assert(line.slot?.kind === "argument");
   assertEquals(line.slot.index, 3);
-  assertEquals(line.options.get("piece"), "x");
+  assertEquals(line.options.get("cell"), "x");
 });
 
 Deno.test("resolve: the boundary does not reach a command that parses to the end", () => {
@@ -298,7 +298,7 @@ Deno.test("resolve: a deno task cf line resolves like a cf line", () => {
   assertEquals(line.path, ["call"]);
   assert(line.slot?.kind === "argument");
   assertEquals(line.slot.argument.name, "callable");
-  assertEquals(line.options.get("piece"), "x");
+  assertEquals(line.options.get("cell"), "x");
 });
 
 Deno.test("declaredSlots names a value-taking option by long name and command", () => {

@@ -14,7 +14,7 @@
 import type { Argument, Command, Option } from "@cliffy/command";
 // Free at completion time: walking the tree means loading the command tree,
 // which already resolves this module.
-import { matchLLMFriendlyLink } from "@commonfabric/runner/shared";
+import { isReference } from "../llm-friendly-ref.ts";
 
 /**
  * A command of any option/argument parameterization.
@@ -116,7 +116,7 @@ export interface CompletionLine {
 
   /**
    * A canonical reference written in the first positional, in place of
-   * `--piece`. It does not count as a positional: the command reads it out
+   * `--cell`. It does not count as a positional: the command reads it out
    * before the rest, so `<callable>` is still the argument after it.
    */
   readonly address?: string;
@@ -210,8 +210,8 @@ function stopsEarly(command: AnyCommand): boolean {
 }
 
 /**
- * Commands whose first positional may carry a canonical reference in place of
- * `--piece`, keyed the way the provider tables are.
+ * Commands whose first positional may carry a reference in place of the
+ * `--cell` flag, keyed the way the provider tables are.
  *
  * `readTargetPositionals` and `readCallTarget` in `commands/piece.ts` are what
  * implement it, and nothing on the command tree distinguishes those two
@@ -228,15 +228,15 @@ const POSITIONAL_ADDRESS_COMMANDS: ReadonlySet<string> = new Set([
 /**
  * Whether `token` in the first positional of `path` names the target rather
  * than filling that argument. The deciding grammar is the command's:
- * a canonical reference begins with `/`, and neither a cell path nor a
- * callable name ever does.
+ * a reference begins with `/`, and neither a cell path nor a callable name
+ * ever does.
  */
 function isPositionalAddress(
   path: readonly string[],
   token: string,
 ): boolean {
   return POSITIONAL_ADDRESS_COMMANDS.has(path.join(" ")) &&
-    matchLLMFriendlyLink.test(token.trim());
+    isReference(token);
 }
 
 /** Resolve a subcommand by name or alias, skipping Cliffy's own `help`. */
@@ -430,7 +430,7 @@ export function resolveCompletionLine(
         positionals = [];
         continue;
       }
-      // A positional address replaces `--piece` rather than filling the
+      // A positional address replaces `--cell` rather than filling the
       // argument, so the words after it keep the indices they would have had.
       if (address === undefined && isPositionalAddress(path, token)) {
         address = token;

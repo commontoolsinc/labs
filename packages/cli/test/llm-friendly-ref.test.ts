@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  isReference,
   normalizeLLMFriendlyRef,
   validateEmbeddedSpaces,
 } from "../lib/llm-friendly-ref.ts";
@@ -12,12 +13,23 @@ const HANDLE = `of:fid1:${ID}`;
 const DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 const OTHER_DID = "did:key:z6MkrZ1r5XBFZjBU34qyD8fueMbMRkKw17BZaq2ivKFjnz2z";
 
+/** A resolver that fails the test if a DID-spelled space reaches it. */
+const resolveName = (name: string) =>
+  Promise.resolve(name === "my-space" ? DID : OTHER_DID);
+
 describe("llm-friendly-ref", () => {
-  it("returns undefined for references outside the LLM-friendly form", () => {
+  it("returns undefined for references outside the reference form", () => {
     expect(normalizeLLMFriendlyRef("piece1")).toBeUndefined();
     expect(normalizeLLMFriendlyRef("piece1@user")).toBeUndefined();
     expect(normalizeLLMFriendlyRef(HANDLE)).toBeUndefined();
     expect(normalizeLLMFriendlyRef("piece1/path/to/field")).toBeUndefined();
+  });
+
+  it("reads the rooting as what makes a token a reference", () => {
+    expect(isReference("/tracker")).toBe(true);
+    expect(isReference(`  /${HANDLE}  `)).toBe(true);
+    expect(isReference("tracker")).toBe(false);
+    expect(isReference("items/0/title")).toBe(false);
   });
 
   it("normalizes an id-only reference to the bare handle", () => {
@@ -25,6 +37,67 @@ describe("llm-friendly-ref", () => {
       pieceId: HANDLE,
       path: [],
     });
+  });
+
+  it("names the piece by slug where a handle is accepted", () => {
+    expect(normalizeLLMFriendlyRef("/tracker")).toEqual({
+      pieceId: "tracker",
+      path: [],
+    });
+    expect(normalizeLLMFriendlyRef("/tracker/items/0/title")).toEqual({
+      pieceId: "tracker",
+      path: ["items", 0, "title"],
+    });
+    expect(normalizeLLMFriendlyRef("/tracker@session/draft")).toEqual({
+      pieceId: "tracker",
+      scope: "session",
+      path: ["draft"],
+    });
+  });
+
+  it("names the space by name where a DID is accepted", () => {
+    expect(normalizeLLMFriendlyRef("/@my-space/tracker/items")).toEqual({
+      pieceId: "tracker",
+      embeddedSpace: "my-space",
+      path: ["items"],
+    });
+  });
+
+  it("settles two space names against each other at parse time", () => {
+    // Same name, same space: nothing is left for the session to check.
+    expect(
+      normalizeLLMFriendlyRef("/@my-space/tracker", { space: "my-space" }),
+    ).toEqual({ pieceId: "tracker", path: [] });
+    expect(() =>
+      normalizeLLMFriendlyRef("/@my-space/tracker", { space: "other-space" })
+    ).toThrow(
+      `Reference names space "my-space" but the command targets ` +
+        `space "other-space".`,
+    );
+  });
+
+  it("defers a space name against a DID target space", () => {
+    // Only a derivation can compare the two spellings, and that needs the
+    // session the target space is resolved by.
+    expect(
+      normalizeLLMFriendlyRef("/@my-space/tracker", { space: DID }),
+    ).toEqual({
+      pieceId: "tracker",
+      embeddedSpace: "my-space",
+      path: [],
+    });
+  });
+
+  it("refuses a piece segment that is neither a handle nor a slug", () => {
+    expect(() => normalizeLLMFriendlyRef("/of:short")).toThrow(
+      `"of:short" is neither a piece handle (of:fid1:...) nor a slug.`,
+    );
+    expect(() => normalizeLLMFriendlyRef("/Tracker")).toThrow(
+      /is not a slug/,
+    );
+    expect(() => normalizeLLMFriendlyRef("/my--tracker")).toThrow(
+      /is not a slug/,
+    );
   });
 
   it("converts embedded path segments the way a positional path is", () => {
@@ -96,21 +169,29 @@ describe("llm-friendly-ref", () => {
     });
   });
 
-  it("passes a deferred embedded DID that matches the resolved space", () => {
-    expect(() => validateEmbeddedSpaces([DID], DID)).not.toThrow();
-    expect(() => validateEmbeddedSpaces(undefined, DID)).not.toThrow();
+  it("passes a deferred embedded DID that matches the resolved space", async () => {
+    // A DID is already what the comparison is in, so the resolver — which
+    // would answer with the wrong space here — is never reached for one.
+    const refuse = () => Promise.reject(new Error("resolved a DID"));
+    await validateEmbeddedSpaces([DID], DID, refuse);
+    await validateEmbeddedSpaces(undefined, DID, refuse);
   });
 
   it("rejects a deferred embedded DID against another resolved space", () => {
-    expect(() => validateEmbeddedSpaces([DID], OTHER_DID)).toThrow(
-      `Reference names space "${DID}" but the command targets ` +
-        `space "${OTHER_DID}".`,
-    );
+    return expect(validateEmbeddedSpaces([DID], OTHER_DID, resolveName))
+      .rejects.toThrow(
+        `Reference names space "${DID}" but the command targets ` +
+          `space "${OTHER_DID}".`,
+      );
   });
 
-  it("surfaces the runner parser's rejection of short ids", () => {
-    expect(() => normalizeLLMFriendlyRef("/of:short")).toThrow(
-      /must use handles/,
+  it("holds a deferred space name to the DID it derives to", async () => {
+    await validateEmbeddedSpaces(["my-space"], DID, resolveName);
+    await expect(
+      validateEmbeddedSpaces(["their-space"], DID, resolveName),
+    ).rejects.toThrow(
+      `Reference names space "their-space" but the command targets ` +
+        `space "${DID}".`,
     );
   });
 

@@ -113,7 +113,7 @@ describe("main command", () => {
     const call = pieceDataCommand("call");
     const expectedUsage =
       "--identity <identity> --url <url> --api-url <api-url> --space <space> " +
-      "--piece <piece> [address] <callable> [input]";
+      "--cell <cell> [address] <callable> [input]";
 
     expect(call.getArgsDefinition()).toBe(
       "<callable:string> [tail...:string]",

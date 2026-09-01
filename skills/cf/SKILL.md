@@ -134,23 +134,29 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 Every read and every call names a target, and the spelling decides whether the
 answer composes into the next command.
 
-- `--piece <id|slug>` — the alias form. Convenient for a target you already
-  know; it carries no space, so `--space` rides beside it.
-- `/[@did:.../]of:fid1:<id>[@scope][/path]` — the canonical reference, the one
-  syntax the whole fabric shares. A space embedded in it supplies `--space` when
-  the flag is absent, and must agree with it when both are given. **An address
-  printed by one command is accepted by the next with no flag beside it.** The
-  alias form cannot do that, which is the reason to prefer the canonical one
-  whenever you are chaining commands rather than typing one.
-- On `cf get`, `cf set` and `cf call` a canonical reference may sit in the first
-  positional instead of on `--piece`: an address begins with `/` and a relative
-  path never does, so the two cannot collide.
-- A canonical reference ending `#argument` selects the piece's arguments cell —
-  the same selection `--input` makes, and it is accepted exactly where `--input`
-  is: `cf get`, `cf set`, and `cf piece get-label|set-label`. A command that
-  takes no `--input` refuses the suffix rather than ignoring it, `cf call` among
-  them. The suffix also needs the canonical form, so with `--url` or a bare id,
-  `--input` is the spelling that reaches it.
+- `/[@<space>/]<piece>[@<scope>][/<path>]` — the reference, the one syntax the
+  whole fabric shares. `<space>` is a name or a DID and `<piece>` is a slug or a
+  handle, so `/@my-space/tracker/items` and `/@did:key:.../of:fid1:.../items`
+  are the same shape. A space embedded in it supplies `--space` when the flag is
+  absent, and must agree with it when both are given. **An address printed by
+  one command is accepted by the next with no flag beside it.**
+- On `cf get`, `cf set` and `cf call`, write the reference in the first
+  positional — `cf get /tracker items/0/title`. A reference begins with `/` and
+  a relative path never does, so the two cannot collide. This is the spelling to
+  reach for.
+- `--cell <reference|id|slug>` takes the same target where a flag suits better,
+  and is where the bare id and slug spellings go — there no path competes for
+  the position. `--piece` is a deprecated name for that same flag: still
+  accepted, no expiration date, and not what to write new commands against.
+  Naming the target twice — the flag beside a positional reference — is refused.
+- `--url <browser url>` is a convenience for pasting. It is not a spelling of
+  its own: the host becomes `--api-url` and the rest becomes a reference.
+- A reference ending `#argument` selects the piece's arguments cell — the same
+  selection `--input` makes, and it is accepted exactly where `--input` is:
+  `cf get`, `cf set`, and `cf piece get-label|set-label`. A command that takes
+  no `--input` refuses the suffix rather than ignoring it, `cf call` among them.
+  The suffix needs a reference, so with `--url` or a bare id, `--input` is the
+  spelling that reaches it.
 
 ## Where the read options go
 
@@ -185,35 +191,35 @@ speculatively against a space you do not intend to touch.
 
 ## Quick Command Reference
 
-| Operation          | Command                                                                                                                      |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| Type check         | `deno task cf check pattern.tsx --no-run`                                                                                    |
-| Test pattern       | `deno task cf test pattern.test.tsx`                                                                                         |
-| Deploy new         | `deno task cf piece new pattern.tsx --test pattern.test.tsx --root . --repository REPO -i key -a url -s space`               |
-| Attach a data file | `deno task cf piece new pattern.tsx --test pattern.test.tsx --datafile data/cities.json ...`                                 |
-| Update existing    | `deno task cf piece setsrc pattern.tsx --test pattern.test.tsx --root . --repository REPO --piece ID -i key -a url -s space` |
-| Inspect state      | `deno task cf piece inspect --piece ID ...`                                                                                  |
-| Get field          | `deno task cf get --piece ID fieldPath ...`                                                                                  |
-| Filter array       | `deno task cf get --piece ID items --filter '.active == true' ...`                                                           |
-| Project fields     | `deno task cf get --piece ID items --select id,title ...`                                                                    |
-| Read an address    | `deno task cf get --piece ID --select 'topic@,topic.title' ...`                                                              |
-| Read addresses     | `deno task cf get --piece ID items --schema '{"type":"array","items":{"$link":true}}' ...`                                   |
-| Step + get         | `deno task cf get --piece ID fieldPath --step ...`                                                                           |
-| Set field          | `echo '{"data":...}' \| deno task cf set --piece ID path ...`                                                                |
-| Call handler       | `deno task cf call --piece ID handlerName ...`                                                                               |
-| Shape a result     | `deno task cf call --piece ID addTopic ... -- --select topic.title`                                                          |
-| List verbs         | `deno task cf piece verbs --piece ID --json ...` (`--all` adds wrapper/deprecated; `hidden` counts them)                     |
-| Trigger recompute  | `deno task cf piece step --piece ID ...`                                                                                     |
-| Mint a session     | `export CF_INVOCATION_SESSION="$(deno task cf invocation-session new)"` (once per run; ids deduplicate only within it)       |
-| Replayable call    | `deno task cf call --piece ID --invocation my-id-1 handlerName ...` (same pair retries settle on the original outcome)       |
-| Detached call      | `deno task cf call --piece ID --no-wait --invocation my-id-1 handlerName ...` (exits at commit with `receipt` address)       |
-| Collect a receipt  | `deno task cf get --piece <receipt> ...` (the envelope's `receipt` string, later, from any process)                          |
-| List pieces        | `deno task cf piece ls -i key -a url -s space` (registry only — a handler-created piece appears only if sent to `addPiece`)  |
-| Describe a piece   | `deno task cf piece describe --piece ID ...` (name, purpose, state, inputs, verbs; `--json`, `--all`)                        |
-| List slugs         | `deno task cf piece slugs ...`                                                                                               |
-| Search piece data  | `deno task cf piece search <query> ...` (registered pieces only)                                                             |
-| Visualize          | `deno task cf piece map ...`                                                                                                 |
-| Rehearse an update | `deno task cf space clone <did> --from <snapshot> --to <dir>` (then `verify` / `reset`)                                      |
+| Operation          | Command                                                                                                                     |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| Type check         | `deno task cf check pattern.tsx --no-run`                                                                                   |
+| Test pattern       | `deno task cf test pattern.test.tsx`                                                                                        |
+| Deploy new         | `deno task cf piece new pattern.tsx --test pattern.test.tsx --root . --repository REPO -i key -a url -s space`              |
+| Attach a data file | `deno task cf piece new pattern.tsx --test pattern.test.tsx --datafile data/cities.json ...`                                |
+| Update existing    | `deno task cf piece setsrc pattern.tsx --test pattern.test.tsx --root . --repository REPO --cell ID -i key -a url -s space` |
+| Inspect state      | `deno task cf piece inspect --cell ID ...`                                                                                  |
+| Get field          | `deno task cf get --cell ID fieldPath ...`                                                                                  |
+| Filter array       | `deno task cf get --cell ID items --filter '.active == true' ...`                                                           |
+| Project fields     | `deno task cf get --cell ID items --select id,title ...`                                                                    |
+| Read an address    | `deno task cf get --cell ID --select 'topic@,topic.title' ...`                                                              |
+| Read addresses     | `deno task cf get --cell ID items --schema '{"type":"array","items":{"$link":true}}' ...`                                   |
+| Step + get         | `deno task cf get --cell ID fieldPath --step ...`                                                                           |
+| Set field          | `echo '{"data":...}' \| deno task cf set --cell ID path ...`                                                                |
+| Call handler       | `deno task cf call --cell ID handlerName ...`                                                                               |
+| Shape a result     | `deno task cf call --cell ID addTopic ... -- --select topic.title`                                                          |
+| List verbs         | `deno task cf piece verbs --cell ID --json ...` (`--all` adds wrapper/deprecated; `hidden` counts them)                     |
+| Trigger recompute  | `deno task cf piece step --cell ID ...`                                                                                     |
+| Mint a session     | `export CF_INVOCATION_SESSION="$(deno task cf invocation-session new)"` (once per run; ids deduplicate only within it)      |
+| Replayable call    | `deno task cf call --cell ID --invocation my-id-1 handlerName ...` (same pair retries settle on the original outcome)       |
+| Detached call      | `deno task cf call --cell ID --no-wait --invocation my-id-1 handlerName ...` (exits at commit with `receipt` address)       |
+| Collect a receipt  | `deno task cf get --cell <receipt> ...` (the envelope's `receipt` string, later, from any process)                          |
+| List pieces        | `deno task cf piece ls -i key -a url -s space` (registry only — a handler-created piece appears only if sent to `addPiece`) |
+| Describe a piece   | `deno task cf piece describe --cell ID ...` (name, purpose, state, inputs, verbs; `--json`, `--all`)                        |
+| List slugs         | `deno task cf piece slugs ...`                                                                                              |
+| Search piece data  | `deno task cf piece search <query> ...` (registered pieces only)                                                            |
+| Visualize          | `deno task cf piece map ...`                                                                                                |
+| Rehearse an update | `deno task cf space clone <did> --from <snapshot> --to <dir>` (then `verify` / `reset`)                                     |
 
 ## Check Command Flags
 
@@ -260,7 +266,7 @@ deno task cf piece new pattern.tsx --test pattern.test.tsx ...
 # Output: Created piece bafyreia... <- Save this ID!
 
 # ALL subsequent iterations
-deno task cf piece setsrc pattern.tsx --test pattern.test.tsx --piece bafyreia... ...
+deno task cf piece setsrc pattern.tsx --test pattern.test.tsx --cell bafyreia... ...
 ```
 
 **Why:** `new` creates duplicate pieces. `setsrc` updates in-place. `--test`
@@ -377,7 +383,7 @@ below it, so marking a field under a linked element names that element's own
 document rather than a slot in the collection above it; a position with no link
 above it keeps the source document's own address. A marked position is never
 fetched, so a marked collection costs one document read rather than one per
-element; the rendered address is what `--piece` accepts, scheme included, so an
+element; the rendered address is what `--cell` accepts, scheme included, so an
 emitted address composes into the next command unchanged, without being
 reassembled. Neither spelling composes with `--filter`. See
 `packages/cli/README.md` for the exact syntax and supported schema subset.
@@ -406,7 +412,7 @@ same error messages. They shape the result of the call — a handler's `result`
 inside the Invocation JSON, or a tool's JSON on stdout:
 
 ```bash
-deno task cf call --piece ID addTopic '{"title":"Ship it"}' -- --select topic.title
+deno task cf call --cell ID addTopic '{"title":"Ship it"}' -- --select topic.title
 ```
 
 A selection shapes a result that already exists; it does not narrow what the
@@ -417,7 +423,7 @@ reactive one carries none). A value-less verb therefore still reports no
 result that does exist is refused, so the two stay distinguishable. A shaped
 call also waits on the CLI runtime's global idle, not just its own handling's
 commit, so on a piece with heavy derived state prefer calling plain (or
-`--no-wait`) and shaping the collect: `cf get --piece <receipt id> --select …`.
+`--no-wait`) and shaping the collect: `cf get --cell <receipt id> --select …`.
 `--no-wait` refuses all three flags, since it skips the receipt readback they
 are answered from. `--show-links` composes with a projection — links are
 collected after the selection, so each address names a position in the value you
@@ -432,7 +438,7 @@ belongs to the callable's own schema-derived interface — which also means a
 callable run through its own shebang cannot carry them. `exec` settles a handler
 under an invocation of its own and prints the same Invocation JSON `cf call`
 does; a tool's result stays on stdout with its result cell's address on stderr,
-written as an address argument `--piece` takes unchanged.
+written as an address argument `--cell` takes unchanged.
 
 ```bash
 deno task cf wish '#profile' -i ./claude.key --select name,avatar
@@ -445,17 +451,17 @@ that section. The JSON forms match `cf exec`:
 
 ```bash
 # Complete input as an inline JSON value
-deno task cf call --piece ID search --json '{"query":"milk"}'
+deno task cf call --cell ID search --json '{"query":"milk"}'
 
 # Complete input from stdin
 printf '%s' '{"query":"milk"}' |
-  deno task cf call --piece ID search --json
+  deno task cf call --cell ID search --json
 
 # Machine-readable callable schema
-deno task cf call --piece ID search --help --json
+deno task cf call --cell ID search --help --json
 
 # Schema-derived input flags, in the section the callable name opened
-deno task cf call --piece ID search --query milk
+deno task cf call --cell ID search --query milk
 ```
 
 A single positional JSON value after the callable is also accepted. Use
@@ -473,12 +479,12 @@ session-local materialization into the following `cf get` process.
 
 ```bash
 # After setting data:
-echo '[...]' | deno task cf set --piece ID expenses ...
-deno task cf piece step --piece ID ...  # Required!
-deno task cf get --piece ID totalSpent ...
+echo '[...]' | deno task cf set --cell ID expenses ...
+deno task cf piece step --cell ID ...  # Required!
+deno task cf get --cell ID totalSpent ...
 
 # Equivalent one-session read (required for session-scoped computed output):
-deno task cf get --piece ID totalSpent --step ...
+deno task cf get --cell ID totalSpent --step ...
 ```
 
 A path-less `cf get` (whole result) degrades outputs it cannot reach — values
@@ -488,9 +494,9 @@ members materialized in your own session.
 
 ```bash
 # After calling a handler:
-deno task cf call --piece ID addItem '{"title": "Test"}'
-deno task cf piece step --piece ID ...  # Required!
-deno task cf piece inspect --piece ID ...
+deno task cf call --cell ID addItem '{"title": "Test"}'
+deno task cf piece step --cell ID ...  # Required!
+deno task cf piece inspect --cell ID ...
 ```
 
 `piece inspect` prints a `--- Cached Result Fields ---` section naming every
@@ -511,11 +517,11 @@ deno task cf test pattern.test.tsx
 # 2. Deploy with the test attached
 deno task cf piece new pattern.tsx --test pattern.test.tsx -i key -a url -s space
 # 3. Call a handler
-deno task cf call --piece ID handlerName '{"arg": "value"}' ...
+deno task cf call --cell ID handlerName '{"arg": "value"}' ...
 # 4. Step to process
-deno task cf piece step --piece ID ...
+deno task cf piece step --cell ID ...
 # 5. Inspect result
-deno task cf piece inspect --piece ID ...
+deno task cf piece inspect --cell ID ...
 # 6. Repeat 3-5 for each handler
 ```
 

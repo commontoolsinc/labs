@@ -53,8 +53,10 @@ export interface ExecCommandOptions {
  *
  * **The result cell's address goes to stderr, written the way the next command
  * takes it.** An address has three parts, and `canonicalAddress` renders all
- * three as the one token `--piece` parses, the space embedded as its
- * `/@did:.../` prefix. Naming the space is not decoration — `cf exec` takes
+ * three as one reference, the space embedded as its `/@did:.../` prefix. A
+ * reference is written positionally, so the address is printed into the
+ * position the next command reads it from rather than behind a flag. Naming
+ * the space is not decoration — `cf exec` takes
  * its space from the mount, while `cf get` falls back to whatever space
  * the caller has configured, so a token that omitted it would suggest a
  * command that reads a different cell.
@@ -80,8 +82,8 @@ export function renderExecOutcome(
     if (result.resultRef) {
       const address = canonicalAddress(result.resultRef);
       writeError(
-        `Tool result cell: ${address} (read it back with \`cf get ` +
-          `--piece ${address}\`)`,
+        `Tool result cell: ${address} (read it back with ` +
+          `\`cf get ${address}\`)`,
       );
     }
     return;

@@ -63,10 +63,10 @@ deno task cf piece new packages/patterns/[name]/main.tsx --test packages/pattern
 **Update deployed pattern (all subsequent iterations):**
 
 ```bash
-deno task cf piece setsrc packages/patterns/[name]/main.tsx --test packages/patterns/[name]/main.test.tsx --piece <ID> --identity cf.key --api-url $CF_API_URL --space <space>
+deno task cf piece setsrc packages/patterns/[name]/main.tsx --test packages/patterns/[name]/main.test.tsx --cell <ID> --identity cf.key --api-url $CF_API_URL --space <space>
 ```
 
-`--piece` is required for `setsrc` — never "update" by re-running `piece new`,
+`--cell` is required for `setsrc` — never "update" by re-running `piece new`,
 which creates a duplicate piece.
 
 `--test` packages and type-checks a test but does not run it. Every `setsrc`
@@ -86,15 +86,15 @@ flag on each update too.
 **Inspect piece state:**
 
 ```bash
-deno task cf piece inspect --piece <ID> --identity cf.key --api-url $CF_API_URL --space <space>
+deno task cf piece inspect --cell <ID> --identity cf.key --api-url $CF_API_URL --space <space>
 ```
 
 **Test handler via CLI:**
 
 ```bash
-deno task cf call --piece PIECE_ID handlerName
-deno task cf piece step --piece PIECE_ID    # Required! Triggers recomputation
-deno task cf piece inspect --piece PIECE_ID  # Now shows updated state
+deno task cf call --cell PIECE_ID handlerName
+deno task cf piece step --cell PIECE_ID    # Required! Triggers recomputation
+deno task cf piece inspect --cell PIECE_ID  # Now shows updated state
 ```
 
 **Important:** Always run `piece step` after `cf call` or `cf set`. Without it,
@@ -105,7 +105,7 @@ computed values remain stale and `inspect`/`get` return old data.
 - If `piece new` or `setsrc` errors, re-run `deno task cf check` locally first.
 - Verify `CF_API_URL` is reachable (see the cf skill's troubleshooting table).
 - If you accidentally ran `new` twice, remove the duplicate with
-  `deno task cf piece rm --piece <ID> ...` before continuing.
+  `deno task cf piece rm --cell <ID> ...` before continuing.
 - Never retry `new` to "fix" a failed `setsrc`.
 
 ## Get Help

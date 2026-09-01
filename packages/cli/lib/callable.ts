@@ -204,7 +204,7 @@ export interface CallableExecutionDeps {
  * (`packages/cli/lib/llm-friendly-ref.ts`). One string carries the id, the
  * space when it differs from the one the call targeted, the scope, and the
  * path inside the backing document, so the address a call hands back is
- * exactly what a later command takes in as `--piece`. */
+ * exactly what a later command takes in as `--cell`. */
 export type InvocationResultLink = string;
 
 /** The outcome of a handler invocation made with a caller-supplied id. */
@@ -224,7 +224,7 @@ export interface InvocationOutcome {
    * callback carries, so the address is known BEFORE the outcome is read.
    * That is what makes it available under `--no-wait`: a caller that chose
    * not to wait still holds the address to collect from, and reads it back
-   * with `cf get --piece <receipt>` rather than re-invoking the verb.
+   * with `cf get --cell <receipt>` rather than re-invoking the verb.
    * The receipt is a COMMIT witness, not an execution witness — a same-id
    * replay
    * runs the handler body again and then loses the race, so effects outside
@@ -253,7 +253,7 @@ export interface InvocationOutcome {
 
   /** Under `--show-links` only: result paths mapped to their backing cell
    * addresses in canonical reference syntax, provenance beside the value the
-   * caller can pass straight back to `--piece`. The root `"/"` entry is the
+   * caller can pass straight back to `--cell`. The root `"/"` entry is the
    * result value's own backing document — the receipt, unless the result is
    * itself a reference, in which case the receipt address rides the
    * reserved bare `"receipt"` key; other entries appear only where a path's
@@ -292,7 +292,7 @@ export function addressArgument(ref: CallableResultRef): string {
 /**
  * `ref` written as the canonical fabric reference with its space embedded —
  * `/@<space>/<id>[@scope]` — the one token that names the cell from any
- * configuration. `--piece` takes it whole: the embedded space supplies the
+ * configuration. `--cell` takes it whole: the embedded space supplies the
  * target space when `--space` is absent, and is checked against it when both
  * are named. The id-and-scope segment is {@link addressArgument}'s, so the
  * two spellings of an address cannot drift apart.
@@ -1573,7 +1573,7 @@ async function boundCyclicResult(
       " Collect the outcome with a shape that bounds it: " +
       (receiptId === undefined
         ? "read the receipt with --select or --schema."
-        : `cf get --piece ${receiptId} ` +
+        : `cf get --cell ${receiptId} ` +
           `--schema '{"properties":{"<field>":{"$link":true}}}'.`) +
       " Calling the verb again under --select or --schema shapes it at the " +
       "call, but runs the handler body a second time.",

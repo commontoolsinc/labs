@@ -30,9 +30,9 @@ have landed.
 | step | state |
 | --- | --- |
 | 8 — `CF_SPACE` is ambient, and a write names the space it wrote to | on main |
-| 9 — a reference takes a space by name and a piece by slug, positionally | not started; lands with 11, not alone |
+| 9 — a reference takes a space by name and a piece by slug, positionally | on main, with 11 |
 | 10 — the verb opens the callable's section and `--` closes it | on main |
-| 11 — `--url` decomposes into the transport it names and the reference it carries | not started; lands with 9 |
+| 11 — `--url` decomposes into the transport it names and the reference it carries | on main, with 9 |
 
 ## What the surface is for
 
@@ -68,7 +68,7 @@ nothing else.
 | `--piece` | a piece | any cell address — the function that fetches a piece's result returns the piece unchanged, and the read path checks nothing piece-specific |
 | `--input` | a mode you switch on | an address — it follows a link stored in the document to reach the arguments cell |
 | `--schema` | one input format | two — a full schema, and a concise path shorthand that is not a schema |
-| `--url` | a transport address | a target reference — host, space and piece in one token, and the only spelling that takes a space by name |
+| `--url` | a transport address | a transport and a reference in one token, taken apart into the two when it is read |
 
 The `--piece` case is not cosmetic. Believing the target had to be a piece is
 what made a verb's receipt look like it needed purpose-built read machinery,
@@ -250,26 +250,28 @@ follow. A projection written before the verb is refused rather than accepted
 quietly, so the three flags sit in the same relative place on `call` as on
 `get` — after the thing they shape.
 
-### What names a target today
+### What names a target
 
-Four spellings, no two of which carry the same parts:
+One spelling carries the whole target, and it is the one a person writes:
 
 | Spelling | Carries | Piece written as | Space written as |
 | --- | --- | --- | --- |
-| `--space` plus `--piece` | space, piece | a handle or a slug | a name or a DID |
-| `--url` | host, space, piece | a handle | a name |
-| `/@did:…/of:fid1:…` | space, piece, scope, path | a handle only | a DID only |
-| positional `/of:fid1:…` | piece, scope, path | a handle only | not carried |
+| `/@my-space/tracker`, positionally or on `--cell` | space, piece, scope, path | a handle or a slug | a name or a DID |
+| `--space` plus `--cell` | space, piece | a handle or a slug | a name or a DID |
+| `--url` | host, plus a reference | a handle or a slug | a name or a DID |
 
-Two of those columns are the whole problem, and they run in opposite
-directions. The alias grammar is the one a person can write — it takes a slug,
-and a space by name. The canonical reference is the one that carries the most
-and is meant to lead, and it refuses both: a slug in that position is turned
-away with "piece references must use handles, not human names."
+The reference is what the other two are read against. `--cell` takes a
+reference whole, so the flag is the same vocabulary written behind a name
+rather than a second one; `--url` is a browser URL, and what it means is an
+`--api-url` and a reference, which is how it is read. So the form that
+composes and the form anyone types are the same form, and there is one
+grammar to learn rather than a spelling per position.
 
-So the form that composes is not the form anyone types, and the form anyone
-types cannot carry a space at all. Neither is a spelling a caller can learn
-once.
+Where the readings differ is what each one can resolve, not what it accepts.
+A pattern resolves a link from the string alone, so it needs the
+self-identifying spellings — `did:key:…` and `fid1:…`, which say what they
+are. `cf` opens a session before it reads anything, so it resolves a name and
+a slug as well. One grammar, held to whichever rule the reader can enforce.
 
 **Terseness lives in the identifier, not in the separator.** The same piece,
 three ways:
@@ -298,10 +300,11 @@ supplied by context, the same shape a container image reference has.
 **A host is not part of the referent.** `--url` carries one because it is a
 browser URL, and that conflates a transport with a thing being addressed: the
 same space and piece are the same space and piece whichever host serves them.
-`--api-url` already names the transport. So `--url` does not want a better
-name — it wants to decompose into the two things it is carrying, and survive as
+`--api-url` already names the transport. So `--url` did not want a better
+name — it wanted to decompose into the two things it carries, and to survive as
 a documented convenience for pasting a URL out of a browser rather than as the
-only spelling that carries a whole target.
+one spelling carrying a whole target. It reads that way: the host is the
+`--api-url` and the rest is a reference.
 
 ### Three moves, which compose
 
@@ -324,12 +327,11 @@ happens. Nothing in this CLI asks a caller to confirm anything, and this does
 not introduce the first thing that does.
 
 **Let one spelling carry the whole target, in the form a person writes.** The
-canonical reference has the right structure and the wrong vocabulary; the alias
-has the right vocabulary and carries less. Closing the gap means the reference
-accepts a space by name and a piece by slug — `did:key:…` and `fid1:…` are both
-self-identifying, so neither can be mistaken for a name — and that a reference
-may be written positionally wherever `--piece` is accepted, which a slug cannot
-be today.
+reference had the right structure and a narrower vocabulary than the alias
+beside it. Closing the gap means the reference accepts a space by name and a
+piece by slug — `did:key:…` and `fid1:…` are both self-identifying, so neither
+can be mistaken for a name — and that a reference may be written positionally
+wherever the target flag is accepted.
 
 The reference carries cells and stops there. A verb is not one, so it stays the
 word after the reference rather than a segment inside it — which is where a
@@ -337,16 +339,15 @@ caller reads it anyway, the reference already in hand by the time they write it.
 
 That is a change to the rule that new capabilities land in the canonical form
 first and an alias never leads. The rule is right about direction and this does
-not overturn it: the canonical form still leads, and what it gains is the
-ability to say the same things the alias already says. What would break the rule
-is leaving the human vocabulary in the alias and letting the alias grow, which
-is the shape the surface has now.
+not overturn it: the canonical form still leads, and what it gained is the
+ability to say the same things the alias says. What would break the rule is
+leaving the human vocabulary in the alias and letting the alias grow.
 
 A reference that carries the target also collapses the chain into one word,
 where every part a later segment depends on sits to its left inside the same
 token. Resolving one is then the segment-at-a-time walk a path within a cell
-already needs, rather than a rule about the order of separate words. And it
-gives `--url` somewhere to decompose to.
+already needs, rather than a rule about the order of separate words. And it is
+what `--url` decomposes to.
 
 **Separate the three parties on the line.** A call is read by three: `cf`
 resolves the target, the callable consumes its input, and the read step shapes
@@ -609,8 +610,22 @@ spellings 6a warned about, so step 10 is free to change those same commands.
    it, serving reads and writes alike; and every command that writes names the
    space it wrote to.
 9. **The reference takes a space by name and a piece by slug**, and may be
-   written positionally wherever `--piece` is accepted. A slug is accepted
-   positionally today only through the flag, which is the gap this closes.
+   written positionally wherever the target flag is accepted. Done.
+
+   The flag is `--cell`, and `--piece` is a deprecated name for the same
+   option — one Cliffy option with two long names, so the two cannot disagree
+   and writing both is refused. Deprecated says what it says: do not write new
+   commands against it. What it does not say is when it stops working, because
+   there is no removal date and no removal condition, deliberately. Nothing
+   warns at runtime either: a notice is worth printing when it names something
+   a caller can act on, and this one would name nothing to do beyond a rename
+   the documentation already asks for, while a per-invocation warning with
+   nothing attached teaches people to ignore `cf`'s stderr — the surface where
+   real problems are reported. "Will be removed" is what is not written, since
+   that commits to something not decided.
+
+   The positional reference is preferred over either flag, which is what makes
+   the flag's name a small question rather than a large one.
 10. **The verb opens the callable's section and `--` closes it**, on `call` and
     on `exec`. A projection is refused before the verb and inside the callable's
     section, and each refusal names the section the flag belongs to and prints
@@ -634,32 +649,38 @@ spellings 6a warned about, so step 10 is free to change those same commands.
     same word.
 11. **`--url` decomposes** into the transport it names and the reference it
     carries, and survives as a convenience for pasting rather than as the only
-    spelling that carries a whole target.
+    spelling that carries a whole target. Done. It has no parsing of its own
+    any more: the host becomes the `--api-url`, the rest becomes a reference,
+    and both are read on exactly as if they had been written. Segments past
+    the piece are that reference's path, which is the reading `parseFabricUrl`
+    already gives a page URL of this shape and which the old `--url` dropped
+    without saying so.
 
 Steps 8, 9 and 11 add. Step 10 is the one that changes what a written line
 means, and it is the one the rest of the surface reads against — a projection
 cannot be written after the verb until it lands.
 
-**9 and 11 land together, as one change.** Step 9 on its own gives the
-canonical reference a vocabulary another spelling already has and retires
-neither, so the surface it leaves is the same four spellings with more overlap
-between them — capability added to the accretion this document exists to
-reduce. What makes 9 worth doing is 11: the reference earns the human
-vocabulary so that `--url` can decompose to it and stop being the only spelling
-that carries a whole target. Landed as a pair, the surface ends with one fewer
-way to name a thing; landed alone, 9 ends with one more.
+**9 and 11 landed together, as one change**, which is what kept them worth
+doing. Step 9 on its own would have given the reference a vocabulary another
+spelling already had and retired neither, leaving more overlap between the same
+spellings — capability added to the accretion this document exists to reduce.
+What made 9 worth doing is 11: the reference earned the human vocabulary so
+that `--url` could decompose to it and stop being the only spelling carrying a
+whole target. As a pair the surface ends with one fewer way to name a thing;
+9 alone would have ended with one more.
 
 Their ergonomics compound the same way, and mostly outside 9. Naming the space
 ambiently is step 8's, and the slug is what saves the hundred characters — so
 the increment 9 adds over 8 is that a slug also works in the canonical
 position, not the whole distance between the long form and the short one.
 
-**The prior question, which this document does not answer.** Whether a
-reference grammar is the right home for this at all, or whether it stands in
-for a naming and resolution layer that does not exist. Everything above assumes
-the canonical reference's structure is right and only its vocabulary is
-missing. That assumption is worth testing before 9 and 11 are built, because a
-resolution layer would make both of them smaller — or unnecessary.
+**The prior question, and its answer.** Whether a reference grammar is the
+right home for this at all, or whether it stands in for a naming and
+resolution layer that does not exist. `cf` needs the grammar precisely because
+it cannot have a *place*: [Shuttle](shuttle/) carries a mutable position
+across commands, and a one-shot process cannot. They are complements rather
+than substitutes, and a resolution layer would not have made either step
+smaller.
 
 **The trailing form is taught throughout.** The read options go after the thing
 they shape on every command that has them, which is what `get` and `wish`
