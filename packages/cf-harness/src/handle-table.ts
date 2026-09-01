@@ -588,6 +588,17 @@ export const assertValidHarnessHandleTable = (
       );
     }
     if (entry.acquisition !== undefined) {
+      // Shape before fields: a persisted table is untrusted input, and reading
+      // a field off a null or an array would fail as a TypeError naming
+      // neither the table nor the entry.
+      if (
+        typeof entry.acquisition !== "object" || entry.acquisition === null ||
+        Array.isArray(entry.acquisition)
+      ) {
+        throw new Error(
+          `invalid handle table: entry \`${entry.token}\` has an acquisition that is not an object`,
+        );
+      }
       // Acquisition provenance is trusted-side only, so a table that arrives
       // claiming it on a handle no acquisition could have minted is refused
       // rather than read: a `skill-context` capability is what says the value

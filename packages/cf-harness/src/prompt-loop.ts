@@ -1174,6 +1174,11 @@ export const scrubHandleSkillTextDeep = (
  * judged — and is the whole answer after a crash, where the running ref is the
  * only trace the lost delegation left.
  *
+ * A delegation that declared `withoutSkillHandle` discharges everything
+ * outstanding when it is reached. The refusal exists to make the parent answer
+ * once; a run that answered is not asked again, and does not carry the flag
+ * for the rest of its life because one child died.
+ *
  * Reads the parent's own run state, so the answer survives a resume: nothing
  * about custody lives only in this process.
  */
@@ -1182,6 +1187,10 @@ export const outstandingSkillCustody = (
 ): readonly string[] => {
   const latestCompleted = new Map<string, boolean>();
   for (const run of subagentRuns) {
+    if (run.withoutSkillHandle === true) {
+      latestCompleted.clear();
+      continue;
+    }
     if (run.skillHandle === undefined) continue;
     latestCompleted.set(run.skillHandle, run.status === "completed");
   }
@@ -4382,6 +4391,9 @@ export class CfHarnessPromptLoop {
       ...(options.resolvedSkill !== undefined
         ? { skillHandle: options.resolvedSkill.token }
         : {}),
+      ...(delegateInput.withoutSkillHandle === true
+        ? { withoutSkillHandle: true }
+        : {}),
     });
     const childLoop = new CfHarnessPromptLoop({
       engine: childEngine,
@@ -4614,6 +4626,9 @@ export class CfHarnessPromptLoop {
       manifest,
       ...(options.resolvedSkill !== undefined
         ? { skillHandle: options.resolvedSkill.token }
+        : {}),
+      ...(delegateInput.withoutSkillHandle === true
+        ? { withoutSkillHandle: true }
         : {}),
       runState: subagent.runState,
       ...(structuredReturn !== undefined ? { structuredReturn } : {}),

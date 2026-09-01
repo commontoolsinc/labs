@@ -750,6 +750,24 @@ describe("handle-table", () => {
       );
     });
 
+    it("throws for an acquisition that is not an object", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+        { capability: "skill-context", acquisition: ACQUISITION },
+      );
+      for (const acquisition of [null, ["not", "an", "object"], "text"]) {
+        const broken = {
+          ...table,
+          entries: table.entries.map((entry) => ({ ...entry, acquisition })),
+        } as unknown as HarnessHandleTable;
+
+        expect(() => assertValidHarnessHandleTable(broken)).toThrow(
+          "an acquisition that is not an object",
+        );
+      }
+    });
+
     it("throws for an acquisition field that is not a non-empty string", async () => {
       const { table } = await mintAddressHandle(
         createHarnessHandleTable("run-1"),

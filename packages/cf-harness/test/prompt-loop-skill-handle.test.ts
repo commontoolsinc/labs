@@ -705,6 +705,7 @@ describe("prompt-loop delegate_task skillHandle", () => {
     const runRef = (
       skillHandle: string | undefined,
       status: "running" | "completed" | "failed",
+      withoutSkillHandle = false,
     ) =>
       ({
         type: "cf-harness.subagent-run-ref",
@@ -713,6 +714,7 @@ describe("prompt-loop delegate_task skillHandle", () => {
         manifest: {},
         status,
         ...(skillHandle !== undefined ? { skillHandle } : {}),
+        ...(withoutSkillHandle ? { withoutSkillHandle: true } : {}),
       }) as unknown as HarnessSubagentRunRef;
 
     it("holds a token whose latest delegation failed", () => {
@@ -740,6 +742,25 @@ describe("prompt-loop delegate_task skillHandle", () => {
       // settled would drop custody exactly where it is least safe to.
       expect(outstandingSkillCustody([runRef("cfh:a:aaaaa", "running")]))
         .toEqual(["cfh:a:aaaaa"]);
+    });
+
+    it("discharges custody once a delegation declared it carries no skill", () => {
+      // The refusal exists to make the parent answer once. Having answered,
+      // the run is not asked again on every later delegation.
+      expect(outstandingSkillCustody([
+        runRef("cfh:a:aaaaa", "failed"),
+        runRef(undefined, "completed", true),
+      ])).toEqual([]);
+    });
+
+    it("holds a token a delegation after the declaration failed on", () => {
+      // The declaration answers what was outstanding when it was made, not
+      // custody a later delegation goes on to incur.
+      expect(outstandingSkillCustody([
+        runRef("cfh:a:aaaaa", "failed"),
+        runRef(undefined, "completed", true),
+        runRef("cfh:a:bbbbb", "failed"),
+      ])).toEqual(["cfh:a:bbbbb"]);
     });
 
     it("ignores delegations that carried no handle", () => {

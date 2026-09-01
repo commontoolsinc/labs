@@ -249,9 +249,12 @@ export interface HarnessSkillActivation {
 
   /**
    * The parent-held handle token a `skill-handle` activation's text was
-   * materialized through. Together with {@link digest} this is the
-   * activation's provenance: which reference supplied the skill, and the
-   * exact text it resolved to at activation time.
+   * materialized through. With {@link digest} it says which reference
+   * supplied the skill and the exact text it resolved to at activation time —
+   * the whole provenance for a handle the harness did not fetch. Where the
+   * handle came from an acquisition, {@link HarnessSkillActivation.acquisition}
+   * carries the rest of it, and a reader after the external source wants that
+   * field rather than this one.
    */
   handleToken?: string;
 

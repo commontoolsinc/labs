@@ -167,9 +167,16 @@ going unmade. While a run holds a token whose most recent delegation did not
 complete, a `delegate_task` that omits both `skillHandle` and
 `withoutSkillHandle` is refused, naming the outstanding token. The parent
 either carries the handle again or states that this child runs without it, and
-either way the run state says which. The outstanding set is read off the
-parent's own subagent run refs rather than held in memory, so it survives a
-resume.
+either way the run state says which.
+
+The refusal asks a question once. A delegation that declares
+`withoutSkillHandle` discharges what was outstanding when it was made, so a
+run does not carry the flag for the rest of its life because one child died —
+though custody a later delegation goes on to incur is its own question, asked
+again. Both the outstanding set and the discharge are read off the parent's
+own subagent run refs rather than held in memory, so they survive a resume;
+a delegation left `running` by a crash is the case that most needs this, and
+counts as outstanding.
 
 **The acquisition step.** The host-side `acquire_skill` effect resolves a
 discovery id, fetches a skill from a **pinned** address, verifies its complete
