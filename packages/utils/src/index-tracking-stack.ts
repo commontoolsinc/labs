@@ -10,6 +10,11 @@
  * where a keyed lookup is not, and the two are within reach of each other only
  * over a range that a short stack sits well below.
  *
+ * What the marks weigh is the whole of a stack's use, maintenance included,
+ * rather than a lookup on its own. Where an index exists it answers, at any
+ * height: maintaining it is what a short stack is being spared, and that is
+ * already spent by the time a lookup asks.
+ *
  * The index is dropped again once the stack falls below
  * {@link #DROP_INDEX_BELOW}, so a stack that grew tall once and came back down
  * goes back to scanning rather than paying for a height it no longer has. The

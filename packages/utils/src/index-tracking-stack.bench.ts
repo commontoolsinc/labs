@@ -89,13 +89,24 @@ function batchOf(repeated: boolean): object[] {
   return out;
 }
 
-/** The three states, as the height a stack reaches and where it settles. */
+/**
+ * The states, as the height a stack reaches and where it settles. `between` is
+ * the one the lookup groups exist for: tall enough to have built an index and
+ * not short enough to have dropped it, at a height a scan would still be
+ * cheap at.
+ */
 const STATES = [
   { name: "scanning", climb: 0, settle: 0 },
   {
     name: "crossed",
     climb: IndexTrackingStack.ADD_INDEX_AT + ABOVE,
     settle: IndexTrackingStack.DROP_INDEX_BELOW - BELOW,
+  },
+  {
+    name: "between",
+    climb: IndexTrackingStack.ADD_INDEX_AT + ABOVE,
+    settle: (IndexTrackingStack.ADD_INDEX_AT +
+      IndexTrackingStack.DROP_INDEX_BELOW) / 2,
   },
   {
     name: "indexed",
@@ -169,6 +180,89 @@ for (const band of BANDS) {
     }
     b.end();
   });
+}
+
+/** How many lookups one timed batch performs, against one stack. */
+const LOOKUPS = 64;
+
+/**
+ * The height the lookup groups measure at, chosen between the two marks: a
+ * stack can sit here either with an index or without one, which is what makes
+ * the comparison a comparison.
+ */
+const LOOKUP_HEIGHT =
+  (IndexTrackingStack.ADD_INDEX_AT + IndexTrackingStack.DROP_INDEX_BELOW) / 2;
+
+/**
+ * The lookup subjects, as how a stack of `LOOKUP_HEIGHT` got there. The first
+ * two sit at the same height and differ only in whether an index exists, so
+ * the gap between them is what consulting one costs against scanning. The
+ * third is the height an index is actually for.
+ */
+const LOOKUP_SUBJECTS = [
+  { name: "no index", climb: LOOKUP_HEIGHT, settle: LOOKUP_HEIGHT },
+  {
+    name: "index, between the marks",
+    climb: IndexTrackingStack.ADD_INDEX_AT + ABOVE,
+    settle: LOOKUP_HEIGHT,
+  },
+  {
+    name: "index, above the high mark",
+    climb: IndexTrackingStack.ADD_INDEX_AT + ABOVE,
+    settle: IndexTrackingStack.ADD_INDEX_AT + ABOVE,
+  },
+] as const;
+
+/**
+ * A pool of stacks in the given lookup subject's state, each with the object
+ * sitting at its bottom.
+ */
+function lookupPool(
+  subject: typeof LOOKUP_SUBJECTS[number],
+): { stack: IndexTrackingStack; bottom: object }[] {
+  const out: { stack: IndexTrackingStack; bottom: object }[] = [];
+
+  for (let at = 0; at < POOL; at++) {
+    const stack = new IndexTrackingStack();
+    const held = objects(subject.climb);
+
+    for (const value of held) stack.push(value);
+    while (stack.depth > subject.settle) stack.pop();
+
+    out.push({ stack, bottom: held[0]! });
+  }
+
+  return out;
+}
+
+// The two ends of what a scan can be asked for. A miss is what it cannot cut
+// short, so it reads the whole stack; a hit at the bottom is `indexOf`'s first
+// comparison, so it reads one entry. A keyed lookup costs the same either way,
+// and between them the pair says where each structure wins.
+//
+// A caller asks for one or the other far more often than at random. The cycle
+// guard this class was written for asks `indexOf(value) >= 0` once per
+// container and misses every time, a graph with no cycle in it never being an
+// ancestor of itself.
+for (const [what, held] of [["a miss", false], ["the bottom", true]] as const) {
+  for (const subject of LOOKUP_SUBJECTS) {
+    Deno.bench({
+      name: `indexOf ${subject.name}`,
+      group: `indexOf — ${what}`,
+      baseline: subject.name === "no index",
+    }, (b) => {
+      const pool = lookupPool(subject);
+      const absent = {};
+
+      b.start();
+      for (const { stack, bottom } of pool) {
+        const sought = held ? bottom : absent;
+
+        for (let at = 0; at < LOOKUPS; at++) stack.indexOf(sought);
+      }
+      b.end();
+    });
+  }
 }
 
 for (const repeated of [false, true]) {
