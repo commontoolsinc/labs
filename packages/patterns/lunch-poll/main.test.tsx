@@ -320,6 +320,11 @@ export default pattern(() => {
     if (first) poll.castVote.send({ optionId: first.id, voteType: "green" });
   });
 
+  const action_clear_my_vote_first = action(() => {
+    const first = poll.options[0];
+    if (first) poll.clearMyVote.send({ optionId: first.id });
+  });
+
   const action_reset_votes = action(() => {
     poll.resetVotes.send({});
   });
@@ -430,6 +435,8 @@ export default pattern(() => {
   });
 
   const assert_revote_green_cleared = assert(() => poll.votes.length === 0);
+
+  const assert_my_vote_cleared = assert(() => poll.votes.length === 0);
 
   const assert_votes_reset = assert(() => poll.votes.length === 0);
 
@@ -753,6 +760,15 @@ export default pattern(() => {
 
       // Voting that same color once more re-adds it. A removed vote clears its
       // entity, so the toggle decision does not see stale content and dead-click.
+      { action: action_vote_green_first_again },
+      { assertion: assert_green_vote_recorded },
+
+      // Clearing my vote drops it, and casting that same color afterwards
+      // re-adds it: the clear discards the vote's stored content as well as
+      // its place in the list, so the next cast is not read as a toggle
+      // against the vote it just removed.
+      { action: action_clear_my_vote_first },
+      { assertion: assert_my_vote_cleared },
       { action: action_vote_green_first_again },
       { assertion: assert_green_vote_recorded },
 

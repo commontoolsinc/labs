@@ -281,3 +281,59 @@ run stays green.
 
 Because that ceiling is the board's cost and not a property of the benchmark,
 the two skipped sizes should be enabled as part of whatever lowers it.
+
+## The multiplayer contention benchmark
+
+`packages/patterns/integration/lunch-poll-vote-burst.bench.ts` measures what
+several people editing one thing at the same moment cost each other: ten voters
+each cast a vote on each of ten lunch-poll options, all hundred dispatched
+before any settles, timed until every one of the ten clients holds the whole
+result. Its `lunch poll` group carries one series, `vote burst 10x10`.
+
+It is the only benchmark in the repository with a second writer. Every other
+bench file drives one runtime against storage it alone holds, so a write
+conflict cannot arise in one, and the cost of a contended write — the rejected
+commit, the rolled-back optimistic write, the re-run — is invisible to all of
+them. This one runs ten runtimes, each in its own Deno worker, against one
+in-process storage server, which is the arrangement
+`packages/patterns/integration/multi-runtime-harness.ts` exists for. No toolshed
+and no browser.
+
+Four things follow from that shape:
+
+- **Setup runs once, at module scope.** Ten workers, ten joins, ten options and
+  two warm-up bursts cost around twelve seconds, so paying it per iteration
+  would leave a run with almost no samples. Each iteration recolors every vote,
+  so all hundred are real changes and the poll holds a hundred votes throughout;
+  no iteration leaves a state the next one starts from differently.
+- **Few samples.** An iteration runs in a few hundred milliseconds, which puts
+  this benchmark at the end of the distribution where the 75th percentile buys
+  least — it discards the slowest quarter of a dozen samples, so two stalls in a
+  run reach the figure the trend reads. Read it across several windows.
+- **The wall-clock is half of what it measures.** A contended write is also
+  work thrown away, and that half does not appear in a timing. The file writes a
+  contention accounting — rejected commits and rolled-back writes over one
+  untimed burst — to stderr, and so into `diagnostics.log`. On the keyed vote
+  write both are zero; the same burst over a whole-list write measured 430 and
+  558.
+- **The size names the series.** `CF_LUNCH_POLL_VOTERS` and
+  `CF_LUNCH_POLL_OPTIONS` resize it for a local run asking how the burst scales.
+  Changing either starts a new line rather than continuing this one, exactly as
+  the board benchmark's size does. CI leaves both unset, and the size in force
+  is written to stderr.
+
+Ten runtimes is the largest footprint of any benchmark in the job, and the cost
+is worth knowing before adding a voter to it. Measured on an Apple M5 Max, the
+file adds around twenty-three seconds and peaks at 5.4GB resident, against
+245MB for a run without it. That peak is a working set rather than a leak — the
+same run under `--max-old-space-size=512` completes in 3.5GB, at roughly double
+the per-iteration time — so what it actually reaches depends on the headroom the
+heap is given. The memory is not released when the file's benchmarks finish,
+because the harness has no teardown seam `Deno.bench` can call, so whatever it
+reaches is held for the rest of the job. `deno bench` picks its own order and
+put this file first in every ordering tried, which means the rest of the job
+runs beside it.
+
+`packages/patterns/integration/lunch-poll-keyed-votes.test.ts` is the assertion
+half of the same property: it bounds rolled-back writes instead of timing them,
+so a regression that this benchmark shows as trend drift also fails a test.

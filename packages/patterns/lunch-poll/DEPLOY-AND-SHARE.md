@@ -206,6 +206,16 @@ result cell and its populated inputs. **Adding a new `PerSpace` field is safe**
 — on an existing piece it hydrates to its `Default<>` while populated fields
 keep their data.
 
+> **Reset the votes after an update that changes how a vote is addressed.** A
+> vote lives at an address derived from its key — its voter's profile entity and
+> the option — and a poll may be carrying votes stored under some other scheme,
+> which no key names. Those rows still render and still tally, but the handlers
+> cannot reach them: casting over one adds a second, keyed vote beside it and
+> the voter counts twice. `setsrc` keeps them, so the host clears the board once
+> after the update (see "Resetting / re-seeding state"), and everyone votes
+> again. Votes are shown a day at a time anyway, so a reset costs the group
+> nothing they were still looking at.
+
 **Removing one is refused wherever the pattern publishes it.** A `PerSpace`
 field that also reaches the result is held by the result contract, and the
 compatibility check rejects a source that drops it, without touching the piece:

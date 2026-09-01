@@ -14,20 +14,19 @@ that make such a migration look finished while it is not, see
 
 ## The lunch poll's read-then-write inventory
 
-Every mutating handler in `packages/patterns/lunch-poll`, by shape, and the
-mergeable form it now uses:
+Every list-mutating handler in `packages/patterns/lunch-poll`, by what it
+mutates and the form it uses. The poll is the worked example because a lunch
+decision is the contended case: everyone votes at once, on the same list.
 
-| Handler | Original shape | Mergeable form |
+| Handler | What it mutates | Form |
 | --- | --- | --- |
-| `addOption` | append a new option | set the option entity by id, `addUnique` it |
-| `enrichHomePages` | `refresh.set(get() + 1)` | `increment(1)` |
-| `addUser` | insert unique by `name` | unchanged — see "The danger with push" |
-| `castVote` | upsert by `(voter, option)` with toggle-off | read/edit the vote entity by key; `addUnique` / `removeByValue` |
-| `setOptionUrl` / `setOptionImage` / `setOptionHomePageUrl` | edit a field of the option keyed by `id` | edit the field on the option entity addressed by `id` |
-| `removeOption` | remove by `id`, then remove its votes | `removeByValue` the option by id; cascade `removeByValue` each vote by its key |
-| `clearMyVote` | remove by `(voter, option)` | `removeByValue` the vote by key |
-| `resetVotes` | clear all (admin only) | clear each vote entity, then `set([])` — an intentional overwrite |
-| `setCity` | scalar register (admin only) | unchanged — `set` is fine |
+| `addOption` | insert an option if its id is new | set the option entity by id, `addUnique` it |
+| `setOptionImage` | edit one field of the option with a given id | edit the field on the option entity addressed by `id` |
+| `removeOption` | remove an option, then its votes | `removeByValue` the option by id; cascade `removeByValue` each vote by its key |
+| `castVote` | upsert by `(voter, option)`, with toggle-off | read/edit the vote entity by key; `addUnique` / `removeByValue` |
+| `clearMyVote` | remove by `(voter, option)` | `removeByValue` the vote by key, then clear its entity |
+| `resetVotes` | clear every vote (host only) | clear each vote entity, then `set([])` — an intentional overwrite |
+| `logVisit` | append a visit, then cap the log | one read-modify-write `set` — the cap is derived from the list |
 
 The bulk are **keyed** mutations of a list of records: insert-if-new, set my
 value, edit a record's field, delete a record. Written as read-whole-list,
@@ -36,6 +35,18 @@ false-conflict and clobber under the concurrency a shared multi-user poll has,
 and the positional `key(idx)` is fragile: the index is resolved against the
 reader's snapshot, so a concurrent insert or remove shifts it and the wrong
 record is edited.
+
+A vote's key is `(the voter's profile entity, the option id)`, minted by
+`voteKeyFor` in the poll's `main.tsx`. Identity there is a profile CELL rather
+than a name, and a cell is not a string, so the key takes the entity the cell
+points at. That keeps the key computable from the event alone, which is the
+property the whole scheme rests on: a handler that had to search the list for
+its voter would put the list back in its conflict set and give up the merge.
+
+`packages/patterns/integration/lunch-poll-keyed-votes.test.ts` holds the poll
+to this. It has one session read another session's vote at that address, which
+only succeeds if the vote was stored as a keyed element — the tally reads the
+same either way, so nothing lighter than an address can tell the two apart.
 
 ## The model: a keyed element is a separately-addressed entity
 
@@ -151,17 +162,24 @@ whole-list read this design exists to avoid.
 
 ## Back-compatibility: addressing scheme changes
 
-This moves the poll's options and votes from append-addressed entities (a `push`
-mints the entity id from a per-frame counter folded together with the event
-cause) to content-addressed entities (`elementById` derives the id from the key
-alone). The two id derivations never coincide, so a poll created before this
-change holds options and votes the new handlers cannot reach:
-`options.elementById(id).get()` and `votes.elementById(key).get()` return
-undefined for pre-existing records, so editing or removing an old option
-silently no-ops, and toggling an old vote adds a parallel new-scheme vote that
-double-counts in the tally. There is no data migration for pattern instances, so
-this applies to fresh polls; existing deployed polls would need to be recreated
-to benefit.
+A keyed entity's id comes from its key alone. An appended one's comes from a
+per-frame counter folded together with the event cause, and a record written as
+part of a whole-list value gets an id minted from that write. None of those
+derivations coincide, so a collection that moves to keyed addressing leaves
+every record already in it unreachable from the new handlers:
+`options.elementById(id).get()` and `votes.elementById(key).get()` read
+undefined for such a record. Editing or removing an old option then silently
+no-ops, and casting over an old vote adds a second, keyed vote beside it, so the
+voter counts twice.
+
+There is no data migration for pattern instances, and no per-handler legacy
+fallback either — `migrating-collection-writes.md` says why the fallback costs
+more than it looks. A populated instance is recreated, or repaired once by a
+handler that already rewrites the whole collection. The poll has one: `resetVotes`
+is a whole-list overwrite, so it reaches rows no key can name, and a host
+clearing the board is the repair for a poll carrying votes from before its
+votes were keyed. Options have no such handler; a poll whose options predate
+their keyed addressing is recreated.
 
 ## The danger with `push`, and making it safe
 
