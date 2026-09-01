@@ -2354,11 +2354,16 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
           value: { value: { computed: "target result" } },
         }, {
           op: "set",
+          id: "of:target-cell",
+          value: { value: { derived: "target cell" } },
+        }, {
+          op: "set",
           id: "of:crossing-target",
           value: {
             value: { name: "target" },
             pattern: link("of:target-family"),
             result: link("of:target-result"),
+            internal: [{ link: link("of:target-cell") }],
           },
         }, {
           op: "set",
@@ -2406,6 +2411,10 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
     assert(ids.has("of:root-family"));
     assert(ids.has("of:target-result"));
     assert(!ids.has("of:target-family"));
+    // The crossed piece's derived cell is registered, not delivered: its
+    // bytes ride its next commit rather than every subscription that can
+    // see the piece.
+    assert(!ids.has("of:target-cell"));
 
     const targetRooted = queryGraph(
       space,
@@ -2429,9 +2438,11 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
       targetRooted.entities.map((entity) => entity.id),
     );
     // The same document, NAMED as a root, chases its family: intent to
-    // load rides the naming, not the reachability.
+    // load rides the naming, not the reachability — the internal cell
+    // included, eagerly.
     assert(targetIds.has("of:crossing-target"));
     assert(targetIds.has("of:target-family"));
+    assert(targetIds.has("of:target-cell"));
 
     const bothRooted = queryGraph(
       space,
@@ -2517,6 +2528,141 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
       ),
     );
     assert(isGraphQueryCoveredByState(space, tracked.state, laterQuery));
+
+    // Delivery-on-commit: a fresh crossing-only state registers the
+    // derived cell lazily; the cell's next commit promotes it — delivered
+    // with that refresh's updates, tracked from then on.
+    const lazyTracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:meta-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              child: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    assert(!lazyTracked.state.entities.has(`${space}/space/of:target-cell`));
+    assert(lazyTracked.state.lazy.has(`${space}/space/of:target-cell`));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:target-cell",
+          value: { value: { derived: "target cell, recomputed" } },
+        }],
+      },
+    });
+    const refreshed = refreshTrackedGraph(
+      space,
+      engine,
+      lazyTracked.state,
+      new Set([toDirtyKey("of:target-cell")]),
+    );
+    assertExists(refreshed);
+    const delivered = refreshed.updates.get(
+      `${space}/space/of:target-cell`,
+    );
+    assertExists(delivered);
+    assert(!lazyTracked.state.lazy.has(`${space}/space/of:target-cell`));
+    assert(lazyTracked.state.tracker.has(`${space}/space/of:target-cell`));
+
+    // A dirty crossing keeps its crossing shape: updating the crossed
+    // document re-walks it WITHOUT promoting it to a named root's
+    // family, so what a subscriber holds does not depend on update
+    // history.
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(3),
+      authorization,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:crossing-target",
+          value: {
+            value: { name: "target, renamed" },
+            pattern: link("of:target-family"),
+            result: link("of:target-result"),
+            internal: [{ link: link("of:target-cell") }],
+          },
+        }],
+      },
+    });
+    const crossingRefreshed = refreshTrackedGraph(
+      space,
+      engine,
+      lazyTracked.state,
+      new Set([toDirtyKey("of:crossing-target")]),
+    );
+    assertExists(crossingRefreshed);
+    assert(
+      !lazyTracked.state.tracker.has(`${space}/space/of:target-family`),
+    );
+    assert(!lazyTracked.state.entities.has(`${space}/space/of:target-family`));
+
+    // An absent NAMED root heals with its family: naming records the
+    // role, creation delivers the family, and coverage then holds.
+    const absentRootQuery: Parameters<typeof extendTrackedGraph>[3] = {
+      roots: [{
+        id: "of:late-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: { name: { type: "string" } },
+          },
+        },
+      }],
+    };
+    const lateTracked = trackGraph(space, engine, absentRootQuery);
+    assert(!lateTracked.state.rootFamilies.has(`${space}/space/of:late-root`));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(4),
+      authorization,
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:late-family",
+          value: { value: { kind: "late pattern" } },
+        }, {
+          op: "set",
+          id: "of:late-root",
+          value: {
+            value: { name: "born late" },
+            pattern: link("of:late-family"),
+          },
+        }],
+      },
+    });
+    const lateRefreshed = refreshTrackedGraph(
+      space,
+      engine,
+      lateTracked.state,
+      new Set([toDirtyKey("of:late-root"), toDirtyKey("of:late-family")]),
+    );
+    assertExists(lateRefreshed);
+    assert(lateTracked.state.rootFamilies.has(`${space}/space/of:late-root`));
+    assert(lateTracked.state.tracker.has(`${space}/space/of:late-family`));
+    assert(
+      isGraphQueryCoveredByState(space, lateTracked.state, absentRootQuery),
+    );
   } finally {
     close(engine);
     await Deno.remove(path);

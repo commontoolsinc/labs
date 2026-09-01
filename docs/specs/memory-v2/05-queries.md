@@ -259,20 +259,48 @@ top-level document object for metadata links and manifest links such as:
 
 The `pattern`, `argument`, and `result` fields use the same sigil link form as
 ordinary cell references. The `internal` field is raw metadata, not a direct
-metadata link. It stores a manifest array, and traversal resolves each
-manifest-entry `link` as an internal cell owned by the result cell. The `cfc`
-metadata field is also special: it uses a compact metadata object, and traversal
-converts its `schemaHash` into a CID sigil link before loading the referenced
-document. If present, the server resolves each metadata link and each internal
-manifest link, loads that document, adds it to the query result and watch
-tracker, and then repeats the same metadata/manifest check on the loaded
-document. This continues until a document without metadata links or manifest
-links is reached or a cycle is detected.
+metadata link. It stores a manifest array, and each manifest-entry `link` names
+an internal cell owned by the result cell. The `cfc` metadata field is also
+special: it uses a compact metadata object, and traversal converts its
+`schemaHash` into a CID sigil link before loading the referenced document.
+
+How much of a document's metadata family the evaluation loads depends on the
+document's ROLE in the query:
+
+- A document the query NAMES as a root is owed its full family: the server
+  MUST resolve every metadata link and every internal manifest link, load
+  each target, add it to the query result and watch tracker, and repeat the
+  same check on each loaded document until a document without metadata or
+  manifest links is reached or a cycle is detected. This is what a caller
+  that intends to load and run what it named relies on, and the role is
+  persistent: a refresh that re-evaluates a named document — including an
+  absent root's first evaluation after it is created — owes it the same
+  full family.
+
+- A document the evaluation merely reaches — loaded mid-walk through a link
+  crossing — is owed its computed surface, not its whole family. The server
+  MUST resolve and load its `result` metadata link, and MUST register every
+  internal manifest link's target in the watch tracking state WITHOUT
+  loading or delivering it: the subscription stays reactive to each
+  registered document, and the next commit that touches one PROMOTES it —
+  delivered whole with that refresh's updates, tracked from then on, its
+  own internal manifest links registered in turn. The `pattern`,
+  `argument`, and `cfc` links of a crossing-reached document are not
+  chased. A refresh that re-evaluates a crossing-reached document applies
+  these same rules, so a subscription's delivered shape does not depend on
+  the order in which documents changed.
+
+A later query naming a document the evaluation had only reached does not
+count as covered by existing watch state until that document's full family
+has been chased: naming, not reachability, is what entitles a caller to the
+family.
 
 This behavior is not optional provenance decoration. It is part of the query
-result shape, mirroring `loadMetaLinkedDocs()` in `traverse.ts`, and is required
-for piece execution metadata to reconstruct the full lineage of a result
-document.
+result shape, mirroring `loadMetaLinkedDocs()` and its lazy registration
+sink in `traverse.ts` and `graph-query.ts`, and it is what lets a
+subscriber both reconstruct the full lineage of a result document it named
+and stay subscribed to the computed cells of every piece it can see without
+receiving every derived cell of every one of them.
 
 Content-addressed schema documents ride the same mechanism
 (`docs/specs/content-addressed-schemas.md`): a link or selector schema

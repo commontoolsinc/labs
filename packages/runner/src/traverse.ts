@@ -1289,6 +1289,21 @@ export type TraversalContext = {
    */
   loadedMetaRails: readonly MetaRail[];
 
+  /**
+   * Rails whose linked documents a mid-walk chase REGISTERS without
+   * loading or delivering: each target's tracker-style key goes to
+   * `lazyMetaSink`, derived from the manifest link alone — no read. The
+   * receiver keeps the subscription reactive to those documents and
+   * delivers one when a later commit touches it. Empty (with no sink)
+   * everywhere except the memory server's graph-query walk, which lazies
+   * the `internal` rail: a crossed piece's derived cells stay subscribed
+   * without shipping every one of them to every subscriber that can see
+   * the piece. A named root's chase bypasses this routing and loads every
+   * rail eagerly.
+   */
+  lazyMetaRails: readonly MetaRail[];
+  lazyMetaSink?: (key: string) => void;
+
   /** Tracker key → the rails already chased for that document within this
    * traversal, so a later chase under a wider rail set still walks the
    * rails an earlier, narrower one did not. */
@@ -1351,6 +1366,8 @@ export function createTraversalContext(
   schemaDocsLoaded: Set<string> = new Set<string>(),
   schemaDocsAvailable: Set<string> = new Set<string>(),
   loadedMetaRails: readonly MetaRail[] = ALL_META_RAILS,
+  lazyMetaRails: readonly MetaRail[] = [],
+  lazyMetaSink?: (key: string) => void,
 ): TraversalContext {
   return {
     tracker,
@@ -1358,6 +1375,8 @@ export function createTraversalContext(
     scopeKeyIdentity,
     includeMeta,
     loadedMetaRails,
+    lazyMetaRails,
+    lazyMetaSink,
     metaDocsVisited,
     onMissingLinkTarget,
     schemaDocsLoaded,
@@ -2624,6 +2643,49 @@ function trackVisitedDoc(
 }
 
 // These meta links don't have full link chains. We only follow the first link.
+/**
+ * The key-only half of `loadMetaLinkedDoc`: derive each of `meta`'s target
+ * keys from the links the document already carries and hand them to `sink`,
+ * reading nothing. What the sink does with a key — typically register it
+ * for delivery on its next commit — is the caller's contract.
+ */
+export function sinkMetaLinkedDocKeys(
+  valueEntry: IMemorySpaceAttestation,
+  meta: MetaRail,
+  identity: ScopeKeyIdentity,
+  sink: (key: string) => void,
+): void {
+  const targetObj = valueEntry.value as Immutable<JSONObject>;
+  if (!isObjectOrArray(targetObj) || !(meta in targetObj)) return;
+  const links: SigilLink[] = [];
+  if (meta === "internal") {
+    if (!Array.isArray(targetObj["internal"])) return;
+    for (const manifestEntry of targetObj["internal"]) {
+      if (
+        isObjectOrArray(manifestEntry) && "link" in manifestEntry &&
+        isSigilLink(manifestEntry.link)
+      ) {
+        links.push(manifestEntry.link);
+      }
+    }
+  } else {
+    const linkObj = isSigilLink(targetObj[meta])
+      ? targetObj[meta] as SigilLink
+      : (meta === "cfc")
+      ? cfcMetaToSigilLink(targetObj["cfc"])
+      : undefined;
+    if (linkObj !== undefined) links.push(linkObj);
+  }
+  for (const linkObj of links) {
+    const link = parseLink(linkObj, valueEntry.address);
+    if (link?.id === undefined) continue;
+    sink(getTrackerKey(
+      { space: link.space, id: link.id, scope: link.scope },
+      identity,
+    ));
+  }
+}
+
 function loadMetaLinkedDoc(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
@@ -2878,39 +2940,55 @@ export function loadMetaLinkedDocs(
   valueEntry: IMemorySpaceAttestation,
   context: TraversalContext,
   rails: readonly MetaRail[] = ALL_META_RAILS,
+  // A named root's chase passes false: every rail loads eagerly no matter
+  // what the context routes lazily for mid-walk crossings.
+  sinkLazyRails = true,
 ) {
-  const missingRailsOf = (key: string): MetaRail[] => {
-    const seen = context.metaDocsVisited.get(key);
-    return seen === undefined
-      ? [...rails]
-      : rails.filter((rail) => !seen.has(rail));
-  };
-  const recordRails = (key: string, chased: readonly MetaRail[]): void => {
+  const seenRailsOf = (key: string): Set<MetaRail> | undefined =>
+    context.metaDocsVisited.get(key);
+  const recordRails = (key: string): void => {
     let seen = context.metaDocsVisited.get(key);
     if (seen === undefined) {
       seen = new Set<MetaRail>();
       context.metaDocsVisited.set(key, seen);
     }
-    for (const rail of chased) seen.add(rail);
+    for (const rail of rails) seen.add(rail);
+  };
+  const coveredForCall = (key: string): boolean => {
+    const seen = seenRailsOf(key);
+    return seen !== undefined && rails.every((rail) => seen.has(rail));
   };
 
   const valueEntryKey = getTrackerKey(
     valueEntry.address,
     context.scopeKeyIdentity,
   );
-  const entryRails = missingRailsOf(valueEntryKey);
-  if (entryRails.length === 0) {
+  if (coveredForCall(valueEntryKey)) {
     return;
   }
-  recordRails(valueEntryKey, entryRails);
+  recordRails(valueEntryKey);
 
-  const pendingDocs: [IMemorySpaceAttestation, readonly MetaRail[]][] = [[
-    valueEntry,
-    entryRails,
-  ]];
+  const pendingDocs: IMemorySpaceAttestation[] = [valueEntry];
   while (pendingDocs.length > 0) {
-    const [currentDoc, currentRails] = pendingDocs.shift()!;
-    for (const meta of currentRails) {
+    const currentDoc = pendingDocs.shift()!;
+    for (const meta of rails) {
+      if (
+        sinkLazyRails &&
+        context.lazyMetaSink !== undefined &&
+        context.lazyMetaRails.includes(meta)
+      ) {
+        // Registered, not loaded: the sink receives each target's key,
+        // derived from the manifest link alone. No read, no tracker
+        // entry, no recursion — and no visited record, so a later eager
+        // chase of this document's rail (a root naming it) still runs.
+        sinkMetaLinkedDocKeys(
+          currentDoc,
+          meta,
+          context.scopeKeyIdentity,
+          context.lazyMetaSink,
+        );
+        continue;
+      }
       const linkedDocs = loadMetaLinkedDoc(
         tx,
         currentDoc,
@@ -2927,10 +3005,14 @@ export function loadMetaLinkedDocs(
           linkedDoc.address,
           context.scopeKeyIdentity,
         );
-        const linkedRails = missingRailsOf(linkedDocKey);
-        if (linkedRails.length === 0) continue;
-        recordRails(linkedDocKey, linkedRails);
-        pendingDocs.push([linkedDoc, linkedRails]);
+        // Recurse unless this call's whole rail set is already recorded
+        // for the child: a document first chased under a narrower set —
+        // a crossing before a root named its ancestor — still has its
+        // descendants upgraded, because coverage is judged against THIS
+        // call's rails, not against having been seen at all.
+        if (coveredForCall(linkedDocKey)) continue;
+        recordRails(linkedDocKey);
+        pendingDocs.push(linkedDoc);
       }
     }
   }

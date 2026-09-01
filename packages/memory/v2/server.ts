@@ -4258,7 +4258,7 @@ export class Server {
         message.watches,
         { principal: session.principal, sessionId: message.sessionId },
       );
-      this.#addMissedToTrackedIds(session.trackedIds, graphs.values());
+      this.#addUndeliveredToTrackedIds(session.trackedIds, graphs.values());
       session.lastSyncedSeq = serverSeq;
       this.#notifyDemandChanged(message.space, "watch", session.principal);
       return {
@@ -4474,7 +4474,7 @@ export class Server {
         principal: session.principal,
         sessionId: message.sessionId,
       });
-      this.#addMissedToTrackedIds(trackedIds, graphs.values());
+      this.#addUndeliveredToTrackedIds(trackedIds, graphs.values());
       const sync: SessionSync = {
         type: "sync",
         fromSeq,
@@ -4867,20 +4867,25 @@ export class Server {
    * are wake-reactivity only — they are never delivered, so they flow
    * into `trackedIds` beside the delivered entities at every site that
    * rebuilds or folds that set. */
-  #addMissedToTrackedIds(
+  #addUndeliveredToTrackedIds(
     trackedIds: Set<string>,
     graphs: Iterable<TrackedGraphState>,
   ): void {
-    for (const graph of graphs) {
-      for (const [key] of graph.missed) {
-        let parsed: { id: string; scopeKey: ScopeKey };
-        try {
-          parsed = fromDocKey(key as QueryDocKey);
-        } catch {
-          continue;
-        }
-        trackedIds.add(toDirtyKey(parsed.id, parsed.scopeKey));
+    // Missed and lazily registered documents are dirty interest exactly
+    // like delivered ones: a commit touching either must wake the session
+    // — to heal the miss, or to promote and deliver the lazy document.
+    const add = (key: string) => {
+      let parsed: { id: string; scopeKey: ScopeKey };
+      try {
+        parsed = fromDocKey(key as QueryDocKey);
+      } catch {
+        return;
       }
+      trackedIds.add(toDirtyKey(parsed.id, parsed.scopeKey));
+    };
+    for (const graph of graphs) {
+      for (const [key] of graph.missed) add(key);
+      for (const key of graph.lazy) add(key);
     }
   }
 
@@ -5170,7 +5175,7 @@ export class Server {
               }
               // A refresh's re-walk can DEAD-END on new absent targets;
               // their misses are wake-reactivity the next commit needs.
-              this.#addMissedToTrackedIds(
+              this.#addUndeliveredToTrackedIds(
                 session.trackedIds,
                 session.graphs.values(),
               );
@@ -5273,7 +5278,10 @@ export class Server {
           // the space is offered every batch — so no tracked key is
           // needed to bring the withheld instances back.)
           const evaluatedTrackedIds = trackedIdsFromEntries(entities.values());
-          this.#addMissedToTrackedIds(evaluatedTrackedIds, graphs.values());
+          this.#addUndeliveredToTrackedIds(
+            evaluatedTrackedIds,
+            graphs.values(),
+          );
           addOperationWatchTrackedIds(
             evaluatedTrackedIds,
             session.watches,
@@ -5665,7 +5673,10 @@ export class Server {
       // the graph-only provenance from delivered entries plus traversal misses
       // before producing demand rows.
       const graphTrackedIds = trackedIdsFromEntries(session.entities.values());
-      this.#addMissedToTrackedIds(graphTrackedIds, session.graphs.values());
+      this.#addUndeliveredToTrackedIds(
+        graphTrackedIds,
+        session.graphs.values(),
+      );
       const emit = (dirtyKey: string, root: boolean) => {
         const rowKey = `${dirtyKey}\0${session.id}`;
         if (rows.has(rowKey)) {
