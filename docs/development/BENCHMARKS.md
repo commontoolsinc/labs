@@ -306,10 +306,11 @@ Four things follow from that shape:
   would leave a run with almost no samples. Each iteration recolors every vote,
   so all hundred are real changes and the poll holds a hundred votes throughout;
   no iteration leaves a state the next one starts from differently.
-- **Few samples.** An iteration runs in a few hundred milliseconds, which puts
-  this benchmark at the end of the distribution where the 75th percentile buys
-  least — it discards the slowest quarter of a dozen samples, so two stalls in a
-  run reach the figure the trend reads. Read it across several windows.
+- **Few samples.** An iteration runs in about 450ms on a developer machine and
+  2.6 seconds on a four-core CI host, which puts this benchmark at the end of
+  the distribution where the 75th percentile buys least — it discards the
+  slowest quarter of a dozen samples, so two stalls in a run reach the figure
+  the trend reads. Read it across several windows.
 - **The wall-clock is half of what it measures.** A contended write is also
   work thrown away, and that half does not appear in a timing. The file writes a
   contention accounting — rejected commits and rolled-back writes over one
@@ -323,16 +324,20 @@ Four things follow from that shape:
   is written to stderr.
 
 Ten runtimes is the largest footprint of any benchmark in the job, and the cost
-is worth knowing before adding a voter to it. Measured on an Apple M5 Max, the
-file adds around twenty-three seconds and peaks at 5.4GB resident, against
-245MB for a run without it. That peak is a working set rather than a leak — the
-same run under `--max-old-space-size=512` completes in 3.5GB, at roughly double
-the per-iteration time — so what it actually reaches depends on the headroom the
-heap is given. The memory is not released when the file's benchmarks finish,
-because the harness has no teardown seam `Deno.bench` can call, so whatever it
-reaches is held for the rest of the job. `deno bench` picks its own order and
-put this file first in every ordering tried, which means the rest of the job
-runs beside it.
+is worth knowing before adding a voter to it. **Measured on a four-core CI host
+with 15.6GB of memory: 89 seconds for the file, peaking at 4.76GB resident** —
+under a third of that host, with around 9GB still free, so it runs with room
+rather than close to the edge. A developer machine with far more memory peaks
+higher, at 5.4GB, because the figure is a working set rather than a leak: the
+same run under `--max-old-space-size=512` completes in 3.5GB at roughly double
+the per-iteration time, so what it reaches depends on the headroom the heap is
+given rather than on what it needs.
+
+That peak is a floor under everything measured after it. The workers are
+released at process exit — `Deno.bench` offers no seam for "this file's
+benchmarks are done", so the file closes the harness from an `unload` listener —
+and `deno bench` picks its own order, which put this file first in every
+ordering tried. So the rest of the job runs beside it.
 
 `packages/patterns/integration/lunch-poll-keyed-votes.test.ts` is the assertion
 half of the same property: it bounds rolled-back writes instead of timing them,

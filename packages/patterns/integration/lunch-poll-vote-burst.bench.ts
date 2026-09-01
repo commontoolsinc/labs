@@ -28,12 +28,12 @@
  * assertion half of the same property, bounding rolled-back writes rather than
  * timing them.
  *
- * Sample count is the weak point, and it is inherent. One iteration is around
- * half a second on a developer machine, so a run collects few samples, and the
- * 75th percentile the dashboard trend reads only discards the slowest quarter
- * of what it collected — a runner that stalls twice in a handful of samples
- * moves this line without any code changing. Read it for the shape of a move
- * across several windows, not for one window against the last.
+ * Sample count is the weak point, and it is inherent. An iteration takes about
+ * 450ms on an Apple M5 Max and 2.6 seconds on a four-core CI host, so a run
+ * collects eleven or twelve samples either way. The 75th percentile the
+ * dashboard trend reads discards only the slowest quarter of those, so a runner
+ * that stalls twice moves this line without any code changing. Read it for the
+ * shape of a move across several windows, not for one window against the last.
  *
  * The setup — ten Deno workers, ten joins, ten options, and a warm-up burst —
  * runs once at module scope, outside every measurement, because it costs some
@@ -41,6 +41,13 @@
  * no samples. Each iteration recolors every vote, so all hundred are genuine
  * changes and the vote count holds at a hundred throughout; no iteration leaves
  * a state the next one starts from differently.
+ *
+ * Ten runtimes is the largest footprint of any benchmark in the job. Measured
+ * on a four-core CI host with 15.6GB of memory: the whole file takes 89 seconds
+ * and peaks at 4.76GB resident, which is under a third of that host and leaves
+ * the rest of the job room. The peak is held to the end of the process, because
+ * the workers are released at exit rather than when this file's benchmarks
+ * finish, so it is a floor under everything measured after it.
  *
  * `CF_LUNCH_POLL_VOTERS` and `CF_LUNCH_POLL_OPTIONS` resize it for a local run
  * asking how the burst scales. The size is part of the measurement and names
