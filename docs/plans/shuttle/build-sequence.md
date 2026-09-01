@@ -56,8 +56,11 @@ well before it.
 
 **A4 — exit and output seams audit.** Done (#6704). `exitWithDataError` and
 `exitPieceCallFailure` default to `Deno.exit(1)` and take a `deps`
-override in its place — `printError`, `printHint`, and an `exit` typed
-`never` — and every seam a v1 verb reaches forwards the caller's own:
+override in its place, each with an `exit` typed `never` beside the sinks
+its own report needs — `printError` and `printHint` for the data error,
+`printError` and `render` for the call failure, whose expiry writes
+Invocation JSON to the machine surface. Every seam a v1 verb reaches
+forwards the caller's own:
 `getCellValueFromCommand`, and `callFromCommand` at each of its three
 exits, the payload rejection reported from inside the dispatch's promise
 chain included. An `exit` typed `never` throws rather than returning, so
