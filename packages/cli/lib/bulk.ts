@@ -390,6 +390,7 @@ export interface RollbackRunDependencies {
 /** A rollback run's report, beside the plan the derivation produced. */
 export interface RollbackRunResult {
   report: ApplyReport;
+
   /** The derived plan, so a caller can report what it was run from. */
   plan: PiecePlan;
 }

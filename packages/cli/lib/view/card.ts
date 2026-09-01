@@ -35,9 +35,10 @@ export interface CardTarget {
   /** Index into the card's `info` lines (for highlight + reveal). */
   readonly cardLine: number;
 
-  /** Destination line/column in the main document. */
+  /** Destination line in the main document. */
   readonly destLine: number;
 
+  /** Destination column on that line. */
   readonly destCol: number;
 
   /** Char offset of the declaration to select, when the target is a definition. */

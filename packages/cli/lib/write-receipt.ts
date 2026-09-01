@@ -1,8 +1,3 @@
-import type {
-  IExtendedStorageTransaction,
-  MemorySpace,
-} from "@commonfabric/runner";
-
 /**
  * The receipt a write leaves behind: the space it landed in, named on stderr
  * once a write has actually happened.
@@ -30,6 +25,11 @@ import type {
  * do, so a new write path carries it by construction and a command that only
  * writes under `--apply` says nothing on a dry run.
  */
+
+import type {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "@commonfabric/runner";
 
 /**
  * Spaces already receipted in this process, so a command whose work runs

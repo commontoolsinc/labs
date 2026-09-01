@@ -28,6 +28,7 @@ export class TraceBeforeRelayQueue {
 
 export type FuseMemoryProxy = {
   server: Deno.HttpServer;
+
   /** Resolves after every received upstream frame has reached the trace. */
   idle(): Promise<void>;
 };
