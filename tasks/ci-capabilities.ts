@@ -227,14 +227,19 @@ const browser: Capability = {
   async open(context) {
     const sysctl = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns";
     if (!context.dryRun) {
+      const exec = execOf(context);
+      // Asked of the machine rather than of the filesystem directly, so
+      // that an image with the knob and an image without it are the same
+      // question with two answers rather than two code paths only one
+      // machine can reach.
       try {
-        await Deno.stat(sysctl);
+        await exec("sh", ["-c", `test -e ${sysctl}`]);
       } catch {
-        // No such knob on this image: nothing restricts the namespace and
-        // nothing needs relaxing.
+        // Nothing restricts the namespace here, so nothing needs
+        // relaxing.
         return exported({});
       }
-      await execOf(context)("sh", [
+      await exec("sh", [
         "-c",
         `printf '0\\n' | sudo tee ${sysctl} >/dev/null`,
       ]);

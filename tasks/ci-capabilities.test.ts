@@ -272,13 +272,22 @@ describe("opening a capability on a machine that answers", () => {
       .toBe(false);
   });
 
-  it("relaxes nothing on an image with no such restriction", async () => {
-    // The knob is absent outside Linux, and a capability that insisted
-    // on it would fail every lane on a machine that never restricted
-    // the namespace in the first place.
-    const m = machine();
-    await open("browser", m);
-    expect(m.asked).toEqual([]);
+  it("relaxes the namespace only on an image that restricts it", async () => {
+    // A capability that insisted on the knob would fail every lane on a
+    // machine that never restricted the namespace in the first place,
+    // and one that never looked would leave the browser unable to start
+    // where it did.
+    const restricted = machine();
+    await open("browser", restricted);
+    expect(restricted.asked.some((line) => line.includes("sudo tee")))
+      .toBe(true);
+
+    const unrestricted = machine({
+      "test -e /proc/sys/kernel/apparmor": "!no such file",
+    });
+    await open("browser", unrestricted);
+    expect(unrestricted.asked.some((line) => line.includes("sudo tee")))
+      .toBe(false);
   });
 
   it("starts a server on a port of its own and kills what it started", async () => {
