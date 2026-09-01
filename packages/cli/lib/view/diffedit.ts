@@ -527,7 +527,6 @@ function reconstructNewSide(
     ? 0
     : lines.length - (oldTrailingNewline ? 1 : 0);
   let trailingNewline = oldTrailingNewline;
-  let newLineCount = oldLineCount;
   const hunks = [...file.hunks].sort((a, b) =>
     sideStart(b.oldStart, b.oldCount) - sideStart(a.oldStart, a.oldCount) ||
     b.headerLine - a.headerLine
@@ -556,9 +555,7 @@ function reconstructNewSide(
       hunk.oldCount,
       ...replacement,
     );
-    newLineCount += hunk.newCount - hunk.oldCount;
   }
-  if (newLineCount === 0) trailingNewline = false;
   if (trailingNewline && lines.at(-1) !== "") lines.push("");
   if (!trailingNewline && lines.length > 1 && lines.at(-1) === "") lines.pop();
   return lines.join("\n");
