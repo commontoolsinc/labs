@@ -116,12 +116,17 @@ describe("test-records-shell", () => {
     }
   });
 
-  it("records a trailing marker as the phase that just finished", async () => {
+  it("closes the open step from a script that owns its own exit trap", async () => {
+    // The shape fuse-exec.sh uses: it needs its own EXIT trap for the FUSE
+    // teardown, so it names itself and closes both records by hand instead of
+    // registering cf_test_record_script's trap.
+
     const records = await recorded(`
       CF_TEST_RECORD_NAME="fuse-exec.sh"
       CF_TEST_RECORD_START_MS=$(cf_test_now_ms)
-      cf_test_step_done "mounted the filesystem"
-      cf_test_step_done "read a callable"
+      cf_test_step_begin "mounted the filesystem"
+      cf_test_step_begin "read a callable"
+      cf_test_step_close 0
       cf_test_record_with_status 0
     `);
     expect(records.map((record) => record.test.n)).toEqual([
@@ -136,7 +141,8 @@ describe("test-records-shell", () => {
     const records = await recorded(`
       CF_TEST_RECORD_NAME="fuse-exec.sh"
       CF_TEST_RECORD_START_MS=$(cf_test_now_ms)
-      cf_test_step_done 'a "quoted" name with a \\ backslash'
+      cf_test_step_begin 'a "quoted" name with a \\ backslash'
+      cf_test_step_close 0
     `);
     expect(records.map((record) => record.test.n)).toEqual([
       String.raw`fuse-exec.sh a "quoted" name with a \ backslash`,
@@ -149,7 +155,6 @@ describe("test-records-shell", () => {
         `
         cf_test_record_script "acl.sh"
         cf_test_step_begin piece-values
-        cf_test_step_done "a phase"
       `,
         { recording: false },
       ),
