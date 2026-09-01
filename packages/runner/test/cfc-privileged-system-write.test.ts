@@ -11,6 +11,7 @@ import {
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { storedCfcMetadataAppliesToPath } from "../src/cfc/metadata.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -306,9 +307,10 @@ describe("CFC privileged system write (S18)", () => {
     // (docs/plans/runner_cfc_implementation.md "Document Surface Rules").
     // The meta seam is gated across both addressing modes
     // (meta-seam-write-authorization.test.ts); label-map forgery through the
-    // document root is what this test records as ungated. A root write that
-    // leaves NO readable map behind is a different case and IS gated — see
-    // the erasure cases below.
+    // document root is what this test records as ungated. This case mints
+    // onto a document that stored no map; the case below strips a live one. A
+    // root write that leaves NO readable map behind is a different case and
+    // IS gated — see the erasure cases after that.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -432,6 +434,58 @@ describe("CFC privileged system write (S18)", () => {
       expect(after.readOrThrow({ ...address, path: ["cfc"] })).toEqual(
         storedMetadata,
       );
+      await after.commit();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not gate a loaded writer stripping a live label map to an empty one", async () => {
+    // The half of the forge residual that decides how much the erasure arm
+    // above is worth. A writer holding the document — the arm's best case,
+    // where its transaction-local read sees the stored map — strips every
+    // label by substituting a well-formed map with no entries. Nothing is
+    // recorded, the commit lands, and policy then applies on no path at all:
+    // the same unlabeled document an erasure would leave, reached without
+    // ever dropping the member.
+    //
+    // So an erasure gate is not the boundary here while this stands. It is
+    // pinned rather than described because it is what a reader weighing the
+    // erasure arm's reach needs to see, and because it fails the day the
+    // forge residual closes.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const address = await seedLabeledDocument(runtime, "s18-root-strip");
+      const target = {
+        space: signer.did(),
+        id: address.id,
+        scope: "space",
+        path: [],
+      } as const;
+
+      const before = runtime.edit();
+      expect(storedCfcMetadataAppliesToPath(before, target)).toBe(true);
+      await before.commit();
+
+      const tx = runtime.edit();
+      const envelope = tx.readOrThrow(address) as Record<string, unknown>;
+      expect(envelope.cfc).toBeDefined();
+      tx.writeOrThrow(address, {
+        ...envelope,
+        value: { note: "stripped" },
+        cfc: { ...storedMetadata, labelMap: { version: 1, entries: [] } },
+      });
+      expect(tx.getCfcState().unprivilegedSystemWrites).toEqual([]);
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const after = runtime.edit();
+      expect(storedCfcMetadataAppliesToPath(after, target)).toBe(false);
       await after.commit();
     } finally {
       await runtime.dispose();
