@@ -73,6 +73,7 @@ export class Page extends EventTarget {
   #page: AstralPage | null;
   #timeout: number;
   #afterNavigation: Array<() => Promise<void> | void> = [];
+  #beforeUnload: Array<() => Promise<void> | void> = [];
   #interactionObserver?: InteractionObserver;
   #defaultTypeDelay = 0;
   #decoratedElements = new WeakSet<AstralElementHandle>();
@@ -277,6 +278,29 @@ export class Page extends EventTarget {
     this.#defaultTypeDelay = delay;
   }
 
+  // Registers `hook` to run before this page's current document goes away:
+  // a navigation, a reload, or the page closing. Hooks run in the order they
+  // were added, and the returned function removes this one. Anything held in
+  // the document's realm — the runtime worker and what it has accumulated —
+  // is still reachable from a hook and gone once it returns.
+  addBeforeUnloadHook(hook: () => Promise<void> | void): () => void {
+    this.#beforeUnload.push(hook);
+    return () => {
+      const index = this.#beforeUnload.indexOf(hook);
+      if (index >= 0) this.#beforeUnload.splice(index, 1);
+    };
+  }
+
+  async #runBeforeUnloadHooks(): Promise<void> {
+    // Over a snapshot, so a hook registered by a hook waits for the next
+    // unload. Each is re-checked against the live list, so a hook whose remover
+    // ran while an earlier hook was awaiting does not run afterwards.
+    for (const hook of [...this.#beforeUnload]) {
+      if (!this.#beforeUnload.includes(hook)) continue;
+      await hook();
+    }
+  }
+
   // Registers `hook` to run after every navigation this page performs, once
   // the navigation itself has settled. Hooks run in the order they were added,
   // and the returned function removes this one. A page carries several at a
@@ -368,6 +392,7 @@ export class Page extends EventTarget {
     });
     await previousNavigation;
     try {
+      await this.#runBeforeUnloadHooks();
       await operation();
     } finally {
       releaseNavigation();
@@ -688,6 +713,7 @@ export class Page extends EventTarget {
   // Passthru of `@astral/astral`'s `Page#close`
   async close() {
     this.#checkIsOk();
+    await this.#runBeforeUnloadHooks();
     const page = this.#page;
     this.#page = null;
     await page!.close();

@@ -1,7 +1,12 @@
 import { assert, assertEquals } from "@std/assert";
 import { resolve } from "@std/path";
 import type { PatternCoverageSpan } from "@commonfabric/runner";
-import { PATTERNS_ROOT, withRepositoryFileNames } from "./pattern-coverage.ts";
+import {
+  collectPatternCoverage,
+  PATTERNS_ROOT,
+  withRepositoryFileNames,
+} from "./pattern-coverage.ts";
+import type { Page } from "./page.ts";
 
 const span = (fileName: string): PatternCoverageSpan => ({
   fileName,
@@ -69,4 +74,131 @@ Deno.test("a name that is not under the patterns route is left alone", () => {
     hits: [{ fileName: mounted, id: 1, count: 1 }],
   });
   assertEquals(mapped.spans[0].fileName, mounted);
+});
+
+//
+// Collecting one page's dump
+//
+// The dump is the only chance to take what a worker holds: the runtime it
+// belongs to is dropped immediately afterwards, and every hit it accumulated
+// goes with it. A page that never booted a runtime is the one empty-handed
+// answer that costs nothing. Every other one is coverage the report will not
+// carry, which the gate reads as lines that ran nowhere, so the cases below
+// pin that each of those says so.
+//
+
+// A `Page` that answers `evaluate` with `respond()`, ignoring the function it
+// is handed. The real evaluate runs that function in the page's realm; here the
+// answer stands for what the realm would have returned.
+function respondingPage(respond: () => unknown): Page {
+  return {
+    evaluate: () => Promise.resolve(respond()),
+  } as unknown as Page;
+}
+
+// Runs `body` with pattern coverage written to a temporary directory, and with
+// every `console.warn` collected rather than printed. Returns what was warned.
+async function collectingWarnings(
+  body: (dir: string) => Promise<void>,
+): Promise<string[]> {
+  const dir = await Deno.makeTempDir();
+  const previousDir = Deno.env.get("CF_PATTERN_COVERAGE_DIR");
+  const warn = console.warn;
+  const warnings: string[] = [];
+  console.warn = (...args: unknown[]) => warnings.push(args.join(" "));
+  Deno.env.set("CF_PATTERN_COVERAGE_DIR", dir);
+  try {
+    await body(dir);
+  } finally {
+    console.warn = warn;
+    if (previousDir === undefined) Deno.env.delete("CF_PATTERN_COVERAGE_DIR");
+    else Deno.env.set("CF_PATTERN_COVERAGE_DIR", previousDir);
+    await Deno.remove(dir, { recursive: true });
+  }
+  return warnings;
+}
+
+// The `DA:` counts the merged LCOV in `dir` carries for `path`.
+async function lcovCounts(
+  dir: string,
+  path: string,
+): Promise<Map<number, number>> {
+  const [entry] = [...Deno.readDirSync(dir)];
+  const text = await Deno.readTextFile(resolve(dir, entry.name));
+  const counts = new Map<number, number>();
+  let inRecord = false;
+  for (const line of text.split("\n")) {
+    if (line.startsWith("SF:")) inRecord = line.slice(3).endsWith(path);
+    else if (inRecord && line.startsWith("DA:")) {
+      const [number, count] = line.slice(3).split(",");
+      counts.set(Number(number), Number(count));
+    }
+  }
+  return counts;
+}
+
+Deno.test("a dump carrying only hits credits the lines they name", async () => {
+  // The realm that compiled a pattern holds its spans; a realm that warm-loaded
+  // the same instrumented bytes reports hits against them and holds none. The
+  // second dump is the whole contribution of every page that ran a pattern
+  // somebody else compiled.
+  const fileName = "/api/patterns/system/profile-home.tsx";
+  const compiled = span(fileName);
+  const warnings = await collectingWarnings(async (dir) => {
+    await collectPatternCoverage(
+      respondingPage(() => ({ data: { spans: [compiled], hits: [] } })),
+    );
+    assertEquals(
+      (await lcovCounts(dir, "system/profile-home.tsx")).get(1),
+      0,
+      "the compiling realm ran no line of it",
+    );
+
+    await collectPatternCoverage(
+      respondingPage(() => ({
+        data: { spans: [], hits: [{ fileName, id: compiled.id, count: 1 }] },
+      })),
+    );
+    assertEquals(
+      (await lcovCounts(dir, "system/profile-home.tsx")).get(1),
+      1,
+      "the warm-loading realm's hit lands on the compiling realm's span",
+    );
+  });
+  assertEquals(warnings, []);
+});
+
+Deno.test("a page that never booted a runtime is collected in silence", async () => {
+  const warnings = await collectingWarnings(async () => {
+    await collectPatternCoverage(respondingPage(() => ({ noRuntime: true })));
+  });
+  assertEquals(warnings, []);
+});
+
+Deno.test("a page that cannot be reached reports what it took with it", async () => {
+  const warnings = await collectingWarnings(async () => {
+    await collectPatternCoverage(respondingPage(() => {
+      throw new Error("Page is already closed.");
+    }));
+  });
+  assertEquals(warnings.length, 1);
+  assert(warnings[0].includes("Page is already closed."), warnings[0]);
+});
+
+Deno.test("a runtime that does not answer the request reports the loss", async () => {
+  const warnings = await collectingWarnings(async () => {
+    await collectPatternCoverage(
+      respondingPage(() => ({ noCoverageRequest: true })),
+    );
+  });
+  assertEquals(warnings.length, 1);
+  assert(warnings[0].includes("getPatternCoverage"), warnings[0]);
+});
+
+Deno.test("a worker built without a collector reports the loss", async () => {
+  const warnings = await collectingWarnings(async () => {
+    await collectPatternCoverage(respondingPage(() => ({ data: null })));
+  });
+  assertEquals(warnings.length, 1);
+  assert(warnings[0].includes("without a collector"), warnings[0]);
 });
