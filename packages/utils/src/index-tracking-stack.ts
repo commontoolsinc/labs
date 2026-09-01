@@ -30,6 +30,10 @@ export class IndexTrackingStack<T> {
    */
   #positions: Map<unknown, number[]> | undefined;
 
+  //
+  // Instance members
+  //
+
   /**
    * How deep the stack is: how many values it holds, which is also the index
    * the next value pushed will take.
