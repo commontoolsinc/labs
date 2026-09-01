@@ -1,0 +1,28 @@
+// Config for the ON-DEMAND `in`-usage audit. Deliberately separate from the
+// workspace lint config: the rule reports ~56 sites in the runner/data-model
+// core alone, and roughly four in five of those are CORRECT — array
+// sparse-hole probes (`i in value`), where `in` is the right operator because
+// arrays do not inherit index properties, plus the query-result proxy's `has`
+// trap, where prototype-chain semantics are the point.
+//
+// A CI rule at that signal-to-noise would train people to silence it. So this
+// is a tool you point at a subsystem when you are asking the question, not a
+// gate. Run it as:
+//
+//     deno lint -c packages/utils/lint-plugins/audit-in-usage.jsonc <paths>
+//
+// Then read every hit and decide. What you are looking for is a key that comes
+// from DATA or a SCHEMA meeting a record — not a loop index, and not a name the
+// code chose itself.
+//
+// Regression protection for the paths where this actually bit lives in
+// packages/runner/test/prototype-named-properties.test.ts, which asserts
+// behaviour instead of syntax and so has no false positives.
+{
+  "lint": {
+    "plugins": ["./no-prototype-aware-in.ts"],
+    "rules": {
+      "tags": []
+    }
+  }
+}
