@@ -4706,7 +4706,8 @@ export async function applyPieceSourceCommandAction(
   (deps.hint ?? hint)(cliText(`NEXT STEPS:
   → Test in browser: ${config.apiUrl}/${config.space}/${config.piece}
   → Test a callable: cf call --cell ${config.piece} <callableName> ...
-  → Check state:     cf piece inspect --cell ${config.piece} ...`));
+  → Verify state:    cf get --cell ${config.piece} <path> ...
+  → Full inspect:    cf piece inspect --cell ${config.piece} ...`));
 }
 
 /**
