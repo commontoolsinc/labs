@@ -109,6 +109,12 @@ function stackIn(state: typeof STATES[number]): IndexTrackingStack<object> {
   const stack = new IndexTrackingStack<object>();
 
   for (const value of objects(state.climb)) stack.push(value);
+
+  // An index is built by a lookup rather than by growth, so a stack that has
+  // only been pushed to has none however tall it got. The states that are
+  // meant to hold one ask for it here, before anything is timed.
+  stack.indexOf(stack);
+
   while (stack.depth > state.settle) stack.pop();
 
   return stack;
@@ -127,6 +133,11 @@ function poolIn(state: typeof STATES[number]): IndexTrackingStack<object>[] {
  * The oscillating cases, as the band a stack swings through: one that never
  * indexes, one that indexes and stays above `DROP_INDEX_BELOW`, and one that
  * crosses both marks on every swing.
+ *
+ * Each step looks a value up and then pushes it, which is the shape of the
+ * caller these bands stand for -- and the shape that matters, an index being
+ * built by a lookup rather than by growth. A band that only pushed and popped
+ * would never build one, and all three would measure the same thing.
  */
 const BANDS = [
   {
@@ -168,7 +179,12 @@ for (const band of BANDS) {
 
     b.start();
     for (let done = 0; done < SWING_OPS; done += swing * 2) {
-      for (let at = 0; at < swing; at++) stack.push(batch[band.floor + at]!);
+      for (let at = 0; at < swing; at++) {
+        const value = batch[band.floor + at]!;
+
+        stack.indexOf(value);
+        stack.push(value);
+      }
       for (let at = 0; at < swing; at++) stack.pop();
     }
     b.end();
@@ -219,6 +235,11 @@ function lookupPool(
     const held = objects(subject.climb);
 
     for (const value of held) stack.push(value);
+
+    // Built here rather than by the first timed lookup, which would otherwise
+    // pay for it and report the build as the cost of a lookup.
+    stack.indexOf(stack);
+
     while (stack.depth > subject.settle) stack.pop();
 
     out.push({ stack, bottom: held[0]! });

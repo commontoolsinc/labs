@@ -18,15 +18,15 @@ export class IndexTrackingStack<T> {
   readonly #stack: T[] = [];
 
   /**
-   * The positions each value occupies, ascending, while the stack is tall
-   * enough to want them, and `undefined` otherwise. Keyed by {@link #keyFor},
-   * not by the value itself.
+   * The positions each value occupies, ascending, and `undefined` while there
+   * is none. Keyed by {@link #keyFor}, not by the value itself.
    *
-   * Kept once built until the stack falls below {@link #DROP_INDEX_BELOW},
-   * and used at every height while it exists: what a short stack is spared is
-   * maintaining this, and that is already spent by the time a lookup asks.
-   * The two marks are far enough apart that ordinary movement does not build
-   * and drop repeatedly -- a stack has to swing across the whole gap.
+   * Built by {@link #indexIfWanted} and dropped once the stack falls below
+   * {@link #DROP_INDEX_BELOW}. Used at every height while it exists: what a
+   * short stack is spared is maintaining this, and that is already spent by
+   * the time a lookup asks. The two marks are far enough apart that ordinary
+   * movement does not build and drop repeatedly -- a stack has to swing
+   * across the whole gap.
    */
   #positions: Map<unknown, number[]> | undefined;
 
@@ -47,7 +47,7 @@ export class IndexTrackingStack<T> {
    * the stack.
    */
   indexOf(value: T): number {
-    const positions = this.#positions;
+    const positions = this.#indexIfWanted();
 
     if (positions !== undefined) {
       return positions.get(IndexTrackingStack.#keyFor(value))?.[0] ?? -1;
@@ -67,7 +67,7 @@ export class IndexTrackingStack<T> {
    * the stack.
    */
   lastIndexOf(value: T): number {
-    const positions = this.#positions;
+    const positions = this.#indexIfWanted();
 
     if (positions !== undefined) {
       const found = positions.get(IndexTrackingStack.#keyFor(value));
@@ -132,6 +132,9 @@ export class IndexTrackingStack<T> {
 
     this.#stack.push(value);
 
+    // Only an index that already exists is maintained. Building one is
+    // {@link #indexIfWanted}'s business, and a stack nobody asks a position of
+    // never has one to maintain.
     if (this.#positions !== undefined) {
       const key = IndexTrackingStack.#keyFor(value);
       const found = this.#positions.get(key);
@@ -141,22 +144,40 @@ export class IndexTrackingStack<T> {
       } else {
         found.push(at);
       }
-    } else if (this.#stack.length >= IndexTrackingStack.#ADD_INDEX_AT) {
-      const positions = new Map<unknown, number[]>();
-
-      for (let index = 0; index < this.#stack.length; index++) {
-        const key = IndexTrackingStack.#keyFor(this.#stack[index] as T);
-        const found = positions.get(key);
-
-        if (found === undefined) {
-          positions.set(key, [index]);
-        } else {
-          found.push(index);
-        }
-      }
-
-      this.#positions = positions;
     }
+  }
+
+  /**
+   * The index, built first if the stack is tall enough to want one and has
+   * none, and `undefined` if it is not.
+   *
+   * Built here rather than as the stack grows, because height alone is no
+   * reason to have one: what an index is for is answering a lookup, and a
+   * stack that is never asked never needs it.
+   */
+  #indexIfWanted(): Map<unknown, number[]> | undefined {
+    if (this.#positions !== undefined) {
+      return this.#positions;
+    } else if (this.#stack.length < IndexTrackingStack.#ADD_INDEX_AT) {
+      return undefined;
+    }
+
+    const positions = new Map<unknown, number[]>();
+
+    for (let index = 0; index < this.#stack.length; index++) {
+      const key = IndexTrackingStack.#keyFor(this.#stack[index] as T);
+      const found = positions.get(key);
+
+      if (found === undefined) {
+        positions.set(key, [index]);
+      } else {
+        found.push(index);
+      }
+    }
+
+    this.#positions = positions;
+
+    return positions;
   }
 
   /**

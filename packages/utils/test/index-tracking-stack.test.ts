@@ -38,6 +38,11 @@ function stackOf(height: number, values: readonly object[]) {
   const stack = new IndexTrackingStack<object>();
 
   for (const filler of objects(height)) stack.push(filler);
+
+  // An index is built by a lookup, not by growth, so a padded stack is not an
+  // indexed one until something has asked it a position.
+  stack.indexOf({});
+
   for (const value of values) stack.push(value);
 
   return stack;
@@ -439,6 +444,7 @@ describe("IndexTrackingStack", () => {
       const flat = new IndexTrackingStack<object>();
 
       for (const filler of objects(TALL)) climbed.push(filler);
+      climbed.indexOf({});
       for (let at = 0; at < TALL; at++) climbed.pop();
       for (const value of held) climbed.push(value);
       for (const value of held) flat.push(value);
@@ -462,6 +468,7 @@ describe("IndexTrackingStack", () => {
       stack.push(twice);
       stack.push(twice);
       for (const filler of objects(TALL)) stack.push(filler);
+      stack.indexOf({});
       while (stack.depth > 2) stack.pop();
 
       expect(stack.depth).toBe(2);
@@ -477,6 +484,7 @@ describe("IndexTrackingStack", () => {
       const stack = new IndexTrackingStack<object>();
 
       for (const filler of objects(TALL)) stack.push(filler);
+      stack.indexOf({});
       while (stack.depth > 0) stack.pop();
 
       stack.push(twice);
