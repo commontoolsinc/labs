@@ -16,7 +16,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
-import { runCase, voterKey } from "../tools/lunch-poll-diagnose.ts";
+import { runCase, voterIdentity } from "../tools/lunch-poll-diagnose.ts";
 
 describe("lunch-poll-diagnose", () => {
   it("measures a poll two voters joined, filled, and voted in", async () => {
@@ -50,33 +50,56 @@ describe("lunch-poll-diagnose", () => {
     }
   });
 
-  describe("voterKey", () => {
+  describe("voterIdentity", () => {
     // A vote names its voter by profile cell, and a read of the poll output
     // hands that back either resolved or as the link that reaches it. Both
     // name the same person, and the convergence fingerprint is only a
     // comparison of vote sets while every voter has a key of their own.
 
+    const ID = "of:fid1:lj_-VYUlQNO3nl9TB-U3wTrLA7NTtge02az-NgnaA1g";
+    const SPACE = "did:key:z6Mkh7LjNUSoSVtFSQQRAVZz5XigakGLvLemwAeC4nCjQb4m";
+
     it("names a voter by the name on their resolved profile", () => {
-      expect(voterKey({ name: "User 1" })).toBe("User 1");
+      expect(voterIdentity({ name: "User 1" })).toEqual(["name", "User 1"]);
     });
 
     it("names a voter by the link that reaches their profile", () => {
-      const id = "of:fid1:lj_-VYUlQNO3nl9TB-U3wTrLA7NTtge02az-NgnaA1g";
-      const space = "did:key:z6Mkh7LjNUSoSVtFSQQRAVZz5XigakGLvLemwAeC4nCjQb4m";
-      const key = voterKey(
-        linkRefFrom({ path: [], id, space, scope: "space" }),
+      const identity = voterIdentity(
+        linkRefFrom({ path: [], id: ID, space: SPACE, scope: "space" }),
       );
-      expect(key).toBe(`${space}/${id}/`);
+      expect(identity).toEqual(["link", SPACE, ID, "space", []]);
+    });
+
+    it("tells two links apart by the scope they are stored under", () => {
+      const inSpace = linkRefFrom({
+        path: [],
+        id: ID,
+        space: SPACE,
+        scope: "space",
+      });
+      const perUser = linkRefFrom({
+        path: [],
+        id: ID,
+        space: SPACE,
+        scope: "user",
+      });
+      expect(voterIdentity(inSpace)).not.toEqual(voterIdentity(perUser));
+    });
+
+    it("tells two links apart when a path segment holds a separator", () => {
+      const nested = linkRefFrom({ path: ["a", "b"], id: ID, space: SPACE });
+      const dotted = linkRefFrom({ path: ["a.b"], id: ID, space: SPACE });
+      expect(voterIdentity(nested)).not.toEqual(voterIdentity(dotted));
     });
 
     it("names no voter for a vote that has none", () => {
-      expect(voterKey(undefined)).toBe("");
+      expect(voterIdentity(undefined)).toEqual([]);
     });
 
     it("refuses a voter it cannot name", () => {
       // An empty key for a voter who has one would read as a vote nobody
       // cast, in every session at once, and compare equal everywhere.
-      expect(() => voterKey({ profile: "not a link" })).toThrow(
+      expect(() => voterIdentity({ profile: "not a link" })).toThrow(
         "cannot identify",
       );
     });

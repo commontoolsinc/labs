@@ -10,8 +10,8 @@ interface PollOutputSummary {
   users: readonly { name?: string }[];
   options: readonly { id?: string; title?: string }[];
   votes: readonly {
-    /** What names the voter — see `voterKey` — or "" for a vote with none. */
-    voter: string;
+    /** What names the voter — see `voterIdentity`. */
+    voter: readonly unknown[];
     optionId?: string;
     voteType?: string;
   }[];
@@ -200,12 +200,15 @@ async function collectConvergence(
 ): Promise<ConvergenceResult> {
   const states = await Promise.all(sessions.map(async (session) => {
     const poll = pollSummary(await session.read());
+    // Each vote renders as JSON of its own, so no option id carrying the
+    // delimiter can run two votes together, and sorting orders values that
+    // are equal exactly when the votes are.
     const fingerprint = poll.votes
       .map((vote) =>
-        `${vote.voter}|${vote.optionId ?? "?"}|${vote.voteType ?? "?"}`
+        JSON.stringify([vote.voter, vote.optionId ?? "", vote.voteType ?? ""])
       )
       .sort()
-      .join(",");
+      .join("\n");
     return {
       votes: poll.voteCount,
       options: poll.optionCount,
@@ -266,16 +269,20 @@ const asStringArray = (value: unknown): readonly string[] =>
  * Anything else refuses. A voter this cannot name flattens every vote's key to
  * the same empty string, in every session at once, which leaves the votes
  * comparing equal and the run reporting a convergence it never checked.
+ *
+ * What comes back is a tagged tuple, which the fingerprint compares whole, so
+ * two voters are equal exactly when they are the same voter. A link's entire
+ * address goes in — a cell's scope names the partition it is stored under, so
+ * one id under two scopes is two cells — and its path stays the array it is,
+ * which no delimiter can run together.
  */
-export function voterKey(value: unknown): string {
-  if (value === undefined || value === null) return "";
+export function voterIdentity(value: unknown): readonly unknown[] {
+  if (value === undefined || value === null) return [];
   const link = parseLink(value);
-  if (link) {
-    return `${link.space ?? "?"}/${link.id}/${link.path.join(".")}`;
-  }
+  if (link) return ["link", link.space, link.id, link.scope, link.path];
   if (isObjectNotArray(value)) {
     const name = asString(value.name);
-    if (name !== "") return name;
+    if (name !== "") return ["name", name];
   }
   throw new Error(
     `a vote names a voter this tool cannot identify: ${JSON.stringify(value)}`,
@@ -292,7 +299,7 @@ function pollSummary(value: unknown): PollOutputSummary {
     users: asRecordArray(value.users),
     options: asRecordArray(value.options),
     votes: asRecordArray(value.votes).map((vote) => ({
-      voter: voterKey(vote.voter),
+      voter: voterIdentity(vote.voter),
       optionId: asString(vote.optionId),
       voteType: asString(vote.voteType),
     })),
