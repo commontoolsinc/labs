@@ -531,6 +531,10 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         responseCompleteDurationMs: this.#elapsedMsSince(startedAtMs),
       });
     }
+    // Emitting the attempt is the last await the stream's own abort handling
+    // does not cover, so an abort landing during it would otherwise surface as
+    // a completed turn.
+    if (request.signal?.aborted) throw abortReason(request.signal);
     if (!terminal) {
       throw providerUnavailable(
         "Codex Responses stream ended without a terminal response event",

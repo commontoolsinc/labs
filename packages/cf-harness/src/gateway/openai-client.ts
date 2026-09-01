@@ -615,12 +615,12 @@ export class OpenAICompatibleGatewayClient {
         `chat completion request failed (${response.status}): ${body}`,
       );
     }
-    const parsed = await response.json() as OpenAIChatCompletionResponse;
-    await emitChatCompletionAttempt(options, {
-      ...diagnostic,
-      responseCompleteDurationMs: this.#elapsedMsSince(dispatchedAtMs),
-    });
-    return parsed;
+    return await this.#readJsonEmittingAttempt<OpenAIChatCompletionResponse>(
+      response,
+      diagnostic,
+      dispatchedAtMs,
+      options,
+    );
   }
 
   async createResponseJson(
@@ -661,7 +661,33 @@ export class OpenAICompatibleGatewayClient {
         `responses request failed (${response.status}): ${body}`,
       );
     }
-    const parsed = await response.json() as OpenAIResponsesResponse;
+    return await this.#readJsonEmittingAttempt<OpenAIResponsesResponse>(
+      response,
+      diagnostic,
+      dispatchedAtMs,
+      options,
+    );
+  }
+
+  /**
+   * Parses the body of a successful response and emits the one record this
+   * attempt gets, whichever way the parse goes. A body that fails to arrive or
+   * to parse never completed, so its record carries no
+   * `responseCompleteDurationMs`.
+   */
+  async #readJsonEmittingAttempt<T>(
+    response: Response,
+    diagnostic: OpenAIChatCompletionAttemptDiagnostic,
+    dispatchedAtMs: number,
+    options: OpenAIChatCompletionAttemptOptions,
+  ): Promise<T> {
+    let parsed: T;
+    try {
+      parsed = await response.json() as T;
+    } catch (error) {
+      await emitChatCompletionAttempt(options, diagnostic);
+      throw error;
+    }
     await emitChatCompletionAttempt(options, {
       ...diagnostic,
       responseCompleteDurationMs: this.#elapsedMsSince(dispatchedAtMs),

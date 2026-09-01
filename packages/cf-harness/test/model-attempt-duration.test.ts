@@ -123,6 +123,30 @@ describe("model-attempt-duration", () => {
       expect(attempts.length).toBe(1);
       expect(attempts[0].responseCompleteDurationMs).toBeUndefined();
     });
+
+    it("omits `responseCompleteDurationMs` for a body that fails to parse", async () => {
+      const attempts: OpenAIChatCompletionAttemptDiagnostic[] = [];
+      const client = new OpenAICompatibleGatewayClient({
+        baseUrl: "https://llm.stage.commontools.dev/",
+        apiKey: "test-key",
+        monotonicNowMs: scriptedClock([1_000, 1_012, 1_900]),
+        fetchFn: () =>
+          Promise.resolve(new Response("not json", { status: 200 })),
+      });
+
+      await expect(client.createChatCompletionJson({
+        model: "gpt-5.4",
+        messages: [],
+      }, {
+        onChatCompletionAttempt: (attempt) => {
+          attempts.push(attempt);
+        },
+      })).rejects.toThrow();
+
+      expect(attempts.length).toBe(1);
+      expect(attempts[0].durationMs).toBe(12);
+      expect(attempts[0].responseCompleteDurationMs).toBeUndefined();
+    });
   });
 
   describe("OpenAICodexResponsesClient", () => {
@@ -186,6 +210,65 @@ describe("model-attempt-duration", () => {
 
       expect(attempts.length).toBe(1);
       expect(attempts[0].responseCompleteDurationMs).toBe(500);
+    });
+
+    it("ends both durations at the failure for a transport error", async () => {
+      const attempts: HarnessModelAttemptDiagnostic[] = [];
+      const client = new OpenAICodexResponsesClient({
+        credentialResolver: { resolve: () => Promise.resolve(credential) },
+        monotonicNowMs: scriptedClock([1_000, 1_055]),
+        fetchFn: () => Promise.reject(new Error("connection reset")),
+      });
+
+      await expect(client.complete({
+        model: "gpt-5.4",
+        transcript: [{ role: "user", content: "hi" }],
+        tools: [],
+        nativeModelToolIds: [],
+        runId: "run-123",
+        onAttempt: (attempt) => {
+          attempts.push(attempt);
+        },
+      })).rejects.toThrow("transport request failed");
+
+      expect(attempts.length).toBe(1);
+      expect(attempts[0].outcome).toBe("transport_error");
+      expect(attempts[0].durationMs).toBe(55);
+      expect(attempts[0].responseCompleteDurationMs).toBe(55);
+    });
+
+    it("throws the abort reason for an abort landing while the attempt is emitted", async () => {
+      const controller = new AbortController();
+      const client = new OpenAICodexResponsesClient({
+        credentialResolver: { resolve: () => Promise.resolve(credential) },
+        monotonicNowMs: scriptedClock([1_000, 1_012, 1_900]),
+        fetchFn: () =>
+          Promise.resolve(sse({
+            type: "response.completed",
+            response: {
+              id: "resp_1",
+              status: "completed",
+              output: [{
+                type: "message",
+                id: "msg_1",
+                role: "assistant",
+                content: [{ type: "output_text", text: "hello" }],
+              }],
+            },
+          })),
+      });
+
+      await expect(client.complete({
+        model: "gpt-5.4",
+        transcript: [{ role: "user", content: "hi" }],
+        tools: [],
+        nativeModelToolIds: [],
+        runId: "run-123",
+        signal: controller.signal,
+        onAttempt: () => {
+          controller.abort(new Error("caller went away"));
+        },
+      })).rejects.toThrow("caller went away");
     });
   });
 });
