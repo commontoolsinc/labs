@@ -13,6 +13,7 @@ import type { PiecesController } from "@commonfabric/piece/ops";
 
 import { type PieceConfig, stepPiece } from "../lib/piece.ts";
 import { resetWriteReceipts } from "../lib/write-receipt.ts";
+import { captureStderr } from "./utils.ts";
 
 const SPACE = "did:key:z6MkjcdxtxTiUWkPkPffhs8ENkCcJjuRCQPpJFb2xyzwHqEk";
 
@@ -42,21 +43,6 @@ function stubController(calls: string[]): PiecesController {
       return Promise.resolve();
     },
   } as unknown as PiecesController;
-}
-
-// Collects what a receipt writes, and restores the console afterwards.
-async function captureStderr(body: () => Promise<void>): Promise<string[]> {
-  const lines: string[] = [];
-  const original = console.error;
-  console.error = (...args: unknown[]) => {
-    lines.push(args.map(String).join(" "));
-  };
-  try {
-    await body();
-  } finally {
-    console.error = original;
-  }
-  return lines;
 }
 
 describe("stepPiece", () => {
