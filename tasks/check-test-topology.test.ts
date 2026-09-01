@@ -96,9 +96,9 @@ describe("the tree half of the drift guard", () => {
 describe("the store half of the drift guard", () => {
   const bakery = suite({
     id: "workspace-unit",
-    units: ["packages/bakery/glaze.test.ts"],
+    units: ["packages/bakery/test/glaze.test.ts"],
     locate: (record) =>
-      record.file === "packages/bakery/glaze.test.ts"
+      record.file === "packages/bakery/test/glaze.test.ts"
         ? { level: "unit", unit: record.file }
         : undefined,
   });
@@ -106,7 +106,7 @@ describe("the store half of the drift guard", () => {
   it("passes a recorded identity exactly one suite claims", () => {
     const findings = checkStore([bakery], [{
       test: { k: "unit", s: "bakery", n: "glaze > sets" },
-      file: "packages/bakery/glaze.test.ts",
+      file: "packages/bakery/test/glaze.test.ts",
     }]);
     expect(findings.filter((finding) => finding.fails)).toEqual([]);
   });
@@ -127,11 +127,38 @@ describe("the store half of the drift guard", () => {
     const twin = suite({ ...bakery, id: "runner-unit" });
     const findings = checkStore([bakery, twin], [{
       test: { k: "unit", s: "bakery", n: "glaze > sets" },
-      file: "packages/bakery/glaze.test.ts",
+      file: "packages/bakery/test/glaze.test.ts",
     }]);
     expect(
       findings.some((finding) =>
         finding.fails && finding.message.includes("both claim")
+      ),
+    ).toBe(true);
+  });
+
+  it("says nothing about the lane measuring its own setup and batches", () => {
+    // The lane writes these through the same record machinery every test
+    // uses, and no suite claims them: nothing enumerates them and no lane
+    // can be asked to run one. Failing on them would fail every `main`
+    // run the moment lanes exist.
+    const findings = checkStore([bakery], [
+      { test: { k: "gate", s: "ci", n: "ci-lane setup toolshed-baked-on" } },
+      { test: { k: "gate", s: "ci", n: "ci-lane batch workspace-unit" } },
+      {
+        test: { k: "unit", s: "bakery", n: "glaze > sets" },
+        file: "packages/bakery/test/glaze.test.ts",
+      },
+    ]);
+    expect(findings.filter((finding) => finding.fails)).toEqual([]);
+  });
+
+  it("still fails a gate-kind record that is not the lane's own", () => {
+    const findings = checkStore([bakery], [
+      { test: { k: "gate", s: "ci", n: "something nobody declared" } },
+    ]);
+    expect(
+      findings.some((finding) =>
+        finding.fails && finding.message.includes("no suite claims")
       ),
     ).toBe(true);
   });
@@ -146,7 +173,7 @@ describe("the store half of the drift guard", () => {
     const withSkip = suite({
       ...bakery,
       unavailable: [{
-        unit: "packages/bakery/glaze.test.ts",
+        unit: "packages/bakery/test/glaze.test.ts",
         reason: "the surface it exercises has not landed",
       }],
     });

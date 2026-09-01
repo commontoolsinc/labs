@@ -37,6 +37,7 @@ import {
   type TestIdentity,
   testIdentityKey,
 } from "@commonfabric/test-support/records";
+import { isLaneMeasurement } from "./ci-lane.ts";
 import { dayOf } from "./test-selection/build.ts";
 import { claimsFor, loadTopology } from "./test-topology.ts";
 import type { Suite } from "./test-topology/suite.ts";
@@ -305,6 +306,11 @@ export function checkStore(
     const key = testIdentityKey(record.test);
     if (seen.has(key)) continue;
     seen.add(key);
+    // The lane measures its own setup and batches through the same
+    // record machinery every test uses. Those are not test surfaces —
+    // nothing enumerates them and no lane can be asked to run one — so
+    // no suite claims them and none should.
+    if (isLaneMeasurement(record.test)) continue;
     const claims = claimsFor(suites, record);
     if (claims.length === 0) {
       findings.push({

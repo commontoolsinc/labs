@@ -381,6 +381,28 @@ async function runInvocation(
   };
 }
 
+/** The record surface the lane measures itself on. */
+export const LANE_MEASUREMENT_SURFACE = { kind: "gate", scope: "ci" };
+
+/** What the lane's own measurements are named for. */
+export const LANE_MEASUREMENT_PREFIX = "ci-lane ";
+
+/**
+ * Whether an identity is the lane measuring itself rather than a test.
+ *
+ * The topology claims test surfaces, and these are not one: nothing
+ * enumerates them, nothing scores them, and no lane can be asked to run
+ * one. They would therefore be identities no suite claims, which is what
+ * the store half of the drift guard exists to fail on, so the guard is
+ * told about them here — beside the code that writes them, rather than in
+ * a second list that could describe something this no longer produces.
+ */
+export function isLaneMeasurement(test: TestIdentity): boolean {
+  return test.k === LANE_MEASUREMENT_SURFACE.kind &&
+    test.s === LANE_MEASUREMENT_SURFACE.scope &&
+    test.n.startsWith(LANE_MEASUREMENT_PREFIX);
+}
+
 /**
  * A record measuring the lane machinery rather than a test. The publisher
  * fits `setupCost`, `suiteOverhead` and `correction` from these, so they
@@ -392,7 +414,11 @@ async function runInvocation(
 function timingRecord(name: string, seconds: number, ok: boolean): TestRecord {
   return {
     line: "record",
-    test: { k: "gate", s: "ci", n: name },
+    test: {
+      k: LANE_MEASUREMENT_SURFACE.kind,
+      s: LANE_MEASUREMENT_SURFACE.scope,
+      n: name,
+    },
     outcome: ok ? "pass" : "fail",
     durationMs: Math.round(seconds * 1000),
   };
