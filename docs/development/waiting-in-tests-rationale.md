@@ -258,7 +258,7 @@ observes a controllable time window a fake clock would help with.
 [Proving a negative](waiting-in-tests.md#proving-a-negative) gives the shape:
 send a barrier that must arrive after the event being ruled out, wait for the
 barrier, and pair the conversion with a control that can fail. The
-iframe-sandbox CSP suite (`packages/iframe-sandbox/test/iframe-csp.test.ts`)
+iframe-sandbox CSP suite (`packages/iframe-sandbox/test/iframe-csp.browser.test.ts`)
 is the worked example of how much checking both requirements take.
 
 The barrier has to be genuinely ordered after the event, which is a claim

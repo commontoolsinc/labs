@@ -18,8 +18,6 @@ async function mount<T extends UpdatingElement>(element: T): Promise<T> {
 }
 
 Deno.test("cf-chip exposes separate primary and remove buttons", async () => {
-  if (typeof document === "undefined") return;
-
   const chip = document.createElement("cf-chip") as UpdatingElement & {
     label: string;
     interactive: boolean;
@@ -68,8 +66,6 @@ Deno.test("cf-chip exposes separate primary and remove buttons", async () => {
 });
 
 Deno.test("cf-chip leaves display-only chips out of the tab order", async () => {
-  if (typeof document === "undefined") return;
-
   const chip = document.createElement("cf-chip") as UpdatingElement & {
     label: string;
   };
@@ -88,8 +84,6 @@ Deno.test("cf-chip leaves display-only chips out of the tab order", async () => 
 });
 
 Deno.test("cf-tile exposes its title as a button without swallowing details", async () => {
-  if (typeof document === "undefined") return;
-
   const tile = document.createElement("cf-tile") as UpdatingElement & {
     item: { title: string };
     summary: string;
@@ -127,8 +121,6 @@ Deno.test("cf-tile exposes its title as a button without swallowing details", as
 });
 
 Deno.test("cf-tags exposes named edit, remove, and add buttons", async () => {
-  if (typeof document === "undefined") return;
-
   const tags = document.createElement("cf-tags") as UpdatingElement & {
     tags: string[];
     readonly: boolean;
@@ -177,8 +169,6 @@ Deno.test("cf-tags exposes named edit, remove, and add buttons", async () => {
 });
 
 Deno.test("cf-tags add button reveals the new-tag textbox", async () => {
-  if (typeof document === "undefined") return;
-
   const tags = document.createElement("cf-tags") as UpdatingElement & {
     tags: string[];
   };

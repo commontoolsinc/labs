@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import "./index.ts";
 
 type UpdatingElement = HTMLElement & {
   updateComplete: Promise<unknown>;
@@ -18,10 +19,6 @@ async function mountVStack(
 }
 
 Deno.test("directional padding overrides uniform padding on its side", async () => {
-  if (typeof document === "undefined") {
-    return;
-  }
-
   const { host, stack } = await mountVStack({ padding: "4", pt: "2" });
   try {
     const style = getComputedStyle(stack);
@@ -35,10 +32,6 @@ Deno.test("directional padding overrides uniform padding on its side", async () 
 });
 
 Deno.test("single-side padding overrides the axis padding on its side", async () => {
-  if (typeof document === "undefined") {
-    return;
-  }
-
   const { host, stack } = await mountVStack({ px: "4", pl: "1" });
   try {
     const style = getComputedStyle(stack);
@@ -52,10 +45,6 @@ Deno.test("single-side padding overrides the axis padding on its side", async ()
 });
 
 Deno.test("t-shirt scale values work for directional padding", async () => {
-  if (typeof document === "undefined") {
-    return;
-  }
-
   const { host, stack } = await mountVStack({ py: "md" });
   try {
     const style = getComputedStyle(stack);

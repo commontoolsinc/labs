@@ -64,7 +64,7 @@ export class CommonIframeSandboxElement extends LitElement {
   /**
    * The frame this element renders, held so the guest can be reached through
    * it. TypeScript-private rather than `#`, as `readyWindow` and
-   * `onOuterReady` also are, because `test/iframe.test.ts` reaches for all
+   * `onOuterReady` also are, because `test/iframe.browser.test.ts` reaches for all
    * three: it asserts the outer-ready refusal where the refusal is made, and
    * a frame reports itself ready exactly once, from a window nothing outside
    * this element can speak for.

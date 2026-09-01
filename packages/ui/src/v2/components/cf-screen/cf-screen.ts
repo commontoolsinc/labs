@@ -1,6 +1,23 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
+/** The part of a slotted element the footer-fade decision reads. */
+type FooterSlotEntry = Pick<Element, "localName" | "getAttribute">;
+
+/**
+ * Whether the main scroller fades out where it meets the footer, given what
+ * the footer slot holds. An inset `cf-tab-bar` along the bottom is the one
+ * arrangement it fades for: the scroller runs underneath such a bar, so its
+ * content has to fall away instead of ending at the bar's edge.
+ */
+export function footerFades(slotted: readonly FooterSlotEntry[]): boolean {
+  return slotted.some((element) =>
+    element.localName === "cf-tab-bar" &&
+    element.getAttribute("variant") === "inset" &&
+    element.getAttribute("position") !== "top"
+  );
+}
+
 /**
  * CFScreen - Full height screen layout component with header/main/footer slots
  *
@@ -88,14 +105,10 @@ export class CFScreen extends BaseElement {
     const footerSlot = this.shadowRoot?.querySelector<HTMLSlotElement>(
       'slot[name="footer"]',
     );
-    const hasFooterFade = footerSlot?.assignedElements({ flatten: true }).some(
-      (element) =>
-        element.localName === "cf-tab-bar" &&
-        element.getAttribute("variant") === "inset" &&
-        element.getAttribute("position") !== "top",
-    ) ?? false;
-
-    this.toggleAttribute("data-footer-fade", hasFooterFade);
+    this.toggleAttribute(
+      "data-footer-fade",
+      footerFades(footerSlot?.assignedElements({ flatten: true }) ?? []),
+    );
   };
 
   override render() {
