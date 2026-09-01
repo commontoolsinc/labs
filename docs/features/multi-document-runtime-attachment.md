@@ -81,17 +81,23 @@ quietly accepted a second initialization as an attach would make a genuine
 double-initialization bug silent, which is the failure the singleton it
 replaced existed to prevent.
 
-1. The owner's page transfers a `MessagePort` to the worker, alongside an
-   `AttachPort` message. The port rides `postMessage`'s transfer list, a port
-   being no `FabricValue` and having no encoding; the message beside it is the
-   marker saying what the transferred port is for. Only the owner may hand one
-   over — a document that arrived over a port does not get to enlarge the
-   family it joined.
+1. The owner's page calls `WebWorkerRuntimeTransport.attachClientPort(port)`,
+   which transfers the port to the worker alongside an `AttachPort` message.
+   The port rides `postMessage`'s transfer list, a port being no `FabricValue`
+   and having no encoding; the message beside it is the marker saying what the
+   transferred port is for. Only the owner may hand one over — a document that
+   arrived over a port does not get to enlarge the family it joined.
 2. The joining document speaks over its end of that port and sends `Attach`,
    carrying its asserted security context. Until that is accepted it may ask
    for nothing else.
 3. Every later request on that duplex carries the attached client, and the
    runtime files what it creates under it.
+
+An attach that is refused rejects on the joining side, so a document learns it
+is not part of the family rather than waiting on a promise nobody settles.
+Until the attach is accepted the client may send nothing else, and a
+notification — which cannot be refused, having no reply — is dropped rather
+than acted on.
 
 `RuntimeClients.attach` takes anything shaped like a
 [`MessagePortLike`](../../packages/runtime-client/src/shared/message-port-like.ts),
@@ -100,6 +106,12 @@ shell, built by a test from a `MessageChannel` — is not something the worker
 learns. `MessagePortRuntimeTransport` is the other end of the same seam, and
 `RuntimeInternals.create`'s `transport` and `attach` options are how an
 embedder supplies one instead of spawning a dedicated worker.
+
+A page that both runs a runtime and hands ports to it needs the transport in
+its own hands, since `attachClientPort` lives there. `resolveWorkerUrl` is
+exported for exactly that: build the URL, connect a `WebWorkerRuntimeTransport`
+to it, pass that transport to `RuntimeInternals.create`, and keep it for the
+ports handed over later.
 
 ## Departure
 

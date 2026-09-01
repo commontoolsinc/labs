@@ -1020,6 +1020,19 @@ describe("RuntimeInternals", () => {
       }
     });
 
+    it("refuses to attach with no transport to attach over", async () => {
+      const identity = await Identity.generate({ implementation: "noble" });
+      await expect(
+        withNoWorkerConstructible(() =>
+          RuntimeInternals.create({
+            identity,
+            apiUrl: new URL("http://shell.test/"),
+            attach: true,
+          })
+        ),
+      ).rejects.toThrow("`attach` needs a `transport`");
+    });
+
     it("initializes over the supplied transport when not attaching", async () => {
       const identity = await Identity.generate({ implementation: "noble" });
       const transport = new StubTransport();

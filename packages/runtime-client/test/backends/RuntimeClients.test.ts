@@ -393,6 +393,37 @@ describe("RuntimeClients", () => {
         }
       });
 
+      it("drops a notification from a client that has not attached", async () => {
+        const h = harness();
+        await h.initialize(1);
+        const port = await attachPort(h);
+        try {
+          port.channel.port1.postMessage(
+            realmFromFabricValue(
+              {
+                type: ClientNotificationType.VDomBatchApplied,
+                mountId: 1,
+                batchId: 2,
+              } as never,
+            ),
+          );
+          // A notification is answered by nothing, so there is no reply to
+          // wait on. Round-tripping a request that IS answered puts this one
+          // behind a settled point: the loop is ordered, so a notification
+          // that reached the runtime would have done so by now.
+          const replied = port.next();
+          port.channel.port1.postMessage(
+            realmFromFabricValue(
+              { msgId: 6, data: { type: RequestType.Idle } } as never,
+            ),
+          );
+          await replied;
+          expect(h.notifications).toEqual([]);
+        } finally {
+          port.channel.port1.close();
+        }
+      });
+
       it("reports an attach-port message that carries no port", async () => {
         const h = harness();
         await h.initialize(1);

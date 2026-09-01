@@ -196,10 +196,15 @@ export class RuntimeClients {
 
     // One-way notifications carry no msgId and get no response. Drop them once
     // the worker is gone or disposed; in teardown the main thread may still be
-    // flushing fire-and-forget signals.
+    // flushing fire-and-forget signals. Dropped too from a client whose attach
+    // is not settled -- a notification cannot be refused, so the only refusal
+    // available is not to act on it.
     if (isIPCClientNotification(message)) {
       try {
-        if (this.#runtime && !this.#runtime.isDisposed()) {
+        if (
+          this.#isSpeaking(client) && this.#runtime &&
+          !this.#runtime.isDisposed()
+        ) {
           this.#runtime.handleNotification(message, client);
         }
       } catch (error) {
@@ -288,11 +293,8 @@ export class RuntimeClients {
         return;
       }
 
-      if (client.id !== this.#owner.id) {
-        const registered = this.#attachedClients.get(client.id);
-        if (!registered?.attached) {
-          throw new Error("Client is not attached to the WorkerRuntime.");
-        }
+      if (!this.#isSpeaking(client)) {
+        throw new Error("Client is not attached to the WorkerRuntime.");
       }
 
       if (!this.#runtime) {
@@ -367,6 +369,17 @@ export class RuntimeClients {
         ...(code ? { code } : {}),
       });
     }
+  }
+
+  /**
+   * May `client` ask the runtime for anything? The owner always may. A client
+   * that arrived over a port may once its attach has been accepted, and not
+   * before: until then the runtime has not agreed that this client is one of
+   * its own.
+   */
+  #isSpeaking(client: WorkerClient): boolean {
+    if (client.id === this.#owner.id) return true;
+    return this.#attachedClients.get(client.id)?.attached === true;
   }
 
   /**

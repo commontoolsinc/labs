@@ -252,6 +252,46 @@ export function fetchBuildHash(): Promise<string | undefined> {
   return buildHashPromise;
 }
 
+/**
+ * The URL this page's runtime worker is loaded from.
+ *
+ * Production deploys retain each complete module graph under its commit SHA.
+ * Keeping the entry and all of its relative split chunks in that same
+ * immutable namespace prevents a later root deployment from deleting a chunk
+ * that a long-lived page still needs. An explicit `workerUrl` (local
+ * development) or an absent `clientVersion` retains the mutable root URL and
+ * its manifest cache-buster.
+ *
+ * {@link RuntimeInternals.create} calls this for the worker it spawns. It is
+ * exported for the page that spawns one and then hands ports to it: such a
+ * page holds the transport itself, and must reach the same URL doing so.
+ */
+export async function resolveWorkerUrl(
+  options: {
+    workerUrl?: URL;
+    clientVersion?: string;
+    getBuildHash?: () => Promise<string | undefined>;
+  } = {},
+): Promise<URL> {
+  const { workerUrl, clientVersion, getBuildHash = fetchBuildHash } = options;
+  const immutableBuildId = workerUrl === undefined && clientVersion
+    ? clientVersion
+    : undefined;
+  const resolved = workerUrl ?? new URL(
+    immutableBuildId
+      ? `/builds/${
+        encodeURIComponent(immutableBuildId)
+      }/scripts/worker-runtime.js`
+      : "/scripts/worker-runtime.js",
+    globalThis.location.origin,
+  );
+  if (!immutableBuildId) {
+    const buildHash = await getBuildHash();
+    if (buildHash) resolved.searchParams.set("v", buildHash);
+  }
+  return resolved;
+}
+
 export function createRuntimeClientOptions({
   session,
   apiUrl,
@@ -719,33 +759,14 @@ export class RuntimeInternals extends EventTarget {
       `[Identity] User DID: ${identity.did()}`,
     );
 
-    let connection = transport;
-    if (!connection) {
-      // Production deploys retain each complete module graph under its commit
-      // SHA. Keeping the entry and all of its relative split chunks in that
-      // same immutable namespace prevents a later root deployment from
-      // deleting a chunk that a long-lived page still needs. An explicit
-      // worker URL (local development) or an absent clientVersion retains the
-      // mutable root URL and its manifest cache-buster.
-      const immutableBuildId = workerUrl === undefined && clientVersion
-        ? clientVersion
-        : undefined;
-      const resolvedWorkerUrl = workerUrl ?? new URL(
-        immutableBuildId
-          ? `/builds/${
-            encodeURIComponent(immutableBuildId)
-          }/scripts/worker-runtime.js`
-          : "/scripts/worker-runtime.js",
-        globalThis.location.origin,
-      );
-      if (!immutableBuildId) {
-        const buildHash = await getBuildHash();
-        if (buildHash) resolvedWorkerUrl.searchParams.set("v", buildHash);
-      }
-      connection = await WebWorkerRuntimeTransport.connect({
-        workerUrl: resolvedWorkerUrl,
+    const connection = transport ??
+      await WebWorkerRuntimeTransport.connect({
+        workerUrl: await resolveWorkerUrl({
+          workerUrl,
+          clientVersion,
+          getBuildHash,
+        }),
       });
-    }
 
     const clientOptions = createRuntimeClientOptions({
       session,

@@ -4,6 +4,8 @@ import { type ErrorNotification, NotificationType } from "@/protocol/mod.ts";
 import { expect } from "@std/expect";
 import { TransportNotificationType } from "@/protocol/mod.ts";
 import { WebWorkerRuntimeTransport } from "@/client/transports/web-worker/transport-web-worker.ts";
+import { ClientTransportNotificationType } from "@/protocol/mod.ts";
+import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 
 // Exercises the transport's handling of forwarded worker console output
 // without a real worker: a fake Worker class lets us construct the transport,
@@ -16,8 +18,8 @@ class FakeWorker extends EventTarget {
     super();
     FakeWorker.instances.push(this);
   }
-  postMessage(message: unknown): void {
-    this.posted.push(message);
+  postMessage(message: unknown, transfer?: unknown[]): void {
+    this.posted.push(transfer === undefined ? message : [message, transfer]);
   }
   terminate(): void {
     this.terminated = true;
@@ -304,6 +306,31 @@ describe("WebWorkerRuntimeTransport", () => {
       expect(emitted).toContainEqual(ipc);
 
       await transport.dispose();
+    });
+  });
+
+  describe("attachClientPort()", () => {
+    // A further document reaches the runtime over a port this worker is
+    // handed. Only the page holding this transport can hand one over -- it is
+    // the page that spawned the worker -- so this is where that happens.
+
+    it("transfers the port alongside the marker saying what it is for", () => {
+      const transport = makeTransport();
+      const worker = FakeWorker.instances[FakeWorker.instances.length - 1];
+      const channel = new MessageChannel();
+      try {
+        transport.attachClientPort(channel.port2);
+        expect(worker.posted).toHaveLength(1);
+        const [message, transfer] = worker.posted[0] as [unknown, unknown[]];
+        expect(fabricFromRealmValue(message as never)).toEqual({
+          type: ClientTransportNotificationType.AttachPort,
+        });
+        // The port rides the transfer list rather than the message: a port is
+        // no `FabricValue` and has no encoding.
+        expect(transfer).toEqual([channel.port2]);
+      } finally {
+        channel.port1.close();
+      }
     });
   });
 });
