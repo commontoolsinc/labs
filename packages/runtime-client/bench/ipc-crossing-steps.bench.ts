@@ -70,6 +70,8 @@ import {
 import { CellHandle } from "@/cell-handle.ts";
 import { $conn, type RuntimeClient } from "@/runtime-client.ts";
 
+import { readRecordList } from "./fixtures/schema-read.ts";
+
 /** The options the IPC response and notification paths convert under. */
 const CONVERT_OPTIONS = {
   includeSchema: true,
@@ -171,6 +173,19 @@ const SUBJECTS: readonly Subject[] = [
   { name: "100 records, labeled", value: makeList(100, true), labeled: true },
   { name: "1000 records", value: makeList(1000, false), labeled: false },
   { name: "1000 records, labeled", value: makeList(1000, true), labeled: true },
+  // The read subjects are the same records as a schema-bearing read hands
+  // them back, which is what the worker actually converts: every container
+  // annotated and frozen, and each `source` a `Cell` rather than a link.
+  {
+    name: "100 records, read",
+    value: await readRecordList(100) as FabricValue,
+    labeled: false,
+  },
+  {
+    name: "1000 records, read",
+    value: await readRecordList(1000) as FabricValue,
+    labeled: false,
+  },
 ];
 
 for (const { name, value, labeled } of SUBJECTS) {

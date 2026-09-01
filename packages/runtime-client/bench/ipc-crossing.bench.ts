@@ -47,6 +47,7 @@ import { convertCellsToLinks, KeepAsCell } from "@commonfabric/runner";
 import { redactSigilCfcLabelViewsForDisplay } from "@commonfabric/runner/cfc";
 
 import type { CrossingRequest } from "./fixtures/ipc-far-side.ts";
+import { readRecordList } from "./fixtures/schema-read.ts";
 
 /** The options the IPC response and notification paths convert under. */
 const CONVERT_OPTIONS = {
@@ -105,6 +106,11 @@ const SUBJECTS: readonly (readonly [string, FabricValue])[] = [
   ["flat 100 members", makeFlat(100)],
   ["100 records with links", makeList(100)],
   ["1000 records with links", makeList(1000)],
+  // The read subjects are the same records as a schema-bearing read hands
+  // them back, which is what the worker actually converts: every container
+  // annotated and frozen, and each `source` a `Cell` rather than a link.
+  ["100 records, read", await readRecordList(100) as FabricValue],
+  ["1000 records, read", await readRecordList(1000) as FabricValue],
 ];
 
 for (const [name, value] of SUBJECTS) {
