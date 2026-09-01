@@ -3704,6 +3704,104 @@ describe("stage D seal-into-wave", () => {
     expect(stored?.document).toEqual({ value: { seq: 9, other: 7 } });
   });
 
+  it("reinstantiates a piece once after an immediate stale-read refusal", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-stale-read",
+    );
+    let pieceInstantiationSeals = 0;
+    let readinessCalls = 0;
+    const failures: unknown[] = [];
+    runtime.pieceStartCommitFailureObserver = ({ error }) => {
+      failures.push(error);
+    };
+    const staleRead = {
+      name: "ConflictError" as const,
+      message: "stale confirmed read: of:piece-start at seq 0 " +
+        "conflicted with seq 1",
+      readyToRetry: () => {
+        readinessCalls += 1;
+        return Promise.resolve();
+      },
+    };
+    runtime.installSealDestination({
+      seal: (tx) => {
+        if (
+          !waveRunContextOf(tx)?.actionId.startsWith("piece-instantiate/")
+        ) {
+          return tx.tx.commit();
+        }
+        pieceInstantiationSeals += 1;
+        if (pieceInstantiationSeals === 1) {
+          return Promise.resolve({ error: staleRead as never });
+        }
+        return tx.tx.commit();
+      },
+    }, {
+      runStamper: (tx, info) =>
+        stampWaveRunContext(tx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        }),
+    });
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+
+    expect(pieceInstantiationSeals).toBe(2);
+    expect(readinessCalls).toBe(1);
+    expect(failures).toContain(staleRead);
+    expect(witness.instantiations()).toBe(3);
+    expect(witness.lastRunInstantiation()).toBe(3);
+  });
+
+  it("tears down after an immediate non-stale instantiation refusal", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-terminal-refusal",
+    );
+    const refusal = {
+      name: "TransactionError" as const,
+      message: "piece instantiate destination refused",
+    };
+    const failures: unknown[] = [];
+    let refusals = 0;
+    runtime.pieceStartCommitFailureObserver = ({ error }) => {
+      failures.push(error);
+    };
+    runtime.installSealDestination({
+      seal: (tx) => {
+        if (
+          waveRunContextOf(tx)?.actionId.startsWith("piece-instantiate/") &&
+          refusals === 0
+        ) {
+          refusals += 1;
+          return Promise.resolve({ error: refusal as never });
+        }
+        return tx.tx.commit();
+      },
+    }, {
+      runStamper: (tx, info) =>
+        stampWaveRunContext(tx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        }),
+    });
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(refusals).toBe(1);
+    expect(failures).toContain(refusal);
+    expect(witness.instantiations()).toBe(2);
+
+    // A terminal refusal retires the exact outer registration, so a later
+    // owner can start the piece afresh instead of finding a dead entry.
+    runtime.clearSealDestination();
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(witness.instantiations()).toBe(3);
+  });
+
   it("reinstantiates a piece once after its bookkeeping contribution is withdrawn, preserving the live registration and action", async () => {
     const witness = await stoppedWitnessPiece(
       "wave-piece-instantiate-recovery",
