@@ -140,17 +140,12 @@ describe("listing a member's test files", () => {
     expect(files).toEqual(["test/scenarios.ts"]);
   });
 
-  it("treats a directory the tree does not hold as holding nothing", async () => {
-    // The other half of that judgement — raising anything which is not a
-    // missing directory — is not staged here. Denying access with chmod
-    // is the obvious way and it does not hold: a suite running as root
-    // reads the directory anyway, so the case would pass without ever
-    // occurring.
-    const dir = await member({});
-    const files = await memberTestFiles(
-      dir,
-      parseTestTask("deno test test")!,
-    );
+  it("walks a directory that holds no test file and finds none", async () => {
+    // The directory has to exist, or the path never reaches the walk:
+    // an absent one is not a directory, so it falls through to being
+    // expanded as a glob and the case would prove nothing about walking.
+    const dir = await member({}, ["test/helper.ts", "test/data/fixture.json"]);
+    const files = await memberTestFiles(dir, parseTestTask("deno test test")!);
     expect(files).toEqual([]);
   });
 

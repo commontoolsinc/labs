@@ -115,13 +115,19 @@ describe("reading the topology as a whole", () => {
   });
 
   it("pairs every unit with the suite that runs it", () => {
-    const units = topologyUnits(suites);
-    expect(units.length).toBe(
-      suites.reduce((total, suite) => total + suite.units.length, 0),
-    );
-    for (const { suite, unit } of units.slice(0, 50)) {
-      expect([unit, suite.units.includes(unit)]).toEqual([unit, true]);
-    }
+    // Against suites written out here rather than against the topology:
+    // asserting that the pairs come from the units they were built from
+    // is a claim about the expression, not about the function.
+    const pairs = topologyUnits([
+      { ...suites[0]!, id: "one", units: ["a", "b"] },
+      { ...suites[0]!, id: "other", units: ["c"] },
+    ]);
+    expect(pairs.map((pair) => [pair.suite.id, pair.unit])).toEqual([
+      ["one", "a"],
+      ["one", "b"],
+      ["other", "c"],
+    ]);
+    expect(topologyUnits([])).toEqual([]);
   });
 
   it("keys a set of records the way the store keys them", () => {

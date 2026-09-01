@@ -139,25 +139,27 @@ async function walkTestFiles(
   directory: string,
   found: string[],
 ): Promise<void> {
-  // The read is inside the try because `Deno.readDir` raises while its
-  // iterator is consumed rather than when it is made, so a catch around
-  // the call alone never fires. A directory the tree does not hold
-  // contributes nothing; anything else — a permission the walk does not
-  // have, a filesystem error — would silently shorten the list of tests,
-  // so it is raised.
+  // The entries are read before any of them is followed, so that only
+  // this directory's own absence is passed over. Catching around the
+  // recursion as well would let one directory that vanished mid-walk end
+  // the walk at every level above it, silently shortening the list of
+  // tests — the failure the topology exists to make impossible.
+  let entries: Deno.DirEntry[];
   try {
-    for await (const entry of Deno.readDir(directory)) {
-      if (entry.isDirectory) {
-        if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
-        await walkTestFiles(path.join(directory, entry.name), found);
-        continue;
-      }
-      if (entry.isFile && DENO_TEST_FILE.test(entry.name)) {
-        found.push(path.join(directory, entry.name));
-      }
-    }
+    entries = await Array.fromAsync(Deno.readDir(directory));
   } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
+    if (error instanceof Deno.errors.NotFound) return;
+    throw error;
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory) {
+      if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
+      await walkTestFiles(path.join(directory, entry.name), found);
+      continue;
+    }
+    if (entry.isFile && DENO_TEST_FILE.test(entry.name)) {
+      found.push(path.join(directory, entry.name));
+    }
   }
 }
 

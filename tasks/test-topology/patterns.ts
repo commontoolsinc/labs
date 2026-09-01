@@ -50,14 +50,18 @@ async function filesIn(
 async function patternTestFiles(root: string): Promise<string[]> {
   const found: string[] = [];
   const walk = async (directory: string): Promise<void> => {
-    let entries: AsyncIterable<Deno.DirEntry>;
+    // Read before any entry is followed, so a directory that vanishes
+    // mid-walk ends its own subtree rather than every level above it.
+    let entries: Deno.DirEntry[];
     try {
-      entries = Deno.readDir(path.join(root, directory));
+      entries = await Array.fromAsync(
+        Deno.readDir(path.join(root, directory)),
+      );
     } catch (error) {
       if (error instanceof Deno.errors.NotFound) return;
       throw error;
     }
-    for await (const entry of entries) {
+    for (const entry of entries) {
       if (entry.isDirectory) await walk(`${directory}/${entry.name}`);
       else if (entry.isFile && entry.name.endsWith(".test.tsx")) {
         found.push(`${directory}/${entry.name}`);

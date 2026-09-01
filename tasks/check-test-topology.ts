@@ -67,28 +67,32 @@ const ROOTS = ["packages", "tasks", "scripts", "tools"];
 export async function candidateSurfaces(root: string): Promise<string[]> {
   const found: string[] = [];
   const walk = async (relative: string): Promise<void> => {
-    // The read is inside the try because `Deno.readDir` raises while its
-    // iterator is consumed rather than when it is made, so a catch around
-    // the call alone never fires. A directory this checkout does not hold
-    // holds no test surface; anything else would shorten the list the
-    // guard checks against, which is the guard failing silently.
+    // The entries are read before any of them is followed, and only that
+    // read is allowed to answer "no such directory". A catch around the
+    // recursion as well would let one directory that vanished mid-walk —
+    // a temporary one a running test made and removed — end the walk at
+    // every level above it, silently shortening the list the guard
+    // checks against. That is the guard failing while reporting success.
+    let entries: Deno.DirEntry[];
     try {
-      for await (const entry of Deno.readDir(path.join(root, relative))) {
-        const at = `${relative}/${entry.name}`;
-        if (entry.isDirectory) {
-          if (!SKIPPED.has(entry.name)) await walk(at);
-          continue;
-        }
-        if (!entry.isFile) continue;
-        if (TEST_FILE.test(entry.name)) found.push(at);
-        else if (
-          entry.name.endsWith(".sh") && relative.endsWith("/integration")
-        ) {
-          found.push(at);
-        }
-      }
+      entries = await Array.fromAsync(Deno.readDir(path.join(root, relative)));
     } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) throw error;
+      if (error instanceof Deno.errors.NotFound) return;
+      throw error;
+    }
+    for (const entry of entries) {
+      const at = `${relative}/${entry.name}`;
+      if (entry.isDirectory) {
+        if (!SKIPPED.has(entry.name)) await walk(at);
+        continue;
+      }
+      if (!entry.isFile) continue;
+      if (TEST_FILE.test(entry.name)) found.push(at);
+      else if (
+        entry.name.endsWith(".sh") && relative.endsWith("/integration")
+      ) {
+        found.push(at);
+      }
     }
   };
   for (const start of ROOTS) await walk(start);
@@ -435,7 +439,9 @@ export function parseCheckArgs(
  * because it needs nothing but the checkout; the store half runs when a
  * run's records are named.
  */
-export async function check(options: CheckOptions): Promise<Finding[]> {
+export async function check(
+  options: CheckOptions,
+): Promise<{ findings: Finding[]; suites: number }> {
   const suites = await loadTopology(options.root);
   const findings = checkTree(
     suites,
@@ -445,7 +451,10 @@ export async function check(options: CheckOptions): Promise<Finding[]> {
   if (options.records !== undefined) {
     findings.push(...checkStore(suites, await readRecords(options.records)));
   }
-  return findings;
+  // The count travels with the findings because loading the topology
+  // walks every workspace member and every test file, and doing that a
+  // second time to print one number is the enumeration twice over.
+  return { findings, suites: suites.length };
 }
 
 /** Prints what was found, and says whether anything failed. */
@@ -479,8 +488,7 @@ export function report(
 
 async function main(): Promise<void> {
   const options = parseCheckArgs(Deno.args, Deno.cwd());
-  const findings = await check(options);
-  const suites = (await loadTopology(options.root)).length;
+  const { findings, suites } = await check(options);
   if (!report(findings, suites)) Deno.exit(1);
 }
 

@@ -394,7 +394,8 @@ describe("running the check and saying what it found", () => {
   it("accounts for this repository's own tree", async () => {
     // The check the repository runs on itself, run the way it runs it.
     const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
-    const findings = await check({ root });
+    const { findings, suites } = await check({ root });
     expect(findings.filter((finding) => finding.fails)).toEqual([]);
+    expect(suites).toBeGreaterThan(0);
   });
 });

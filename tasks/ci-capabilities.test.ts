@@ -257,13 +257,18 @@ describe("opening a capability on a machine that answers", () => {
 
   async function open(id: CapabilityId, m: ReturnType<typeof machine>) {
     const root = await Deno.makeTempDir({ prefix: "capability-" });
-    const opened = await openCapabilities([id], {
-      root,
-      dryRun: false,
-      workDir: root,
-      exec: m.exec,
-    }, CAPABILITIES);
-    return { opened, root };
+    try {
+      const opened = await openCapabilities([id], {
+        root,
+        dryRun: false,
+        workDir: root,
+        exec: m.exec,
+      }, CAPABILITIES);
+      await opened.close();
+      return { opened, root };
+    } finally {
+      await Deno.remove(root, { recursive: true }).catch(() => {});
+    }
   }
 
   it("installs the FUSE packages only where one is missing", async () => {
@@ -324,9 +329,9 @@ describe("opening a capability on a machine that answers", () => {
     expect(opened.env.API_URL).toBe(`http://localhost:${port}/`);
     expect(m.asked.some((line) => line.includes(`--port=${port}`))).toBe(true);
     expect(m.asked.some((line) => line.includes("--background"))).toBe(true);
-    // Killing a process this test invented would be worse than not
-    // checking; what matters is that close does not throw.
-    await opened.close();
+    // Closing is what `open` already did; killing a process this test
+    // invented would be worse than not checking, and what matters is
+    // that it does not throw.
   });
 
   it("refuses a launch that names no process to kill later", async () => {
