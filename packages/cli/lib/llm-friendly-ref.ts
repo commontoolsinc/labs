@@ -24,7 +24,7 @@
 
 import { ValidationError } from "@cliffy/command";
 import type { CellScope } from "@commonfabric/api";
-import { isDID } from "@commonfabric/identity";
+import { createSession, isDID, type Session } from "@commonfabric/identity";
 import {
   isPieceHandle,
   linkPathSegmentToCellPathSegment,
@@ -87,21 +87,24 @@ function spaceMismatchError(
 /**
  * The deferred counterpart of `normalizeLLMFriendlyRef`'s parse-time
  * embedded-space check: compare the spaces embedded in a command's references
- * against the space its session actually resolved to. Call it once the session
- * exists; `resolvedSpace` is that DID, and `resolveName` derives the DID a
- * space name stands for, which is what an embedded name has to be held to.
+ * against the space the session actually resolved to.
+ *
+ * The session is the argument rather than the DID it resolved to, because a
+ * name on either side has to reach a DID through the same derivation the
+ * session itself used. Two derivations would be two answers, and the whole
+ * value of the comparison is that it compares one thing.
  */
 export async function validateEmbeddedSpaces(
   embeddedSpaces: readonly string[] | undefined,
-  resolvedSpace: string,
-  resolveName: (name: string) => Promise<string>,
+  session: Session,
 ): Promise<void> {
   for (const embedded of embeddedSpaces ?? []) {
     const embeddedDid = isDID(embedded)
       ? embedded
-      : await resolveName(embedded);
-    if (embeddedDid !== resolvedSpace) {
-      throw spaceMismatchError(embedded, resolvedSpace);
+      : (await createSession({ identity: session.as, spaceName: embedded }))
+        .space;
+    if (embeddedDid !== session.space) {
+      throw spaceMismatchError(embedded, session.space);
     }
   }
 }

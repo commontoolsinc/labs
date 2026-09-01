@@ -5,6 +5,7 @@ import {
   normalizeLLMFriendlyRef,
   validateEmbeddedSpaces,
 } from "../lib/llm-friendly-ref.ts";
+import { createSession, Identity } from "@commonfabric/identity";
 
 // The 43-character id length matches the entity ids the runtime mints, and
 // clears the runner parser's handle-length threshold.
@@ -13,9 +14,18 @@ const HANDLE = `of:fid1:${ID}`;
 const DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 const OTHER_DID = "did:key:z6MkrZ1r5XBFZjBU34qyD8fueMbMRkKw17BZaq2ivKFjnz2z";
 
-/** A resolver that fails the test if a DID-spelled space reaches it. */
-const resolveName = (name: string) =>
-  Promise.resolve(name === "my-space" ? DID : OTHER_DID);
+const signer = await Identity.fromPassphrase("cf-llm-friendly-ref");
+
+/** A session on `space`, the way `loadPieces` opens one. */
+const sessionOn = (space: string) =>
+  createSession(
+    space.startsWith("did:")
+      ? { identity: signer, spaceDid: space as `did:${string}:${string}` }
+      : { identity: signer, spaceName: space },
+  );
+
+/** The DID a space name derives to, which is what the check holds it to. */
+const didFor = async (name: string) => (await sessionOn(name)).space;
 
 describe("llm-friendly-ref", () => {
   it("returns undefined for references outside the reference form", () => {
@@ -170,15 +180,13 @@ describe("llm-friendly-ref", () => {
   });
 
   it("passes a deferred embedded DID that matches the resolved space", async () => {
-    // A DID is already what the comparison is in, so the resolver — which
-    // would answer with the wrong space here — is never reached for one.
-    const refuse = () => Promise.reject(new Error("resolved a DID"));
-    await validateEmbeddedSpaces([DID], DID, refuse);
-    await validateEmbeddedSpaces(undefined, DID, refuse);
+    const session = await sessionOn(DID);
+    await validateEmbeddedSpaces([DID], session);
+    await validateEmbeddedSpaces(undefined, session);
   });
 
-  it("rejects a deferred embedded DID against another resolved space", () => {
-    return expect(validateEmbeddedSpaces([DID], OTHER_DID, resolveName))
+  it("rejects a deferred embedded DID against another resolved space", async () => {
+    await expect(validateEmbeddedSpaces([DID], await sessionOn(OTHER_DID)))
       .rejects.toThrow(
         `Reference names space "${DID}" but the command targets ` +
           `space "${OTHER_DID}".`,
@@ -186,13 +194,16 @@ describe("llm-friendly-ref", () => {
   });
 
   it("holds a deferred space name to the DID it derives to", async () => {
-    await validateEmbeddedSpaces(["my-space"], DID, resolveName);
-    await expect(
-      validateEmbeddedSpaces(["their-space"], DID, resolveName),
-    ).rejects.toThrow(
-      `Reference names space "their-space" but the command targets ` +
-        `space "${DID}".`,
-    );
+    // Both sides reach a DID through the session's own derivation, so a name
+    // and the DID it stands for compare equal.
+    const session = await sessionOn("my-space");
+    await validateEmbeddedSpaces(["my-space"], session);
+    await validateEmbeddedSpaces([await didFor("my-space")], session);
+    await expect(validateEmbeddedSpaces(["their-space"], session))
+      .rejects.toThrow(
+        `Reference names space "their-space" but the command targets ` +
+          `space "${await didFor("my-space")}".`,
+      );
   });
 
   it('reads a trailing "#argument" as the arguments-cell selection', () => {

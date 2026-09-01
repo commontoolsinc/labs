@@ -527,12 +527,7 @@ export async function loadPieces(
   // reference naming its space by name is held to the same derivation the
   // target space went through, so the two are compared as the one thing they
   // both stand for.
-  await validateEmbeddedSpaces(
-    config.embeddedSpaces,
-    session.space,
-    async (name) =>
-      (await createSession({ identity: session.as, spaceName: name })).space,
-  );
+  await validateEmbeddedSpaces(config.embeddedSpaces, session);
   const runtimeErrors: CliRuntimeErrorRecord[] = [];
   const runtime = await timeCliPhase(
     "loadPieces.runtime",

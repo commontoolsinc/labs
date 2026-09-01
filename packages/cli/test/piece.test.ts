@@ -564,6 +564,20 @@ describe("cli piece parsing", () => {
     )).toMatchObject({ piece: `of:fid1:${"a".repeat(43)}` });
   });
 
+  it("parseSpaceOptions() refuses a URL segment that is not valid escaping", () => {
+    // `new URL()` accepts a malformed escape and keeps it in the pathname, so
+    // the decode is where it surfaces — and a URL naming no readable word
+    // names no cell.
+    expect(() => parseSpaceOptions({ url: `${API_URL}/%ZZ`, identity: ID }))
+      .toThrow(/is not valid percent-encoding/);
+    expect(() =>
+      parsePieceOptions(
+        { url: `${FULL_URL}/%E0%A4%A`, identity: ID },
+        { acceptsPath: true },
+      )
+    ).toThrow(/is not valid percent-encoding/);
+  });
+
   it("parseSpaceOptions() refuses a URL part holding the reference terminator", () => {
     // Folded into the reference this decomposes to, "#" would read as the
     // suffix and silently address the arguments cell instead.
