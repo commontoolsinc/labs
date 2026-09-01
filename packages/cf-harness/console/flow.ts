@@ -30,17 +30,22 @@ export type ConsoleFlowKind =
 export interface ConsoleFlowCell {
   /** Stable identity — the address where known, the token otherwise. */
   id: string;
+
   token?: string;
   ref?: string;
   slug?: string;
   /** The step whose result minted it. */
   producedByStep?: number;
+
   /** The shape the pattern that made it declared, for the chip's card. */
   schema?: unknown;
+
   /** Confidentiality atoms the invocation context put where it was used. */
   confidentiality: readonly string[];
+
   /** The labels the space holds for the cell itself, where the run read them. */
   labels?: ConsoleCellLabels;
+
   /** The argument name it came in as, for a cell a call read. */
   as?: string;
 }
@@ -66,9 +71,13 @@ export interface ConsoleFlowNode {
 
   status: ConsoleStepStatus;
 
-  /** What CFC decided, and whether it refused the observation. */
+  /** What CFC decided about the observation. */
   policyDecision?: string;
+
+  /** Whether that decision refused it. */
   policyDenied?: boolean;
+
+  /** What the decision said, where it said more than its verdict. */
   policyDetail?: string;
 
   /** Cells this call read. */
@@ -90,6 +99,7 @@ export interface ConsoleFlowNode {
    * carried one. A long numeric run is the shape of a channel.
    */
   valueBytes?: number;
+
   longestNumericRun?: number;
 
   /** The child run this call delegated to, drawn beneath it. */
@@ -103,8 +113,10 @@ export interface ConsoleFlowNode {
 export interface ConsoleFlowTurn {
   /** The step of the parent run that opened it. */
   step: number;
+
   /** What the person asked, elided. */
   text?: string;
+
   nodes: readonly ConsoleFlowNode[];
 }
 
@@ -132,10 +144,13 @@ export interface ConsoleFlow {
    * run whose space could not be read.
    */
   cellLabels?: ConsoleCellLabelsSummary;
+
   /** Calls that failed, across the whole family. */
   failures: number;
+
   /** Calls CFC refused, across the whole family. */
   denials: number;
+
   /** Patterns that read no cell — work built from literals. */
   unwiredPatterns: number;
 }

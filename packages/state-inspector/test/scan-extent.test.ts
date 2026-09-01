@@ -64,6 +64,7 @@ interface SeedEntity {
 
   /** The stored document, written once per revision. */
   document: Record<string, unknown>;
+
   revisions: number;
 
   /** Branch the revisions are written on. Defaults to the space branch. */
