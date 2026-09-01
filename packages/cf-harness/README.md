@@ -123,7 +123,8 @@ What works today:
     [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
   - `search_patterns` (present only when the run configures a pattern index with
     `--pattern-index-url`; finds published patterns by hashtag or free text and
-    reports each one's declared shapes and import specifier, never its source)
+    reports each one's kind, evidence quality, declared shapes, and import
+    specifier, never its source)
   - `record_feedback` (under the same pattern-index gate; votes a pattern up or
     down so the index learns which ones were worth offering)
   - `search_skills` (present only on the parent surface when the run configures
@@ -726,13 +727,14 @@ bound for model context carries tokens, while the persisted tool-output artifact
 keeps the raw addresses. Model-authored tool arguments resolve tokens back to
 canonical references before policy evaluation, summarization, and dispatch —
 except for `delegate_task`, whose `goal` and `context` reach the child verbatim,
-so a token there is inert text to the parent boundary (its `skillHandle` is the
-one delegate argument the parent boundary resolves itself: trusted-side
-materialization is that parameter's whole point — see "Skill by handle" below).
-And a sealed subagent structured-return string whose raw value names an address
-comes back as a token rather than an opaque `@link` object; the return's
-`linkedStringCount` counts only the positions still sealed. Denial-path tool
-messages are not swapped; that coverage, value handles, and an explicit
+so a token there is inert text to the parent boundary. Its `skillHandle` and
+`patternRefs` fields are resolved separately on the trusted side: materializing
+stored skill text and rebuilding selected pattern-search records are those
+parameters' whole point (see "Skill by handle" and "Pattern references by search
+record" below). And a sealed subagent structured-return string whose raw value
+names an address comes back as a token rather than an opaque `@link` object; the
+return's `linkedStringCount` counts only the positions still sealed. Denial-path
+tool messages are not swapped; that coverage, value handles, and an explicit
 release/readback mechanism are listed in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 #### Well-known grants
@@ -967,6 +969,25 @@ preamble that keeps a skill from authorizing tools applies to it unchanged. The
 child's activation record carries `source: "skill-handle"`, the token, and the
 digest of the exact text injected, so the artifacts say which reference supplied
 the skill and what it said.
+
+#### Pattern references by search record
+
+`delegate_task` also takes up to eight optional `patternRefs`, each containing a
+`patternId` and an optional bounded parent note. The harness resolves an id only
+from successful `search_patterns` results retained by that parent run and
+restored from its persisted transcript on resume; it neither trusts
+model-retyped metadata nor fetches the index during delegation. A known id gives
+the child a neutral generated block with the record's kind, quality,
+description, match evidence, import hint, argument shape, result shape, and the
+note verbatim. An id absent from the parent's record is omitted from child
+context and returned by name in `patternRefRefusals` with reason
+`not-searched-by-parent`.
+
+Cell handles passed as tokens, `skillHandle`, and `patternRefs` are sibling
+channels of one conceptual kind: an id names hashed information stored
+somewhere, attached metadata accompanies it, and trusted-side code resolves it.
+They deliberately remain separate until experience supplies a concrete reason to
+unify them.
 
 ### Running patterns against a Fabric space
 

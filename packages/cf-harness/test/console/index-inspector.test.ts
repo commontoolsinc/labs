@@ -157,6 +157,8 @@ describe("console/index-inspector", () => {
       ownerDid: "did:key:zOwner",
       createdAt: "2026-08-01T00:00:00.000Z",
       dependencies: [],
+      kind: "part",
+      quality: "proven",
       ...overrides,
     });
 

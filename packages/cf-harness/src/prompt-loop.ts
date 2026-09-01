@@ -59,6 +59,8 @@ import {
   asHarnessSubagentFailureReport,
   BROWSER_SUBAGENT_PROFILE,
   DEFAULT_SUBAGENT_PROFILE,
+  type DelegateTaskPatternRef,
+  type DelegateTaskPatternRefRefusal,
   type DelegateTaskToolInput,
   type DelegateTaskToolOutput,
   getHarnessSubagentProfileConfig,
@@ -72,6 +74,8 @@ import {
   type HarnessSubagentRunStateSummary,
   type HarnessSubagentStructuredReturn,
   isHarnessSubagentProfile,
+  MAX_DELEGATE_PATTERN_REF_NOTE_LENGTH,
+  MAX_DELEGATE_PATTERN_REFS,
   MAX_SUBAGENT_MAX_MODEL_TURNS,
   PATTERN_AUTHOR_SUBAGENT_PROFILE,
   SUBAGENT_FAILURE_REASON_CODES,
@@ -136,6 +140,10 @@ import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
 import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
 import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
 import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
+import {
+  isSearchPatternsToolSuccessOutput,
+  type SearchPatternsToolResult,
+} from "./tools/search-patterns.ts";
 import {
   isRunPatternToolSuccessOutput,
   scrubBareFabricIdentifiers,
@@ -737,6 +745,47 @@ const parseDelegateTaskInput = (
       invalid: { field: "context", expected: "a string, or omit it" },
     };
   }
+  let patternRefs: readonly DelegateTaskPatternRef[] | undefined;
+  if (input.patternRefs !== undefined) {
+    if (
+      !Array.isArray(input.patternRefs) ||
+      input.patternRefs.length > MAX_DELEGATE_PATTERN_REFS
+    ) {
+      return {
+        invalid: {
+          field: "patternRefs",
+          expected:
+            `an array of at most ${MAX_DELEGATE_PATTERN_REFS} pattern references`,
+        },
+      };
+    }
+    const parsed: DelegateTaskPatternRef[] = [];
+    for (const patternRef of input.patternRefs) {
+      if (
+        !isObjectNotArray(patternRef) ||
+        typeof patternRef.patternId !== "string" ||
+        patternRef.patternId.trim().length === 0 ||
+        (patternRef.note !== undefined &&
+          (typeof patternRef.note !== "string" ||
+            patternRef.note.length > MAX_DELEGATE_PATTERN_REF_NOTE_LENGTH))
+      ) {
+        return {
+          invalid: {
+            field: "patternRefs",
+            expected:
+              `entries with a non-empty patternId and an optional note of at most ${MAX_DELEGATE_PATTERN_REF_NOTE_LENGTH} characters`,
+          },
+        };
+      }
+      parsed.push({
+        patternId: patternRef.patternId,
+        ...(typeof patternRef.note === "string"
+          ? { note: patternRef.note }
+          : {}),
+      });
+    }
+    patternRefs = parsed;
+  }
   const profile = input.profile === undefined
     ? DEFAULT_SUBAGENT_PROFILE
     : typeof input.profile === "string" &&
@@ -822,6 +871,7 @@ const parseDelegateTaskInput = (
         : {}),
       ...(typeof maxModelTurns === "number" ? { maxModelTurns } : {}),
       ...(returnSchema !== undefined ? { returnSchema } : {}),
+      ...(patternRefs !== undefined ? { patternRefs } : {}),
       ...(typeof input.skillHandle === "string"
         ? { skillHandle: input.skillHandle.trim() }
         : {}),
@@ -1219,7 +1269,7 @@ const buildSubagentSystemPrompt = (
           ]
           : []),
         "Pass pattern source inline as the run_pattern `sourceText` argument. You have no write_file or edit_file; do not try to author patterns as workspace files.",
-        "The pattern factory must return its result object literal directly — `return { count, $UI: <div>…</div> }` — with computed() wrapping individual derived fields at most. Never return a computed(), lift, or other derived wrapper as the whole result: the piece it creates exists only in this session's runtime, and the browser link handed to the user will fail to load it.",
+        "Return a durable result object directly — `return { count, $UI: <div>…</div> }`. A whole-result derived wrapper is a known smell, but not a deterministic failure: after instantiation run_pattern checks the actual pattern pointer and refuses a piece materialized under a session-only identity.",
         "You own the write, compile-error, fix loop. A `compile-error` result is normal iteration material: read the diagnostic, correct the source, and call run_pattern again. Do not hand a compile error back to the parent as the answer.",
         "Use read_file and bash to read existing patterns and pattern documentation in the workspace when the compiler or the preloaded skills leave a question open.",
         "Every reference in your task is an address, not a value. Wire it into the pattern as a run_pattern `inputs` entry so the pattern reads it live; never try to read, print, or transcribe the data behind it yourself.",
@@ -1269,11 +1319,56 @@ const buildSubagentSystemPrompt = (
       ]),
   ].join("\n");
 
-const buildSubagentUserPrompt = (input: DelegateTaskToolInput): string =>
+/** One selected pattern rebuilt from the parent's trusted search record. */
+interface RehydratedDelegatePatternRef {
+  record: SearchPatternsToolResult;
+  note?: string;
+}
+
+/**
+ * Experimental neutral wording for pattern-reference child context. The
+ * committed suites measure this variable; advisory and directive variants
+ * remain empirically undecided, so this one presents available material and
+ * mandates nothing.
+ */
+const PATTERN_REFS_CHILD_CONTEXT = (
+  patternRefs: readonly RehydratedDelegatePatternRef[],
+): string =>
+  [
+    "Published pattern references selected by the parent:",
+    "These records from the parent's earlier searches are available for this delegated task.",
+    ...patternRefs.flatMap(({ record, note }, index) => [
+      "",
+      `Pattern ${index + 1}: ${record.patternId}`,
+      `Kind: ${record.kind}`,
+      `Quality: ${record.quality}`,
+      `Description: ${record.description}`,
+      ...(record.matchedTerms !== undefined &&
+          record.queryTerms !== undefined
+        ? [
+          `Match: ${record.matchedTerms} of ${record.queryTerms} stopword-free query terms`,
+        ]
+        : []),
+      `Import: ${record.importHint}`,
+      "Argument shape:",
+      record.argumentType ?? "Not available.",
+      "Result shape:",
+      record.resultType ?? "Not available.",
+      ...(note !== undefined ? ["Parent note:", note] : []),
+    ]),
+  ].join("\n");
+
+const buildSubagentUserPrompt = (
+  input: DelegateTaskToolInput,
+  patternRefs: readonly RehydratedDelegatePatternRef[] = [],
+): string =>
   [
     "Task:",
     input.goal,
     ...(input.context !== undefined ? ["", "Context:", input.context] : []),
+    ...(patternRefs.length > 0
+      ? ["", PATTERN_REFS_CHILD_CONTEXT(patternRefs)]
+      : []),
     ...(input.returnSchema !== undefined
       ? [
         "",
@@ -2320,6 +2415,10 @@ export class CfHarnessPromptLoop {
   readonly #reasoningEffort?: string;
   readonly #compactThreshold?: number;
   readonly #subagentCompositionGuidance: boolean;
+  readonly #trustedPatternSearchRecords = new Map<
+    string,
+    SearchPatternsToolResult
+  >();
 
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
     this.engine = options.engine ?? new CfHarnessEngine(options);
@@ -2565,6 +2664,7 @@ export class CfHarnessPromptLoop {
     }
     this.engine.bindRunModel(model);
     const transcript: HarnessTranscriptMessage[] = [...options.transcript];
+    this.#restorePatternSearchRecords(transcript);
     const maxModelTurns = options.maxModelTurns ?? this.#maxModelTurns;
     const toolActivity: HarnessToolActivity[] = [];
     const modelAttempts: HarnessModelAttempt[] = [];
@@ -2891,6 +2991,72 @@ export class CfHarnessPromptLoop {
     if (minted.table !== table) {
       await this.engine.recordHandleTable(minted.table);
     }
+  }
+
+  /** Restores successful search hits already present in parent history. */
+  #restorePatternSearchRecords(
+    transcript: readonly HarnessTranscriptMessage[],
+  ): void {
+    for (const message of transcript) {
+      if (message.role !== "tool" || message.toolName !== "search_patterns") {
+        continue;
+      }
+      try {
+        this.#recordPatternSearchResult(
+          "search_patterns",
+          JSON.parse(message.content),
+        );
+      } catch {
+        // A malformed persisted result grants no pattern reference.
+      }
+    }
+  }
+
+  /** Retains successful search hits for this parent prompt loop. */
+  #recordPatternSearchResult(toolId: BuiltinToolId, output: unknown): void {
+    if (
+      toolId !== "search_patterns" ||
+      !isSearchPatternsToolSuccessOutput(output)
+    ) {
+      return;
+    }
+    for (const record of output.results) {
+      this.#trustedPatternSearchRecords.set(
+        record.patternId,
+        structuredClone(record),
+      );
+    }
+  }
+
+  /** Rehydrates selected ids from this parent's prior search results only. */
+  #rehydrateDelegatePatternRefs(
+    patternRefs: readonly DelegateTaskPatternRef[] | undefined,
+  ): {
+    records: readonly RehydratedDelegatePatternRef[];
+    refusals: readonly DelegateTaskPatternRefRefusal[];
+  } {
+    const records: RehydratedDelegatePatternRef[] = [];
+    const refusals: DelegateTaskPatternRefRefusal[] = [];
+    for (const patternRef of patternRefs ?? []) {
+      const record = this.#trustedPatternSearchRecords.get(
+        patternRef.patternId,
+      );
+      if (record === undefined) {
+        refusals.push({
+          patternId: patternRef.patternId,
+          reason: "not-searched-by-parent",
+        });
+        continue;
+      }
+      // No new CFC boundary is crossed here: every search field could already
+      // travel in `goal` or `context`, and `note` is parent-authored prose like
+      // those fields. Trusted-side rehydration replaces lossy retyping.
+      records.push({
+        record: structuredClone(record),
+        ...(patternRef.note !== undefined ? { note: patternRef.note } : {}),
+      });
+    }
+    return { records, refusals };
   }
 
   /**
@@ -3415,6 +3581,7 @@ export class CfHarnessPromptLoop {
       // what lets it stay run-fatal without matching error-message strings.
       throw error;
     }
+    this.#recordPatternSearchResult(toolId, result.output);
     // Before the outbound swap, so the token it mints for the result cell
     // already carries the shape the compiler knew.
     await this.#recordRunPatternResultShape(
@@ -3758,6 +3925,9 @@ export class CfHarnessPromptLoop {
     resultRef: ToolResultRef;
   }> {
     const delegateInput = options.input;
+    const patternRefResolution = this.#rehydrateDelegatePatternRefs(
+      delegateInput.patternRefs,
+    );
     const profileConfig = subagentProfileConfigForRun(
       delegateInput.profile,
       this.#toolBackingAvailability(),
@@ -4032,7 +4202,10 @@ export class CfHarnessPromptLoop {
               : {}),
           },
         ),
-        prompt: buildSubagentUserPrompt(delegateInput),
+        prompt: buildSubagentUserPrompt(
+          delegateInput,
+          patternRefResolution.records,
+        ),
         contextMessages: childSkillContextMessages,
         model: childModel.model,
         maxModelTurns,
@@ -4134,6 +4307,9 @@ export class CfHarnessPromptLoop {
       type: "cf-harness.delegate-task-output",
       outputId: this.engine.nextToolOutputId("delegate_task"),
       subagent,
+      ...(patternRefResolution.refusals.length > 0
+        ? { patternRefRefusals: patternRefResolution.refusals }
+        : {}),
     };
     const result = await this.engine.recordBuiltinToolOutput(
       "delegate_task",
