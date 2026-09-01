@@ -335,9 +335,10 @@ given rather than on what it needs.
 
 That peak is a floor under everything measured after it. The workers are
 released at process exit — `Deno.bench` offers no seam for "this file's
-benchmarks are done", so the file closes the harness from an `unload` listener —
-and `deno bench` picks its own order, which put this file first in every
-ordering tried. So the rest of the job runs beside it.
+benchmarks are done", so the file closes the harness from an `unload` listener.
+Which benchmarks that floor sits under is therefore a question of where
+`deno bench` places this file, and the pipeline section above says that is not
+a question the workflow's list answers.
 
 `packages/patterns/integration/lunch-poll-keyed-votes.test.ts` is the assertion
 half of the same property: it bounds rolled-back writes instead of timing them,
