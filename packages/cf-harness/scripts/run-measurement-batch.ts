@@ -880,29 +880,43 @@ export class ConsoleClient {
     if (typeof answer !== "object" || answer === null) {
       return { error: "/api/policy did not return a JSON object" };
     }
+    // Every field is required, and the two nullable ones have to arrive as an
+    // explicit `null`. Reading a field the console never sent as "it has none"
+    // would pass a spec asserting `null` against a console that disclosed
+    // nothing, which is the vacuous check this pre-flight exists to remove.
     const report = answer as Record<string, unknown>;
     for (const field of ["allowedToolIds", "allowedSubagentProfiles"]) {
-      if (!Array.isArray(report[field])) {
-        return { error: `/api/policy is missing the ${field} array` };
+      const value = report[field];
+      if (
+        !Array.isArray(value) ||
+        value.some((entry) => typeof entry !== "string")
+      ) {
+        return {
+          error: `/api/policy did not report ${field} as a list of strings`,
+        };
       }
     }
     for (const field of ["fabricSpace", "artifactRoot"]) {
       if (typeof report[field] !== "string") {
-        return { error: `/api/policy is missing the ${field} field` };
+        return { error: `/api/policy did not report ${field} as a string` };
+      }
+    }
+    for (const field of ["systemPromptSha256", "sessionDbPath"]) {
+      if (report[field] !== null && typeof report[field] !== "string") {
+        return {
+          error:
+            `/api/policy did not report ${field} as a string or null, so this console said nothing about it`,
+        };
       }
     }
     return {
-      systemPromptSha256: typeof report.systemPromptSha256 === "string"
-        ? report.systemPromptSha256
-        : null,
+      systemPromptSha256: report.systemPromptSha256 as string | null,
       allowedToolIds: report.allowedToolIds as readonly string[],
       allowedSubagentProfiles: report
         .allowedSubagentProfiles as readonly string[],
       fabricSpace: report.fabricSpace as string,
       artifactRoot: report.artifactRoot as string,
-      sessionDbPath: typeof report.sessionDbPath === "string"
-        ? report.sessionDbPath
-        : null,
+      sessionDbPath: report.sessionDbPath as string | null,
     };
   }
 

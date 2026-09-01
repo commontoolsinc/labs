@@ -13,6 +13,8 @@
 
 import { encodeHex } from "@std/encoding/hex";
 
+import { sha256 } from "@commonfabric/content-hash";
+
 import type { HarnessChatPolicy } from "../src/contracts/interactive-chat.ts";
 
 /** What the server was configured with, for {@link consolePolicyReport}. */
@@ -55,18 +57,16 @@ export interface ConsolePolicyReport {
 }
 
 /** `text`'s SHA-256, hex encoded. */
-const sha256Hex = async (text: string): Promise<string> =>
-  encodeHex(
-    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)),
-  );
+const sha256Hex = (text: string): string =>
+  encodeHex(sha256(new TextEncoder().encode(text)));
 
 /** What a new session would run under, holding no prompt text. */
-export const consolePolicyReport = async (
+export const consolePolicyReport = (
   input: ConsolePolicyInput,
-): Promise<ConsolePolicyReport> => ({
+): ConsolePolicyReport => ({
   systemPromptSha256: input.systemPrompt === undefined
     ? null
-    : await sha256Hex(input.systemPrompt),
+    : sha256Hex(input.systemPrompt),
   allowedToolIds: [...input.policy.allowedToolIds],
   allowedSubagentProfiles: [...input.policy.allowedSubagentProfiles],
   fabricSpace: input.fabricSpace,

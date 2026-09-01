@@ -996,7 +996,7 @@ export class ConsoleServer {
       });
     }
     if (request.method === "GET" && url.pathname === "/api/policy") {
-      return Response.json(await this.#policy());
+      return Response.json(this.#policy());
     }
     if (
       request.method === "GET" && url.pathname.startsWith("/api/turns/")
@@ -1206,7 +1206,7 @@ export class ConsoleServer {
    * digest, so a client can check that this console holds the prompt it was
    * told to measure without the prompt's text leaving the process.
    */
-  #policy(): Promise<ConsolePolicyReport> {
+  #policy(): ConsolePolicyReport {
     return consolePolicyReport({
       policy: this.#sessionPolicy(),
       fabricSpace: this.#config.fabricSession.space,

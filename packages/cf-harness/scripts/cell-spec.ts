@@ -85,15 +85,31 @@ const ASSERTING_FIELDS: readonly string[] = [
   ...NULLABLE_STRING_FIELDS,
 ];
 
+/**
+ * One list field's entries, or `undefined` when the file leaves it out.
+ *
+ * A part-list is empty only by mistake: `requiredToolIds: []` asserts that the
+ * policy offers at least nothing, which every console satisfies, and a file of
+ * such lists would pass the whole-spec guard below while checking as little as
+ * a file with no fields at all. `allowEmpty` is for the whole-set fields,
+ * where an empty list is the strongest claim the spec can make rather than the
+ * weakest — that the policy offers nothing.
+ */
 const stringList = (
   value: unknown,
   field: string,
+  allowEmpty: boolean,
 ): readonly string[] | undefined => {
   if (value === undefined) return undefined;
   if (
     !Array.isArray(value) || value.some((entry) => typeof entry !== "string")
   ) {
     throw new Error(`a cell spec's ${field} must be a list of strings`);
+  }
+  if (value.length === 0 && !allowEmpty) {
+    throw new Error(
+      `a cell spec's ${field} is empty, which every console satisfies; name at least one entry or leave the field out`,
+    );
   }
   return value as readonly string[];
 };
@@ -135,9 +151,9 @@ export const parseCellSpec = (input: unknown): CellSpec => {
     spec[field] = raw[field];
   }
   for (const [exact, required, forbidden] of SET_FIELDS) {
-    const exactSet = stringList(raw[exact], exact);
-    const requiredSet = stringList(raw[required], required);
-    const forbiddenSet = stringList(raw[forbidden], forbidden);
+    const exactSet = stringList(raw[exact], exact, true);
+    const requiredSet = stringList(raw[required], required, false);
+    const forbiddenSet = stringList(raw[forbidden], forbidden, false);
     if (
       exactSet !== undefined &&
       (requiredSet !== undefined || forbiddenSet !== undefined)

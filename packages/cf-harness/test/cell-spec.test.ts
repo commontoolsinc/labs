@@ -76,6 +76,36 @@ describe("cell-spec", () => {
       );
     });
 
+    it("throws for a prompt digest that is neither a string nor `null`", () => {
+      expect(() => parseCellSpec({ systemPromptSha256: false })).toThrow(
+        "systemPromptSha256 must be a string or null",
+      );
+    });
+
+    it("throws for a session store path given as a number", () => {
+      expect(() => parseCellSpec({ sessionDbPath: 7 })).toThrow(
+        "sessionDbPath must be a string or null",
+      );
+    });
+
+    it("throws for an empty must-include list, which every console satisfies", () => {
+      expect(() => parseCellSpec({ requiredToolIds: [] })).toThrow(
+        "requiredToolIds is empty, which every console satisfies",
+      );
+    });
+
+    it("throws for an empty must-exclude profile list", () => {
+      expect(() => parseCellSpec({ forbiddenSubagentProfiles: [] })).toThrow(
+        "forbiddenSubagentProfiles is empty",
+      );
+    });
+
+    it("returns an empty whole set, which asserts that the policy offers nothing", () => {
+      expect(parseCellSpec({ allowedToolIds: [] })).toEqual({
+        allowedToolIds: [],
+      });
+    });
+
     it("throws for an empty space name, which asserts nothing while looking as though it does", () => {
       expect(() => parseCellSpec({ fabricSpace: "  " })).toThrow(
         "fabricSpace must be a non-empty string",
@@ -130,6 +160,14 @@ describe("cell-spec", () => {
       ).toEqual([{
         field: "allowedToolIds (must exclude)",
         expected: "none of shell",
+        actual: "run_pattern, search_patterns, shell",
+      }]);
+    });
+
+    it("returns a mismatch for a policy offering tools where the spec names an empty whole set", () => {
+      expect(checkCellSpec({ allowedToolIds: [] }, POLICY)).toEqual([{
+        field: "allowedToolIds",
+        expected: "(none)",
         actual: "run_pattern, search_patterns, shell",
       }]);
     });

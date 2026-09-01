@@ -217,7 +217,7 @@ passed.
 ```json
 {
   "label": "phase 3, composition under the authored prompt",
-  "systemPromptSha256": "3f786850e387550fdab836ed7e6dc881de23001b",
+  "systemPromptSha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
   "requiredToolIds": ["run_pattern", "search_patterns", "record_feedback"],
   "forbiddenToolIds": ["web_search"],
   "requiredSubagentProfiles": ["pattern-author"],
@@ -241,7 +241,11 @@ passed.
 Stating a set as a whole and in parts at once is refused rather than resolved:
 `allowedToolIds` beside `requiredToolIds` is a file that has not decided which
 claim it makes. So is a name in both the required and the forbidden list, and a
-field name nothing asserts, which would otherwise pass silently as a typo.
+field name nothing asserts, which would otherwise pass silently as a typo. An
+empty required or forbidden list is refused for the same reason: every console
+offers at least nothing, so the field looks like a check and is not. An empty
+whole set is kept, because there it is the strongest claim the file can make —
+that the policy offers nothing at all.
 
 A mismatch refuses the batch with exit code 6, names every disagreeing field
 with expected against actual, and starts no task. So does a console that will

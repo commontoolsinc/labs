@@ -1468,8 +1468,87 @@ describe("run-measurement-batch", () => {
         });
         expect(preflight.kind).toBe("refused");
         expect(preflight.kind === "refused" ? preflight.reason : "").toContain(
-          "missing the allowedToolIds array",
+          "did not report allowedToolIds as a list of strings",
         );
+      });
+    });
+
+    it("returns a refusal for a policy answer that is not a JSON object", async () => {
+      await withClient(
+        { streams: [], policy: "measurement" },
+        async (client) => {
+          const preflight = await preflightCellSpec(client, {
+            fabricSpace: "measurement",
+          });
+          expect(preflight.kind).toBe("refused");
+          expect(preflight.kind === "refused" ? preflight.reason : "")
+            .toContain(
+              "did not return a JSON object",
+            );
+        },
+      );
+    });
+
+    it("returns a refusal for a tool list holding something other than strings", async () => {
+      await withClient({
+        streams: [],
+        policy: { ...POLICY, allowedToolIds: ["shell", 7] },
+      }, async (client) => {
+        const preflight = await preflightCellSpec(client, {
+          fabricSpace: "measurement",
+        });
+        expect(preflight.kind).toBe("refused");
+        expect(preflight.kind === "refused" ? preflight.reason : "").toContain(
+          "did not report allowedToolIds as a list of strings",
+        );
+      });
+    });
+
+    it("returns a refusal for a policy answer naming no space", async () => {
+      await withClient({
+        streams: [],
+        policy: { ...POLICY, fabricSpace: undefined },
+      }, async (client) => {
+        const preflight = await preflightCellSpec(client, {
+          fabricSpace: "measurement",
+        });
+        expect(preflight.kind).toBe("refused");
+        expect(preflight.kind === "refused" ? preflight.reason : "").toContain(
+          "did not report fabricSpace as a string",
+        );
+      });
+    });
+
+    it("refuses a spec asserting no prompt against a console that left the field out, rather than reading it as none", async () => {
+      // Absent and `null` are the same value to a reader that coerces, and
+      // they are different facts: one console says it seeds no prompt, the
+      // other says nothing at all.
+
+      await withClient({
+        streams: [],
+        policy: { ...POLICY, systemPromptSha256: undefined },
+      }, async (client) => {
+        const preflight = await preflightCellSpec(client, {
+          systemPromptSha256: null,
+        });
+        expect(preflight.kind).toBe("refused");
+        expect(preflight.kind === "refused" ? preflight.reason : "").toContain(
+          "this console said nothing about it",
+        );
+      });
+    });
+
+    it("returns a match for a console that reported an explicit `null` prompt and store", async () => {
+      await withClient({
+        streams: [],
+        policy: { ...POLICY, systemPromptSha256: null, sessionDbPath: null },
+      }, async (client) => {
+        expect(
+          (await preflightCellSpec(client, {
+            systemPromptSha256: null,
+            sessionDbPath: null,
+          })).kind,
+        ).toBe("matched");
       });
     });
   });
