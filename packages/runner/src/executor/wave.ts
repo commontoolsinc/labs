@@ -1505,14 +1505,18 @@ export class WaveAccumulator
     if (this.#closed) return;
     this.#closed = true;
     for (const contribution of this.#contributions) {
-      this.#withdraw(contribution, `wave abandoned: ${reason}`);
+      this.#withdraw(
+        contribution,
+        `wave abandoned: ${reason}`,
+        "wave-abandoned",
+      );
     }
   }
 
   #withdraw(
     contribution: WaveContribution,
     message: string,
-    cause?: "contribution-dropped",
+    cause?: "contribution-dropped" | "wave-abandoned",
   ): void {
     for (const space of contribution.spaces) {
       space.resolveVerdict({

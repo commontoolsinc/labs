@@ -6658,7 +6658,12 @@ supply; OW29/OW32/OW34 closed):
     cancellation signal; a runtime cycle, pointer change, or newer node
     group wins through exact guards. A second drop tears the exact
     registration down rather than spinning. A whole-wave abort or abandon
-    is not retried in place.
+    is not retried in place. An immediate self-minted instantiate commit
+    refusal/rejection also tears down the exact current registration in every
+    posture, including client/OFF: a graph whose setup writes never landed is
+    a zombie, not a viable self-healing registration. Explicit wave abandon
+    is classified separately and warned without incrementing the serving
+    runtime's structure-load-failure observer; other failures remain loud.
     Pinned in `executor-wave.test.ts` by a deterministic whole-document
     conflict plus a held-readiness teardown companion. And OW46's
     `structure-load-stuck` counter is BLIND here: it fires 6× per run

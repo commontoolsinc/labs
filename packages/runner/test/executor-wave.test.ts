@@ -3930,6 +3930,10 @@ describe("stage D seal-into-wave", () => {
     const firstWave = newWave({ lease });
     const recoveryWave = newWave({ lease });
     const route = routePieceInstantiationWaves(firstWave, recoveryWave);
+    const failures: unknown[] = [];
+    runtime.pieceStartCommitFailureObserver = ({ error }) => {
+      failures.push(error);
+    };
 
     expect(await runtime.start(witness.cell)).toBe(true);
     await route.firstSeal;
@@ -3942,6 +3946,9 @@ describe("stage D seal-into-wave", () => {
 
     expect(route.recoverySeals()).toBe(0);
     expect(witness.instantiations()).toBe(2);
+    // Explicit wave abandonment is clean enclosing-lifecycle teardown: it
+    // remains visible as a warning, but does not tick the failure observer.
+    expect(failures).toEqual([]);
 
     // The non-retryable withdrawal removed the dead registration, so an
     // ordinary later start can rebuild it through its owning lifecycle.
@@ -4052,7 +4059,12 @@ describe("stage F fix round: foreign-batch settle sequences and shallow reads", 
     runtime.clearSealDestination();
     wave2.abandon("test-induced abort");
     await wave2.settled();
-    expect((await settlement2!).error).toBeDefined();
+    const settled2 = await settlement2!;
+    expect(settled2.error).toBeDefined();
+    expect(
+      (settled2.error as { waveWithdrawalCause?: unknown })
+        .waveWithdrawalCause,
+    ).toBe("wave-abandoned");
 
     // A tx that never sealed into a wave has no settlement (the OFF
     // arm's discriminator).

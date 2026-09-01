@@ -2821,10 +2821,10 @@ export type SealedCommitVerdict =
     withdrawn: {
       message: string;
       superseded?: true;
-      /** A single contribution was dropped while the rest of its wave
-       * remained viable. Consumers may distinguish this from whole-wave
-       * abort/abandon without parsing a diagnostic message. */
-      cause?: "contribution-dropped";
+      /** Structured withdrawal classification for consumers that must not
+       * parse diagnostic prose. A contribution drop is retryable in place;
+       * an explicit wave abandon is expected enclosing-lifecycle teardown. */
+      cause?: "contribution-dropped" | "wave-abandoned";
     };
   };
 

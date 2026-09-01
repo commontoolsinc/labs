@@ -3382,15 +3382,26 @@ export class Runner {
             const settled = await settlement;
             if (settled.error === undefined) return;
 
-            this.#reportPieceStartCommitFailure(
-              instantiateActionId,
-              settled.error,
-            );
+            const waveWithdrawalCause = (settled.error as {
+              waveWithdrawalCause?: unknown;
+            }).waveWithdrawalCause;
+            if (waveWithdrawalCause === "wave-abandoned") {
+              // Explicit abandon is clean enclosing-lifecycle teardown, not a
+              // structure-load failure. Keep it visible without incrementing
+              // the serving runtime's failure observer/health counter.
+              logger.warn("piece-start-commit-abandoned", () => [
+                `piece-start commit ${instantiateActionId} was withdrawn by ` +
+                "wave abandon; the enclosing lifecycle owns any restart",
+                settled.error,
+              ]);
+            } else {
+              this.#reportPieceStartCommitFailure(
+                instantiateActionId,
+                settled.error,
+              );
+            }
             if (!exactNodesAreCurrent()) return;
-            if (
-              (settled.error as { waveWithdrawalCause?: unknown })
-                .waveWithdrawalCause !== "contribution-dropped"
-            ) {
+            if (waveWithdrawalCause !== "contribution-dropped") {
               teardownRegistrationIfCurrent();
               return;
             }
