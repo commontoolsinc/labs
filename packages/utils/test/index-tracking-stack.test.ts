@@ -288,6 +288,41 @@ describe("IndexTrackingStack", () => {
       expect(climbed.indexOf({})).toBe(flat.indexOf({}));
     });
 
+    it("answers from the scan again once the index has been dropped", () => {
+      // Coming back down past `DROP_BELOW` drops the index, so what answers
+      // afterwards is the scan -- over a stack that a `Map` was tracking a
+      // moment ago, and has to have stopped tracking cleanly.
+      const twice = {};
+      const stack = new IndexTrackingStack();
+
+      stack.push(twice);
+      stack.push(twice);
+      for (const filler of objects(TALL)) stack.push(filler);
+      while (stack.depth > 2) stack.pop();
+
+      expect(stack.depth).toBe(2);
+      expect(stack.indexOf(twice)).toBe(0);
+      expect(stack.lastIndexOf(twice)).toBe(1);
+      expect(stack.indexOf({})).toBe(-1);
+    });
+
+    it("builds the index again when it grows back past the threshold", () => {
+      // A rebuild from a stack that has held an index before is a different
+      // path from the first build, and it has to arrive at the same answers.
+      const twice = {};
+      const stack = new IndexTrackingStack();
+
+      for (const filler of objects(TALL)) stack.push(filler);
+      while (stack.depth > 0) stack.pop();
+
+      stack.push(twice);
+      stack.push(twice);
+      for (const filler of objects(TALL)) stack.push(filler);
+
+      expect(stack.indexOf(twice)).toBe(0);
+      expect(stack.lastIndexOf(twice)).toBe(1);
+    });
+
     it("carries both positions of an object already held twice into the index", () => {
       // The index is built by grouping the stack as it stands, so an object
       // already holding two positions is the case where that grouping has to

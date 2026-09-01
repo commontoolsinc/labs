@@ -3,21 +3,25 @@
  * with and without a repeated object in play.
  *
  * The states are what make this more than one figure. `IndexTrackingStack`
- * answers by scanning until it has been `INDEX_AT` entries tall, and from an
- * index after that -- and it keeps the index for the rest of its life. So a
- * stack that once went past the threshold and came back down is not the same
- * stack as one that never went up, at the same height, and the middle group
- * below is what prices that decision:
+ * answers by scanning while it is short, from an index once it has been
+ * `INDEX_AT` entries tall, and by scanning again once it has come back below
+ * `DROP_BELOW`:
  *
  * | state | index | height while timed |
  * | --- | --- | --- |
  * | `scanning` | never built | below `INDEX_AT` |
- * | `crossed` | built, then descended | below `INDEX_AT` |
+ * | `crossed` | built, then dropped on the way down | below `DROP_BELOW` |
  * | `indexed` | built | above `INDEX_AT` |
  *
- * `scanning` and `crossed` do the same work at the same height and differ only
- * in which structure answers, so the gap between them is the price of keeping
- * the index. `indexed` is what a deep graph pays.
+ * `scanning` and `crossed` do the same work at the same height, so the two of
+ * them meeting is what says the index was dropped rather than carried. No test
+ * can say it, the drop changing no answer.  `indexed` is what a deep graph
+ * pays.
+ *
+ * The `oscillating` group is what says the two marks are far enough apart. A
+ * stack swinging inside either mark neither builds nor drops; only one
+ * swinging across the whole gap rebuilds, and that band is here to be watched
+ * rather than because it is expected.
  *
  * A repeated object is measured separately throughout, because it is what the
  * index has to record per object rather than as a single number: a push adds a
@@ -56,7 +60,7 @@ const POOL = 128;
 /** How far above `INDEX_AT` the indexed state sits. */
 const ABOVE = 8;
 
-/** How far below `INDEX_AT` the crossed state comes back down to. */
+/** How far below `DROP_BELOW` the crossed state comes back down to. */
 const BELOW = 8;
 
 /** Distinct objects, as many as asked for. */
@@ -91,7 +95,7 @@ const STATES = [
   {
     name: "crossed",
     climb: IndexTrackingStack.INDEX_AT + ABOVE,
-    settle: BELOW,
+    settle: IndexTrackingStack.DROP_BELOW - BELOW,
   },
   {
     name: "indexed",
@@ -117,6 +121,54 @@ function poolIn(state: typeof STATES[number]): IndexTrackingStack[] {
   for (let at = 0; at < POOL; at++) out.push(stackIn(state));
 
   return out;
+}
+
+/**
+ * The oscillating cases, as the band a stack swings through: one that never
+ * indexes, one that indexes and stays above `DROP_BELOW`, and one that crosses
+ * both marks on every swing.
+ */
+const BANDS = [
+  {
+    name: "below the threshold",
+    floor: 0,
+    ceiling: IndexTrackingStack.INDEX_AT - 8,
+  },
+  {
+    name: "above the low mark",
+    floor: IndexTrackingStack.INDEX_AT - 8,
+    ceiling: IndexTrackingStack.INDEX_AT + 48,
+  },
+  {
+    name: "across both marks",
+    floor: IndexTrackingStack.DROP_BELOW - 8,
+    ceiling: IndexTrackingStack.INDEX_AT + 48,
+  },
+] as const;
+
+/** How many operations one oscillating iteration performs. */
+const SWING_OPS = 10240;
+
+for (const band of BANDS) {
+  const swing = band.ceiling - band.floor;
+
+  Deno.bench({
+    name: `oscillating ${band.name}`,
+    group: "oscillating",
+    baseline: band.name === "below the threshold",
+  }, (b) => {
+    const stack = new IndexTrackingStack();
+    const batch = objects(band.ceiling);
+
+    for (const value of batch.slice(0, band.floor)) stack.push(value);
+
+    b.start();
+    for (let done = 0; done < SWING_OPS; done += swing * 2) {
+      for (let at = 0; at < swing; at++) stack.push(batch[band.floor + at]!);
+      for (let at = 0; at < swing; at++) stack.pop();
+    }
+    b.end();
+  });
 }
 
 for (const repeated of [false, true]) {

@@ -4,11 +4,18 @@
  * bottom, so the first object pushed is at index `0`, and an index does not
  * change while things are pushed above it.
  *
- * Both lookups are answered by scanning below {@link #INDEX_AT} entries, and
- * by an index built and maintained past that. Which one answers is not
+ * Both lookups are answered by scanning while the stack is short, and by an
+ * index once it has grown past {@link #INDEX_AT}. Which one answers is not
  * observable beyond the cost: a scan is linear in the stack's height where a
  * keyed lookup is not, and the two are within reach of each other only over a
  * range that a short stack sits well below.
+ *
+ * The index is dropped again once the stack falls below {@link #DROP_BELOW},
+ * so a stack that grew tall once and came back down goes back to scanning
+ * rather than paying for a height it no longer has. The two marks are kept
+ * apart so that ordinary movement does not build and drop repeatedly: only a
+ * stack swinging across the whole gap between them rebuilds, and one hovering
+ * near either mark does not.
  *
  * An object may be pushed more than once, and then occupies as many positions
  * as it was pushed at. That is what makes the two lookups differ, and what the
@@ -19,15 +26,8 @@ export class IndexTrackingStack {
   readonly #stack: object[] = [];
 
   /**
-   * The positions each object occupies, ascending, once the stack has been
-   * tall enough to want them, and `undefined` until then.
-   *
-   * Kept for the rest of the stack's life once built, so a stack that has been
-   * past {@link #INDEX_AT} and come back down goes on answering from the index
-   * at a height where a stack that never went up would still be scanning --
-   * and goes on paying for it, at about what it pays above the threshold. A
-   * caller that pushes deep once and then stays shallow for a long time is the
-   * shape that costs.
+   * The positions each object occupies, ascending, while the stack is tall
+   * enough to want them, and `undefined` otherwise.
    */
   #positions: Map<object, number[]> | undefined;
 
@@ -105,6 +105,10 @@ export class IndexTrackingStack {
       if (found.length === 0) {
         this.#positions!.delete(value);
       }
+
+      if (this.#stack.length < IndexTrackingStack.DROP_BELOW) {
+        this.#positions = undefined;
+      }
     }
 
     return value;
@@ -162,9 +166,16 @@ export class IndexTrackingStack {
   //
 
   /**
-   * The height past which an index is kept. Set well below the height at which
-   * a scan and a keyed lookup cost the same, so that crossing it never costs
-   * more than not having crossed it.
+   * The height past which an index is built. Set well below the height at
+   * which a scan and a keyed lookup cost the same, so that reaching it never
+   * costs more than not having reached it.
    */
   static readonly INDEX_AT = 64;
+
+  /**
+   * The height below which the index is dropped. The gap between this and
+   * {@link #INDEX_AT} is what keeps a stack from building and dropping over
+   * and over: a stack has to swing across the whole of it to rebuild.
+   */
+  static readonly DROP_BELOW = 32;
 }
