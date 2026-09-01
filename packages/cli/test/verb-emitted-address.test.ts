@@ -66,6 +66,15 @@ describe("verb-emitted-address", () => {
         resolveEmittedAddressArguments({ on: `/@my-space/${ID}` }, inlineMarker)
           .refusal,
       ).toContain("is not an address");
+      // The colon is what separates the vocabularies, not the length: a slug
+      // may run to eighty characters, so one past twenty reads as a handle to
+      // a length rule and is stored verbatim.
+      expect(
+        resolveEmittedAddressArguments(
+          { on: "/a-piece-name-that-is-twenty-plus" },
+          inlineMarker,
+        ).refusal,
+      ).toContain("is not an address");
     });
 
     it("converts a reference whose space is a DID, which a link can hold", () => {

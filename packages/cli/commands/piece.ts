@@ -4363,7 +4363,7 @@ export interface PieceDescribeCommandDependencies {
 export async function describePieceFromCommand(
   options:
     & PieceSummaryCLIOptions
-    & { piece?: string; all?: boolean; quiet?: boolean },
+    & { all?: boolean; quiet?: boolean },
   deps: PieceDescribeCommandDependencies = {},
 ): Promise<void> {
   setQuietMode(!!options.quiet);

@@ -120,9 +120,13 @@ export async function validateEmbeddedSpaces(
  * resolves both before it uses them, which is why it takes the wider
  * vocabulary; a value crossing into stored data has no such step and is held
  * to the narrower one.
+ *
+ * The colon is what decides, not the length. A handle always carries one and
+ * a slug never may, where the length rule alone would read any slug past
+ * twenty characters as a handle — and a slug may run to eighty.
  */
 export function namesResolvedParts(ref: NormalizedLLMFriendlyRef): boolean {
-  return isPieceHandle(ref.pieceId) &&
+  return !isSlugAddress(ref.pieceId) && isPieceHandle(ref.pieceId) &&
     (ref.embeddedSpace === undefined || isDID(ref.embeddedSpace));
 }
 
