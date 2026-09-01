@@ -54,7 +54,7 @@ elsewhere — it opens inside the chained `piece` command expression, around
 its first inline action, and `buildCallCommand` is a standalone function
 well before it.
 
-**A4 — exit and output seams audit.** Done. `exitWithDataError` and
+**A4 — exit and output seams audit.** Done (#6704). `exitWithDataError` and
 `exitPieceCallFailure` default to `Deno.exit(1)` and take a `deps`
 override in its place — `printError`, `printHint`, and an `exit` typed
 `never` — and every seam a v1 verb reaches forwards the caller's own:
