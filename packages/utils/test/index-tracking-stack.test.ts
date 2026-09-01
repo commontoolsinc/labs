@@ -49,7 +49,7 @@ function objects(count: number): object[] {
  * is the thing most easily left untested here.
  */
 function stackOf(height: number, values: readonly unknown[]) {
-  const stack = new IndexTrackingStack<unknown>();
+  const stack = new IndexTrackingStack();
 
   for (const filler of objects(height)) stack.push(filler);
   stack.indexOf({});
@@ -86,8 +86,8 @@ describe("IndexTrackingStack", () => {
     it("tells an empty stack from one holding an `undefined`", () => {
       // `popElseUndefined()` cannot, which is what its doc says; this is what
       // a caller uses instead.
-      const held = new IndexTrackingStack<unknown>();
-      const empty = new IndexTrackingStack<unknown>();
+      const held = new IndexTrackingStack();
+      const empty = new IndexTrackingStack();
 
       held.push(undefined);
 
@@ -104,7 +104,7 @@ describe("IndexTrackingStack", () => {
     });
 
     it("throws given an empty stack whose domain holds `undefined`", () => {
-      expect(() => new IndexTrackingStack<unknown>().pop()).toThrow();
+      expect(() => new IndexTrackingStack().pop()).toThrow();
     });
 
     it("returns the values it pops, topmost first", () => {
@@ -129,7 +129,7 @@ describe("IndexTrackingStack", () => {
     });
 
     it("pops an `undefined` that is really there", () => {
-      const stack = new IndexTrackingStack<unknown>();
+      const stack = new IndexTrackingStack();
 
       stack.push(undefined);
 
@@ -202,7 +202,7 @@ describe("IndexTrackingStack", () => {
     it("throws given an empty stack rather than meeting an `undefined`", () => {
       // The trap a parametric domain opens: reading past the bottom of an
       // empty stack yields `undefined`, which would meet the expectation.
-      expect(() => new IndexTrackingStack<unknown>().popExpect(undefined))
+      expect(() => new IndexTrackingStack().popExpect(undefined))
         .toThrow();
     });
 
@@ -410,7 +410,7 @@ describe("IndexTrackingStack", () => {
 
     /** A stack tall enough to hold an index, holding it, and holding a `0`. */
     function indexedStack() {
-      const stack = new IndexTrackingStack<unknown>();
+      const stack = new IndexTrackingStack();
 
       for (const filler of objects(TALL)) stack.push(filler);
       stack.push(0);
@@ -467,7 +467,7 @@ describe("IndexTrackingStack", () => {
       // The build runs here, a lookup being what triggers one, so these are
       // the cases where a value was already on the stack when it was keyed.
       it("sweeps a `-0` and a `0` into separate entries as it builds", () => {
-        const stack = new IndexTrackingStack<unknown>();
+        const stack = new IndexTrackingStack();
 
         stack.push(0);
         stack.push(-0);
@@ -479,7 +479,7 @@ describe("IndexTrackingStack", () => {
       });
 
       it("sweeps a `NaN` into its own entry as it builds", () => {
-        const stack = new IndexTrackingStack<unknown>();
+        const stack = new IndexTrackingStack();
 
         stack.push(NaN);
         stack.push(0);

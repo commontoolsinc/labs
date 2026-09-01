@@ -13,7 +13,7 @@
  *
  * A lookup does not get slower as the stack grows.
  */
-export class IndexTrackingStack<T> {
+export class IndexTrackingStack<T = unknown> {
   /** The values, in order, so a value's position is its index. */
   readonly #stack: T[] = [];
 
