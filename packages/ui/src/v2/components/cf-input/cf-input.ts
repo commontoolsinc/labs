@@ -505,11 +505,10 @@ export class CFInput extends BaseElement {
   }
 
   /**
-   * Flush any pending edit and await its commit to the bound cell, so callers
-   * can rely on the typed value having been applied and the set() round-trip
-   * completed before continuing. Does not surface a remote-commit rejection (the
-   * underlying set() logs and swallows that). When the field is not bound to a
-   * Cell, it falls back to the cell controller's setValue.
+   * Flushes any pending edit and awaits its confirmed commit to the bound cell.
+   * Resolves once the runtime commits the typed value, and rejects when the
+   * write fails. When the field is not bound to a cell, falls back to the cell
+   * controller's `setValue()`.
    *
    * This is for standalone inputs. Inside a cf-form the form owns durable writes
    * and flushes every field atomically on submit, so commit() resolves without
