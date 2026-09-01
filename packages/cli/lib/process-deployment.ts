@@ -19,6 +19,8 @@
  * belongs when one connection stops being enough.
  */
 
+import { normalizeApiUrl } from "./api-url.ts";
+
 /**
  * The deployment claimed, normalized for comparison, or `null` while this
  * process has claimed none.
@@ -26,15 +28,18 @@
 let claimed: string | null = null;
 
 /**
- * Helper for {@link claimProcessDeployment}, which normalizes `apiUrl` for
- * comparison, or returns `null` for one no connection can be opened over.
+ * Helper for {@link claimProcessDeployment}, which returns the deployment
+ * `apiUrl` names, or `null` for one no connection can be opened over.
  *
  * Every consumer of an API URL resolves a path against it, so that is the
- * test: `localhost:8000` parses as a URL and still fails it, its `8000`
- * being an opaque path that no path can be resolved against.
+ * test for the second case: `localhost:8000` parses as a URL and still fails
+ * it, its `8000` being an opaque path that no path can be resolved against.
+ * What passes is keyed through `normalizeApiUrl`, the spelling the whole CLI
+ * reads an API URL by, so two spellings of one deployment claim one
+ * deployment.
  */
 function deploymentKey(apiUrl: string): string | null {
-  return URL.canParse("/", apiUrl) ? new URL(apiUrl).href : null;
+  return URL.canParse("/", apiUrl) ? normalizeApiUrl(apiUrl) : null;
 }
 
 /**

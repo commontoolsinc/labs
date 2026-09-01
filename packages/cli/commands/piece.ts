@@ -26,6 +26,7 @@ import {
 } from "@commonfabric/runner/shared";
 import { decode } from "@commonfabric/utils/encoding";
 
+import { normalizeApiUrl } from "../lib/api-url.ts";
 import {
   type PhaseRetarget,
   readSourcePin,
@@ -153,17 +154,6 @@ function hint(message: string, showQuietTip = true) {
  */
 function note(message: string) {
   console.error(message);
-}
-
-export function normalizeApiUrl(apiUrl: string): string {
-  const parsed = new URL(apiUrl);
-  const normalized = new URL(parsed);
-  const basePath = parsed.pathname.split("/").filter(Boolean).join("/");
-  normalized.pathname = basePath ? `/${basePath}` : "/";
-  normalized.search = "";
-  normalized.hash = "";
-  const href = normalized.toString();
-  return basePath ? href : href.slice(0, -1);
 }
 
 function summarizeForDisplay(value: unknown): unknown {

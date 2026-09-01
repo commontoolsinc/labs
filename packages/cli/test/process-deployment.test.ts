@@ -37,8 +37,18 @@ describe("process-deployment", () => {
     it("throws naming both deployments given a different one", () => {
       claimProcessDeployment("https://first.test");
       expect(() => claimProcessDeployment("https://second.test")).toThrow(
-        /`https:\/\/first\.test\/`.*`https:\/\/second\.test\/`/,
+        /`https:\/\/first\.test`.*`https:\/\/second\.test`/,
       );
+    });
+
+    it("accepts every spelling the CLI reads as one deployment", () => {
+      claimProcessDeployment("https://toolshed.test/base/");
+      expect(() => claimProcessDeployment("https://toolshed.test/base"))
+        .not.toThrow();
+      expect(() => claimProcessDeployment("https://toolshed.test/base?x=1"))
+        .not.toThrow();
+      expect(() => claimProcessDeployment("https://toolshed.test/base#top"))
+        .not.toThrow();
     });
 
     it("says how to reach the refused deployment", () => {
