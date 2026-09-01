@@ -79,8 +79,9 @@ drawing its own screen. The bulk seams — survey, repair, retarget,
 Each threaded seam carries the test the override makes possible: an
 injected exit that throws, and the report read back as a value.
 
-**A5 — module-global state.** Done, as the recorded limit rather than as
-scoping: **shuttle v1 holds one connection per process**, revisited when
+**A5 — module-global state.** Done (#6717), as the recorded limit rather
+than as scoping: **shuttle v1 holds one connection per process**, revisited
+when
 multiple places arrive ([`futures.md`](futures.md) candidate 3). What the
 limit covers is `quietMode` (`commands/piece.ts`), the process's hint
 posture; `receipted` (`lib/write-receipt.ts`), which memoizes the write
