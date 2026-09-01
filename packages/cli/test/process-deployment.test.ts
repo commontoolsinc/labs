@@ -1,13 +1,16 @@
 /**
  * Unit tests for the process's claim on the deployment it connects to: what
- * `claimProcessDeployment` accepts, what it refuses, and how it compares two
- * spellings of one API URL. The claim is a module-level string and nothing
- * else, so each case resets it and calls the function directly.
+ * `claimProcessDeployment` accepts, what it refuses, what it declines to
+ * record at all, and how it compares two spellings of one API URL. The claim
+ * is a module-level string and nothing else, so each case resets it and calls
+ * the function directly.
  *
- * The last case drives the real `loadPieces`, which claims ahead of the
- * identity it reads and the flags it fetches from the deployment. A refused
- * connection therefore rejects with the limit's own message, and no runtime,
- * socket, or server stands behind that case either.
+ * The `loadPieces` cases drive the real thing, which claims ahead of the
+ * identity it reads and the flags it fetches from the deployment: a refused
+ * connection rejects with the limit's own message, and an API URL no
+ * connection can be opened over rejects on the URL itself, leaving the claim
+ * free for the corrected one. No runtime, socket, or server stands behind
+ * either.
  */
 
 import { expect } from "@std/expect";
@@ -38,12 +41,11 @@ describe("process-deployment", () => {
       );
     });
 
-    it("compares an api url that does not parse as written", () => {
-      claimProcessDeployment("toolshed-without-a-scheme");
-      expect(() => claimProcessDeployment("toolshed-without-a-scheme"))
-        .not.toThrow();
-      expect(() => claimProcessDeployment("another-without-a-scheme"))
-        .toThrow();
+    it("declines an api url no connection can use, leaving the claim unmade", () => {
+      claimProcessDeployment("not-a-url");
+      claimProcessDeployment("localhost:8000");
+      expect(() => claimProcessDeployment("https://first.test")).not.toThrow();
+      expect(() => claimProcessDeployment("https://second.test")).toThrow();
     });
   });
 
@@ -59,6 +61,16 @@ describe("process-deployment", () => {
         identity: "/nonexistent/second-deployment.key",
         space: "second-deployment",
       })).rejects.toThrow("one deployment per process");
+    });
+
+    it("leaves the claim unmade for an api url it cannot connect over", async () => {
+      await expect(loadPieces({
+        apiUrl: "localhost:8000",
+        identity: "/nonexistent/unusable-api-url.key",
+        space: "unusable-api-url",
+      })).rejects.toThrow();
+      expect(() => claimProcessDeployment("https://real.test")).not.toThrow();
+      expect(() => claimProcessDeployment("https://other.test")).toThrow();
     });
   });
 });

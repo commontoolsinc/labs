@@ -93,7 +93,7 @@ prose: `claimProcessDeployment` (`lib/process-deployment.ts`) refuses a
 connection to a second *deployment*, a weaker bound than the limit and
 the one where those settings actually fight, since a verb reaching an
 un-injected library function opens another connection to the same
-deployment as a matter of course. The three declarations that carry the
+deployment as a matter of course. The three declarations that name the
 limit are all in `packages/cli`; the inventory, both bounds, and the
 globals in the other two packages, recorded there and nowhere else, are
 in item 6 of [`runtime-integration.md`](runtime-integration.md).

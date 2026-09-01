@@ -27,15 +27,14 @@ let claimed: string | null = null;
 
 /**
  * Helper for {@link claimProcessDeployment}, which normalizes `apiUrl` for
- * comparison, returning it as written when it does not parse — an unusable
- * API URL is the connection's error to raise rather than this one's.
+ * comparison, or returns `null` for one no connection can be opened over.
+ *
+ * Every consumer of an API URL resolves a path against it, so that is the
+ * test: `localhost:8000` parses as a URL and still fails it, its `8000`
+ * being an opaque path that no path can be resolved against.
  */
-function deploymentKey(apiUrl: string): string {
-  try {
-    return new URL(apiUrl).href;
-  } catch {
-    return apiUrl;
-  }
+function deploymentKey(apiUrl: string): string | null {
+  return URL.canParse("/", apiUrl) ? new URL(apiUrl).href : null;
 }
 
 /**
@@ -43,8 +42,11 @@ function deploymentKey(apiUrl: string): string {
  * different one is already claimed. Claiming the deployment already held is
  * what every connection after the first does, and passes.
  *
- * A claim stands whether or not the connection it was made for opens: a
- * connection that fails on the way up has written those settings already.
+ * A claim stands whether or not the connection it was made for opens, since
+ * a connection that fails on the way up has written those settings already.
+ * One case cannot have written them: an API URL no connection can be opened
+ * over fails before the first of them is set, so it claims nothing and the
+ * corrected URL after it still connects.
  *
  * What it catches is a second deployment, not a second connection: two
  * connections to one deployment write the same settings and go unremarked,
@@ -52,6 +54,7 @@ function deploymentKey(apiUrl: string): string {
  */
 export function claimProcessDeployment(apiUrl: string): void {
   const key = deploymentKey(apiUrl);
+  if (key === null) return;
   if (claimed === null) {
     claimed = key;
     return;

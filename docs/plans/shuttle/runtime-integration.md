@@ -316,14 +316,16 @@ Each of these is small and lands on its own; together they are what decision
    `PiecesController.initialize` directly, as `packages/fuse` and
    `packages/cf-harness` open one, passes no claim at all.
 
-   Three declarations carry the limit, all of them in `packages/cli`:
-   `quietMode`, `receipted`, and `loadPieces`, where a connection's own
-   writes begin. The globals in `packages/llm` and `packages/runner`
-   belong to other packages and say nothing about it, so this inventory is
-   the only record of them — and the part of it that goes stale first if
-   nobody reads it back against those files. `packages/cli/README.md`
-   records the limit for a caller of the library seams, and a shuttle
-   process holds the one connection the limit allows.
+   Three declarations name it, all of them in `packages/cli`: `quietMode`
+   and `receipted` say what holds of them under it, and `loadPieces` says
+   what it refuses and where the reasoning is kept. The globals in
+   `packages/llm` and `packages/runner` belong to other packages and say
+   nothing about it, so this inventory is the only record of them — and
+   the part of it that goes stale first if nobody reads it back against
+   those files. What `packages/cli/README.md` records is the deployment
+   rule, on `cf`'s own terms: one connection per process is false of `cf`,
+   where a single verb opens several, so the connection limit is recorded
+   here, and a shuttle process is what holds to it.
 7. **Disposal.** `withRuntimeCleanupOnFailure` disposes only on throw; the
    success path relies on process exit. In a long-lived shell every
    un-injected call leaks a runtime, a storage manager, and a WebSocket —
