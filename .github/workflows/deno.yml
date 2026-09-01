@@ -655,6 +655,61 @@ jobs:
           path: ./dist/toolshed
           if-no-files-found: error
 
+  # TEMPORARY (PR #6719) — delete before merging. Measures what the vote-burst
+  # benchmark actually costs on a CI host, to settle whether ten runtimes belong
+  # in the shared benchmarks job. The developer-machine figure (5.4GB peak) is a
+  # working set V8 grows into available RAM, so it says little about a host with
+  # less of it; this job reports the host's own total alongside the peak. It runs
+  # on ubuntu-latest, not the benchmarks job's `labs` group, so it bounds the
+  # question rather than answering it outright.
+  benchmark-memory-probe:
+    name: "TEMP: vote-burst benchmark footprint"
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: *job-timeout
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      - name: 🖥️ Report the host's memory
+        run: |
+          echo "=== /proc/meminfo (first 3 lines) ==="
+          head -3 /proc/meminfo
+          echo "=== free -m ==="
+          free -m
+          echo "=== nproc ==="
+          nproc
+
+      - name: 🏋️ Run the vote-burst benchmark under GNU time
+        timeout-minutes: *work-timeout
+        env:
+          CF_LOG_LEVEL: silent
+        run: |
+          # Same v8 flags the benchmarks workflow uses, so the heap headroom
+          # matches the run this is asking about.
+          /usr/bin/time -v deno bench --json -A --v8-flags=--expose-gc \
+            packages/patterns/integration/lunch-poll-vote-burst.bench.ts \
+            > bench.json 2> time.log || true
+          echo "=== peak RSS and wall clock ==="
+          grep -E "Maximum resident set size|Elapsed \(wall clock\)" time.log || true
+          echo "=== the benchmark's own contention accounting ==="
+          grep -a "lunch-poll vote burst" time.log || true
+          echo "=== reported timing ==="
+          deno eval --ext=ts '
+            const d = JSON.parse(Deno.readTextFileSync("bench.json"));
+            for (const b of d.benches) {
+              const r = b.results[0].ok;
+              if (!r) continue;
+              console.log(`${b.name}: n=${r.n} p75=${(r.p75/1e6).toFixed(1)}ms avg=${(r.avg/1e6).toFixed(1)}ms`);
+            }
+          ' || true
+
   build-bg-piece-service:
     name: "Build Binary (bg-piece-service)"
     runs-on: ubuntu-latest
