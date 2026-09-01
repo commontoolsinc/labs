@@ -54,9 +54,9 @@ export class IndexTrackingStack<T> {
       return this.#stack.findIndex((held) =>
         IndexTrackingStack.#same(held, value)
       );
+    } else {
+      return this.#stack.indexOf(value);
     }
-
-    return this.#stack.indexOf(value);
   }
 
   /**
@@ -74,9 +74,9 @@ export class IndexTrackingStack<T> {
       return this.#stack.findLastIndex((held) =>
         IndexTrackingStack.#same(held, value)
       );
+    } else {
+      return this.#stack.lastIndexOf(value);
     }
-
-    return this.#stack.lastIndexOf(value);
   }
 
   /**
@@ -252,8 +252,8 @@ export class IndexTrackingStack<T> {
       return IndexTrackingStack.#NAN;
     } else if (Object.is(value, -0)) {
       return IndexTrackingStack.#NEGATIVE_ZERO;
+    } else {
+      return value;
     }
-
-    return value;
   }
 }
