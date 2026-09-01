@@ -204,15 +204,27 @@ Each of these is small and lands on its own; together they are what decision
 3. **`callFromCommand`.** Done. `buildCallCommand`'s action reads the two
    argv arrays off the command bound to it and hands them on; everything
    below that line is the named export, which needs no binding.
-4. **Exit discipline.** `exitWithDataError` and `exitPieceCallFailure` call
-   `Deno.exit(1)` (typed `never`); `getCellValueFromCommand` reaches the
-   former on a data error, which would kill the shell. Both take a `deps`
-   override — shuttle threads an exit shim through every seam it calls, and
-   catches the `ValidationError` that `exitPieceCallFailure` rethrows for
-   Cliffy's usage rendering.
-5. **Output capture.** The `FromCommand` seams accept `render`/`hint` deps;
-   stray `console.error` calls in `lib/piece.ts` do not. Sweep as views
-   need them captured.
+4. **Exit discipline.** Done. `exitWithDataError` and `exitPieceCallFailure`
+   default to `Deno.exit(1)` (typed `never`) and take a `deps` override in
+   its place, which the seams a v1 verb reaches forward:
+   `getCellValueFromCommand` on a data error, and `callFromCommand` at each
+   of its three exits. Shuttle's shim therefore throws rather than returns —
+   what an `exit` typed `never` requires — and shuttle catches it beside the
+   `ValidationError` that `exitPieceCallFailure` rethrows for Cliffy's usage
+   rendering. `callFromCommand` reports its payload rejection from inside
+   the dispatch's promise chain, so it records that an exit ran and rethrows
+   rather than describing the shim's own throw as a second failure.
+5. **Output capture.** Every seam a v1 verb reaches routes its output —
+   the value or page, the next steps, and a failure's report — through
+   `render`, `hint`, and `printError` deps. The `console.error` calls in
+   `lib/piece.ts` do not: the navigate wiring and the phase trace sit
+   inside `loadPieces`, which takes a config and no deps, and the rest
+   belong to `setsrc` and `piece map`. `noteWroteTo`
+   (`lib/write-receipt.ts`) is the write receipt, which `--quiet`
+   deliberately does not silence, so it wants a sink of its own rather
+   than the hint stream — and a memo per process rather than per
+   connection, which is item 6's subject. Sweep as views need them
+   captured.
 6. **Module-global state.** `quietMode` is a file-level `let` set on every
    `FromCommand` entry; `setLLMUrl` is a global written by both `loadPieces`
    and `PiecesController.initialize`, so two connections on different API

@@ -54,12 +54,22 @@ elsewhere — it opens inside the chained `piece` command expression, around
 its first inline action, and `buildCallCommand` is a standalone function
 well before it.
 
-**A4 — exit and output seams audit.** Every seam shuttle calls must accept
-an exit override (`exitWithDataError` / `exitPieceCallFailure` call
-`Deno.exit(1)` by default — a data error must not kill the shell) and
-route output through the `render`/`hint` deps rather than stray
-`console.error`. One audit PR that threads what is missing, with the test
-that proves a data error surfaces as a value.
+**A4 — exit and output seams audit.** Done. `exitWithDataError` and
+`exitPieceCallFailure` default to `Deno.exit(1)` and take a `deps`
+override in its place — `printError`, `printHint`, and an `exit` typed
+`never` — and every seam a v1 verb reaches forwards the caller's own:
+`getCellValueFromCommand`, and `callFromCommand` at each of its three
+exits, the payload rejection reported from inside the dispatch's promise
+chain included. An `exit` typed `never` throws rather than returning, so
+that rejection's throw lands in the action's own catch;
+`callFromCommand` records that an exit ran and rethrows, rather than
+describing the shell's exit as a second failure of the call.
+`describePieceFromCommand` takes `render`/`hint` beside them, so its page
+and next steps land where the caller puts them. The bulk seams — survey,
+repair, retarget, `setsrc --check` — are on no v1 verb's path and keep
+the exits they have. Each threaded seam carries the test the override
+makes possible: an injected exit that throws, and the report read back as
+a value.
 
 **A5 — module-global state.** `quietMode` is a file-level `let`;
 `setLLMUrl` is written by both `loadPieces` and
