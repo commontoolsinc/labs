@@ -51,9 +51,11 @@ export class IndexTrackingStack<T> {
     if (positions !== undefined) {
       return positions.get(IndexTrackingStack.#keyFor(value))?.[0] ?? -1;
     } else if (typeof value === "number") {
-      return this.#stack.findIndex((held) =>
-        IndexTrackingStack.#same(held, value)
-      );
+      // `Array.prototype.indexOf` compares strictly, so it would find a `0`
+      // for a `-0` and never find a `NaN`. `===` and `Object.is` part company
+      // on numbers and only on numbers, so this arm is exactly the set that
+      // needs the slower search.
+      return this.#stack.findIndex((held) => Object.is(held, value));
     } else {
       return this.#stack.indexOf(value);
     }
@@ -71,9 +73,7 @@ export class IndexTrackingStack<T> {
 
       return (found === undefined) ? -1 : found[found.length - 1]!;
     } else if (typeof value === "number") {
-      return this.#stack.findLastIndex((held) =>
-        IndexTrackingStack.#same(held, value)
-      );
+      return this.#stack.findLastIndex((held) => Object.is(held, value));
     } else {
       return this.#stack.lastIndexOf(value);
     }
@@ -118,7 +118,7 @@ export class IndexTrackingStack<T> {
 
     const top = this.#stack[this.#stack.length - 1] as T;
 
-    if (!IndexTrackingStack.#same(top, expected)) {
+    if (!Object.is(top, expected)) {
       throw new Error("The top of the stack is not the expected value.");
     }
 
@@ -220,23 +220,10 @@ export class IndexTrackingStack<T> {
   static readonly DROP_INDEX_BELOW = 32;
 
   /**
-   * Whether two values are the same one, which is what this class compares by.
-   *
-   * `Array.prototype.indexOf` will not do it: it compares strictly, so it
-   * finds a `0` for a `-0` and never finds a `NaN`. `===` and `Object.is` part
-   * company on numbers and only on numbers, so the `typeof` here is not a
-   * heuristic -- it is exactly the set that needs the slower answer, and a
-   * stack of anything else pays one check for all of it.
-   */
-  static #same(a: unknown, b: unknown): boolean {
-    return (typeof a === "number") ? Object.is(a, b) : (a === b);
-  }
-
-  /**
    * The index key for the given value: the value itself, except for the two a
-   * `Map` does not key as {@link #same} would have it. A `Map` normalizes a
+   * `Map` does not key as `Object.is` would have it. A `Map` normalizes a
    * `-0` key to `0`, so those two would otherwise share an entry. Two values
-   * take the same key exactly when {@link #same} calls them the same value.
+   * take the same key exactly when `Object.is` calls them the same value.
    *
    * A `NaN` needs no standing in as `Map` is written today, and gets one
    * anyway, so that the pair is read as one rule rather than as one rule and
