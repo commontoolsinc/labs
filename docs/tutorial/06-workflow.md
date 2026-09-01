@@ -76,7 +76,7 @@ deno task cf piece new pattern.tsx --test pattern.test.tsx -s myspace
 # Every iteration after that: rerun tests, then update the SAME piece in place
 deno task cf test pattern.test.tsx
 deno task cf piece setsrc pattern.tsx --test pattern.test.tsx \
-  --piece fid1:abc... -s myspace
+  --cell fid1:abc... -s myspace
 ```
 
 The most common workflow mistake is rerunning `piece new` after each edit —
@@ -96,7 +96,7 @@ deno task cf test pattern.integration.test.tsx
 deno task cf piece setsrc pattern.tsx \
   --test pattern.test.tsx \
   --test pattern.integration.test.tsx \
-  --piece fid1:abc... -s myspace
+  --cell fid1:abc... -s myspace
 ```
 
 The attached files are included by `cf piece getsrc`, so another checkout of
@@ -156,7 +156,7 @@ with a pattern that does not read it — is attached with a repeatable
 deno task cf piece setsrc pattern.tsx \
   --test pattern.test.tsx \
   --datafile data/lookup.csv \
-  --piece fid1:abc... -s myspace
+  --cell fid1:abc... -s myspace
 ```
 
 That flag names a path on disk, and the file is stored under its path relative
@@ -179,29 +179,32 @@ belongs in its cells.
 Everything a pattern exports (Chapter 3) is drivable without a browser:
 
 ```bash
-deno task cf piece ls -s myspace                       # list registered pieces
-deno task cf piece search -s myspace "invoice"         # search registered pieces
-deno task cf piece inspect --piece <ID>                # dump structure/state
-deno task cf get --piece <ID> items                    # read one exported field
-deno task cf call --piece <ID> addItem '{"title": "Test"}'   # send to a stream
-echo '"hello"' | deno task cf set --piece <ID> title   # write a field
-deno task cf piece step --piece <ID>                   # force recompute
-deno task cf piece view --piece <ID>                   # render the UI in the terminal
-deno task cf piece link <srcID>/items <dstID>/items    # wire two pieces
-deno task cf piece set-slug myslug <ID>                # pretty URL
+deno task cf piece ls -s myspace                          # list registered pieces
+deno task cf piece search -s myspace "invoice"            # search registered pieces
+deno task cf piece inspect --cell <ID>                    # dump structure/state
+deno task cf get --cell <ID> items                        # read one exported field
+deno task cf call --cell <ID> addItem '{"title": "Test"}' # send to a stream
+echo '"hello"' | deno task cf set --cell <ID> title       # write a field
+deno task cf piece step --cell <ID>                       # force recompute
+deno task cf piece view --cell <ID>                       # render the UI in the terminal
+deno task cf piece link <srcID>/items <dstID>/items       # wire two pieces
+deno task cf piece set-slug myslug <ID>                   # pretty URL
 ```
 
-`--piece` takes an id (`fid1:abc...`), a slug, or the canonical fabric
-reference other commands print (`/of:fid1:...`). The canonical form can carry
-its space — `/@did:key:.../of:fid1:...` — and a reference that does needs no
-`-s` beside it: the embedded space supplies the target, and a `-s` that
-disagrees with it is refused. So an address copied off one command's output
-drives the next command unchanged, even from a shell configured for a
+A reference names the target, and one grammar covers every part of the name:
+`/[@<space>/]<piece>[@<scope>][/<path>]`. The space is a name or a DID, the
+piece a slug or a handle, so `/@my-space/tracker/items` and
+`/@did:key:.../of:fid1:.../items` are the same shape. A reference carrying its
+space needs no `-s` beside it: the embedded space supplies the target, and a
+`-s` that disagrees with it is refused. So an address copied off one command's
+output drives the next command unchanged, even from a shell configured for a
 different space.
 
-On `get`, `set`, and `call`, the canonical reference can also sit in the
-first positional instead of the flag — `cf get /of:fid1:.../items`. On
-the commands that take `--input` (`get` and `set` here), a trailing
+On `get`, `set`, and `call`, write the reference in the first positional —
+`cf get /tracker/items`. `--cell` takes the same word where a flag suits
+better, and is also where the bare id and slug spellings go (`--cell
+fid1:abc...`, `--cell myslug`); `--piece` is a deprecated name for that same
+flag, still accepted. On the commands that take `--input` (`get` and `set` here), a trailing
 `#argument` selects the piece's arguments cell the way that flag does;
 `call` takes no `--input` and refuses the suffix. The three are the piece
 data commands mounted at top level — reading and writing cells is not
@@ -212,7 +215,7 @@ outputs. `set` writes the cell without running anything; `call` runs the
 handler (so the handler's own writes land and sync), but the scheduler is
 lazy — derived values recompute only when something observes them
 (Chapter 8), and nothing in the ephemeral CLI session does. Run
-`cf piece step --piece <ID>` — which pulls the piece, forcing
+`cf piece step --cell <ID>` — which pulls the piece, forcing
 recomputation — before inspecting computed fields with `get`/`inspect`.
 
 This CLI surface is also exactly how *agents* drive the system — same

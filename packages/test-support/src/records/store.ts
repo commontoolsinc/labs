@@ -41,6 +41,7 @@ export interface CreateObjectOptions {
 
   /** Full object name, prefix included. */
   name: string;
+
   body: Uint8Array;
   token: string;
   contentType?: string;

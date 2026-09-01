@@ -274,22 +274,21 @@ describe("MentionController — mention insertion", () => {
 //
 
 describe("MentionController — indexed rows", () => {
-  /** An index-row list: each entry is bookkeeping standing for its piece. */
+  /** An index-row list: each entry is bookkeeping standing for its piece,
+   * held as the stored `$link` an `asCell` position actually carries — the
+   * value never holds a handle, and the mock network follows the link at
+   * resolution exactly as the runtime does. */
   function createIndexedCell(entries: { name: string; pieceId: string }[]) {
-    const pieces = entries.map(({ name, pieceId }) =>
-      createMockCellHandle({ [NAME]: name }, { id: pieceId as any })
-    );
-    const rows: MentionableArray = entries.map(({ name }, i) => ({
+    const rows: MentionableArray = entries.map(({ name, pieceId }) => ({
       [NAME]: name,
       title: name,
-      piece: pieces[i],
+      piece: { "$link": { id: pieceId, path: [] } },
     }));
     return {
       cell: createMockCellHandle(rows, {
         id: "of:mention-index" as any,
         schema: { type: "array", items: { type: "object" } },
       }),
-      pieces,
     };
   }
 

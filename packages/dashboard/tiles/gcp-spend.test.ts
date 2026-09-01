@@ -169,9 +169,10 @@ Deno.test(
     // month-to-date total and out of the rate.
     assertEquals(result.status, "good");
     assertEquals(result.value, "~$509/mo");
+    assertEquals(result.valueLabel, result.value);
     assertEquals(
       result.aside,
-      '<span class="hmtd">$185 MTD</span>',
+      '<span class="hmtd" title="$185 MTD">$185 MTD</span>',
     );
     assertEquals(result.sub, "billing account spend");
     assertEquals(result.duration, 45 * DAY);
@@ -242,7 +243,7 @@ Deno.test(
     assertEquals(result.value, "~$382/mo");
     assertEquals(
       result.aside,
-      '<span class="hmtd">$139 MTD</span>',
+      '<span class="hmtd" title="$139 MTD">$139 MTD</span>',
     );
     assertEquals(result.sub, "billing account spend");
     // One line, for what the account pays. The credit is not a figure the tile
@@ -304,7 +305,7 @@ Deno.test(
     assertEquals(result.value, "~$310/mo");
     assertEquals(
       result.aside,
-      '<span class="hmtd">$7 MTD</span>',
+      '<span class="hmtd" title="$7 MTD">$7 MTD</span>',
     );
     assertEquals(result.duration, 45 * DAY);
     const polylines = [
@@ -329,7 +330,7 @@ Deno.test(
     assertEquals(result.value, "~$620/mo");
     assertEquals(
       result.aside,
-      '<span class="hmtd">$40 MTD</span>',
+      '<span class="hmtd" title="$40 MTD">$40 MTD</span>',
     );
     assertEquals(result.duration, 0);
     assertEquals(result.extra, "");
@@ -383,7 +384,7 @@ Deno.test(
     assertEquals(result.value, "~$620/mo");
     assertEquals(
       result.aside,
-      '<span class="hmtd">$150 MTD</span>',
+      '<span class="hmtd" title="$150 MTD">$150 MTD</span>',
     );
     assertEquals(result.duration, 7 * DAY);
   },
@@ -409,7 +410,7 @@ Deno.test(
     // the month-to-date total. Rating every day the export has touched would
     // read the same $620 off days two of which are not all there.
     assertEquals(result.value, "~$620/mo");
-    assertEquals(result.aside, '<span class="hmtd">$180 MTD</span>');
+    assertEquals(result.aside, '<span class="hmtd" title="$180 MTD">$180 MTD</span>');
     assertEquals(result.duration, 7 * DAY);
   },
 );
@@ -438,7 +439,7 @@ Deno.test(
 
     // Four days at $20 and five at $6 rate the month: $110 / 9 * 31 = $379.
     assertEquals(result.value, "~$379/mo");
-    assertEquals(result.aside, '<span class="hmtd">$116 MTD</span>');
+    assertEquals(result.aside, '<span class="hmtd" title="$116 MTD">$116 MTD</span>');
     assertEquals(result.duration, 9 * DAY);
   },
 );

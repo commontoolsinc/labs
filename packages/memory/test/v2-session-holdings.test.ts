@@ -9,6 +9,7 @@
  * The cases drive the server through its wire boundary, the way the
  * closure-delivery pins do: raw connections, raw messages.
  */
+
 import { assert } from "@std/assert";
 import { expect } from "@std/expect";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
@@ -116,9 +117,11 @@ const ids = (entries: readonly { id: string }[]): string[] =>
 describe("session holdings", () => {
   let server: Server;
   let writerSession: string;
+
   /** The union every reader watches: two roots, one of which mentions
    * the leaf schema, so the closure joins `cid:<leaf>`. */
   const roots = ["of:holdings-a", "of:holdings-b"];
+
   const watches = [
     watchOn("of:holdings-a", "w-a"),
     watchOn("of:holdings-b", "w-b"),

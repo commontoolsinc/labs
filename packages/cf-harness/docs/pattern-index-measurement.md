@@ -128,15 +128,20 @@ also refuses by default. `--allow-diverged` is the explicit opt-out for a batch
 that intentionally measures such a server; a commit that cannot be checked
 remains a non-fatal `unchecked` reading.
 
+`--cell-spec=<file>` states what this experiment requires of the console, and
+refuses the whole batch before the first task when the console is something
+else. See [The cell spec](#the-cell-spec).
+
 The runner loads the console page to pick up the token cookie every `/api` route
 is gated on. Before reading the index or starting a paid model turn, it requires
 `/api/status` to carry an absolute top-level `artifactRoot` and a `sessions`
-array. It then reads the index and runs each task in its own session. It waits
-on the console's own `turn_completed`, `turn_failed` or `turn_canceled` event,
-read off the server-sent event stream, and on nothing else. There is no timeout:
-a turn that hangs is a batch that hangs, which an operator can see and release
-with a `POST /api/cancel`, rather than a bound that turns a slow run into a
-failed one.
+array, and — when a cell spec was named — the console's `/api/policy` to satisfy
+every field of it. It then reads the index and runs each task in its own
+session. It waits on the console's own `turn_completed`, `turn_failed` or
+`turn_canceled` event, read off the server-sent event stream, and on nothing
+else. There is no timeout: a turn that hangs is a batch that hangs, which an
+operator can see and release with a `POST /api/cancel`, rather than a bound that
+turns a slow run into a failed one.
 
 After a turn settles, the runner locates its root run under the session's
 `artifactRoot`, falling back to the console-wide root. A candidate must have
@@ -194,6 +199,74 @@ carries its own identifier, so without the hop it would read as pre-existing and
 count a composition of seeded work as evidence against the seeding.
 
 Hops beyond the first are not resolved, and the report says so.
+
+## The cell spec
+
+A suite says what the batch asks the model. A cell spec says what the console
+has to be for those answers to mean anything, and it is checked before the first
+task rather than read out of the artifacts afterwards. A console whose policy
+cannot offer the tool an experiment exists to test produces a night of runs that
+look, in every other artifact, exactly like runs that chose not to use it.
+
+The file is JSON, passed as `--cell-spec`. Every field is optional and every
+field present is asserted; a field left out is not checked and the report says
+so. `label` names the spec and asserts nothing, and a file carrying nothing else
+is refused — a check that checks nothing is indistinguishable from one that
+passed.
+
+```json
+{
+  "label": "phase 3, composition under the authored prompt",
+  "systemPromptSha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+  "requiredToolIds": ["run_pattern", "search_patterns", "record_feedback"],
+  "forbiddenToolIds": ["web_search"],
+  "requiredSubagentProfiles": ["pattern-author"],
+  "fabricSpace": "pattern-index-demo",
+  "artifactRoot": "/Users/me/labs/packages/cf-harness/.cf-harness-console/runs",
+  "sessionDbPath": "/Users/me/labs/packages/cf-harness/.cf-harness-console/sessions.sqlite"
+}
+```
+
+| field                                                    | asserts                                                                       |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `systemPromptSha256`                                     | the SHA-256 of the seeded system prompt, or `null` for a console seeding none |
+| `allowedToolIds`                                         | the whole tool set, compared as a set                                         |
+| `requiredToolIds` / `forbiddenToolIds`                   | tools the policy must offer, and must not                                     |
+| `allowedSubagentProfiles`                                | the whole profile set                                                         |
+| `requiredSubagentProfiles` / `forbiddenSubagentProfiles` | profiles the policy must authorize, and must not                              |
+| `fabricSpace`                                            | the space the runs write into                                                 |
+| `artifactRoot`                                           | where the console files its runs                                              |
+| `sessionDbPath`                                          | the durable session store, or `null` for sessions held in memory              |
+
+Stating a set as a whole and in parts at once is refused rather than resolved:
+`allowedToolIds` beside `requiredToolIds` is a file that has not decided which
+claim it makes. So is a name in both the required and the forbidden list, and a
+field name nothing asserts, which would otherwise pass silently as a typo. An
+empty required or forbidden list is refused for the same reason: every console
+offers at least nothing, so the field looks like a check and is not. An empty
+whole set is kept, because there it is the strongest claim the file can make —
+that the policy offers nothing at all.
+
+A mismatch refuses the batch with exit code 6, names every disagreeing field
+with expected against actual, and starts no task. So does a console that will
+not disclose its policy at all: a spec was named, and nothing can report it
+satisfied.
+
+The prompt crosses as a digest and never as text. Take one with
+`shasum -a 256 <the prompt file>` and paste the hex.
+
+Two limits worth holding. `/api/policy` reports what the console's policy
+**asks** for, and the prompt loop withholds a tool again when its backing is
+absent — so a spec naming `search_patterns` proves the policy offers it, not
+that a turn will hold it; the index pre-flight is what says the backing answers.
+And the digest covers the seeded system prompt alone, not the tool descriptors
+or the subagent guidance that also reach a model.
+
+The spec describes a console, because a console is the only thing this runner
+starts work on. `measure-runs` reads runs that are already on disk and spends
+nothing, so it has nothing to refuse; a `cf-harness` CLI run states its own
+policy in the flags that start it, where it is visible in the command rather
+than in a server somebody else configured.
 
 ## The batch publishes into the corpus it is measuring
 

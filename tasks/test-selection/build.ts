@@ -20,6 +20,7 @@ import {
 import {
   costSeconds,
   type DaySamples,
+  daysBetween,
   emptyContext,
   emptySamples,
   emptyState,
@@ -48,6 +49,7 @@ import {
   type WithheldEntry,
 } from "./manifest.ts";
 import {
+  COST_WINDOW_DAYS,
   FLAKE_EXCLUSION_RATE,
   FLAKE_REPEAT_RATES,
   LANE_PROLOGUE_SECONDS,
@@ -461,7 +463,12 @@ export class Fold {
     const observations: Observation[] = [];
     for (const report of reports) {
       const read = readReport(report, this.#resolver);
-      observations.push(...read.observations);
+      // Appended one at a time rather than spread: a rollup shard holds a
+      // whole day, and spreading that many arguments onto the stack is
+      // past what a call can carry.
+      for (const observation of read.observations) {
+        observations.push(observation);
+      }
       for (const [key, surface] of read.surfaces) {
         // A file names something a runner can be pointed at, and an
         // identity's own name does not. A record with no file arriving in
@@ -473,11 +480,15 @@ export class Fold {
       }
       for (const [key, byDay] of read.durations) {
         let known = this.#samples.get(key);
-        if (known === undefined) {
-          known = new Map();
-          this.#samples.set(key, known);
-        }
         for (const [day, sampled] of byDay) {
+          // A day past the cost window is sealed and then dropped again
+          // by the same `finish` that sealed it, so sampling it buys
+          // nothing and a bootstrap holds sixty days of it at once.
+          if (daysBetween(day, this.#today) > COST_WINDOW_DAYS) continue;
+          if (known === undefined) {
+            known = new Map();
+            this.#samples.set(key, known);
+          }
           const into = known.get(day) ?? emptySamples();
           for (const durationMs of sampled) sampleDuration(into, durationMs);
           known.set(day, into);

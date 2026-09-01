@@ -182,13 +182,13 @@ Export handlers to test them via CLI during development:
 
 ```bash
 # Call a handler with JSON payload (flags go before the callable name)
-deno task cf call --piece <ID> addItem '{"title": "Test"}'
+deno task cf call --cell <ID> addItem '{"title": "Test"}'
 
 # Step to process
-deno task cf piece step --piece <ID>
+deno task cf piece step --cell <ID>
 
 # Verify state
-deno task cf piece inspect --piece <ID>
+deno task cf piece inspect --cell <ID>
 ```
 
 See [Testing Handlers via CLI](../workflows/handlers-cli-testing.md) for the full workflow.

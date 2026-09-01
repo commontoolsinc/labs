@@ -22,9 +22,10 @@ export interface Style {
 export const ESC = "\x1b";
 export const CSI = `${ESC}[`;
 
-/** Operating System Command introducer and its BEL terminator. */
+/** Operating System Command introducer. */
 const OSC = `${ESC}]`;
 
+/** The BEL terminator that closes an OSC sequence. */
 const BEL = "\x07";
 export const RESET = `${CSI}0m`;
 

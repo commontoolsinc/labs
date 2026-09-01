@@ -134,10 +134,12 @@ let patternCoveragePath: string | undefined;
 let patternCoverageRoot: string | undefined;
 const runtimeErrors: string[] = [];
 
-/** Channel 1: console.error/warn captured via the harness console event. */
+/** Channel 1: console.error calls captured via the harness console event. */
 const consoleErrors: string[] = [];
 
+/** Channel 1: console.warn calls, captured the same way. */
 const consoleWarnings: string[] = [];
+
 const continuousUiErrors: Error[] = [];
 let continuousUiCancel: (() => void) | undefined;
 // Run-phase gate for channel 1 (mirrors test-runner.ts): flips true at the

@@ -97,10 +97,13 @@ or explicitly stores `everyoneIsAdmin: false`. That bootstrap is what answers
 "who may take the first seat" — an empty roster is open, and once a role exists
 the roster gates itself.
 
-`AdminManagerCredential` mints an atom onto a value standing for "this actor may
-edit the roster". It is for a credential the pattern is handed, not one the
-viewer switches on for itself; see "A self-granted flag is not a credential"
-below.
+There is no helper here for "this actor may edit the roster", and a registry
+does not need one. The per-user switch that reveals the admin controls is a
+plain boolean carrying no integrity, and the roster's own `writeAuthorizedBy`
+binding is what decides which code may change it. A separate `*-admin-manager`
+atom standing for the authority to edit is the shape the parking coordinator,
+the lobby and the lot watch were each repaired out of; the next section says why
+it cannot work.
 
 ## Floor An Admin Registry
 
@@ -186,6 +189,9 @@ check it against has moved.
 `packages/patterns/factory-outputs/parking-coordinator/main.tsx` follows all
 five. `packages/patterns/lobby/main.tsx` binds its registry to a reviewed
 handler the same way, with profiles rather than names as role subjects.
+`packages/patterns/factory-outputs/lot-watch/main.tsx` binds a registry whose
+subjects are names, and `packages/patterns/cfc-group-chat-demo/trusted.tsx`
+floors a second list, its rooms, on the same atom as its roster.
 
 ## Use Prompt-Injection Helpers
 

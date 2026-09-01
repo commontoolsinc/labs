@@ -563,7 +563,7 @@ describe("piece-rollback", () => {
     it("prints one line per revision when none is named", async () => {
       const printed: unknown[] = [];
       const hints: string[] = [];
-      await restoreFromCommand({ ...TARGET, piece: "fid1:aaa" }, {
+      await restoreFromCommand({ ...TARGET, cell: "fid1:aaa" }, {
         render: (value) => {
           printed.push(value);
         },
@@ -588,7 +588,7 @@ describe("piece-rollback", () => {
       const out = await captureStdout(() =>
         restoreFromCommand({
           ...TARGET,
-          piece: "fid1:aaa",
+          cell: "fid1:aaa",
           revision: "rev-a",
         }, {
           runRestore: (_config, given) => {
@@ -614,7 +614,7 @@ describe("piece-rollback", () => {
       await captureStdout(() =>
         restoreFromCommand({
           ...TARGET,
-          piece: "fid1:aaa",
+          cell: "fid1:aaa",
           revision: "rev-b",
           apply: true,
         }, {
@@ -641,7 +641,7 @@ describe("piece-rollback", () => {
       await captureStdout(() =>
         restoreFromCommand({
           ...TARGET,
-          piece: "fid1:aaa",
+          cell: "fid1:aaa",
           revision: "rev-b",
         }, {
           runRestore: () =>
@@ -671,7 +671,7 @@ describe("piece-rollback", () => {
         captureStdout(() =>
           restoreFromCommand({
             ...TARGET,
-            piece: "fid1:aaa",
+            cell: "fid1:aaa",
             revision: "rev-z",
             apply: true,
           }, {
@@ -700,7 +700,7 @@ describe("piece-rollback", () => {
       await captureStdout(() =>
         restoreFromCommand({
           ...TARGET,
-          piece: "fid1:aaa",
+          cell: "fid1:aaa",
           revision: "rev-a",
           apply: true,
         }, {
@@ -727,7 +727,7 @@ describe("piece-rollback", () => {
       const out = await captureStdout(() =>
         restoreFromCommand({
           ...TARGET,
-          piece: "fid1:aaa",
+          cell: "fid1:aaa",
           revision: "rev-a",
           json: true,
         }, {

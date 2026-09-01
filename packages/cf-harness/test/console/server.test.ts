@@ -18,13 +18,16 @@ import {
 import type { HarnessFetch } from "../../src/contracts/http-fetch.ts";
 import { PatternIndexClient } from "../../src/pattern-index/client.ts";
 import {
+  type HarnessInteractiveChatEventListener,
   HarnessInteractiveChatService,
   type HarnessInteractivePromptLoopFactory,
 } from "../../src/interactive-chat-service.ts";
+import { openSqliteHarnessChatSessionStore } from "../../src/sqlite-session-store.ts";
 import type {
   HarnessPromptLoopResult,
   RunHarnessTranscriptOptions,
 } from "../../src/prompt-loop.ts";
+import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
 
 /**
  * A loop that answers the task it was given and nothing else. The console
@@ -41,6 +44,43 @@ const answeringLoop: HarnessInteractivePromptLoopFactory = () => ({
     return {
       model: "gpt-test",
       finalAssistantText: answer.content,
+      transcript,
+      modelTurns: 1,
+      runState: {} as HarnessPromptLoopResult["runState"],
+    };
+  },
+});
+
+/**
+ * A loop that records the supplied completion in the run artifact directory.
+ * This is the production ordering the console depends on: the prompt loop
+ * persists its transcript before the service emits `turn_completed`.
+ */
+const artifactLoop = (
+  messages: readonly HarnessTranscriptMessage[],
+): HarnessInteractivePromptLoopFactory =>
+(loopOptions) => ({
+  runTranscript: async (
+    options: RunHarnessTranscriptOptions,
+  ): Promise<HarnessPromptLoopResult> => {
+    if (
+      loopOptions.artifactRoot === undefined || loopOptions.runId === undefined
+    ) {
+      throw new Error("artifact loop requires an artifact root and run id");
+    }
+    const transcript = [...options.transcript, ...messages];
+    await writeTurnTranscript(
+      loopOptions.artifactRoot,
+      loopOptions.runId,
+      transcript,
+      options.transcript.length,
+    );
+    const finalAssistantText =
+      transcript.findLast((message) => message.role === "assistant")?.content ??
+        "";
+    return {
+      model: "gpt-test",
+      finalAssistantText,
       transcript,
       modelTurns: 1,
       runState: {} as HarnessPromptLoopResult["runState"],
@@ -111,6 +151,34 @@ const getRequest = (
   path: string,
   headers: Record<string, string> = {},
 ): Request => new Request(`http://127.0.0.1:8100${path}`, { headers });
+
+const writeTurnTranscript = async (
+  artifactRoot: string,
+  turnId: string,
+  transcript: readonly HarnessTranscriptMessage[],
+  firstGeneratedIndex = 0,
+): Promise<void> => {
+  const runRoot = join(artifactRoot, turnId);
+  await Deno.mkdir(runRoot, { recursive: true });
+  await Deno.writeTextFile(
+    join(runRoot, "transcript.json"),
+    JSON.stringify(transcript),
+  );
+  await Deno.writeTextFile(
+    join(runRoot, "run-report.json"),
+    JSON.stringify({
+      finalAssistantText: transcript.slice(firstGeneratedIndex).findLast(
+        (message) => message.role === "assistant",
+      )?.content ?? "",
+      timeline: transcript.map((message, transcriptIndex) => ({
+        kind: "transcript_message",
+        transcriptIndex,
+        role: message.role,
+        ...(transcriptIndex >= firstGeneratedIndex ? { modelTurn: 1 } : {}),
+      })),
+    }),
+  );
+};
 
 describe("console/server", () => {
   let server: ConsoleServer;
@@ -238,6 +306,61 @@ describe("console/server", () => {
     };
   };
 
+  /** Reads one live completed event backed by its durable run transcript. */
+  const liveTurnResult = async (
+    messages: readonly HarnessTranscriptMessage[],
+  ): Promise<unknown> => {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-console-result-event-",
+    });
+    try {
+      const resultConfig = resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+          "--artifact-root",
+          artifactRoot,
+        ],
+        {},
+        "/console",
+      );
+      const resultServer = new ConsoleServer(
+        resultConfig,
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            basePromptLoopOptions: { artifactRoot },
+            createPromptLoop: artifactLoop(messages),
+            now: advancingClock(),
+            onEvent,
+            runIdForTurn: (_sessionId, turnId) => turnId,
+          }),
+        undefined,
+        () => Promise.resolve(),
+      );
+      const page = await resultServer.handle(getRequest("/"));
+      await page.body?.cancel();
+      const resultCookie = page.headers.get("set-cookie")!.split(";")[0];
+      const response = await resultServer.handle(getRequest(
+        "/api/events?afterSequence=0",
+        { cookie: resultCookie },
+      ));
+      const startedResponse = await resultServer.handle(
+        jsonRequest("/api/task", { text: "track my books" }, {
+          cookie: resultCookie,
+        }),
+      );
+      expect(startedResponse.status).toBe(200);
+      return (await envelopesUntil(response, "turn_completed")).at(-1)!.event
+        .result;
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  };
+
   const envelope = (
     sequence: number,
     event: HarnessChatStructuredEvent,
@@ -280,6 +403,9 @@ describe("console/server", () => {
       expect(serviceOptions.basePromptLoopOptions?.skillsSh).toEqual({
         baseUrl: "https://registry.example",
       });
+      expect(serviceOptions.runIdForTurn?.("session-1", "turn-1")).toBe(
+        "turn-1",
+      );
       expect(consoleChatPolicy(false, true).allowedToolIds).toContain(
         "search_skills",
       );
@@ -563,6 +689,302 @@ describe("console/server", () => {
     });
   });
 
+  describe("GET /api/policy", () => {
+    it("returns what a session started here would run under, before any session exists", async () => {
+      const response = await server.handle(
+        getRequest("/api/policy", { cookie }),
+      );
+
+      expect(response.status).toBe(200);
+      const policy = consoleChatPolicy(false, false);
+      expect(await response.json()).toEqual({
+        systemPromptSha256: null,
+        allowedToolIds: [...policy.allowedToolIds],
+        allowedSubagentProfiles: [...policy.allowedSubagentProfiles],
+        fabricSpace: config().fabricSession.space,
+        artifactRoot: config().artifactRoot,
+        sessionDbPath: null,
+      });
+    });
+
+    it("answers 403 without the token, as the route carrying the same policy on a session does", async () => {
+      const response = await server.handle(getRequest("/api/policy"));
+
+      expect(response.status).toBe(403);
+    });
+  });
+
+  describe("GET /api/health", () => {
+    it("reports the configured Fabric API and unverified session liveness without a token", async () => {
+      const response = await server.handle(getRequest("/api/health"));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        ok: true,
+        fabricApiUrl: config().fabricSession.apiUrl,
+        fabricSession: "unverified",
+      });
+    });
+
+    it("answers 403 when the request names another host", async () => {
+      const response = await server.handle(
+        getRequest("/api/health", { host: "evil.test:8100" }),
+      );
+
+      expect(response.status).toBe(403);
+    });
+  });
+
+  describe("GET /api/turns/<turnId>/result", () => {
+    it("returns named errors for malformed and unknown turn paths", async () => {
+      const malformedRoute = await server.handle(getRequest(
+        "/api/turns/not-a-result",
+        { cookie },
+      ));
+      expect(malformedRoute.status).toBe(404);
+
+      const malformedEncoding = await server.handle(getRequest(
+        "/api/turns/%/result",
+        { cookie },
+      ));
+      expect(malformedEncoding.status).toBe(404);
+
+      const unknownTurn = await server.handle(getRequest(
+        "/api/turns/turn-nobody-started/result",
+        { cookie },
+      ));
+      expect(unknownTurn.status).toBe(404);
+      expect(await unknownTurn.json()).toEqual({
+        code: "turn_not_found",
+        error: "turn turn-nobody-started was not found",
+      });
+    });
+
+    it("returns a named error when completed-turn artifacts are unavailable", async () => {
+      const started = await startTask({ text: "track my books" });
+
+      const response = await server.handle(getRequest(
+        `/api/turns/${started.turnId}/result`,
+        { cookie },
+      ));
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({
+        code: "turn_result_unavailable",
+        error: `result for turn ${started.turnId} is unavailable`,
+      });
+    });
+
+    it("returns the durable result of a completed turn", async () => {
+      const artifactRoot = await Deno.makeTempDir({
+        prefix: "cf-harness-console-result-route-",
+      });
+      try {
+        const resultConfig = resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            "console-test",
+            "--session-db",
+            "none",
+            "--artifact-root",
+            artifactRoot,
+          ],
+          {},
+          "/console",
+        );
+        const resultServer = new ConsoleServer(
+          resultConfig,
+          (onEvent) =>
+            new HarnessInteractiveChatService({
+              createPromptLoop: answeringLoop,
+              now: advancingClock(),
+              onEvent,
+            }),
+          undefined,
+          () => Promise.resolve(),
+        );
+        const page = await resultServer.handle(getRequest("/"));
+        await page.body?.cancel();
+        const resultCookie = page.headers.get("set-cookie")!.split(";")[0];
+        const startedResponse = await resultServer.handle(
+          jsonRequest("/api/task", { text: "track my books" }, {
+            cookie: resultCookie,
+          }),
+        );
+        const started = await startedResponse.json();
+        await resultServer.service.waitForTurn(
+          started.sessionId,
+          started.turnId,
+        );
+        await writeTurnTranscript(artifactRoot, started.turnId, [
+          {
+            role: "tool",
+            toolCallId: "call-1",
+            toolName: "assign_slug",
+            content: JSON.stringify({
+              outputId: "run:assign_slug:1",
+              status: "ok",
+              slug: "reading-list",
+              url: "http://localhost:8000/console-test/reading-list",
+            }),
+          },
+          { role: "assistant", content: "built it" },
+        ]);
+
+        const response = await resultServer.handle(getRequest(
+          `/api/turns/${started.turnId}/result`,
+          { cookie: resultCookie },
+        ));
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+          pieces: [{
+            slug: "reading-list",
+            url: "http://localhost:8000/console-test/reading-list",
+          }],
+          spaceName: "console-test",
+          finalText: "built it",
+        });
+      } finally {
+        await Deno.remove(artifactRoot, { recursive: true });
+      }
+    });
+
+    it("returns a completed turn after its session is restored", async () => {
+      const artifactRoot = await Deno.makeTempDir({
+        prefix: "cf-harness-console-result-restored-",
+      });
+      const store = await openSqliteHarnessChatSessionStore({
+        url: toFileUrl(join(artifactRoot, "sessions.sqlite")),
+      });
+      try {
+        const resultConfig = resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            "console-test",
+            "--session-db",
+            "none",
+            "--artifact-root",
+            artifactRoot,
+          ],
+          {},
+          "/console",
+        );
+        const createService = (onEvent: HarnessInteractiveChatEventListener) =>
+          new HarnessInteractiveChatService({
+            basePromptLoopOptions: { artifactRoot },
+            createPromptLoop: artifactLoop([
+              { role: "assistant", content: "restored result" },
+            ]),
+            onEvent,
+            runIdForTurn: (_sessionId, turnId) => turnId,
+            sessionStore: store,
+          });
+        const firstServer = new ConsoleServer(
+          resultConfig,
+          createService,
+          undefined,
+          () => Promise.resolve(),
+        );
+        const firstPage = await firstServer.handle(getRequest("/"));
+        await firstPage.body?.cancel();
+        const firstCookie = firstPage.headers.get("set-cookie")!.split(";")[0];
+        const startedResponse = await firstServer.handle(
+          jsonRequest("/api/task", { text: "persist this turn" }, {
+            cookie: firstCookie,
+          }),
+        );
+        const started = await startedResponse.json();
+        await firstServer.service.waitForTurn(
+          started.sessionId,
+          started.turnId,
+        );
+
+        const restoredServer = new ConsoleServer(
+          resultConfig,
+          createService,
+          undefined,
+          () => Promise.resolve(),
+        );
+        await restoredServer.service.initializeFromStore();
+        const restoredPage = await restoredServer.handle(getRequest("/"));
+        await restoredPage.body?.cancel();
+        const restoredCookie = restoredPage.headers.get("set-cookie")!.split(
+          ";",
+        )[0];
+
+        const response = await restoredServer.handle(getRequest(
+          `/api/turns/${started.turnId}/result`,
+          { cookie: restoredCookie },
+        ));
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+          pieces: [],
+          spaceName: "console-test",
+          finalText: "restored result",
+        });
+      } finally {
+        store.close();
+        await Deno.remove(artifactRoot, { recursive: true });
+      }
+    });
+
+    it("returns a named error for a turn that has not completed", async () => {
+      let finish: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const waitingServer = new ConsoleServer(
+        config(),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: () => ({
+              runTranscript: async (options) => {
+                await gate;
+                return await answeringLoop({} as never).runTranscript(options);
+              },
+            }),
+            now: advancingClock(),
+            onEvent,
+          }),
+        undefined,
+        () => Promise.resolve(),
+      );
+      const page = await waitingServer.handle(getRequest("/"));
+      await page.body?.cancel();
+      const waitingCookie = page.headers.get("set-cookie")!.split(";")[0];
+      const startedResponse = await waitingServer.handle(
+        jsonRequest("/api/task", { text: "keep working" }, {
+          cookie: waitingCookie,
+        }),
+      );
+      const started = await startedResponse.json();
+      try {
+        const response = await waitingServer.handle(getRequest(
+          `/api/turns/${started.turnId}/result`,
+          { cookie: waitingCookie },
+        ));
+
+        expect(response.status).toBe(409);
+        expect(await response.json()).toEqual({
+          code: "turn_not_completed",
+          error: `turn ${started.turnId} has not completed`,
+        });
+      } finally {
+        finish!();
+        await waitingServer.service.waitForTurn(
+          started.sessionId,
+          started.turnId,
+        );
+      }
+    });
+  });
+
   describe("POST /api/task", () => {
     it("starts a follow-up turn in the session the request names", async () => {
       const started = await startTask({ text: "track my books" });
@@ -620,6 +1042,53 @@ describe("console/server", () => {
         "assistant_completed",
         "turn_completed",
       ]);
+    });
+
+    it("adds the durable result to a completed turn", async () => {
+      expect(
+        await liveTurnResult([
+          {
+            role: "assistant",
+            content: "",
+            toolCalls: [{
+              id: "call-1",
+              type: "function",
+              function: { name: "assign_slug", arguments: "{}" },
+            }],
+          },
+          {
+            role: "tool",
+            toolCallId: "call-1",
+            toolName: "assign_slug",
+            content: JSON.stringify({
+              outputId: "run:assign_slug:1",
+              status: "ok",
+              slug: "reading-list",
+              url: "http://localhost:8000/console-test/reading-list",
+            }),
+          },
+          { role: "assistant", content: "built it" },
+        ]),
+      ).toEqual({
+        pieces: [{
+          slug: "reading-list",
+          url: "http://localhost:8000/console-test/reading-list",
+        }],
+        spaceName: "console-test",
+        finalText: "built it",
+      });
+    });
+
+    it("adds `pieces: []` when a completed turn assigned no slug", async () => {
+      expect(
+        await liveTurnResult([
+          { role: "assistant", content: "calculated it" },
+        ]),
+      ).toEqual({
+        pieces: [],
+        spaceName: "console-test",
+        finalText: "calculated it",
+      });
     });
 
     it("replays only the session the stream names", async () => {
@@ -1004,7 +1473,7 @@ describe("console/server", () => {
 interface StreamedEnvelope {
   sessionId: string;
   sequence: number;
-  event: { kind: string };
+  event: { kind: string; result?: unknown };
 }
 
 /**

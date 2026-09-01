@@ -13,10 +13,10 @@
  * where it begins: a page anywhere on the web can drive requests at this
  * socket, and a hostile name that resolves to 127.0.0.1 can make these routes
  * same-origin. So every request has to name this server's own host, and every
- * `/api` route has to carry the per-process token the page is handed as a
- * `SameSite=Strict` cookie when it loads — a token a cross-origin caller
- * cannot send and a rebound origin cannot obtain. Do not put this behind a
- * public address.
+ * `/api` route except health has to carry the per-process token the page is
+ * handed as a `SameSite=Strict` cookie when it loads — a token a cross-origin
+ * caller cannot send and a rebound origin cannot obtain. Do not put this
+ * behind a public address.
  *
  * Two pieces of configuration are what make a run able to finish with a link
  * rather than a transcript. The fabric session — API URL, identity keyfile,
@@ -95,6 +95,7 @@ import type { CreateHarnessPromptLoopOptions } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
 import { FileSystemHarnessArtifactStore } from "../src/artifacts.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
+import { type ConsolePolicyReport, consolePolicyReport } from "./policy.ts";
 import {
   listConsoleRuns,
   readConsoleRun,
@@ -114,6 +115,11 @@ import {
   parseAfterSequence,
   pingFrame,
 } from "./sse.ts";
+import {
+  type ConsoleTurnCompletedEvent,
+  type ConsoleTurnResult,
+  readConsoleTurnResult,
+} from "./turn-result.ts";
 
 /** Loopback only. See the module comment on what does and does not protect. */
 const HOSTNAME = "127.0.0.1";
@@ -796,7 +802,7 @@ export class ConsoleServer {
    * write still lets the event through: the run stands as it is, and the page
    * is owed the turn either way.
    */
-  broadcast(envelope: HarnessChatEventEnvelope): void {
+  broadcast(envelope: HarnessChatEventEnvelope): Promise<void> {
     const snapshot = TERMINAL_TURN_EVENT_KINDS.has(envelope.event.kind)
       ? this.#recordCellLabels(envelope.sessionId).catch((error: unknown) => {
         console.error(
@@ -807,16 +813,56 @@ export class ConsoleServer {
       : undefined;
     if (snapshot === undefined && this.#heldFanOut === undefined) {
       this.#fanOut(envelope);
-      return;
+      return Promise.resolve();
     }
     const held = (this.#heldFanOut ?? Promise.resolve())
       .then(() => snapshot)
-      .then(() => this.#fanOut(envelope), () => this.#fanOut(envelope));
+      .then(
+        async () => this.#fanOut(await this.#consoleEnvelope(envelope)),
+        async () => this.#fanOut(await this.#consoleEnvelope(envelope)),
+      );
     this.#heldFanOut = held;
     void held.finally(() => {
       if (this.#heldFanOut === held) {
         this.#heldFanOut = undefined;
       }
+    });
+    return held;
+  }
+
+  async #consoleEnvelope(
+    envelope: HarnessChatEventEnvelope,
+  ): Promise<HarnessChatEventEnvelope> {
+    if (envelope.event.kind !== "turn_completed") {
+      return envelope;
+    }
+    const result = await this.#readTurnResult(
+      envelope.sessionId,
+      envelope.event.turnId,
+    ) ?? {
+      pieces: [],
+      spaceName: this.#config.fabricSession.space,
+      finalText: envelope.event.finalText ?? "",
+    };
+    const event: ConsoleTurnCompletedEvent = {
+      ...envelope.event,
+      result,
+    };
+    return {
+      ...envelope,
+      event,
+    };
+  }
+
+  async #readTurnResult(
+    sessionId: string,
+    turnId: string,
+  ): Promise<ConsoleTurnResult | undefined> {
+    const [session] = this.#service.status(sessionId).sessions;
+    return await readConsoleTurnResult({
+      artifactRoot: session?.artifactRoot ?? this.#config.artifactRoot,
+      turnId,
+      spaceName: this.#config.fabricSession.space,
     });
   }
 
@@ -908,6 +954,13 @@ export class ConsoleServer {
     if (refusal !== undefined) {
       return refusal;
     }
+    if (request.method === "GET" && url.pathname === "/api/health") {
+      return Response.json({
+        ok: true,
+        fabricApiUrl: this.#config.fabricSession.apiUrl,
+        fabricSession: "unverified",
+      });
+    }
     if (request.method === "GET" && ASSET_PATH.test(url.pathname)) {
       const response = await this.#asset(url.pathname);
       response.headers.set(
@@ -942,6 +995,14 @@ export class ConsoleServer {
         ...this.#service.status(url.searchParams.get("sessionId") ?? undefined),
       });
     }
+    if (request.method === "GET" && url.pathname === "/api/policy") {
+      return Response.json(this.#policy());
+    }
+    if (
+      request.method === "GET" && url.pathname.startsWith("/api/turns/")
+    ) {
+      return await this.#turnResult(url);
+    }
     if (request.method === "GET" && url.pathname === "/api/events") {
       return this.#events(url);
     }
@@ -961,9 +1022,9 @@ export class ConsoleServer {
    * the request is one this server's own page made. The `Host` gate comes
    * first and covers every route, including the page: a request that arrived
    * under another name was addressed to somewhere else, whatever it asks for.
-   * The token then gates `/api` whole, reads included, because a read here
-   * hands out run artifacts and a write starts an effectful turn under the
-   * local fabric identity.
+   * The token then gates the API's artifact reads and writes. Health carries
+   * configuration and an explicitly unverified liveness value, so it keeps
+   * the host and origin gates and needs no token.
    */
   #refuse(request: Request, url: URL): Response | undefined {
     const port = this.#config.port;
@@ -981,6 +1042,9 @@ export class ConsoleServer {
     if (origin !== null && !allowedOrigins(port).includes(origin)) {
       return new Response("forbidden", { status: 403 });
     }
+    if (request.method === "GET" && url.pathname === "/api/health") {
+      return undefined;
+    }
     if (
       cookieValue(request.headers.get("cookie"), TOKEN_COOKIE) !== this.#token
     ) {
@@ -995,6 +1059,41 @@ export class ConsoleServer {
       return new Response("unsupported media type", { status: 415 });
     }
     return undefined;
+  }
+
+  /** Returns one completed turn's durable external result. */
+  async #turnResult(url: URL): Promise<Response> {
+    const match = /^\/api\/turns\/([^/]+)\/result$/.exec(url.pathname);
+    if (match === null) {
+      return new Response("not found", { status: 404 });
+    }
+    let turnId: string;
+    try {
+      turnId = decodeURIComponent(match[1]);
+    } catch {
+      return new Response("not found", { status: 404 });
+    }
+    const turns = await this.#service.listTurnsForReplay({});
+    const turn = turns.turns.find((entry) => entry.turn.turnId === turnId);
+    if (turn === undefined) {
+      return Response.json({
+        code: "turn_not_found",
+        error: `turn ${turnId} was not found`,
+      }, { status: 404 });
+    }
+    if (turn.turn.status !== "completed") {
+      return Response.json({
+        code: "turn_not_completed",
+        error: `turn ${turnId} has not completed`,
+      }, { status: 409 });
+    }
+    const result = await this.#readTurnResult(turn.sessionId, turnId);
+    return result === undefined
+      ? Response.json({
+        code: "turn_result_unavailable",
+        error: `result for turn ${turnId} is unavailable`,
+      }, { status: 404 })
+      : Response.json(result);
   }
 
   /**
@@ -1090,6 +1189,38 @@ export class ConsoleServer {
   }
 
   /**
+   * The policy every new session here is started with. One expression rather
+   * than two because `/api/policy` answers for the sessions `/api/task`
+   * creates, and a client that acts on the answer is owed the same object the
+   * next session actually gets.
+   */
+  #sessionPolicy(): HarnessChatPolicy {
+    return consoleChatPolicy(
+      this.#config.patternIndex !== undefined,
+      this.#config.skillsSh !== undefined,
+    );
+  }
+
+  /**
+   * What a new session would run under. The seeded system prompt crosses as a
+   * digest, so a client can check that this console holds the prompt it was
+   * told to measure without the prompt's text leaving the process.
+   */
+  #policy(): ConsolePolicyReport {
+    return consolePolicyReport({
+      policy: this.#sessionPolicy(),
+      fabricSpace: this.#config.fabricSession.space,
+      artifactRoot: this.#config.artifactRoot,
+      ...(this.#config.systemPrompt !== undefined
+        ? { systemPrompt: this.#config.systemPrompt }
+        : {}),
+      ...(this.#config.sessionDbPath !== undefined
+        ? { sessionDbPath: this.#config.sessionDbPath }
+        : {}),
+    });
+  }
+
+  /**
    * Starts a turn, in the session the request names or in a new one. One
    * request rather than two because a session with no turn is not a thing
    * anyone asked for, and the page needs both identifiers before it can
@@ -1123,10 +1254,7 @@ export class ConsoleServer {
         workspace: { hostPath: this.#config.workspacePath },
         model: this.#config.model,
         artifactRoot: this.#config.artifactRoot,
-        policy: consoleChatPolicy(
-          this.#config.patternIndex !== undefined,
-          this.#config.skillsSh !== undefined,
-        ),
+        policy: this.#sessionPolicy(),
       });
       if (!session.ok) {
         return chatErrorResponse(session);
@@ -1284,12 +1412,12 @@ export class ConsoleServer {
     this.#service.listEventsForReplay({
       ...(sessionId !== undefined ? { sessionId } : {}),
       afterSequence,
-    }).then((replay) => {
+    }).then(async (replay) => {
       for (const envelope of envelopesAfter(replay.events, afterSequence)) {
-        this.#write(client, envelope);
+        this.#write(client, await this.#consoleEnvelope(envelope));
       }
       for (const envelope of envelopesAfter(client.pending, afterSequence)) {
-        this.#write(client, envelope);
+        this.#write(client, await this.#consoleEnvelope(envelope));
       }
       client.pending.length = 0;
       client.ready = true;
@@ -1386,6 +1514,10 @@ export const createConsoleInteractiveServiceOptions = (
     ? { credentialOwner: modelOptions.credentialOwner }
     : {}),
   ...(sessionStore !== undefined ? { sessionStore } : {}),
+  // Console turn ids are process-generated UUIDs and name the durable run
+  // directory that its result route reads. Other interactive transports keep
+  // their existing run-id policy.
+  runIdForTurn: (_sessionId, turnId) => turnId,
   onEvent,
 });
 

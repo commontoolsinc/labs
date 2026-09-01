@@ -129,7 +129,7 @@ echo -n "Updated content" > /tmp/cf/my-space/pieces/my-app/input/title
 
 # 6. Iterate on the pattern and retain its tests
 deno task cf piece setsrc packages/patterns/my-app/main.tsx \
-  --test packages/patterns/my-app/main.test.tsx --piece bafyreia...
+  --test packages/patterns/my-app/main.test.tsx --cell bafyreia...
 # => Result updates in both browser AND filesystem
 ```
 
@@ -182,7 +182,7 @@ against FUSE-T. The loop cannot detect a dead transport, which stalls it
 indefinitely; `.status` at the mount root reports `connection.disconnected`.
 
 For a subscription rather than a poll, go through the runtime instead of the
-filesystem: `cf piece render --piece <id> --watch` subscribes to the cell and
+filesystem: `cf piece render --cell <id> --watch` subscribes to the cell and
 re-renders on each change. That surface renders UI, so it fits watching a piece
 render rather than reading a single scalar.
 

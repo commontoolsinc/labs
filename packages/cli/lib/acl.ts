@@ -5,9 +5,21 @@ import {
   type Capability,
   isACLUser,
 } from "@commonfabric/memory/acl";
-import { loadPieces, type SpaceConfig } from "./piece.ts";
+import {
+  loadPieces,
+  type PieceResolutionDeps,
+  type SpaceConfig,
+} from "./piece.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
 import { noteWroteTo } from "./write-receipt.ts";
+
+/**
+ * The connection an ACL operation runs over. It carries the loader alone: an
+ * ACL document is addressed by the space DID, so nothing here resolves a
+ * piece address and a `resolvePieceAddress` accepted alongside would be a
+ * promise no function keeps.
+ */
+export type AclConnectionDeps = Pick<PieceResolutionDeps, "loadPieces">;
 
 // Open the space and hand an ACLManager to `run`. The ACL document is
 // addressed by the space DID and read through the ACLManager, so the space
@@ -16,9 +28,16 @@ async function withAcl<T>(
   config: SpaceConfig,
   run: (acl: ACLManager) => Promise<T>,
   options: { writes?: boolean } = {},
+  deps: AclConnectionDeps = {},
 ): Promise<T> {
-  const pieces = await loadPieces({ ...config, deferSpaceCellSync: true });
-  await using runtime = pieces.runtime;
+  const pieces = await (deps.loadPieces ?? loadPieces)({
+    ...config,
+    deferSpaceCellSync: true,
+  });
+  const runtime = pieces.runtime;
+  // A connection opened here is closed here. One the caller supplied outlives
+  // the call, and closing its runtime would take down a socket still in use.
+  await using _opened = deps.loadPieces ? undefined : runtime;
   const space = pieces.getSpace();
   const result = await run(new ACLManager(runtime, space));
   // Before the authorization check below, which throws on a denial recorded
@@ -37,27 +56,30 @@ export async function setAclEntry(
   config: SpaceConfig,
   user: string,
   capability: Capability,
+  deps: AclConnectionDeps = {},
 ): Promise<void> {
   const userDid = userToACLUser(user);
   await withAcl(config, (acl) => acl.set(userDid, capability), {
     writes: true,
-  });
+  }, deps);
 }
 
 // Remove an ACL entry for a DID
 export async function removeAclEntry(
   config: SpaceConfig,
   user: string,
+  deps: AclConnectionDeps = {},
 ): Promise<void> {
   const userDid = userToACLUser(user);
-  await withAcl(config, (acl) => acl.remove(userDid), { writes: true });
+  await withAcl(config, (acl) => acl.remove(userDid), { writes: true }, deps);
 }
 
 // Get the current ACL for a space
 export async function getAcl(
   config: SpaceConfig,
+  deps: AclConnectionDeps = {},
 ): Promise<ACL | null> {
-  return await withAcl(config, (acl) => acl.get());
+  return await withAcl(config, (acl) => acl.get(), {}, deps);
 }
 
 // Use "ANYONE" on the command line to map to "*"

@@ -32,6 +32,7 @@ const SQLITE_SUFFIX = ".sqlite";
 export type SpaceStoreInfo = {
   /** Canonical space DID (decoded from the on-disk filename). */
   space: string;
+
   sizeBytes: number;
   mtimeMs: number;
 };

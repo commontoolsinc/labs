@@ -1110,6 +1110,7 @@ export class PatternManager {
       }
       return { complete: true, sourceDocs, compiledDocs };
     };
+
     /** One full read attempt: the caller-named origin, then the FALLBACK
      * ORIGINS (see `#persistedClosureSpaces`): the caller-named origin is a
      * provenance heuristic and can be closure-less through no fault of any
@@ -1159,6 +1160,7 @@ export class PatternManager {
       }
       return primary;
     };
+
     let origin = await readOriginWithFallbacks();
     if (!origin.complete) {
       // GEOMETRY 3 (verification-coverage.md OW45; direct-CI probe 4, run

@@ -5,6 +5,7 @@
  */
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { TILE_LAYOUT_FIXTURES } from "./tile-layout-fixtures.ts";
 import { runSource, type Ctx, type Run } from "./types.ts";
 import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO } from "./config.ts";
 import { labsCi, loomCi } from "./tiles/main-build.ts";
@@ -102,17 +103,26 @@ Deno.test("labs ci trust: only first-attempt success counts as green", async () 
 Deno.test(
   "labs ci trust grid: every run in the latest 160-run window has a cell",
   async () => {
+    const createdAt = (index: number) => new Date(index * 1_000).toISOString();
     const runs = [
-      run({ status: "in_progress", conclusion: null }),
-      ...Array.from({ length: 159 }, () => run({ conclusion: "success" })),
-      run({ conclusion: "failure" }),
+      run({
+        status: "in_progress",
+        conclusion: null,
+        created_at: createdAt(160),
+      }),
+      ...Array.from({ length: 159 }, (_, index) =>
+        run({
+          conclusion: "success",
+          created_at: createdAt(159 - index),
+        })),
+      run({ conclusion: "failure", created_at: createdAt(0) }),
     ];
     const view = await labsCiTrust.collect(ctx(runs));
     const cells = (view.extra ?? "").match(/class="cell"/g)?.length ?? 0;
     assertEquals(cells, 160);
     assertStringIncludes(
       view.extra ?? "",
-      "grid-template-columns:repeat(40,1fr)",
+      'class="cells labeled"',
     );
     assertEquals(
       view.sub,
@@ -147,6 +157,32 @@ Deno.test("labs ci trust grid: cell colors match trust scoring", async () => {
     colors.filter((color) => color === "var(--status-unknown)").length,
     2,
   );
+});
+
+Deno.test("labs ci trust grid: duration spans the displayed runs", async () => {
+  const now = Date.now();
+  const runs = [
+    run({ created_at: new Date(now).toISOString() }),
+    run({ created_at: new Date(now - 2 * 86_400_000).toISOString() }),
+    run({ created_at: new Date(now - 5 * 86_400_000).toISOString() }),
+  ];
+  const view = await labsCiTrust.collect(ctx(runs));
+  assertEquals(view.duration, 5 * 86_400_000);
+  assertStringIncludes(view.extra ?? "", 'class="cells labeled"');
+
+  const malformed = await labsCiTrust.collect(ctx([
+    runs[0],
+    run({ created_at: "not a timestamp" }),
+    runs[2],
+  ]));
+  assertEquals(malformed.duration, 0);
+  assert(!(malformed.extra ?? "").includes("cells labeled"));
+
+  const window = Array.from({ length: 161 }, (_, i) =>
+    run({ created_at: new Date(now - i * 86_400_000).toISOString() })
+  );
+  const limited = await labsCiTrust.collect(ctx(window));
+  assertEquals(limited.duration, 159 * 86_400_000);
 });
 
 Deno.test("ci-duration window: the 6h window when it has >= 20 runs, else the most recent 20", async () => {
@@ -341,10 +377,14 @@ Deno.test("recent runs: duration opens every successful run for the commit", asy
 
 Deno.test("tile labels: the labs/loom ci family is renamed and paired", async () => {
   const one = ctx([run({ conclusion: "success" })]);
+  const labsTrust = await labsCiTrust.collect(one);
+  const loomTrust = await loomCiTrust.collect(one);
   assertEquals((await labsCi.collect(one)).label, "labs ci");
   assertEquals((await loomCi.collect(one)).label, "loom ci");
-  assertEquals((await labsCiTrust.collect(one)).label, "labs ci trust");
-  assertEquals((await loomCiTrust.collect(one)).label, "loom ci trust");
+  assertEquals(labsTrust.label, "labs ci trust");
+  assertEquals(loomTrust.label, "loom ci trust");
+  assertEquals(labsTrust.alignChartBottom, true);
+  assertEquals(loomTrust.alignChartBottom, true);
   assertEquals((await labsCiDuration.collect(one)).label, "labs ci duration");
   assertEquals((await loomCiDuration.collect(one)).label, "loom ci duration");
 });
@@ -634,4 +674,15 @@ Deno.test("registry: unique ids and positive intervals", () => {
   for (const t of TILES) {
     assert(t.intervalMs > 0, `${t.id} needs a positive intervalMs`);
   }
+});
+
+Deno.test("layout fixtures cover every registered tile in registry order", () => {
+  assertEquals(
+    TILE_LAYOUT_FIXTURES.map(({ id }) => id),
+    TILES.map(({ id }) => id),
+  );
+  assertEquals(
+    TILE_LAYOUT_FIXTURES.filter(({ wide }) => wide).map(({ id }) => id),
+    TILES.filter(({ wide }) => wide).map(({ id }) => id),
+  );
 });

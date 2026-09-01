@@ -25,6 +25,7 @@ import {
   HANDLE_TOKEN_ALPHABET,
   HANDLE_TOKEN_PATTERN,
   HARNESS_HANDLE_TABLE_TYPE,
+  type HarnessHandleCapability,
   type HarnessHandleEntry,
   type HarnessHandleTable,
   MIN_HANDLE_TOKEN_SUFFIX_LENGTH,
@@ -147,6 +148,9 @@ export interface MintAddressHandleOptions {
   /** Digest seam; defaults to SHA-256. */
   hasher?: HandleTokenHasher;
 
+  /** Restricts materialization to one capability-typed consumer. */
+  capability?: HarnessHandleCapability;
+
   /**
    * Shape of the value at the address, when the caller already knows it out of
    * its OWN work — the result schema of a pattern this harness compiled and
@@ -187,9 +191,14 @@ export const mintAddressHandle = async (
   const link = normalizeHandleRef(refText);
   const key = addressKey(link);
   const schema = options.schema;
+  const capability = options.capability;
   const existing = table.entries.find((entry) => entry.addressKey === key);
   if (existing !== undefined) {
-    if (existing.schema !== undefined || schema === undefined) {
+    const nextCapability = existing.capability ?? capability;
+    if (
+      (existing.schema !== undefined || schema === undefined) &&
+      existing.capability === nextCapability
+    ) {
       return { table, token: existing.token };
     }
     return {
@@ -197,7 +206,15 @@ export const mintAddressHandle = async (
         ...table,
         entries: table.entries.map((entry) =>
           entry === existing
-            ? { ...entry, schema, schemaSource: "harness" as const }
+            ? {
+              ...entry,
+              ...(entry.schema === undefined && schema !== undefined
+                ? { schema, schemaSource: "harness" as const }
+                : {}),
+              ...(nextCapability !== undefined
+                ? { capability: nextCapability }
+                : {}),
+            }
             : entry
         ),
       },
@@ -221,6 +238,7 @@ export const mintAddressHandle = async (
     kind: "address",
     ref: canonicalRef(link),
     addressKey: key,
+    ...(capability !== undefined ? { capability } : {}),
     ...(schema !== undefined
       ? { schema, schemaSource: "harness" as const }
       : {}),
@@ -405,7 +423,10 @@ const swapTokensInString = (
 ): string =>
   text.replace(
     new RegExp(HANDLE_TOKEN_PATTERN.source, "g"),
-    (token) => resolveHandleToken(table, token)?.ref ?? token,
+    (token) => {
+      const entry = resolveHandleToken(table, token);
+      return entry?.capability === undefined ? entry?.ref ?? token : token;
+    },
   );
 
 /**
@@ -530,6 +551,15 @@ export const assertValidHarnessHandleTable = (
     if (entry.schemaSource !== undefined && entry.schema === undefined) {
       throw new Error(
         `invalid handle table: entry \`${entry.token}\` claims schema provenance \`${entry.schemaSource}\` with no schema`,
+      );
+    }
+    if (
+      entry.capability !== undefined && entry.capability !== "skill-context"
+    ) {
+      throw new Error(
+        `invalid handle table: entry \`${entry.token}\` has an unknown capability \`${
+          String(entry.capability)
+        }\``,
       );
     }
     if (tokens.has(entry.token)) {

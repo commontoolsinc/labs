@@ -28,6 +28,12 @@ export interface PatternIndexSignals {
   score: number;
 }
 
+/** Whether a published argument schema classifies a hit as reusable or whole. */
+export type PatternIndexPatternKind = "part" | "app";
+
+/** Evidence tier the deployed index computed from recorded run outcomes. */
+export type PatternIndexQuality = "penalized" | "unproven" | "proven";
+
 /** One hit from `searchPatterns`. Carries metadata and never source. */
 export interface PatternIndexSearchResult {
   patternId: string;
@@ -38,8 +44,14 @@ export interface PatternIndexSearchResult {
   dependencies: readonly string[];
   signals?: PatternIndexSignals;
 
+  /** Whether the published argument schema classifies this as a part or app. */
+  kind: PatternIndexPatternKind;
+
+  /** Evidence tier computed by the index from recorded run outcomes. */
+  quality: PatternIndexQuality;
+
   /**
-   * With a text query: how many of its terms this hit carries, out of
+   * With a text query: how many stopword-free terms this hit carries, out of
    * `queryTerms`. Text matching is disjunctive and ranked, so a hit is not a
    * claim that everything matched — the ratio is what says how close.
    */

@@ -36,12 +36,16 @@ export type PresenceFailureCategory =
 export type PresencePublication = {
   /** Plain-text participant label. */
   name: string;
+
   /** Whether the editor currently owns browser focus. */
   focused: boolean;
+
   /** Confirmed Memory coordinate used by the selection. */
   cursor: PresenceCursor;
+
   /** Selection in confirmed coordinates, or `null` until one is established. */
   selection: PresenceSelection;
+
   /** Whether local pending changes were involved in deriving the selection. */
   basis: ParticipantPresence["basis"];
 };
@@ -50,6 +54,7 @@ export type PresencePublication = {
 export type PresenceSnapshot = {
   /** Participant id assigned to this WebSocket by the room. */
   selfParticipantId: string;
+
   /** Latest states for the room's other live participants. */
   participants: ParticipantPresence[];
 };
@@ -64,20 +69,27 @@ export type PresenceServerMessage =
 export interface PresenceSocket {
   /** Current WebSocket ready-state value. */
   readonly readyState: number;
+
   /** Sends one UTF-8 JSON protocol frame. */
   send(data: string): void;
+
   /** Closes the socket with an optional protocol code and public reason. */
   close(code?: number, reason?: string): void;
-  /** Registers an open-event listener. */
+
+  /**
+   * Registers a listener for one socket event, typed to the event that name
+   * carries.
+   */
+  // Open.
   addEventListener(type: "open", listener: (event: Event) => void): void;
-  /** Registers a message-event listener. */
+  // Message.
   addEventListener(
     type: "message",
     listener: (event: MessageEvent) => void,
   ): void;
-  /** Registers an error-event listener. */
+  // Error.
   addEventListener(type: "error", listener: (event: Event) => void): void;
-  /** Registers a close-event listener. */
+  // Close.
   addEventListener(type: "close", listener: (event: CloseEvent) => void): void;
 }
 
@@ -85,16 +97,22 @@ export interface PresenceSocket {
 export type CopresenceSessionOptions = {
   /** WebSocket origin or base URL for the co-presence service. */
   serviceUrl: string;
+
   /** Opaque high-entropy room identifier. */
   room: string;
+
   /** Optional WebSocket factory used by tests and alternate browser hosts. */
   createSocket?: (url: string) => PresenceSocket;
+
   /** Optional animation-frame scheduler used to coalesce publications. */
   scheduleFrame?: (callback: FrameRequestCallback) => number;
+
   /** Cancels a frame scheduled through `scheduleFrame`. */
   cancelFrame?: (handle: number) => void;
+
   /** Receives one strictly validated server message. */
   onMessage: (message: PresenceServerMessage) => void;
+
   /** Receives the first terminal failure category for this session. */
   onFailure: (category: PresenceFailureCategory) => void;
 };

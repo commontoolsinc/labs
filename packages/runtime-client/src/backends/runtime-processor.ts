@@ -99,6 +99,7 @@ import {
   resetAllCountBaselines,
   resetAllTimingBaselines,
 } from "@commonfabric/utils/logger";
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 import {
@@ -187,6 +188,7 @@ import {
   RequestType,
   type ResolveEventAttentionRequest,
   type ResolveSpaceNameRequest,
+  type RuntimeSecurityContext,
   type SetActionRunTraceEnabledRequest,
   type SetBreakpointsRequest,
   type SetLoggerEnabledRequest,
@@ -220,12 +222,24 @@ import {
 } from "@/protocol/mod.ts";
 
 import type { VDomOp } from "@/protocol/types.ts";
+import {
+  normalizeOrigin,
+  normalizeSpaceHostMap,
+  securityContextDifferences,
+} from "@/shared/security-context.ts";
 import { cellRefToKey, describeFailure } from "@/shared/utils.ts";
 import { postToClient } from "./post-to-client.ts";
 import {
   postContextualRuntimeError,
-  postRuntimeError,
+  runtimeErrorPost,
 } from "./runtime-error.ts";
+import {
+  type ClientId,
+  clientKeyPrefix,
+  clientScopedKey,
+  ownerClient,
+  type WorkerClient,
+} from "./worker-client.ts";
 import {
   assertFabricLoggerFlags,
   createCellRef,
@@ -625,6 +639,40 @@ export const hasExplicitSubscriptionSchema = (schema: unknown): boolean =>
     typeof schema === "object" && schema !== null &&
     Object.keys(schema).length > 0);
 
+/**
+ * Where a mount's render errors go: the client that mounted it, and no other.
+ *
+ * A render error belongs to the document showing the tree rather than to
+ * whichever client happens to own the worker, and a reconciler reports one
+ * from deep inside a render. Named here so that rule is one a test can state,
+ * the render failures that raise it being reachable only through a pattern.
+ */
+export function mountErrorSink(
+  client: WorkerClient,
+): (error: Error) => void {
+  return (error) => {
+    client.post(runtimeErrorPost(error));
+  };
+}
+
+export function securityContextFrom(
+  data: InitializationData,
+  identity: DID,
+): RuntimeSecurityContext {
+  return {
+    identity,
+    apiUrl: normalizeOrigin(data.apiUrl),
+    spaceHostMap: normalizeSpaceHostMap(data.spaceHostMap),
+    spaceDid: data.spaceDid,
+    experimental: data.experimental,
+    cfcEnforcementMode: data.cfcEnforcementMode,
+    cfcFlowLabels: data.cfcFlowLabels,
+    renderDeclassificationPolicy: data.renderDeclassificationPolicy,
+    renderConfidentialityCeiling: data.renderConfidentialityCeiling,
+    trustSnapshot: data.trustSnapshot,
+  };
+}
+
 type RuntimeOperationTarget = {
   capability: IOperationStorageCapability;
   address: OperationFieldAddress;
@@ -634,6 +682,12 @@ type RuntimeOperationSession = {
   cellKey: string;
   target: RuntimeOperationTarget;
   subscriptions: Set<string>;
+  /**
+   * The client that opened this session. A session id is a UUID its client
+   * minted, which keeps two clients from colliding but does not stop one
+   * naming another's -- so who may close it is recorded rather than assumed.
+   */
+  clientId: ClientId;
 };
 
 export class RuntimeProcessor {
@@ -652,10 +706,18 @@ export class RuntimeProcessor {
   private identity: Identity;
   private _isDisposed = false;
   private disposingPromise: Promise<void> | undefined;
+  // Cell subscriptions, by the subscribing client's scoped cell key. Two
+  // clients watching one cell are two subscriptions, so that one client's
+  // unsubscribe stops its own feed and no one else's.
   private subscriptions = new Map<string, Cancel>();
   private operationSubscriptions = new Map<
     string,
-    { cancel?: Cancel; cancelled: boolean; sessionKey?: string }
+    {
+      cancel?: Cancel;
+      cancelled: boolean;
+      sessionKey?: string;
+      client: WorkerClient;
+    }
   >();
   private operationSessions = new Map<string, RuntimeOperationSession>();
   private pieceSourceConfirmations = new Map<
@@ -663,13 +725,19 @@ export class RuntimeProcessor {
     { token: string; prepared: PreparedPieceSourceChange }
   >();
   private telemetry: RuntimeTelemetry;
+  // Whom this runtime acts as and under which enforcement configuration,
+  // fixed by the client that initialized it. A runtime carries exactly one,
+  // and every client attached to it is checked against this one.
+  readonly #securityContext: RuntimeSecurityContext;
   #telemetryEnabled = false;
   #intentOutcomeCancel: Cancel | undefined;
 
-  // VDOM mounts: mountId -> { reconciler, cancel }
+  // VDOM mounts, by the mounting client's scoped mount id. A mount id comes
+  // from a counter that starts at 1 in each client's own document, so the id
+  // alone names a mount only while there is one client.
   private vdomMounts = new Map<
-    number,
-    { reconciler: WorkerReconciler; cancel: Cancel }
+    string,
+    { reconciler: WorkerReconciler; cancel: Cancel; client: WorkerClient }
   >();
   private vdomBatchIdCounter = 0;
   // Render-boundary declassification policy applied to every mount's
@@ -695,6 +763,7 @@ export class RuntimeProcessor {
     initSpace: DID,
     identity: Identity,
     telemetry: RuntimeTelemetry,
+    securityContext: RuntimeSecurityContext,
   ) {
     this.runtime = runtime;
     this.cc = cc;
@@ -702,6 +771,7 @@ export class RuntimeProcessor {
     this.identity = identity;
     this.telemetry = telemetry;
     this.telemetry.addEventListener("telemetry", this.#onTelemetry);
+    this.#securityContext = securityContext;
   }
 
   static async initialize(data: InitializationData): Promise<RuntimeProcessor> {
@@ -824,6 +894,7 @@ export class RuntimeProcessor {
       space,
       identity,
       telemetry,
+      securityContextFrom(data, identity.did()),
     );
     // InitializationData crosses postMessage with no runtime validation, so a
     // typo'd host config or version-skewed peer must fail CLOSED, not open:
@@ -1011,6 +1082,86 @@ export class RuntimeProcessor {
 
   isDisposed(): boolean {
     return this._isDisposed;
+  }
+
+  /**
+   * Refuses an attach whose asserted security context is not this runtime's.
+   *
+   * One runtime is one signer under one enforcement configuration, so every
+   * document attached to it acts as the same principal with the same posture.
+   * A client asserting anything else is asking for a runtime this is not, and
+   * the two contexts are never merged: a merge would leave each document
+   * believing a posture the runtime does not hold. The refusal is the honest
+   * answer, and a second runtime is the remedy.
+   *
+   * @throws If any field of the asserted context differs from the running
+   *   one's. The message names every field that differs.
+   */
+  assertAttachable(asserted: RuntimeSecurityContext): void {
+    const differing = securityContextDifferences(
+      asserted,
+      this.#securityContext,
+    );
+    if (differing.length === 0) return;
+    const named = differing.map((field) => backtickQuote(field)).join(", ");
+    throw new Error(
+      "Attach refused: the asserted security context differs from the " +
+        `runtime's at ${named}.`,
+    );
+  }
+
+  /**
+   * Tears down everything one client owns, leaving the runtime and every other
+   * client's work running. This is what a client's departure costs: its cell
+   * and operation subscriptions stop, its VDOM trees unmount, and nothing else
+   * moves.
+   *
+   * The runtime itself is never touched here, however the departing client
+   * came to leave. Only {@link dispose} ends a runtime, and only the client
+   * that stood it up asks for that.
+   *
+   * `pieceSourceConfirmations` is deliberately not swept. It holds a two-phase
+   * confirmation for a PIECE, keyed by the piece rather than by a client, and
+   * its token is a UUID handed to whoever prepared the change -- so a
+   * departing client takes the only means of confirming its pending entry with
+   * it, and what is left is a token nobody holds, replaced the next time
+   * anyone prepares a change to that piece. Two clients preparing one piece's
+   * change do collide there, the second prepare invalidating the first's
+   * token; that is a refusal rather than a lost write, and it is the same
+   * collision two tabs have today.
+   */
+  disposeClient(client: WorkerClient): void {
+    const prefix = clientKeyPrefix(client);
+
+    for (const [key, cancel] of [...this.subscriptions]) {
+      if (!key.startsWith(prefix)) continue;
+      cancel();
+      this.subscriptions.delete(key);
+    }
+
+    for (
+      const [subscriptionId, subscription] of [
+        ...this.operationSubscriptions,
+      ]
+    ) {
+      if (subscription.client.id !== client.id) continue;
+      this.handleOperationUnsubscribe({
+        type: RequestType.OperationUnsubscribe,
+        subscriptionId,
+      }, client);
+    }
+
+    for (const [key, mount] of [...this.vdomMounts]) {
+      if (!key.startsWith(prefix)) continue;
+      mount.cancel();
+      mount.reconciler.unmount();
+      this.vdomMounts.delete(key);
+    }
+
+    for (const [sessionId, session] of [...this.operationSessions]) {
+      if (session.clientId !== client.id) continue;
+      this.operationSessions.delete(sessionId);
+    }
   }
 
   /**
@@ -1227,7 +1378,8 @@ export class RuntimeProcessor {
 
   private operationTarget(
     cell: CellGetRequest["cell"],
-    operationSessionId?: string,
+    operationSessionId: string | undefined,
+    client: WorkerClient,
   ) {
     if (
       operationSessionId !== undefined &&
@@ -1276,6 +1428,7 @@ export class RuntimeProcessor {
       cellKey,
       target,
       subscriptions: new Set<string>(),
+      clientId: client.id,
     };
     this.operationSessions.set(sessionKey, session);
     return { ...target, sessionKey, session };
@@ -1283,20 +1436,24 @@ export class RuntimeProcessor {
 
   async handleOperationCapabilities(
     request: OperationCapabilitiesRequest,
+    client: WorkerClient = ownerClient,
   ): Promise<OperationCapabilitiesResponse> {
     const { capability } = this.operationTarget(
       request.cell,
       request.operationSessionId,
+      client,
     );
     return { codecs: [...await capability.operationCodecs()] };
   }
 
   async handleOperationQuery(
     request: OperationQueryRequest,
+    client: WorkerClient = ownerClient,
   ): Promise<OperationFieldResponse> {
     const { capability, address } = this.operationTarget(
       request.cell,
       request.operationSessionId,
+      client,
     );
     const field = await capability.queryOperationField({
       ...address,
@@ -1307,10 +1464,12 @@ export class RuntimeProcessor {
 
   async handleOperationApply(
     request: OperationApplyRequest,
+    client: WorkerClient = ownerClient,
   ): Promise<OperationApplyResponse> {
     const { capability, address } = this.operationTarget(
       request.cell,
       request.operationSessionId,
+      client,
     );
     const resolution = await capability.applyOperation({
       op: "apply-op",
@@ -1328,6 +1487,7 @@ export class RuntimeProcessor {
 
   async handleOperationSubscribe(
     request: OperationSubscribeRequest,
+    client: WorkerClient = ownerClient,
   ): Promise<BooleanResponse> {
     if (this.operationSubscriptions.has(request.subscriptionId)) {
       return { value: false };
@@ -1335,13 +1495,19 @@ export class RuntimeProcessor {
     const { capability, address, sessionKey, session } = this.operationTarget(
       request.cell,
       request.operationSessionId,
+      client,
     );
+    // A subscription id is a UUID the client mints, so two clients never
+    // collide on one. What the owning client settles is where an update goes,
+    // and what a departing client takes with it.
     const subscription: {
       cancel?: Cancel;
       cancelled: boolean;
       sessionKey?: string;
+      client: WorkerClient;
     } = {
       cancelled: false,
+      client,
       ...(sessionKey === undefined ? {} : { sessionKey }),
     };
     this.operationSubscriptions.set(request.subscriptionId, subscription);
@@ -1357,7 +1523,7 @@ export class RuntimeProcessor {
             subscription
         ) return;
         queueMicrotask(() =>
-          postToClient({
+          client.post({
             type: NotificationType.OperationUpdate,
             subscriptionId: request.subscriptionId,
             field: field,
@@ -1392,10 +1558,12 @@ export class RuntimeProcessor {
 
   async handleOperationRelease(
     request: OperationReleaseRequest,
+    client: WorkerClient = ownerClient,
   ): Promise<BooleanResponse> {
     const { capability, address } = this.operationTarget(
       request.cell,
       request.operationSessionId,
+      client,
     );
     await capability.releaseOperationField({
       op: "release-op-field",
@@ -1408,11 +1576,18 @@ export class RuntimeProcessor {
 
   handleOperationUnsubscribe(
     request: OperationUnsubscribeRequest,
+    client: WorkerClient = ownerClient,
   ): BooleanResponse {
     const subscription = this.operationSubscriptions.get(
       request.subscriptionId,
     );
-    if (subscription === undefined) return { value: false };
+    // A subscription is its subscriber's to stop, and no one else's. The id
+    // is a UUID, so another client naming it is a client that came by it
+    // somehow rather than one that guessed it -- which is the case worth
+    // refusing.
+    if (subscription === undefined || subscription.client.id !== client.id) {
+      return { value: false };
+    }
     this.operationSubscriptions.delete(request.subscriptionId);
     subscription.cancelled = true;
     subscription.cancel?.();
@@ -1428,9 +1603,14 @@ export class RuntimeProcessor {
 
   handleOperationSessionClose(
     request: OperationSessionCloseRequest,
+    client: WorkerClient = ownerClient,
   ): BooleanResponse {
+    const session = this.operationSessions?.get(request.operationSessionId);
+    if (session === undefined || session.clientId !== client.id) {
+      return { value: false };
+    }
     return {
-      value: this.operationSessions?.delete(request.operationSessionId),
+      value: this.operationSessions.delete(request.operationSessionId),
     };
   }
 
@@ -1486,8 +1666,11 @@ export class RuntimeProcessor {
     if (result.error) throw new Error(result.error.message);
   }
 
-  handleCellSubscribe(request: CellSubscribeRequest): BooleanResponse {
-    const key = cellRefToKey(request.cell);
+  handleCellSubscribe(
+    request: CellSubscribeRequest,
+    client: WorkerClient = ownerClient,
+  ): BooleanResponse {
+    const key = clientScopedKey(client, cellRefToKey(request.cell));
 
     if (this.subscriptions.has(key)) {
       return { value: false };
@@ -1531,7 +1714,7 @@ export class RuntimeProcessor {
       // in a microtask so that the subscription response returns
       // before a notification fires.
       queueMicrotask(() =>
-        postToClient({
+        client.post({
           type: NotificationType.CellUpdate,
           cell: request.cell,
           value: converted,
@@ -1544,8 +1727,11 @@ export class RuntimeProcessor {
     return { value: true };
   }
 
-  handleCellUnsubscribe(request: CellUnsubscribeRequest): BooleanResponse {
-    const key = cellRefToKey(request.cell);
+  handleCellUnsubscribe(
+    request: CellUnsubscribeRequest,
+    client: WorkerClient = ownerClient,
+  ): BooleanResponse {
+    const key = clientScopedKey(client, cellRefToKey(request.cell));
     const cancel = this.subscriptions.get(key);
     if (cancel) {
       cancel();
@@ -2510,6 +2696,7 @@ export class RuntimeProcessor {
 
   async handleRequest(
     request: IPCClientRequest,
+    client: WorkerClient = ownerClient,
   ): Promise<RemoteResponse | void> {
     switch (request.type) {
       case RequestType.Dispose:
@@ -2527,27 +2714,27 @@ export class RuntimeProcessor {
       case RequestType.CellSend:
         return this.handleCellSend(request);
       case RequestType.CellSubscribe:
-        return this.handleCellSubscribe(request);
+        return this.handleCellSubscribe(request, client);
       case RequestType.CellUnsubscribe:
-        return this.handleCellUnsubscribe(request);
+        return this.handleCellUnsubscribe(request, client);
       case RequestType.CellResolveAsCell:
         return this.handleCellResolveAsCell(request);
       case RequestType.CellGetCfcLabel:
         return await this.handleCellGetCfcLabel(request);
       case RequestType.OperationQuery:
-        return await this.handleOperationQuery(request);
+        return await this.handleOperationQuery(request, client);
       case RequestType.OperationCapabilities:
-        return await this.handleOperationCapabilities(request);
+        return await this.handleOperationCapabilities(request, client);
       case RequestType.OperationApply:
-        return await this.handleOperationApply(request);
+        return await this.handleOperationApply(request, client);
       case RequestType.OperationRelease:
-        return await this.handleOperationRelease(request);
+        return await this.handleOperationRelease(request, client);
       case RequestType.OperationSubscribe:
-        return await this.handleOperationSubscribe(request);
+        return await this.handleOperationSubscribe(request, client);
       case RequestType.OperationUnsubscribe:
-        return this.handleOperationUnsubscribe(request);
+        return this.handleOperationUnsubscribe(request, client);
       case RequestType.OperationSessionClose:
-        return this.handleOperationSessionClose(request);
+        return this.handleOperationSessionClose(request, client);
       case RequestType.SqliteQuery:
         return await this.handleSqliteQuery(request);
       case RequestType.SqliteExec:
@@ -2655,9 +2842,9 @@ export class RuntimeProcessor {
       case RequestType.UploadBlob:
         return await this.handleUploadBlob(request);
       case RequestType.VDomMount:
-        return this.handleVDomMount(request);
+        return this.handleVDomMount(request, client);
       case RequestType.VDomUnmount:
-        return this.handleVDomUnmount(request);
+        return this.handleVDomUnmount(request, client);
       default:
         throw new Error(`Unknown message type: ${(request as any).type}`);
     }
@@ -2668,12 +2855,15 @@ export class RuntimeProcessor {
    * channel back to the sender, so handlers return void; a throw propagates to
    * the worker message loop, which logs it worker-side.
    */
-  handleNotification(notification: IPCClientNotification): void {
+  handleNotification(
+    notification: IPCClientNotification,
+    client: WorkerClient = ownerClient,
+  ): void {
     switch (notification.type) {
       case ClientNotificationType.VDomEvent:
-        return this.handleVDomEvent(notification);
+        return this.handleVDomEvent(notification, client);
       case ClientNotificationType.VDomBatchApplied:
-        return this.handleVDomBatchApplied(notification);
+        return this.handleVDomBatchApplied(notification, client);
       default:
         console.warn(
           `[RuntimeProcessor] Unknown notification type: ${
@@ -2684,11 +2874,17 @@ export class RuntimeProcessor {
   }
 
   /**
-   * Handle a DOM event dispatched from the main thread.
-   * This routes the event to the appropriate reconciler based on mountId.
+   * Handle a DOM event dispatched from the main thread. It reaches the
+   * reconciler of the sending client's own mount, so one document's events
+   * never find another document's handlers.
    */
-  handleVDomEvent(request: VDomEventNotification): void {
-    const mount = this.vdomMounts.get(request.mountId);
+  handleVDomEvent(
+    request: VDomEventNotification,
+    client: WorkerClient = ownerClient,
+  ): void {
+    const mount = this.vdomMounts.get(
+      clientScopedKey(client, request.mountId),
+    );
     if (!mount) {
       console.warn(
         `[RuntimeProcessor] No mount found for mountId: ${request.mountId}`,
@@ -2715,12 +2911,20 @@ export class RuntimeProcessor {
    * Handle a request to start VDOM rendering for a cell.
    * Creates a WorkerReconciler, subscribes to the cell, and sends VDomBatch notifications.
    */
-  handleVDomMount(request: VDomMountRequest): VDomMountResponse {
+  handleVDomMount(
+    request: VDomMountRequest,
+    client: WorkerClient = ownerClient,
+  ): VDomMountResponse {
     const { mountId, cell: cellRef } = request;
+    const key = clientScopedKey(client, mountId);
 
-    // Check if already mounted
-    if (this.vdomMounts.has(mountId)) {
-      this.handleVDomUnmount({ type: RequestType.VDomUnmount, mountId });
+    // Check if already mounted. Scoped to this client, so a second client
+    // mounting under the same id mounts rather than displacing the first.
+    if (this.vdomMounts.has(key)) {
+      this.handleVDomUnmount(
+        { type: RequestType.VDomUnmount, mountId },
+        client,
+      );
     }
 
     // Get the cell from the runtime and apply rendererVDOMSchema
@@ -2736,7 +2940,9 @@ export class RuntimeProcessor {
       membershipProvider: this.renderMembershipProvider,
       onOps: (ops: VDomOp[]) => {
         const batchId = this.vdomBatchIdCounter++;
-        postToClient({
+        // `mountId` as the client sent it: the scoping is this worker's
+        // bookkeeping, and the client knows its mounts by its own ids.
+        client.post({
           type: NotificationType.VDomBatch,
           batchId,
           ops,
@@ -2745,14 +2951,14 @@ export class RuntimeProcessor {
         });
         return batchId;
       },
-      onError: postRuntimeError,
+      onError: mountErrorSink(client),
     });
 
     // Mount the cell - the reconciler will subscribe and emit initial ops
     const cancel = reconciler.mount(cell);
 
     // Track this mount
-    this.vdomMounts.set(mountId, { reconciler, cancel });
+    this.vdomMounts.set(key, { reconciler, cancel, client });
 
     return { rootId: reconciler.getRootNodeId() };
   }
@@ -2760,10 +2966,13 @@ export class RuntimeProcessor {
   /**
    * Handle a request to stop VDOM rendering for a mount.
    */
-  handleVDomUnmount(request: VDomUnmountRequest): void {
+  handleVDomUnmount(
+    request: VDomUnmountRequest,
+    client: WorkerClient = ownerClient,
+  ): void {
     const { mountId } = request;
 
-    const mount = this.vdomMounts.get(mountId);
+    const mount = this.vdomMounts.get(clientScopedKey(client, mountId));
     if (!mount) {
       console.warn(`[RuntimeProcessor] Mount ${mountId} not found for unmount`);
       return;
@@ -2772,11 +2981,16 @@ export class RuntimeProcessor {
     // Cancel subscriptions and clean up
     mount.cancel();
     mount.reconciler.unmount();
-    this.vdomMounts.delete(mountId);
+    this.vdomMounts.delete(clientScopedKey(client, mountId));
   }
 
-  handleVDomBatchApplied(request: VDomBatchAppliedNotification): void {
-    const mount = this.vdomMounts.get(request.mountId);
+  handleVDomBatchApplied(
+    request: VDomBatchAppliedNotification,
+    client: WorkerClient = ownerClient,
+  ): void {
+    const mount = this.vdomMounts.get(
+      clientScopedKey(client, request.mountId),
+    );
     if (!mount) {
       return;
     }

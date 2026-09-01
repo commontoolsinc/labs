@@ -1,9 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  isReference,
   normalizeLLMFriendlyRef,
   validateEmbeddedSpaces,
 } from "../lib/llm-friendly-ref.ts";
+import { createSession, Identity } from "@commonfabric/identity";
 
 // The 43-character id length matches the entity ids the runtime mints, and
 // clears the runner parser's handle-length threshold.
@@ -12,12 +14,32 @@ const HANDLE = `of:fid1:${ID}`;
 const DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 const OTHER_DID = "did:key:z6MkrZ1r5XBFZjBU34qyD8fueMbMRkKw17BZaq2ivKFjnz2z";
 
+const signer = await Identity.fromPassphrase("cf-llm-friendly-ref");
+
+/** A session on `space`, the way `loadPieces` opens one. */
+const sessionOn = (space: string) =>
+  createSession(
+    space.startsWith("did:")
+      ? { identity: signer, spaceDid: space as `did:${string}:${string}` }
+      : { identity: signer, spaceName: space },
+  );
+
+/** The DID a space name derives to, which is what the check holds it to. */
+const didFor = async (name: string) => (await sessionOn(name)).space;
+
 describe("llm-friendly-ref", () => {
-  it("returns undefined for references outside the LLM-friendly form", () => {
+  it("returns undefined for references outside the reference form", () => {
     expect(normalizeLLMFriendlyRef("piece1")).toBeUndefined();
     expect(normalizeLLMFriendlyRef("piece1@user")).toBeUndefined();
     expect(normalizeLLMFriendlyRef(HANDLE)).toBeUndefined();
     expect(normalizeLLMFriendlyRef("piece1/path/to/field")).toBeUndefined();
+  });
+
+  it("reads the rooting as what makes a token a reference", () => {
+    expect(isReference("/tracker")).toBe(true);
+    expect(isReference(`  /${HANDLE}  `)).toBe(true);
+    expect(isReference("tracker")).toBe(false);
+    expect(isReference("items/0/title")).toBe(false);
   });
 
   it("normalizes an id-only reference to the bare handle", () => {
@@ -25,6 +47,67 @@ describe("llm-friendly-ref", () => {
       pieceId: HANDLE,
       path: [],
     });
+  });
+
+  it("names the piece by slug where a handle is accepted", () => {
+    expect(normalizeLLMFriendlyRef("/tracker")).toEqual({
+      pieceId: "tracker",
+      path: [],
+    });
+    expect(normalizeLLMFriendlyRef("/tracker/items/0/title")).toEqual({
+      pieceId: "tracker",
+      path: ["items", 0, "title"],
+    });
+    expect(normalizeLLMFriendlyRef("/tracker@session/draft")).toEqual({
+      pieceId: "tracker",
+      scope: "session",
+      path: ["draft"],
+    });
+  });
+
+  it("names the space by name where a DID is accepted", () => {
+    expect(normalizeLLMFriendlyRef("/@my-space/tracker/items")).toEqual({
+      pieceId: "tracker",
+      embeddedSpace: "my-space",
+      path: ["items"],
+    });
+  });
+
+  it("settles two space names against each other at parse time", () => {
+    // Same name, same space: nothing is left for the session to check.
+    expect(
+      normalizeLLMFriendlyRef("/@my-space/tracker", { space: "my-space" }),
+    ).toEqual({ pieceId: "tracker", path: [] });
+    expect(() =>
+      normalizeLLMFriendlyRef("/@my-space/tracker", { space: "other-space" })
+    ).toThrow(
+      `Reference names space "my-space" but the command targets ` +
+        `space "other-space".`,
+    );
+  });
+
+  it("defers a space name against a DID target space", () => {
+    // Only a derivation can compare the two spellings, and that needs the
+    // session the target space is resolved by.
+    expect(
+      normalizeLLMFriendlyRef("/@my-space/tracker", { space: DID }),
+    ).toEqual({
+      pieceId: "tracker",
+      embeddedSpace: "my-space",
+      path: [],
+    });
+  });
+
+  it("refuses a piece segment that is neither a handle nor a slug", () => {
+    expect(() => normalizeLLMFriendlyRef("/of:short")).toThrow(
+      `"of:short" is neither a piece handle (of:fid1:...) nor a slug.`,
+    );
+    expect(() => normalizeLLMFriendlyRef("/Tracker")).toThrow(
+      /is not a slug/,
+    );
+    expect(() => normalizeLLMFriendlyRef("/my--tracker")).toThrow(
+      /is not a slug/,
+    );
   });
 
   it("converts embedded path segments the way a positional path is", () => {
@@ -96,22 +179,31 @@ describe("llm-friendly-ref", () => {
     });
   });
 
-  it("passes a deferred embedded DID that matches the resolved space", () => {
-    expect(() => validateEmbeddedSpaces([DID], DID)).not.toThrow();
-    expect(() => validateEmbeddedSpaces(undefined, DID)).not.toThrow();
+  it("passes a deferred embedded DID that matches the resolved space", async () => {
+    const session = await sessionOn(DID);
+    await validateEmbeddedSpaces([DID], session);
+    await validateEmbeddedSpaces(undefined, session);
   });
 
-  it("rejects a deferred embedded DID against another resolved space", () => {
-    expect(() => validateEmbeddedSpaces([DID], OTHER_DID)).toThrow(
-      `Reference names space "${DID}" but the command targets ` +
-        `space "${OTHER_DID}".`,
-    );
+  it("rejects a deferred embedded DID against another resolved space", async () => {
+    await expect(validateEmbeddedSpaces([DID], await sessionOn(OTHER_DID)))
+      .rejects.toThrow(
+        `Reference names space "${DID}" but the command targets ` +
+          `space "${OTHER_DID}".`,
+      );
   });
 
-  it("surfaces the runner parser's rejection of short ids", () => {
-    expect(() => normalizeLLMFriendlyRef("/of:short")).toThrow(
-      /must use handles/,
-    );
+  it("holds a deferred space name to the DID it derives to", async () => {
+    // Both sides reach a DID through the session's own derivation, so a name
+    // and the DID it stands for compare equal.
+    const session = await sessionOn("my-space");
+    await validateEmbeddedSpaces(["my-space"], session);
+    await validateEmbeddedSpaces([await didFor("my-space")], session);
+    await expect(validateEmbeddedSpaces(["their-space"], session))
+      .rejects.toThrow(
+        `Reference names space "their-space" but the command targets ` +
+          `space "${await didFor("my-space")}".`,
+      );
   });
 
   it('reads a trailing "#argument" as the arguments-cell selection', () => {

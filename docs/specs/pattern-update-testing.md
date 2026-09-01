@@ -117,6 +117,17 @@ candidate pattern generates it during setup. This admits the forward migration;
 add a result default as well when an older concurrently running generation must
 still be able to write its previous result shape.
 
+A verb's event is the one place inside a result where that reasoning does not
+hold, and the direction is decided by which side supplies the value rather
+than by where the node sits. A verb declares its event below a stream marker
+in the result, but the pattern does not generate the event — a caller does. So
+a field the candidate event newly requires is a demand on every call already
+written, and each one omitting it is refused at dispatch after the update has
+landed. Below a verb node a newly required field therefore needs a default,
+exactly as an argument does. A field that carried the same default before and
+after may become required, because a caller that omits it still materializes
+one.
+
 ## Tier 2 — state continuity
 
 Replays committed SQLite stores — real state, written through a pattern's own

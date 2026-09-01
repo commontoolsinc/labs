@@ -50,6 +50,42 @@ describe("verb-emitted-address", () => {
         .toEqual({ value: { on: ENVELOPE } });
     });
 
+    it("refuses a reference naming a piece by slug or a space by name", () => {
+      // The wider vocabulary `cf`'s own intake takes stops at this seam. What
+      // is built here is a stored link, which holds the id and the space
+      // verbatim and has no session behind it to resolve a name with, so a
+      // slug written into one is a durable edge pointing at nothing.
+      expect(
+        resolveEmittedAddressArguments({ on: "/tracker" }, inlineMarker)
+          .refusal,
+      ).toBe(
+        '"/tracker" at <event>.on is not an address — the position ' +
+          "declares a reference, and takes the /of:… form a read prints",
+      );
+      expect(
+        resolveEmittedAddressArguments({ on: `/@my-space/${ID}` }, inlineMarker)
+          .refusal,
+      ).toContain("is not an address");
+      // The colon is what separates the vocabularies, not the length: a slug
+      // may run to eighty characters, so one past twenty reads as a handle to
+      // a length rule and is stored verbatim.
+      expect(
+        resolveEmittedAddressArguments(
+          { on: "/a-piece-name-that-is-twenty-plus" },
+          inlineMarker,
+        ).refusal,
+      ).toContain("is not an address");
+    });
+
+    it("converts a reference whose space is a DID, which a link can hold", () => {
+      const did = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+      expect(
+        resolveEmittedAddressArguments({ on: `/@${did}/${ID}` }, inlineMarker),
+      ).toEqual({
+        value: { on: { "/": { "link@1": { id: ID, space: did } } } },
+      });
+    });
+
     it("reads the marker off the `$ref` site, where the compiled contract carries it", () => {
       // The compiled contract spells a named reference `{$ref: …, asCell: […]}`
       // — the marker rides the REFERENCE SITE. A walk that resolves the `$ref`

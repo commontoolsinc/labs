@@ -52,6 +52,34 @@ class MockCellNetwork {
   }
 
   /**
+   * Resolve a ref the way the runtime does: if the value at the ref's path
+   * is a stored `$link`, the resolution answers with the LINKED ref;
+   * otherwise the asking ref is already canonical and echoes back. This is
+   * what lets a test model an index row whose `piece` field holds a link —
+   * the value an `asCell` position actually stores.
+   */
+  resolveRef(ref: CellRef): CellRef {
+    const root = this.#roots.get(this.#rootKey(ref));
+    let value: unknown = root?.get();
+    for (const seg of ref.path ?? []) {
+      if (value == null || typeof value !== "object") break;
+      value = (value as Record<string, unknown>)[seg as string];
+    }
+    const link = value != null && typeof value === "object" &&
+      (value as Record<string, unknown>)["$link"];
+    if (link != null && typeof link === "object") {
+      return {
+        scope: "space",
+        path: [],
+        schema: undefined,
+        space: ref.space,
+        ...(link as Partial<CellRef>),
+      } as CellRef;
+    }
+    return ref;
+  }
+
+  /**
    * Handle a CellSet request: propagate child writes to the root handle.
    */
   handleCellSet(
@@ -103,9 +131,9 @@ function deepSet(
  * Create a mock InitializedRuntimeConnection backed by a MockCellNetwork.
  *
  * - `request()` intercepts CellSet to propagate child→parent writes,
- *   answers CellResolveAsCell with the asking ref (a mock cell is already
- *   canonical — there is no link indirection to follow), and resolves
- *   everything else with `{}`.
+ *   answers CellResolveAsCell by following a stored `$link` at the asked
+ *   path (echoing the asking ref when there is none to follow — already
+ *   canonical), and resolves everything else with `{}`.
  * - `subscribe()` / `unsubscribe()` are no-ops.
  * - Includes EventEmitter stubs (`on`, `off`, `emit`) to satisfy the type.
  */
@@ -118,7 +146,7 @@ function createMockConnection(
         network.handleCellSet(data.cell, data.value);
       }
       if (data.type === "cell:resolveAsCell" && data.cell) {
-        return Promise.resolve({ cell: data.cell } as any);
+        return Promise.resolve({ cell: network.resolveRef(data.cell) } as any);
       }
       return Promise.resolve({} as any);
     },

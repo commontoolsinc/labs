@@ -5,8 +5,8 @@
  * not one of those, and reading it that way delivered `undefined` in place of
  * every object.
  */
-import { describe, it } from "@std/testing/bdd";
 
+import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { resolve } from "@std/path";
 import { runTests } from "../lib/test-runner.ts";

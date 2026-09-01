@@ -25,10 +25,12 @@ import {
   CHURN_WINDOW_DAYS,
   COST_WINDOW_DAYS,
   ENVIRONMENTAL_MIN_SOURCES,
+  FLAKE_COMMIT_REACH,
   FLAKE_WINDOW_DAYS,
   FRESHNESS_FLOOR,
   FRESHNESS_HALF_LIFE_DAYS,
   PROVEN_SATURATION,
+  SAME_COMMIT_REACH_DAYS,
   VALUE_FLOOR,
   WEIGHT_BREADTH,
   WEIGHT_CHURN,
@@ -246,8 +248,24 @@ export interface FoldResult {
  * caller folding a stream carries one of these along and trims it.
  */
 export interface FoldContext {
-  /** Every outcome seen for one identity at one commit, with its day. */
-  outcomesAtCommit: Map<string, { day: string; outcomes: Set<string> }>;
+  /**
+   * The outcomes seen at one commit, by identity, with the commit's day.
+   * Keyed by commit rather than by the pair so that the window below can
+   * drop a whole commit at once, and so that a commit's name is stored
+   * once instead of against every identity that ran at it.
+   */
+  outcomesAtCommit: Map<
+    string,
+    { day: string; identities: Map<string, Set<string>> }
+  >;
+
+  /**
+   * The most recently seen commits, oldest first, at most
+   * `FLAKE_COMMIT_REACH` of them. Outcomes are remembered at a commit
+   * while it is in here, and afterwards only for identities the failure
+   * witness still names.
+   */
+  recentCommits: string[];
 
   /**
    * What the default branch said about one identity at one commit, with
@@ -273,6 +291,7 @@ export interface FoldContext {
 export function emptyContext(): FoldContext {
   return {
     outcomesAtCommit: new Map(),
+    recentCommits: [],
     mainAtCommit: new Map(),
     credited: new Map(),
     failures: new Map(),
@@ -281,7 +300,10 @@ export function emptyContext(): FoldContext {
 
 /** A fold context as it travels between runs. */
 export interface StoredFoldContext {
-  outcomesAtCommit: Array<[string, { day: string; outcomes: string[] }]>;
+  outcomesAtCommit: Array<
+    [string, { day: string; identities: Array<[string, string[]]> }]
+  >;
+  recentCommits: string[];
   mainAtCommit: Array<[string, { day: string; outcome: "pass" | "fail" }]>;
   credited: Array<[string, string]>;
   failures: Array<[string, Array<{ day: string; source: string }>]>;
@@ -308,9 +330,16 @@ function isDay(value: unknown): value is string {
 /** The context, flattened for the aggregate that carries it. */
 export function serializeContext(context: FoldContext): StoredFoldContext {
   return {
-    outcomesAtCommit: [...context.outcomesAtCommit].map((
-      [at, seen],
-    ) => [at, { day: seen.day, outcomes: [...seen.outcomes] }]),
+    outcomesAtCommit: [...context.outcomesAtCommit].map(([commit, seen]) => [
+      commit,
+      {
+        day: seen.day,
+        identities: [...seen.identities].map((
+          [key, outcomes],
+        ) => [key, [...outcomes]] as [string, string[]]),
+      },
+    ]),
+    recentCommits: [...context.recentCommits],
     mainAtCommit: [...context.mainAtCommit],
     credited: [...context.credited],
     failures: [...context.failures],
@@ -333,21 +362,28 @@ export function parseContext(value: unknown): FoldContext {
       )
       : [];
 
-  for (const [at, seen] of pairs(stored.outcomesAtCommit)) {
+  for (const [commit, seen] of pairs(stored.outcomesAtCommit)) {
     if (typeof seen !== "object" || seen === null) continue;
-    const held = seen as { day?: unknown; outcomes?: unknown };
-    if (!isDay(held.day) || !Array.isArray(held.outcomes)) continue;
-    // An outcome this reader does not know would read as one more thing
-    // the identity did at that commit, and two of them is the test
-    // disagreeing with itself — which suppresses a real catch.
-    const outcomes = held.outcomes.filter((outcome): outcome is string =>
-      typeof outcome === "string" && OUTCOMES.has(outcome)
-    );
-    if (outcomes.length === 0) continue;
-    context.outcomesAtCommit.set(at, {
-      day: held.day,
-      outcomes: new Set(outcomes),
-    });
+    const held = seen as { day?: unknown; identities?: unknown };
+    if (!isDay(held.day)) continue;
+    const identities = new Map<string, Set<string>>();
+    for (const [key, raw] of pairs(held.identities)) {
+      if (!Array.isArray(raw)) continue;
+      // An outcome this reader does not know would read as one more
+      // thing the identity did at that commit, and two of them is the
+      // test disagreeing with itself — which suppresses a real catch.
+      const outcomes = raw.filter((outcome): outcome is string =>
+        typeof outcome === "string" && OUTCOMES.has(outcome)
+      );
+      if (outcomes.length > 0) identities.set(key, new Set(outcomes));
+    }
+    if (identities.size === 0) continue;
+    context.outcomesAtCommit.set(commit, { day: held.day, identities });
+  }
+  if (Array.isArray(stored.recentCommits)) {
+    context.recentCommits = stored.recentCommits
+      .filter((commit): commit is string => typeof commit === "string")
+      .slice(-FLAKE_COMMIT_REACH);
   }
   for (const [at, seen] of pairs(stored.mainAtCommit)) {
     if (typeof seen !== "object" || seen === null) continue;
@@ -377,22 +413,26 @@ export function parseContext(value: unknown): FoldContext {
 }
 
 /**
- * Drops what the two rules can no longer reach. Both look back at most
- * `CATCH_BREADTH_WINDOW_DAYS`, so anything older than that cannot change
- * a verdict, and a stream that never trimmed would grow with the number
+ * Drops what the rules can no longer reach, each on the span its own
+ * question needs. A stream that never trimmed would grow with the number
  * of runs rather than with the number of tests.
  */
 export function trimContext(context: FoldContext, today: string): void {
-  const stale = (day: string) =>
+  const beyondBreadth = (day: string) =>
     daysBetween(day, today) > CATCH_BREADTH_WINDOW_DAYS;
   for (const [key, seen] of context.failures) {
-    const kept = seen.filter((failure) => !stale(failure.day));
+    const kept = seen.filter((failure) => !beyondBreadth(failure.day));
     if (kept.length === 0) context.failures.delete(key);
     else context.failures.set(key, kept);
   }
-  for (const [at, seen] of context.outcomesAtCommit) {
-    if (stale(seen.day)) context.outcomesAtCommit.delete(at);
+  for (const [commit, seen] of context.outcomesAtCommit) {
+    if (daysBetween(seen.day, today) > SAME_COMMIT_REACH_DAYS) {
+      context.outcomesAtCommit.delete(commit);
+    }
   }
+  context.recentCommits = context.recentCommits.filter((commit) =>
+    context.outcomesAtCommit.has(commit)
+  );
   // A commit is re-run within days of the run it repeats, not months, so
   // these age on the same window. Kept forever they would grow with the
   // number of catches the repository has ever made.
@@ -447,23 +487,54 @@ export function foldObservations(
   // before any one observation can be judged.
   const outcomesAtCommit = context.outcomesAtCommit;
   const failures = context.failures;
+  const recent = context.recentCommits;
+
+  // The failure witness first, so that the pass below can tell a test
+  // that has failed from one that never has.
   for (const observation of observations) {
+    if (observation.outcome !== "fail") continue;
     const key = testIdentityKey(observation.test);
-    const at = `${key} ${observation.commit}`;
-    let seen = outcomesAtCommit.get(at);
-    if (seen === undefined) {
-      seen = { day: observation.day, outcomes: new Set() };
-      outcomesAtCommit.set(at, seen);
-    }
+    const list = failures.get(key) ?? [];
+    list.push({ day: observation.day, source: observation.source });
+    failures.set(key, list);
+  }
+
+  // Outcomes at a commit, for as long as they can still be asked about.
+  // Every identity runs at nearly every commit, so keeping all of them
+  // costs the corpus times the commits: one measured day is 2.6 million
+  // pairs and 442MB, which is more than a string can hold. A commit is
+  // remembered whole while it is one of the last `FLAKE_COMMIT_REACH`
+  // seen, and once it slides out it keeps only the identities the
+  // failure witness names — so a test that has failed is exact until the
+  // commit ages out at `SAME_COMMIT_REACH_DAYS`, and one that never has
+  // is remembered only as long as its rerun could plausibly still
+  // arrive.
+  for (const observation of observations) {
     // A skip is a test that deliberately did not run, so it agrees with
     // nothing and contradicts nothing; counting it as disagreement would
     // read a skip beside a failure as the test disagreeing with itself.
-    if (observation.outcome !== "skip") seen.outcomes.add(observation.outcome);
-    if (observation.outcome === "fail") {
-      const list = failures.get(key) ?? [];
-      list.push({ day: observation.day, source: observation.source });
-      failures.set(key, list);
+    if (observation.outcome === "skip") continue;
+    const key = testIdentityKey(observation.test);
+    const commit = observation.commit;
+    let seen = outcomesAtCommit.get(commit);
+    if (seen === undefined) {
+      seen = { day: observation.day, identities: new Map() };
+      outcomesAtCommit.set(commit, seen);
+      recent.push(commit);
+      while (recent.length > FLAKE_COMMIT_REACH) {
+        const dropped = recent.shift()!;
+        const held = outcomesAtCommit.get(dropped);
+        if (held === undefined) continue;
+        for (const identity of [...held.identities.keys()]) {
+          if (!failures.has(identity)) held.identities.delete(identity);
+        }
+        if (held.identities.size === 0) outcomesAtCommit.delete(dropped);
+      }
     }
+    if (!recent.includes(commit) && !failures.has(key)) continue;
+    const outcomes = seen.identities.get(key) ?? new Set<string>();
+    outcomes.add(observation.outcome);
+    seen.identities.set(key, outcomes);
   }
 
   // What the default branch said at each commit, gathered before anything
@@ -522,8 +593,8 @@ export function foldObservations(
 
     bump(state.failuresByDay, day);
 
-    const seen = outcomesAtCommit.get(`${key} ${observation.commit}`);
-    if ((seen?.outcomes.size ?? 0) > 1) {
+    const seen = outcomesAtCommit.get(observation.commit)?.identities.get(key);
+    if ((seen?.size ?? 0) > 1) {
       // It passed and failed at one commit, with nothing between the two
       // runs but chance.
       bump(state.flakesByDay, day);

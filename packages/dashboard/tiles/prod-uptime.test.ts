@@ -452,6 +452,10 @@ Deno.test("prod uptime: several hosts with nothing behind them are counted", asy
     const view = await prodUptime.collect(ctx());
     assertEquals(view.status, "bad");
     assertEquals(view.value, "3 hosts down");
+    assertStringIncludes(view.extra ?? "", 'class="tile-detail-list"');
+    assertStringIncludes(view.extra ?? "", 'role="region"');
+    assertStringIncludes(view.extra ?? "", 'tabindex="0"');
+    assertStringIncludes(view.extra ?? "", "scroll for more");
     assertStringIncludes(view.extra ?? "", "rapids");
     assertStringIncludes(view.extra ?? "", "bastion");
     assertStringIncludes(view.extra ?? "", "stage shell");
@@ -473,6 +477,9 @@ Deno.test("prod uptime: one host down is named rather than counted", async () =>
     const view = await prodUptime.collect(ctx());
     assertEquals(view.status, "bad");
     assertEquals(view.value, "LLM down");
+    assertStringIncludes(view.extra ?? "", 'role="region"');
+    assertStringIncludes(view.extra ?? "", 'tabindex="0"');
+    assert(!(view.extra ?? "").includes("scroll for more"));
     assertStringIncludes(view.extra ?? "", "LLM");
     assertStringIncludes(view.extra ?? "", "DNS down");
   } finally {

@@ -124,7 +124,7 @@ describe("cf piece CFC labels", () => {
       apiUrl: "https://example.com",
       identity: "/identity.key",
       space: signer.did(),
-      piece: "piece",
+      cell: "piece",
       input: true,
       quiet: true,
     };

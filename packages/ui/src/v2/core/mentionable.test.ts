@@ -15,9 +15,9 @@ describe("mentionable", () => {
 
     it("reads piece as a cell rather than a value", () => {
       // The MentionRef.destination shape: an opaque boundary the client
-      // hydrates to a handle. Reading THROUGH it here would put every
-      // listed piece back into the editor's own demand — the cost the
-      // index exists to remove.
+      // reaches by address rather than through its value. Reading THROUGH it
+      // here would put every listed piece back into the editor's own demand —
+      // the cost the index exists to remove.
       expect(MentionableSchema.properties.piece.asCell).toEqual(["cell"]);
       expect(MentionableSchema.properties.piece.properties).toEqual({});
     });

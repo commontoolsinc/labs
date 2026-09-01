@@ -295,6 +295,8 @@ export class EventAppendDuplicateError extends ProtocolError {
  * defined once here in the wire-shape module (protocol.md §7).
  */
 export type CommitClass = "authored" | "derived" | "system";
+
+/** The same closed set, enumerable at run time. */
 export const COMMIT_CLASSES: readonly CommitClass[] = [
   "authored",
   "derived",
@@ -453,6 +455,7 @@ export type DeliveryDeferral = {
   activeFailureStartedAt?: number;
   state: "failed" | "recovering";
   recoveryEpoch?: string;
+
   /** Positive versioned producer evidence that this failure is permanent. */
   permanentEvidence?: true;
 };
@@ -492,6 +495,7 @@ export type StreamEventEntry = {
   /** The stream this entry targets — self-describing so the drain, the
    * dropped-notice reader, and compaction never need a reverse map. */
   stream: StreamLinkRef;
+
   payload?: FabricValue;
   firedAt?: StreamEventFiredAt;
 
@@ -526,9 +530,13 @@ export type StreamEventEntry = {
    * (events.md §5). */
   error?: string;
 
-  /** Processing-side: the dropped-event notice (events.md §5 T7) —
-   * `{ status: "dropped", reason }` on the entry itself. */
+  /** Processing-side: how the entry ended, where it did not simply run.
+   * `"dropped"` is the dropped-event notice (events.md §5 T7);
+   * `"needs-attention"` has its detail in `attention` below. */
   status?: "dropped" | "needs-attention";
+
+  /** The dropped-event notice's reason, the other half of
+   * `{ status: "dropped", reason }` on the entry itself. */
   reason?: string;
 
   /** Processing-side checkpoint. It is not a consequence and advances no
@@ -580,6 +588,7 @@ export type StreamEventsDocValue = {
 export type EventAppendDecl = {
   /** The stream's sidecar doc ({@link streamEntriesDocId}). */
   id: EntityId;
+
   scope?: CellScope;
   eventId: string;
 };
@@ -740,10 +749,12 @@ export const identityOfScopeKey = (
 export type DerivedWriteAnnotation = {
   /** Index into the commit's operations array. */
   op: number;
+
   scopeKey?: string;
   actingUser?: string;
   actingSession?: string;
 };
+
 export type Reference = string & {
   readonly __memoryV2Reference: unique symbol;
 };
@@ -913,8 +924,10 @@ export type OperationFieldSnapshot = OperationFieldAddress & {
   baselineHash: string;
   materialized: FabricValue;
   operations: IntegratedOperation[];
+
   /** Lowest cursor from which the retained integrated suffix is contiguous. */
   retainedFrom?: OpCursor;
+
   /** Replace local codec state from `materialized` before continuing. */
   reset?: boolean;
 };
@@ -1021,8 +1034,8 @@ export type CommitPrecondition =
     id: EntityId;
     scope?: CellScope;
   }
+  /** Security-critical exact value pin, including null for absent/deleted. */
   | {
-    /** Security-critical exact value pin, including null for absent/deleted. */
     kind: "entity-value-hash";
     id: EntityId;
     scope?: CellScope;
@@ -1070,12 +1083,16 @@ export type MemoryProtocolFlags = {
 
   /** The server integrates durable collaborative operation streams. */
   applyOp: boolean;
+
   /** Versioned operation codecs registered by this server build. */
   operationCodecs?: readonly string[];
+
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
+
   /** The peer can exchange versioned binary gzip message envelopes. */
   messageCompressionV1: boolean;
+
   /**
    * Server capability (CFC Phase 3.c): commit-folded `sqlite` writes to
    * rule-bearing tables are re-derived through the shared row-label evaluator
@@ -1271,6 +1288,7 @@ export type GraphQueryRoot = {
    * error (the silent-empty-instance trap).
    */
   entityScopeKey?: ScopeKey;
+
   selector: SchemaPathSelector;
 };
 
@@ -1297,6 +1315,7 @@ export type EntitySnapshot = {
    * byte-identical.
    */
   scopeKey?: ScopeKey;
+
   seq: number;
   document: EntityDocument | null;
 
@@ -1374,6 +1393,7 @@ export type SessionSyncUpsert = {
    * (protocol.md §1, §3); the OFF-arm wire is byte-identical.
    */
   scopeKey?: ScopeKey;
+
   seq: number;
   doc?: EntityDocument;
   deleted?: true;
@@ -1569,6 +1589,7 @@ export type SqliteNativeRow = Record<string, FabricValue>;
 
 export type SqliteQueryResult = {
   rows: SqliteNativeRow[];
+
   /** Per-result-column origin, present ONLY when the db needs provenance for
    *  CFC labeling — any column declares `ifc` (Phase 2) or any table declares
    *  a per-row label rule (Phase 3); see `dbNeedsColumnProvenance`. An aliased

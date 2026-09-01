@@ -3,8 +3,8 @@
  * reason its subject does: importing it costs `--allow-ffi`, and keeping that
  * out of the shared lib's test file makes the boundary visible where someone
  * would otherwise reintroduce it. */
-import { describe, it } from "@std/testing/bdd";
 
+import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import { argumentIdOf } from "./topics-snapshot-lib.ts";

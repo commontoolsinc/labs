@@ -983,6 +983,7 @@ export type Engine = {
 export class ConflictError extends Error {
   /** Entity whose confirmed read went stale (stale-read conflicts only). */
   readonly of?: string;
+
   readonly seq?: number;
   readonly conflictSeq?: number;
   constructor(
@@ -1201,6 +1202,7 @@ export type AppliedCommit = {
    * The commit itself still records and advances the space log.
    */
   elidedOpIndexes?: number[];
+
   operationResolutions?: ApplyOpResolution[];
 };
 
@@ -2428,6 +2430,7 @@ type EventAppendStamp = {
   /** Index into the patch's `values` array (append/add-unique) or the
    * written array value (add/replace/set). */
   valueIndex: number;
+
   firedAt: StreamEventFiredAt;
 };
 

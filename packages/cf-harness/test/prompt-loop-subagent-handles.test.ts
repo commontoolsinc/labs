@@ -671,6 +671,15 @@ describe("prompt-loop cross-agent address handles", () => {
     expect(childSystemPrompt).toContain(
       "Build up in atoms rather than in one leap.",
     );
+    expect(childSystemPrompt).toContain(
+      "A whole-result derived wrapper is a known smell",
+    );
+    expect(childSystemPrompt).toContain(
+      "run_pattern checks the actual pattern pointer",
+    );
+    expect(childSystemPrompt).not.toContain(
+      "Never return a computed(), lift, or other derived wrapper",
+    );
   });
 
   it("runs a `pattern-author` child on the profile's own turn budget rather than the run default", async () => {

@@ -12,6 +12,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { createNonReactiveTransaction } from "../src/storage/extended-storage-transaction.ts";
+import { runtimeWritePolicyAuthorization } from "../src/cfc/types.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("extended-storage-transaction");
@@ -224,6 +225,88 @@ describe("extended-storage-transaction", () => {
           reason: "sink-request confidentiality exceeds ceiling for " +
             'fetchText: "medical"',
         }]);
+      } finally {
+        await tx.commit();
+      }
+    });
+  });
+
+  describe("a write-policy input's recorder", () => {
+    // A gate that ACTS on a write-policy input asks who recorded it, because
+    // this method is on the public interface and pattern-authored code
+    // reaches the transaction its cells are bound to. The authorization
+    // travels as an argument of the one call that carries it, so the answer
+    // has to be per input rather than per transaction.
+
+    const input = (id: string) =>
+      ({
+        kind: "structural-provenance",
+        target: { space, id, scope: "space", path: [] },
+        claim: "runtime.setup.piece-substrate",
+        sources: [],
+      }) as const;
+
+    it("returns `true` for an input recorded with the authorization", async () => {
+      const tx = runtime.edit();
+      try {
+        tx.recordCfcWritePolicyInput(
+          input("of:authorized"),
+          runtimeWritePolicyAuthorization,
+        );
+        const [recorded] = tx.getCfcState().writePolicyInputs;
+        expect(tx.isRuntimeWritePolicyInput(recorded)).toBe(true);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("returns `false` for an input recorded without it", async () => {
+      const tx = runtime.edit();
+      try {
+        tx.recordCfcWritePolicyInput(input("of:unauthorized"));
+        const [recorded] = tx.getCfcState().writePolicyInputs;
+        expect(tx.isRuntimeWritePolicyInput(recorded)).toBe(false);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("answers per input rather than per transaction", async () => {
+      // The mark reaches the one input its call carried, so recording an
+      // authorized input does not lend the mark to an unauthorized one
+      // beside it — in either order.
+      const tx = runtime.edit();
+      try {
+        tx.recordCfcWritePolicyInput(
+          input("of:first-authorized"),
+          runtimeWritePolicyAuthorization,
+        );
+        tx.recordCfcWritePolicyInput(input("of:then-plain"));
+        tx.recordCfcWritePolicyInput(
+          input("of:then-authorized"),
+          runtimeWritePolicyAuthorization,
+        );
+        expect(
+          tx.getCfcState().writePolicyInputs.map((recorded) =>
+            tx.isRuntimeWritePolicyInput(recorded)
+          ),
+        ).toEqual([true, false, true]);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("returns `false` for an input this transaction never recorded", async () => {
+      // The mark is held by reference to the frozen record the transaction
+      // owns, so a look-alike built outside it answers `false` however
+      // exactly its fields match.
+      const tx = runtime.edit();
+      try {
+        tx.recordCfcWritePolicyInput(
+          input("of:owned"),
+          runtimeWritePolicyAuthorization,
+        );
+        expect(tx.isRuntimeWritePolicyInput(input("of:owned"))).toBe(false);
       } finally {
         await tx.commit();
       }

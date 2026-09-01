@@ -162,8 +162,10 @@ import {
   validateSchemaValue,
 } from "./cfc/schema-sanitization.ts";
 import {
+  CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type ImplementationIdentity,
+  runtimeWritePolicyAuthorization,
 } from "./cfc/types.ts";
 import {
   prepareSourceClosureVerification,
@@ -937,6 +939,59 @@ const recordSetupProjectionPolicyInputs = (
     }
   }
 };
+
+/**
+ * Name `substrate` as a document this transaction is setting `resultCell`'s
+ * piece up in.
+ *
+ * A piece's substrate holds whatever the setup transaction read, and an
+ * author cannot know which atoms a given transaction will carry, so no
+ * confidentiality declaration written into a schema covers it. CFC's
+ * write-side fit check (spec §8.12.4) reads this marker and declares that
+ * policy itself; `docs/specs/cfc-enforcement-matrix.md` §4 states the route.
+ *
+ * `substrate` must be an address MINTED from `resultCell`'s cause, never one
+ * read back out of stored metadata: a stored `argument` link can name another
+ * document, and that document is its owner's store rather than this piece's.
+ * The address goes on verbatim, path included, and the fit check takes the
+ * marker only where it names a whole document.
+ *
+ * The marker carries the runtime's authorization, which is what the fit check
+ * asks for: the method that records it is reachable from anything holding a
+ * cell, so an unmarked marker naming the same document counts for nothing.
+ */
+const recordPieceSubstrate = (
+  tx: IExtendedStorageTransaction,
+  resultCell: Cell<any>,
+  substrate: NormalizedFullLink,
+): void => {
+  const result = resultCell.getAsNormalizedFullLink();
+  tx.recordCfcWritePolicyInput({
+    kind: "structural-provenance",
+    target: {
+      space: substrate.space,
+      id: substrate.id,
+      scope: substrate.scope,
+      path: [...substrate.path],
+    },
+    claim: CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
+    sources: [{
+      space: result.space,
+      id: result.id,
+      scope: result.scope,
+      path: [...result.path],
+    }],
+  }, runtimeWritePolicyAuthorization);
+};
+
+/** Whether two links name the same document, each at that document's root. */
+const sameRootDocument = (
+  left: NormalizedFullLink,
+  right: NormalizedFullLink,
+): boolean =>
+  left.space === right.space && left.id === right.id &&
+  left.scope === right.scope && left.path.length === 0 &&
+  right.path.length === 0;
 
 type SetupResult<R> = {
   resultCell: Cell<R>;
@@ -2025,10 +2080,21 @@ export class Runner {
 
   #updateArgument<T>(
     tx: IExtendedStorageTransaction,
+    resultCell: Cell<any>,
     argumentLink: NormalizedFullLink,
     argument: T,
     argumentSchema: JSONSchema | undefined,
   ): void {
+    // The argument link can come from the result cell's stored `argument`
+    // meta, which need not name the document this result cell's cause mints
+    // — a nested piece's argument lives in its HOST's document. Mark the
+    // substrate only where the two agree, so the marker never claims a store
+    // this piece does not own.
+    const mintedArgument = getMetaCell(resultCell, "argument", tx)
+      .getAsNormalizedFullLink();
+    if (sameRootDocument(argumentLink, mintedArgument)) {
+      recordPieceSubstrate(tx, resultCell, mintedArgument);
+    }
     const argumentCell = this.runtime.getCellFromLink(
       argumentLink,
       undefined,
@@ -2069,12 +2135,19 @@ export class Runner {
    * reject the transaction unless the resulting value satisfies its schema. */
   #updateAndValidateArgument<T>(
     tx: IExtendedStorageTransaction,
+    resultCell: Cell<any>,
     argumentLink: NormalizedFullLink,
     argument: T,
     argumentSchema: JSONSchema,
     defaults: FabricValue,
   ): void {
-    this.#updateArgument(tx, argumentLink, argument, argumentSchema);
+    this.#updateArgument(
+      tx,
+      resultCell,
+      argumentLink,
+      argument,
+      argumentSchema,
+    );
     this.#validateArgument(
       tx,
       argumentLink,
@@ -2274,6 +2347,7 @@ export class Runner {
       // pattern-changing updates always take the validated path below.
       this.#updateArgument(
         tx,
+        resultCell,
         argumentLink,
         nextArgument,
         pattern.argumentSchema,
@@ -2394,6 +2468,13 @@ export class Runner {
         link: derivedSigilLink,
       });
       setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));
+      // Minted from the result cell's cause, so this address is the piece's
+      // own by construction.
+      recordPieceSubstrate(
+        tx,
+        resultCell,
+        getDerivedInternalCellLink(resultCell, descriptor),
+      );
       if (manifestMatch === -1) {
         // Seed the build-time default for the freshly created cell. The
         // manifest entry and this default are written together in one
@@ -2542,6 +2623,7 @@ export class Runner {
         // case — so the merge yields a value.)
         this.#updateAndValidateArgument(
           tx,
+          resultCell,
           argumentLink,
           nextArgument,
           pattern.argumentSchema,
@@ -2557,6 +2639,7 @@ export class Runner {
       // validate their exact supplied value before entering Runner.
       this.#updateArgument(
         tx,
+        resultCell,
         argumentLink,
         nextArgument,
         pattern.argumentSchema,

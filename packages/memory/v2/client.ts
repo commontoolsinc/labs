@@ -49,6 +49,7 @@ import { type ArmedTurn, armTurn } from "./turn.ts";
 export type Transport = {
   /** Whether this transport can exchange negotiated compression envelopes. */
   readonly supportsMessageCompression?: boolean;
+
   send(payload: string): Promise<void>;
   close(): Promise<void>;
   setReceiver(receiver: (payload: string) => void): void;
@@ -96,6 +97,7 @@ export type WatchMutationResult = {
 
   /** Effects delivered before the first watch response, in wire order. */
   precedingSyncs: SessionSync[];
+
   sync: SessionSync;
 };
 
@@ -681,6 +683,7 @@ export class SpaceSession {
    * cannot take it (`sessionHoldings` unadvertised) terminates the
    * session at restore rather than silently degrading (see `restore`). */
   holdingsProvider: (() => SessionHolding[] | undefined) | undefined;
+
   // Highest caughtUpLocalSeq already pushed into the WatchView (via a real sync
   // or a synthetic forward). Subscribers such as runner storage only advance
   // their own caught-up seq from emitted syncs, so a resume that promotes

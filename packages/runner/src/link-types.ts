@@ -478,8 +478,98 @@ export function linkPathSegmentToCellPathSegment(
 // Matches both standard links (/of:...) and cross-space links (/@did:...)
 export const matchLLMFriendlyLink = new RegExp("^/[@a-zA-Z0-9]+:");
 
-// Matches a space DID prefix in a link (/@did:key:z6Mk...)
-const matchSpacePrefix = new RegExp("^@(did:[^:]+:[^/]+)$");
+// Matches the space DID a link's leading `@` segment names, the `@` removed.
+const matchSpaceDid = new RegExp("^did:[^:]+:[^/]+$");
+
+/**
+ * The shortest an id segment may be and still be a piece handle.
+ *
+ * Handles are long encoded strings — `of:fid1:...` runs well past forty
+ * characters — where a name a person chose is short. The threshold is
+ * deliberately conservative and deliberately not a parse of a handle's own
+ * structure: what it has to separate is the two vocabularies a reference
+ * admits, not one encoding from another.
+ */
+const HANDLE_MIN_LENGTH = 20;
+
+/** Whether an id segment names a piece by handle rather than by name. */
+export function isPieceHandle(id: string): boolean {
+  return id.length >= HANDLE_MIN_LENGTH;
+}
+
+/**
+ * The parts a reference names, each still in the spelling it was written in.
+ *
+ * `space` is whatever the leading `@` segment carried — a DID, or a name that
+ * only a session can resolve — and `id` is whatever the segment after it
+ * carried, a handle or a slug. Holding either to a form is the caller's, which
+ * is the difference between this and {@link parseLLMFriendlyLink}.
+ */
+export interface ReferenceParts {
+  id: string;
+  scope?: CellScope;
+  space?: string;
+  path: string[];
+}
+
+/**
+ * Split a reference into the parts it names, without holding any of them to a
+ * form.
+ *
+ * This is the grammar itself: rooted at `/`, an optional `@`-prefixed space
+ * segment, the id, and a JSON Pointer path. What a reader may write in the
+ * space and id segments differs by where the reference is read — the runner
+ * resolves a link with nothing but the string, so it requires the
+ * self-identifying spellings {@link parseLLMFriendlyLink} enforces, while a
+ * caller holding a session can resolve a space name and a slug as well.
+ * Splitting the grammar from those rules is what keeps the two readings one
+ * language.
+ *
+ * Throws when the string is not a reference at all: unrooted, or naming no id.
+ */
+export function parseReferenceParts(target: string): ReferenceParts {
+  const [empty, firstSegment, ...rest] = decodeJsonPointer(target.trim());
+
+  if (empty !== "") {
+    throw new Error("Target must start with a slash.");
+  }
+
+  let space: string | undefined;
+  let idSegment: string | undefined;
+  let path: string[];
+  if (firstSegment !== undefined && firstSegment.startsWith("@")) {
+    space = firstSegment.slice(1);
+    if (space === "") {
+      throw new Error(
+        'Target must name a space after "@", e.g. "/@did:key:z6Mk.../of:fid1:abc123".',
+      );
+    }
+    [idSegment, ...path] = rest;
+  } else {
+    idSegment = firstSegment;
+    path = rest;
+  }
+
+  if (idSegment === undefined || idSegment === "") {
+    throw new Error(
+      'Target must include a piece handle, e.g. "/of:fid1:abc123/path".',
+    );
+  }
+
+  const scopedId = parseScopedIdSegment(idSegment);
+
+  // Remove path element from trailing slash
+  if (path.length > 0 && path[path.length - 1] === "") {
+    path.pop();
+  }
+
+  return {
+    id: scopedId.id,
+    ...(scopedId.scope && { scope: scopedId.scope }),
+    ...(space !== undefined && { space }),
+    path,
+  };
+}
 
 /**
  * Parses a LLM friendly link from a target string.
@@ -511,56 +601,30 @@ export function parseLLMFriendlyLink(
     );
   }
 
-  const [empty, firstSegment, ...rest] = decodeJsonPointer(target);
+  const parsed = parseReferenceParts(target);
 
-  if (empty !== "") {
-    throw new Error("Target must start with a slash.");
+  // A link resolves from the string alone, so both parts have to say what they
+  // are: a space name and a slug each need a session to look up, and there is
+  // none here.
+  if (parsed.space !== undefined) {
+    if (!matchSpaceDid.test(parsed.space)) {
+      throw new Error(
+        `Link spaces must be DIDs (e.g., "/@did:key:z6Mk.../of:fid1:abc123"), not names (e.g., "${parsed.space}").`,
+      );
+    }
+    space = parsed.space as MemorySpace;
   }
-
-  // Check if first segment is a space DID (cross-space link)
-  let id: string | undefined;
-  let path: string[];
-  const spaceMatch = firstSegment?.match(matchSpacePrefix);
-  if (spaceMatch) {
-    // Cross-space format: /@did:key:z6Mk.../of:fid1:abc123/path
-    const embeddedSpace = spaceMatch[1] as MemorySpace;
-    [id, ...path] = rest;
-    space = embeddedSpace;
-  } else {
-    // Standard format: /of:fid1:abc123/path
-    id = firstSegment;
-    path = rest;
-  }
-  if (id === undefined) {
+  if (!isPieceHandle(parsed.id)) {
     throw new Error(
-      'Target must include a piece handle, e.g. "/of:fid1:abc123/path".',
+      `Piece references must use handles (e.g., "/of:fid1:abc123/path"), not human names (e.g., "${parsed.id}").`,
     );
-  }
-  const scopedId = parseScopedIdSegment(id);
-  id = scopedId.id;
-
-  // Check if first segment looks like a CID/handle by length
-  //
-  // CIDs are long encoded strings (typically 40+ chars), whereas human names
-  // are short. Use a conservative threshold to distinguish handles from
-  // human-readable names Handle format is "/of:..." (the internal storage
-  // format)
-  if (id === undefined || id.length < 20) {
-    throw new Error(
-      `Piece references must use handles (e.g., "/of:fid1:abc123/path"), not human names (e.g., "${id}").`,
-    );
-  }
-
-  // Remove path element from trailing slash
-  if (path.length > 0 && path[path.length - 1] === "") {
-    path.pop();
   }
 
   return {
-    id: id as `${string}:${string}`,
-    path,
+    id: parsed.id as `${string}:${string}`,
+    path: parsed.path,
     ...(space && { space }),
-    ...(scopedId.scope && { scope: scopedId.scope }),
+    ...(parsed.scope && { scope: parsed.scope }),
   };
 }
 

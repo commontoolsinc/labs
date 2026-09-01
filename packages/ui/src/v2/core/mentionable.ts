@@ -9,10 +9,16 @@ export interface Mentionable {
    * Optional, and its absence changes what an entry IS. Without one, the
    * entry is the piece itself, listed directly. With one, the entry is a
    * derived row standing for `piece` — the editor lists and matches on the
-   * row's own strings and resolves `piece` when a completion is picked, so
+   * row's own name and resolves `piece` when a completion is picked, so
    * what a mention stores is the piece and never the row.
+   *
+   * The VALUE at this position never carries a usable handle: an `asCell`
+   * position crosses the client boundary as an empty object. A reader
+   * detects a row by this key's presence and reaches the piece by ADDRESS
+   * — `entry.key("piece").resolveAsCell()` — never through the value.
    */
   piece?: unknown;
+
   [key: string]: unknown;
 }
 
@@ -22,8 +28,10 @@ export const MentionableSchema = {
   type: "object",
   properties: {
     [NAME]: { type: "string" },
-    // The `MentionRef.destination` shape: an opaque cell boundary, hydrated
-    // to a handle and never read through under this schema.
+    // The `MentionRef.destination` shape: an opaque cell boundary. The value
+    // at this position never carries a usable handle — an `asCell` position
+    // crosses the client boundary as an empty object — so a reader reaches
+    // the piece by ADDRESS and never reads through it under this schema.
     piece: { type: "object", properties: {}, asCell: ["cell"] },
   },
   required: [NAME],

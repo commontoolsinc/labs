@@ -54,6 +54,7 @@ export interface TestRecord {
 export interface CiContext {
   /** GitHub workflow run id; spans every job of the workflow run. */
   workflowRunId: string;
+
   runAttempt: number;
   workflow: string;
 
@@ -94,6 +95,7 @@ export interface RunContext {
 
   /** True when the working tree had uncommitted changes. */
   dirty: boolean;
+
   branch?: string;
   env: "ci" | "local";
   ci?: CiContext;
@@ -103,6 +105,7 @@ export interface RunContext {
    * harness a run was started under when that variable is unset.
    */
   agent?: string;
+
   os: string;
   arch: string;
   denoVersion: string;

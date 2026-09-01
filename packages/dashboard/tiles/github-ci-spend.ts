@@ -29,7 +29,14 @@
  */
 
 import type { Status, Tile, TileView } from "../types.ts";
-import { budgetStatus, daysLabel, friendlyError, github, usd } from "../lib.ts";
+import {
+  budgetStatus,
+  daysLabel,
+  escapeHtml,
+  friendlyError,
+  github,
+  usd,
+} from "../lib.ts";
 import { REPO } from "../config.ts";
 import {
   calendarMonth,
@@ -466,6 +473,7 @@ export const githubCiSpend: Tile = {
         }],
         now,
         status,
+        spend.estimateDays,
       );
       const amount = chart.chart ? "" : ` ${usd(spend.mtd)}`;
       // The ceiling shown beside the headline covers the products the headline
@@ -479,15 +487,19 @@ export const githubCiSpend: Tile = {
       const budgetLabel = Number.isFinite(shownBudget)
         ? ` • Budget ${usd(shownBudget)}`
         : "";
+      const legendText = `GitHub${amount}${budgetLabel}`;
       const legend =
-        `<p class="sub">${GITHUB_SWATCH} GitHub${amount}${budgetLabel}</p>`;
+        `<p class="sub" title="${escapeHtml(legendText)}">${GITHUB_SWATCH} ${legendText}</p>`;
+      const value = `~${usd(spend.projected)}/mo`;
+      const mtd = `${usd(spend.mtd)} MTD`;
 
       return {
         ...drill,
         label,
         status,
-        value: `~${usd(spend.projected)}/mo`,
-        aside: `<span class="hmtd">${usd(spend.mtd)} MTD</span>`,
+        value,
+        valueLabel: value,
+        aside: `<span class="hmtd" title="${mtd}">${mtd}</span>`,
         extra: `${legend}${chart.chart}`,
         duration: chart.duration,
       };
@@ -498,7 +510,8 @@ export const githubCiSpend: Tile = {
         status: "unknown",
         value: "—",
         sub: unavailableMessage(error),
-        extra: `<p class="sub">${GITHUB_SWATCH} GitHub $???</p>`,
+        extra:
+          `<p class="sub" title="GitHub $???">${GITHUB_SWATCH} GitHub $???</p>`,
       };
     }
   },

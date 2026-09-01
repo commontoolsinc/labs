@@ -12,6 +12,7 @@ import type { HarnessFetch } from "../../src/contracts/http-fetch.ts";
 import type { SkillsShSearchHit } from "../../src/skills-sh/search-client.ts";
 import {
   resolveSkillsShHitPin,
+  resolveSkillsShSkillIdPin,
   SkillsShPinResolutionError,
 } from "../../src/skills-sh/pin.ts";
 
@@ -64,6 +65,50 @@ const refusalOf = async (
 };
 
 describe("skills.sh pin resolution", () => {
+  it("resolves a validated discovery id without consulting registry metadata", async () => {
+    const { fetch, urls } = fixtureFetch();
+
+    const pin = await resolveSkillsShSkillIdPin(HIT.id, {
+      fetch,
+      now: () => "2026-09-01T02:03:04.000Z",
+    });
+
+    expect(urls).toEqual([
+      "https://api.github.com/repos/vercel-labs/agent-skills",
+      "https://api.github.com/repos/vercel-labs/agent-skills/branches/main",
+    ]);
+    expect(pin).toEqual({
+      id: HIT.id,
+      owner: "vercel-labs",
+      repo: "agent-skills",
+      slug: "vercel-react-native-skills",
+      commitSha: COMMIT_SHA,
+      resolvedAt: "2026-09-01T02:03:04.000Z",
+    });
+  });
+
+  it("refuses malformed discovery ids before any request", async () => {
+    const { fetch, urls } = fixtureFetch();
+
+    for (
+      const id of [
+        "vercel-labs/agent-skills",
+        `${HIT.id}/extra`,
+        "owner space/agent-skills/slug",
+        "vercel-labs/repo space/slug",
+        "vercel-labs/../slug",
+        "vercel-labs/agent-skills/slug space",
+        "vercel-labs/agent-skills/..",
+      ]
+    ) {
+      const refusal = await refusalOf(
+        resolveSkillsShSkillIdPin(id, { fetch }),
+      );
+      expect(refusal.code).toBe("invalid_hit");
+    }
+    expect(urls).toEqual([]);
+  });
+
   it("resolves the source repository's default branch head", async () => {
     const { fetch, urls } = fixtureFetch();
     const pin = await resolveSkillsShHitPin(HIT, {

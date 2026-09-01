@@ -24,8 +24,17 @@ import {
   reportFromText,
 } from "./build.ts";
 import { parseManifest, serializeManifest } from "./manifest.ts";
-import { emptyState, flakeRate, type IdentityState } from "./score.ts";
-import { FLAKE_EXCLUSION_RATE, MAX_REPEATS } from "./policy.ts";
+import {
+  daysBetween,
+  emptyState,
+  flakeRate,
+  type IdentityState,
+} from "./score.ts";
+import {
+  COST_WINDOW_DAYS,
+  FLAKE_EXCLUSION_RATE,
+  MAX_REPEATS,
+} from "./policy.ts";
 
 const NO_ALIASES = new AliasResolver([]);
 
@@ -599,5 +608,68 @@ describe("a batch whose reports interleave in time", () => {
     expect(backwards).toEqual(forwards);
     expect(shuffled).toEqual(forwards);
     expect(forwards.mainCatches).toBe(2);
+  });
+});
+
+describe("a report holding a whole day", () => {
+  it("folds a rollup shard larger than a call can carry arguments", () => {
+    // A rollup shard is a whole day of records in one object. Appending
+    // its observations by spreading them as arguments overflows the
+    // stack, and the rollup path is the one that reads these.
+    const many = Array.from(
+      { length: 200_000 },
+      (_, i) => record({ test: { k: "unit", s: "memory", n: `case ${i}` } }),
+    );
+    const fold = new Fold(
+      emptyAggregate("2026-08-20"),
+      new AliasResolver([]),
+      "2026-08-20",
+    );
+    fold.add([stored(CI_NAME, context(), many)]);
+    expect(fold.observations).toBe(many.length);
+  });
+});
+
+describe("the days a fold measures cost over", () => {
+  const KEY = testIdentityKey({ k: "unit", s: "memory", n: "space > writes" });
+
+  /** One run of the test on `day`, taking `ms`. */
+  function ranOn(day: string, ms: number) {
+    return stored(
+      `labs/test-records/submissions/ci/v1/${
+        day.replaceAll("-", "/")
+      }/r.ndjson`,
+      context({ startedAt: `${day}T00:00:00.000Z`, commit: `c-${day}` }),
+      [record({ durationMs: ms })],
+    );
+  }
+
+  function costsAfterFolding(days: readonly string[]) {
+    const fold = new Fold(
+      emptyAggregate("2026-08-20"),
+      new AliasResolver([]),
+      "2026-08-20",
+    );
+    for (const day of days) fold.add([ranOn(day, 1000)]);
+    return fold.finish().states.get(KEY)!.costByDay;
+  }
+
+  it("keeps a day inside the window", () => {
+    expect(Object.keys(costsAfterFolding(["2026-08-20"]))).toEqual([
+      "2026-08-20",
+    ]);
+  });
+
+  it("holds no cost for a day the window cannot reach", () => {
+    // This is what makes not sampling such a day safe: `finish` seals a
+    // day's cost and then ages it off in the same call, so a day past
+    // the window has no cost either way, and sampling it only costs the
+    // memory to hold sixty days of samples during a bootstrap.
+    const old = "2026-06-01";
+    expect(daysBetween(old, "2026-08-20")).toBeGreaterThan(COST_WINDOW_DAYS);
+    expect(costsAfterFolding([old])).toEqual({});
+    expect(costsAfterFolding([old, "2026-08-20"])).toEqual(
+      costsAfterFolding(["2026-08-20"]),
+    );
   });
 });

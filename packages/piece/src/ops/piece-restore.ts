@@ -35,11 +35,14 @@ export interface RestorableRevision {
   revisionId: string;
   /** When the piece accepted this source state, as an epoch millisecond. */
   timestamp: number;
+
   patternIdentity: string;
   /** The export the revision runs — the executable pointer's other half. */
   symbol: string;
+
   /** The transition that recorded it: a baseline, an edit, a revert. */
   operation: PieceSourceRevisionState["operation"];
+
   /**
    * Whether the source behind `patternIdentity` is verifiably retained in
    * the space — the canonical loader can produce its closure. A revision
@@ -48,6 +51,7 @@ export interface RestorableRevision {
    * incident.
    */
   retained: boolean;
+
   /**
    * Whether the piece runs this revision's reference right now. A fact
    * about the reference alone: a piece that runs it while still following
@@ -62,8 +66,10 @@ export interface RestorableRevision {
 export interface RestoreOutcome {
   /** The piece's canonical address. */
   piece: string;
+
   /** Every revision the piece's log holds, oldest first. */
   revisions: readonly RestorableRevision[];
+
   /**
    * The revision this run named, when it named one that exists. A copy of
    * the matching `revisions` entry rather than that entry itself: the CLI's
@@ -72,6 +78,7 @@ export interface RestoreOutcome {
    * instead of the revision, in exactly the mode a script reads.
    */
   selected?: RestorableRevision;
+
   /**
    * The origin the piece follows, when it follows one; absent when it is
    * detached. A restore severs it, so this is what tells a piece that is
@@ -79,8 +86,10 @@ export interface RestoreOutcome {
    * reference and would still take the origin's next update.
    */
   origin?: string;
+
   /** Whether this run wrote the restore. False on every dry run. */
   restored: boolean;
+
   /**
    * Why the named revision was not restored: no such revision in this
    * piece's log, a source no longer retained, or a compatibility verdict
@@ -93,6 +102,7 @@ export interface RestoreOutcome {
    * rather than settling into an outcome.
    */
   problem?: string;
+
   /**
    * What the runtime warned about a transition that committed anyway — the
    * restored source ran and something in its execution complained. The
@@ -109,8 +119,10 @@ export interface RestoreOptions {
    * could actually load.
    */
   revisionId?: string;
+
   /** Perform the restore. Absent, the run reads and writes nothing. */
   apply?: boolean;
+
   /**
    * The piece scope to read and write under, when the caller named one. A
    * scoped reference names a different cell from the default-scope one, so a
@@ -130,6 +142,7 @@ export interface RestorableSource {
    * pattern identity at all.
    */
   pattern?: { identity: string; symbol: string };
+
   /**
    * The origin the piece follows as THIS read observed it, and null when it
    * follows none — the same fact the runtime's own source snapshot carries,
@@ -139,6 +152,7 @@ export interface RestorableSource {
    * reference cannot answer.
    */
   origin: string | null;
+
   /** Every revision the log holds, oldest first. */
   revisions: RestorableRevision[];
 }

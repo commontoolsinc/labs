@@ -24,6 +24,7 @@ export interface TransformOptions {
 
   /** If provided, pipeline diagnostics will be pushed into this array after transformation. */
   pipelineDiagnostics?: TransformationDiagnostic[];
+
   moduleIdentities?: ReadonlyMap<string, string>;
   policyManifests?: unknown[];
   state?: CrossStageState;

@@ -5,7 +5,7 @@
  * completion callback only `(command, parent)`: no cursor word, and no access
  * to the options already typed. That is enough for a static command tree and
  * nothing more — it cannot answer "the callables of the piece named by the
- * `--piece` on this line". Since the values worth completing in cf are exactly
+ * `--cell` on this line". Since the values worth completing in cf are exactly
  * those context-dependent ones (piece ids, callables, cell paths), this command
  * emits its own thin shell functions that forward the whole line instead.
  */

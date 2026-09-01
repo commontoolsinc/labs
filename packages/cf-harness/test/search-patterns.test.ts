@@ -6,6 +6,7 @@ import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessFetch } from "../src/contracts/http-fetch.ts";
 import { PatternIndexClient } from "../src/pattern-index/client.ts";
 import {
+  isSearchPatternsToolSuccessOutput,
   searchPatternsTool,
   type SearchPatternsToolErrorOutput,
   type SearchPatternsToolSuccessOutput,
@@ -62,6 +63,8 @@ const SEARCH_HIT = {
   createdAt: "2026-08-01T00:00:00.000Z",
   dependencies: [],
   signals: { uses: 12, score: 0.9 },
+  quality: "proven",
+  kind: "part",
 };
 
 const PATTERN_RECORD = {
@@ -150,6 +153,8 @@ describe("search-patterns", () => {
     expect(output.results[0].description).toBe("Totals an expense list");
     expect(output.results[0].hashtags).toEqual(["expenses", "money"]);
     expect(output.results[0].signals).toEqual({ uses: 12, score: 0.9 });
+    expect(output.results[0].quality).toBe("proven");
+    expect(output.results[0].kind).toBe("part");
     expect(output.results[0].importHint).toBe(
       'import X from "cf:pattern:pat-expenses"',
     );
@@ -214,6 +219,42 @@ describe("search-patterns", () => {
 
   it("declares itself a read, since a search alters nothing", () => {
     expect(searchPatternsTool.descriptor.effectClass).toBe("read");
+  });
+
+  it("does not trust a persisted success whose hit is incomplete", () => {
+    expect(isSearchPatternsToolSuccessOutput({
+      outputId: "search_patterns-1",
+      status: "ok",
+      results: [{ patternId: "pat-incomplete" }],
+    })).toBe(false);
+  });
+
+  it("does not trust non-object persisted successes or hits", () => {
+    expect(isSearchPatternsToolSuccessOutput(null)).toBe(false);
+    expect(isSearchPatternsToolSuccessOutput({
+      outputId: "search_patterns-1",
+      status: "ok",
+      results: [null],
+    })).toBe(false);
+  });
+
+  it("describes deployed stopword-free disjunctive matching", () => {
+    const schema = searchPatternsTool.descriptor.inputSchema;
+    if (
+      typeof schema !== "object" || schema === null ||
+      schema.type !== "object" || schema.properties === undefined
+    ) {
+      throw new Error("expected `search_patterns` object input schema");
+    }
+    const text = schema.properties.text;
+    const description = typeof text === "object" && text !== null
+      ? text.description
+      : undefined;
+
+    expect(description).toContain("stopword-free");
+    expect(description).toContain("whole words");
+    expect(description).toContain("suffix");
+    expect(description).not.toContain("more words widen the net");
   });
 
   it("reports what the index answered when a search fails", async () => {

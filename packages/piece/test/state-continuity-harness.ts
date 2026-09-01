@@ -166,6 +166,7 @@ export interface VintageRuntime {
    * reader to work out why a root was not there.
    */
   restoredSpaces: readonly string[];
+
   storeDir: string;
 
   /**
@@ -177,6 +178,7 @@ export interface VintageRuntime {
    * write itself (`captureVintage` does).
    */
   snapshot(destPath: string): Promise<void>;
+
   dispose(): Promise<void>;
 }
 
@@ -487,6 +489,7 @@ export interface VintageManifestEntry {
 
   /** Entity id of the result cell the pattern was materialized onto. */
   cellId: string;
+
   space: string;
 }
 

@@ -113,7 +113,7 @@ describe("main command", () => {
     const call = pieceDataCommand("call");
     const expectedUsage =
       "--identity <identity> --url <url> --api-url <api-url> --space <space> " +
-      "--piece <piece> [address] <callable> [input]";
+      "--cell <cell> [address] <callable> [input]";
 
     expect(call.getArgsDefinition()).toBe(
       "<callable:string> [tail...:string]",
@@ -293,6 +293,26 @@ describe("main command", () => {
         );
       });
     });
+  });
+
+  it("refuses --list beside the target flag, under either of its names", async () => {
+    // The conflict names the option's Cliffy key, and both spellings share
+    // one. A stale key here is silent: the command runs, the list selector
+    // wins, and a repair --apply mutates a target the line does not name.
+    for (const flag of ["--cell", "--piece"]) {
+      for (const command of ["piece survey", "piece repair"]) {
+        const where = `${command} ${flag}`;
+        const { code, stderr } = await cf(
+          `${command} ${flag} holder --list member`,
+        );
+        // The whole command line is echoed to stderr, so a looser assertion
+        // here passes whether or not the conflict fires. Name the refusal.
+        expect(stripAnsi(stderr.join("\n")), where).toContain(
+          'Option "--list" conflicts with option "--cell".',
+        );
+        expect(code, where).toBe(2);
+      }
+    }
   });
 
   it("shows exec command help before trying to resolve a mounted file", async () => {

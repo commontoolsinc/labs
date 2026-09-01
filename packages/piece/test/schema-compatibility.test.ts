@@ -2723,6 +2723,141 @@ describe("verb event closed-world transitions", () => {
   });
 });
 
+describe("verb event required-field transitions", () => {
+  // A verb node sits in the RESULT, which the checker compares covariantly
+  // because a pattern produces its result. The event below it inverts that:
+  // the caller supplies the value, so requiring a field the previous event
+  // did not is a demand on every call already written, each refused at
+  // dispatch once the update lands. Distinct from the closed-world rule
+  // above — that one is free in both directions, this one is not.
+
+  const verbInResult = (event: JSONSchema): Pattern =>
+    pattern({ type: "object", properties: {} }, {
+      type: "object",
+      properties: { setLabel: { $ref: "#/$defs/Ev", asCell: ["stream"] } },
+      $defs: { Ev: event },
+    });
+
+  const oneRequired: JSONSchema = {
+    type: "object",
+    properties: { label: { type: "string" } },
+    required: ["label"],
+  };
+
+  it("refuses an event field the candidate newly requires", () => {
+    const twoRequired: JSONSchema = {
+      type: "object",
+      properties: { label: { type: "string" }, color: { type: "string" } },
+      required: ["label", "color"],
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(oneRequired),
+        verbInResult(twoRequired),
+      )
+    ).toThrow(/newly required verb event field has no default/);
+  });
+
+  it("accepts an event field that becomes required while keeping its default", () => {
+    const withDefault = (required: string[]): JSONSchema => ({
+      type: "object",
+      properties: {
+        label: { type: "string" },
+        color: { type: "string", default: "none" },
+      },
+      required,
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(withDefault(["label"])),
+        verbInResult(withDefault(["label", "color"])),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts an event field added as optional", () => {
+    const widened: JSONSchema = {
+      type: "object",
+      properties: { label: { type: "string" }, color: { type: "string" } },
+      required: ["label"],
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(oneRequired),
+        verbInResult(widened),
+      )
+    ).not.toThrow();
+  });
+
+  it("reaches a required field nested inside the event", () => {
+    const nested = (required: string[]): JSONSchema => ({
+      type: "object",
+      properties: {
+        payload: {
+          type: "object",
+          properties: { note: { type: "string" }, kind: { type: "string" } },
+          required,
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(nested(["note"])),
+        verbInResult(nested(["note", "kind"])),
+      )
+    ).toThrow(/newly required verb event field has no default/);
+  });
+
+  it("accepts an event field that stops being required", () => {
+    const twoRequired: JSONSchema = {
+      type: "object",
+      properties: { label: { type: "string" }, color: { type: "string" } },
+      required: ["label", "color"],
+    };
+    const oneOfTwo: JSONSchema = {
+      type: "object",
+      properties: { label: { type: "string" }, color: { type: "string" } },
+      required: ["label"],
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(twoRequired),
+        verbInResult(oneOfTwo),
+      )
+    ).not.toThrow();
+  });
+
+  it("still refuses an ordinary result field that stops being required", () => {
+    const result = (required: string[]): Pattern =>
+      pattern({ type: "object", properties: {} }, {
+        type: "object",
+        properties: { total: { type: "number" }, label: { type: "string" } },
+        required,
+      });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        result(["total", "label"]),
+        result(["total"]),
+      )
+    ).toThrow(/result field is no longer required/);
+  });
+
+  it("still lets an ordinary result field become newly required", () => {
+    const result = (required: string[]): Pattern =>
+      pattern({ type: "object", properties: {} }, {
+        type: "object",
+        properties: { total: { type: "number" }, label: { type: "string" } },
+        required,
+      });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        result(["total"]),
+        result(["total", "label"]),
+      )
+    ).not.toThrow();
+  });
+});
+
 describe("listing marks are annotation-class", () => {
   // `tier: "wrapper"` and standard `deprecated: true` shape only what
   // `cf piece verbs` shows by default (verb contract WS-F); neither

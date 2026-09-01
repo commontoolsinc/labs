@@ -89,6 +89,7 @@ export type ExecutionLeaseWrite = {
    *  judges liveness by. Injectable so tests can construct expiry without
    *  waiting on real time. */
   now?: number;
+
   ttlMs?: number;
 };
 
@@ -183,6 +184,7 @@ export type ExecutionLeaseCycleOptions = {
 
   /** The DR1 per-process holder identity (`executionLeaseHolder`). */
   holder: string;
+
   ttlMs?: number;
 
   /** The cycle's clock; injectable for tests. Defaults to `Date.now`. */

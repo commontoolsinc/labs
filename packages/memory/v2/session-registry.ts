@@ -50,6 +50,7 @@ export type SessionState = {
    * a renewal blip the SpaceServer survives in-process must not leave
    * its serving replica silently stale. Cleared by that pass. */
   leaseHolderReadsLapsed?: boolean;
+
   expiresAt: number | null;
   ownerConnectionId: string | null;
   principal?: string;

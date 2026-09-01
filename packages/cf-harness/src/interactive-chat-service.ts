@@ -74,6 +74,13 @@ export interface CreateHarnessInteractiveChatServiceOptions {
   basePromptLoopOptions?: CreateHarnessPromptLoopOptions;
 
   /**
+   * Maps one service turn to a run artifact identifier when the transport
+   * owns that mapping. The prompt loop must construct the run from its
+   * options, so this cannot accompany an injected engine or run state.
+   */
+  runIdForTurn?: (sessionId: string, turnId: string) => string;
+
+  /**
    * System prompt seeded as the first message of a session's transcript.
    *
    * A session without one runs with no system message at all, which is what
@@ -659,6 +666,7 @@ const fileChangeFromToolMessage = (
 
 export class HarnessInteractiveChatService {
   readonly #basePromptLoopOptions: CreateHarnessPromptLoopOptions;
+  readonly #runIdForTurn?: (sessionId: string, turnId: string) => string;
   readonly #loomLocalHostBinding?: LoomLocalHostBinding;
   readonly #loomLocalHostModel?: string;
   readonly #createPromptLoop: HarnessInteractivePromptLoopFactory;
@@ -675,6 +683,20 @@ export class HarnessInteractiveChatService {
 
   constructor(options: CreateHarnessInteractiveChatServiceOptions = {}) {
     this.#basePromptLoopOptions = options.basePromptLoopOptions ?? {};
+    const injectedRunSource = this.#basePromptLoopOptions.engine !== undefined
+      ? "engine"
+      : this.#basePromptLoopOptions.runState !== undefined
+      ? "run state"
+      : undefined;
+    if (
+      options.runIdForTurn !== undefined &&
+      injectedRunSource !== undefined
+    ) {
+      throw new Error(
+        `turn run-id mapping cannot be combined with an injected ${injectedRunSource}`,
+      );
+    }
+    this.#runIdForTurn = options.runIdForTurn;
     if (options.systemPrompt !== undefined) {
       this.#systemPrompt = options.systemPrompt;
     }
@@ -1451,7 +1473,12 @@ export class HarnessInteractiveChatService {
 
     try {
       const loop = await this.#startPromptLoop(
-        this.#buildPromptLoopOptions(session, policy, browserAccess),
+        this.#buildPromptLoopOptions(
+          session,
+          turnId,
+          policy,
+          browserAccess,
+        ),
       );
       const result = await loop.runTranscript({
         transcript,
@@ -1564,6 +1591,7 @@ export class HarnessInteractiveChatService {
 
   #buildPromptLoopOptions(
     session: HarnessChatSessionStatus,
+    turnId: string,
     policy: HarnessChatPolicy,
     browserAccess?: HarnessChatBrowserAccessLease,
   ): CreateHarnessPromptLoopOptions {
@@ -1576,6 +1604,9 @@ export class HarnessInteractiveChatService {
         ? { cwd: session.workspace.cwd }
         : {}),
       ...(session.model !== undefined ? { model: session.model } : {}),
+      ...(this.#runIdForTurn !== undefined
+        ? { runId: this.#runIdForTurn(session.sessionId, turnId) }
+        : {}),
       ...(this.#loomLocalHostBinding !== undefined &&
           session.model !== undefined
         ? {

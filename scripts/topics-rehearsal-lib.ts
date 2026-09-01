@@ -244,10 +244,6 @@ export interface TopicsExport {
   manifest: { fid: string; patternIdentity: string; resultKeys: string[] }[];
 }
 
-/** The known link-valued argument fields a restore handles specially:
- * `mentionable` is re-established with `cf piece link` after the write, and
- * the deprecated `myName` stays retired. */
-
 /**
  * The link-valued argument fields a restore re-establishes with
  * `cf piece link` rather than writing as data, mapped to the board path each
@@ -267,6 +263,11 @@ export const STRUCTURAL_LINK_SOURCES: Record<string, string> = {
 };
 
 export const STRUCTURAL_LINK_FIELDS = Object.keys(STRUCTURAL_LINK_SOURCES);
+
+/**
+ * Retired link-valued fields, recognized so that a restore sets one aside by
+ * name rather than reaching the unknown-link throw below.
+ */
 export const LEGACY_LINK_FIELDS = ["myName"] as const;
 
 export interface RestoreDocument {

@@ -2,7 +2,7 @@
  * Unit tests for the pure helpers. No network, subprocess, or filesystem.
  */
 
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { budgetStatus, clampInt, concDot, daysLabel, durationTag, escapeHtml, friendlyError, humanDur, humanSpan, landingHref, lighten, multiSparkline, readBudget, sparkline, strip, thin, usd } from "./lib.ts";
 
 Deno.test("landingHref: squash-merge trailing (#N) -> the PR", () => {
@@ -536,12 +536,16 @@ Deno.test("strip: each cell links to that run's CI results in a new tab", () => 
   const html = strip([
     { outcome: "green", href: "https://github.com/o/r/actions/runs/1" },
     { outcome: "red", href: "https://github.com/o/r/actions/runs/2" },
-  ], 40);
+  ]);
   assertEquals([...html.matchAll(/<a class="cell"/g)].length, 2);
   assert(html.includes('href="https://github.com/o/r/actions/runs/1"'), "first run link");
   assert(html.includes('href="https://github.com/o/r/actions/runs/2"'), "second run link");
   assert(html.includes('target="_blank"'), "opens in a new tab");
-  assertEquals(strip([], 40), ""); // empty -> nothing
+  assertStringIncludes(
+    strip([{ outcome: "green", href: "" }], true),
+    'class="cells labeled"',
+  );
+  assertEquals(strip([]), ""); // empty -> nothing
 });
 
 Deno.test("sparkline: no highlight is a single line; a short series is empty", () => {

@@ -23,8 +23,13 @@ import type {
 import type { ConsoleFlow, ConsoleFlowCell, ConsoleFlowNode } from "../flow.ts";
 import type { ConsoleRunSummary } from "../runs.ts";
 import type { ConsoleSessionSummary } from "../sessions.ts";
+import type {
+  ConsoleChatEventEnvelope,
+  ConsoleTurnResult,
+} from "../turn-result.ts";
 
 export type {
+  ConsoleChatEventEnvelope,
   ConsoleFlow,
   ConsoleFlowCell,
   ConsoleFlowNode,
@@ -34,6 +39,7 @@ export type {
   ConsoleRunDetail,
   ConsoleRunSummary,
   ConsoleSessionSummary,
+  ConsoleTurnResult,
   HarnessChatEventEnvelope,
   PatternIndexEvent,
   PatternIndexListPatternsResponse,
@@ -116,6 +122,14 @@ export const listRuns = async (): Promise<readonly ConsoleRunSummary[]> =>
   (await json<{ runs: readonly ConsoleRunSummary[] }>(
     await fetch("/api/runs"),
   )).runs;
+
+/** The durable external result of one completed turn. */
+export const readTurnResult = async (
+  turnId: string,
+): Promise<ConsoleTurnResult> =>
+  await json<ConsoleTurnResult>(
+    await fetch(`/api/turns/${encodeURIComponent(turnId)}/result`),
+  );
 
 export const readRun = async (runId: string): Promise<ConsoleRunDetail> =>
   await json<ConsoleRunDetail>(

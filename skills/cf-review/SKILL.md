@@ -217,8 +217,8 @@ it was written for. The comment reaches on past it, so the members added under
 it look documented when they are not — which is exactly the shape a diff
 appending one member to a run of them puts in front of you. See the same
 document, "The blank line below". An overload set counts as one declaration
-here, so the blank line falls after the implementation and not between the
-signatures.
+here, so the blank line falls after the implementation — or, for a set with none
+to close it, after its last signature — and never between the signatures.
 
 **A missing or misplaced file header** is that same defect one level up, and is
 equally a thing a diff shows you. A file header is a doc comment at the very

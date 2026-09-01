@@ -8,8 +8,8 @@ its events over Server-Sent Events.
 The server binds `127.0.0.1`, and it treats loopback as an address rather than
 as an authorization: a page anywhere on the web can drive requests at the
 socket, so every request must name this server's own host and every `/api` route
-must carry the per-process token the page is handed as a `SameSite=Strict`
-cookie when it loads. Do not put it behind a public address.
+except health must carry the per-process token the page is handed as a
+`SameSite=Strict` cookie when it loads. Do not put it behind a public address.
 
 ## Prerequisites
 
@@ -110,6 +110,54 @@ enforcing run without those transports wired, so this surface sites them itself;
 is what a throwaway run wants. Otherwise sessions, turns, and events are
 durable: restarting the server and reopening the page replays the log.
 
+## HTTP routes
+
+Every route retains the console's loopback `Host` and `Origin` checks. The token
+column refers to the per-process cookie obtained by loading `/`.
+
+| Method | Route                        | Token | Result                                                                                  |
+| ------ | ---------------------------- | ----- | --------------------------------------------------------------------------------------- |
+| `GET`  | `/api/health`                | No    | Console health, configured Fabric API URL, and honestly limited Fabric-session liveness |
+| `POST` | `/api/task`                  | Yes   | Starts a session or a follow-up turn                                                    |
+| `POST` | `/api/cancel`                | Yes   | Cancels the active turn                                                                 |
+| `GET`  | `/api/sessions`              | Yes   | Durable session summaries                                                               |
+| `GET`  | `/api/status`                | Yes   | Session status and artifact roots                                                       |
+| `GET`  | `/api/policy`                | Yes   | What a new session here would run under                                                 |
+| `GET`  | `/api/turns/<turnId>/result` | Yes   | Durable structured result for a completed turn                                          |
+| `GET`  | `/api/events`                | Yes   | Live and replayed chat events over SSE                                                  |
+| `GET`  | `/api/runs`                  | Yes   | Run summaries                                                                           |
+| `GET`  | `/api/runs/<runId>/...`      | Yes   | Run detail, flow, graph, artifacts, and tool outputs                                    |
+| `POST` | `/api/index/call`            | Yes   | One allowlisted pattern-index read                                                      |
+
+Health returns `ok`, `fabricApiUrl`, and `fabricSession`. The last field is
+`unverified`: the console has no inspectable Fabric-session connection state,
+and HTTP reachability, configuration, or factory existence says nothing about
+whether a retained session can complete an operation. The field does not spend a
+provider turn or make a Fabric round trip. A caller needing proven substrate
+liveness must perform a separate probe.
+
+The completed-turn result is:
+
+```json
+{
+  "pieces": [
+    {
+      "slug": "reading-list",
+      "url": "http://localhost:8000/my-space/reading-list"
+    }
+  ],
+  "spaceName": "my-space",
+  "finalText": "Your reading list is ready."
+}
+```
+
+`pieces` is always present, including as `[]` when the run assigned no slug.
+Each entry copies only `slug` and `url` from the model-facing `assign_slug`
+output recorded in the run transcript; the console neither reconstructs the URL
+nor derives pattern metadata. `spaceName` identifies the space this console is
+configured against. A turn that is still running returns the named
+`turn_not_completed` error rather than holding the request open.
+
 ## What you'll see
 
 Type a task — "build me a page that tracks the books I'm reading" — and press
@@ -122,6 +170,11 @@ Start. The feed then shows, in the order the harness produces them:
   child's profile and the goal it was given, holding the child's own tool and
   assistant lines as they happen and closing with the child's status.
 - **the final text** of the turn, in a boxed entry, when it completes.
+
+The `turn_completed` event also carries the same structured object under
+`result`. Live streams and replayed durable events have the same shape, so a
+caller can open `result.pieces[0].url` without parsing assistant prose. Pollers
+read the same object from `GET /api/turns/<turnId>/result`.
 
 When the run names a piece, the `assign_slug` result carries a `slug` and a
 `url`, and the page raises an **Open your piece** link above the feed. That link
@@ -161,10 +214,43 @@ capabilities, policy, and, once a run has started, its own `artifactRoot`. A
 need a run's artifacts use the session's root when it is present and the
 top-level root as the console-wide fallback.
 
-Like every `/api` route, status requires the per-process token cookie obtained
-by loading the console page. The top-level fields are present even before the
-console has any sessions, so an unattended client can check the route contract
-before starting a model turn.
+Status requires the per-process token cookie obtained by loading the console
+page. The top-level fields are present even before the console has any sessions,
+so an unattended client can check the route contract before starting a model
+turn.
+
+### Policy route
+
+`GET /api/policy` returns what a session started here **would** run under, which
+is the same question the status route answers only for sessions that already
+exist:
+
+| field                     | value                                                                 |
+| ------------------------- | --------------------------------------------------------------------- |
+| `systemPromptSha256`      | SHA-256 of the seeded system prompt, or `null` when none is seeded    |
+| `allowedToolIds`          | the tools a new session's policy asks for                             |
+| `allowedSubagentProfiles` | the subagent profiles it authorizes                                   |
+| `artifactRoot`            | where runs are filed                                                  |
+| `fabricSpace`             | the space name runs build in                                          |
+| `sessionDbPath`           | the durable session store, or `null` when sessions are held in memory |
+
+The prompt crosses as a digest and never as text, so a client can check that
+this console holds the prompt it was told to run without the prompt leaving the
+process. `allowedToolIds` is what the policy asks for; the prompt loop withholds
+a tool again when its backing is absent, so this says a session may reach a tool
+rather than that a turn will hold it.
+
+The route carries the token, as the status route carrying the same policy on a
+live session does — and the space name and the two host paths, which nothing
+outside this server's own page has business reading. The health route's
+exemption is for a client that has no token yet and wants liveness; a client
+acting on this answer has loaded the page and holds one.
+
+An unattended client is the caller this route is for: the measurement batch
+runner refuses a whole batch when the console it found is not the cell its
+`--cell-spec` names, before the first task spends anything. That file's shape is
+in
+[the measurement protocol](../docs/pattern-index-measurement.md#the-cell-spec).
 
 ## CFC
 
@@ -388,8 +474,8 @@ forwarded, so nothing extra survives the crossing. `getPattern` is called
 without `includeSource`: this surface shows metadata, schemas, dependencies and
 events, and a pattern's source is read through the CLI.
 
-The route sits under `/api/`, so the `Host`, `Origin` and token gates that cover
-every other route cover it too.
+The route sits under `/api/`, so it carries the protected routes' `Host`,
+`Origin`, and token gates.
 
 Three panes:
 

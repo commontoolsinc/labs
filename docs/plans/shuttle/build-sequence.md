@@ -26,27 +26,33 @@ contract, and the short list is the record of which internals have a
 second caller. (The view substrate's entries wait for B3, which is when
 they earn their place on that record.)
 
-**A2 — connection injection for the write path.** Three shapes of work,
-not one. `stepPiece` is already done — it gained the
-`PieceResolutionDeps` seam with its write receipt (#6556), and its unit
-test is the template. `callPieceHandler` and `getPieceView` are
-forwarding gaps: each delegates to an already-injectable function
-(`resolvePieceCallable`, `inspectPiece`) without passing deps through, so
-the fix is a threaded parameter. The genuine conversions — the functions
-that call `loadPieces(config)` directly — are `setCellValue` first (a v1
-verb), then `removePiece`, `renderPiece`, and the `lib/acl.ts` loaders.
-Each change carries the unit test the seam makes possible; that is the
-PR's standalone value. Re-verify this inventory against the tree when A2
-starts: it churned three times during the design, once against its own
-prerequisite landing (#6556).
+**A2 — connection injection for the write path.** Done (#6646). The write
+path takes the connection as a parameter, so a held `PiecesController`
+serves every call rather than each opening a runtime, a storage manager,
+and a socket of its own: `setCellValue`, `removePiece`, `linkPieces`,
+`renderPiece`, `callPieceHandler`, and `getPieceView` in `lib/piece.ts`
+and `lib/piece-render.ts`, plus the `lib/acl.ts` loaders, beside
+`stepPiece`, whose seam (#6556) the rest are modeled on. `withAcl`
+disposes only a runtime it opened itself, so an ACL call over a held
+connection leaves it open. Each carries the unit test the seam makes
+possible — a controller stub driving the function's body against a doubled
+piece, with no socket and no server behind it — which is the PR's
+standalone value.
 
-**A3 — extract `callFromCommand`.** `buildCallCommand`'s action is inline
-and bound to Cliffy's `this` (`getLiteralArgs`); its constituents are
-already exported. The extraction makes the literal-args array a parameter
-and gives `call` the same named-export shape as its siblings. Independent
-value: an inline action body is uncoverable and everything registered
-after it sits in coverage shadow, so extraction retires debt in the
-package where coverage debt is a standing cost.
+**A3 — extract `callFromCommand`.** Done (#6682). `call` carries the
+named-export shape its siblings have: the mount's spelling and the two
+arrays Cliffy splits the argv into — this command's own arguments, the
+line past `cf call`, which a grammar refusal reprints, and the words past
+`--`, which the read step parses — are parameters beside the options and
+the positionals, so nothing under the action line needs the binding. The
+dispatch and the `render`/`hint` sinks ride a deps bag, which holds
+collaborators and no data. Its unit tests drive the whole action over a
+stub dispatcher and reach the success tail, which is what the extraction
+is worth in coverage: seven lines of `commands/piece.ts`, measured, and no
+other tracked file moves. The package's coverage shadow is real and lies
+elsewhere — it opens inside the chained `piece` command expression, around
+its first inline action, and `buildCallCommand` is a standalone function
+well before it.
 
 **A4 — exit and output seams audit.** Every seam shuttle calls must accept
 an exit override (`exitWithDataError` / `exitPieceCallFailure` call
@@ -101,8 +107,9 @@ half.
 write must surface as a value, never reach `Deno.exit`). `set` with
 inline values,
 `edit` over `$EDITOR`, and `link` — the one spelling that writes a
-reference instead of copying a value (decision 14), and the only write of
-the three that has no `cf` equivalent to lean on. `call` through
+reference instead of copying a value (decision 14), which leans on
+`cf piece link`. `edit` is the only write of the three with no `cf`
+equivalent behind it. `call` through
 `callFromCommand`, with `verbs` and `describe` beside it, since listing a
 piece's callables is what makes `call` usable without leaving the shell.
 Numbered handles from listings land here, and `more` with them: `more`

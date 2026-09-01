@@ -24,6 +24,8 @@ export const PATTERN_AUTHOR_SUBAGENT_PROFILE = "pattern-author" as const;
 export const WEB_SEARCH_SUBAGENT_MODEL = "gemini-3.5-flash" as const;
 export const DEFAULT_SUBAGENT_MAX_MODEL_TURNS = 8;
 export const MAX_SUBAGENT_MAX_MODEL_TURNS = 64;
+export const MAX_DELEGATE_PATTERN_REFS = 8;
+export const MAX_DELEGATE_PATTERN_REF_NOTE_LENGTH = 500;
 
 /**
  * Turn budget of the `pattern-author` profile. Authoring is a write,
@@ -581,12 +583,30 @@ export type HarnessSubagentRunRef =
   | HarnessRunningSubagentRunRef
   | HarnessTerminalSubagentRunRef;
 
+/** One published pattern the parent selected from its prior search results. */
+export interface DelegateTaskPatternRef {
+  /** Content-addressed id exactly as `search_patterns` returned it. */
+  patternId: string;
+
+  /** Parent-authored context for this selection, passed to the child verbatim. */
+  note?: string;
+}
+
+/** An inert refusal for a selected id absent from the parent's search record. */
+export interface DelegateTaskPatternRefRefusal {
+  patternId: string;
+  reason: "not-searched-by-parent";
+}
+
 export interface DelegateTaskToolInput {
   goal: string;
   profile: HarnessSubagentProfile;
   context?: string;
   maxModelTurns?: number;
   returnSchema?: JSONSchema;
+
+  /** Published patterns selected from this parent's prior search results. */
+  patternRefs?: readonly DelegateTaskPatternRef[];
 
   /**
    * A handle the PARENT holds, naming a cell whose string value is skill
@@ -602,4 +622,5 @@ export interface DelegateTaskToolOutput {
   type: "cf-harness.delegate-task-output";
   outputId: string;
   subagent: HarnessSubagentResult;
+  patternRefRefusals?: readonly DelegateTaskPatternRefRefusal[];
 }

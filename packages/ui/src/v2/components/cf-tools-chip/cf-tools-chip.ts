@@ -309,6 +309,7 @@ export class CFToolsChip extends BaseElement {
     | ToolsChipTool[]
     | ToolsRecord
     | undefined = undefined;
+
   /** Delay in ms before closing on hover-out. */
   declare closeDelay: number;
 

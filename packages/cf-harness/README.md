@@ -123,7 +123,8 @@ What works today:
     [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
   - `search_patterns` (present only when the run configures a pattern index with
     `--pattern-index-url`; finds published patterns by hashtag or free text and
-    reports each one's declared shapes and import specifier, never its source)
+    reports each one's kind, evidence quality, declared shapes, and import
+    specifier, never its source)
   - `record_feedback` (under the same pattern-index gate; votes a pattern up or
     down so the index learns which ones were worth offering)
   - `search_skills` (present only on the parent surface when the run configures
@@ -131,6 +132,10 @@ What works today:
     identifiers, names, sources, registry-reported install counts, and the
     number of refused hits, never skill text. Install counts are unauthenticated
     and unverifiable telemetry, not a trust signal)
+  - `acquire_skill` (present only on the parent surface when both the skills
+    registry and a Fabric session are configured; resolves a discovery id to a
+    full GitHub commit, checks the complete recursive tree, and returns a handle
+    or a first-class refusal, never skill text)
 - composing published patterns: source the model authors may
   `import Sub from "cf:pattern:<patternId>"`, and `run_pattern` fetches and
   compiles each named pattern into the space before compiling the source that
@@ -162,7 +167,9 @@ What works today:
   snapshots, and tool outputs, plus explicit skill registry and activation
   artifacts
 - provider-neutral run-report model-attempt diagnostics, one record per attempt,
-  naming the provider and the API operation that served it
+  naming the provider and the API operation that served it, and timing it twice
+  — `durationMs` to the response headers, `responseCompleteDurationMs` to the
+  end of the body or stream, which is the model's own working time
 - provider-reported per-turn token usage in run reports, with aggregate input,
   cached-input, cache-write, output, reasoning, and total tokens surfaced in
   operator and batch results
@@ -298,9 +305,11 @@ From [packages/cf-harness](.):
   one thing here that calls the live registry, which is why it is a script you
   run rather than a test that runs itself; the committed tests use a captured
   response. It uses the same guarded client as the parent-only `search_skills`
-  tool and prints no skill text. Configure that tool with
+  tool and prints no skill text. Configure discovery and pinned acquisition with
   `--skills-registry-url` or `CF_HARNESS_SKILLS_REGISTRY_URL`; without either,
-  the tool is absent. The discovery half of
+  both tools are absent. `acquire_skill` additionally requires the three Fabric
+  session flags because its successful result is a durable cell handle. The
+  discovery half of
   [`../../docs/plans/external-skill-acquisition.md`](../../docs/plans/external-skill-acquisition.md)
   is what it exists to exercise.
 
@@ -726,13 +735,14 @@ bound for model context carries tokens, while the persisted tool-output artifact
 keeps the raw addresses. Model-authored tool arguments resolve tokens back to
 canonical references before policy evaluation, summarization, and dispatch —
 except for `delegate_task`, whose `goal` and `context` reach the child verbatim,
-so a token there is inert text to the parent boundary (its `skillHandle` is the
-one delegate argument the parent boundary resolves itself: trusted-side
-materialization is that parameter's whole point — see "Skill by handle" below).
-And a sealed subagent structured-return string whose raw value names an address
-comes back as a token rather than an opaque `@link` object; the return's
-`linkedStringCount` counts only the positions still sealed. Denial-path tool
-messages are not swapped; that coverage, value handles, and an explicit
+so a token there is inert text to the parent boundary. Its `skillHandle` and
+`patternRefs` fields are resolved separately on the trusted side: materializing
+stored skill text and rebuilding selected pattern-search records are those
+parameters' whole point (see "Skill by handle" and "Pattern references by search
+record" below). And a sealed subagent structured-return string whose raw value
+names an address comes back as a token rather than an opaque `@link` object; the
+return's `linkedStringCount` counts only the positions still sealed. Denial-path
+tool messages are not swapped; that coverage, value handles, and an explicit
 release/readback mechanism are listed in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 #### Well-known grants
@@ -942,12 +952,41 @@ do not offer it.
 
 #### Skill by handle
 
+`acquire_skill` fills this path without exposing its payload to the chooser. It
+takes an exact id returned by `search_skills`, resolves the source repository's
+default branch to a full commit SHA, reads GitHub's recursive tree at that
+commit, and derives the candidate root from exact path-segment equality with the
+discovery slug. No case folding or path normalization participates. Zero or
+multiple candidates refuse, and a tree response marked `truncated` refuses
+because an unread inventory is not evidence of absence.
+
+The instructions-only whitelist is scoped to the selected candidate root's
+subtree, so sibling skills and repository files outside that root do not leak
+into the payload decision. Within the subtree, exactly root `SKILL.md` is
+admitted. Every other path — including a directory, script, reference, asset, or
+package file — refuses the whole acquisition and is returned as sanitized, inert
+refusal metadata. Nothing is silently stripped: prose referring to a missing
+script would be a different and misleading skill. Only after this check does the
+host require root `SKILL.md` to be a regular Git tree file, stream at most 256
+KiB of pinned raw bytes, require non-empty UTF-8, and write them to a cell.
+
+The successful write carries the weaker `kind: "fetch"` `ExternalIngest`
+provenance variant. It records the exact pinned raw URL, commit SHA, fetch time,
+and the harness-computed SHA-256 of the fetched bytes. It has no channel or
+audience claim, grants no permission, and declassifies nothing. A registry hash
+is not a pin and never enters provenance. The tool returns the handle and this
+inert acquisition metadata; loading the handle remains a separate
+`delegate_task` decision.
+
 `delegate_task` takes an optional `skillHandle`: a handle the parent holds,
 naming a cell whose string value is skill text for the child. The text is
-materialized on the trusted host side at child spawn — through the same
-resolution contract as every other handle value: table membership mandatory,
-string-only, same-space-only, with a structured refusal naming the reference on
-any miss, delivered before any child exists — and injected into the child's
+materialized on the trusted host side at child spawn. Acquired handles carry the
+`skill-context` capability and only this exact slot can consume one:
+`describe_handle`, browser value binding, ordinary tool-input resolution,
+delegation goal/context seeding, and child-return resolution all refuse or keep
+it opaque. The authorized resolution still requires table membership, a string
+value, and the same Fabric space, with a structured refusal naming the reference
+on any miss before any child exists. The text is injected into the child's
 context as a `<skill_context source="handle:<token>">` block beside the
 profile's registry preload. The parent never reads the text, and the child never
 holds the handle. The return path is mediated too: every parent-facing return of
@@ -967,6 +1006,25 @@ preamble that keeps a skill from authorizing tools applies to it unchanged. The
 child's activation record carries `source: "skill-handle"`, the token, and the
 digest of the exact text injected, so the artifacts say which reference supplied
 the skill and what it said.
+
+#### Pattern references by search record
+
+`delegate_task` also takes up to eight optional `patternRefs`, each containing a
+`patternId` and an optional bounded parent note. The harness resolves an id only
+from successful `search_patterns` results retained by that parent run and
+restored from its persisted transcript on resume; it neither trusts
+model-retyped metadata nor fetches the index during delegation. A known id gives
+the child a neutral generated block with the record's kind, quality,
+description, match evidence, import hint, argument shape, result shape, and the
+note verbatim. An id absent from the parent's record is omitted from child
+context and returned by name in `patternRefRefusals` with reason
+`not-searched-by-parent`.
+
+Cell handles passed as tokens, `skillHandle`, and `patternRefs` are sibling
+channels of one conceptual kind: an id names hashed information stored
+somewhere, attached metadata accompanies it, and trusted-side code resolves it.
+They deliberately remain separate until experience supplies a concrete reason to
+unify them.
 
 ### Running patterns against a Fabric space
 
@@ -1182,6 +1240,40 @@ free-text fields. Compiler diagnostics come back as
 bare fabric identifiers a diagnostic can embed (compiler-generated `fid1:`
 module roots, DIDs, `data:` URIs) are replaced with a `[fabric-id]` placeholder
 in the model-facing message, while the persisted artifact keeps the raw text.
+
+Only the newest such diagnostic is carried at full length. When a `run_pattern`
+result arrives, every earlier failed `run_pattern` result in that loop's
+transcript has its `message` replaced with a one-line summary naming the
+attempt, the status, how many errors the diagnostic reports and what they say —
+or the message's first line, where it reports no compiler error — and the tool
+output holding the full text; the summary is marked with `messageCollapsed` and
+the length it replaced. The newest failure is what the model writes its next
+source against, and the ones before it are re-read on every remaining turn
+without being acted on. Every other field of the result, a policy refusal among
+them, is left as it stands, as is a diagnostic already shorter than its own
+summary. The rewrite happens in the transcript itself, so the persisted
+transcript records the context the model was given, and the tool-output
+artifacts keep every diagnostic in full.
+
+The source those attempts carried is collapsed on the same terms. A
+`run_pattern` call arriving in the transcript replaces the `sourceText` of every
+earlier `run_pattern` call with a marker naming the attempt, how long its source
+ran, and the tool output holding it — the loop edits against the source it wrote
+last, and the drafts before it are re-sent whole on every remaining turn. Each
+call's source is written to `tool-outputs` under that call's own `outputId` as
+it runs, so the marker names an artifact that exists; a call whose result
+reported no `outputId`, one naming a `patternId` rather than source, and one
+whose source is shorter than the marker are all left as they stand, along with
+every other argument of a call that is collapsed.
+
+What a tool result may weigh in model context is bounded per tool. A `bash` or
+`run_skill_script` stream keeps 60,000 characters of head and 20,000 of tail; a
+`read_file` result keeps 8,000 and 2,000, because a file is read for a passage
+and the whole document would otherwise sit in context for every later turn.
+Either way the omitted middle is replaced by a marker counting the characters
+dropped and naming the tool output that holds the whole text, the result carries
+the original length beside the truncated field, and the artifact is written
+before the bound is applied.
 
 Interactive chat stdio transport:
 

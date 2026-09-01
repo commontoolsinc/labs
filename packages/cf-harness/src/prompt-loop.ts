@@ -59,6 +59,8 @@ import {
   asHarnessSubagentFailureReport,
   BROWSER_SUBAGENT_PROFILE,
   DEFAULT_SUBAGENT_PROFILE,
+  type DelegateTaskPatternRef,
+  type DelegateTaskPatternRefRefusal,
   type DelegateTaskToolInput,
   type DelegateTaskToolOutput,
   getHarnessSubagentProfileConfig,
@@ -72,6 +74,8 @@ import {
   type HarnessSubagentRunStateSummary,
   type HarnessSubagentStructuredReturn,
   isHarnessSubagentProfile,
+  MAX_DELEGATE_PATTERN_REF_NOTE_LENGTH,
+  MAX_DELEGATE_PATTERN_REFS,
   MAX_SUBAGENT_MAX_MODEL_TURNS,
   PATTERN_AUTHOR_SUBAGENT_PROFILE,
   SUBAGENT_FAILURE_REASON_CODES,
@@ -121,6 +125,8 @@ import type {
 } from "./model/client.ts";
 import { OpenAICompatibleGatewayModelClient } from "./model/openai-compatible-gateway.ts";
 import { sumHarnessModelUsage } from "./model/usage.ts";
+import { collapseSupersededRunPatternDiagnostics } from "./run-pattern-diagnostic-collapse.ts";
+import { collapseSupersededRunPatternSources } from "./run-pattern-source-collapse.ts";
 import {
   loadHarnessSkillContext,
   loadHarnessSkillContextFromText,
@@ -136,6 +142,10 @@ import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
 import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
 import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
 import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
+import {
+  isSearchPatternsToolSuccessOutput,
+  type SearchPatternsToolResult,
+} from "./tools/search-patterns.ts";
 import {
   isRunPatternToolSuccessOutput,
   scrubBareFabricIdentifiers,
@@ -737,6 +747,47 @@ const parseDelegateTaskInput = (
       invalid: { field: "context", expected: "a string, or omit it" },
     };
   }
+  let patternRefs: readonly DelegateTaskPatternRef[] | undefined;
+  if (input.patternRefs !== undefined) {
+    if (
+      !Array.isArray(input.patternRefs) ||
+      input.patternRefs.length > MAX_DELEGATE_PATTERN_REFS
+    ) {
+      return {
+        invalid: {
+          field: "patternRefs",
+          expected:
+            `an array of at most ${MAX_DELEGATE_PATTERN_REFS} pattern references`,
+        },
+      };
+    }
+    const parsed: DelegateTaskPatternRef[] = [];
+    for (const patternRef of input.patternRefs) {
+      if (
+        !isObjectNotArray(patternRef) ||
+        typeof patternRef.patternId !== "string" ||
+        patternRef.patternId.trim().length === 0 ||
+        (patternRef.note !== undefined &&
+          (typeof patternRef.note !== "string" ||
+            patternRef.note.length > MAX_DELEGATE_PATTERN_REF_NOTE_LENGTH))
+      ) {
+        return {
+          invalid: {
+            field: "patternRefs",
+            expected:
+              `entries with a non-empty patternId and an optional note of at most ${MAX_DELEGATE_PATTERN_REF_NOTE_LENGTH} characters`,
+          },
+        };
+      }
+      parsed.push({
+        patternId: patternRef.patternId,
+        ...(typeof patternRef.note === "string"
+          ? { note: patternRef.note }
+          : {}),
+      });
+    }
+    patternRefs = parsed;
+  }
   const profile = input.profile === undefined
     ? DEFAULT_SUBAGENT_PROFILE
     : typeof input.profile === "string" &&
@@ -822,6 +873,7 @@ const parseDelegateTaskInput = (
         : {}),
       ...(typeof maxModelTurns === "number" ? { maxModelTurns } : {}),
       ...(returnSchema !== undefined ? { returnSchema } : {}),
+      ...(patternRefs !== undefined ? { patternRefs } : {}),
       ...(typeof input.skillHandle === "string"
         ? { skillHandle: input.skillHandle.trim() }
         : {}),
@@ -891,7 +943,7 @@ const subagentProfileConfigForRun = (
  * rather than present-but-failing, even when an explicit allowlist names it.
  */
 const FABRIC_SESSION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
-  ["run_pattern", "assign_slug"] as const,
+  ["run_pattern", "assign_slug", "acquire_skill"] as const,
 );
 
 /**
@@ -903,8 +955,13 @@ const PATTERN_INDEX_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
 );
 
 /** The metadata-only tool gated on configured skills.sh discovery. */
-const SKILLS_SH_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+const SKILLS_SH_SEARCH_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
   ["search_skills"] as const,
+);
+
+/** The pinned acquisition tool gated separately from discovery. */
+const SKILLS_SH_ACQUISITION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+  ["acquire_skill"] as const,
 );
 
 /**
@@ -923,6 +980,7 @@ interface HarnessToolBackingAvailability {
   fabricSessionAvailable: boolean;
   patternIndexAvailable: boolean;
   skillsShSearchAvailable: boolean;
+  skillsShAcquisitionAvailable: boolean;
   skillRegistryAvailable: boolean;
 }
 
@@ -933,7 +991,10 @@ const withheldToolIds = (
   new Set([
     ...(availability.fabricSessionAvailable ? [] : FABRIC_SESSION_TOOL_IDS),
     ...(availability.patternIndexAvailable ? [] : PATTERN_INDEX_TOOL_IDS),
-    ...(availability.skillsShSearchAvailable ? [] : SKILLS_SH_TOOL_IDS),
+    ...(availability.skillsShSearchAvailable ? [] : SKILLS_SH_SEARCH_TOOL_IDS),
+    ...(availability.skillsShAcquisitionAvailable
+      ? []
+      : SKILLS_SH_ACQUISITION_TOOL_IDS),
     ...(availability.skillRegistryAvailable ? [] : SKILL_REGISTRY_TOOL_IDS),
   ]);
 
@@ -963,7 +1024,7 @@ const seedSubagentHandleTable = (
   for (const text of [input.goal, input.context ?? ""]) {
     for (const match of text.matchAll(new RegExp(HANDLE_TOKEN_PATTERN))) {
       const entry = resolveHandleToken(parentTable, match[0]);
-      if (entry !== undefined) {
+      if (entry !== undefined && entry.capability === undefined) {
         seeded.set(entry.token, entry);
       }
     }
@@ -1076,10 +1137,70 @@ const resolveChildHandleTokens = (
   const table = childEngine.handleTable;
   return text.replace(
     new RegExp(HANDLE_TOKEN_PATTERN.source, "g"),
-    (token) =>
-      (table === undefined ? undefined : resolveHandleToken(table, token))
-        ?.ref ?? SCRUBBED_CHILD_HANDLE_TOKEN,
+    (token) => {
+      const entry = table === undefined
+        ? undefined
+        : resolveHandleToken(table, token);
+      return entry !== undefined && entry.capability === undefined
+        ? entry.ref
+        : SCRUBBED_CHILD_HANDLE_TOKEN;
+    },
   );
+};
+
+/**
+ * Finds the first skill-context token used outside the one slot authorized to
+ * consume it. Keys count as input too. `describe_handle` is allowed to see
+ * the token so that it can return its own named, value-free refusal.
+ */
+const restrictedSkillContextToken = (
+  table: HarnessHandleTable | undefined,
+  toolId: string,
+  value: unknown,
+  path: readonly string[] = [],
+): string | undefined => {
+  if (table === undefined) return undefined;
+  if (typeof value === "string") {
+    for (const match of value.matchAll(new RegExp(HANDLE_TOKEN_PATTERN))) {
+      const entry = resolveHandleToken(table, match[0]);
+      if (entry?.capability !== "skill-context") continue;
+      const authorized = toolId === "delegate_task" && path.length === 1 &&
+        path[0] === "skillHandle";
+      if (!authorized && toolId !== "describe_handle") return entry.token;
+    }
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const found = restrictedSkillContextToken(
+        table,
+        toolId,
+        value[index],
+        [...path, String(index)],
+      );
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, entry] of Object.entries(value)) {
+      const keyMatch = restrictedSkillContextToken(
+        table,
+        toolId,
+        key,
+        [...path, key],
+      );
+      if (keyMatch !== undefined) return keyMatch;
+      const found = restrictedSkillContextToken(
+        table,
+        toolId,
+        entry,
+        [...path, key],
+      );
+      if (found !== undefined) return found;
+    }
+  }
+  return undefined;
 };
 
 /**
@@ -1219,9 +1340,11 @@ const buildSubagentSystemPrompt = (
           ]
           : []),
         "Pass pattern source inline as the run_pattern `sourceText` argument. You have no write_file or edit_file; do not try to author patterns as workspace files.",
-        "The pattern factory must return its result object literal directly — `return { count, $UI: <div>…</div> }` — with computed() wrapping individual derived fields at most. Never return a computed(), lift, or other derived wrapper as the whole result: the piece it creates exists only in this session's runtime, and the browser link handed to the user will fail to load it.",
+        "Return a durable result object directly — `return { count, $UI: <div>…</div> }`. A whole-result derived wrapper is a known smell, but not a deterministic failure: after instantiation run_pattern checks the actual pattern pointer and refuses a piece materialized under a session-only identity.",
         "You own the write, compile-error, fix loop. A `compile-error` result is normal iteration material: read the diagnostic, correct the source, and call run_pattern again. Do not hand a compile error back to the parent as the answer.",
         "Use read_file and bash to read existing patterns and pattern documentation in the workspace when the compiler or the preloaded skills leave a question open.",
+        "Read the passage, not the guide. Locate it first with bash — `grep -n` for the term — and read the lines around the hit with `sed -n '120,180p'`. Where you do reach for read_file on a document, bound it with `maxBytes`. A read is cut at roughly ten thousand characters with the full text left in the run artifact, so a whole-guide read spends the turn and still does not land on the passage.",
+        "Read again rather than hoard. Everything you have read stays in front of you for the rest of the run whether you need it again or not, so read what the next call needs and come back to the file when a later question wants a different part of it.",
         "Every reference in your task is an address, not a value. Wire it into the pattern as a run_pattern `inputs` entry so the pattern reads it live; never try to read, print, or transcribe the data behind it yourself.",
         "Use describe_handle on a reference you were given to see its shape before authoring against it. It answers with a schema and never with data.",
         'To read what the pattern computed, pass run_pattern a `resultSchema` describing the fields you want; without one you get a reference and no value at all. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. Numbers, booleans and enum strings come back as themselves; unconstrained strings and anything the schema does not model are withheld as text and come back as reference tokens addressing those positions, which you can describe_handle or wire into a later pattern. You do not need to declare $NAME or $UI.',
@@ -1269,11 +1392,56 @@ const buildSubagentSystemPrompt = (
       ]),
   ].join("\n");
 
-const buildSubagentUserPrompt = (input: DelegateTaskToolInput): string =>
+/** One selected pattern rebuilt from the parent's trusted search record. */
+interface RehydratedDelegatePatternRef {
+  record: SearchPatternsToolResult;
+  note?: string;
+}
+
+/**
+ * Experimental neutral wording for pattern-reference child context. The
+ * committed suites measure this variable; advisory and directive variants
+ * remain empirically undecided, so this one presents available material and
+ * mandates nothing.
+ */
+const PATTERN_REFS_CHILD_CONTEXT = (
+  patternRefs: readonly RehydratedDelegatePatternRef[],
+): string =>
+  [
+    "Published pattern references selected by the parent:",
+    "These records from the parent's earlier searches are available for this delegated task.",
+    ...patternRefs.flatMap(({ record, note }, index) => [
+      "",
+      `Pattern ${index + 1}: ${record.patternId}`,
+      `Kind: ${record.kind}`,
+      `Quality: ${record.quality}`,
+      `Description: ${record.description}`,
+      ...(record.matchedTerms !== undefined &&
+          record.queryTerms !== undefined
+        ? [
+          `Match: ${record.matchedTerms} of ${record.queryTerms} stopword-free query terms`,
+        ]
+        : []),
+      `Import: ${record.importHint}`,
+      "Argument shape:",
+      record.argumentType ?? "Not available.",
+      "Result shape:",
+      record.resultType ?? "Not available.",
+      ...(note !== undefined ? ["Parent note:", note] : []),
+    ]),
+  ].join("\n");
+
+const buildSubagentUserPrompt = (
+  input: DelegateTaskToolInput,
+  patternRefs: readonly RehydratedDelegatePatternRef[] = [],
+): string =>
   [
     "Task:",
     input.goal,
     ...(input.context !== undefined ? ["", "Context:", input.context] : []),
+    ...(patternRefs.length > 0
+      ? ["", PATTERN_REFS_CHILD_CONTEXT(patternRefs)]
+      : []),
     ...(input.returnSchema !== undefined
       ? [
         "",
@@ -1564,10 +1732,28 @@ type RecordHarnessPolicyEvent = (
   event: Parameters<CfHarnessEngine["recordPolicyEvent"]>[0],
 ) => Promise<void>;
 
-const MODEL_FACING_BASH_STREAM_HEAD_CHARS = 60_000;
-const MODEL_FACING_BASH_STREAM_TAIL_CHARS = 20_000;
-const MODEL_FACING_BASH_STREAM_MAX_CHARS = MODEL_FACING_BASH_STREAM_HEAD_CHARS +
-  MODEL_FACING_BASH_STREAM_TAIL_CHARS;
+/** How much of one stream or file a model-facing rendering carries. */
+interface ModelFacingTextBounds {
+  head: number;
+  tail: number;
+}
+
+const MODEL_FACING_BASH_STREAM_BOUNDS: ModelFacingTextBounds = {
+  head: 60_000,
+  tail: 20_000,
+};
+
+/**
+ * A file is read for a passage rather than run for its output, and a whole
+ * document then sits in context for every later turn of the loop that read
+ * it. What is kept is enough to answer from or to locate the passage in, and
+ * the read is repeatable against the same file.
+ */
+const MODEL_FACING_READ_FILE_BOUNDS: ModelFacingTextBounds = {
+  head: 8_000,
+  tail: 2_000,
+};
+
 const REDACTED_READ_FILE_ERROR_PATH = "[redacted]";
 const REDACTED_READ_FILE_ERROR_MESSAGE =
   "read_file failed: filesystem status not observable under CFC policy";
@@ -1790,23 +1976,22 @@ const truncateModelFacingBashStream = (
   value: string | ObservationDenied,
   channel: "stdout" | "stderr",
   resultRef: ToolResultRef,
+  bounds: ModelFacingTextBounds = MODEL_FACING_BASH_STREAM_BOUNDS,
 ): {
   value: string | ObservationDenied;
   truncated?: boolean;
   originalLength?: number;
 } => {
-  if (
-    typeof value !== "string" ||
-    value.length <= MODEL_FACING_BASH_STREAM_MAX_CHARS
-  ) {
+  const kept = bounds.head + bounds.tail;
+  if (typeof value !== "string" || value.length <= kept) {
     return { value };
   }
-  const omitted = value.length - MODEL_FACING_BASH_STREAM_MAX_CHARS;
+  const omitted = value.length - kept;
   return {
-    value: `${value.slice(0, MODEL_FACING_BASH_STREAM_HEAD_CHARS)}\n\n` +
+    value: `${value.slice(0, bounds.head)}\n\n` +
       `[cf-harness: ${channel} truncated for model context; omitted ${omitted} characters. ` +
       `Full ${channel} is preserved in tool output ${resultRef.outputId}.]\n\n` +
-      value.slice(-MODEL_FACING_BASH_STREAM_TAIL_CHARS),
+      value.slice(-bounds.tail),
     truncated: true,
     originalLength: value.length,
   };
@@ -1859,6 +2044,7 @@ const truncateModelFacingReadFileOutput = (
     typeof output.content === "string" ? output.content : "",
     "stdout",
     resultRef,
+    MODEL_FACING_READ_FILE_BOUNDS,
   );
   return {
     ...output,
@@ -2141,6 +2327,7 @@ const renderMediatedReadFileOutput = (
     renderStreamObservation(cfcResult.stdout, resultRef),
     "stdout",
     resultRef,
+    MODEL_FACING_READ_FILE_BOUNDS,
   );
   const observation = modelContextObservationForStream(
     cfcResult.stdout,
@@ -2320,6 +2507,17 @@ export class CfHarnessPromptLoop {
   readonly #reasoningEffort?: string;
   readonly #compactThreshold?: number;
   readonly #subagentCompositionGuidance: boolean;
+  readonly #trustedPatternSearchRecords = new Map<
+    string,
+    SearchPatternsToolResult
+  >();
+
+  /**
+   * The `outputId` of every `run_pattern` call whose source this loop wrote to
+   * an artifact. A source is collapsed only where its id is here, so a run
+   * with no artifact store keeps every draft it was given.
+   */
+  readonly #persistedRunPatternSources = new Set<string>();
 
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
     this.engine = options.engine ?? new CfHarnessEngine(options);
@@ -2393,7 +2591,12 @@ export class CfHarnessPromptLoop {
       ...DEFAULT_PROMPT_LOOP_TOOL_IDS,
       ...(availability.fabricSessionAvailable ? FABRIC_SESSION_TOOL_IDS : []),
       ...(availability.patternIndexAvailable ? PATTERN_INDEX_TOOL_IDS : []),
-      ...(availability.skillsShSearchAvailable ? SKILLS_SH_TOOL_IDS : []),
+      ...(availability.skillsShSearchAvailable
+        ? SKILLS_SH_SEARCH_TOOL_IDS
+        : []),
+      ...(availability.skillsShAcquisitionAvailable
+        ? SKILLS_SH_ACQUISITION_TOOL_IDS
+        : []),
     ];
     const withheld = withheldToolIds(availability);
     this.#allowedToolIds = new Set(
@@ -2431,6 +2634,7 @@ export class CfHarnessPromptLoop {
       fabricSessionAvailable: this.engine.fabricSessionAvailable,
       patternIndexAvailable: this.engine.patternIndexAvailable,
       skillsShSearchAvailable: this.engine.skillsShSearchAvailable,
+      skillsShAcquisitionAvailable: this.engine.skillsShAcquisitionAvailable,
       // A configured skills root is what a run scans into the registry the
       // skill tools read, so its presence is the tools' backing — a run that
       // has yet to scan still knows it will, and one that never will offers
@@ -2565,6 +2769,7 @@ export class CfHarnessPromptLoop {
     }
     this.engine.bindRunModel(model);
     const transcript: HarnessTranscriptMessage[] = [...options.transcript];
+    this.#restorePatternSearchRecords(transcript);
     const maxModelTurns = options.maxModelTurns ?? this.#maxModelTurns;
     const toolActivity: HarnessToolActivity[] = [];
     const modelAttempts: HarnessModelAttempt[] = [];
@@ -2778,6 +2983,18 @@ export class CfHarnessPromptLoop {
           );
           const toolMessage = invokedToolCall.toolMessage;
           transcript.push(toolMessage);
+          // After the result rather than after the call that asked for it: a
+          // marker names the artifact holding what it replaced, and both the
+          // result's `outputId` and the source artifact under it exist only
+          // once the call has run. One assistant message may carry several
+          // calls, and each result collapses what it supersedes.
+          if (toolMessage.toolName === "run_pattern") {
+            collapseSupersededRunPatternDiagnostics(transcript);
+            collapseSupersededRunPatternSources(
+              transcript,
+              this.#persistedRunPatternSources,
+            );
+          }
           await this.engine.persistTranscript(transcript);
           reportTimeline.push(transcriptTimelineEntry(
             toolMessage,
@@ -2891,6 +3108,107 @@ export class CfHarnessPromptLoop {
     if (minted.table !== table) {
       await this.engine.recordHandleTable(minted.table);
     }
+  }
+
+  /**
+   * Helper for `#invokeToolCall()`, which records the source a `run_pattern`
+   * call carried beside that call's tool output, under the same `outputId`.
+   *
+   * The transcript holds each attempt's source only until a later attempt
+   * supersedes it, at which point the call's arguments are collapsed to a
+   * marker naming this artifact. Writing it here rather than at the collapse
+   * keeps the record independent of whether the loop ran again, and the
+   * source is the model's own writing, so nothing crosses a boundary by
+   * being kept.
+   */
+  async #persistRunPatternSource(
+    toolId: BuiltinToolId,
+    input: Record<string, unknown>,
+    resultRef: ToolResultRef,
+  ): Promise<void> {
+    const store = this.engine.artifactStore;
+    if (
+      store === undefined || toolId !== "run_pattern" ||
+      typeof input.sourceText !== "string"
+    ) {
+      return;
+    }
+    await store.persistToolOutput(
+      "run-pattern-source",
+      resultRef.outputId,
+      {
+        type: "cf-harness.run-pattern-source",
+        outputId: resultRef.outputId,
+        sourceText: input.sourceText,
+      },
+    );
+    this.#persistedRunPatternSources.add(resultRef.outputId);
+  }
+
+  /** Restores successful search hits already present in parent history. */
+  #restorePatternSearchRecords(
+    transcript: readonly HarnessTranscriptMessage[],
+  ): void {
+    for (const message of transcript) {
+      if (message.role !== "tool" || message.toolName !== "search_patterns") {
+        continue;
+      }
+      try {
+        this.#recordPatternSearchResult(
+          "search_patterns",
+          JSON.parse(message.content),
+        );
+      } catch {
+        // A malformed persisted result grants no pattern reference.
+      }
+    }
+  }
+
+  /** Retains successful search hits for this parent prompt loop. */
+  #recordPatternSearchResult(toolId: BuiltinToolId, output: unknown): void {
+    if (
+      toolId !== "search_patterns" ||
+      !isSearchPatternsToolSuccessOutput(output)
+    ) {
+      return;
+    }
+    for (const record of output.results) {
+      this.#trustedPatternSearchRecords.set(
+        record.patternId,
+        structuredClone(record),
+      );
+    }
+  }
+
+  /** Rehydrates selected ids from this parent's prior search results only. */
+  #rehydrateDelegatePatternRefs(
+    patternRefs: readonly DelegateTaskPatternRef[] | undefined,
+  ): {
+    records: readonly RehydratedDelegatePatternRef[];
+    refusals: readonly DelegateTaskPatternRefRefusal[];
+  } {
+    const records: RehydratedDelegatePatternRef[] = [];
+    const refusals: DelegateTaskPatternRefRefusal[] = [];
+    for (const patternRef of patternRefs ?? []) {
+      const record = this.#trustedPatternSearchRecords.get(
+        patternRef.patternId,
+      );
+      if (record === undefined) {
+        refusals.push({
+          patternId: patternRef.patternId,
+          reason: "not-searched-by-parent",
+        });
+        continue;
+      }
+      // No new CFC boundary is crossed here: every search field could already
+      // travel in `goal` or `context`, and `note` is parent-authored prose like
+      // those fields. Trusted-side rehydration replaces lossy retyping.
+      records.push({
+        record: structuredClone(record),
+        ...(patternRef.note !== undefined ? { note: patternRef.note } : {}),
+      });
+    }
+    return { records, refusals };
   }
 
   /**
@@ -3125,6 +3443,28 @@ export class CfHarnessPromptLoop {
       });
     }
     const parsedAllowedInput = toolInput.input;
+    const restrictedToken = restrictedSkillContextToken(
+      this.engine.handleTable,
+      toolId,
+      parsedAllowedInput,
+    );
+    if (restrictedToken !== undefined) {
+      return await this.#rejectInvalidToolCall({
+        toolCall,
+        invalid: {
+          reason: "invalid-argument",
+          toolId,
+          expected:
+            "skill-context handles can be consumed only by delegate_task skillHandle",
+        },
+        sequence,
+        startedAt: activityStartedAt,
+        effectClass: tool.descriptor.effectClass,
+        ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
+        policyEventIndexes,
+        recordActivity,
+      });
+    }
     // Handle tokens resolve to their referents here, so policy evaluation,
     // summarization, and the tool itself all see the real addresses. Denial
     // summaries recorded above keep the tokens the model wrote. A
@@ -3291,6 +3631,7 @@ export class CfHarnessPromptLoop {
           this.engine.handleValueResolutionContext,
           delegateInput.skillHandle,
           "skillHandle",
+          { capability: "skill-context" },
         );
         if (resolution.error !== undefined) {
           return await this.#rejectInvalidToolCall({
@@ -3415,12 +3756,14 @@ export class CfHarnessPromptLoop {
       // what lets it stay run-fatal without matching error-message strings.
       throw error;
     }
+    this.#recordPatternSearchResult(toolId, result.output);
     // Before the outbound swap, so the token it mints for the result cell
     // already carries the shape the compiler knew.
     await this.#recordRunPatternResultShape(
       toolId,
       result.output,
     );
+    await this.#persistRunPatternSource(toolId, input, result.resultRef);
     const modelOutputResult = await this.#modelFacingToolOutput(
       toolId,
       result.output,
@@ -3758,6 +4101,9 @@ export class CfHarnessPromptLoop {
     resultRef: ToolResultRef;
   }> {
     const delegateInput = options.input;
+    const patternRefResolution = this.#rehydrateDelegatePatternRefs(
+      delegateInput.patternRefs,
+    );
     const profileConfig = subagentProfileConfigForRun(
       delegateInput.profile,
       this.#toolBackingAvailability(),
@@ -4032,7 +4378,10 @@ export class CfHarnessPromptLoop {
               : {}),
           },
         ),
-        prompt: buildSubagentUserPrompt(delegateInput),
+        prompt: buildSubagentUserPrompt(
+          delegateInput,
+          patternRefResolution.records,
+        ),
         contextMessages: childSkillContextMessages,
         model: childModel.model,
         maxModelTurns,
@@ -4134,6 +4483,9 @@ export class CfHarnessPromptLoop {
       type: "cf-harness.delegate-task-output",
       outputId: this.engine.nextToolOutputId("delegate_task"),
       subagent,
+      ...(patternRefResolution.refusals.length > 0
+        ? { patternRefRefusals: patternRefResolution.refusals }
+        : {}),
     };
     const result = await this.engine.recordBuiltinToolOutput(
       "delegate_task",

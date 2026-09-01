@@ -118,14 +118,15 @@ Deno.test("model spend: all three providers read -> green, combined MTD, a line 
       // $1/day from OpenAI and $2/day from Anthropic for each day of the month so
       // far, plus OpenRouter's running $5. The buckets with no day and no figures
       // are dropped rather than counted, and both pages of each provider land.
-      assertEquals(v.aside, `<span class="hmtd">$${3 * DOM + 5} MTD</span>`);
+      assertEquals(v.valueLabel, v.value);
+      assertEquals(v.aside, `<span class="hmtd" title="$${3 * DOM + 5} MTD">$${3 * DOM + 5} MTD</span>`);
       assert(v.value?.startsWith("~"), `a complete read is a projection, got ${v.value}`);
       assert(v.value?.endsWith("/mo"));
       // The key: a swatch each for the charted providers (their totals sit at the
       // line ends), OpenRouter's total inline since it has no line.
       assertStringIncludes(
         v.extra ?? "",
-        `<p class="sub">${themedSwatch("#10a37f")} OpenAI • ` +
+        `<p class="sub" title="OpenAI • Anthropic • OR $5">${themedSwatch("#10a37f")} OpenAI • ` +
           `${themedSwatch("#d97757")} Anthropic • OR $5</p>`,
       );
       // Each line is drawn in its provider's color and labeled with its own MTD.
@@ -160,11 +161,11 @@ Deno.test("model spend: a provider that errors -> $??? and gray, the rest still 
       // is unknown, so the tile grays out rather than claiming a verdict.
       const v = await modelSpend.collect(ctx({ ...ALL_KEYS, MODEL_MONTHLY_BUDGET: "0" }));
       assertEquals(v.status, "unknown");
-      assertEquals(v.aside, `<span class="hmtd">$${DOM + 5} MTD</span>`); // Anthropic adds nothing
+      assertEquals(v.aside, `<span class="hmtd" title="$${DOM + 5} MTD">$${DOM + 5} MTD</span>`); // Anthropic adds nothing
       assert(v.value?.startsWith("≥"), `the total is a lower bound, got ${v.value}`);
       assertStringIncludes(
         v.extra ?? "",
-        `<p class="sub">${themedSwatch("#10a37f")} OpenAI • Anthropic $??? • OR $5</p>`,
+        `<p class="sub" title="OpenAI • Anthropic $??? • OR $5">${themedSwatch("#10a37f")} OpenAI • Anthropic $??? • OR $5</p>`,
       );
       assertEquals(v.duration, 45 * DAY); // OpenAI's line is still drawn
       assertStringIncludes(v.extra ?? "", "#10a37f");
@@ -192,7 +193,7 @@ Deno.test("model spend: a provider whose report stopped -> $??? and gray, never 
     const v = await modelSpend.collect(ctx({ OPENAI_ADMIN_KEY: "oa", OPENROUTER_KEY: "or" }));
     assertEquals(v.status, "unknown"); // OpenAI's recent days are unknown, not quiet
     assert(v.value?.startsWith("≥"), `the total is a lower bound, got ${v.value}`);
-    assertEquals(v.extra, `<p class="sub">OpenAI $??? • OR $5</p>`); // no line, no total
+    assertEquals(v.extra, `<p class="sub" title="OpenAI $??? • OR $5">OpenAI $??? • OR $5</p>`); // no line, no total
   });
 });
 
@@ -213,7 +214,7 @@ Deno.test("model spend: a provider with no bucket at all draws no line of $0", a
   await withFetch({ "api.openai.com": () => json({ data: [] }), "api.anthropic.com": anthropicPaged }, async () => {
     const v = await modelSpend.collect(ctx({ OPENAI_ADMIN_KEY: "oa", ANTHROPIC_ADMIN_KEY: "an" }));
     assertEquals(v.status, "good");
-    assertEquals(v.aside, `<span class="hmtd">$${2 * DOM} MTD</span>`); // Anthropic's $2/day alone
+    assertEquals(v.aside, `<span class="hmtd" title="$${2 * DOM} MTD">$${2 * DOM} MTD</span>`); // Anthropic's $2/day alone
     // OpenAI's color survives in the key's swatch and nowhere in the chart.
     assertEquals((v.extra ?? "").match(/#10a37f/gi)?.length, 1);
     assertStringIncludes(v.extra ?? "", "#d97757");
@@ -224,10 +225,10 @@ Deno.test("model spend: a one-key deployment still turns green (an unset key doe
   await withFetch({ "openrouter.ai": openrouterFive }, async () => {
     const v = await modelSpend.collect(ctx({ OPENROUTER_KEY: "or" }));
     assertEquals(v.status, "good");
-    assertEquals(v.aside, `<span class="hmtd">$5 MTD</span>`);
+    assertEquals(v.aside, `<span class="hmtd" title="$5 MTD">$5 MTD</span>`);
     assert(v.value?.startsWith("~"), `nothing configured is missing, got ${v.value}`);
     // OpenRouter has no daily series, so there is no chart and nothing to span.
-    assertEquals(v.extra, `<p class="sub">OR $5</p>`);
+    assertEquals(v.extra, `<p class="sub" title="OR $5">OR $5</p>`);
     assertEquals(v.duration, 0);
   });
 });
@@ -237,8 +238,8 @@ Deno.test("model spend: one day of data draws no chart, so the provider's total 
   await withFetch({ "api.openai.com": () => json({ data: [oaBucket(today, 12)] }) }, async () => {
     const v = await modelSpend.collect(ctx({ OPENAI_ADMIN_KEY: "oa" }));
     assertEquals(v.status, "good");
-    assertEquals(v.extra, `<p class="sub">${themedSwatch("#10a37f")} OpenAI $12</p>`);
-    assertEquals(v.aside, `<span class="hmtd">$12 MTD</span>`);
+    assertEquals(v.extra, `<p class="sub" title="OpenAI $12">${themedSwatch("#10a37f")} OpenAI $12</p>`);
+    assertEquals(v.aside, `<span class="hmtd" title="$12 MTD">$12 MTD</span>`);
     assertEquals(v.duration, 0);
   });
 });

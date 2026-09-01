@@ -87,6 +87,7 @@ interface MutableCapabilityState {
    * identity paths the unknown access can actually cover, instead of
    * blanket-erasing every capture sharing this root state (#4714). */
   readonly wildcardPaths: Set<string>;
+
   hasIdentityUse: boolean;
   hasNonIdentityUse: boolean;
   hasNonIdentityRootUse: boolean;

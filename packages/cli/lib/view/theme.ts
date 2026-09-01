@@ -166,10 +166,11 @@ export const ui = {
   searchMatch: { fg: C.ink, bg: C.cyan } as Style,
   searchCurrent: { fg: C.ink, bg: C.yellow, bold: true } as Style,
 
-  /** A dialog is a panel a shade lighter than the editor, with a bright frame
-   * and a drop shadow, distinct from the content behind it. */
+  /** Background of an overlay or dialog panel: a shade lighter than the
+   * editor, distinct from the content behind it. */
   overlayBg: C.panel,
 
+  /** The panel's bright frame. */
   overlayBorder: { fg: C.white, bold: true } as Style,
 
   /** Border of an overlay that shows source (an editor window). */

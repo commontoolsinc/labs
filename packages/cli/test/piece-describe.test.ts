@@ -483,7 +483,7 @@ describe("piece-describe", () => {
       apiUrl: "http://localhost:8000",
       identity: "/tmp/test-identity.pem",
       space: "home",
-      piece: "board",
+      cell: "board",
       quiet: true,
     };
 

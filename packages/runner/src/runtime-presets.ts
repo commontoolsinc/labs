@@ -740,13 +740,13 @@ export interface RemoteClientPresetParams extends CoreParams {
   patternCoverage?: PatternCoverageCollector;
 
   /**
-   * Host-controlled rollout dials, the browserWorker precedent: a client
-   * host (cf-harness's fabric session) may raise enforcement and turn on
-   * flow-label persistence for one session without moving the fleet posture
-   * in `coreOptions`.
+   * Host-controlled rollout dial, on the browserWorker precedent: a client
+   * host (cf-harness's fabric session) may raise enforcement for one session
+   * without moving the fleet posture in `coreOptions`.
    */
   cfcEnforcementMode?: CfcEnforcementMode;
 
+  /** The other such dial: flow-label persistence, on the same terms. */
   cfcFlowLabels?: CfcFlowLabelsMode;
 }
 
@@ -772,10 +772,12 @@ export interface BrowserWorkerPresetParams extends CoreParams {
   /** Map from space DIDs to HTTP or HTTPS origins selected by the shell host. */
   spaceHostMap?: Record<string, string>;
 
-  /** Host-controlled rollout dials, from `InitializationData`. */
+  /** Host-controlled rollout dial, from `InitializationData`. */
   cfcEnforcementMode?: CfcEnforcementMode;
 
+  /** The other such dial, from the same source. */
   cfcFlowLabels?: CfcFlowLabelsMode;
+
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
   telemetry?: RuntimeTelemetry;
   consoleHandler?: ConsoleHandler;

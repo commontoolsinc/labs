@@ -68,6 +68,7 @@ import {
   type CfcGrantWriteInput,
   type CfcLabelMetadataObservation,
   type CfcLabelMetadataProtectionMode,
+  cfcMetadataPresent,
   type CfcPolicyEvaluationMode,
   type CfcPrefixProvenanceSummary,
   CfcRefusalDetail,
@@ -97,10 +98,12 @@ import {
   prepareCfcGrantWrite,
   preparedDigestFor,
   type PreparedDigestInput,
+  type RuntimeWritePolicyAuthorization,
   type SinkMaxConfidentiality,
   type TrustSnapshot,
   type WritePolicyInput,
 } from "../cfc/mod.ts";
+import { runtimeWritePolicyAuthorized } from "../cfc/types.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
 import { isTerminalRefusal, plainReason } from "../cfc/verdict-reason.ts";
 import {
@@ -120,6 +123,7 @@ import { CFC_ENFORCEMENT_REJECTION_PREFIX } from "./rejection.ts";
 import {
   clearSchemaRefusalTx,
   ignoreReadForCommit,
+  internalVerifierRead,
   isInternalVerifierRead,
   isLazyMaterializationTx,
   isUiInputBlindWriteTx,
@@ -431,6 +435,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // ECMAScript-private (#) so handler code reaching cell.tx cannot enter the
   // scope via `(cell.tx as any)` — `as any` cannot touch a `#private` member.
   #privilegedSystemWriteDepth = 0;
+
+  // The write-policy inputs the runtime recorded, by reference to the frozen
+  // record. `#`-private, so nothing outside this class can add to it; the one
+  // writer is `recordCfcWritePolicyInput` handed the runtime's mark.
+  #runtimeWritePolicyInputs = new WeakSet<WritePolicyInput>();
   // Per-transaction cache of `Cell.get()` results, keyed by stable cell view.
   // Replaced wholesale on any write (see `#invalidateReadResultCache`), so a hit
   // is only ever served when nothing has been written since the cached read.
@@ -917,18 +926,20 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
-  // Record a write to a document's ["cfc"] label-map path made outside the
-  // privileged scope. Such a write forges the metadata that drives CFC
-  // derivation for OTHER writes, bypassing the commit-boundary derivation +
-  // mint-gating (audit S18). prepareBoundaryCommit turns each recorded address
-  // into a fail-closed reason, so the violation surfaces uniformly with every
-  // other CFC reason (enforce rejects, observe diagnoses). Recording (and
-  // relevance marking) is deliberately unconditional on the enforcement mode,
-  // like every other CFC signal: setCfcEnforcementMode permits raising the
-  // mode mid-transaction (disabled/observe impose no floor), so a forgery in a
-  // disabled window must still be on record when a later escalation evaluates
-  // it. A transaction still `disabled` at commit never runs
-  // prepareBoundaryCommit, so the record stays inert there.
+  // Record a write that reaches a document's ["cfc"] label map from outside
+  // the privileged scope, whether by naming that path or by replacing the
+  // whole document envelope. Such a write forges or erases the metadata that
+  // drives CFC derivation for OTHER writes, bypassing the commit-boundary
+  // derivation + mint-gating (audit S18). prepareBoundaryCommit turns each
+  // recorded address into a fail-closed reason, so the violation surfaces
+  // uniformly with every other CFC reason (enforce rejects, observe
+  // diagnoses). Recording (and relevance marking) is deliberately
+  // unconditional on the enforcement mode, like every other CFC signal:
+  // setCfcEnforcementMode permits raising the mode mid-transaction
+  // (disabled/observe impose no floor), so a forgery in a disabled window must
+  // still be on record when a later escalation evaluates it. A transaction
+  // still `disabled` at commit never runs prepareBoundaryCommit, so the record
+  // stays inert there.
   #noteSystemWrite(
     address: IMemorySpaceAddress,
     value?: FabricValue,
@@ -1025,13 +1036,90 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           `is emitted as a patch and rejected by the memory server.`,
       );
     }
+    // A path-[] write replaces the whole document envelope, so it reaches the
+    // label map without naming it.
+    if (address.path.length === 0) {
+      this.#noteRootEnvelopeWrite(address, value);
+      return;
+    }
     // The ["cfc"] document field holds the persisted label map. A value-path
-    // write (path[0] is a user key) or a path-[] full-document write is not it.
+    // write (path[0] is a user key) is not it.
     if (address.path[0] !== "cfc") return;
     this.markCfcRelevant("unprivileged-cfc-metadata-write");
     this.#cfcState.unprivilegedSystemWrites.push(
       `${address.id}/${address.path.join("/")}`,
     );
+  }
+
+  // Record a path-[] whole-document write that erases the stored ["cfc"] label
+  // map. Such a write replaces every sibling of `value`, so an envelope that
+  // leaves the document without a label map erases the one it held, and a
+  // labeled document reads afterwards as an unlabeled one. That is the
+  // downgrade the ["cfc"]-path arm above catches, reached by omission rather
+  // than by overwrite, so it lands in the same record and yields the same
+  // fail-closed reason.
+  //
+  // Both halves ask `cfcMetadataPresent`, the reader's own account of what
+  // presents a label map, so the arm fires on the change a reader would see
+  // rather than on the presence of a key. An envelope carrying `cfc: null`, or
+  // any other value the reader reports as absent, erases the map as surely as
+  // one carrying no `cfc` at all. A stored value the reader reports as absent
+  // is not a map to erase.
+  //
+  // What this does NOT reach is a root write that leaves a label map behind
+  // but not the stored one — minting a map where the document had none, or
+  // substituting one for another. Both are the S18 forgery this seam still
+  // stands open on, and the CFC test suite seeds stored label state through
+  // exactly those shapes, so closing them means giving those fixtures another
+  // way to seed first.
+  //
+  // The arm fires only when a map is there to erase: creating a document, and
+  // replacing one that carries no label map, pass through. Hydration passes
+  // through as well — an envelope delivered from storage carries the `cfc` it
+  // was stored with — and the runtime's own root writes (`cid:` schema
+  // documents) return at the privileged-scope check above before reaching
+  // here.
+  //
+  // The read carries no weight of its own, the way the meta seam's guard read
+  // above carries none. It goes through the inner transaction, so it stays out
+  // of the outer transaction's reactivity log and flow join; it names the
+  // ["cfc"] member rather than the document root, so it does not widen what
+  // the transaction counts as consumed; and `ignoreReadForCommit` keeps it out
+  // of the conflict set, so a blind root write stays blind rather than
+  // becoming a read-modify-write that loses the race against any advance of
+  // the document it replaces. `internalVerifierRead` says what the read is:
+  // the runtime resolving a label, the same mark `readStoredCfcMetadata`
+  // carries.
+  //
+  // That read is transaction-local, and it bounds what this arm establishes. A
+  // transaction whose view does not hold the document answers the same "no map
+  // here" that a document with no map answers, so a writer that has not synced
+  // the document erases its label map and commits. There is no race in that:
+  // the map is present throughout, and the writer simply never looked. What
+  // the arm establishes is that a root envelope write cannot erase a label map
+  // THIS TRANSACTION HAS LOADED, which is narrower than the seam needs.
+  // Closing the rest means forcing the document into view before deciding —
+  // the read-modify-write this design declines — or making the commit boundary
+  // establish what the space holds. `cfc-privileged-system-write.test.ts` pins
+  // the bypass, so it fails when either lands.
+  #noteRootEnvelopeWrite(
+    address: IMemorySpaceAddress,
+    value: FabricValue | undefined,
+  ): void {
+    const carried = isObjectOrArray(value)
+      ? (value as { cfc?: unknown }).cfc
+      : undefined;
+    if (cfcMetadataPresent(carried)) return;
+    const stored = this.tx.read({ ...address, path: ["cfc"] }, {
+      meta: {
+        ...ignoreReadForScheduling,
+        ...ignoreReadForCommit,
+        ...internalVerifierRead,
+      },
+    });
+    if (!cfcMetadataPresent(stored.ok?.value)) return;
+    this.markCfcRelevant("unprivileged-cfc-metadata-erasure");
+    this.#cfcState.unprivilegedSystemWrites.push(`${address.id}/cfc`);
   }
 
   // Capture the implementation identity active at this write into the per-tx
@@ -1337,7 +1425,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
-  recordCfcWritePolicyInput(input: WritePolicyInput): void {
+  recordCfcWritePolicyInput(
+    input: WritePolicyInput,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): void {
     // Freeze on entry: from this point on the record is owned by the tx and
     // identity-stable, which lets `hashStringOf()` cache its hash on the
     // existing WeakMap. The within-sort tiebreaker in
@@ -1351,9 +1442,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       frozen,
       this.#cfcState.implementationIdentity,
     );
+    // And remember whether the RUNTIME recorded it. The set is private and
+    // holds the frozen record itself, so `isRuntimeWritePolicyInput` answers
+    // for exactly the records that arrived with the mark.
+    if (runtimeWritePolicyAuthorized(authorization)) {
+      this.#runtimeWritePolicyInputs.add(frozen);
+    }
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-policy-input-added");
     }
+  }
+
+  isRuntimeWritePolicyInput(input: WritePolicyInput): boolean {
+    return this.#runtimeWritePolicyInputs.has(input);
   }
 
   recordCfcConsultedGrant(consulted: ConsultedGrant): void {
@@ -2080,12 +2181,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#assertWritable("recordMergeableOp");
     const address = toMemorySpaceAddress(link);
     // Same S18 chokepoint as write()/writeOrThrow(): a mergeable op IS a
-    // write. The ["cfc"]-path arm is structurally unreachable here (a
-    // NormalizedFullLink always yields a value-rooted storage path), but the
-    // reserved `grant:cfc:` documents are keyed by ID, and the mergeable
-    // path must not slip an unprivileged grant mutation past the gate. The
-    // meta-seam arm is unreachable for the same reason the ["cfc"] arm is,
-    // which is why no value reaches it from here.
+    // write. The label-map arms are structurally unreachable here (a
+    // NormalizedFullLink always yields a value-rooted storage path, so neither
+    // the ["cfc"] path nor the document root can arrive), but the reserved
+    // `grant:cfc:` documents are keyed by ID, and the mergeable path must not
+    // slip an unprivileged grant mutation past the gate. The meta-seam arm is
+    // unreachable for the same reason, which is why no value reaches it from
+    // here.
     this.#noteSystemWrite(address);
     // Record a mergeable intent only when the underlying transaction can also
     // poison it. Recording an intent that can never be poisoned would let a
@@ -2344,11 +2446,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // throw propagate past the commit, which is what every caller does
       // today). See `writeValuesOrThrow` partial-batch coverage in
       // `packages/runner/test/memory-v2-acl-mutation.test.ts`.
-      // The value reaches the chokepoint's meta-seam arm, which reads the
-      // envelope of a document-root write. A batch addresses its writes by
-      // link, and `toMemorySpaceAddress` prefixes "value", so no batch write
-      // is addressed at a document root; the value travels anyway, so the
-      // batch and single-write paths ask the chokepoint the same question.
+      // The value reaches the chokepoint's meta-seam and label-map arms,
+      // both of which read the envelope of a document-root write. A batch
+      // addresses its writes by link, and `toMemorySpaceAddress` prefixes
+      // "value", so no batch write is addressed at a document root; the value
+      // travels anyway, so the batch and single-write paths ask the
+      // chokepoint the same question.
       const noteSystemWrite = (
         address: IMemorySpaceAddress,
         value: FabricValue,
@@ -3050,8 +3153,15 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.#wrapped.setCfcImplementationIdentity(identity);
   }
 
-  recordCfcWritePolicyInput(input: WritePolicyInput): void {
-    this.#wrapped.recordCfcWritePolicyInput(input);
+  recordCfcWritePolicyInput(
+    input: WritePolicyInput,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): void {
+    this.#wrapped.recordCfcWritePolicyInput(input, authorization);
+  }
+
+  isRuntimeWritePolicyInput(input: WritePolicyInput): boolean {
+    return this.#wrapped.isRuntimeWritePolicyInput(input);
   }
 
   recordCfcConsultedGrant(consulted: ConsultedGrant): void {

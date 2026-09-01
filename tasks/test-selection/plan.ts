@@ -54,7 +54,12 @@ export interface LaneAssignment {
   lane: number;
   selections: Selection[];
 
-  /** Seconds of work this lane is expected to take, setup included. */
+  /**
+   * Seconds of work this lane is expected to take, setup included. It
+   * stops at the lane budget, except for a lane holding a single identity
+   * costing more than that, which runs up to the hard bound, and for a
+   * mandatory set that fits in no lane, which `overBudgetSeconds` reports.
+   */
   projectedSeconds: number;
 
   /** The capabilities its batches need, in a stable order. */
@@ -68,7 +73,13 @@ export interface Plan {
   /** Identities the manifest withheld, so a lane can say why. */
   withheld: Manifest["withheld"];
 
-  /** Set when the mandatory pass alone did not fit. */
+  /**
+   * Seconds by which the mandatory pass alone put the longest lane past a
+   * lane's budget, and zero where every lane held what it was given. The
+   * longest lane is what a pull request waits on, which is why this is
+   * that figure rather than the amount the five lanes' total was overrun
+   * by.
+   */
   overBudgetSeconds: number;
 
   /**
@@ -103,7 +114,7 @@ export interface PlanInput {
    */
   unknown?: ReadonlyMap<string, { suite: string; unit: string }>;
 
-  /** How many lanes to fill. Defaults to the dial. */
+  /** How many lanes to fill, at least one. Defaults to the dial. */
   lanes?: number;
 
   /** Seconds each lane may fill. Defaults to the dial. */
@@ -206,72 +217,126 @@ function marginalCost(
   return cost;
 }
 
-function place(
-  input: PlanInput,
-  lanes: Filling[],
-  entry: ManifestEntry,
-  reason: SelectionReason,
-  repeats: number,
-): number {
-  // Longest-processing-time scheduling: the cheapest lane to add this to
-  // wins, which is what makes tests needing the same environment group
-  // together rather than being a special case in the packer.
-  let best = lanes[0]!;
-  let bestCost = marginalCost(input.manifest, input, best, entry, repeats);
-  for (const lane of lanes.slice(1)) {
-    const cost = marginalCost(input.manifest, input, lane, entry, repeats);
-    if (cost < bestCost || (cost === bestCost && lane.load < best.load)) {
-      best = lane;
-      bestCost = cost;
-    }
-  }
-  best.selections.push({ entry, reason, repeats });
-  best.load += bestCost;
-  best.suites.add(entry.suite);
-  best.units.add(entry.unit);
-  for (const capability of input.capabilities.get(entry.suite) ?? []) {
-    best.capabilities.add(capability);
-  }
-  return bestCost;
+/** A lane an identity could go in, and what it would cost there. */
+interface Spot {
+  lane: Filling;
+  cost: number;
 }
 
 /**
- * Whether a lane could take this identity without going past the share of
- * the total budget this pass is allowed. The passes are bounded by shares
- * of the whole rather than per lane, so an expensive test can have a lane
- * to itself while the others carry the tail.
+ * What a lane may hold. A lane running one identity once and nothing else
+ * may go up to the hard bound, which is where an identity costing more
+ * than a whole lane's budget runs: it cannot be split, so a lane to
+ * itself is the only place it goes. A repeat can be split — dropping one
+ * run of it is what `fill` does — so a lane repeating an identity stops
+ * at the budget like any other.
  */
-function fits(
+function capacity(
+  lane: Filling,
+  repeats: number,
+  laneBudget: number,
+  bound: number,
+): number {
+  return lane.selections.length === 0 && repeats === 1 ? bound : laneBudget;
+}
+
+/**
+ * Where this identity could go.
+ *
+ * `fitting` is the cheapest lane that can still hold it inside that
+ * lane's own capacity, which is what makes tests needing the same
+ * environment group together rather than being a special case in the
+ * packer. Lanes of equal cost are separated by load, so the emptier one
+ * wins.
+ *
+ * `shortest` is the lane the identity would leave shortest, whether or
+ * not that lane can hold it. Only the mandatory pass uses it, and only
+ * when nothing fits: that pass may put a lane past its budget, and
+ * putting the overrun where the finishing time rises least is what keeps
+ * the longest lane down.
+ */
+function spotsFor(
   input: PlanInput,
-  lanes: Filling[],
+  lanes: readonly Filling[],
   entry: ManifestEntry,
   repeats: number,
-  ceiling: number,
-): boolean {
-  const cheapest = Math.min(
-    ...lanes.map((lane) =>
-      marginalCost(input.manifest, input, lane, entry, repeats)
-    ),
-  );
-  const spent = lanes.reduce((total, lane) => total + lane.load, 0);
-  return spent + cheapest <= ceiling;
+  laneBudget: number,
+  bound: number,
+): { fitting?: Spot; shortest?: Spot } {
+  let fitting: Spot | undefined;
+  let shortest: Spot | undefined;
+  for (const lane of lanes) {
+    const cost = marginalCost(input.manifest, input, lane, entry, repeats);
+    if (
+      shortest === undefined ||
+      lane.load + cost < shortest.lane.load + shortest.cost
+    ) {
+      shortest = { lane, cost };
+    }
+    if (lane.load + cost > capacity(lane, repeats, laneBudget, bound)) {
+      continue;
+    }
+    if (
+      fitting === undefined || cost < fitting.cost ||
+      (cost === fitting.cost && lane.load < fitting.lane.load)
+    ) {
+      fitting = { lane, cost };
+    }
+  }
+  return { fitting, shortest };
+}
+
+function place(
+  input: PlanInput,
+  spot: Spot,
+  entry: ManifestEntry,
+  reason: SelectionReason,
+  repeats: number,
+): void {
+  const lane = spot.lane;
+  lane.selections.push({ entry, reason, repeats });
+  lane.load += spot.cost;
+  lane.suites.add(entry.suite);
+  lane.units.add(entry.unit);
+  for (const capability of input.capabilities.get(entry.suite) ?? []) {
+    lane.capabilities.add(capability);
+  }
 }
 
 /**
  * Works out what runs, and where.
  *
- * Four passes in order. Mandatory first, which can in principle exceed
- * the budget and says so when it does rather than silently dropping work.
+ * Four passes in order. Mandatory first, which can in principle put a
+ * lane past its budget and says how far past rather than silently
+ * dropping work.
  * Then value, ignoring cost, which is what gets the expensive genuinely
  * broken integration test into the run. Then density, which sweeps up the
  * cheap tail the value floor puts at the top of the value-per-second
  * ordering. Then exploration, so the unselected corpus keeps producing
  * data.
+ *
+ * What the last three passes may spend is a share of the whole run's
+ * budget rather than of each lane's, so an expensive test can have a lane
+ * to itself while the others carry the tail. What keeps any one lane from
+ * running long is separate from the shares: those three passes put no
+ * work in a lane past that lane's budget, and the lane that carries an
+ * identity costing more than a whole lane's budget carries that identity
+ * and nothing else. Together they make every lane finish near the budget,
+ * which is the number the pull request waits on. The mandatory pass is
+ * bounded by neither, and reports how far past a lane it went.
  */
 export function plan(input: PlanInput): Plan {
   const manifest = input.manifest;
   const laneCount = input.lanes ?? LANES;
-  const budget = (input.budgetSeconds ?? LANE_BUDGET_SECONDS) * laneCount;
+  // Every pass below reaches for a lane to put work in, so there has to
+  // be one.
+  if (laneCount < 1) {
+    throw new RangeError(
+      `a plan needs a lane to fill, and was asked for ${laneCount}`,
+    );
+  }
+  const laneBudget = input.budgetSeconds ?? LANE_BUDGET_SECONDS;
+  const budget = laneBudget * laneCount;
   const lanes: Filling[] = Array.from({ length: laneCount }, (_, i) => ({
     lane: i + 1,
     selections: [],
@@ -327,9 +392,12 @@ export function plan(input: PlanInput): Plan {
       return !taken.has(key) && !excluded.has(key);
     });
 
-  // An identity the manifest has never heard of still has to run, and the
-  // caller says so by naming it mandatory. It has no entry, so one is
-  // made for it at the floor, costing nothing anybody measured.
+  const required: {
+    key: string;
+    reason: SelectionReason;
+    entry: ManifestEntry;
+    cost: number;
+  }[] = [];
   for (const [key, reason] of input.mandatory) {
     // Not even a mandatory identity is placed past the hard bound: the
     // lane would be killed and the run would report a timeout rather than
@@ -344,13 +412,46 @@ export function plan(input: PlanInput): Plan {
     // far as anything here knows.
     const entry = byKey.get(key) ?? unknownEntry(key, input);
     if (entry === undefined) continue;
-    taken.add(key);
+    required.push({
+      key,
+      reason,
+      entry,
+      cost: loneCost(manifest, input, entry),
+    });
+  }
+
+  // Longest-processing-time scheduling, which wants the largest piece of
+  // work placed first: an expensive identity offered a set of lanes that
+  // are already full has nowhere to go but past one lane's budget, where
+  // the same identity offered empty lanes fits inside one. Every
+  // mandatory identity runs whatever the order, so ordering this pass
+  // decides only where the work lands. The key breaks ties, so two
+  // identities costing the same are ordered the same way in every lane.
+  required.sort((a, b) =>
+    b.cost - a.cost || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+  );
+
+  for (const { key, reason, entry } of required) {
     // Mandatory work runs once. A repeat covers nothing a measured run
-    // did not, and this pass is the one allowed to exceed the budget.
-    place(input, lanes, entry, reason, 1);
+    // did not, and this pass is the one allowed to put a lane past its
+    // budget: it takes a lane that can hold the work where there is one,
+    // and the lane it leaves shortest where there is not.
+    const spots = spotsFor(input, lanes, entry, 1, laneBudget, bound);
+    // Every lane is a candidate for work that fits in none of them, and
+    // there is at least one lane, so there is always a shortest.
+    const spot = spots.fitting ?? spots.shortest!;
+    taken.add(key);
+    place(input, spot, entry, reason, 1);
   }
   const mandatoryLoad = laneLoad(lanes);
-  const overBudget = Math.max(0, mandatoryLoad - budget);
+  // A mandatory set larger than the whole run's budget leaves some lane
+  // past its own share of it, so measuring the longest lane reports that
+  // case as well as the case the total misses: work that fits the run
+  // between them but that no one lane can hold its part of.
+  const overBudget = lanes.reduce(
+    (most, lane) => Math.max(most, lane.load - laneBudget),
+    0,
+  );
 
   // The three shares are of what the mandatory pass left, so a change
   // that forced a great deal of work in does not then get a full budget
@@ -366,6 +467,8 @@ export function plan(input: PlanInput): Plan {
     remaining().sort((a, b) => b.score - a.score),
     "value",
     mandatoryLoad + left * FILL_VALUE_SHARE,
+    laneBudget,
+    bound,
     withRepeats,
   );
 
@@ -380,6 +483,8 @@ export function plan(input: PlanInput): Plan {
     ),
     "density",
     mandatoryLoad + left * (FILL_VALUE_SHARE + FILL_DENSITY_SHARE),
+    laneBudget,
+    bound,
     withRepeats,
   );
 
@@ -396,6 +501,8 @@ export function plan(input: PlanInput): Plan {
     "exploration",
     mandatoryLoad +
       left * (FILL_VALUE_SHARE + FILL_DENSITY_SHARE + FILL_EXPLORATION_SHARE),
+    laneBudget,
+    bound,
     withRepeats,
   );
 
@@ -451,6 +558,13 @@ function laneLoad(lanes: readonly Filling[]): number {
   return lanes.reduce((total, lane) => total + lane.load, 0);
 }
 
+/**
+ * Takes candidates in the order given, up to this pass's share of the
+ * whole run's budget and no further. The share is of the whole rather
+ * than of each lane, so an expensive test can have a lane to itself while
+ * the others carry the tail; what stops any one lane running long is the
+ * lane's own capacity, which `spotsFor` applies.
+ */
 function fill(
   input: PlanInput,
   lanes: Filling[],
@@ -458,19 +572,23 @@ function fill(
   candidates: readonly ManifestEntry[],
   reason: SelectionReason,
   ceiling: number,
+  laneBudget: number,
+  bound: number,
   repeatsOf: (entry: ManifestEntry) => number,
 ): void {
   for (const entry of candidates) {
     const key = testIdentityKey(entry.test);
     if (taken.has(key)) continue;
-    // An identity that would be repeated but no longer fits runs once:
-    // one observation beats none.
-    let repeats = repeatsOf(entry);
-    while (repeats > 1 && !fits(input, lanes, entry, repeats, ceiling)) {
-      repeats--;
+    const spent = laneLoad(lanes);
+    // An identity that would be repeated but no longer fits runs fewer
+    // times, down to once: one observation beats none.
+    for (let repeats = repeatsOf(entry); repeats >= 1; repeats--) {
+      const spot = spotsFor(input, lanes, entry, repeats, laneBudget, bound)
+        .fitting;
+      if (spot === undefined || spent + spot.cost > ceiling) continue;
+      taken.add(key);
+      place(input, spot, entry, reason, repeats);
+      break;
     }
-    if (!fits(input, lanes, entry, repeats, ceiling)) continue;
-    taken.add(key);
-    place(input, lanes, entry, reason, repeats);
   }
 }

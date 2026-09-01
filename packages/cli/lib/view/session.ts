@@ -61,9 +61,19 @@ import {
   sourceColumnOf,
 } from "./display.ts";
 import {
+  DIFF_COUNT_MODES,
+  type DiffCountMode,
+  diffCountModeLabel,
+  type DiffCounts,
+  diffCounts,
+  type DiffLineCounts,
+  sumDiffLineCounts,
+} from "./diffcounts.ts";
+import {
   buildFoldPlan,
   type DiffFileRange,
   diffFiles,
+  diffFileSummary,
   type FoldPlan,
   identityFold,
 } from "./fold.ts";
@@ -210,6 +220,9 @@ interface JumpEntry {
 
   /** Short name for the "Jumped to …" confirmation. */
   readonly name: string;
+
+  /** Diff-file index for file rows; absent on commit rows. */
+  readonly fileIndex?: number;
 }
 
 export class Session {
@@ -393,6 +406,13 @@ export class Session {
   #jumpEntries: JumpEntry[] = [];
   #jumpFilter = "";
   #jumpSel = 0;
+  #jumpSearching = false;
+  #jumpCountMode: DiffCountMode = "normal";
+  #jumpCountCache?: {
+    readonly doc: Document;
+    readonly mode: DiffCountMode;
+    readonly counts: DiffCounts;
+  };
 
   constructor(
     doc: Document,
@@ -986,7 +1006,7 @@ export class Session {
         ? `definition: ${this.#input}`
         : this.#mode === "filePicker"
         ? `find file: ${this.#files?.join(this.#pickerDir, this.#pickerFilter)}`
-        : this.#mode === "jumpList"
+        : this.#mode === "jumpList" && this.#jumpSearching
         ? `jump to: ${this.#jumpFilter}`
         : null,
       dialog: this.#promptDialog(),
@@ -2128,6 +2148,11 @@ export class Session {
     const line = this.#foldAnchor().docLine;
     const file = files.find((f) => line >= f.headerLine && line <= f.endLine) ??
       files.find((f) => f.headerLine >= line) ?? files[files.length - 1];
+    this.#toggleFile(file, { docLine: file.headerLine, sourceCol: 0 });
+  }
+
+  /** Toggles one file while restoring `anchor` after its layout changes. */
+  #toggleFile(file: DiffFileRange, anchor = this.#foldAnchor()): void {
     if (this.#collapsed.has(file.index)) {
       this.#collapsed.delete(file.index);
       this.#message = `Showing ${file.path}`;
@@ -2135,7 +2160,7 @@ export class Session {
       this.#collapsed.add(file.index);
       this.#message = `Hiding ${file.path}`;
     }
-    this.#applyFoldChange({ docLine: file.headerLine, sourceCol: 0 });
+    this.#applyFoldChange(anchor);
   }
 
   /** Hide every file (collapse all to summary lines). */
@@ -4485,13 +4510,14 @@ export class Session {
     }
     this.#jumpAll = entries;
     this.#jumpFilter = "";
+    this.#jumpSearching = false;
     this.#overlayScroll = 0;
     this.#mode = "jumpList";
     this.#refreshJump();
     // Open focused on the file the viewport is already reading, so the list
     // starts where the eye is.
     this.#jumpSel = this.#jumpEntryAtViewport();
-    this.#scrollListToSelection(this.#jumpSel);
+    this.#scrollJumpToSelection(this.#jumpSel);
   }
 
   /** Every file the diff touches and every commit whose message it carries, in
@@ -4500,6 +4526,7 @@ export class Session {
     if (!this.#source?.isDiff) return [];
     const texts = this.#currentDoc.lines.map((l) => l.text);
     const subjects = commitSubjects(texts);
+    const counts = this.#jumpDiffCounts();
     const entries: JumpEntry[] = [];
     for (const header of findCommitHeaders(texts)) {
       const subject = subjects.get(header.sha) ?? "";
@@ -4512,11 +4539,17 @@ export class Session {
       });
     }
     for (const file of this.#foldFiles()) {
+      const fileCounts = counts.files[file.index] ?? file;
       entries.push({
         line: file.headerLine,
-        display: fileJumpLine(file, this.#collapsed.has(file.index)),
+        display: fileJumpLine(
+          file,
+          this.#collapsed.has(file.index),
+          fileCounts,
+        ),
         filterText: file.path.toLowerCase(),
         name: file.path,
+        fileIndex: file.index,
       });
     }
     entries.sort((a, b) => a.line - b.line);
@@ -4534,7 +4567,7 @@ export class Session {
       0,
       Math.max(0, this.#jumpEntries.length - 1),
     );
-    this.#scrollListToSelection(this.#jumpSel);
+    this.#scrollJumpToSelection(this.#jumpSel);
   }
 
   /** The index of the entry the viewport currently sits on: the last one whose
@@ -4552,28 +4585,43 @@ export class Session {
   #handleJumpList(key: Key): void {
     this.#message = "";
     const last = Math.max(0, this.#jumpEntries.length - 1);
-    switch (key.name) {
-      case "escape":
-        this.#mode = "normal";
-        this.#overlayScroll = 0;
-        this.#message = "Cancelled";
+    if (
+      key.name === "escape" ||
+      (key.name === "q" && !this.#jumpSearching)
+    ) {
+      if (this.#jumpSearching) {
+        this.#jumpSearching = false;
+        this.#jumpFilter = "";
+        this.#jumpSel = 0;
+        this.#refreshJump();
         return;
+      }
+      this.#mode = "normal";
+      this.#overlayScroll = 0;
+      this.#message = "Cancelled";
+      return;
+    }
+    switch (key.name) {
       case "down":
       case "ctrl-n":
         this.#jumpSel = clamp(this.#jumpSel + 1, 0, last);
-        return this.#scrollListToSelection(this.#jumpSel);
+        return this.#scrollJumpToSelection(this.#jumpSel);
       case "up":
       case "ctrl-p":
         this.#jumpSel = clamp(this.#jumpSel - 1, 0, last);
-        return this.#scrollListToSelection(this.#jumpSel);
+        return this.#scrollJumpToSelection(this.#jumpSel);
       case "pagedown":
         this.#jumpSel = clamp(this.#jumpSel + 10, 0, last);
-        return this.#scrollListToSelection(this.#jumpSel);
+        return this.#scrollJumpToSelection(this.#jumpSel);
+      case "space":
+        if (this.#jumpSearching) break;
+        this.#jumpSel = clamp(this.#jumpSel + 10, 0, last);
+        return this.#scrollJumpToSelection(this.#jumpSel);
       case "pageup":
         this.#jumpSel = clamp(this.#jumpSel - 10, 0, last);
-        return this.#scrollListToSelection(this.#jumpSel);
+        return this.#scrollJumpToSelection(this.#jumpSel);
       case "backspace":
-        if (this.#jumpFilter.length > 0) {
+        if (this.#jumpSearching && this.#jumpFilter.length > 0) {
           this.#jumpFilter = this.#jumpFilter.slice(0, -1);
           this.#jumpSel = 0;
           this.#refreshJump();
@@ -4584,11 +4632,108 @@ export class Session {
         this.#activateJump();
         return;
     }
-    if (key.char && key.char >= " " && !key.ctrl) {
+    if (this.#jumpSearching && key.char && key.char >= " " && !key.ctrl) {
       this.#jumpFilter += key.char;
       this.#jumpSel = 0;
       this.#refreshJump();
+      return;
     }
+    switch (key.name) {
+      case "/":
+        this.#jumpSearching = true;
+        this.#jumpFilter = "";
+        this.#jumpSel = 0;
+        this.#refreshJump();
+        return;
+      case "f":
+        this.#toggleJumpFile();
+        return;
+      case "F":
+        this.#collapseAllFiles();
+        this.#rebuildJumpEntries();
+        return;
+      case "E":
+        this.#expandAllFiles();
+        this.#rebuildJumpEntries();
+        return;
+      case "T":
+        this.#toggleFileCategory((file) => file.isTest, "test");
+        this.#rebuildJumpEntries();
+        return;
+      case "M":
+        this.#toggleFileCategory((file) => file.isMarkdown, "Markdown");
+        this.#rebuildJumpEntries();
+        return;
+      case "D":
+        this.#cycleJumpCountMode();
+        return;
+    }
+  }
+
+  /** Toggles the file on the highlighted jump-list row. */
+  #toggleJumpFile(): void {
+    const fileIndex = this.#jumpEntries[this.#jumpSel]?.fileIndex;
+    const file = fileIndex === undefined
+      ? undefined
+      : this.#foldFiles()[fileIndex];
+    if (!file) {
+      this.#message = "Select a file to hide or show.";
+      return;
+    }
+    this.#toggleFile(file);
+    this.#rebuildJumpEntries();
+  }
+
+  /** Keeps the selection visible and reveals the summary at the last entry. */
+  #scrollJumpToSelection(selection: number): void {
+    this.#scrollListToSelection(selection);
+    const innerHeight = overlayBox(this.width, this.height).innerH;
+    if (
+      innerHeight > 0 && this.#jumpEntries.length > 0 &&
+      selection === this.#jumpEntries.length - 1
+    ) {
+      this.#overlayScroll = Math.max(
+        0,
+        this.#jumpEntries.length + 3 - innerHeight,
+      );
+    }
+  }
+
+  /** Rebuilds jump rows after visibility or count settings change. */
+  #rebuildJumpEntries(): void {
+    this.#jumpAll = this.#buildJumpEntries();
+    this.#refreshJump();
+  }
+
+  /** Advances to the next diff-count policy and refreshes every count shown. */
+  #cycleJumpCountMode(): void {
+    const index = DIFF_COUNT_MODES.indexOf(this.#jumpCountMode);
+    this.#jumpCountMode = DIFF_COUNT_MODES[
+      (index + 1) % DIFF_COUNT_MODES.length
+    ];
+    this.#rebuildJumpEntries();
+  }
+
+  /** Counts for the current source document under the selected policy. */
+  #jumpDiffCounts(): DiffCounts {
+    if (
+      this.#jumpCountCache?.doc !== this.#sourceDoc ||
+      this.#jumpCountCache.mode !== this.#jumpCountMode
+    ) {
+      this.#jumpCountCache = {
+        doc: this.#sourceDoc,
+        mode: this.#jumpCountMode,
+        counts: diffCounts(
+          this.#sourceDoc.text,
+          this.#sourceDoc.lines,
+          this.#jumpCountMode,
+          this.#jumpCountMode === "comments"
+            ? this.#source?.diffCountContexts?.(this.#sourceDoc.text)
+            : undefined,
+        ),
+      };
+    }
+    return this.#jumpCountCache.counts;
   }
 
   /** Jump to the highlighted entry and close the list. A filter that matches
@@ -4620,11 +4765,22 @@ export class Session {
       const text = "(no matches)";
       lines.push({ text, spans: [{ col: 0, text, cls: "comment" }] });
     }
+    const counts = this.#jumpDiffCounts();
+    const shown = sumDiffLineCounts(
+      counts.files.filter((_, index) => !this.#collapsed.has(index)),
+    );
+    lines.push(
+      { text: "", spans: [] },
+      jumpCountModeLine(this.#jumpCountMode),
+      jumpCountSummaryLine(counts.totals, shown),
+    );
     return {
       title: "Jump to file or commit",
       lines,
       scroll: this.#overlayScroll,
-      footer: "↑/↓ select · enter jump · esc cancel",
+      footer: this.#jumpSearching
+        ? "type · ↑↓ select · Space page · Enter jump · Esc list"
+        : "↑↓ · Space page · / filter · f F E T M · D counts · Enter · Esc",
       selectedLine: this.#jumpEntries.length > 0 ? this.#jumpSel : undefined,
     };
   }
@@ -4739,22 +4895,55 @@ function commitJumpLine(shortSha: string, subject: string): Line {
 
 /** Add the category keys that affect a file to its jump-list row. Collapsed
  * rows use the dialog's muted style. */
-function fileJumpLine(file: DiffFileRange, collapsed: boolean): Line {
+function fileJumpLine(
+  file: DiffFileRange,
+  collapsed: boolean,
+  counts: DiffLineCounts,
+): Line {
   const flags = `${file.isMarkdown ? "M" : " "}${file.isTest ? "T" : " "}`;
   const prefix = `${flags} `;
+  const summary = diffFileSummary(file, counts.adds, counts.dels);
   const spans: Span[] = [
     { col: 0, text: prefix, cls: "builderCall" },
-    ...file.summary.spans.map((span) => ({
+    ...summary.spans.map((span) => ({
       ...span,
       col: span.col + 3,
     })),
   ];
   return {
-    text: prefix + file.summary.text,
+    text: prefix + summary.text,
     spans: collapsed
       ? spans.map((span) => ({ ...span, cls: "comment" }))
       : spans,
   };
+}
+
+/** Builds the jump-list row naming its current count policy. */
+function jumpCountModeLine(mode: DiffCountMode): Line {
+  const text = `Counts: ${diffCountModeLabel(mode)}`;
+  return { text, spans: [{ col: 0, text, cls: "diffMeta" }] };
+}
+
+/** Builds the styled all-files and shown-files totals row. */
+function jumpCountSummaryLine(
+  all: DiffLineCounts,
+  shown: DiffLineCounts,
+): Line {
+  const spans: Span[] = [];
+  let text = "";
+  const add = (value: string, cls: TokenClass) => {
+    spans.push({ col: cpLen(text), text: value, cls });
+    text += value;
+  };
+  add("All files ", "plain");
+  add(`+${all.adds}`, "diffAdd");
+  add(" ", "whitespace");
+  add(`−${all.dels}`, "diffDel");
+  add(" · Shown files ", "plain");
+  add(`+${shown.adds}`, "diffAdd");
+  add(" ", "whitespace");
+  add(`−${shown.dels}`, "diffDel");
+  return { text, spans };
 }
 
 export function helpOverlay(): {
@@ -4785,6 +4974,8 @@ export function helpOverlay(): {
     ["  T", "hide / show test and test-support files"],
     ["  M", "hide / show Markdown files"],
     ["  i", "list the diff's files and commits, jump to one"],
+    ["  / (in list)", "filter the list"],
+    ["  D (in list)", "cycle its diff counts"],
     ["", ""],
     ["Structure tree", ""],
     ["  W / S", "previous / next sibling (W → parent, S → out, at ends)"],

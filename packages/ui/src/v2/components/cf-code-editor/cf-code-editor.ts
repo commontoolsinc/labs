@@ -303,6 +303,7 @@ export class CFCodeEditor extends BaseElement {
    * Mentionable items for @ completion.
    */
   declare mentionable?: CellHandle<MentionableArray> | null;
+
   declare mentioned?: CellHandle<MentionableArray>;
 
   /**
@@ -317,6 +318,7 @@ export class CFCodeEditor extends BaseElement {
    * URL from anywhere else is a link to a web page.
    */
   declare fabricHosts: string[];
+
   declare pattern: CellHandle<string>;
   declare wordWrap: boolean;
   declare lineNumbers: boolean;
@@ -581,6 +583,11 @@ export class CFCodeEditor extends BaseElement {
 
     for (let i = 0; i < mentionableData.length; i++) {
       const mention = mentionableData[i];
+      // An index row is withheld until its piece resolves: a completion
+      // taken from it before then could only persist an id naming the row.
+      // Resolution starts when the list binds, so the window is the round
+      // trips of `_resolvePieceIds`, not something a user waits on.
+      if (this._isIndexRow(i) && !this._resolvedPieceIds.has(i)) continue;
       if (
         mention &&
         mention[NAME]
@@ -609,6 +616,9 @@ export class CFCodeEditor extends BaseElement {
     const queryLower = query.toLowerCase();
 
     for (let i = 0; i < mentionableData.length; i++) {
+      // Same withholding rule as the filtered list: an unresolved index
+      // row cannot be completed against, exactly or otherwise.
+      if (this._isIndexRow(i) && !this._resolvedPieceIds.has(i)) continue;
       const mention = mentionableData[i];
       const name = mention?.[NAME] ?? "";
       if (name.toLowerCase() === queryLower) {
@@ -722,7 +732,9 @@ export class CFCodeEditor extends BaseElement {
    * persisted against that path would later name whatever had moved into the
    * slot. `_resolvePieceIds` follows the indirection; until it has, this
    * returns null and the caller mints a wiki-link instead — the older form,
-   * but one whose id comes from the same resolution.
+   * but one whose id comes from the same resolution. An index row cannot
+   * reach either fallback: the completion surfaces withhold it until it is
+   * resolved, so a row arriving here always finds its piece in the cache.
    */
   private _createRefEntry(index: number): string | null {
     const destination = this._resolvedPieceCells.get(index);
@@ -1168,13 +1180,14 @@ export class CFCodeEditor extends BaseElement {
         // The resolved cell IS the piece. For an index row the sub-cell is
         // the row rather than the topic behind it, and every caller here
         // wants the piece — to navigate to it, subscribe to its title, or
-        // write its name back. Before resolution completes, a row's own
-        // hydrated piece is the piece by a shorter road; only an entry
-        // that IS the piece falls through to the sub-cell, with exactly
-        // _getPieceId's instability caveat.
+        // write its name back — so an unresolved row answers "not found"
+        // rather than the row. Only an entry that IS the piece falls
+        // through to the sub-cell, with exactly _getPieceId's instability
+        // caveat.
         return this._resolvedPieceCells.get(i) ??
-          this._hydratedPiece(i) ??
-          (handle.key(i) as CellHandle<Mentionable>);
+          (this._isIndexRow(i)
+            ? null
+            : (handle.key(i) as CellHandle<Mentionable>));
       }
     }
 
@@ -1182,31 +1195,33 @@ export class CFCodeEditor extends BaseElement {
   }
 
   /**
-   * The piece handle an index row carries, hydrated by the client — the
-   * synchronous stand-in until resolution lands, and null for an entry that
-   * is the piece itself. Bound to the mentionable schema so field reads on
-   * it materialize, as `_refDestination` binds a stored destination.
+   * Whether the entry at `index` is an index row standing for a piece — it
+   * carries a `piece` property. The property's VALUE is no use for
+   * reaching the piece: an `asCell` position crosses the client boundary
+   * as an empty object, so a row's piece is reachable only by ADDRESS
+   * (`key(index).key("piece")`), and only asynchronously. Until that
+   * resolution lands a row has no usable identity, so the completion
+   * surfaces withhold it rather than mint an id naming the row.
    */
-  private _hydratedPiece(index: number): CellHandle<Mentionable> | null {
+  private _isIndexRow(index: number): boolean {
     const item = ((this.mentionable?.get() ?? []) as MentionableArray)[index];
-    return item && isCellHandle(item.piece)
-      ? item.piece.asSchema<Mentionable>(MentionableSchema)
-      : null;
+    return item != null && Object.hasOwn(item, "piece");
   }
 
   /**
    * Get the stable piece cell ID for a mentionable item at the given index,
    * in the BARE embed form wiki-link text persists (see mentionIdFromCellId
    * — CellHandle.id() is the full schemed URI; renderers add `/of:` back).
-   * Returns the pre-resolved ID if available, then an index row's own
-   * hydrated piece, and only then the sub-cell ID (which may be unstable
-   * across recomputations, and for an index row names the row rather than
-   * the piece).
+   * Returns the pre-resolved ID if available. An entry that IS the piece
+   * falls back to the sub-cell ID (which may be unstable across
+   * recomputations); an unresolved index row yields the empty id instead —
+   * the sub-cell names the row, and no id beats a wrong one.
    */
   private _getPieceId(index: number): string {
     const id = this._resolvedPieceIds.get(index) ??
-      this._hydratedPiece(index)?.id() ??
-      (this.mentionable?.key(index)?.id() ?? "");
+      (this._isIndexRow(index)
+        ? ""
+        : (this.mentionable?.key(index)?.id() ?? ""));
     return id ? mentionIdFromCellId(id) : id;
   }
 
@@ -1239,14 +1254,14 @@ export class CFCodeEditor extends BaseElement {
     const promises = mentionableData.map(async (item, i) => {
       if (!item) return;
       try {
-        const hydrated = this._hydratedPiece(i);
-        const source = hydrated ?? handle.key(i);
+        const viaPiece = this._isIndexRow(i);
+        const source = viaPiece ? handle.key(i).key("piece") : handle.key(i);
         const resolved = await source.resolveAsCell();
         // Resolution answers with the canonical cell under its own schema,
         // so a piece reached through a row is rebound to the mentionable
         // schema — the `_refDestination` shape — for the field reads its
         // consumers make (the title subscription, the name write-back).
-        const pieceCell = hydrated !== null
+        const pieceCell = viaPiece
           ? resolved.asSchema<Mentionable>(MentionableSchema)
           : (resolved as CellHandle<Mentionable>);
         newCells.set(i, pieceCell);
@@ -1255,7 +1270,8 @@ export class CFCodeEditor extends BaseElement {
           newResolved.set(i, resolvedId);
         }
       } catch {
-        // If resolution fails, we'll fall back to the sub-cell ID
+        // If resolution fails, a direct entry falls back to the sub-cell
+        // ID; an index row stays withheld (its sub-cell names the row).
       }
     });
 
@@ -1853,11 +1869,14 @@ export class CFCodeEditor extends BaseElement {
     // delivering values to subscribers.
     const unsubscribe = this.mentionable
       .subscribe((_value) => {
-        // Clear stale resolved IDs and re-resolve asynchronously
+        // Clear stale resolved IDs and re-resolve asynchronously. The
+        // $mentioned reconciliation waits for the resolution pass (which
+        // runs it on publish): against cleared maps an index-row backlink
+        // has no id, and reconciling in that window would transiently drop
+        // its edge only to re-add it moments later.
         this._resolvedPieceIds.clear();
         this._resolvedPieceCells.clear();
         this._resolvePieceIds();
-        this._updateMentionedFromContent();
       });
     this._mentionableUnsub = unsubscribe;
   }

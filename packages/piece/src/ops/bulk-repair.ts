@@ -81,6 +81,7 @@ export interface DocumentChange {
    * escaped `~0`.
    */
   path: string;
+
   kind: "changed" | "added" | "removed";
   before?: unknown;
   after?: unknown;
@@ -110,6 +111,7 @@ export interface RepairRow {
 
   /** The plan row's phase label, carried as the survey stamped it. */
   phase?: string;
+
   verdict: RepairVerdict;
 
   /** What a refused, moved, or failed row broke; absent otherwise. */
@@ -570,6 +572,7 @@ type RowDecision =
      * the report and the write cannot describe two different evaluations
      * of a fixer that lied to the purity probe. */
     document: Record<string, unknown>;
+
     changes: readonly DocumentChange[];
   }
   | { kind: "refused"; documentHash: string; problem: string };
@@ -770,6 +773,7 @@ export async function repairPieces(
   // piece in the report twice, under two verdicts, the second contradicting
   // what the caller was just told.
   let reporterThrew = false;
+
   const report = (row: RepairRow) => {
     rows.push(row);
     if (options.onRow === undefined) return;

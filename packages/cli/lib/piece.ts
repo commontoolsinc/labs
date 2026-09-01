@@ -164,7 +164,7 @@ export interface PieceConfig extends SpaceConfig {
   pieceScope?: CellScope;
 
   /**
-   * Path segments embedded in an LLM-friendly `--piece` reference. A command
+   * Path segments embedded in an LLM-friendly `--cell` reference. A command
    * that reads or writes at a path prepends these to its positional path
    * argument; a command whose intake is id-only rejects a reference that
    * carries them.
@@ -300,11 +300,11 @@ export class PieceVerbReadError extends Error {
   constructor(verb: string, piece: string, callable: boolean) {
     super(
       callable
-        ? `Path resolves to a verb; use 'cf call --piece ${piece} ${verb}' instead.`
+        ? `Path resolves to a verb; use 'cf call --cell ${piece} ${verb}' instead.`
         : `Path resolves to a verb that is not directly callable: verbs are ` +
           `invoked at the piece's root surface. Read the parent object ` +
           `instead, or list the callable verbs with ` +
-          `'cf piece verbs --piece ${piece}'.`,
+          `'cf piece verbs --cell ${piece}'.`,
     );
     this.name = "PieceVerbReadError";
   }
@@ -523,8 +523,11 @@ export async function loadPieces(
   ]);
   // A `--space` given as a name has only now resolved to a DID; this is the
   // deferred half of the embedded-space check `normalizeLLMFriendlyRef`
-  // performs at parse time for a DID-configured space.
-  validateEmbeddedSpaces(config.embeddedSpaces, session.space);
+  // performs at parse time when the two spaces are written the same way. A
+  // reference naming its space by name is held to the same derivation the
+  // target space went through, so the two are compared as the one thing they
+  // both stand for.
+  await validateEmbeddedSpaces(config.embeddedSpaces, session);
   const runtimeErrors: CliRuntimeErrorRecord[] = [];
   const runtime = await timeCliPhase(
     "loadPieces.runtime",
@@ -699,7 +702,7 @@ export interface SlugSummary {
 }
 
 /** Every slug the space's index records, each resolved to the piece id
- * `--piece` would resolve it to. The index bounds the listing: it names
+ * `--cell` would resolve it to. The index bounds the listing: it names
  * slugs assigned since it existed, so an older slug still resolves but is
  * not listed — nothing can enumerate what it was never told the name of. */
 export async function listSpaceSlugs(
@@ -3423,6 +3426,14 @@ export async function executePieceCallable(
   });
 }
 
+/**
+ * Points the target piece's `targetPath` at the value `sourcePath` names on
+ * the source piece, so the target reads the source rather than holding a copy
+ * of what it said.
+ *
+ * Both endpoints are read back first, and the link is refused when either the
+ * piece or the path is missing; `options.allowNonExisting` links anyway.
+ */
 export async function linkPieces(
   config: SpaceConfig,
   sourcePieceId: string,
@@ -3435,21 +3446,30 @@ export async function linkPieces(
     sourceScope?: PieceConfig["pieceScope"];
     targetScope?: PieceConfig["pieceScope"];
   },
+  deps: PieceResolutionDeps = {},
 ): Promise<void> {
   const pieces = await timeCliPhase(
     "linkPieces.loadPieces",
-    () => loadPieces(config),
+    () => (deps.loadPieces ?? loadPieces)(config),
   );
   const resolvedSourcePieceId = await timeCliPhase(
     "linkPieces.resolveSource",
     () =>
-      resolveLinkEndpointAddress(pieces, sourcePieceId, undefined, {
-        allowMissingSlugFallback: true,
-      }),
+      resolveLinkEndpointAddress(
+        pieces,
+        sourcePieceId,
+        deps.resolvePieceAddress,
+        { allowMissingSlugFallback: true },
+      ),
   );
   const resolvedTargetPieceId = await timeCliPhase(
     "linkPieces.resolveTarget",
-    () => resolveLinkEndpointAddress(pieces, targetPieceId),
+    () =>
+      resolveLinkEndpointAddress(
+        pieces,
+        targetPieceId,
+        deps.resolvePieceAddress,
+      ),
   );
 
   // Validate that source and target pieces/paths exist by reading them
@@ -4013,8 +4033,15 @@ async function inspectSlugTargetCell(
   };
 }
 
-export async function getPieceView(config: PieceConfig): Promise<unknown> {
-  const data = (await inspectPiece(config)) as any;
+/**
+ * Returns the view a piece publishes — the `[UI]` node on its result cell —
+ * or `undefined` where the piece publishes none.
+ */
+export async function getPieceView(
+  config: PieceConfig,
+  deps: PieceResolutionDeps = {},
+): Promise<unknown> {
+  const data = (await inspectPiece(config, deps)) as any;
   return data.result?.[UI] as VNode;
 }
 
@@ -4420,14 +4447,23 @@ export async function getCellValue(
   }
 }
 
+/**
+ * Writes `value` at `path` on a piece's result cell, or on its arguments cell
+ * under `options.input`, and receipts the space the write landed in.
+ */
 export async function setCellValue(
   config: PieceConfig,
   path: (string | number)[],
   value: unknown,
   options?: { input?: boolean },
+  deps: PieceResolutionDeps = {},
 ): Promise<void> {
-  const pieces = await loadPieces(config);
-  const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
+    config,
+    pieces,
+    deps.resolvePieceAddress,
+  );
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
@@ -4443,23 +4479,47 @@ export async function setCellValue(
 }
 
 /**
+ * What a {@link callPieceHandler} call supplies: the connection its
+ * resolution runs over, and the three execution deps a handling can observe
+ * through a call that returns nothing.
+ *
+ * Narrower than {@link PieceCallableDependencies} by the fields this path
+ * cannot keep. The input readers and the help prefix have no bearing on it —
+ * the payload arrives decoded as an argument, and nothing here renders a
+ * page. The result-shaping deps are excluded for a sharper reason: a
+ * selection makes the dispatch derive a value that this signature then
+ * discards, so admitting one would spend a settle and a sync on an answer
+ * nobody receives, and could raise where the handling itself committed
+ * cleanly. A call that wants a result wants
+ * {@link executePieceCallable}, which returns one.
+ */
+export type PieceHandlerCallDeps =
+  & Pick<CallableExecutionDeps, "invocation" | "onPhase" | "skipReadback">
+  & Pick<PieceCallableDependencies, "loadPieces" | "loadPiece">;
+
+/**
  * Calls a named handler within a piece with a decoded JSON payload.
+ *
+ * A `deps.invocation` names the id and session the handling files its receipt
+ * under; without one the dispatch takes a runtime-minted event id, and there
+ * is no receipt to come back for.
  */
 export async function callPieceHandler<T = any>(
   config: PieceConfig,
   handlerName: string,
   args: T,
+  deps: PieceHandlerCallDeps = {},
 ): Promise<void> {
   const resolved = await timeCliPhase(
     "callPieceHandler.resolve",
-    () => resolvePieceCallable(config, handlerName),
+    () => resolvePieceCallable(config, handlerName, deps),
   );
   if (resolved.callableKind !== "handler") {
     throw new Error(`Callable "${handlerName}" is not a handler`);
   }
   await timeCliPhase(
     "callPieceHandler.execute",
-    () => executeResolvedCallable(resolved, args),
+    () => executeResolvedCallable(resolved, args, deps),
   );
 }
 
@@ -4500,9 +4560,16 @@ export async function stepPiece(
 /**
  * Removes a piece from the space.
  */
-export async function removePiece(config: PieceConfig): Promise<void> {
-  const pieces = await loadPieces(config);
-  const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
+export async function removePiece(
+  config: PieceConfig,
+  deps: PieceResolutionDeps = {},
+): Promise<void> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
+    config,
+    pieces,
+    deps.resolvePieceAddress,
+  );
   const removed = await pieces.remove(resolvedConfig.piece);
 
   if (!removed) {
