@@ -10,6 +10,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { toCell } from "../src/back-to-cell.ts";
 import { type CellLinkInput, convertCellsToLinks } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -69,6 +70,47 @@ describe("convertCellsToLinks() with runtime-annotated arrays", () => {
         includeSchema: true,
       }),
     ).toEqual([4, 5]);
+  });
+
+  it("returns a plain array from an annotated `Array` subclass", () => {
+    // An annotated container is rebuilt through its own `map()`, which on a
+    // subclass would return a subclass instance. The prototype guard is what
+    // keeps such a value on the cleaning path instead.
+    class Tagged extends Array<number> {}
+    const tagged = Tagged.from([1, 2]);
+    Object.defineProperty(tagged, toCell, {
+      value: () => runtime.getCell(space, "annotated-subclass", undefined, tx),
+      enumerable: false,
+    });
+
+    const converted = convertCellsToLinks(tagged as CellLinkInput, {
+      doNotConvertCellResults: true,
+      includeSchema: true,
+    });
+
+    expect(converted).toEqual([1, 2]);
+    expect(Object.getPrototypeOf(converted)).toBe(Array.prototype);
+  });
+
+  it("converts a schemaless read, which is a proxy, under `doNotConvertCellResults`", () => {
+    // A schemaless read serves the annotation from a trap rather than as an
+    // own property, and its `map()` is the proxy's. Its content still comes
+    // through as plain containers.
+    const cell = runtime.getCell<unknown>(
+      space,
+      "annotated-proxy",
+      undefined,
+      tx,
+    );
+    cell.set({ list: [1, 2, 3], nested: { a: 1 } });
+
+    const converted = convertCellsToLinks(cell.get() as CellLinkInput, {
+      doNotConvertCellResults: true,
+      includeSchema: true,
+    });
+
+    expect(converted).toEqual({ list: [1, 2, 3], nested: { a: 1 } });
+    expect(Object.getOwnPropertySymbols(converted)).toEqual([]);
   });
 
   it("still rejects an array carrying a genuine named property", () => {

@@ -16,7 +16,9 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { toCompactDebugString } from "@commonfabric/data-model";
+import { isLinkRef } from "@commonfabric/data-model/cell-rep";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   MultiRuntimeHarness,
   type MultiRuntimeSession,
@@ -81,6 +83,34 @@ describe("multi-runtime harness value fidelity", () => {
     assert(
       Object.keys(counts).length > 1,
       "a breakdown naming no logger at all",
+    );
+  });
+
+  it("reads a whole result, with a link where the schema says cell", async () => {
+    // A schema-aware read hands back a live `Cell` at every `asCell`
+    // location, and a cell belongs to the runtime's own realm. `setWeird` is
+    // a stream, which is one such location; a pattern's `[UI]` tree is full of
+    // them. Reading the whole result at all is half the assertion.
+    await alice.send("setWeird", { weird: 41 });
+    await harness.settle();
+
+    const whole = await alice.read() as Record<string, unknown>;
+    assertEquals(
+      whole.weird,
+      41,
+      `weird came back as ${toCompactDebugString(whole.weird)}`,
+    );
+    assert(
+      isLinkRef(whole.setWeird),
+      `setWeird came back as ${toCompactDebugString(whole.setWeird)}, ` +
+        "not the link that reaches it",
+    );
+    // The containers around it stay containers: the same read annotates each
+    // one with the cell it came from, and an annotation is not a cell the
+    // schema asked for.
+    assert(
+      isObjectNotArray(whole.$UI) && whole.$UI.name === "div",
+      `the view came back as ${toCompactDebugString(whole.$UI)}`,
     );
   });
 

@@ -241,14 +241,14 @@ cf-harness runs.
 
 ### Success Boundaries
 
-| Operation                                | Default success boundary                                                                                                                                         |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| scalar / `.json` cell write              | local validation and CFC authorization passed; `cell.set()` resolved; backend sync/acceptance completed; projection invalidation or rebuild is scheduled safely. |
-| `[FS]` projection write                  | parsed content applied to the corresponding cells; required deletes/updates completed; projection invalidation or rebuild is scheduled safely.                   |
-| source write                             | `piece.setPattern()` resolved; error log updated; source projection finalized or invalidated.                                                                    |
-| handler write                            | runtime accepted the invocation and sync/idle boundary completed. Downstream reactive effects may settle later.                                                  |
-| create/mkdir/unlink/rmdir/rename/symlink | parent/common cell mutation resolved and the shared `FsTree` is updated from confirmed state or safely invalidated for rebuild.                                  |
-| CFC writeback                            | trusted prepare was valid when required; mutation succeeded; finalize/reconcile was recorded, or incomplete/fail-closed state was persisted.                     |
+| Operation                                | Default success boundary                                                                                                                                                     |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| scalar / `.json` cell write              | local validation and CFC authorization passed; `cell.set()` resolved; backend sync/acceptance completed; projection invalidation or rebuild is scheduled safely.             |
+| `[FS]` projection write                  | parsed content applied to the corresponding cells; required deletes/updates completed; projection invalidation or rebuild is scheduled safely.                               |
+| source write                             | `piece.setPattern()` resolved with a commit receipt; error log updated. A projection finalize failure after the commit degrades to a recorded warning, never a failed write. |
+| handler write                            | runtime accepted the invocation and sync/idle boundary completed. Downstream reactive effects may settle later.                                                              |
+| create/mkdir/unlink/rmdir/rename/symlink | parent/common cell mutation resolved and the shared `FsTree` is updated from confirmed state or safely invalidated for rebuild.                                              |
+| CFC writeback                            | trusted prepare was valid when required; mutation succeeded; finalize/reconcile was recorded, or incomplete/fail-closed state was persisted.                                 |
 
 `create`/`mkdir` must not depend on the sandboxed program calling `setxattr`
 afterward. Normal programs should run unchanged against `/fabric`; any required

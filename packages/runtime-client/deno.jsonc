@@ -11,8 +11,11 @@
     "integration": "LOG_LEVEL=warn deno test -A $INTEGRATION_TEST_FLAGS \"./integration/*.test.ts\"",
     // --allow-read so that a benchmark may start a `Worker`, which reads the
     // worker's module from disk. The crossing benchmark measures a real
-    // `postMessage()`, that being the boundary the connection is.
-    "bench": "deno bench --allow-read --no-check bench/"
+    // `postMessage()`, that being the boundary the connection is. --allow-ffi
+    // and --allow-env are what an emulated runtime needs, whose storage is
+    // SQLite reached over FFI: a benchmark reads its subject through one, so
+    // that the value it times is what a read hands back.
+    "bench": "deno bench --allow-read --allow-ffi --allow-env --no-check bench/"
   },
   "exports": {
     ".": "./src/mod.ts",

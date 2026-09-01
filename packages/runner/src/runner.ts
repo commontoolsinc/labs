@@ -997,8 +997,89 @@ const sameRootDocument = (
 type SetupResult<R> = {
   resultCell: Cell<R>;
   pattern?: Pattern;
+  patternRef?: { identity: string; symbol: string };
   needsStart: boolean;
 };
+
+/** Receipt for a pattern setup transaction accepted by storage. */
+export interface PatternSetupCommitReceipt {
+  /** Content-addressed pattern pointer written by the transaction. */
+  pattern: { identity: string; symbol: string };
+}
+
+/** Result of running a pattern through an owned setup transaction. */
+export interface RunSyncedCommitResult<R> {
+  /** Cell view reconciled to the pattern current after post-commit work. */
+  cell: Cell<R>;
+  /** Receipt issued from the accepted setup transaction. */
+  commit: PatternSetupCommitReceipt;
+}
+
+/**
+ * Why a receipt is refused on a runtime that seals rather than commits. One
+ * string because the refusal is raised twice — once as a fast answer, once
+ * against the transaction the receipt would have described — and a caller
+ * matching on it should not have to know which one it caught.
+ */
+export const SEALING_RECEIPT_REFUSAL =
+  "a committed pattern setup receipt is unavailable while sealing into a " +
+  "wave, whose acceptance a later withdrawal can undo";
+
+/**
+ * Reports work which failed after storage accepted a pattern setup.
+ *
+ * The receipt remains authoritative for the setup transaction. `.cause`
+ * describes the later dependency synchronization, start, or schema-load
+ * failure.
+ */
+export class PatternSetupPostCommitError extends Error {
+  #commit: PatternSetupCommitReceipt;
+
+  /** Constructs an instance carrying the accepted transaction's receipt. */
+  constructor(commit: PatternSetupCommitReceipt, cause: unknown) {
+    super("pattern setup committed, but post-commit processing failed", {
+      cause,
+    });
+    this.name = "PatternSetupPostCommitError";
+    this.#commit = commit;
+  }
+
+  /** Receipt issued for the accepted setup transaction. */
+  get commit(): PatternSetupCommitReceipt {
+    return this.#commit;
+  }
+}
+
+/** Options which constrain and annotate an atomic pattern setup. */
+export interface RunSyncedOptions {
+  /** Pattern pointer which must still be current inside the transaction. */
+  expectedPatternIdentity?: { identity: string; symbol: string };
+  /** Invariant over the argument stored before setup changes it. */
+  validateCurrentArgument?: (argumentCell: Cell<unknown>) => void;
+  /** Invariant over links retained by the candidate argument schema. */
+  validateArgumentLinks?: (
+    argumentCell: Cell<unknown>,
+    argumentSchema: JSONSchema,
+  ) => void;
+  /** Repository locator written atomically with pattern setup. */
+  patternRepository?: string;
+  /** Source lifecycle change written atomically with ordinary pattern setup. */
+  pieceSourceTransition?: PieceSourceTransition;
+}
+
+/** Options for a pattern setup whose fresh source revision proves a commit. */
+export interface RunSyncedWithCommitOptions extends RunSyncedOptions {
+  /** Pattern pointer which must still be current inside the transaction. */
+  expectedPatternIdentity: { identity: string; symbol: string };
+  /**
+   * Fresh source revision written by this transaction.
+   *
+   * Required because storage elides wholly redundant transactions before they
+   * reach the server. The unique revision is the novelty which makes a
+   * successful verdict proof that storage accepted this particular setup.
+   */
+  pieceSourceTransition: PieceSourceTransition;
+}
 
 type SetupValidationOptions = {
   /** Optional invariant over the argument stored before setup changes it. */
@@ -2305,6 +2386,7 @@ export class Runner {
     resultCell: Cell<R>,
     argument: T,
     pattern: Pattern,
+    patternRef: { identity: string; symbol: string },
     setupState: SetupStateReuse,
   ): SetupResult<R> | undefined {
     const key = this.getDocKey(resultCell);
@@ -2329,7 +2411,7 @@ export class Runner {
       if (setupState.restageStoredArgument) {
         this.#validateStoredArgument(tx, resultCell, pattern);
       }
-      return { resultCell, needsStart: false };
+      return { resultCell, patternRef, needsStart: false };
     }
 
     if (setupState.sameStoredSetup) {
@@ -2353,7 +2435,7 @@ export class Runner {
         nextArgument,
         pattern.argumentSchema,
       );
-      return { resultCell, needsStart: false };
+      return { resultCell, patternRef, needsStart: false };
     }
 
     return undefined;
@@ -2965,6 +3047,7 @@ export class Runner {
       resultCell,
       argument,
       pattern,
+      entryRef,
       setupState,
     );
     if (runningSetup) {
@@ -3032,7 +3115,7 @@ export class Runner {
       }
     }
 
-    return { resultCell, pattern, needsStart: true };
+    return { resultCell, pattern, patternRef: entryRef, needsStart: true };
   }
 
   /**
@@ -4973,20 +5056,125 @@ export class Runner {
     };
   }
 
+  /**
+   * Runs a pattern and returns its reconciled result-cell view.
+   *
+   * A failure after the setup transaction commits reaches the caller as the
+   * failure itself, never wrapped: a receipt is what a wrapper would carry,
+   * and this surface asks for none. Callers that classify such a failure by
+   * message — `isCfcMigrationRejection` among them — depend on that, so the
+   * gate that keeps receipts to the callers who request one is load-bearing
+   * for more than the receipt.
+   */
   async runSynced(
     resultCell: Cell<any>,
     pattern: Pattern | Module,
     inputs?: any,
-    options?: {
-      expectedPatternIdentity?: { identity: string; symbol: string };
-      validateCurrentArgument?: SetupValidationOptions[
-        "validateCurrentArgument"
-      ];
-      validateArgumentLinks?: SetupValidationOptions["validateArgumentLinks"];
-      patternRepository?: string;
-      pieceSourceTransition?: PieceSourceTransition;
-    },
-  ) {
+    options?: RunSyncedOptions,
+  ): Promise<Cell<any>> {
+    return (await this.#runSynced(
+      resultCell,
+      pattern,
+      inputs,
+      options,
+      false,
+    )).cell;
+  }
+
+  /**
+   * Runs a pattern source update and returns its accepted transaction receipt.
+   *
+   * A resolved call is proof that storage accepted this transaction. Five
+   * conditions make that so, and each is enforced here rather than inferred
+   * from the caller's options or its runtime, so narrowing one cannot quietly
+   * downgrade the receipt into a claim nothing checked:
+   *
+   * - the operation owns the transaction, so the receipt reports a storage
+   *   verdict and never writes merely staged in a caller-owned transaction;
+   * - the runtime commits to storage rather than sealing into a wave, where
+   *   acceptance means "taken into the wave" and a later withdrawal —
+   *   superseded, requeued, lease lost — can undo it. Such a contribution
+   *   cannot back a receipt that says `committed`, and waiting for the wave to
+   *   settle from inside the action that feeds it can deadlock, so the answer
+   *   is a refusal at the boundary rather than a weaker word for durable. A
+   *   flag-ON client speculating installs no destination and is unaffected;
+   *   its setup is stamped as bookkeeping, which the overlay passes through to
+   *   the real store;
+   * - a commit that storage rejects throws, and never falls through to the
+   *   post-commit work that a receipt-less run tolerates;
+   * - the required source transition appends a fresh revision, so the setup
+   *   cannot be elided as a wholly redundant transaction before reaching
+   *   storage;
+   * - a setup that recorded no pattern pointer throws, because a receipt
+   *   naming no pattern is not a receipt.
+   *
+   * @throws PatternSetupPostCommitError when the transaction commits and the
+   * work that refreshes the running piece then fails. Its `.commit` is the
+   * accepted transaction's receipt and its `.cause` the later failure.
+   */
+  async runSyncedWithCommit(
+    resultCell: Cell<any>,
+    pattern: Pattern | Module,
+    inputs: any,
+    options: RunSyncedWithCommitOptions,
+  ): Promise<RunSyncedCommitResult<any>> {
+    if (resultCell.tx?.status().status === "ready") {
+      throw new Error(
+        "a committed pattern setup receipt requires an unbound result cell",
+      );
+    }
+    // A fast refusal. The condition is asked again inside the transaction,
+    // which is where it decides anything: a destination installed while the
+    // synchronization below is in flight would pass this check and still seal
+    // the transaction the receipt would describe.
+    if (this.runtime.sealDestinationInstalled) {
+      throw new Error(SEALING_RECEIPT_REFUSAL);
+    }
+    if (options.pieceSourceTransition === undefined) {
+      // TypeScript callers cannot omit this, but the runtime boundary is also
+      // used from JavaScript. Without a fresh revision a redundant setup can
+      // be elided locally and would mint a receipt for a commit storage never
+      // saw, so fail closed rather than relying on a caller's discipline.
+      throw new Error(
+        "a committed pattern setup receipt requires a fresh source transition",
+      );
+    }
+    const result = await this.#runSynced(
+      resultCell,
+      pattern,
+      inputs,
+      options,
+      true,
+    );
+    // Under `requireCommit` the helper has two exits: it throws, or it issues
+    // a receipt. The check above is what rules out the third — the staging
+    // path, which commits nothing — and it holds for the whole call rather
+    // than only at entry: a cell's `tx` is readonly and `withTx()` yields a
+    // different cell, so this one cannot acquire a transaction along the way,
+    // and `ready` is a transaction's initial state, which `pending` and `done`
+    // follow but never precede.
+    return { cell: result.cell, commit: result.commit! };
+  }
+
+  /**
+   * Helper for `runSynced()` and `runSyncedWithCommit()`.
+   *
+   * `requireCommit` is what separates them. It makes an owned transaction
+   * mandatory, turns a rejected commit and a pointer-less setup into throws,
+   * and is the only condition under which a receipt is issued at all — so a
+   * receipt-less caller cannot receive a `PatternSetupPostCommitError` that
+   * hides its failure's own type behind a wrapper.
+   */
+  async #runSynced(
+    resultCell: Cell<any>,
+    pattern: Pattern | Module,
+    inputs: any,
+    options: RunSyncedOptions | undefined,
+    requireCommit: boolean,
+  ): Promise<{
+    cell: Cell<any>;
+    commit?: PatternSetupCommitReceipt;
+  }> {
     await resultCell.sync();
 
     const synced = await this.syncCellsForRunningPattern(
@@ -5005,6 +5193,7 @@ export class Runner {
     // run. Though most likely the worst case is just extra invocations.
     const givenTx = resultCell.tx?.status().status === "ready" && resultCell.tx;
     let setupRes: ReturnType<typeof this.setupInternal> | undefined;
+    let commit: PatternSetupCommitReceipt | undefined;
     const assertExpectedPatternIdentity = (
       cell: Cell<any>,
     ): void => {
@@ -5041,16 +5230,32 @@ export class Runner {
         },
       );
     } else {
-      const { error } = await this.runtime.editWithRetry((tx) => {
+      const outcome = await this.runtime.editWithRetry((tx) => {
+        // Asked here rather than only at the entry point, because a seal
+        // destination can be installed while the synchronization above is in
+        // flight, and because `editWithRetry` builds a fresh transaction per
+        // retry. The receipt describes THIS transaction, so the condition
+        // that decides whether it can describe one has to hold for the
+        // transaction, not for the moment the call started.
+        if (requireCommit && this.runtime.sealDestinationInstalled) {
+          throw new Error(SEALING_RECEIPT_REFUSAL);
+        }
         // runSynced's own setup tx (async surface, e.g. compileAndRun's
         // continuation on a served run): no scheduler run around it;
         // bookkeeping per serving-loop.md §3d.
+        //
+        // The kind also decides where this transaction lands. Under
+        // experimental server execution a derivation or event-handler run is
+        // diverted into the speculation overlay, whose acceptance is a seal
+        // that a later withdrawal can undo; bookkeeping commits to storage.
+        // A receipt minted from an overlay seal would claim durability it
+        // does not have, so re-stamping this one is not a naming change.
         this.runtime.stampServerRun(tx, {
           actionId: `piece-run-synced/${resultCell.sourceURI}`,
           kind: "bookkeeping",
         });
         assertExpectedPatternIdentity(resultCell.withTx(tx));
-        setupRes = this.setupInternal(
+        return this.setupInternal(
           tx,
           pattern,
           inputs,
@@ -5063,7 +5268,8 @@ export class Runner {
           },
         );
       });
-      if (error) {
+      if (outcome.error) {
+        const error = outcome.error;
         if (
           error.name === "StorageTransactionAborted" &&
           error.message.startsWith("editWithRetry action threw:") &&
@@ -5071,66 +5277,107 @@ export class Runner {
         ) {
           throw error.reason;
         }
-        if (options?.expectedPatternIdentity) {
+        // A caller owed a receipt is owed the storage verdict too: continuing
+        // here would run the post-commit work over a setup storage refused and
+        // then report no receipt for it. The identity arm below predates the
+        // receipt and covers its own callers; neither subsumes the other.
+        if (requireCommit || options?.expectedPatternIdentity) {
           throw error;
         }
         logger.error("pattern-setup-error", "Error setting up pattern", error);
         setupRes = undefined;
-      }
-    }
-
-    // If a new pattern was specified, make sure to sync any new cells
-    if (pattern || !synced) {
-      await this.syncCellsForRunningPattern(resultCell, pattern);
-    }
-
-    if (setupRes?.needsStart) {
-      if (givenTx) {
-        this.startWithTx(
-          givenTx,
-          resultCell.withTx(givenTx),
-          setupRes.pattern,
-        );
       } else {
-        // The setup commit can be superseded while dependency sync is in
-        // flight. Resolve startup from the current durable pattern pointer so
-        // a stale caller can never instantiate its old candidate while
-        // recording a newer identity as current.
-        await resultCell.sync();
-        await this.start(resultCell);
+        setupRes = outcome.ok;
+        // Only a caller that asked for a receipt gets one, and that decides
+        // more than the return value: the receipt is what the post-commit
+        // wrapper below carries, so withholding it here is what keeps
+        // `runSynced`'s failures unwrapped for the callers that read their
+        // messages. Minting unconditionally would wrap those failures in a
+        // type whose message names none of them.
+        if (requireCommit) {
+          const patternRef = setupRes.patternRef;
+          if (patternRef === undefined) {
+            // `setupInternal` returns without a pointer when it resolves no
+            // pattern at all. A caller passing one cannot reach that, so this
+            // guards the type's edge rather than a live path — and it fails
+            // loudly instead of minting a receipt that names nothing.
+            throw new Error(
+              "the pattern setup committed without recording a pattern identity",
+            );
+          }
+          commit = { pattern: patternRef };
+        }
       }
     }
 
-    // A concurrent source update can supersede this caller after its setup
-    // commit but before its post-commit dependency sync settles. Return a view
-    // typed by the pattern that is actually durable now, not by this caller's
-    // stale candidate.
-    let currentRef = getPatternIdentityRef(resultCell);
-    while (currentRef !== undefined) {
-      const loadedRef = currentRef;
-      const currentPattern = await this.runtime.patternManager
-        .loadPatternByIdentity(
-          loadedRef.identity,
-          loadedRef.symbol,
-          resultCell.space,
-        );
-      currentRef = getPatternIdentityRef(resultCell);
-      if (
-        currentRef !== undefined &&
-        patternIdentityKey(currentRef) !== patternIdentityKey(loadedRef)
-      ) {
-        continue;
+    try {
+      // If a new pattern was specified, make sure to sync any new cells
+      if (pattern || !synced) {
+        await this.syncCellsForRunningPattern(resultCell, pattern);
       }
-      if (
-        currentRef === undefined || currentPattern?.resultSchema === undefined
-      ) {
-        return resultCell;
+
+      if (setupRes?.needsStart) {
+        if (givenTx) {
+          this.startWithTx(
+            givenTx,
+            resultCell.withTx(givenTx),
+            setupRes.pattern,
+          );
+        } else {
+          // The setup commit can be superseded while dependency sync is in
+          // flight. Resolve startup from the current durable pattern pointer so
+          // a stale caller can never instantiate its old candidate while
+          // recording a newer identity as current.
+          await resultCell.sync();
+          await this.start(resultCell);
+        }
       }
-      return resultCell.asSchema(currentPattern.resultSchema);
+
+      // A concurrent source update can supersede this caller after its setup
+      // commit but before its post-commit dependency sync settles. Return a view
+      // typed by the pattern that is actually durable now, not by this caller's
+      // stale candidate.
+      let currentRef = getPatternIdentityRef(resultCell);
+      while (currentRef !== undefined) {
+        const loadedRef = currentRef;
+        const currentPattern = await this.runtime.patternManager
+          .loadPatternByIdentity(
+            loadedRef.identity,
+            loadedRef.symbol,
+            resultCell.space,
+          );
+        currentRef = getPatternIdentityRef(resultCell);
+        if (
+          currentRef !== undefined &&
+          patternIdentityKey(currentRef) !== patternIdentityKey(loadedRef)
+        ) {
+          continue;
+        }
+        if (
+          currentRef === undefined || currentPattern?.resultSchema === undefined
+        ) {
+          return {
+            cell: resultCell,
+            ...(commit === undefined ? {} : { commit }),
+          };
+        }
+        return {
+          cell: resultCell.asSchema(currentPattern.resultSchema),
+          ...(commit === undefined ? {} : { commit }),
+        };
+      }
+      return {
+        cell: pattern?.resultSchema !== undefined
+          ? resultCell.asSchema(pattern.resultSchema)
+          : resultCell,
+        ...(commit === undefined ? {} : { commit }),
+      };
+    } catch (error) {
+      if (commit !== undefined) {
+        throw new PatternSetupPostCommitError(commit, error);
+      }
+      throw error;
     }
-    return pattern?.resultSchema !== undefined
-      ? resultCell.asSchema(pattern.resultSchema)
-      : resultCell;
   }
 
   // Result-pattern cache key, per scope INSTANCE (key-vocabulary.md §1
@@ -9461,6 +9708,15 @@ export function applyPieceSourceTransition(
   ) {
     throw new Error(PIECE_SOURCE_MOVED);
   }
+  const history = getPieceSourceRevisions(candidate);
+  if (
+    history.some((revision) => revision.revisionId === transition.revisionId)
+  ) {
+    throw new Error(
+      `piece source revision ID already exists: ` +
+        `\`${transition.revisionId}\``,
+    );
+  }
 
   const verifyRetainedPattern = (
     pattern: { identity: string; symbol: string },
@@ -9501,7 +9757,6 @@ export function applyPieceSourceTransition(
     }, rawMetaWriteAuthorization);
   }
 
-  const history = getPieceSourceRevisions(candidate);
   const recordedCurrent = history.at(-1);
   const currentOrigin = normalizePieceSourceOrigin(
     runtime,

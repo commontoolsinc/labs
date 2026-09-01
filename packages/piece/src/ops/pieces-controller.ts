@@ -46,6 +46,8 @@ import {
   type Pattern,
   type PatternCoverageCollector,
   PatternManager,
+  type PatternSetupCommitReceipt,
+  PatternSetupPostCommitError,
   type PieceSourceTransition,
   preparePieceSourceTransitionBaseline,
   Runtime,
@@ -1356,6 +1358,12 @@ export class PiecesController<T = unknown> {
   // id `pieceId`, applies the provided `pattern` (which may be
   // its current pattern -- useful when we are only updating inputs),
   // and optionally applies `inputs` if provided.
+  //
+  // Reports a failure as itself, whether it happened before or after the
+  // setup transaction committed. `runPatternUpdate` below runs the same
+  // post-commit work and differs precisely here: it issues a receipt, so it
+  // reports a post-commit failure as a `PatternSetupPostCommitError` carrying
+  // that receipt. Callers classifying failures by message want this one.
   async runWithPattern(
     pattern: Pattern | Module,
     pieceId: string,
@@ -1403,6 +1411,62 @@ export class PiecesController<T = unknown> {
     }
 
     return currentPiece;
+  }
+
+  /**
+   * Applies a pattern through an owned transaction and returns its receipt.
+   *
+   * A later failure to synchronize dependencies, start the piece, load its
+   * schema, or pull its result throws `PatternSetupPostCommitError`, whose
+   * `.commit` remains the accepted transaction's result.
+   */
+  async runPatternUpdate(
+    pattern: Pattern | Module,
+    pieceId: string,
+    inputs: object | undefined,
+    options: {
+      expectedPatternIdentity: { identity: string; symbol: string };
+      /** Invariant over the argument stored before setup changes it. */
+      validateCurrentArgument?: (argumentCell: Cell<unknown>) => void;
+      /** Invariant over links retained by the candidate argument schema. */
+      validateArgumentLinks?: (
+        argumentCell: Cell<unknown>,
+        argumentSchema: JSONSchema,
+      ) => void;
+      /** Repository locator written atomically with pattern setup. */
+      repository?: string;
+      /** Fresh source lifecycle revision written atomically with setup. */
+      sourceTransition: PieceSourceTransition;
+    },
+  ): Promise<{
+    /** Cell view reconciled to the pattern current after post-commit work. */
+    cell: Cell<unknown>;
+    /** Receipt issued from the accepted setup transaction. */
+    commit: PatternSetupCommitReceipt;
+  }> {
+    const piece = this.runtime.getCellFromEntityId(
+      this.#space,
+      entityIdFrom(pieceId),
+    );
+    const result = await this.runtime.runSyncedWithCommit(
+      piece,
+      pattern,
+      inputs,
+      {
+        expectedPatternIdentity: options.expectedPatternIdentity,
+        patternRepository: options.repository,
+        pieceSourceTransition: options.sourceTransition,
+        validateCurrentArgument: options.validateCurrentArgument,
+        validateArgumentLinks: options.validateArgumentLinks,
+      },
+    );
+    try {
+      await this.syncPattern(result.cell);
+      await this.getResult(result.cell).pull();
+      return result;
+    } catch (error) {
+      throw new PatternSetupPostCommitError(result.commit, error);
+    }
   }
 
   /**

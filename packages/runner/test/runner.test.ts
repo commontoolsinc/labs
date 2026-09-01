@@ -13,6 +13,7 @@ import {
   NAME,
   type Pattern,
 } from "../src/builder/types.ts";
+import type { Cell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
 import { validateSchemaValue } from "../src/cfc/mod.ts";
@@ -28,10 +29,15 @@ import {
   extractDefaultValues,
   getPatternIdentityRef,
   getPatternSetupIdentityRef,
+  getPieceSourceSnapshot,
   mergeObjects,
   mergeSchemaDefaults,
+  PatternSetupPostCommitError,
+  type PieceSourceTransition,
+  preparePieceSourceTransitionBaseline,
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
+  SEALING_RECEIPT_REFUSAL,
 } from "../src/runner.ts";
 import {
   type ICommitNotification,
@@ -74,6 +80,75 @@ function setupTrusted(
     argument as never,
     resultCell as never,
   );
+}
+
+async function compileReceiptPattern(
+  runtime: Runtime,
+  marker: string,
+): Promise<Pattern> {
+  return await runtime.patternManager.compilePattern({
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        "import { pattern } from 'commonfabric';",
+        "interface Args { label?: string }",
+        "export default pattern<Args, { marker: string }>(() => ({",
+        `  marker: ${JSON.stringify(marker)},`,
+        "}));",
+      ].join("\n"),
+    }],
+  }, { space });
+}
+
+/** Returns the receipt fixture's durable or session-side source state. */
+function receiptSourceSnapshot(
+  runtime: Runtime,
+  resultCell: Cell<unknown>,
+) {
+  const snapshot = getPieceSourceSnapshot(
+    resultCell,
+    runtime.runner.sessionPatternPointerFor(resultCell),
+  );
+  if (snapshot === undefined) {
+    throw new Error("the receipt fixture has no source snapshot");
+  }
+  return snapshot;
+}
+
+async function receiptSourceTransition(
+  runtime: Runtime,
+  resultCell: Cell<unknown>,
+): Promise<PieceSourceTransition> {
+  const expected = receiptSourceSnapshot(runtime, resultCell);
+  return {
+    revisionId: crypto.randomUUID(),
+    baseline: await preparePieceSourceTransitionBaseline(
+      runtime,
+      resultCell,
+      expected,
+    ),
+    timestamp: Date.now(),
+    operation: "edit",
+    origin: null,
+    expected,
+  };
+}
+
+/** Transition for tests which must refuse before source setup is reached. */
+function unreachableReceiptSourceTransition(): PieceSourceTransition {
+  return {
+    revisionId: crypto.randomUUID(),
+    baseline: { kind: "unavailable" },
+    timestamp: Date.now(),
+    operation: "edit",
+    origin: null,
+    expected: {
+      pattern: { identity: "of:fid1:unreachable", symbol: "default" },
+      origin: null,
+      revisionId: null,
+    },
+  };
 }
 
 describe("runPattern", () => {
@@ -1734,6 +1809,518 @@ describe("setup/start", () => {
     expect(result).toBe(resultCell);
   });
 
+  it("runSynced returns the untyped cell when the durable pattern cannot be loaded", async () => {
+    // After post-commit work, the returned view is re-typed by the pattern
+    // that is durable NOW. When that pattern cannot be loaded, the answer is
+    // the raw cell rather than a stale schema. What the branch responds to is
+    // the load's answer, so the load is answered directly instead of staging
+    // the timing that would produce it.
+    const resultCell = runtime.getCell(space, "runSynced unloadable winner");
+    const pattern = await compileReceiptPattern(runtime, "unloadable");
+    await runtime.runSynced(resultCell, pattern, {});
+    expect(getPatternIdentityRef(resultCell)).toBeDefined();
+
+    const manager = runtime.patternManager;
+    const originalLoad = manager.loadPatternByIdentity.bind(manager);
+    manager.loadPatternByIdentity = () => Promise.resolve(undefined);
+
+    try {
+      const result = await runtime.runSynced(resultCell, pattern, {});
+      expect(result).toBe(resultCell);
+    } finally {
+      manager.loadPatternByIdentity = originalLoad;
+    }
+  });
+
+  it("runSynced follows the durable identity when it moves during the schema load", async () => {
+    // The recheck after each load is what makes the loop settle on the
+    // pattern that is durable now: a pointer that moved while its pattern
+    // loaded restarts the resolution instead of typing the view by the
+    // pattern that was current a moment ago. The move is performed from
+    // inside the load itself, which is the window the recheck exists for.
+    const resultCell = runtime.getCell(space, "runSynced moving winner");
+    const first = await compileReceiptPattern(runtime, "moving-first");
+    const second = await compileReceiptPattern(runtime, "moving-second");
+    const secondRef = runtime.patternManager.getArtifactEntryRef(second);
+    if (secondRef === undefined) {
+      throw new Error("the compiled pattern has no entry ref");
+    }
+    await runtime.runSynced(resultCell, first, {});
+    expect(getPatternIdentityRef(resultCell)).toBeDefined();
+
+    const manager = runtime.patternManager;
+    const originalLoad = manager.loadPatternByIdentity.bind(manager);
+    let moved = false;
+    manager.loadPatternByIdentity = async (identity, symbol, loadSpace) => {
+      if (!moved) {
+        moved = true;
+        const { error } = await runtime.editWithRetry((tx) => {
+          resultCell.withTx(tx).setMetaRaw(
+            "patternIdentity",
+            secondRef,
+            rawMetaWriteAuthorization,
+          );
+        });
+        if (error !== undefined) throw error;
+      }
+      return await originalLoad(identity, symbol, loadSpace);
+    };
+
+    try {
+      const result = await runtime.runSynced(resultCell, first, {});
+
+      expect(moved).toBe(true);
+      expect(getPatternIdentityRef(resultCell)).toEqual(secondRef);
+      expect(result.getAsNormalizedFullLink().schema).toEqual(
+        second.resultSchema,
+      );
+    } finally {
+      manager.loadPatternByIdentity = originalLoad;
+    }
+  });
+
+  it("runSyncedWithCommit returns the pattern accepted by its setup transaction", async () => {
+    const resultCell = runtime.getCell(space, "runSynced commit receipt");
+    const initialPattern = await compileReceiptPattern(runtime, "v1");
+    const nextPattern = await compileReceiptPattern(runtime, "v2");
+
+    await runtime.runSynced(
+      resultCell,
+      initialPattern,
+      {},
+    );
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
+    const pieceSourceTransition = await receiptSourceTransition(
+      runtime,
+      resultCell,
+    );
+
+    const result = await runtime.runSyncedWithCommit(
+      resultCell,
+      nextPattern,
+      {},
+      { expectedPatternIdentity: previous, pieceSourceTransition },
+    );
+
+    expect(result.commit.pattern).toEqual(
+      receiptSourceSnapshot(runtime, resultCell).pattern,
+    );
+    expect(result.cell.get()).toEqual({ marker: "v2" });
+  });
+
+  it("runSyncedWithCommit carries its receipt through post-commit failures", async () => {
+    const resultCell = runtime.getCell(
+      space,
+      "runSynced post-commit receipt",
+    );
+    const initialPattern = await compileReceiptPattern(runtime, "v1");
+    const nextPattern = await compileReceiptPattern(runtime, "v2");
+    await runtime.runSynced(
+      resultCell,
+      initialPattern,
+      {},
+    );
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
+    const pieceSourceTransition = await receiptSourceTransition(
+      runtime,
+      resultCell,
+    );
+
+    const runner = runtime.runner as unknown as {
+      syncCellsForRunningPattern(
+        resultCell: unknown,
+        pattern: Pattern,
+        inputs?: unknown,
+      ): Promise<boolean>;
+    };
+    const originalSync = runner.syncCellsForRunningPattern.bind(
+      runtime.runner,
+    );
+    const postCommitFailure = new Error("injected post-commit failure");
+    let syncCount = 0;
+    runner.syncCellsForRunningPattern = async (
+      resultCell,
+      executable,
+      inputs,
+    ) => {
+      syncCount++;
+      if (syncCount === 2) throw postCommitFailure;
+      return await originalSync(resultCell, executable, inputs);
+    };
+
+    try {
+      let reported: unknown;
+      try {
+        await runtime.runSyncedWithCommit(
+          resultCell,
+          nextPattern,
+          {},
+          { expectedPatternIdentity: previous, pieceSourceTransition },
+        );
+      } catch (error) {
+        reported = error;
+      }
+
+      expect(reported).toBeInstanceOf(PatternSetupPostCommitError);
+      const failure = reported as PatternSetupPostCommitError;
+      expect(failure.cause).toBe(postCommitFailure);
+      expect(failure.commit.pattern).toEqual(
+        receiptSourceSnapshot(runtime, resultCell).pattern,
+      );
+    } finally {
+      runner.syncCellsForRunningPattern = originalSync;
+    }
+  });
+
+  it("runSyncedWithCommit refuses a receipt without a fresh source transition", async () => {
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit no-op receipt refusal",
+    );
+    const executable = trustExecutable(runtime, pattern);
+    await runtime.runSynced(resultCell, executable, {});
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
+
+    await expect(runtime.runSyncedWithCommit(
+      resultCell,
+      executable,
+      {},
+      // JavaScript callers can bypass the required TypeScript field; the
+      // runtime boundary must still refuse rather than minting a receipt for
+      // the zero-write setup this exact fixture produces.
+      { expectedPatternIdentity: previous } as never,
+    )).rejects.toThrow("requires a fresh source transition");
+  });
+
+  it("runSyncedWithCommit refuses a source revision ID already in history", async () => {
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit reused source revision",
+    );
+    const initialPattern = await compileReceiptPattern(runtime, "v1");
+    const secondPattern = await compileReceiptPattern(runtime, "v2");
+    const thirdPattern = await compileReceiptPattern(runtime, "v3");
+
+    await runtime.runSynced(resultCell, initialPattern, {});
+    const initial = receiptSourceSnapshot(runtime, resultCell);
+    const firstTransition = await receiptSourceTransition(runtime, resultCell);
+    await runtime.runSyncedWithCommit(resultCell, secondPattern, {}, {
+      expectedPatternIdentity: initial.pattern,
+      pieceSourceTransition: firstTransition,
+    });
+    const current = receiptSourceSnapshot(runtime, resultCell);
+    const reusedTransition = {
+      ...await receiptSourceTransition(runtime, resultCell),
+      revisionId: firstTransition.revisionId,
+    };
+
+    await expect(runtime.runSyncedWithCommit(
+      resultCell,
+      thirdPattern,
+      {},
+      {
+        expectedPatternIdentity: current.pattern,
+        pieceSourceTransition: reusedTransition,
+      },
+    )).rejects.toThrow("source revision ID already exists");
+    expect(receiptSourceSnapshot(runtime, resultCell)).toEqual(current);
+    expect(resultCell.get()).toEqual({ marker: "v2" });
+  });
+
+  it("runSyncedWithCommit refuses to issue a receipt while sealing into a wave", async () => {
+    // A serving runtime seals rather than commits: acceptance means the wave
+    // took the contribution, and a later withdrawal — superseded, requeued,
+    // lease lost — can undo it. A receipt saying `committed` would overstate
+    // that, and waiting for the wave to settle from inside the action feeding
+    // it can deadlock, so the boundary refuses instead of weakening the word.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    // A serving runtime of its own: installing a seal destination is the ON
+    // arm's posture, which the suite's shared client runtime does not have.
+    const servingStorage = StorageManager.emulate({ as: signer });
+    const serving = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: servingStorage,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+    const resultCell = serving.getCell(
+      space,
+      "runSyncedWithCommit while sealing",
+    );
+    const sealed: IExtendedStorageTransaction[] = [];
+    serving.installSealDestination({
+      seal: (tx: IExtendedStorageTransaction) => {
+        sealed.push(tx);
+        return tx.commit();
+      },
+    });
+
+    try {
+      await expect(serving.runSyncedWithCommit(
+        resultCell,
+        trustExecutable(serving, pattern),
+        {},
+        {
+          expectedPatternIdentity: {
+            identity: "of:fid1:expected",
+            symbol: "default",
+          },
+          pieceSourceTransition: unreachableReceiptSourceTransition(),
+        },
+      )).rejects.toThrow(SEALING_RECEIPT_REFUSAL);
+      // Refused at the boundary, so nothing reached the wave to be withdrawn.
+      expect(sealed).toEqual([]);
+    } finally {
+      serving.clearSealDestination();
+      await serving.dispose();
+      await servingStorage.close();
+    }
+  });
+
+  it("runSyncedWithCommit refuses a wave that starts sealing mid-call", async () => {
+    // The entry check answers for the moment the call started, and the call
+    // then awaits. A destination installed during those awaits would seal the
+    // very transaction the receipt describes, so the condition is asked again
+    // inside the transaction — which is also what covers `editWithRetry`
+    // building a fresh one per retry.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const servingStorage = StorageManager.emulate({ as: signer });
+    const serving = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: servingStorage,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+    const resultCell = serving.getCell(
+      space,
+      "runSyncedWithCommit sealing mid-call",
+    );
+    await serving.runSynced(resultCell, trustExecutable(serving, pattern), {});
+    const previous = receiptSourceSnapshot(serving, resultCell).pattern;
+
+    // Installed from the synchronization the call performs before it opens
+    // its transaction, which is the window the entry check cannot see.
+    const sealed: IExtendedStorageTransaction[] = [];
+    const mutableCell = resultCell as unknown as {
+      sync: typeof resultCell.sync;
+    };
+    const originalSync = resultCell.sync.bind(resultCell);
+    mutableCell.sync = (async (...args: Parameters<typeof resultCell.sync>) => {
+      const synced = await originalSync(...args);
+      if (!serving.sealDestinationInstalled) {
+        serving.installSealDestination({
+          seal: (tx: IExtendedStorageTransaction) => {
+            sealed.push(tx);
+            return tx.commit();
+          },
+        });
+      }
+      return synced;
+    }) as typeof resultCell.sync;
+
+    try {
+      await expect(serving.runSyncedWithCommit(
+        resultCell,
+        trustExecutable(serving, pattern),
+        {},
+        {
+          expectedPatternIdentity: previous,
+          pieceSourceTransition: unreachableReceiptSourceTransition(),
+        },
+      )).rejects.toThrow(SEALING_RECEIPT_REFUSAL);
+      expect(sealed).toEqual([]);
+    } finally {
+      mutableCell.sync = originalSync;
+      serving.clearSealDestination();
+      await serving.dispose();
+      await servingStorage.close();
+    }
+  });
+
+  it("runSyncedWithCommit refuses a result cell bound to an open transaction", async () => {
+    // Writes staged in a transaction the caller still owns have no storage
+    // verdict yet — the caller decides their fate — so there is nothing to
+    // issue a receipt for. Refusing up front is what makes "resolved means
+    // storage accepted it" true of every receipt this method returns.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit bound transaction",
+    );
+    const tx = runtime.edit();
+
+    try {
+      await expect(runtime.runSyncedWithCommit(
+        resultCell.withTx(tx),
+        trustExecutable(runtime, pattern),
+        {},
+        {
+          expectedPatternIdentity: {
+            identity: "of:fid1:expected",
+            symbol: "default",
+          },
+          pieceSourceTransition: unreachableReceiptSourceTransition(),
+        },
+      )).rejects.toThrow("requires an unbound result cell");
+    } finally {
+      await tx.commit();
+    }
+  });
+
+  it("runSyncedWithCommit rejects a commit storage refused", async () => {
+    // The receipt's whole claim is that storage accepted the transaction, so
+    // a rejected commit has to reach the caller as that rejection. Reported
+    // through a resolved `{ error }` — the shape `editWithRetry` uses for a
+    // refusal it did not throw — because a receipt path that treats it as
+    // anything other than a failure would report success for a write storage
+    // turned down.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit rejected commit",
+    );
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    const failure = new Error("commit refused by storage");
+    runtime.editWithRetry = (() => Promise.resolve({ error: failure })) as any;
+
+    try {
+      await expect(runtime.runSyncedWithCommit(
+        resultCell,
+        trustExecutable(runtime, pattern),
+        {},
+        {
+          expectedPatternIdentity: {
+            identity: "of:fid1:expected",
+            symbol: "default",
+          },
+          pieceSourceTransition: unreachableReceiptSourceTransition(),
+        },
+      )).rejects.toThrow("commit refused by storage");
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
+    }
+  });
+
+  it("runSyncedWithCommit rejects a setup that recorded no pattern identity", async () => {
+    // Setup answers without a pattern pointer when it resolves no pattern at
+    // all — neither supplied nor stored — and a receipt naming no pattern is
+    // not a receipt. A caller cannot reach that state through this method's
+    // signature, so setup is answered directly here: what is pinned is the
+    // refusal, which is the only thing standing between that shape and a
+    // receipt whose `pattern` is undefined.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit without pattern identity",
+    );
+    await runtime.runSynced(resultCell, trustExecutable(runtime, pattern), {});
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
+
+    const runner = runtime.runner as unknown as {
+      setupInternal(...args: unknown[]): unknown;
+    };
+    const originalSetupInternal = runner.setupInternal.bind(runtime.runner);
+    runner.setupInternal = () => ({ resultCell, needsStart: false });
+
+    try {
+      await expect(runtime.runSyncedWithCommit(
+        resultCell,
+        trustExecutable(runtime, pattern),
+        {},
+        {
+          expectedPatternIdentity: previous,
+          pieceSourceTransition: unreachableReceiptSourceTransition(),
+        },
+      )).rejects.toThrow("without recording a pattern identity");
+    } finally {
+      runner.setupInternal = originalSetupInternal;
+    }
+  });
+
+  it("runSynced preserves its legacy error when post-commit work fails", async () => {
+    const pattern = (marker: string): Pattern => ({
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: { type: "object", properties: {} },
+      result: { marker },
+      nodes: [],
+    });
+    const resultCell = runtime.getCell(
+      space,
+      "runSynced legacy post-commit error",
+    );
+    await runtime.runSynced(
+      resultCell,
+      trustExecutable(runtime, pattern("v1")),
+      {},
+    );
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
+
+    const runner = runtime.runner as unknown as {
+      syncCellsForRunningPattern(
+        resultCell: unknown,
+        pattern: Pattern,
+        inputs?: unknown,
+      ): Promise<boolean>;
+    };
+    const originalSync = runner.syncCellsForRunningPattern.bind(
+      runtime.runner,
+    );
+    let syncCount = 0;
+    runner.syncCellsForRunningPattern = async (
+      resultCell,
+      executable,
+      inputs,
+    ) => {
+      syncCount++;
+      if (syncCount === 2) {
+        throw new Error("injected legacy post-commit failure");
+      }
+      return await originalSync(resultCell, executable, inputs);
+    };
+
+    try {
+      await expect(runtime.runSynced(
+        resultCell,
+        trustExecutable(runtime, pattern("v2")),
+        {},
+        { expectedPatternIdentity: previous },
+      )).rejects.toThrow("injected legacy post-commit failure");
+    } finally {
+      runner.syncCellsForRunningPattern = originalSync;
+    }
+  });
+
   it("setup rethrows callback failures from editWithRetry", async () => {
     const pattern: Pattern = {
       argumentSchema: {
@@ -2309,6 +2896,58 @@ describe("setup/start", () => {
       expect(runtime.runner.cancels.size).toBe(1);
     } finally {
       await boundTx.commit();
+    }
+  });
+
+  it("rethrows post-setup failures when writes remain transaction-bound", async () => {
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [],
+    };
+    const trusted = trustExecutable(runtime, pattern);
+    const resultCell = runtime.getCell(
+      space,
+      "transaction-bound post-setup failure",
+    );
+    await runtime.runSynced(resultCell, trusted, {});
+    const currentIdentity = receiptSourceSnapshot(runtime, resultCell).pattern;
+
+    const boundTx = runtime.edit();
+    const runner = runtime.runner as unknown as {
+      syncCellsForRunningPattern(
+        resultCell: unknown,
+        pattern: Pattern,
+        inputs?: unknown,
+      ): Promise<boolean>;
+    };
+    const originalSync = runner.syncCellsForRunningPattern.bind(
+      runtime.runner,
+    );
+    let syncCount = 0;
+    runner.syncCellsForRunningPattern = async (
+      resultCell,
+      executable,
+      inputs,
+    ) => {
+      syncCount++;
+      if (syncCount === 2) {
+        throw new Error("transaction-bound post-setup failure");
+      }
+      return await originalSync(resultCell, executable, inputs);
+    };
+
+    try {
+      await expect(runtime.runSynced(
+        resultCell.withTx(boundTx),
+        trusted,
+        {},
+        { expectedPatternIdentity: currentIdentity },
+      )).rejects.toThrow("transaction-bound post-setup failure");
+    } finally {
+      runner.syncCellsForRunningPattern = originalSync;
+      boundTx.abort();
     }
   });
 });

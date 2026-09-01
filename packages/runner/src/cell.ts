@@ -4241,20 +4241,39 @@ function convertOneToLinks(
   // the walk, and the next position holding it would be taken for a cycle.
   try {
     // A schema-bearing read hangs a non-enumerable `toCell` symbol on the
-    // arrays it returns. That symbol is machinery, not content, and an array
-    // carrying it is not a `FabricValue`, so drop it before the vetting below
-    // would reject it. Only annotated arrays are cleaned: an array carrying
-    // anything else non-index is genuinely unrepresentable and must still be
-    // rejected.
+    // containers it returns. That symbol is machinery, not content, and a
+    // container carrying it is not a `FabricValue`, so it is kept away from
+    // the vetting below, which would refuse it. Whatever else a container
+    // carries that is neither an index nor an enumerable string key is
+    // dropped along with the symbol.
     if (isCellResultForDereferencing(value) && isPlainContainer(value)) {
-      // What these produce is a valid `FabricValueLayer` already, so it wants
-      // no further conversion. Objects need this as much as arrays do -- the
-      // annotation goes on either (see `schema.ts`).
-      container = (Array.isArray(value)
-        ? shallowCleanArray(value, false)
-        : shallowCleanPlainObject(value as object, false)) as
-          | unknown[]
-          | Record<string, unknown>;
+      const isArray = Array.isArray(value);
+
+      if (
+        Object.hasOwn(value, toCell) &&
+        Object.getPrototypeOf(value) ===
+          (isArray ? Array.prototype : Object.prototype)
+      ) {
+        // An annotated container: a plain array or object carrying the
+        // symbol as its own property. The rebuild below reads only index and
+        // enumerable string keys, so it sheds the symbol on its own, and the
+        // container goes to it as it stands. The prototype check is what
+        // lets the rebuild use the container's own `map()`, which on a
+        // subclass would return a subclass instance.
+        container = value as unknown[] | Record<string, unknown>;
+      } else {
+        // A query-result proxy serves the symbol from a trap rather than as
+        // an own property, and a subclass fails the prototype check. Either
+        // is read out into a plain copy first, which is a valid
+        // `FabricValueLayer` already and so wants no further conversion.
+        // Objects need this as much as arrays do -- the annotation goes on
+        // either (see `schema.ts`).
+        container = (isArray
+          ? shallowCleanArray(value, false)
+          : shallowCleanPlainObject(value as object, false)) as
+            | unknown[]
+            | Record<string, unknown>;
+      }
     } else {
       // A native object carrying a fabric form is minted into it here: a
       // `Date` or `Uint8Array` becomes a `FabricPrimitive`, an `Error` a

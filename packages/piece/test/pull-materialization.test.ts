@@ -19,6 +19,7 @@ import {
   KeepAsCell,
   NAME,
   Pattern,
+  PatternSetupPostCommitError,
   Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
@@ -7131,11 +7132,31 @@ describe("piece pull materialization", () => {
       await winnerPostCommitSync.promise;
 
       releaseWinner.resolve();
-      await winnerUpdate;
+      const winnerReceipt = await winnerUpdate;
       releaseFirst.resolve();
-      await firstUpdate;
+      const firstReceipt = await firstUpdate;
       await runtime.idle();
 
+      // Each receipt answers whether that caller's transaction committed; it
+      // is not a later snapshot of the row. The winner assertion below is the
+      // independent current-state check, just as it would be after two
+      // successful database updates to the same row.
+      expect(firstReceipt.ref).toEqual(
+        runtime.patternManager.getArtifactEntryRef(firstPattern),
+      );
+      expect(winnerReceipt.ref).toEqual(
+        runtime.patternManager.getArtifactEntryRef(winnerPattern),
+      );
+      // Each revision names its own caller's transaction too. This is the
+      // field that would drift first if a receipt ever started reporting the
+      // history's last entry rather than what the caller committed: both
+      // revisions are in the history, and only their order distinguishes
+      // them.
+      const revisions = getPieceSourceRevisions(piece);
+      const revisionIds = revisions.map((revision) => revision.revisionId);
+      expect(firstReceipt.revisionId).not.toBe(winnerReceipt.revisionId);
+      expect(revisionIds).toContain(firstReceipt.revisionId);
+      expect(revisions.at(-1)?.revisionId).toBe(winnerReceipt.revisionId);
       expect(getPatternIdentityRef(piece)).toEqual(
         runtime.patternManager.getArtifactEntryRef(winnerPattern),
       );
@@ -7158,7 +7179,7 @@ describe("piece pull materialization", () => {
     }
   });
 
-  it("does not install an older controller mutation after a newer one", async () => {
+  it("keeps the newer mutation's schema when an older one fails after it", async () => {
     const initialProgram = compiledResultNarrowingProgram(
       "string | number | boolean",
     );
@@ -7182,11 +7203,21 @@ describe("piece pull materialization", () => {
       "controller-update-race-" + crypto.randomUUID(),
       { start: false },
     );
+    const winnerRef = runtime.patternManager.getArtifactEntryRef(winnerPattern);
+    if (!winnerRef) {
+      throw new Error("missing compiled pattern ref");
+    }
     const controller = new PieceController(pieces, piece);
     const firstRunEntered = defer<void>();
     const releaseFirstRun = defer<void>();
-    const originalRunWithPattern = pieces.runWithPattern;
-    pieces.runWithPattern = async (
+    // Only the losing update is intercepted: it is held until the winner has
+    // finished, then fails, which is what an update superseded before it
+    // commits does — the identity precondition inside the setup transaction
+    // refuses it. The winner runs the real update path, so the pointer it
+    // commits and the receipt it returns are the ones production would
+    // produce rather than values this fixture invented.
+    const originalRunPatternUpdate = pieces.runPatternUpdate.bind(pieces);
+    pieces.runPatternUpdate = async (
       pattern,
       pieceId,
       inputs,
@@ -7195,13 +7226,11 @@ describe("piece pull materialization", () => {
       if (pattern === firstPattern) {
         firstRunEntered.resolve();
         await releaseFirstRun.promise;
-        return piece.asSchema(firstPattern.resultSchema);
+        throw new Error(
+          "piece pattern changed while the source update was compiling",
+        );
       }
-      if (pattern === winnerPattern) {
-        return piece.asSchema(winnerPattern.resultSchema);
-      }
-      return await originalRunWithPattern.call(
-        pieces,
+      return await originalRunPatternUpdate(
         pattern,
         pieceId,
         inputs,
@@ -7218,18 +7247,24 @@ describe("piece pull materialization", () => {
     }) as typeof runtime.patternManager.compilePattern;
 
     try {
-      const firstUpdate = controller.setPattern(firstProgram);
+      const firstUpdate = expect(controller.setPattern(firstProgram)).rejects
+        .toThrow(/pattern changed while the source update was compiling/);
       await firstRunEntered.promise;
-      await controller.setPattern(winnerProgram);
+      const winnerReceipt = await controller.setPattern(winnerProgram);
       releaseFirstRun.resolve();
       await firstUpdate;
 
+      // The loser's failure is handled after the winner installed its schema,
+      // and must leave that schema in place rather than reconciling back to
+      // the version it was carrying.
       expect(controller.getCell().getAsNormalizedFullLink().schema).toEqual(
         winnerPattern.resultSchema,
       );
+      expect(winnerReceipt.ref).toEqual(winnerRef);
+      expect(getPatternIdentityRef(piece)).toEqual(winnerRef);
     } finally {
       releaseFirstRun.resolve();
-      pieces.runWithPattern = originalRunWithPattern;
+      pieces.runPatternUpdate = originalRunPatternUpdate;
       runtime.patternManager.compilePattern = originalCompile;
     }
   });
@@ -7261,15 +7296,14 @@ describe("piece pull materialization", () => {
     const controller = new PieceController(pieces, piece);
     const firstRunReturned = defer<void>();
     const releaseFirstRun = defer<void>();
-    const originalRunWithPattern = pieces.runWithPattern;
-    pieces.runWithPattern = async (
+    const originalRunPatternUpdate = pieces.runPatternUpdate.bind(pieces);
+    pieces.runPatternUpdate = async (
       pattern,
       pieceId,
       inputs,
       options,
     ) => {
-      const cell = await originalRunWithPattern.call(
-        pieces,
+      const result = await originalRunPatternUpdate(
         pattern,
         pieceId,
         inputs,
@@ -7279,9 +7313,12 @@ describe("piece pull materialization", () => {
         firstRunReturned.resolve();
         await releaseFirstRun.promise;
       } else if (pattern === winnerPattern) {
-        throw new Error("injected post-commit failure");
+        throw new PatternSetupPostCommitError(
+          result.commit,
+          new Error("injected post-commit failure"),
+        );
       }
-      return cell;
+      return result;
     };
     const originalCompile = runtime.patternManager.compilePattern.bind(
       runtime.patternManager,
@@ -7296,24 +7333,35 @@ describe("piece pull materialization", () => {
       const firstUpdate = controller.setPattern(firstProgram);
       await firstRunReturned.promise;
       // Resolves rather than rejects: the transition committed, so the
-      // injected post-commit failure is not this call's failure. It reports
-      // what that committed transition detached, which for a piece following
-      // no origin is nothing.
-      await expect(controller.setPattern(winnerProgram)).resolves
-        .toEqual({ detachedOrigin: null });
+      // injected post-commit failure is not this call's failure. The receipt
+      // names what that committed transition wrote, reports the refresh as
+      // failed, and says what it detached — for a piece following no origin,
+      // nothing.
+      const winnerReceipt = await controller.setPattern(winnerProgram);
+      expect(winnerReceipt.ref).toEqual(
+        runtime.patternManager.getArtifactEntryRef(winnerPattern),
+      );
+      expect(winnerReceipt.refresh).toEqual({
+        status: "failed",
+        warning: "injected post-commit failure",
+      });
+      expect(winnerReceipt.detachedOrigin).toBeNull();
       expect(getPatternIdentityRef(piece)).toEqual(
         runtime.patternManager.getArtifactEntryRef(winnerPattern),
       );
 
       releaseFirstRun.resolve();
-      await firstUpdate;
+      const firstReceipt = await firstUpdate;
+      expect(firstReceipt.ref).toEqual(
+        runtime.patternManager.getArtifactEntryRef(firstPattern),
+      );
 
       expect(controller.getCell().getAsNormalizedFullLink().schema).toEqual(
         winnerPattern.resultSchema,
       );
     } finally {
       releaseFirstRun.resolve();
-      pieces.runWithPattern = originalRunWithPattern;
+      pieces.runPatternUpdate = originalRunPatternUpdate;
       runtime.patternManager.compilePattern = originalCompile;
     }
   });
