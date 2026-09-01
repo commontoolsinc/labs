@@ -10,7 +10,7 @@
  * alone. These hold the table to the properties that make a section
  * schedulable: every phase is reachable, from `all` and from what CI
  * dispatches; the prelude every section depends on runs whichever section was
- * asked for; and the two orderings the script's phases depend on survive.
+ * asked for; and the orderings the script's phases depend on survive.
  *
  * What they read is the text of the table, of the phase functions, and of the
  * workflow. Whether a section really stands alone is settled by running it,
@@ -35,15 +35,15 @@ function phaseFunction(phase: string): string {
   return `run_${phase.replaceAll("-", "_")}`;
 }
 
-/** The names inside a `NAME=( ... )` array literal, or undefined. */
-function shellArray(script: string, name: string): string[] | undefined {
-  const opened = script.indexOf(`\n${name}=(`);
-  if (opened < 0) return undefined;
-  const start = opened + name.length + 3;
-  const close = script.indexOf(")", start);
-  return script.slice(start, close).split(/\s+/).filter((word) =>
-    word.length > 0
-  );
+/**
+ * The names inside a `NAME=( ... )` array literal. Missing is an error rather
+ * than an empty list: the checks below read the prelude out of one, and an
+ * empty list would leave them passing over nothing.
+ */
+function shellArray(script: string, name: string): string[] {
+  const found = script.match(new RegExp(`^${name}=\\(([^)]*)\\)`, "m"));
+  if (!found) throw new Error(`fuse-exec.sh has no ${name} array`);
+  return found[1].split(/\s+/).filter((word) => word.length > 0);
 }
 
 /** One arm of the dispatch table and the phases it selects. */
@@ -128,7 +128,7 @@ function ciSections(workflow: string): string[] {
 
 const { arms, malformed } = parseDispatchTable(SCRIPT);
 const byArm = new Map(arms.map((arm) => [arm.section, arm.phases]));
-const prelude = shellArray(SCRIPT, "PRELUDE") ?? [];
+const prelude = shellArray(SCRIPT, "PRELUDE");
 const selectable = [...new Set(arms.flatMap((arm) => arm.phases))];
 const defined = definedPhases(SCRIPT);
 const order = new Map(defined.map((fn, index) => [fn, index]));

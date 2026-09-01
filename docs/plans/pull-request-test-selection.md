@@ -434,8 +434,8 @@ are, since they only ever ran on `main`.
 phase it goes through, through the `cf_test_step_begin` markers
 `integration.sh` also uses. Each marker leads the phase it names, so a
 phase that fails is the record that carries the failure, and the two
-phases that bring the mount up record like the rest, so a mount that never
-comes up is reported as the mount. Scoring, the flake rate and the
+phases that bring the mount up and wait for it to hydrate record like the
+rest, so a mount that never comes up is reported as the mount. Scoring, the flake rate and the
 60-second ratchet each get a number per phase where they had one covering
 a FUSE mount, a Toolshed server and everything the script does with them.
 
@@ -443,7 +443,7 @@ The script also takes a section, so a lane can be pointed at part of it.
 Which phases can stand alone was a question about the script rather than
 about selection — the same independence question [asked of unit
 tests](#skipping-assumes-tests-do-not-lean-on-each-other) — and the answer
-is four sections rather than 25. A section is a group of phases over one
+is four sections rather than one per phase. A section is a group of phases over one
 mount rather than a phase on its own, because the mount, the daemon and
 the piece cost more than every phase together and each section needs all
 three. Four phases therefore run whichever section was asked for, and are

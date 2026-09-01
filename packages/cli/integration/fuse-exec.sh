@@ -143,7 +143,10 @@ dump_daemon_state() {
 # mount, a daemon, and everything done with them — is one identity that can
 # only be scored, run, and skipped as a unit.
 phase() {
-  echo "→ $1"
+  # The prefix is not '→': `cf` starts its own hint lines with that, so a run
+  # of this suite holds three times as many of them as it has phases, and the
+  # log stops being greppable for where a failing run got to.
+  echo "▶ $1"
   cf_test_step_begin "$1"
 }
 
