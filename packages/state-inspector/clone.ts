@@ -57,6 +57,7 @@ const MANIFEST = "clone.json";
  * Kept out of `clone.json` so that file stays small enough to read by eye.
  */
 const BASELINE = "baseline-entities.json";
+
 const MARKER = ".cf-clone";
 const PRISTINE_DIR = "pristine";
 
@@ -87,6 +88,7 @@ export interface CloneManifest {
    * sidecar existed, which fall back to recomputing.
    */
   baselineHash?: string;
+
   snapshotBytes: number;
 
   /** Durable counts at clone time — the cheap half of "did content survive?". */
@@ -142,6 +144,7 @@ export interface ClonePaths {
 
   /** Per-entity baseline hashes (see {@link BASELINE}). */
   baselinePath: string;
+
   pristinePath: string;
   workingPath: string;
 }
