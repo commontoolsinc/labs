@@ -125,6 +125,26 @@ describe("diffcounts", () => {
     expect(counts.comments.totals).toEqual({ adds: 0, dels: 0 });
   });
 
+  it("recognizes fallback comment syntax across supported file families", () => {
+    const cases = [
+      ["style.css", "/* old */", "/* new */"],
+      ["query.sql", "-- old", "-- new"],
+      ["script.lua", "-- old", "-- new"],
+      ["module.hs", "{- old -}", "{- new -}"],
+      ["code.lisp", "; old", "; new"],
+    ];
+    const diff = cases.flatMap(([path, oldLine, newLine]) => [
+      `diff --git a/${path} b/${path}`,
+      `--- a/${path}`,
+      `+++ b/${path}`,
+      "@@ -1 +1 @@",
+      `-${oldLine}`,
+      `+${newLine}`,
+    ]).concat("").join("\n");
+
+    expect(countsFor(diff).comments.totals).toEqual({ adds: 0, dels: 0 });
+  });
+
   it("does not treat an unquoted URL as a comment", () => {
     const diff = [
       "diff --git a/style.scss b/style.scss",

@@ -186,6 +186,14 @@ Deno.test("jumplist: a git show lists the commit message before its files", () =
   ]);
 });
 
+Deno.test("jumplist: f on a commit asks for a file row", () => {
+  const s = diffSession(SHOW);
+  press(s, "i", "f");
+
+  assertEquals(s.view().message, "Select a file to hide or show.");
+  assertEquals(s.view().overlay?.selectedLine, 0);
+});
+
 Deno.test("jumplist: enter on a file jumps the viewport to its header line", () => {
   // A short viewport, so the last file's header can reach the very top.
   const s = diffSession(SHOW, 6);
@@ -434,15 +442,17 @@ Deno.test("jumplist: complete count context rebuilds after an edit", () => {
 });
 
 Deno.test("jumplist: complete count context retains final-newline changes", () => {
-  const contexts = (diff: string, fileText: string) => {
+  const source = (diff: string, fileText: string) => {
     const ws: DiffWorkspace = {
       resolve: (path) => path === "main.rs" ? path : null,
       read: (path) => path === "main.rs" ? fileText : null,
     };
     const model = parseDiff(diff)!;
     const { edit } = buildDiffDocument(diff, model, ws);
-    return diffSource(ws, edit).diffCountContexts?.(diff)?.[0];
+    return diffSource(ws, edit);
   };
+  const contexts = (diff: string, fileText: string) =>
+    source(diff, fileText).diffCountContexts?.(diff)?.[0];
   const addsNewline = [
     "diff --git a/main.rs b/main.rs",
     "--- a/main.rs",
@@ -472,6 +482,23 @@ Deno.test("jumplist: complete count context retains final-newline changes", () =
     "+value",
     "",
   ].join("\n");
+  const deletesToEmpty = [
+    "diff --git a/main.rs b/main.rs",
+    "--- a/main.rs",
+    "+++ b/main.rs",
+    "@@ -1 +0,0 @@",
+    "-old",
+    "",
+  ].join("\n");
+  const crlfChange = [
+    "diff --git a/main.rs b/main.rs\r",
+    "--- a/main.rs\r",
+    "+++ b/main.rs\r",
+    "@@ -1 +1 @@\r",
+    "-old\r",
+    "+new\r",
+    "",
+  ].join("\n");
 
   assertEquals(
     contexts(addsNewline, "new\n")?.newLines?.map((line) => line.text),
@@ -484,6 +511,18 @@ Deno.test("jumplist: complete count context retains final-newline changes", () =
   assertEquals(
     contexts(createsWithNewline, "value\n")?.newLines?.map((line) => line.text),
     ["value", ""],
+  );
+  assertEquals(
+    contexts(deletesToEmpty, "")?.newLines?.map((line) => line.text),
+    [""],
+  );
+  assertEquals(
+    contexts(crlfChange, "new\r\n")?.newLines?.map((line) => line.text),
+    ["new", ""],
+  );
+  assertEquals(
+    source(addsNewline, "new\n").diffCountContexts?.("not a diff"),
+    [],
   );
 });
 
