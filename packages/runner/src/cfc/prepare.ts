@@ -252,6 +252,162 @@ const labelForEntriesAtPath = (
   return joined;
 };
 
+// The §4.6.4 redundant-entry collapse, applied to the per-value components
+// this pass mints. `labelForEntriesAtPath` resolves each component on its own
+// and joins the results, and that join is a clause union with structural
+// dedup, so a `derived` or `structure` entry contributes nothing at a path
+// where the DECLARED component already carries every one of its clauses.
+// Which component supplied a clause does not survive that join: §8.11.4
+// keeps content and flow clauses in one array rather than tracking them
+// apart, and §10's observer model has a label map outside the introspection
+// API as an enforcement artifact rather than an observable surface, so two
+// entry sets that resolve the same boundary labels say the same thing.
+//
+// The growth this closes shows up on a collection whose schema declares an
+// element label. An append reads the collection through that declaration, so
+// the transaction's join is the declared label, and stamping the join onto
+// the appended index records there what the declared `*` entry already says.
+// Two entries per element (the value/shape class split), plus the
+// label-metadata templates derived from them, accumulate for the life of the
+// collection and carry nothing a reader did not already have.
+//
+// Four conditions keep the collapse exact rather than merely fail-safe:
+// every effective label a boundary computes stays the label it computes with
+// the entry in place, rather than a wider one.
+//
+//  - The entry's path is concrete. At a concrete path the resolution
+//    computed here is the resolution a read performs. A `*` segment would
+//    make the entry stand for many concrete paths, at some of which a more
+//    specific declared entry could resolve instead.
+//  - No declared entry sits strictly below that path. Every read at-or-below
+//    the entry's path then resolves the declared component to what it
+//    resolves to at the entry's own path, which is the one place this checks.
+//  - The entry carries confidentiality only. Integrity is never unioned
+//    across components (§8.12.8), so a declared integrity claim cannot stand
+//    in for a per-value one.
+//  - The declared component covers the entry's clauses under every read
+//    selection that consumes the entry, and covers whatever the entry's own
+//    component resolves to once the entry is gone. `"all"` is one of those
+//    selections in its own right: it applies no class filter, so the
+//    declared entry it resolves to can be a classed one the classified
+//    selections filter out, carrying clauses their covers need not. The
+//    second half of the condition is what holds an entry in place while it
+//    shadows a less specific entry of its own component, whose label a read
+//    would otherwise start resolving instead.
+//
+// Past those conditions the collapse rests on the declared component not
+// shrinking, which §8.12.1 requires of it: a clause the declaration stops
+// carrying is one no dropped entry is left to state. The schema walk holds
+// to that by merging the stored envelope's own schema into the one a write
+// arrives with, so a write through a schema declaring less at a path does
+// not lower the entry there.
+//
+// One boundary-visible difference rides along. The §4.6.4.2 population rule
+// fails closed for a declared entry, so a path this leaves carrying its
+// declaration alone reports its atoms' source-bearing fields as
+// unobservable, where the derived entry it dropped supplied them the interim
+// label (`label-introspection.ts`).
+//
+// The `shape` (existence) entries collapse like any other, and the
+// freeze-at-creation mint reads their absence the way it reads the absence
+// left by a path created under an empty join: a later write to that path
+// whose join the declared component does not cover mints the existence entry
+// then, carrying that write's join.
+const READ_CLASS_SELECTIONS: readonly ReadClassSelection[] = [
+  "value",
+  "shape",
+  "followRef",
+  "all",
+];
+
+const clausesCoveredBy = (
+  clauses: readonly CfcConfClause[],
+  cover: readonly CfcConfClause[],
+): boolean => {
+  const normalizedCover = cover.map((clause) => normalizeClause(clause));
+  return clauses.every((clause) => {
+    const normalized = normalizeClause(clause);
+    return normalizedCover.some((candidate) =>
+      deepEqual(candidate, normalized)
+    );
+  });
+};
+
+const isRedundantWithDeclared = (
+  entry: LabelMapEntry,
+  declared: readonly LabelMapEntry[],
+  sameComponent: readonly LabelMapEntry[],
+): boolean => {
+  const clauses = entry.label.confidentiality ?? [];
+  if (clauses.length === 0 || (entry.label.integrity?.length ?? 0) > 0) {
+    return false;
+  }
+  const path = canonicalizeLogicalPath(entry.path);
+  if (path.includes("*")) {
+    return false;
+  }
+  if (
+    declared.some((candidate) => {
+      const candidatePath = canonicalizeLogicalPath(candidate.path);
+      return candidatePath.length > path.length &&
+        isPrefix(path, candidatePath);
+    })
+  ) {
+    return false;
+  }
+  return READ_CLASS_SELECTIONS.every((selection) => {
+    if (!readConsumesEntry(selection, entry)) {
+      return true;
+    }
+    const consumes = (candidate: LabelMapEntry) =>
+      readConsumesEntry(selection, candidate);
+    const cover =
+      labelForEntriesAtPath(declared.filter(consumes), path)?.confidentiality ??
+        [];
+    const residual = labelForEntriesAtPath(
+      sameComponent.filter((candidate) =>
+        candidate !== entry && consumes(candidate)
+      ),
+      path,
+    )?.confidentiality ?? [];
+    return clausesCoveredBy(clauses, cover) &&
+      clausesCoveredBy(residual, cover);
+  });
+};
+
+/**
+ * Drop the per-value entries the declared component already covers. Runs on
+ * the final payload entry set, before the label-metadata templates are
+ * derived from it, so a dropped entry takes its templates with it.
+ */
+const collapseRedundantEntries = (
+  entries: readonly LabelMapEntry[],
+): LabelMapEntry[] => {
+  const declared = entries.filter((entry) => entry.origin === "declared");
+  if (declared.length === 0) {
+    return [...entries];
+  }
+  const perValue = new Map<string, LabelMapEntry[]>();
+  for (const entry of entries) {
+    if (entry.origin === "derived" || entry.origin === "structure") {
+      const component = perValue.get(entry.origin);
+      if (component === undefined) {
+        perValue.set(entry.origin, [entry]);
+      } else {
+        component.push(entry);
+      }
+    }
+  }
+  return entries.filter((entry) =>
+    (entry.origin !== "derived" && entry.origin !== "structure") ||
+    !isRedundantWithDeclared(
+      entry,
+      declared,
+      perValue.get(entry.origin) ?? [],
+    )
+  );
+};
+
 // Effective label of a consumed read. A recursive read materializes the
 // whole subtree under `path`, so its label is the most-specific
 // ancestor-or-equal entry (§4.6.3 replace-down resolution) joined with
@@ -7264,6 +7420,16 @@ export const prepareBoundaryCommit = (
       }
     }
 
+    // The §4.6.4 redundant-entry collapse, ahead of the template derivation
+    // so a dropped entry takes its label-metadata templates with it. It runs
+    // on the final payload set, so it reaches carried-forward entries as well
+    // as this attempt's mints: a document that accumulated redundant
+    // per-value entries under an earlier build sheds them on its next
+    // persist.
+    const collapsedLabelEntries = collapseRedundantEntries(
+      persistedLabelEntries,
+    );
+
     // Stage B (template-population §5/§6; spec §4.6.4.2): derive the
     // label-metadata population templates from the FINAL payload entries —
     // after every clear/carry/mint AND after the Stage-1 representation
@@ -7277,21 +7443,21 @@ export const prepareBoundaryCommit = (
     // the per-path §4.6.4.1 metadata addressing requires. No new dial: the
     // templates describe whatever payload entries the existing dials
     // persisted.
-    persistedLabelEntries.push(
-      ...deriveLabelMetadataTemplateEntries(persistedLabelEntries),
+    collapsedLabelEntries.push(
+      ...deriveLabelMetadataTemplateEntries(collapsedLabelEntries),
     );
 
     const manifestFailures = installCarriedPolicyManifests(
       tx,
       space,
-      persistedLabelEntries,
+      collapsedLabelEntries,
     );
     if (manifestFailures.length > 0) {
       reasons.push(...manifestFailures);
       continue;
     }
 
-    const coalescedLabelEntries = coalesceLabelEntries(persistedLabelEntries);
+    const coalescedLabelEntries = coalesceLabelEntries(collapsedLabelEntries);
 
     if (
       coalescedLabelEntries.length === 0 && !flowCleared && !remintCleared &&

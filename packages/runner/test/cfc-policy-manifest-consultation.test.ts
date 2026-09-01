@@ -546,12 +546,19 @@ describe("module-policy manifest consultation", () => {
       );
       expect(stored?.value).toEqual(artifact);
       expect(stored?.cfc).toBeUndefined();
-      // The derived write itself was measured: the tainted join persisted a
-      // derived component onto the declared-covered target.
+      // The value target went through the persist loop while the manifest
+      // document did not: its envelope carries the declared store policy,
+      // and no derived component beside it — the tainted join is the
+      // declared policy, which the §4.6.4 redundant-entry collapse leaves
+      // stated once.
       const derivedEntries =
         storedDocument(storageManager, derivedId)?.cfc?.labelMap?.entries ?? [];
+      expect(derivedEntries.some((entry) =>
+        entry.origin === "declared" &&
+        (entry.label.confidentiality ?? []).includes("secret")
+      )).toBe(true);
       expect(derivedEntries.some((entry) => entry.origin === "derived")).toBe(
-        true,
+        false,
       );
       expect(
         tx.getCfcState().diagnostics.filter((diagnostic) =>

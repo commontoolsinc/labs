@@ -1028,3 +1028,53 @@ committed field is unenforceable — the plaintext arm of this rule rejects a
 malformed owner and the committed arm cannot, which is a general property of
 every check that validates a commitment-classified field rather than
 something particular to this one.
+
+## From the redundant-entry collapse (2026-09-01)
+
+**SC-40 [editorial] The redundant-entry collapse spans components —
+§4.6.4.** `open`. §4.6.4's idempotent-label-persistence paragraph closes
+with a redundancy rule: "A derived-component entry whose label equals the
+effective label of its parent entry for the same component is redundant and
+SHOULD be dropped at persist time." The qualifier bounds the rule to an
+ancestor of the entry's own component. The runner drops a per-value entry
+whose clauses the DECLARED component already carries at that path, which the
+sentence does not describe.
+
+Three parts of the specification make the broader rule sound, and the entry
+proposes writing them into the sentence rather than leaving an
+implementation to assemble them. §8.12.8 makes the effective label at a path
+the join of the components present there, and that join is a clause union.
+§8.11.4 stores content and flow clauses in one array and does not track them
+apart at runtime, so a clause is the same clause whichever component supplies
+it. §10's compact observer model states that boundary noninterference is
+"not about forcing hidden clauses to be literally identical", and that a
+label map reached outside the first-layer introspection API is an
+"enforcement and proof/model artifact, not a public raw-label surface".
+§4.6.4's own operational guidance already permits avoiding a redundant stored
+template "as long as effective observation labels computed at boundaries are
+identical", which is the test the broader rule meets.
+
+The supplying component's update discipline is the part that has to be said
+out loud. A declared entry may supply the cover because §8.12.1 forbids it to
+shrink, so a clause it carries today it carries tomorrow. A link-carried
+entry may not: §8.12.8 has it replaced when the reference at the path is
+rewritten, which would take the covered clauses with it and leave nothing
+stating them.
+
+One boundary-visible difference follows from the drop rather than from the
+rule. §4.6.4.2 has metadata population fail closed for a declared entry —
+"This interim does not extend to declared or authored entries" — so a path
+left carrying its declaration alone reports its atoms' source-bearing fields
+as unobservable, where the derived entry that was dropped supplied them the
+interim label. That is §4.6.4.2's own treatment of a declared-only path,
+reached by removing an entry rather than by changing what any entry means.
+
+Proposed edit: restate the redundancy sentence over the effective label
+rather than over one component. A per-value entry whose clauses the
+components present at its path already carry is redundant and SHOULD be
+dropped at persist time, provided every supplying component's discipline
+forbids it to lower them — which admits the declared component and excludes
+the link-carried one. Name the observation-class axis in the same breath: the
+cover has to hold under each read class that consumes the entry, since a
+class-scoped declared entry can shadow a covering one for some classes and
+not others.

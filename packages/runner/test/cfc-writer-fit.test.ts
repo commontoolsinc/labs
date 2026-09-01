@@ -358,7 +358,11 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         e.origin === "declared" &&
         (e.label.confidentiality ?? []).includes("secret")
       )).toBe(true);
-      expect(entries.some((e) => e.origin === "derived")).toBe(true);
+      // Nothing is stamped beside it: the join the write carried is the
+      // declared policy itself, and a derived entry repeating it adds
+      // nothing to the label a read resolves at any path (§4.6.4
+      // redundant-entry collapse).
+      expect(entries.some((e) => e.origin === "derived")).toBe(false);
       expect(
         tx.getCfcState().diagnostics.filter((d) => d.includes("writer-fit")),
       ).toEqual([]);
