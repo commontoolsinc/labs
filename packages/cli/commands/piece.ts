@@ -3179,9 +3179,11 @@ export interface PieceCallCommandDependencies {
 
   /**
    * Where the call's in-flight lines go, stderr unless the caller says
-   * otherwise: the invocation pair as the dispatch happens, and the spans
-   * under `--verbose`. One sink rather than two, because no caller wants
-   * one of the pair captured and the other left writing behind its screen.
+   * otherwise: the invocation pair as the dispatch happens, the spans under
+   * `--verbose`, and the per-phase lines `CF_TEST_ANNOUNCE_INVOCATION_PHASES`
+   * adds. One sink rather than several because the three interleave in one
+   * temporal stream, and splitting them would leave a caller rendering them
+   * as ordered events to reassemble an order it was handed already sorted.
    *
    * Distinct from `printError` because these are published while the call
    * is in flight and whether or not it goes on to fail.
@@ -3345,12 +3347,16 @@ export async function callFromCommand(
       ),
       waitControl.boundSeconds,
     );
+    // The bag goes whole, here and at the failure exit below. Re-listing the
+    // fields a callee accepts is a claim about that callee's type which
+    // nothing rechecks when it grows a sink, and a dropped one is invisible:
+    // the default writes to the process and the caller sees no gap.
     renderPieceCallOutcome(
       observer,
       result,
       callableName,
       pieceConfig.piece,
-      { render: deps.render, hint: deps.hint, printError: deps.printError },
+      deps,
       { detached: waitControl.mode === "commit", invocation: identity },
     );
   } catch (error) {

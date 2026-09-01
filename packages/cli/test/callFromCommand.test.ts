@@ -153,11 +153,13 @@ function exitSinks(): {
   printed: string[];
   hinted: string[];
   rendered: string[];
+  announced: string[];
   exited: number[];
 } {
   const printed: string[] = [];
   const hinted: string[] = [];
   const rendered: string[] = [];
+  const announced: string[] = [];
   const exited: number[] = [];
   return {
     deps: {
@@ -170,6 +172,9 @@ function exitSinks(): {
       printError: (message: string) => {
         printed.push(message);
       },
+      announce: (message: string) => {
+        announced.push(message);
+      },
       exit: (code: number): never => {
         exited.push(code);
         throw new Error("exit-sentinel");
@@ -178,6 +183,7 @@ function exitSinks(): {
     printed,
     hinted,
     rendered,
+    announced,
     exited,
   };
 }
@@ -780,8 +786,8 @@ describe("callFromCommand()", () => {
     });
 
     it("names the phase a failed dispatch reached beside its invocation id", async () => {
-      const { deps, printed, exited } = exitSinks();
-      await captureStderr(async () => {
+      const { deps, printed, announced, exited } = exitSinks();
+      const escaped = await captureStderr(async () => {
         await expect(
           callFromCommand(
             options,
@@ -803,12 +809,17 @@ describe("callFromCommand()", () => {
         "send blew up",
         `invocation: ${INVOCATION} phase: dispatched`,
       ]);
+      expect(announced).toEqual([
+        `invocation: ${INVOCATION}`,
+        `session: ${SESSION}`,
+      ]);
+      expect(escaped).toEqual([]);
       expect(exited).toEqual([1]);
     });
 
     it("writes an expired call's Invocation JSON to the caller's own stdout", async () => {
-      const { deps, printed, rendered, exited } = exitSinks();
-      await captureStderr(async () => {
+      const { deps, printed, rendered, announced, exited } = exitSinks();
+      const escaped = await captureStderr(async () => {
         await expect(
           callFromCommand(
             options,
@@ -831,6 +842,11 @@ describe("callFromCommand()", () => {
         status: "dispatched",
       });
       expect(printed[1]).toBe(`invocation: ${INVOCATION} phase: dispatched`);
+      expect(announced).toEqual([
+        `invocation: ${INVOCATION}`,
+        `session: ${SESSION}`,
+      ]);
+      expect(escaped).toEqual([]);
       expect(exited).toEqual([1]);
     });
   });
