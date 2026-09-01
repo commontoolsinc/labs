@@ -282,9 +282,11 @@ document's ROLE in the query:
   MUST resolve and load its `result` metadata link, and MUST register every
   internal manifest link's target in the watch tracking state WITHOUT
   loading or delivering it: the subscription stays reactive to each
-  registered document, and the next commit that touches one PROMOTES it —
-  delivered whole with that refresh's updates, tracked from then on, its
-  own internal manifest links registered in turn. The `pattern`,
+  registered document, and the next commit that leaves one with a live,
+  deliverable snapshot PROMOTES it — delivered whole with that refresh's
+  updates, tracked from then on, its own internal manifest links
+  registered in turn. A deletion does not promote: the registration
+  stays, and the recreation promotes it. The `pattern`,
   `argument`, and `cfc` links of a crossing-reached document are not
   chased. A refresh that re-evaluates a crossing-reached document applies
   these same rules, so a subscription's delivered shape does not depend on

@@ -95,10 +95,12 @@ export type TrackedGraphState = {
 
   /** Doc keys registered for delivery-on-next-commit: the internal-rail
    * documents of crossing-reached pieces, keyed but never loaded at
-   * registration. A commit touching one promotes it — delivered whole,
-   * moved into the tracker, its own internal links registered here in
-   * turn — so a subscriber stays reactive to every derived cell of every
-   * piece it can see while receiving only the ones that change. */
+   * registration. A commit leaving one with a live, deliverable snapshot
+   * promotes it — delivered whole, moved into the tracker, its own
+   * internal links registered here in turn — so a subscriber stays
+   * reactive to every derived cell of every piece it can see while
+   * receiving only the ones that change. A deletion is not a promotion:
+   * the registration stays, and the recreation promotes it. */
   lazy: Set<string>;
 
   /** lazyKey → the REFERRER keys whose manifests registered it, and the

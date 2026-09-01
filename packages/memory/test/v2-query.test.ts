@@ -2572,6 +2572,28 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
     });
     assert(!lazyTracked.state.entities.has(`${space}/space/of:target-cell`));
     assert(lazyTracked.state.lazy.has(`${space}/space/of:target-cell`));
+    // Asserted HERE, while the crossing's manifest still carries the
+    // foreign entry — later commits rewrite the manifest and release
+    // registrations, so a later assertion could not catch an incorrect
+    // initial foreign-space registration.
+    assert(
+      ![...lazyTracked.state.lazy].some((key) => key.includes("foreign-cell")),
+    );
+    assert(
+      ![...lazyTracked.state.tracker].some(([key]) =>
+        key.includes("foreign-cell")
+      ),
+    );
+    assert(
+      ![...lazyTracked.state.tracker].some(([key]) =>
+        key.includes("foreign-root-cell")
+      ),
+    );
+    assert(
+      ![...lazyTracked.state.lazy].some((key) =>
+        key.includes("foreign-root-cell")
+      ),
+    );
     applyCommit(engine, {
       sessionId: "session:writer",
       invocation: invocationFor(2),
@@ -2688,14 +2710,6 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
     // A foreign-space manifest target is never registered lazily — the
     // registering space's refresh could not promote it — and its presence
     // does not disturb the walk.
-    assert(
-      ![...lazyTracked.state.lazy].some((key) => key.includes("foreign-cell")),
-    );
-    assert(
-      ![...lazyTracked.state.tracker].some(([key]) =>
-        key.includes("foreign-cell")
-      ),
-    );
     // The eager paths hold the same-space rule too: a NAMED root's foreign
     // manifest entry selects nothing and creates no tracker entry.
     assert(

@@ -4465,15 +4465,22 @@ export class Server {
       const serverSeq = Engine.serverSeq(engine);
       const fromSeq = session.lastSyncedSeq;
       const entities = new Map(session.entities);
-      const trackedIds = new Set(session.trackedIds);
       for (const [key, entry] of updates) {
         entities.set(key, entry);
-        trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
       }
-      addOperationWatchTrackedIds(trackedIds, nextWatches, {
-        principal: session.principal,
-        sessionId: message.sessionId,
-      });
+      // Rebuilt from provenance — entities, operation watches, and every
+      // graph's undelivered interests — never unioned from the previous
+      // set: an interest a refresh RETIRED (a manifest entry dropped, its
+      // registration released) must leave the wake set with it, or every
+      // later commit to the orphaned document keeps waking this session.
+      const trackedIds = addOperationWatchTrackedIds(
+        trackedIdsFromEntries(entities.values()),
+        nextWatches,
+        {
+          principal: session.principal,
+          sessionId: message.sessionId,
+        },
+      );
       this.#addUndeliveredToTrackedIds(trackedIds, graphs.values());
       const sync: SessionSync = {
         type: "sync",
@@ -5171,10 +5178,21 @@ export class Server {
               const sizeBefore = session.trackedIds.size;
               for (const [key, entry] of updates) {
                 session.entities.set(key, entry);
-                session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
               }
-              // A refresh's re-walk can DEAD-END on new absent targets;
-              // their misses are wake-reactivity the next commit needs.
+              // Rebuilt from provenance rather than grown in place: the
+              // refresh above may have RETIRED interests (a manifest
+              // entry dropped releases its registration), and a retired
+              // interest must leave the wake set with it — while a
+              // re-walk's new absent dead-ends and registrations are
+              // wake-reactivity the next commit needs.
+              session.trackedIds = addOperationWatchTrackedIds(
+                trackedIdsFromEntries(session.entities.values()),
+                session.watches,
+                {
+                  principal: session.principal,
+                  sessionId: session.id,
+                },
+              );
               this.#addUndeliveredToTrackedIds(
                 session.trackedIds,
                 session.graphs.values(),
