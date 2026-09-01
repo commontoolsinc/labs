@@ -8,6 +8,7 @@ import {
   type HarnessHandleTable,
   MIN_HANDLE_TOKEN_SUFFIX_LENGTH,
 } from "../src/contracts/handle-table.ts";
+import type { HarnessSkillAcquisition } from "../src/contracts/skill.ts";
 import {
   assertValidHarnessHandleTable,
   createHarnessHandleTable,
@@ -28,6 +29,15 @@ const SUMMARY_SCHEMA = {
   type: "object",
   properties: { summary: { type: "string" } },
 } as const;
+const ACQUISITION = {
+  registryId: "owner/repository/slug",
+  commitSha: "f484c8265e70ec910a57342389cca5c5de7d8167",
+  sourceUrl:
+    "https://raw.githubusercontent.com/owner/repository/f484c8265e70ec910a57342389cca5c5de7d8167/skills/slug/SKILL.md",
+  verification: "git-commit-sha",
+  valueDigest: "sha256:B0YTDTjHlcVP6qHSqd5d4P5aGgCp9TS8VTB92T-rosg",
+  receivedAt: "2026-04-15T19:00:00.000Z",
+} as const satisfies HarnessSkillAcquisition;
 
 /**
  * A hasher that yields the same digest for every first-attempt preimage
@@ -725,6 +735,56 @@ describe("handle-table", () => {
 
       expect(() => assertValidHarnessHandleTable(broken)).toThrow(
         "unknown capability",
+      );
+    });
+
+    it("throws for acquisition provenance on an entry without the skill-context capability", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+        { acquisition: ACQUISITION },
+      );
+
+      expect(() => assertValidHarnessHandleTable(table)).toThrow(
+        "without the `skill-context` capability",
+      );
+    });
+
+    it("throws for an acquisition field that is not a non-empty string", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+        { capability: "skill-context", acquisition: ACQUISITION },
+      );
+      const broken = {
+        ...table,
+        entries: table.entries.map((entry) => ({
+          ...entry,
+          acquisition: { ...ACQUISITION, commitSha: "" },
+        })),
+      } as unknown as HarnessHandleTable;
+
+      expect(() => assertValidHarnessHandleTable(broken)).toThrow(
+        "empty acquisition `commitSha`",
+      );
+    });
+
+    it("throws for an acquisition verification outside the vocabulary", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+        { capability: "skill-context", acquisition: ACQUISITION },
+      );
+      const broken = {
+        ...table,
+        entries: table.entries.map((entry) => ({
+          ...entry,
+          acquisition: { ...ACQUISITION, verification: "vibes" },
+        })),
+      } as unknown as HarnessHandleTable;
+
+      expect(() => assertValidHarnessHandleTable(broken)).toThrow(
+        "unknown acquisition verification",
       );
     });
 

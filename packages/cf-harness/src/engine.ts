@@ -41,6 +41,7 @@ import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import { harnessCredentialOwnersEqual } from "./contracts/run-manifest.ts";
 import type { HarnessRunReport } from "./contracts/run-report.ts";
 import type {
+  HarnessSkillAcquisition,
   HarnessSkillActivations,
   HarnessSkillRegistry,
   HarnessSkillResourceRead,
@@ -1051,12 +1052,20 @@ export class CfHarnessEngine {
     await this.persistRunState();
   }
 
-  /** Mints and records a handle consumable only as delegated skill context. */
-  async mintSkillContextHandle(ref: string): Promise<string> {
+  /**
+   * Mints and records a handle consumable only as delegated skill context,
+   * carrying `acquisition` as the entry's record of where the value came
+   * from. Only a host step that performed the fetch can supply that record,
+   * and it is what a later delegation's activation names.
+   */
+  async mintSkillContextHandle(
+    ref: string,
+    acquisition: HarnessSkillAcquisition,
+  ): Promise<string> {
     const minted = await mintAddressHandle(
       this.handleTable ?? createHarnessHandleTable(this.#runState.runId),
       ref,
-      { capability: "skill-context" },
+      { capability: "skill-context", acquisition },
     );
     await this.recordHandleTable(minted.table);
     return minted.token;
@@ -1888,7 +1897,10 @@ export class CfHarnessEngine {
           getSkillsShAcquisitionClient: this.#skillsShAcquisitionClientFactory,
         }
         : {}),
-      mintSkillContextHandle: (ref: string) => this.mintSkillContextHandle(ref),
+      mintSkillContextHandle: (
+        ref: string,
+        acquisition: HarnessSkillAcquisition,
+      ) => this.mintSkillContextHandle(ref, acquisition),
       ...(this.#taskText !== undefined ? { taskText: this.#taskText } : {}),
       sandbox: this.sandbox,
       hostProcessRunner: this.hostProcessRunner,

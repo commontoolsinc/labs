@@ -4,6 +4,7 @@
  * the existing echo scrub prevents the child from returning it.
  */
 
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
@@ -12,6 +13,7 @@ import { expect } from "@std/expect";
 import { normalize } from "@std/path/posix";
 import { describe, it } from "@std/testing/bdd";
 
+import { DEFAULT_SUBAGENT_PROFILE } from "../src/contracts/subagent.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import { SkillsShAcquisitionClient } from "../src/skills-sh/acquisition.ts";
@@ -202,99 +204,69 @@ describe("prompt-loop external skill acquisition", () => {
       });
       const requestBodies: unknown[] = [];
       let handleToken = "";
+      let acquireOffered: readonly string[] = [];
+      let childText = "";
+      // Each misuse refusal the parent read, in the order it read them. They
+      // are checked after the run: an `expect()` that throws inside the
+      // scripted fetch is swallowed by the model client's error path and
+      // fails nothing.
+      const refusals: string[] = [];
       const modelFetch: typeof fetch = (_input, init) => {
         const body = JSON.parse(String(init?.body));
         requestBodies.push(body);
         const index = requestBodies.length - 1;
         const view = chatViewOfRequest(body);
+        const lastToolContent = () =>
+          view.messages.findLast((message) => message.role === "tool")
+            ?.content ?? "";
         let turn: unknown;
         if (index === 0) {
-          expect(view.tools).toContain("acquire_skill");
+          acquireOffered = view.tools;
           turn = toolCallTurn("call-acquire", "acquire_skill", {
             id: SKILL_ID,
           });
         } else if (index === 1) {
-          const toolMessage = view.messages.findLast((message) =>
-            message.role === "tool"
-          );
-          expect(toolMessage?.content).not.toContain(CANARY);
-          const output = JSON.parse(toolMessage!.content) as {
+          const output = JSON.parse(lastToolContent()) as {
             skillHandle: string;
           };
           handleToken = output.skillHandle;
-          expect(handleToken).toMatch(/^cfh:a:/);
           turn = toolCallTurn("call-read", "read_file", {
             path: handleToken,
           });
         } else if (index === 2) {
-          const toolMessage = view.messages.findLast((message) =>
-            message.role === "tool"
-          );
-          expect(toolMessage?.content).toContain(
-            "skill-context handles can be consumed only by delegate_task skillHandle",
-          );
+          refusals.push(lastToolContent());
           turn = toolCallTurn("call-describe", "describe_handle", {
             token: handleToken,
           });
         } else if (index === 3) {
-          const toolMessage = view.messages.findLast((message) =>
-            message.role === "tool"
-          );
-          expect(toolMessage?.content).toContain(
-            "describe_handle cannot consume a skill-context handle",
-          );
+          refusals.push(lastToolContent());
           turn = toolCallTurn("call-delegate-misuse", "delegate_task", {
             goal: `Read this as ordinary context: ${handleToken}`,
           });
         } else if (index === 4) {
-          const toolMessage = view.messages.findLast((message) =>
-            message.role === "tool"
-          );
-          expect(toolMessage?.content).toContain(
-            "skill-context handles can be consumed only by delegate_task skillHandle",
-          );
+          refusals.push(lastToolContent());
           turn = toolCallTurn("call-array-misuse", "run_pattern", {
             patternId: "unused",
             hashtags: [handleToken],
           });
         } else if (index === 5) {
-          const toolMessage = view.messages.findLast((message) =>
-            message.role === "tool"
-          );
-          expect(toolMessage?.content).toContain(
-            "skill-context handles can be consumed only by delegate_task skillHandle",
-          );
+          refusals.push(lastToolContent());
           turn = toolCallTurn("call-key-misuse", "run_pattern", {
             patternId: "unused",
             inputs: { [handleToken]: "ordinary value" },
           });
         } else if (index === 6) {
-          const toolMessage = view.messages.findLast((message) =>
-            message.role === "tool"
-          );
-          expect(toolMessage?.content).toContain(
-            "skill-context handles can be consumed only by delegate_task skillHandle",
-          );
+          refusals.push(lastToolContent());
           turn = toolCallTurn("call-delegate", "delegate_task", {
             goal: "Use the acquired instructions.",
             skillHandle: handleToken,
           });
         } else if (index === 7) {
-          const childText = view.messages.map((message) => message.content)
-            .join(
-              "\n",
-            );
-          expect(childText).toContain(CANARY);
-          expect(childText).toContain(
-            `<skill_context source="handle:${handleToken}">`,
+          childText = view.messages.map((message) => message.content).join(
+            "\n",
           );
           turn = assistantTurn(`Attempted echo:\n${SKILL_TEXT}`);
         } else if (index === 8) {
-          const parentText = view.messages.map((message) => message.content)
-            .join(
-              "\n",
-            );
-          expect(parentText).not.toContain(CANARY);
           turn = assistantTurn("Parent completed without seeing skill text.");
         } else {
           throw new Error(`unexpected model request at index ${index}`);
@@ -316,6 +288,7 @@ describe("prompt-loop external skill acquisition", () => {
           "delegate_task",
           "run_pattern",
         ],
+        allowedSubagentProfiles: [DEFAULT_SUBAGENT_PROFILE],
       });
 
       const result = await loop.runPrompt({
@@ -327,6 +300,26 @@ describe("prompt-loop external skill acquisition", () => {
       );
       expect(result.finalAssistantText).not.toContain(CANARY);
       expect(requestBodies).toHaveLength(9);
+      expect(acquireOffered).toContain("acquire_skill");
+      expect(handleToken).toMatch(/^cfh:a:/);
+      // Every route by which the parent could have read the value behind the
+      // token instead of delegating it, refused.
+      const handleOnlyRefusal =
+        "skill-context handles can be consumed only by delegate_task skillHandle";
+      expect(refusals).toHaveLength(5);
+      expect(refusals[0]).toContain(handleOnlyRefusal);
+      expect(refusals[1]).toContain(
+        "describe_handle cannot consume a skill-context handle",
+      );
+      for (const refusal of refusals.slice(2)) {
+        expect(refusal).toContain(handleOnlyRefusal);
+      }
+      // The one child that ran received the text, under the token's own
+      // source attribute.
+      expect(childText).toContain(CANARY);
+      expect(childText).toContain(
+        `<skill_context source="handle:${handleToken}">`,
+      );
       for (const index of [0, 1, 2, 3, 4, 5, 6, 8]) {
         const parentText = chatViewOfRequest(requestBodies[index]).messages
           .map((message) => message.content).join("\n");
@@ -335,6 +328,217 @@ describe("prompt-loop external skill acquisition", () => {
     } finally {
       await runtime.dispose();
       await storageManager.close();
+    }
+  });
+
+  it("refuses a retry that drops the handle, and records the pin on the child that receives it", async () => {
+    // The whole arc a dropped handle hides in: acquire, delegate, lose the
+    // child, delegate again. The second delegation is where custody is either
+    // held or silently lost, and the third is where the record has to say
+    // which commit shaped the work that shipped.
+
+    const identity = await Identity.fromPassphrase(
+      `external-skill-custody-${crypto.randomUUID()}`,
+    );
+    const storageManager = StorageManager.emulate({ as: identity });
+    const runtime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+      cfcEnforcementMode: "disabled",
+      cfcFlowLabels: "off",
+    });
+    const pieces = new PiecesController(
+      await createSession({
+        identity,
+        spaceName: `external-skill-custody-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await pieces.synced();
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "external-skill-custody-",
+    });
+    try {
+      const runId = "external-skill-custody-run";
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId,
+        artifactRoot,
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () => Promise.resolve({ pieces }),
+        skillsShAcquisitionClientFactory: () =>
+          Promise.resolve(
+            new SkillsShAcquisitionClient({ fetch: githubFetch }),
+          ),
+      });
+      const requestBodies: unknown[] = [];
+      let handleToken = "";
+      let firstDelegationOutput = "";
+      let retryRefusal = "";
+      let retriedChildText = "";
+      // Every check on what a request carried is made after the run, on text
+      // captured here: an `expect()` that throws inside the scripted fetch is
+      // swallowed by the model client's error path and fails nothing.
+      const modelFetch: typeof fetch = (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        requestBodies.push(body);
+        const index = requestBodies.length - 1;
+        const view = chatViewOfRequest(body);
+        const lastToolContent = () =>
+          view.messages.findLast((message) => message.role === "tool")
+            ?.content ?? "";
+        let turn: unknown;
+        if (index === 0) {
+          turn = toolCallTurn("call-acquire", "acquire_skill", {
+            id: SKILL_ID,
+          });
+        } else if (index === 1) {
+          handleToken =
+            (JSON.parse(lastToolContent()) as { skillHandle: string })
+              .skillHandle;
+          turn = toolCallTurn("call-first", "delegate_task", {
+            goal: "Use the acquired instructions.",
+            skillHandle: handleToken,
+          });
+        } else if (index === 2) {
+          // The child's own request. Answering it with a provider error is
+          // what leaves the first delegation failed and its custody
+          // outstanding.
+          return Promise.resolve(
+            new Response("upstream stream error", { status: 500 }),
+          );
+        } else if (index === 3) {
+          firstDelegationOutput = lastToolContent();
+          turn = toolCallTurn("call-retry-bare", "delegate_task", {
+            goal: "Use the acquired instructions.",
+          });
+        } else if (index === 4) {
+          retryRefusal = lastToolContent();
+          turn = toolCallTurn("call-retry-held", "delegate_task", {
+            goal: "Use the acquired instructions.",
+            skillHandle: handleToken,
+          });
+        } else if (index === 5) {
+          retriedChildText = view.messages.map((message) => message.content)
+            .join("\n");
+          turn = assistantTurn("Worked through the acquired instructions.");
+        } else if (index === 6) {
+          turn = assistantTurn("Parent shipped the retried result.");
+        } else {
+          throw new Error(`unexpected model request at index ${index}`);
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify(responsesBodyFromChatFixture(turn)), {
+            status: 200,
+          }),
+        );
+      };
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine,
+        fetchFn: modelFetch,
+        allowedToolIds: ["acquire_skill", "delegate_task"],
+        allowedSubagentProfiles: [DEFAULT_SUBAGENT_PROFILE],
+      });
+
+      const result = await loop.runPrompt({
+        prompt: "Acquire the skill and see the work through.",
+      });
+
+      expect(result.finalAssistantText).toBe(
+        "Parent shipped the retried result.",
+      );
+      expect(requestBodies).toHaveLength(7);
+      // The first delegation ran a child and lost it.
+      expect(firstDelegationOutput).toContain('"status":"failed"');
+      // The retry that carried the handle again reached a child holding the
+      // skill text, which is what makes the refusal in between meaningful.
+      expect(retriedChildText).toContain(CANARY);
+      expect(retriedChildText).toContain(
+        `<skill_context source="handle:${handleToken}">`,
+      );
+      // The bare retry never reached a child: it came back as an invalid tool
+      // call naming the handle whose delegation did not complete.
+      expect(retryRefusal).toContain("cf-harness.invalid-tool-call");
+      expect(retryRefusal).toContain(handleToken);
+      expect(retryRefusal).toContain("withoutSkillHandle");
+      const childRuns = result.runState.subagentRuns ?? [];
+      const terminalChildRuns = childRuns.filter((run) =>
+        run.status !== "running"
+      );
+      expect(terminalChildRuns.map((run) => run.status)).toEqual([
+        "failed",
+        "completed",
+      ]);
+      // Both delegations that ran carried the handle, and the record says so.
+      expect(terminalChildRuns.map((run) => run.skillHandle)).toEqual([
+        handleToken,
+        handleToken,
+      ]);
+      // The child that produced the shipped answer holds an activation naming
+      // the commit its instructions came from.
+      const activations = JSON.parse(
+        await Deno.readTextFile(
+          `${artifactRoot}/${
+            terminalChildRuns[1]!.childRunId
+          }/skill-activations.json`,
+        ),
+      ) as {
+        activations: {
+          source: string;
+          acquisition?: Record<string, string>;
+        }[];
+      };
+      const handleActivation = activations.activations.find((activation) =>
+        activation.source === "skill-handle"
+      );
+      expect(handleActivation?.acquisition).toEqual({
+        registryId: SKILL_ID,
+        commitSha: COMMIT_SHA,
+        sourceUrl: SKILL_URL,
+        verification: "git-commit-sha",
+        valueDigest: handleActivation!.acquisition!.valueDigest,
+        receivedAt: handleActivation!.acquisition!.receivedAt,
+      });
+      expect(handleActivation?.acquisition?.valueDigest).toMatch(/^sha256:/);
+      // The pin is provenance, never the payload: nothing about it carries the
+      // skill's own bytes back to a reader of the record.
+      expect(JSON.stringify(activations)).not.toContain(CANARY);
+      // The same acquisition also anchors an `ExternalIngest` mark on the cell
+      // it wrote, so the provenance is on the value as well as in the record.
+      const replica = storageManager.open(pieces.getSpace())
+        .replica as unknown as {
+          getDocument(id: string): {
+            cfc?: {
+              labelMap?: {
+                entries: {
+                  origin?: string;
+                  label: { integrity?: { type: string }[] };
+                }[];
+              };
+            };
+          } | undefined;
+        };
+      const skillCellId = runtime.getCell(
+        pieces.getSpace(),
+        `external-skill:${runId}:${runId}:acquire_skill:1`,
+        {} as const,
+      ).getAsNormalizedFullLink().id;
+      const ingestAtoms =
+        (replica.getDocument(skillCellId)?.cfc?.labelMap?.entries ?? [])
+          .filter((entry) => entry.origin === "external-ingest")
+          .flatMap((entry) => entry.label.integrity ?? []);
+      expect(ingestAtoms).toHaveLength(1);
+      expect(ingestAtoms[0]).toMatchObject({
+        type: CFC_ATOM_TYPE.ExternalIngest,
+        kind: "fetch",
+        pinnedSource: { url: SKILL_URL, commitSha: COMMIT_SHA },
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+      await Deno.remove(artifactRoot, { recursive: true });
     }
   });
 });

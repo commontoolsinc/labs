@@ -7,6 +7,8 @@
 
 import type { JSONSchema } from "@commonfabric/api";
 
+import type { HarnessSkillAcquisition } from "./skill.ts";
+
 /** Discriminator value of a {@link HarnessHandleTable}. */
 export const HARNESS_HANDLE_TABLE_TYPE = "cf-harness.handle-table";
 
@@ -104,6 +106,19 @@ export interface HarnessHandleEntry {
    * trusted.
    */
   schemaSource?: "harness";
+
+  /**
+   * Where the value behind a `skill-context` handle was fetched from, recorded
+   * by the host step that fetched it. The entry is the only durable place that
+   * knows: the parent holds a token, the child holds text, and neither can say
+   * which commit the bytes came from. Carrying it here is what lets the
+   * activation record a delegation writes name that commit.
+   *
+   * Absent on every handle whose value the harness did not fetch from an
+   * external source. A model can neither write nor read this field; it reaches
+   * a model-visible surface nowhere.
+   */
+  acquisition?: HarnessSkillAcquisition;
 }
 
 /**

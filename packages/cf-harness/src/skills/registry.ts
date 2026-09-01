@@ -13,6 +13,7 @@ import {
 import {
   HARNESS_SKILL_ACTIVATIONS_TYPE,
   HARNESS_SKILL_REGISTRY_TYPE,
+  type HarnessSkillAcquisition,
   type HarnessSkillActivation,
   type HarnessSkillActivations,
   type HarnessSkillActivationSource,
@@ -68,6 +69,12 @@ export interface LoadHarnessSkillContextFromTextOptions {
 
   /** The parent-held token the text was materialized through. */
   handleToken: string;
+
+  /**
+   * Where the handle's value was fetched from, when the token's entry carries
+   * that record. Omitted for a handle the harness did not acquire.
+   */
+  acquisition?: HarnessSkillAcquisition;
 
   runId: string;
   activatedAt?: string;
@@ -848,6 +855,9 @@ export const loadHarnessSkillContextFromText = async (
       activatedAt,
       cfcPromptRole: "context",
       handleToken: options.handleToken,
+      ...(options.acquisition !== undefined
+        ? { acquisition: options.acquisition }
+        : {}),
     },
   };
 };
