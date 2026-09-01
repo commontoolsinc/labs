@@ -244,17 +244,16 @@ export class GraphQueryWalk {
       this.#keyOverrides.set(derivedKey, docKey);
     }
     const internedSelector = internPathSelector(effectiveSelector);
-    if (
-      schemaTrackerCoversSelector(
-        this.#context.schemaTracker,
-        docKey,
-        internedSelector,
-      )
-    ) {
+    const covered = schemaTrackerCoversSelector(
+      this.#context.schemaTracker,
+      docKey,
+      internedSelector,
+    );
+    if (covered) {
       this.stats.coveredSelectorSkips++;
-      return;
+    } else {
+      this.#context.schemaTracker.add(docKey, internedSelector);
     }
-    this.#context.schemaTracker.add(docKey, internedSelector);
 
     if (!isObjectNotArray(document.value)) {
       return;
@@ -263,39 +262,44 @@ export class GraphQueryWalk {
     const tx = new ExtendedStorageTransaction(
       new ManagedStorageTransaction(this.#manager),
     );
-    const value = (document.value as { value: FabricValue }).value;
-    const root: IMemorySpaceValueAttestation = {
-      address: { ...document.address, space: this.#space, path: ["value"] },
-      value,
-    };
-    const [nextDoc, nextSelector] = getAtPath(
-      tx,
-      root,
-      effectiveSelector.path.slice(1),
-      this.#context,
-      effectiveSelector,
-    );
-    if (
-      nextDoc.value !== undefined &&
-      nextSelector !== undefined &&
-      nextSelector.schema !== false
-    ) {
-      const traverser = new SchemaObjectTraverser(
+    if (!covered) {
+      const value = (document.value as { value: FabricValue }).value;
+      const root: IMemorySpaceValueAttestation = {
+        address: { ...document.address, space: this.#space, path: ["value"] },
+        value,
+      };
+      const [nextDoc, nextSelector] = getAtPath(
         tx,
-        nextSelector,
+        root,
+        effectiveSelector.path.slice(1),
         this.#context,
-        undefined,
-        this.#memo,
+        effectiveSelector,
       );
-      traverser.traverse(nextDoc);
-      this.#addTraverserStats(traverser);
+      if (
+        nextDoc.value !== undefined &&
+        nextSelector !== undefined &&
+        nextSelector.schema !== false
+      ) {
+        const traverser = new SchemaObjectTraverser(
+          tx,
+          nextSelector,
+          this.#context,
+          undefined,
+          this.#memo,
+        );
+        traverser.traverse(nextDoc);
+        this.#addTraverserStats(traverser);
+      }
     }
 
-    // The named document's family, chased here regardless of the context's
-    // includeMeta — that flag governs the traverser's link crossings above,
-    // and it is off so a crossing-reached document is delivered without its
-    // family. What a caller names, it may intend to load; what a walk merely
-    // reaches, it does not.
+    // The named document's family, chased even when selector coverage skips
+    // the traversal above: a crossing may have covered this document before
+    // a root named it, and coverage proves reach, not family. Chased here
+    // regardless of the context's includeMeta — that flag governs the
+    // traverser's link crossings, and it is off so a crossing-reached
+    // document is delivered without its family. What a caller names, it may
+    // intend to load; what a walk merely reaches, it does not. The chase
+    // dedupes through `metaDocsVisited`, so a repeat visit re-reads nothing.
     loadMetaLinkedDocs(
       tx,
       {
