@@ -272,7 +272,13 @@ export class MultiRuntimeSession {
     }) as { ok: boolean; error?: { name?: string; message?: string } };
   }
 
-  /** Read a value from the piece result, pulling fresh state first. */
+  /**
+   * Read a value from the piece result, pulling fresh state first. Where the
+   * result schema says `asCell` — over a pattern's `[UI]` tree, among other
+   * places — the value carries the link that reaches the cell rather than the
+   * cell, which belongs to the runtime's own realm. Read a path below such a
+   * cell, or use `readRaw`, to reach its contents.
+   */
   async read(path: (string | number)[] = []): Promise<FabricValue> {
     return await this.#client.call("read", { path });
   }
@@ -282,6 +288,23 @@ export class MultiRuntimeSession {
    *  carry, e.g. a query result's `requestHash`. */
   async readRaw(path: (string | number)[] = []): Promise<FabricValue> {
     return await this.#client.call("readRaw", { path });
+  }
+
+  /**
+   * Mint a cell in this runtime's space holding `value`, and answer with the
+   * link that reaches it. `cause` names the cell: the same cause is the same
+   * cell, a different cause a different one.
+   *
+   * The link is ordinary data, so it can be passed straight back in a `send`
+   * event to reach a handler input declared `asCell`. That is how a headless
+   * caller hands a pattern a cell it did not create — a viewer identity, say,
+   * where a browser would supply a resolved `#profile`.
+   */
+  async createCell(
+    cause: FabricValue,
+    value: FabricValue,
+  ): Promise<FabricValue> {
+    return await this.#client.call("createCell", { cause, value });
   }
 
   /** Inspect the normalized link (id, space, scope) at `path` in the result. */

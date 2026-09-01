@@ -17,6 +17,7 @@ import { join } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   MultiRuntimeHarness,
   type MultiRuntimeSession,
@@ -33,6 +34,11 @@ const BYTES: (string | number)[] = ["bytes"];
 const WEIRD: (string | number)[] = ["weird"];
 
 const CONTENT = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+
+/** Whether `value` is a link sigil, the form a cell crosses the boundary in. */
+const isSigilLink = (value: unknown): boolean =>
+  isObjectNotArray(value) && isObjectNotArray(value["/"]) &&
+  isObjectNotArray(value["/"]["link@1"]);
 
 describe("multi-runtime harness value fidelity", () => {
   let harness: MultiRuntimeHarness;
@@ -81,6 +87,31 @@ describe("multi-runtime harness value fidelity", () => {
     assert(
       Object.keys(counts).length > 1,
       "a breakdown naming no logger at all",
+    );
+  });
+
+  it("reads a whole result, with a link where the schema says cell", async () => {
+    // A schema-aware read hands back a live `Cell` at every `asCell`
+    // location, and a cell belongs to the runtime's own realm. `setWeird` is
+    // a stream, which is one such location; a pattern's `[UI]` tree is full of
+    // them. Reading the whole result at all is half the assertion.
+    const whole = await alice.read() as Record<string, unknown>;
+    assertEquals(
+      typeof whole.weird,
+      "number",
+      `weird came back as ${toCompactDebugString(whole.weird)}`,
+    );
+    assert(
+      isSigilLink(whole.setWeird),
+      `setWeird came back as ${toCompactDebugString(whole.setWeird)}, ` +
+        "not the link that reaches it",
+    );
+    // The containers around it stay containers: the same read annotates each
+    // one with the cell it came from, and an annotation is not a cell the
+    // schema asked for.
+    assert(
+      isObjectNotArray(whole.$UI) && whole.$UI.name === "div",
+      `the view came back as ${toCompactDebugString(whole.$UI)}`,
     );
   });
 

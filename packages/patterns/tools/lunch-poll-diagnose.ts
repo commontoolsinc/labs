@@ -9,17 +9,18 @@ interface PollOutputSummary {
   users: readonly { name?: string }[];
   options: readonly { id?: string; title?: string }[];
   votes: readonly {
-    voterName?: string;
+    /** The name on the voter's profile, or "" for a vote with no voter. */
+    voterName: string;
     optionId?: string;
     voteType?: string;
   }[];
-  history: readonly unknown[];
-  adminName: string;
+  hostName: string;
   myName: string;
+  todayDate: string;
+  joinMessage: string;
   userCount: number;
   optionCount: number;
   voteCount: number;
-  historyCount: number;
   isJoined: boolean;
   isAdmin: boolean;
 }
@@ -78,7 +79,7 @@ interface MatrixConfig {
   voteRounds: number;
 }
 
-interface CaseConfig {
+export interface CaseConfig {
   optionCount: number;
   userCount: number;
   voteRounds: number;
@@ -88,7 +89,13 @@ interface CompactSessionSample {
   label: string;
   poll: {
     myName: string;
+    hostName: string;
+    isJoined: boolean;
     isAdmin: boolean;
+    /** Why this session's last join was refused, or "". */
+    joinMessage: string;
+    /** The day votes are filtered to, or "" until the `#now/300` wish lands. */
+    todayDate: string;
     users: number;
     options: number;
     votes: number;
@@ -145,7 +152,7 @@ interface ChurnTotals {
   commitRejected: number;
 }
 
-interface CaseResult {
+export interface CaseResult {
   case: {
     users: number;
     options: number;
@@ -176,7 +183,7 @@ async function collectChurn(
   return totals;
 }
 
-interface ConvergenceResult {
+export interface ConvergenceResult {
   converged: boolean;
   voteCounts: number[];
   optionCounts: number[];
@@ -194,9 +201,7 @@ async function collectConvergence(
     const poll = pollSummary(await session.read());
     const fingerprint = poll.votes
       .map((vote) =>
-        `${vote.voterName ?? "?"}|${vote.optionId ?? "?"}|${
-          vote.voteType ?? "?"
-        }`
+        `${vote.voterName}|${vote.optionId ?? "?"}|${vote.voteType ?? "?"}`
       )
       .sort()
       .join(",");
@@ -246,6 +251,13 @@ const asStringArray = (value: unknown): readonly string[] =>
     ? value.filter((entry): entry is string => typeof entry === "string")
     : [];
 
+// A vote names its voter by profile cell, which a read of the poll output
+// resolves to the profile's contents. The name on it is what tells one voter
+// from another in the convergence fingerprint below, and this tool gives every
+// session a distinct one.
+const voterName = (value: unknown): string =>
+  isObjectNotArray(value) ? asString(value.name) : "";
+
 function pollSummary(value: unknown): PollOutputSummary {
   if (!isObjectNotArray(value)) {
     throw new Error(
@@ -255,14 +267,18 @@ function pollSummary(value: unknown): PollOutputSummary {
   return {
     users: asRecordArray(value.users),
     options: asRecordArray(value.options),
-    votes: asRecordArray(value.votes),
-    history: Array.isArray(value.history) ? value.history : [],
-    adminName: asString(value.adminName),
+    votes: asRecordArray(value.votes).map((vote) => ({
+      voterName: voterName(vote.voter),
+      optionId: asString(vote.optionId),
+      voteType: asString(vote.voteType),
+    })),
+    hostName: asString(value.hostName),
     myName: asString(value.myName),
+    todayDate: asString(value.todayDate),
+    joinMessage: asString(value.joinMessage),
     userCount: asNumber(value.userCount),
     optionCount: asNumber(value.optionCount),
     voteCount: asNumber(value.voteCount),
-    historyCount: asNumber(value.historyCount),
     isJoined: asBoolean(value.isJoined),
     isAdmin: asBoolean(value.isAdmin),
   };
@@ -452,7 +468,11 @@ function compactSessionSample(
     label,
     poll: {
       myName: poll.myName,
+      hostName: poll.hostName,
+      isJoined: poll.isJoined,
       isAdmin: poll.isAdmin,
+      joinMessage: poll.joinMessage,
+      todayDate: poll.todayDate,
       users: poll.userCount,
       options: poll.optionCount,
       votes: poll.voteCount,
@@ -562,6 +582,56 @@ async function samplePhase(
   return sample;
 }
 
+/**
+ * Claim each session's viewer identity through the poll's `overrideViewer`
+ * seam.
+ *
+ * Identity in this poll is a profile cell. A browser viewer gets one from the
+ * `#profile` wish, which has nothing to resolve it in a headless runtime, so
+ * each session mints its own profile cell and claims that. The handler runs in
+ * the sending session's runtime, so every claim lands in that session's own
+ * per-user slot and the sessions stay distinct people on one shared poll.
+ */
+async function claimIdentities(
+  sessions: readonly MultiRuntimeSession[],
+): Promise<void> {
+  await Promise.all(sessions.map(async (session, index) => {
+    const name = `User ${index + 1}`;
+    const profile = await session.createCell(
+      `lunch-poll-diagnose profile ${session.label}`,
+      { name },
+    );
+    await session.send("overrideViewer", { profile, name });
+  }));
+}
+
+/**
+ * Check that a phase's setup took, naming the sessions it did not reach.
+ *
+ * Every step these phases drive is gated in the pattern — joining needs a
+ * resolved profile, adding an option needs the host, casting a vote needs a
+ * roster entry and a resolved clock — and a gate that refuses writes nothing
+ * and reports nothing, leaving the samples that follow reading as an idle
+ * poll. The check asks whether a gate was passed at all, not whether every
+ * write survived: a vote lost to commit contention is what the churn and
+ * convergence sections report.
+ */
+function checkPhase(
+  phase: PhaseSample,
+  requirement: string,
+  reached: (poll: CompactSessionSample["poll"]) => boolean,
+): void {
+  const failures = phase.sessions.filter((session) => !reached(session.poll));
+  if (failures.length === 0) return;
+  throw new Error(
+    `after phase "${phase.phase}", ${failures.length} of ` +
+      `${phase.sessions.length} sessions did not ${requirement}: ` +
+      failures
+        .map((session) => `${session.label} ${JSON.stringify(session.poll)}`)
+        .join("; "),
+  );
+}
+
 async function optionIds(session: MultiRuntimeSession): Promise<string[]> {
   const poll = pollSummary(await session.read());
   return poll.options.map((option) => option.id).filter((id): id is string =>
@@ -584,7 +654,12 @@ async function createHarness(config: CaseConfig): Promise<MultiRuntimeHarness> {
   return harness;
 }
 
-async function runCase(config: CaseConfig): Promise<CaseResult> {
+/**
+ * Run one case end to end: open the poll across a runtime per voter, give each
+ * voter an identity, join them, add the options, and vote. Exported so a test
+ * can drive the probe's own setup rather than a copy of it.
+ */
+export async function runCase(config: CaseConfig): Promise<CaseResult> {
   traceCursors.clear();
   const harness = await createHarness(config);
   const phases: PhaseSample[] = [];
@@ -596,46 +671,63 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
   const host = sessions[0];
 
   try {
+    // Standing in for the `#profile` wish, which is what a browser viewer
+    // loads with, so the baseline below is a poll whose viewers have an
+    // identity and have not joined yet.
+    await claimIdentities(sessions);
     phases.push(await samplePhase("baseline-open", harness, async () => {}));
 
-    phases.push(
-      await samplePhase("all-users-join", harness, async () => {
-        await host.send("joinAs", { name: "User 1" });
-        await Promise.all(
-          sessions.slice(1).map((session, index) =>
-            session.send("joinAs", { name: `User ${index + 2}` })
-          ),
-        );
-      }),
-    );
+    // The host joins alone and first: the first joiner takes the host role,
+    // and the phases below need a settled answer to who that is.
+    const joinPhase = await samplePhase("all-users-join", harness, async () => {
+      await host.send("joinAs", {});
+      await Promise.all(
+        sessions.slice(1).map((session) => session.send("joinAs", {})),
+      );
+    });
+    phases.push(joinPhase);
+    checkPhase(joinPhase, "join the poll", (poll) => poll.isJoined);
 
-    phases.push(
-      await samplePhase("host-adds-options", harness, async () => {
+    const optionsPhase = await samplePhase(
+      "host-adds-options",
+      harness,
+      async () => {
         for (let index = 0; index < config.optionCount; index++) {
           await host.send("addOption", { title: `Restaurant ${index + 1}` });
         }
-      }),
+      },
+    );
+    phases.push(optionsPhase);
+    checkPhase(
+      optionsPhase,
+      "see the host's options",
+      (poll) => poll.options > 0,
     );
 
     for (let round = 0; round < config.voteRounds; round++) {
-      phases.push(
-        await samplePhase(
-          `concurrent-vote-round-${round + 1}`,
-          harness,
-          async () => {
-            const ids = await optionIds(host);
-            if (ids.length === 0) return;
-            await Promise.all(
-              sessions.map((session, index) =>
-                session.send("castVote", {
-                  optionId: ids[(round + index) % ids.length],
-                  voteType: VOTE_COLORS[(round + index) % VOTE_COLORS.length],
-                })
-              ),
-            );
-          },
-        ),
+      const votePhase = await samplePhase(
+        `concurrent-vote-round-${round + 1}`,
+        harness,
+        async () => {
+          const ids = await optionIds(host);
+          if (ids.length === 0) return;
+          await Promise.all(
+            sessions.map((session, index) =>
+              session.send("castVote", {
+                optionId: ids[(round + index) % ids.length],
+                voteType: VOTE_COLORS[(round + index) % VOTE_COLORS.length],
+              })
+            ),
+          );
+        },
       );
+      phases.push(votePhase);
+      // Only the first round is checked: a vote recast in the same color on
+      // the same option and the same day toggles off, so a later round can
+      // empty the poll again.
+      if (round === 0) {
+        checkPhase(votePhase, "see any vote", (poll) => poll.votes > 0);
+      }
     }
 
     const churn = await collectChurn(sessions);
