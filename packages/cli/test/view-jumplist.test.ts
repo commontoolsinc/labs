@@ -461,6 +461,15 @@ Deno.test("jumplist: complete count context retains final-newline changes", () =
     "\\ No newline at end of file",
     "",
   ].join("\n");
+  const createsWithNewline = [
+    "diff --git a/main.rs b/main.rs",
+    "new file mode 100644",
+    "--- /dev/null",
+    "+++ b/main.rs",
+    "@@ -0,0 +1 @@",
+    "+value",
+    "",
+  ].join("\n");
 
   assertEquals(
     contexts(addsNewline, "new\n")?.newLines?.map((line) => line.text),
@@ -469,6 +478,10 @@ Deno.test("jumplist: complete count context retains final-newline changes", () =
   assertEquals(
     contexts(removesNewline, "new")?.newLines?.map((line) => line.text),
     ["new"],
+  );
+  assertEquals(
+    contexts(createsWithNewline, "value\n")?.newLines?.map((line) => line.text),
+    ["value", ""],
   );
 });
 

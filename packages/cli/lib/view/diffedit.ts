@@ -542,6 +542,7 @@ function reconstructNewSide(
       const oldNoNewline = hunkSideHasNoNewline(hunk, "old", raw, diffLines);
       const newNoNewline = hunkSideHasNoNewline(hunk, "new", raw, diffLines);
       if (oldNoNewline || newNoNewline) trailingNewline = !newNoNewline;
+      else if (oldLineCount === 0 && hunk.newCount > 0) trailingNewline = true;
     }
     lines.splice(
       start,
