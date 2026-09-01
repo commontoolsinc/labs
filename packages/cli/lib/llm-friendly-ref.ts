@@ -36,6 +36,7 @@ import { isSlugAddress, isValidSlug } from "@commonfabric/runner/slugs";
 export interface NormalizedLLMFriendlyRef {
   /** The piece, as the reference spelled it: a handle or a slug. */
   pieceId: string;
+
   scope?: CellScope;
 
   /**

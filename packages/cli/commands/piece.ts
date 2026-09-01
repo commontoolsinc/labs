@@ -3054,9 +3054,11 @@ export interface PieceCLIOptions {
    * the leading name.
    */
   cell?: string;
+
   apiUrl?: string;
   identity?: string;
   space?: string;
+
   /**
    * Whether `space` was written on the command line rather than supplied by
    * `CF_SPACE`. Cliffy merges an environment value into the option and keeps

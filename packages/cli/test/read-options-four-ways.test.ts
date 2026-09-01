@@ -1,33 +1,3 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
-import { dirname, join } from "@std/path";
-import { Identity } from "@commonfabric/identity";
-import {
-  type Cell,
-  type JSONSchema,
-  type MemorySpace,
-  type NormalizedFullLink,
-  Runtime,
-} from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import {
-  type CallableResolution,
-  executeResolvedCallable,
-} from "../lib/callable.ts";
-import { getCellValue } from "../lib/piece.ts";
-import { projectWishValue, resolveWish } from "../lib/wish.ts";
-import {
-  type ExecutedMountedCallableFile,
-  executeMountedCallableFile,
-} from "../lib/exec.ts";
-import { renderExecOutcome } from "../commands/exec.ts";
-import { writeMountState } from "../lib/fuse.ts";
-import {
-  type CellSelection,
-  parseCellSelectionOptions,
-} from "../lib/cell-selection.ts";
-import { safeStringify } from "../lib/render.ts";
-
 /**
  * The exit criterion of the read options: **the same cell, reached four ways,
  * renders identically under the same selection.**
@@ -58,6 +28,37 @@ import { safeStringify } from "../lib/render.ts";
  * resolves through — the selection step under test is the production one in
  * every arrival.
  */
+
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { dirname, join } from "@std/path";
+import { Identity } from "@commonfabric/identity";
+import {
+  type Cell,
+  type JSONSchema,
+  type MemorySpace,
+  type NormalizedFullLink,
+  Runtime,
+} from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  type CallableResolution,
+  executeResolvedCallable,
+} from "../lib/callable.ts";
+import { getCellValue } from "../lib/piece.ts";
+import { projectWishValue, resolveWish } from "../lib/wish.ts";
+import {
+  type ExecutedMountedCallableFile,
+  executeMountedCallableFile,
+} from "../lib/exec.ts";
+import { renderExecOutcome } from "../commands/exec.ts";
+import { writeMountState } from "../lib/fuse.ts";
+import {
+  type CellSelection,
+  parseCellSelectionOptions,
+} from "../lib/cell-selection.ts";
+import { safeStringify } from "../lib/render.ts";
+
 const userIdentity = await Identity.fromPassphrase("cf-four-ways-user");
 
 const profileSpace = (await Identity.fromPassphrase("cf-four-ways-profile"))
@@ -226,10 +227,10 @@ describe("read options, four ways", () => {
 
   /** `cf exec <mountedFile>` — the read that arrives through a filesystem
    * mount. A real mount-state file and a real mounted callable path; the
-   * runtime under it is the same one the other three read through. */
-
-  /** `cf exec`'s whole outcome, so both the selected value and the envelope
-   * written around it can be read from one drive of the command. */
+   * runtime under it is the same one the other three read through.
+   *
+   * Answers with `cf exec`'s whole outcome, so both the selected value and the
+   * envelope written around it can be read from one drive of the command. */
   async function execOutcome(
     profile: Cell<unknown>,
     selection: CellSelection,

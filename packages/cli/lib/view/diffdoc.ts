@@ -1057,7 +1057,9 @@ interface HunkCtx {
    * `newLanguage` across a rename that changes the extension. */
   oldLanguage: Language;
 
-  /** New-side path, whose extension the parsers use to pick a script variant. */
+  /**
+   * New-side path, whose extension the parsers use to pick a script variant.
+   */
   newFileName: string | undefined;
 
   /** Old-side path, read the same way. */
