@@ -157,10 +157,15 @@ async function cliCoreSuite(root: string): Promise<Suite> {
 
 /**
  * The FUSE script, which records one identity per phase it completes and
- * runs whole. Splitting the run into sections it can be asked for is a
- * question about the script rather than about selection: it builds up a
- * mount, a daemon and a set of pieces, and which phases can stand alone
- * follows from that.
+ * runs whole here.
+ *
+ * The script itself can be asked for a quarter of its work — it takes a
+ * section, and four of them stand alone. This suite does not use that
+ * yet, because a record and a section are named differently: the
+ * dispatch table names phases by identifier, and a phase records itself
+ * under the sentence it announces. Attributing a record to a section
+ * therefore means reading each phase's function for the announcements
+ * inside it, which is its own change.
  */
 function cliFuseSuite(): Suite {
   const unit = "fuse-exec.sh";
