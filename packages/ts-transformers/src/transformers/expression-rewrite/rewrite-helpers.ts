@@ -326,30 +326,34 @@ function unionWithEnclosingScopeFreeIdentifiers(
   return [...refs, ...added];
 }
 
+/**
+ * The identifier a reference is rooted at, looking through member access, calls,
+ * and the transparent wrapper set.
+ *
+ * This decides which names an existing data flow already covers. A reference
+ * whose root goes unrecognized is not merely skipped: the free-identifier pass
+ * below then adds that root as its own capture, and a whole-object capture
+ * subsumes the narrower paths beside it — so the lift subscribes to the whole
+ * object where it could have subscribed to one field.
+ */
 function getRootIdentifier(expr: ts.Expression): ts.Identifier | undefined {
   let current: ts.Expression = expr;
-  while (
-    ts.isPropertyAccessExpression(current) ||
-    ts.isElementAccessExpression(current) ||
-    ts.isCallExpression(current) ||
-    ts.isParenthesizedExpression(current) ||
-    ts.isAsExpression(current) ||
-    ts.isNonNullExpression(current)
-  ) {
-    if (ts.isCallExpression(current)) {
-      current = current.expression;
-    } else if (ts.isPropertyAccessExpression(current)) {
-      current = current.expression;
-    } else if (ts.isElementAccessExpression(current)) {
-      current = current.expression;
-    } else {
-      current = (current as
-        | ts.ParenthesizedExpression
-        | ts.AsExpression
-        | ts.NonNullExpression).expression;
+  while (true) {
+    const unwrapped = unwrapTransparentWrapperOnce(current);
+    if (unwrapped) {
+      current = unwrapped;
+      continue;
     }
+    if (
+      ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current) ||
+      ts.isCallExpression(current)
+    ) {
+      current = current.expression;
+      continue;
+    }
+    return ts.isIdentifier(current) ? current : undefined;
   }
-  return ts.isIdentifier(current) ? current : undefined;
 }
 
 function isReferenceSite(node: ts.Identifier): boolean {
