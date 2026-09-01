@@ -58,11 +58,18 @@ the test result.
 
 A package can reserve a `*.browser.test.ts` file for DOM behavior that needs a
 real browser but not a running shell, toolshed, or piece. The name is the whole
-of the wiring. The package test task matches `*.browser.test.ts` twice: once as
-an `--ignore` pattern that keeps the file out of plain `deno test` discovery,
-and once as the argument list handed to `deno-web-test`. Adding a browser test
-means naming the file, and nothing further. The package-level task remains the
-one command authors and the root workspace runner invoke; it owns both steps.
+of the wiring. Every package that splits its tests this way matches
+`*.browser.test.ts` twice: once as an `--ignore` pattern that keeps the file out
+of plain `deno test` discovery, and once as the argument list handed to
+`deno-web-test`. The two need not sit in one task line — `packages/dashboard`
+spreads them across the runner script its test task starts and the
+`test-browser` task that runner then calls — but they are the same glob, so
+adding a browser test means naming the file and nothing further. The
+package-level task remains the one command authors and the root workspace
+runner invoke; it owns every step.
+
+A package whose tests all need a browser, `packages/identity` among them, hands
+its whole test directory to `deno-web-test` and has no such split to get wrong.
 
 Name a test that way whenever it needs a browser, including when its subject is
 not a component.
