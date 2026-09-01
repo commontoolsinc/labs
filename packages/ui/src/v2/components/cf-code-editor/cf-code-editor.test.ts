@@ -1,5 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import {
+  autocompletion,
+  CompletionContext,
+  type CompletionResult,
+  completionStatus,
+} from "@codemirror/autocomplete";
+import { EditorState, type TransactionSpec } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
 import { NAME } from "@commonfabric/runner/shared";
 import { type CellHandle, type CellRef } from "@commonfabric/runtime-client";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
@@ -360,11 +368,17 @@ describe("CFCodeEditor mention-piece resolution", () => {
   // the runtime does. Nothing here reaches a piece through a value.
   type ResolutionInternals = {
     mentionable: CellHandle<MentionableArray> | null;
+    mentioned?: CellHandle<MentionableArray>;
+    _editorView: EditorView | undefined;
     _resolvePieceIds(): Promise<void>;
+    _updateMentionedFromContent(content?: string): void;
     _resolvedPieceCells: Map<number, CellHandle<Mentionable>>;
     _getPieceId(index: number): string;
     findPieceById(id: string): CellHandle<Mentionable> | null;
     getFilteredMentionable(query: string): Array<[unknown, number]>;
+    createBacklinkCompletionSource(): (
+      context: CompletionContext,
+    ) => CompletionResult | null;
   };
 
   const internals = (element: CFCodeEditor): ResolutionInternals =>
@@ -422,6 +436,94 @@ describe("CFCodeEditor mention-piece resolution", () => {
     expect(element.getFilteredMentionable("").length).toBe(1);
     const found = element.findPieceById(element._getPieceId(0));
     expect(found?.id()).toBe(target.id());
+  });
+
+  it("defers `$mentioned` reconciliation until index rows resolve", async () => {
+    const element = internals(new CFCodeEditor());
+    const list = createMockCellHandle([
+      { [NAME]: "Row", title: "Row", piece: pieceLink },
+    ]);
+    const release = Promise.withResolvers<void>();
+    const realKey = list.key.bind(list);
+    list.key = ((key: PropertyKey) => {
+      const row = realKey(key as never);
+      if (String(key) === "0") {
+        const realRowKey = row.key.bind(row);
+        row.key = ((rowKey: PropertyKey) => {
+          const destination = realRowKey(rowKey as never);
+          if (String(rowKey) === "piece") {
+            const realResolve = destination.resolveAsCell.bind(destination);
+            destination.resolveAsCell = (async () => {
+              await release.promise;
+              return await realResolve();
+            }) as typeof destination.resolveAsCell;
+          }
+          return destination;
+        }) as unknown as typeof row.key;
+      }
+      return row;
+    }) as typeof list.key;
+
+    const mentioned = createMockCellHandle<MentionableArray>([], {
+      id: "of:mentioned" as CellRef["id"],
+    });
+    let writes = 0;
+    let written: MentionableArray | undefined;
+    const realSet = mentioned.set.bind(mentioned);
+    Object.defineProperty(mentioned, "set", {
+      value: (value: MentionableArray) => {
+        writes++;
+        written = value;
+        return realSet(value);
+      },
+    });
+    element.mentionable = list as unknown as CellHandle<MentionableArray>;
+    element.mentioned = mentioned;
+
+    const resolving = element._resolvePieceIds();
+    element._updateMentionedFromContent("[[Row (target-piece)]]");
+    expect(writes).toBe(0);
+
+    release.resolve();
+    await resolving;
+
+    expect(writes).toBe(1);
+    expect((written?.[0] as unknown as CellHandle<Mentionable>).id()).toBe(
+      "of:target-piece",
+    );
+  });
+
+  it("restarts a matching backlink completion after resolution", async () => {
+    const element = internals(new CFCodeEditor());
+    element.mentionable = createMockCellHandle([
+      { [NAME]: "Row", title: "Row", piece: pieceLink },
+    ]) as unknown as CellHandle<MentionableArray>;
+    const source = element.createBacklinkCompletionSource();
+    const state = EditorState.create({
+      doc: "[[Ro",
+      selection: { anchor: 4 },
+      extensions: [autocompletion({ override: [source] })],
+    });
+    const view: {
+      state: EditorState;
+      dispatch(spec: TransactionSpec): void;
+    } = {
+      state,
+      dispatch(spec: TransactionSpec) {
+        this.state = this.state.update(spec).state;
+      },
+    };
+    element._editorView = view as unknown as EditorView;
+
+    const initial = source(new CompletionContext(view.state, 4, true));
+    expect(initial?.options).toEqual([]);
+    expect(completionStatus(view.state)).toBe(null);
+
+    await element._resolvePieceIds();
+
+    expect(completionStatus(view.state)).toBe("pending");
+    const refreshed = source(new CompletionContext(view.state, 4, true));
+    expect(refreshed?.options.length).toBe(1);
   });
 
   it("keeps the newer resolution when an older pass finishes late", async () => {

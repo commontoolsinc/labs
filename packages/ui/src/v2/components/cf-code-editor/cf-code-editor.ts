@@ -400,6 +400,14 @@ export class CFCodeEditor extends BaseElement {
   // identical when its contents change, so identity alone cannot stop an
   // older pass finishing late and overwriting a newer pass's ordering.
   private _resolveGeneration = 0;
+  // `$mentioned` cannot be reconciled while an index row has no piece id.
+  // Calls made during that window leave the latest content for the current
+  // resolution pass to reconcile when it publishes.
+  private _mentionResolutionPending = false;
+  private _deferredMentionedContent: string | null = null;
+  // A completion source that withheld a matching index row asks the current
+  // resolution pass to query it again once the row has a usable identity.
+  private _backlinkCompletionAwaitingResolution = false;
   private _referencesUnsub: (() => void) | null = null;
   // Label text last seen for each reference key, to detect a user's edit.
   private _previousRefLabels = new Map<string, string>();
@@ -489,6 +497,7 @@ export class CFCodeEditor extends BaseElement {
    */
   private createBacklinkCompletionSource() {
     return (context: CompletionContext): CompletionResult | null => {
+      this._backlinkCompletionAwaitingResolution = false;
       // Look for incomplete backlinks: [[ followed by optional text (not yet closed)
       const backlink = context.matchBefore(/\[\[([^\]]*)?/);
 
@@ -511,6 +520,8 @@ export class CFCodeEditor extends BaseElement {
       const query = backlink.text.slice(2); // Remove [[ prefix
 
       const mentionable = this.getFilteredMentionable(query);
+      this._backlinkCompletionAwaitingResolution = this
+        ._hasUnresolvedIndexRowFor(query);
 
       // Check if auto-close added ]] after cursor
       const hasAutoCloseBrackets = afterCursor.startsWith("]]");
@@ -599,6 +610,28 @@ export class CFCodeEditor extends BaseElement {
     }
 
     return matches;
+  }
+
+  /** Whether a matching index row is waiting for its piece identity. */
+  private _hasUnresolvedIndexRowFor(query: string): boolean {
+    const mentionableData = (this.mentionable?.get() ?? []) as MentionableArray;
+    const queryLower = query.toLowerCase();
+    return mentionableData.some((mention, index) =>
+      this._isIndexRow(index) &&
+      !this._resolvedPieceIds.has(index) &&
+      !!mention?.[NAME]?.toLowerCase()?.includes(queryLower)
+    );
+  }
+
+  /** Restarts a backlink query that withheld a matching index row. */
+  private _refreshBacklinkCompletion(): void {
+    if (!this._backlinkCompletionAwaitingResolution) return;
+    this._backlinkCompletionAwaitingResolution = false;
+
+    const view = this._editorView;
+    if (view && this._currentBacklinkQuery(view) !== null) {
+      startCompletion(view);
+    }
   }
 
   /**
@@ -1237,7 +1270,13 @@ export class CFCodeEditor extends BaseElement {
    */
   private async _resolvePieceIds(): Promise<void> {
     const handle = this.mentionable;
-    if (!handle) return;
+    if (!handle) {
+      this._mentionResolutionPending = false;
+      this._deferredMentionedContent = null;
+      return;
+    }
+
+    this._mentionResolutionPending = true;
 
     const mentionableData = (handle.get() ?? []) as MentionableArray;
 
@@ -1285,8 +1324,15 @@ export class CFCodeEditor extends BaseElement {
     ) {
       this._resolvedPieceIds = newResolved;
       this._resolvedPieceCells = newCells;
-      // Re-resolve mentioned from content now that we have stable IDs
-      this._updateMentionedFromContent();
+      this._mentionResolutionPending = false;
+      const deferredContent = this._deferredMentionedContent;
+      this._deferredMentionedContent = null;
+      if (deferredContent === null) {
+        this._updateMentionedFromContent();
+      } else {
+        this._updateMentionedFromContent(deferredContent);
+      }
+      this._refreshBacklinkCompletion();
     }
   }
 
@@ -1956,6 +2002,10 @@ export class CFCodeEditor extends BaseElement {
     this._cleanupCollaboration();
     this._cleanupPieceNameSubscriptions();
     this._cleanupRefDestinationSubscriptions();
+    this._resolveGeneration++;
+    this._mentionResolutionPending = false;
+    this._deferredMentionedContent = null;
+    this._backlinkCompletionAwaitingResolution = false;
     this._resolvedPieceIds.clear();
     this._resolvedPieceCells.clear();
     if (this._mentionableUnsub) {
@@ -2493,6 +2543,12 @@ export class CFCodeEditor extends BaseElement {
       // Enter: complete backlink OR exit editing mode (no newline inside backlinks)
       // Use Prec.highest to ensure this runs before autocompletion handlers
       Prec.highest(keymap.of([{
+        key: "Escape",
+        run: () => {
+          this._backlinkCompletionAwaitingResolution = false;
+          return false;
+        },
+      }, {
         key: "Enter",
         run: (view) => {
           const pos = view.state.selection.main.head;
@@ -2791,8 +2847,13 @@ export class CFCodeEditor extends BaseElement {
    * Link syntax: [[Name (id)]]. We parse ids and resolve them against
    * `$mentionable` to produce live Piece instances.
    */
-  private _updateMentionedFromContent(content = this.getValue() || ""): void {
+  private _updateMentionedFromContent(content?: string): void {
     if (!this.mentioned) return;
+    content ??= this._editorView?.state.doc.toString() ?? this.getValue() ?? "";
+    if (this._mentionResolutionPending) {
+      this._deferredMentionedContent = content;
+      return;
+    }
 
     if (this._refMode) {
       this._updateMentionedWithRefs(content);

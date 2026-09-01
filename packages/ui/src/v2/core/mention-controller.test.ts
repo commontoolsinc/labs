@@ -267,6 +267,27 @@ describe("MentionController — mention insertion", () => {
     expect(inserts[0]).toMatch(/^\[Test Item\]\(.+\)$/);
     expect(ctrl.isShowing).toBe(false);
   });
+
+  it("falls back to a direct entry's raw reference", async () => {
+    const inserts: string[] = [];
+    const ctrl = new MentionController(createMockHost(), {
+      getContent: () => "@",
+      getCursorPosition: () => 1,
+      onInsert: (markdown) => inserts.push(markdown),
+    });
+    const cell = createMentionableCell(["Direct"]);
+    ctrl.setMentionable(cell);
+    ctrl.handleInput(new Event("input"));
+    const mention = ctrl.getFilteredMentions()[0];
+    Object.defineProperty(mention, "resolveAsCell", {
+      value: () => Promise.reject(new Error("unavailable")),
+    });
+
+    await ctrl.insertMention(mention);
+
+    expect(inserts).toEqual(["[Direct](/of:mentionables/0)"]);
+    expect(ctrl.isShowing).toBe(false);
+  });
 });
 
 //
@@ -314,6 +335,33 @@ describe("MentionController — indexed rows", () => {
 
     expect(inserts.length).toBe(1);
     expect(inserts[0]).toBe("[Indexed Topic](/of:target-piece)");
+  });
+
+  it("leaves an index row uninserted when its piece cannot resolve", async () => {
+    const inserts: string[] = [];
+    const ctrl = new MentionController(createMockHost(), {
+      getContent: () => "@",
+      getCursorPosition: () => 1,
+      onInsert: (markdown) => inserts.push(markdown),
+    });
+    const { cell } = createIndexedCell([
+      { name: "Indexed Topic", pieceId: "of:target-piece" },
+    ]);
+    ctrl.setMentionable(cell);
+    ctrl.handleInput(new Event("input"));
+    const row = ctrl.getFilteredMentions()[0];
+    Object.defineProperty(row, "key", {
+      value: () => ({
+        asSchema: () => ({
+          resolveAsCell: () => Promise.reject(new Error("unavailable")),
+        }),
+      }),
+    });
+
+    await ctrl.insertMention(row);
+
+    expect(inserts).toEqual([]);
+    expect(ctrl.isShowing).toBe(true);
   });
 
   it("decodes a piece href back to its index row", async () => {

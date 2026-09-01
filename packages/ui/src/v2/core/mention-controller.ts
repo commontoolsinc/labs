@@ -267,6 +267,7 @@ export class MentionController implements ReactiveController {
    */
   async insertMention(mention: CellHandle<Mentionable>): Promise<void> {
     const markdown = await this.encodePieceAsMarkdown(mention);
+    if (markdown === null) return;
     this.config.onInsert(markdown, mention);
     this.hide();
   }
@@ -302,10 +303,15 @@ export class MentionController implements ReactiveController {
   private _destinationOf(
     mention: CellHandle<Mentionable>,
   ): CellHandle<Mentionable> {
-    const value = mention.get();
-    return value != null && Object.hasOwn(value, "piece")
+    return this._isIndexRow(mention)
       ? mention.key("piece").asSchema<Mentionable>(MentionableSchema)
       : mention;
+  }
+
+  /** Whether an entry is an index row standing for its `.piece`. */
+  private _isIndexRow(mention: CellHandle<Mentionable>): boolean {
+    const value = mention.get();
+    return value != null && Object.hasOwn(value, "piece");
   }
 
   /**
@@ -317,17 +323,17 @@ export class MentionController implements ReactiveController {
    */
   private async encodePieceAsMarkdown(
     piece: CellHandle<Mentionable>,
-  ): Promise<string> {
+  ): Promise<string | null> {
     const name = piece.get()?.[NAME] || "Unknown";
-    const destination = this._destinationOf(piece);
     try {
+      const destination = this._destinationOf(piece);
       const resolved = await destination.resolveAsCell();
       return `[${name}](/${resolved.ref().id})`;
     } catch {
-      // The ENTRY's href, not the destination's: decode's raw first pass
-      // matches entry refs, so this round-trips even for an index row
-      // whose piece failed to resolve — a `/…/piece` path would match
-      // neither pass.
+      // A direct entry is already the destination, so its raw ref remains a
+      // usable fallback. An index row is only bookkeeping; without its piece
+      // identity there is no valid mention to insert.
+      if (this._isIndexRow(piece)) return null;
       return `[${name}](${this._buildHref(piece.ref())})`;
     }
   }
