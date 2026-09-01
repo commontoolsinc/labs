@@ -136,8 +136,8 @@ The same partition is available from the command line, so the worklist does not
 require a pattern to read it:
 
 ```sh
-cf get --cell ID items --filter '.printable != null' --select 'name,printable.pageCount'
-cf get --cell ID items --filter '.printable == null' --select 'name'
+cf cell get --cell ID items --filter '.printable != null' --select 'name,printable.pageCount'
+cf cell get --cell ID items --filter '.printable == null' --select 'name'
 ```
 
 ## The shape of a holder over time

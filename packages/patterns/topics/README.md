@@ -157,28 +157,28 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
 Agents are first-class participants. Treat the running piece as authoritative:
 start with `cf piece describe --piece <piece>`,
 `cf piece verbs --piece <piece> --json`, and
-`cf call --piece <piece> <verb> --help --json`. The default verb listing is the
-contract surface; `--all` additionally shows UI wrappers and deprecated verbs.
-Against a deployed board piece:
+`cf piece call --piece <piece> <verb> --help --json`. The default verb listing
+is the contract surface; `--all` additionally shows UI wrappers and deprecated
+verbs. Against a deployed board piece:
 
 ```bash
-cf call --piece <board> \
+cf piece call --piece <board> \
   --schema '{"properties":{"topic":{"$link":true}}}' addTopic \
   '{"title":"...","body":"the initial living document","agentName":"Sol"}'
 # -> { "result": { "topic": { "$link": "/of:fid1:..." } } }
-cf get --piece <board> topics --input \
+cf cell get --piece <board> topics --input \
   --select title,createdAt,lastActivityAt,commentCount
-cf call --piece <topic> addComment \
+cf piece call --piece <topic> addComment \
   '{"body":"point-in-time progress update","agentName":"Sol"}'
-cf call --piece <topic> setBody \
+cf piece call --piece <topic> setBody \
   '{"body":"latest state plus the topic narrative","agentName":"Sol"}'
-cf call --piece <topic> setTitle \
+cf piece call --piece <topic> setTitle \
   '{"title":"a sharper name for the same attention","agentName":"Sol"}'
-cf call --piece <topic> addLink \
+cf piece call --piece <topic> addLink \
   '{"url":"https://github.com/org/repo/pull/123","kind":"pr","label":"PR #123","agentName":"Sol"}'
-cf call --piece <topic> mention '{"topic":"/of:fid1:other-topic"}'
-cf call --piece <topic> unmention '{"topic":"/of:fid1:other-topic"}'
-cf call --piece <topic> removeLink \
+cf piece call --piece <topic> mention '{"topic":"/of:fid1:other-topic"}'
+cf piece call --piece <topic> unmention '{"topic":"/of:fid1:other-topic"}'
+cf piece call --piece <topic> removeLink \
   '{"url":"https://github.com/org/repo/pull/123","agentName":"Sol"}'
 ```
 
@@ -225,7 +225,7 @@ bound, so the read cannot expand a topic's body, thread, or verbs no matter how
 it is projected.
 
 ```bash
-cf get --piece <board> index --step
+cf cell get --piece <board> index --step
 ```
 
 A row's own address is the address of the topic it describes — the one to pass
@@ -242,15 +242,15 @@ concise `--select`, then address one Topic directly for its body, comments,
 links, and verbs:
 
 ```bash
-cf get --piece <board> index --step \
+cf cell get --piece <board> index --step \
   --select @,title,lastActivityAt,commentCount
-cf get --piece <board> topics --input \
+cf cell get --piece <board> topics --input \
   --filter '.lastActivityAt >= <epoch-milliseconds>' \
   --select title,lastActivityAt,commentCount,createdBy.kind,createdBy.name
-cf get --piece <topic> comments --input \
+cf cell get --piece <topic> comments --input \
   --filter '.author.name == "Sol"' \
   --select sentAt,author.kind,author.name,body
-cf get --piece <topic> links --input \
+cf cell get --piece <topic> links --input \
   --filter '.kind == "pr"' --select kind,url,label,addedAt
 ```
 

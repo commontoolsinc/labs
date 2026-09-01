@@ -223,7 +223,7 @@ say "tooling; reads and calls already answer in JSON."
 
 act "3 · Ask what a verb wants"
 say "Flags, types, required-ness and result all come from the author's TypeScript."
-run cf call -s "$SPACE" --piece board addItem --help
+run cf piece call -s "$SPACE" --piece board addItem --help
 
 act "4 · Create, and act on what you were handed"
 say "The create returns the piece it made. Its address is the next command's target."
@@ -239,7 +239,7 @@ say "to be named before it can be shaped. The verb opens its own section and"
 say "-- closes it: the verb's fields stand between them, the read options"
 say "after. Reading the line left to right is reading it in the order the"
 say "words become knowable."
-run cf call -s "$SPACE" --piece board addItem --title "Login rewrite" -- --select item@
+run cf piece call -s "$SPACE" --piece board addItem --title "Login rewrite" -- --select item@
 say "The @ renders under the key \$link, which is the spelling every address"
 say "in this transcript arrives in. Capturing one in your own shell is a single"
 say "jq hop — and the quotes around \$link are load-bearing, since jq reads a"
@@ -270,13 +270,13 @@ say "fields' prose, and a summary line per verb, all from the item's author."
 run cf piece describe -s "$SPACE" --piece "$EPIC"
 say "On get and call the address needs no flag at all: it begins with '/' and"
 say "a path never does, so it stands bare in the first position."
-run cf call -s "$SPACE" "$EPIC" addChild --title "Session cookies"
+run cf piece call -s "$SPACE" "$EPIC" addChild --title "Session cookies"
 say "The item it hands back can be reached from inside itself: its parent holds"
 say "it, and it holds its parent. The position where the author's own type"
 say "re-enters answers with an address, so the whole result is still one value."
 # The verb opens the callable's section and `--` closes it: --title is a field
 # of addChild's and stands before the marker, and the read options follow it.
-run cf call -s "$SPACE" "$EPIC" addChild --title "CSRF tokens" -- --select item.title
+run cf piece call -s "$SPACE" "$EPIC" addChild --title "CSRF tokens" -- --select item.title
 say "And a caller who names one field is given one field, circle or no circle."
 say "item.title is the dotted form: it walks into item and keeps title. Note it"
 say "prunes rather than flattens — the answer is still shaped like the result,"
@@ -288,12 +288,12 @@ say "follows every link and copies what it finds; @ on its own names the"
 say "position being read rather than its contents, and applies to each element"
 say "when it crosses an array — so this asks for every child's address, with"
 say "its title beside it."
-run cf get -s "$SPACE" "$EPIC" children --select @,title
+run cf cell get -s "$SPACE" "$EPIC" children --select @,title
 
 act "6 · Ask the same question twice"
 say "The same command as act 5, deliberately — because the first thing anyone"
 say "watching a live system says is 'show me that again'."
-run cf get -s "$SPACE" "$EPIC" children --select @,title
+run cf cell get -s "$SPACE" "$EPIC" children --select @,title
 say "The same answer. A projection is a question you may ask twice, which is"
 say "what makes any of the reads above safe to put in a script — as here: the"
 say "child the next acts drive is taken from the answer just shown."
@@ -305,14 +305,14 @@ CSRF=$(printf '%s' "$OUT" | jq -r '.[] | select(.title=="CSRF tokens")."$link"')
 
 act "7 · A verb returns what only the pattern could compute"
 say "The note's timestamp is the pattern's; the caller never supplied one."
-run cf call -s "$SPACE" "$EPIC" recordNote --body "blocked on the cookie spec"
+run cf piece call -s "$SPACE" "$EPIC" recordNote --body "blocked on the cookie spec"
 # The receipt out of the run just shown, not a second call. Every invocation
 # envelope carries one, and it is an address like any other.
 RECEIPT=$(printf '%s' "$OUT" | jq -r '.receipt')
 say "Act 6 asked a read twice. A call cannot be asked twice — it would run the"
 say "handler again — but it does not need to be: the outcome is durable at an"
 say "address, and every envelope above has carried it as 'receipt'."
-run cf get -s "$SPACE" "$RECEIPT" --select note,noteCount
+run cf cell get -s "$SPACE" "$RECEIPT" --select note,noteCount
 say "The same outcome, without calling anything again. Note what this does"
 say "NOT prove on its own: a receipt is a frozen snapshot of what its handling"
 say "committed, so it reports that outcome whether or not anything else has"
@@ -322,10 +322,10 @@ say ""
 say "That route needs the address. The other one is for when you never got it"
 say "— a dropped connection, a response nobody saw. Name the call with an"
 say "--invocation id and the id itself becomes the handle."
-run cf call -s "$SPACE" --invocation note-retry "$EPIC" recordNote --body "first attempt"
+run cf piece call -s "$SPACE" --invocation note-retry "$EPIC" recordNote --body "first attempt"
 say "Replaying that id hands back the original. The payload below is"
 say "deliberately different text, and it does not take:"
-run cf call -s "$SPACE" --invocation note-retry "$EPIC" recordNote --body "a different body entirely"
+run cf piece call -s "$SPACE" --invocation note-retry "$EPIC" recordNote --body "a different body entirely"
 say "Same body, same receipt — and deduplicated: true, a field the first call"
 say "did not carry. The same caution applies: a replay is DEFINED to hand the"
 say "original snapshot back, so the envelope would look like this whether or"
@@ -336,7 +336,7 @@ say "above rather than typed here."
 say "So read the board, which is where a second note would show up. Two"
 say "entries, from the two calls that committed — and the replay's text is"
 say "not among them:"
-run cf get -s "$SPACE" "$EPIC" notes --select body
+run cf cell get -s "$SPACE" "$EPIC" notes --select body
 say "That is the proof, and it is the only one that holds: the envelopes"
 say "above could not have told you."
 say "The caveat that keeps this honest: the replay DOES run the handler body"
@@ -347,32 +347,32 @@ act "8 · Finishing reports what the caller could not know"
 say "openBelow walks the whole subtree — a caller would need N reads to learn it."
 say "A grandchild is filed first, under the child act 6 handed back, so there"
 say "is a subtree to walk."
-run cf call -s "$SPACE" "$KID" addChild --title "Rotate signing key" -- --select item.title
-run cf call -s "$SPACE" "$EPIC" finish --body "shipping behind a flag"
+run cf piece call -s "$SPACE" "$KID" addChild --title "Rotate signing key" -- --select item.title
+run cf piece call -s "$SPACE" "$EPIC" finish --body "shipping behind a flag"
 
 act "9 · A verb that declares no result"
 say "archive is Stream<void>: nothing to supply, nothing handed back. The call"
 say "is the verb's name alone, and the invocation settles carrying no result"
 say "at all."
-run cf call -s "$SPACE" "$KID" archive
+run cf piece call -s "$SPACE" "$KID" archive
 say "What it changed is a read away, on the one field the caller never sets —"
 say "and the address may carry the path, so one word names the piece and the"
 say "field in it."
-run cf get -s "$SPACE" "$KID/status"
+run cf cell get -s "$SPACE" "$KID/status"
 
 act "10 · Step back and read the board"
 say "Every change so far was seen one call at a time. One read from the name"
 say "the session started with shows the tree they add up to."
-run cf get -s "$SPACE" --piece board items --select title,status,children@
+run cf cell get -s "$SPACE" --piece board items --select title,status,children@
 say "Act 8 paid one verb call for depth — openBelow walked the subtree. Breadth"
 say "is a read: a filter decides membership before projection, so status picks"
 say "the elements and only title comes back."
-run cf get -s "$SPACE" "$EPIC" children --select title --filter '.status == "open"'
+run cf cell get -s "$SPACE" "$EPIC" children --select title --filter '.status == "open"'
 # The two halves of that question do not combine, and the refusal's own message
 # carries the reason, so nothing restates it here.
 refused "an address suffix under a filter" \
   "cannot be combined with an \`@\` suffix" \
-  cf get -s "$SPACE" "$EPIC" children \
+  cf cell get -s "$SPACE" "$EPIC" children \
   --select @,title --filter '.status == "open"'
 
 act "11 · Ask for something that is not there"
@@ -385,11 +385,11 @@ say "the other half of a surface knowing its own vocabulary."
 # after this capability arrived.
 refused "a field the verb does not declare" \
   "is not a field this verb declares" \
-  cf call -s "$SPACE" --piece board addItem \
+  cf piece call -s "$SPACE" --piece board addItem \
   '{"title":"Ship it","titel":"typo"}'
 refused "a keyword the projection reader does not recognize" \
   "is not a projection schema keyword" \
-  cf get -s "$SPACE" "$EPIC" children \
+  cf cell get -s "$SPACE" "$EPIC" children \
   --schema '{"type":"array","items":{"type":"object","propertes":{"title":true}}}'
 say "One shape of answer from both ends: what was wrong, the position it sat at,"
 say "what that position accepts, and the nearest thing you probably meant. The"
@@ -400,22 +400,22 @@ say "The tracker is a graph, not just a tree: an item can wait on any other."
 say "The spelling this session taught throughout — the address as printed —"
 say "stands where the verb declares a reference, and the edge that lands is"
 say "the target itself rather than a copy."
-run cf call -s "$SPACE" "$KID" blockOn --on "$CSRF" -- --select blocked@,on@,blockedOnCount
+run cf piece call -s "$SPACE" "$KID" blockOn --on "$CSRF" -- --select blocked@,on@,blockedOnCount
 say "The two payloads that could only ever be mistakes at a reference"
 say "position are refused naming it: a string that is no address, and an"
 say "inline copy — which would store a detached document inside this item"
 say "and report success."
 refused "a string that is not an address, where a reference is declared" \
   "is not an address" \
-  cf call -s "$SPACE" "$KID" blockOn --on "not-an-address"
+  cf piece call -s "$SPACE" "$KID" blockOn --on "not-an-address"
 refused "an inline copy at a reference position" \
   "detached document" \
-  cf call -s "$SPACE" "$KID" blockOn '{"on":{"title":"a copy"}}'
+  cf piece call -s "$SPACE" "$KID" blockOn '{"on":{"title":"a copy"}}'
 
 act "13 · One item, two paths, one address"
 say "This is what addresses are for: the same item under a parent AND as a"
 say "blocker, and a caller can tell it is one item rather than two copies."
-run cf get -s "$SPACE" "$EPIC" children --select @,title,blockedOn@
+run cf cell get -s "$SPACE" "$EPIC" children --select @,title,blockedOn@
 say "One address, two positions: the same string sits in the row that holds"
 say "the item and in the blockedOn of the item that waits on it."
 

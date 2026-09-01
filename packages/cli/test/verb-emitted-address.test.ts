@@ -477,7 +477,7 @@ describe("verb-emitted-address", () => {
     };
 
     interface Probe {
-      /** Dispatch `verb` as `cf call` does, `payload` spelled as the
+      /** Dispatch `verb` as `cf piece call` does, `payload` spelled as the
        * one positional JSON argument a caller writes by hand. */
       call: (verb: string, payload: unknown) => Promise<unknown>;
 

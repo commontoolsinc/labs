@@ -59,7 +59,11 @@ describe("main command", () => {
     );
     const commands = [main];
     const mismatchedUsage: string[] = [];
-    const customUsageCommands = new Set(["cf call", "cf call"]);
+    // Both mounts of `call`, which states its own usage because the callable
+    // section is not expressible as a Cliffy positional. Written out rather
+    // than derived: this set had held one name twice, so the exemption it was
+    // meant to carry had silently lapsed.
+    const customUsageCommands = new Set(["cf piece call", "cf call"]);
 
     for (const command of commands) {
       commands.push(...command.getCommands());
@@ -93,7 +97,7 @@ describe("main command", () => {
     // the handling committed. The two sit adjacent in `--help`, so a caveat
     // on one and silence on the other reads as a real difference between
     // them.
-    const { code, stdout, stderr } = await cf("call --help");
+    const { code, stdout, stderr } = await cf("piece call --help");
     checkStderr(stderr);
     const help = stripAnsi(stdout.join("\n")).replaceAll(/\s+/g, " ");
     expect(help).toContain(
@@ -110,7 +114,7 @@ describe("main command", () => {
     const { pieceDataCommand } = await import(
       "../commands/piece.ts?piece-call-usage-test"
     );
-    const call = pieceDataCommand("call");
+    const call = pieceDataCommand("call", { spelling: "piece call" });
     const expectedUsage =
       "--identity <identity> --url <url> --api-url <api-url> --space <space> " +
       "--cell <cell> [address] <callable> [input]";
@@ -119,14 +123,14 @@ describe("main command", () => {
       "<callable:string> [tail...:string]",
     );
     expect(call.getUsage()).toBe(expectedUsage);
-    const { code, stdout, stderr } = await cf("call --help");
+    const { code, stdout, stderr } = await cf("piece call --help");
     checkStderr(stderr);
     const help = stripAnsi(stdout.join("\n"));
     const renderedUsage = help.split("\n").find((line) =>
       line.trimStart().startsWith("Usage:")
     );
     expect(renderedUsage?.replaceAll(/\s+/g, " ").trim()).toBe(
-      `Usage: cf call ${expectedUsage}`,
+      `Usage: cf piece call ${expectedUsage}`,
     );
     const normalizedHelp = help.replaceAll(/\s+/g, " ");
     expect(normalizedHelp).toContain(
@@ -230,31 +234,46 @@ describe("main command", () => {
     ).rejects.toThrow(/--select shapes the result/);
   });
 
-  it("mounts the data commands at top level and nowhere under piece", async () => {
-    // The removal is only observable as an absence, so it needs its own
-    // assertion: every other test here names a command that exists, and would
-    // pass unchanged if `cf piece get` came back.
+  it("mounts each data command under the noun it acts on", async () => {
+    // Both halves matter and only one is observable as a presence: the
+    // superseded spellings still resolve, so a test that only looked for the
+    // blessed ones would pass with the surface unchanged.
     const { main } = await import(
       "../commands/main.ts?piece-data-absence"
     );
-    const top = main.getCommands().map((command) => command.getName());
-    expect(top).toContain("get");
-    expect(top).toContain("set");
-    expect(top).toContain("call");
+    const named = (
+      // deno-lint-ignore no-explicit-any
+      command: any,
+      includeHidden: boolean,
+    ): string[] =>
+      command.getCommands(includeHidden).map((c: { getName(): string }) =>
+        c.getName()
+      );
+    const childOf = (name: string) =>
+      // deno-lint-ignore no-explicit-any
+      main.getCommands(true).find((c: any) => c.getName() === name);
 
-    const piece = main.getCommands().find((command) =>
-      command.getName() === "piece"
+    const cell = childOf("cell");
+    expect(cell).toBeDefined();
+    expect(named(cell, false).sort()).toEqual(
+      ["get", "get-label", "help", "set", "set-label"],
     );
+
+    const piece = childOf("piece");
     expect(piece).toBeDefined();
-    const nested = piece!.getCommands(true).map((command) => command.getName());
-    expect(nested).not.toContain("get");
-    expect(nested).not.toContain("set");
-    expect(nested).not.toContain("call");
-    // The lifecycle commands that merely start with the same word stay.
-    expect(nested).toContain("setsrc");
-    expect(nested).toContain("getsrc");
-    expect(nested).toContain("get-label");
-    expect(nested).toContain("set-label");
+    expect(named(piece, false)).toContain("call");
+    // The lifecycle commands that merely start with the same word stay put.
+    expect(named(piece, false)).toContain("setsrc");
+    expect(named(piece, false)).toContain("getsrc");
+    // The label commands act on a cell and moved with `get` and `set`.
+    expect(named(piece, false)).not.toContain("get-label");
+    expect(named(piece, false)).not.toContain("set-label");
+
+    // The superseded top-level spellings resolve and are offered to nobody.
+    for (const superseded of ["get", "set", "call"]) {
+      expect(named(main, true)).toContain(superseded);
+      expect(named(main, false)).not.toContain(superseded);
+    }
   });
 
   it("registers visible commands and reports configured environment defaults", async () => {

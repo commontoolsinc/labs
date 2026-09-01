@@ -46,20 +46,6 @@ export const NO_PROSE = new Map<string, string>([
     "fuse-supervisor",
     "the same, for the process that supervises the FUSE child",
   ],
-  // The step-7 mounts kept only so a caller who learned the old spelling
-  // keeps working. Documenting one would teach the spelling being retired,
-  // and the command says on every run what to write instead. These entries
-  // go when the mounts do: the check fails on an allowance naming a command
-  // the tree no longer accepts, so the removal cannot leave them behind.
-  [
-    "piece recreate-root",
-    "superseded by `cf space recreate-root`; the mount survives for callers " +
-    "who have not migrated and the command itself names its replacement",
-  ],
-  [
-    "piece set-home",
-    "superseded by `cf space set-home`, on the same terms",
-  ],
 ]);
 
 /**
@@ -166,7 +152,7 @@ function escapeRegExp(text: string): string {
  * A document names a command by writing it the way a caller types it, which
  * is the whole command path between boundaries. Three things look like that
  * and are not it. `cf piece setsrc` is a different command with its own prose
- * obligation, so it cannot stand in for `cf set`. `scf brew` is a word
+ * obligation, so it cannot stand in for `cf cell set`. `scf brew` is a word
  * that happens to end in the command's letters. And `cf piece ls` names the
  * child: a reader looking up `cf piece` finds nothing about `cf piece` there,
  * so the parent still owes prose of its own — which is why the next segment

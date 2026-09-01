@@ -149,7 +149,7 @@ const INPUT_CELL_SCHEMA = {
 } as const satisfies JSONSchema;
 
 interface Tracker {
-  /** Dispatch `verb` the way `cf call` does, under an invocation id so
+  /** Dispatch `verb` the way `cf piece call` does, under an invocation id so
    * the outcome is read back off the handling's receipt. */
   call: (
     verb: string,
@@ -190,7 +190,7 @@ async function withTracker<T>(
     await root.pull();
 
     // The same stream the pattern put on `addChild`, reached on the piece's
-    // INPUT cell under a name the result cell does not carry. `cf call`
+    // INPUT cell under a name the result cell does not carry. `cf piece call`
     // resolves a name on the result cell first, so `fileUnder` is the
     // input-cell resolution — and a declared result is keyed by the PATTERN's
     // result properties, which is why that resolution can match none.
@@ -257,7 +257,7 @@ function childTitles(root: Cell<any>): string[] {
   return (root.key("children").get() ?? []).map((child: any) => child.title);
 }
 
-describe("cf call on a piece that points back at its container", () => {
+describe("cf piece call on a piece that points back at its container", () => {
   it("renders the returned piece, with the back-reference as an address", async () => {
     await withTracker("cyclic-returns-child", async ({ call }) => {
       const result = await call("addChild", [
@@ -555,7 +555,7 @@ describe("cf call on a piece that points back at its container", () => {
       // mutation, and the message says so rather than leaving a stack trace to
       // read as "the call failed".
       expect(message).toContain("COMMITTED");
-      expect(message).toContain("cf get --cell of:");
+      expect(message).toContain("cf cell get --cell of:");
       expect(message).toContain("declared result leaves the closing position");
 
       // And the write did land.
@@ -586,7 +586,7 @@ describe("cf call on a piece that points back at its container", () => {
           'closes a circle at "/item/parent/children/0"',
         );
         expect(message).toContain("COMMITTED");
-        expect(message).toContain("cf get --cell of:");
+        expect(message).toContain("cf cell get --cell of:");
         expect(message).not.toContain("leaves the closing position");
         // No pattern was loaded to look for a declaration, because this
         // resolution attaches no thunk to reach one through.

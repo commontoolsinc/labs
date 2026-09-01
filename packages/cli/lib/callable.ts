@@ -180,7 +180,7 @@ export interface CallableExecutionDeps {
   showLinks?: boolean;
 
   /** `--filter`/`--select`/`--schema`: the shape the caller asked the result
-   * to arrive in. Answered by the same selection step `cf get` reads
+   * to arrive in. Answered by the same selection step `cf cell get` reads
    * through, so one grammar covers reads and calls.
    *
    * It shapes a result that exists rather than deciding what is fetched: the
@@ -225,7 +225,7 @@ export interface InvocationOutcome {
    * callback carries, so the address is known BEFORE the outcome is read.
    * That is what makes it available under `--no-wait`: a caller that chose
    * not to wait still holds the address to collect from, and reads it back
-   * with `cf get --cell <receipt>` rather than re-invoking the verb.
+   * with `cf cell get --cell <receipt>` rather than re-invoking the verb.
    * The receipt is a COMMIT witness, not an execution witness — a same-id
    * replay
    * runs the handler body again and then loses the race, so effects outside
@@ -1366,7 +1366,7 @@ export function collectInvocationResultLinks(
 
 /**
  * Shape a call's result the way the caller asked for it, through the same step
- * `cf get` reads through — the one place a `--filter`/`--select`/
+ * `cf cell get` reads through — the one place a `--filter`/`--select`/
  * `--schema` grammar is interpreted, so a caller learns it once.
  *
  * `resultCell` is the cell the value was produced from: a handling's receipt,
@@ -1377,7 +1377,7 @@ export function collectInvocationResultLinks(
  * A selection that materializes nothing over a result that exists is refused
  * rather than reported as an absent result: an omitted `result` key means the
  * verb returned nothing, and a projection that kept nothing is a different
- * fact. `cf get` refuses the same condition on the same grounds.
+ * fact. `cf cell get` refuses the same condition on the same grounds.
  */
 async function selectCallResult(
   resolved: CallableResolution,
@@ -1581,7 +1581,7 @@ async function boundCyclicResult(
       " Collect the outcome with a shape that bounds it: " +
       (receiptId === undefined
         ? "read the receipt with --select or --schema."
-        : `cf get --cell ${receiptId} ` +
+        : `cf cell get --cell ${receiptId} ` +
           `--schema '{"properties":{"<field>":{"$link":true}}}'.`) +
       " Calling the verb again under --select or --schema shapes it at the " +
       "call, but runs the handler body a second time.",

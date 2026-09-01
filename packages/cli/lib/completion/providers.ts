@@ -7,7 +7,7 @@
  *
  * Every provider resolves its fabric context from the half-typed line first and
  * the environment second, which is what lets
- * `cf call -s other-space --cell <TAB>` list the pieces of `other-space`
+ * `cf piece call -s other-space --cell <TAB>` list the pieces of `other-space`
  * rather than whatever `CF_SPACE`-shaped default the shell happens to carry.
  *
  * Failure is always silent and always empty. A completion request runs while
@@ -384,6 +384,9 @@ export function splitPathPrefix(
  * wish commits a cell to the space: a Tab must not write.
  */
 const PROJECTION_SOURCE_COMMANDS: readonly string[] = [
+  "cell get",
+  // The superseded top-level spelling, which still completes its own options
+  // for a caller who has not migrated.
   "get",
 ];
 
@@ -397,7 +400,7 @@ const PROJECTION_SOURCE_COMMANDS: readonly string[] = [
  *
  * The vocabulary needs no request the slot does not already have: the value
  * being projected is the one at the piece and path the line names, which is
- * what `cf get` would read.
+ * what `cf cell get` would read.
  */
 function projectionFieldCandidates(
   flag: "select" | "schema",
@@ -1017,20 +1020,27 @@ const INSPECT_ENTITY_COMMANDS: readonly string[] = [
 /**
  * Positional providers, keyed by `<command path>:<argument name>`. The command
  * path disambiguates arguments that share a name across commands — `path` means
- * a cell path under `cf get` but a filesystem path elsewhere.
+ * a cell path under `cf cell get` but a filesystem path elsewhere.
  */
 const ARGUMENT_PROVIDERS: Readonly<
   Record<string, (line: CompletionLine) => Promise<ProviderResult>>
 > = {
+  "cell get-label:path": cellPathCandidates,
   "piece get-label:path": cellPathCandidates,
+  "cell set-label:path": cellPathCandidates,
   "piece set-label:path": cellPathCandidates,
+  "piece call:callable": callableCandidates,
   "call:callable": callableCandidates,
-  // The first positional of `cf get`/`cf set` is a cell path unless the caller
+  // The first positional of `cf cell get`/`cf cell set` is a cell path unless the caller
   // writes a canonical address there, and an address is pasted rather than
   // completed — so the path candidates serve the slot either way.
+  "cell get:addressOrPath": cellPathCandidates,
   "get:addressOrPath": cellPathCandidates,
+  "cell get:path": cellPathCandidates,
   "get:path": cellPathCandidates,
+  "cell set:addressOrPath": cellPathCandidates,
   "set:addressOrPath": cellPathCandidates,
+  "cell set:path": cellPathCandidates,
   "set:path": cellPathCandidates,
   "piece link:source": linkEndpointCandidates,
   "piece link:target": linkEndpointCandidates,

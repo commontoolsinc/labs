@@ -1481,7 +1481,7 @@ describe("cli piece parsing", () => {
   it("prefers the verb refusal over a selection error on a stream path", async () => {
     // A --filter against a handler fails inside the selector with a shape
     // error ("--filter can only be applied to an array") that sends the
-    // caller to their schema, when the answer is `cf call`. The stored
+    // caller to their schema, when the answer is `cf piece call`. The stored
     // {$stream: true} sentinel is a definite signal, so the verb refusal
     // wins over whatever the selector threw.
     // What a real cell answers for a verb: the parent stores a LINK at the
@@ -2000,13 +2000,13 @@ describe("cli piece parsing", () => {
       piece: PIECE,
     };
 
-    it("refuses a root verb path, pointing at cf call", async () => {
+    it("refuses a root verb path, pointing at cf piece call", async () => {
       const deps = guardDeps(guardPiece(RESULT_VALUE));
       const error = await getCellValue(config, ["addItem"], {}, deps)
         .catch((error) => error);
       expect(error).toBeInstanceOf(PieceVerbReadError);
       expect((error as Error).message).toBe(
-        `Path resolves to a verb; use 'cf call --cell ${PIECE} addItem' instead.`,
+        `Path resolves to a verb; use 'cf piece call --cell ${PIECE} addItem' instead.`,
       );
 
       // A root verb on the input cell redirects the same way: the dispatcher
@@ -2016,7 +2016,7 @@ describe("cli piece parsing", () => {
       );
       await expect(
         getCellValue(config, ["setup"], { input: true }, inputDeps),
-      ).rejects.toThrow(/use 'cf call/);
+      ).rejects.toThrow(/use 'cf piece call/);
     });
 
     it("classifies a verb path without projecting the whole parent", async () => {
@@ -2060,7 +2060,7 @@ describe("cli piece parsing", () => {
           guardDeps(pieceWithChild(child)),
         ).catch((error) => error);
         expect(error).toBeInstanceOf(PieceVerbReadError);
-        expect((error as Error).message).toContain("cf call");
+        expect((error as Error).message).toContain("cf piece call");
       }
 
       // And a data field under the same parent still reads: refusing on
@@ -2100,11 +2100,11 @@ describe("cli piece parsing", () => {
         },
       };
       await expect(getCellValue(config, ["notify"], {}, guardDeps(piece)))
-        .rejects.toThrow(/use 'cf call/);
+        .rejects.toThrow(/use 'cf piece call/);
     });
 
     it("refuses a nested verb path without suggesting an uncallable command", async () => {
-      // `cf call` resolves root-level names only, so `cf call
+      // `cf piece call` resolves root-level names only, so `cf piece call
       // removeItem` would fail — the refusal must not suggest it. It says
       // why the read refused and where to go instead.
       const deps = guardDeps(guardPiece(RESULT_VALUE));
@@ -2121,7 +2121,7 @@ describe("cli piece parsing", () => {
           "instead, or list the callable verbs with " +
           `'cf piece verbs --cell ${PIECE}'.`,
       );
-      expect((error as Error).message).not.toContain("cf call");
+      expect((error as Error).message).not.toContain("cf piece call");
     });
 
     it("reads a probe-classifiable but marker-less output (fails open)", async () => {
@@ -2184,7 +2184,7 @@ describe("cli piece parsing", () => {
       )
         .catch((error) => error);
       expect(error).toBeInstanceOf(PieceVerbReadError);
-      expect((error as Error).message).toContain("cf call");
+      expect((error as Error).message).toContain("cf piece call");
       expect((error as Error).message).not.toContain("--step");
     });
 
@@ -2230,7 +2230,7 @@ describe("cli piece parsing", () => {
           ),
       }).catch((error) => error);
       expect(thrown).toBeInstanceOf(PieceVerbReadError);
-      expect((thrown as Error).message).toContain("cf call");
+      expect((thrown as Error).message).toContain("cf piece call");
 
       // And the same when the selection simply yields nothing.
       const empty = await getCellValue(config, ["addTopic"], options, {

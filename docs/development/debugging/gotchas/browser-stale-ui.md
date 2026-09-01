@@ -24,7 +24,7 @@ mutation style. Don't.
    written to a different piece (or the UI may be rendering a different
    instance) than the one you're inspecting.
 
-3. **Check recompute.** Via the CLI, `cf set` does not trigger computed
+3. **Check recompute.** Via the CLI, `cf cell set` does not trigger computed
    re-evaluation — run `piece step` first (see
    [cli-debugging](../cli-debugging.md#stale-computed-values-after-cf-set)).
 

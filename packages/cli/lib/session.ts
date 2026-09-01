@@ -2,7 +2,7 @@
  * Mint a session id: the caller identity that an invocation id is chosen
  * within.
  *
- * `cf call --invocation <id>` lets a caller name a dispatch so that a
+ * `cf piece call --invocation <id>` lets a caller name a dispatch so that a
  * retry settles on the original outcome: the handler body runs again, loses
  * the race for the create-only receipt, and the caller reads the original
  * back — nothing commits twice, though effects outside the transaction can

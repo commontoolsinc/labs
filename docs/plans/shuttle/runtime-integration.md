@@ -131,7 +131,7 @@ Two disciplines every existing sink consumer rediscovered:
   runtime. The guard-plus-`idle()` form is the one to adopt — no timer.
 - **Freshness requires running.** A piece that is not started serves stored
   state; computed values are only fresh when the pattern runs in this
-  process. That is what `cf get --step` does per invocation
+  process. That is what `cf cell get --step` does per invocation
   (`getCellValue` in `packages/cli/lib/piece.ts`: get with `runIt`, then
   pull, `idle`, `synced`). In a persistent shell that dance collapses to a
   one-time start per piece. When shuttle starts a piece is a policy question
@@ -176,7 +176,8 @@ injection point that lets a lib function reuse a held controller:
 `call` has the family's shape too, in `callFromCommand`
 (`commands/piece.ts`). Cliffy splits an invocation into the two arrays it
 holds on the command object bound as an action's `this` — this command's
-own arguments, the line past `cf call` (`getRawArgs`), which a grammar
+own arguments, the line past `cf piece call` (`getRawArgs`), which a
+grammar
 refusal reprints after prepending that prefix itself, and the words past
 `--` (`getLiteralArgs`), which the read step parses — so both are
 parameters of the named export, beside the mount's spelling, and the action

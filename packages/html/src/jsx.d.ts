@@ -2875,7 +2875,7 @@ type CFEvent<T> = {
 
 // A stream of ANY arity is bindable, including one that declares a result.
 // Deliberate, not incidental: the point of the verb contract is that one verb
-// serves both the UI and an agent calling it through `cf call`, so a
+// serves both the UI and an agent calling it through `cf piece call`, so a
 // verb must not become UI-unbindable by declaring what it returns. The result
 // is simply unobserved here — the DOM has nowhere to put it, and the caller
 // that wants it reads the invocation receipt.

@@ -10,7 +10,7 @@
  * the read step's begins.
  *
  * ```text
- * cf call <target> <verb> <verb input> -- <read opts>
+ * cf piece call <target> <verb> <verb input> -- <read opts>
  * cf exec <mountedFile> <verb input>   -- <read opts>
  * ```
  *

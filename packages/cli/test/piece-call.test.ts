@@ -1025,17 +1025,17 @@ describe("executePieceCallable", () => {
     // mount to name must not teach the deprecated one. Each mount passes its
     // own spelling as helpCommandPrefix.
     expect(result.helpText).toContain(
-      "cf call ... search --help",
+      "cf piece call ... search --help",
     );
     expect(result.helpText).toContain(
-      "cf call ... search [run] --query <string>",
+      "cf piece call ... search [run] --query <string>",
     );
     expect(result.helpText).toContain("JSON input:");
     expect(result.helpText).toContain(
       "Pass inline JSON as one positional argument or after `--json`",
     );
     expect(result.helpText).toContain(
-      "cf call ... search --json [<json>]",
+      "cf piece call ... search --json [<json>]",
     );
     expect(result.helpText).toContain("query: string");
     expect(result.helpText).toContain("Flags:");
@@ -1043,7 +1043,7 @@ describe("executePieceCallable", () => {
       "Read the full input object from stdin.",
     );
     expect(result.helpText).not.toContain(
-      "cf call ... search [run] --help",
+      "cf piece call ... search [run] --help",
     );
     expect(result.helpText).not.toContain("cf exec");
   });
@@ -2476,7 +2476,7 @@ describe("call stdin payloads", () => {
   });
 
   it("forwards a payload written beside flags rather than translating it", () => {
-    // `cf call ... search '{"x":1}' --query milk` names its input twice. The
+    // `cf piece call ... search '{"x":1}' --query milk` names its input twice. The
     // verb's own parser owns both spellings, so it is the door that refuses
     // them together — this one does not translate the payload and so does not
     // hide the second spelling from it.
@@ -3703,7 +3703,7 @@ describe("call selection", () => {
   };
 
   it("points the shared selection step at the receipt the result came from", async () => {
-    // The whole of C2: a call reaches the same step `cf get` reads
+    // The whole of C2: a call reaches the same step `cf cell get` reads
     // through, pointed at the cell the value was read from — so the shaped
     // answer carries the source's own links rather than a copy of a copy.
     const receiptCell = {
@@ -3964,7 +3964,7 @@ describe("call selection", () => {
       ).toBeDefined();
     });
 
-    it("parses through the same grammar `cf get` reads", async () => {
+    it("parses through the same grammar `cf cell get` reads", async () => {
       expect(await parsePieceCallSelection({})).toBeUndefined();
       const selection = await parsePieceCallSelection({
         filter: ".done == false",
@@ -4129,7 +4129,7 @@ describe("call over a live runtime", () => {
 
   it("returns the address of what a verb returned, in place of its contents", async () => {
     // The `$link` marker reaches a call through the same step, which is what
-    // makes `cf call ... addTopic <json> -- --schema
+    // makes `cf piece call ... addTopic <json> -- --schema
     // '{"properties":{"topic":{"$link":true}}}'` — the command's own example
     // — an address a later call can use.
     const tx = runtime.edit();
@@ -4207,7 +4207,7 @@ describe("call over a live runtime", () => {
     // Resolve the published address through the reference intake `--piece`
     // runs it through — the published form IS that intake's form — and read
     // the cell it names. This covers the address and the intake; it stops
-    // short of the whole `cf get` route, which also runs slug
+    // short of the whole `cf cell get` route, which also runs slug
     // resolution and the read-path guards before reaching the same cell.
     const published = parseLink(executed.invocation!.receipt!, { space });
     const collected = runtime.getCellFromEntityId(
@@ -4305,7 +4305,7 @@ describe("get data errors", () => {
     // "Path resolves to a handler; use invoke() instead." — so no extra hint
     // rides along (the --input tip would be a wrong remedy for a verb).
     expect(report?.message).toBe(
-      "Path resolves to a verb; use 'cf call --cell fid1:piece-123 addTopic' instead.",
+      "Path resolves to a verb; use 'cf piece call --cell fid1:piece-123 addTopic' instead.",
     );
     expect(report?.hint).toBeUndefined();
 
@@ -4320,7 +4320,7 @@ describe("get data errors", () => {
     expect(nestedReport?.message).toMatch(
       /cf piece verbs --cell fid1:piece-123/,
     );
-    expect(nestedReport?.message).not.toContain("cf call");
+    expect(nestedReport?.message).not.toContain("cf piece call");
     expect(nestedReport?.hint).toBeUndefined();
 
     // Threaded through the shared data-error exit: stderr message, exit 1.
@@ -4337,7 +4337,7 @@ describe("get data errors", () => {
       })
     ).toThrow("exit-sentinel");
     expect(printed).toEqual([
-      "Path resolves to a verb; use 'cf call --cell fid1:piece-123 addTopic' instead.",
+      "Path resolves to a verb; use 'cf piece call --cell fid1:piece-123 addTopic' instead.",
     ]);
     expect(exited).toEqual([1]);
   });
@@ -4868,7 +4868,7 @@ describe("renderPieceCallOutcome", () => {
     // bare because the readback runs under the same configured space as the
     // call; `cf exec`, whose space comes from the mount instead, prints the
     // space-carrying canonical form for the same cell.
-    assertStringIncludes(hinted[0], "cf get --cell of:x");
+    assertStringIncludes(hinted[0], "cf cell get --cell of:x");
     expect(hinted[0]).not.toContain("(space did:key:s");
   });
 
@@ -4890,7 +4890,7 @@ describe("renderPieceCallOutcome", () => {
     // space-scoped instance, which is a different cell — so the suffix rides
     // the address rather than sitting in a parenthetical the way the prose
     // form's did.
-    assertStringIncludes(hinted[0], "cf get --cell of:x@user");
+    assertStringIncludes(hinted[0], "cf cell get --cell of:x@user");
   });
 
   it("handler invocations render the Invocation JSON with next steps", () => {
@@ -4936,7 +4936,7 @@ describe("renderPieceCallOutcome", () => {
     // address unguessable, and an argument is readable in a process listing.
     assertStringIncludes(
       hinted[0],
-      "CF_INVOCATION_SESSION=ses-7 cf call",
+      "CF_INVOCATION_SESSION=ses-7 cf piece call",
     );
     assertStringIncludes(hinted[0], "--invocation inv-1");
     // And it says what the replay costs: the receipt witnesses the commit,
@@ -4967,7 +4967,7 @@ describe("renderPieceCallOutcome", () => {
     assertStringIncludes(hinted[0], "executes and commits AGAIN");
     // And no dangling alternative: there is nothing for an "Or" to be or to.
     expect(hinted[0]).not.toContain("Or replay");
-    assertStringIncludes(hinted[0], "cf get --cell fid1:piece");
+    assertStringIncludes(hinted[0], "cf cell get --cell fid1:piece");
   });
 
   it("leads the detached next steps with the address it published", () => {
@@ -4991,12 +4991,12 @@ describe("renderPieceCallOutcome", () => {
     // Collecting the outcome is a read of the address this call published,
     // and it comes first because it does not run the verb again. The replay
     // stays on offer below it, for a caller that lost the address.
-    assertStringIncludes(hinted[0], "cf get --cell /of:receipt-1");
+    assertStringIncludes(hinted[0], "cf cell get --cell /of:receipt-1");
     assertStringIncludes(
       hinted[0],
-      "CF_INVOCATION_SESSION=ses-7 cf call",
+      "CF_INVOCATION_SESSION=ses-7 cf piece call",
     );
-    expect(hinted[0].indexOf("cf get --cell /of:receipt-1"))
+    expect(hinted[0].indexOf("cf cell get --cell /of:receipt-1"))
       .toBeLessThan(hinted[0].indexOf("CF_INVOCATION_SESSION"));
   });
 
@@ -5025,7 +5025,7 @@ describe("renderPieceCallOutcome", () => {
     );
     assertStringIncludes(
       hinted[0],
-      "cf get --cell /of:receipt-1@session",
+      "cf cell get --cell /of:receipt-1@session",
     );
   });
 

@@ -39,8 +39,14 @@ const pieceGlobalValueOptions = new Set([
   "--space",
 ]);
 
-function pieceSubcommand(args: readonly string[]): string | undefined {
-  if (args[0] !== "piece") return undefined;
+/**
+ * The nouns whose subcommands carry the shared target options, and so share
+ * this argument shape.
+ */
+const TARGET_NOUNS = new Set(["piece", "cell"]);
+
+function nounSubcommand(args: readonly string[]): string | undefined {
+  if (!TARGET_NOUNS.has(args[0] ?? "")) return undefined;
 
   for (let index = 1; index < args.length; index++) {
     const argument = args[index];
@@ -78,10 +84,17 @@ export function reservesStdoutForCommandOutput(
   if (args[0] === "exec") return true;
   if (args[0] === "wish") return true;
   // `set` is absent for the same reason it is absent below: it writes prose,
-  // not a machine surface.
+  // not a machine surface. The superseded top-level spellings of `get` and
+  // `call` answer for as long as they are mounted, so they reserve stdout on
+  // the same terms as the nouns that replaced them.
   if (args[0] === "get" || args[0] === "call") return true;
-  const subcommand = pieceSubcommand(args);
-  return subcommand === "get-label" ||
+  const subcommand = nounSubcommand(args);
+  if (subcommand === undefined) return false;
+  // Keyed by the whole path where the noun decides the answer, and by the
+  // subcommand alone where both nouns agree.
+  const path = `${args[0]} ${subcommand}`;
+  return path === "cell get" || path === "piece call" ||
+    subcommand === "get-label" ||
     subcommand === "set-label" ||
     subcommand === "survey" || subcommand === "repair" ||
     subcommand === "retarget" || subcommand === "rollback" ||

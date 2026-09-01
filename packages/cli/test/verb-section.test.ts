@@ -100,7 +100,7 @@ describe("verb-section", () => {
   describe("refuseProjectionBeforeSection()", () => {
     it("returns for a line that writes no projection before the verb", () => {
       expect(() =>
-        refuseProjectionBeforeSection("call", "the verb", [
+        refuseProjectionBeforeSection("piece call", "the verb", [
           "--piece",
           "board",
           "addTopic",
@@ -109,7 +109,7 @@ describe("verb-section", () => {
       // Past the marker is where the grammar puts it, so the same flag is
       // untouched there.
       expect(() =>
-        refuseProjectionBeforeSection("call", "the verb", [
+        refuseProjectionBeforeSection("piece call", "the verb", [
           "addTopic",
           "--",
           "--select",
@@ -125,7 +125,7 @@ describe("verb-section", () => {
       // was not in, and would take the word away from a verb that declares a
       // field of that name.
       expect(() =>
-        refuseProjectionBeforeSection("call", "the verb", [
+        refuseProjectionBeforeSection("piece call", "the verb", [
           "--piece",
           "board",
           "addTopic",
@@ -139,7 +139,7 @@ describe("verb-section", () => {
       // The same name on both sides: the first is what the command parsed and
       // the second is the verb's, so only the first moves.
       const message = messageFrom(() =>
-        refuseProjectionBeforeSection("call", "the verb", [
+        refuseProjectionBeforeSection("piece call", "the verb", [
           "--select",
           "topic.title",
           "addTopic",
@@ -148,13 +148,13 @@ describe("verb-section", () => {
         ], { select: "topic.title" })
       );
       expect(message).toContain(
-        "write:    cf call addTopic --select mine -- --select topic.title",
+        "write:    cf piece call addTopic --select mine -- --select topic.title",
       );
     });
 
     it("writes the corrected line with the projection past a new marker", () => {
       const message = messageFrom(() =>
-        refuseProjectionBeforeSection("call", "the verb", [
+        refuseProjectionBeforeSection("piece call", "the verb", [
           "--piece",
           "board",
           "--select",
@@ -164,11 +164,11 @@ describe("verb-section", () => {
         ], { select: "topic.title" })
       );
       expect(message).toContain(
-        `written:  cf call --piece board --select topic.title addTopic ` +
+        `written:  cf piece call --piece board --select topic.title addTopic ` +
           `'{"title":"Ship it"}'`,
       );
       expect(message).toContain(
-        `write:    cf call --piece board addTopic '{"title":"Ship it"}' ` +
+        `write:    cf piece call --piece board addTopic '{"title":"Ship it"}' ` +
           `-- --select topic.title`,
       );
     });
@@ -178,7 +178,7 @@ describe("verb-section", () => {
       // own flags followed a marker. Correcting one without the other would
       // print a line that is refused in turn.
       const message = messageFrom(() =>
-        refuseProjectionBeforeSection("call", "the verb", [
+        refuseProjectionBeforeSection("piece call", "the verb", [
           "--piece",
           "board",
           "--select",
@@ -190,27 +190,29 @@ describe("verb-section", () => {
         ], { select: "item@" })
       );
       expect(message).toContain(
-        `write:    cf call --piece board addItem --title 'Login rewrite' ` +
+        `write:    cf piece call --piece board addItem --title 'Login rewrite' ` +
           `-- --select item@`,
       );
-      expect(message).not.toContain("write:    cf call --piece board -- ");
+      expect(message).not.toContain(
+        "write:    cf piece call --piece board -- ",
+      );
     });
 
     it("reads the `=` spelling, which carries its value inside the token", () => {
       const message = messageFrom(() =>
-        refuseProjectionBeforeSection("call", "the verb", [
+        refuseProjectionBeforeSection("piece call", "the verb", [
           "--select=topic.title",
           "addTopic",
         ], { select: "topic.title" })
       );
       expect(message).toContain(
-        "write:    cf call addTopic -- --select=topic.title",
+        "write:    cf piece call addTopic -- --select=topic.title",
       );
     });
 
     it("names every read option the line wrote", () => {
       const message = messageFrom(() =>
-        refuseProjectionBeforeSection("call", "the verb", [
+        refuseProjectionBeforeSection("piece call", "the verb", [
           "--filter",
           ".done == false",
           "--select",
@@ -233,7 +235,7 @@ describe("verb-section", () => {
       ).toContain("written after the mounted file");
       expect(
         messageFrom(() =>
-          refuseProjectionBeforeSection("call", "the verb", [
+          refuseProjectionBeforeSection("piece call", "the verb", [
             "--select",
             "id",
             "search",
@@ -244,7 +246,7 @@ describe("verb-section", () => {
 
     it("throws a ValidationError, so the CLI reports it as a usage error", () => {
       expect(() =>
-        refuseProjectionBeforeSection("call", "the verb", [
+        refuseProjectionBeforeSection("piece call", "the verb", [
           "--select",
           "a",
           "v",
@@ -256,12 +258,12 @@ describe("verb-section", () => {
   describe("parseReadSection()", () => {
     it("reads the three read options and nothing else", async () => {
       expect(
-        await parseReadSection("call", ["v", "--", "--select", "a,b"], [
+        await parseReadSection("piece call", ["v", "--", "--select", "a,b"], [
           "--select",
           "a,b",
         ]),
       ).toEqual({ select: "a,b" });
-      expect(await parseReadSection("call", ["v"], [])).toEqual({});
+      expect(await parseReadSection("piece call", ["v"], [])).toEqual({});
     });
 
     it("refuses a verb's own flag past the marker, and drops the marker", async () => {
@@ -269,7 +271,7 @@ describe("verb-section", () => {
       // the section the verb opened, so the corrected line takes the marker
       // out rather than describing where they go.
       const message = await asyncMessageFrom(() =>
-        parseReadSection("call", [
+        parseReadSection("piece call", [
           "--piece",
           "board",
           "search",
@@ -280,10 +282,10 @@ describe("verb-section", () => {
       );
       expect(message).toContain('"--query" is not a read option');
       expect(message).toContain(
-        "written:  cf call --piece board search -- --query milk",
+        "written:  cf piece call --piece board search -- --query milk",
       );
       expect(message).toContain(
-        "write:    cf call --piece board search --query milk",
+        "write:    cf piece call --piece board search --query milk",
       );
       // A verb field is not a misspelled read option, so no name is offered.
       expect(message).not.toContain("Did you mean");
@@ -291,17 +293,22 @@ describe("verb-section", () => {
 
     it("corrects a misspelled read option in place, keeping the marker", async () => {
       const message = await asyncMessageFrom(() =>
-        parseReadSection("call", ["v", "--", "--selct", "a"], ["--selct", "a"])
+        parseReadSection("piece call", ["v", "--", "--selct", "a"], [
+          "--selct",
+          "a",
+        ])
       );
       expect(message).toContain('Did you mean "--select"?');
-      expect(message).toContain("write:    cf call v -- --select a");
+      expect(message).toContain("write:    cf piece call v -- --select a");
     });
 
     it("corrects the `=` spelling with the caller's value still attached", async () => {
       const message = await asyncMessageFrom(() =>
-        parseReadSection("call", ["v", "--", "--selct=a,b"], ["--selct=a,b"])
+        parseReadSection("piece call", ["v", "--", "--selct=a,b"], [
+          "--selct=a,b",
+        ])
       );
-      expect(message).toContain("write:    cf call v -- --select=a,b");
+      expect(message).toContain("write:    cf piece call v -- --select=a,b");
     });
 
     it("corrects the occurrence past the marker, not one before it", async () => {
@@ -311,19 +318,19 @@ describe("verb-section", () => {
       // fails exactly as the one the caller wrote did.
       const message = await asyncMessageFrom(() =>
         parseReadSection(
-          "call",
+          "piece call",
           ["add", "--selct", "verb-value", "--", "--selct", "a"],
           ["--selct", "a"],
         )
       );
       expect(message).toContain(
-        "write:    cf call add --selct verb-value -- --select a",
+        "write:    cf piece call add --selct verb-value -- --select a",
       );
     });
 
     it("refuses a bare word past the marker", async () => {
       const message = await asyncMessageFrom(() =>
-        parseReadSection("call", ["v", "--", "payload"], ["payload"])
+        parseReadSection("piece call", ["v", "--", "payload"], ["payload"])
       );
       expect(message).toContain('"payload" is not a read option');
     });
@@ -331,13 +338,13 @@ describe("verb-section", () => {
     it("refuses a second marker, which closes nothing", async () => {
       const message = await asyncMessageFrom(() =>
         parseReadSection(
-          "call",
+          "piece call",
           ["v", "--", "--select", "a", "--", "--x"],
           ["--select", "a", "--", "--x"],
         )
       );
       expect(message).toContain("One boundary follows the callable's section");
-      expect(message).toContain("write:    cf call v -- --select a --x");
+      expect(message).toContain("write:    cf piece call v -- --select a --x");
     });
 
     it("refuses --schema beside --select from the declaration itself", async () => {
@@ -345,7 +352,7 @@ describe("verb-section", () => {
       // is what decides it on both sides of the marker.
       const message = await asyncMessageFrom(() =>
         parseReadSection(
-          "call",
+          "piece call",
           ["v", "--", "--select", "a", "--schema", "{}"],
           ["--select", "a", "--schema", "{}"],
         )
@@ -355,7 +362,7 @@ describe("verb-section", () => {
 
     it("refuses a read option written with no value", async () => {
       const message = await asyncMessageFrom(() =>
-        parseReadSection("call", ["v", "--", "--select"], ["--select"])
+        parseReadSection("piece call", ["v", "--", "--select"], ["--select"])
       );
       expect(message).not.toBe("");
     });
@@ -457,16 +464,19 @@ describe("verb-section", () => {
     }
 
     it("refuses a projection before the verb on `call`", async () => {
-      const { text, exitCode } = await outputFrom(pieceDataCommand("call"), [
-        "--piece",
-        "board",
-        "--select",
-        "topic.title",
-        "addTopic",
-      ]);
+      const { text, exitCode } = await outputFrom(
+        pieceDataCommand("call", { spelling: "piece call" }),
+        [
+          "--piece",
+          "board",
+          "--select",
+          "topic.title",
+          "addTopic",
+        ],
+      );
       expect(text).toContain("--select shapes the result");
       expect(text).toContain(
-        "write:    cf call --piece board addTopic -- --select topic.title",
+        "write:    cf piece call --piece board addTopic -- --select topic.title",
       );
       expect(exitCode).toBe(2);
     });
@@ -491,43 +501,52 @@ describe("verb-section", () => {
       // meets is about the identity it never named. `undeclaredFlagError` is
       // what answers it once a verb is resolved, with that verb's vocabulary
       // in hand.
-      const { text } = await outputFrom(pieceDataCommand("call"), [
-        "--piece",
-        "board",
-        "addTopic",
-        "--select",
-        "topic.title",
-      ]);
+      const { text } = await outputFrom(
+        pieceDataCommand("call", { spelling: "piece call" }),
+        [
+          "--piece",
+          "board",
+          "addTopic",
+          "--select",
+          "topic.title",
+        ],
+      );
       expect(text).not.toContain("shapes the result");
       expect(text).toContain("--identity");
     });
 
     it("refuses a verb's own flag past the marker on `call`", async () => {
-      const { text } = await outputFrom(pieceDataCommand("call"), [
-        "--piece",
-        "board",
-        "search",
-        "--",
-        "--query",
-        "milk",
-      ]);
+      const { text } = await outputFrom(
+        pieceDataCommand("call", { spelling: "piece call" }),
+        [
+          "--piece",
+          "board",
+          "search",
+          "--",
+          "--query",
+          "milk",
+        ],
+      );
       expect(text).toContain('"--query" is not a read option');
       expect(text).toContain(
-        "write:    cf call --piece board search --query milk",
+        "write:    cf piece call --piece board search --query milk",
       );
     });
 
     it("lets a projection past the marker through to the read step", async () => {
       // It must reach the action, so the refusal it meets is about the
       // identity it never named rather than about the grammar.
-      const { text } = await outputFrom(pieceDataCommand("call"), [
-        "--piece",
-        "board",
-        "addTopic",
-        "--",
-        "--select",
-        "topic.title",
-      ]);
+      const { text } = await outputFrom(
+        pieceDataCommand("call", { spelling: "piece call" }),
+        [
+          "--piece",
+          "board",
+          "addTopic",
+          "--",
+          "--select",
+          "topic.title",
+        ],
+      );
       expect(text).not.toContain("is not a read option");
       expect(text).not.toContain("shapes the result");
     });
@@ -537,28 +556,34 @@ describe("verb-section", () => {
       // now arrive from the read section, so the refusal has to be re-read
       // from where they land or it silently stops firing — and a detached
       // exit would return an unprojected value.
-      const { text } = await outputFrom(pieceDataCommand("call"), [
-        "--piece",
-        "board",
-        "--no-wait",
-        "addTopic",
-        "--",
-        "--select",
-        "topic.title",
-      ]);
+      const { text } = await outputFrom(
+        pieceDataCommand("call", { spelling: "piece call" }),
+        [
+          "--piece",
+          "board",
+          "--no-wait",
+          "addTopic",
+          "--",
+          "--select",
+          "topic.title",
+        ],
+      );
       expect(text).toContain("--select");
       expect(text).toContain("receipt readback that --no-wait skips");
     });
 
     it("reports a malformed projection as a data error, not a grammar one", async () => {
-      const { text } = await outputFrom(pieceDataCommand("call"), [
-        "--piece",
-        "board",
-        "addTopic",
-        "--",
-        "--select",
-        "a..b",
-      ]);
+      const { text } = await outputFrom(
+        pieceDataCommand("call", { spelling: "piece call" }),
+        [
+          "--piece",
+          "board",
+          "addTopic",
+          "--",
+          "--select",
+          "a..b",
+        ],
+      );
       expect(text).toContain('Invalid --select field path "a..b"');
     });
   });

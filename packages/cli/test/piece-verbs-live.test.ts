@@ -222,7 +222,7 @@ describe("listPieceCallables against a live piece", () => {
     expect(byName.get("increment")?.kind).toBe("handler");
     // Classified, not assumed: a fallback that hard-codes `"handler"` lists
     // this row with the wrong kind and with a handler's `invoke` command spec,
-    // so `cf piece verbs` and `cf call` disagree about what it is.
+    // so `cf piece verbs` and `cf piece call` disagree about what it is.
     expect(byName.get("hiddenTool")?.kind).toBe("tool");
     // A tool's input schema rides its own callable cell, so a correctly
     // classified row carries the sub-pattern's arguments; the handler branch
@@ -232,7 +232,7 @@ describe("listPieceCallables against a live piece", () => {
     });
     for (const verb of listing.verbs) {
       // The result cell is where the graph exposes them and where
-      // `cf call` resolves them, whatever the result TYPE says.
+      // `cf piece call` resolves them, whatever the result TYPE says.
       expect(verb.on).toBe("result");
     }
   });

@@ -213,34 +213,34 @@ run cf piece describe -s "$SPACE" --piece thermostat
 say "Those are two cells, not two views of one. A read goes to the result"
 say "cell; --input sends it to the arguments cell instead, which holds only"
 say "what the pattern declared as input — here, links to target and zones."
-run cf get -s "$SPACE" --piece thermostat --input
+run cf cell get -s "$SPACE" --piece thermostat --input
 say "So a derived field has no position in the arguments cell at all, and"
 say "asking for one there names the keys that are:"
 refused "a derived field lives on the result cell, not on the arguments cell" \
   "Available keys: target, zones" \
-  cf get -s "$SPACE" --piece thermostat targetFahrenheit --input
+  cf cell get -s "$SPACE" --piece thermostat targetFahrenheit --input
 
 act "3 · A read is a query: name the shape you want"
 say "Unshaped, a read carries everything the result cell holds — including"
 say "the verb handle, which is a link and not data anyone asked for."
-run cf get -s "$SPACE" --piece thermostat
+run cf cell get -s "$SPACE" --piece thermostat
 say "--select names fields and keeps nothing else."
-run cf get -s "$SPACE" --piece thermostat --select target,targetFahrenheit,belowTarget
+run cf cell get -s "$SPACE" --piece thermostat --select target,targetFahrenheit,belowTarget
 say "--filter decides membership in an array, with a jq-inspired predicate."
-run cf get -s "$SPACE" --piece thermostat zones --filter '.celsius < 20'
+run cf cell get -s "$SPACE" --piece thermostat zones --filter '.celsius < 20'
 say "--schema is the same projection written as JSON Schema — the spelling a"
 say "program generates rather than types."
-run cf get -s "$SPACE" --piece thermostat zones \
+run cf cell get -s "$SPACE" --piece thermostat zones \
   --schema '{"type":"array","items":{"type":"object","properties":{"name":true}}}'
 
 act "4 · A write lands on the result cell unless you say otherwise"
-say "cf set reads its value from stdin and addresses the RESULT cell by"
+say "cf cell set reads its value from stdin and addresses the RESULT cell by"
 say "default — the pattern's output, not its input. --input is what sends it"
 say "to the arguments cell, which is the flag's own wording: 'instead of"
 say "result cell'."
-run_stdin '25' cf set -s "$SPACE" --piece thermostat target
+run_stdin '25' cf cell set -s "$SPACE" --piece thermostat target
 say "The target moved. The two figures derived from it did not."
-run cf get -s "$SPACE" --piece thermostat --select target,targetFahrenheit,belowTarget
+run cf cell get -s "$SPACE" --piece thermostat --select target,targetFahrenheit,belowTarget
 say "68F is 20C and 2 is the count against 20 — both answers to the target"
 say "that was there before this write. Nothing recomputed them, because a"
 say "write is a write: it commits a value to a cell and runs no program."
@@ -252,55 +252,55 @@ say "whose whole job is to be that observer: start the piece, let the graph"
 say "settle, sync what it wrote, stop."
 run cf piece step -s "$SPACE" --piece thermostat
 say "Same read as before the step, and now both figures answer to 25."
-run cf get -s "$SPACE" --piece thermostat --select target,targetFahrenheit,belowTarget
+run cf cell get -s "$SPACE" --piece thermostat --select target,targetFahrenheit,belowTarget
 
 act "6 · Writing a derived field, and what the next step does to it"
 say "Nothing stops a write landing on a derived field: it is a position in"
 say "the result cell like any other, and the write is accepted."
-run_stdin '100' cf set -s "$SPACE" --piece thermostat targetFahrenheit
-run cf get -s "$SPACE" --piece thermostat --select targetFahrenheit
+run_stdin '100' cf cell set -s "$SPACE" --piece thermostat targetFahrenheit
+run cf cell get -s "$SPACE" --piece thermostat --select targetFahrenheit
 say "It reads back exactly as written — and survives only until something"
 say "recomputes it. The pattern owns that position, so the next step puts"
 say "the derived answer back."
 run cf piece step -s "$SPACE" --piece thermostat
-run cf get -s "$SPACE" --piece thermostat --select targetFahrenheit
+run cf cell get -s "$SPACE" --piece thermostat --select targetFahrenheit
 
 act "7 · The arguments cell, by flag and by suffix"
 say "--input sends the same write to the arguments cell."
-run_stdin '15' cf set -s "$SPACE" --piece thermostat target --input
-run cf get -s "$SPACE" --piece thermostat target --input
+run_stdin '15' cf cell set -s "$SPACE" --piece thermostat target --input
+run cf cell get -s "$SPACE" --piece thermostat target --input
 say "The other spelling of that choice rides the address. Ask the piece for"
 say "its own — @ alone answers with the address of what is being read —"
-run cf get -s "$SPACE" --piece thermostat --select @
+run cf cell get -s "$SPACE" --piece thermostat --select @
 ADDRESS=$(printf '%s' "$OUT" | jq -r '."$link"')
 say "— and a trailing #argument on that address selects the same cell --input"
 say "does, on both the read and the write."
-run cf get -s "$SPACE" "$ADDRESS#argument" target
-run_stdin '30' cf set -s "$SPACE" "$ADDRESS#argument" target
-run cf get -s "$SPACE" --piece thermostat target --input
+run cf cell get -s "$SPACE" "$ADDRESS#argument" target
+run_stdin '30' cf cell set -s "$SPACE" "$ADDRESS#argument" target
+run cf cell get -s "$SPACE" --piece thermostat target --input
 say "A slug and a bare id designate the piece a reference designates, so the"
 say "selection written after one means what it means after the other. Here the"
 say "slug reads back the cell the address just wrote to:"
-run cf get -s "$SPACE" --piece 'thermostat#argument' target
+run cf cell get -s "$SPACE" --piece 'thermostat#argument' target
 say "And a command that takes no --input takes no #argument either, so a"
 say "call cannot quietly be aimed at the arguments cell:"
 refused "a command without --input has no arguments cell to select" \
   'does not take' \
-  cf call -s "$SPACE" "$ADDRESS#argument" setTarget '{"celsius":21}'
+  cf piece call -s "$SPACE" "$ADDRESS#argument" setTarget '{"celsius":21}'
 
 act "8 · A verb writes, and leaves the derived fields behind just the same"
 say "A verb is how a pattern changes its own state: the handler runs inside"
 say "the piece, and what it returns is computed there. Watch what it hands"
 say "back —"
-run cf call -s "$SPACE" --piece thermostat setTarget --celsius 10
+run cf piece call -s "$SPACE" --piece thermostat setTarget --celsius 10
 say "— and then read the piece. The target is the verb's; the derived fields"
 say "still answer to the target the last step saw. Settlement is the"
 say "handler's commit, not the recomputation that commit sets off, so a call"
 say "is no more of an observer than a set is."
-run cf get -s "$SPACE" --piece thermostat --select target,targetFahrenheit,belowTarget
+run cf cell get -s "$SPACE" --piece thermostat --select target,targetFahrenheit,belowTarget
 say "One step, and the whole piece agrees with itself again."
 run cf piece step -s "$SPACE" --piece thermostat
-run cf get -s "$SPACE" --piece thermostat --select target,targetFahrenheit,belowTarget
+run cf cell get -s "$SPACE" --piece thermostat --select target,targetFahrenheit,belowTarget
 
 act "9 · A query instead of an address, and the read that writes"
 say "Every read so far named its target. cf wish names a query and lets the"
@@ -309,7 +309,7 @@ say "to addresses rather than contents."
 run cf wish -s "$SPACE" '#pieceRegistry' --select @
 FOUND=$(printf '%s' "$OUT" | jq -r '.[0]."$link"')
 say "That address is an ordinary one: it goes into a read unedited."
-run cf get -s "$SPACE" "$FOUND" --select target,belowTarget
+run cf cell get -s "$SPACE" "$FOUND" --select target,belowTarget
 say "Resolving a wish is not free the way a get is. It runs a one-node"
 say "pattern to hold the query and commits it, so the resolution is a WRITE"
 say "against the space — the one command here that reads like a query and"

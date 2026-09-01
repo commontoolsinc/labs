@@ -412,7 +412,7 @@ emits `asCell: ["opaque"]` is wrong on this tree.
 ### 6.5 Stream event schemas — deliberately open (C5)
 
 A stream property's schema object is the verb's **event** schema — what a
-caller sends, which `cf piece verbs` publishes and `cf call` validates
+caller sends, which `cf piece verbs` publishes and `cf piece call` validates
 payloads against. It carries no `additionalProperties` of its own — only
 what the event type itself demands (an index signature, a `Record` value
 type). The verb contract wants event schemas closed-world

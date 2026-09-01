@@ -41,22 +41,34 @@ describe("JSON command contracts", () => {
         "--pattern-json",
       ]),
     ).toBe(true);
-    // Which data commands reserve stdout: get and call do, set does not.
+    // Which data commands reserve stdout: reading does, writing does not,
+    // because `set` reports in prose rather than on a machine surface.
+    expect(reservesStdoutForCommandOutput(["cell", "get", "path"])).toBe(true);
+    expect(reservesStdoutForCommandOutput(["piece", "call", "verb"])).toBe(
+      true,
+    );
+    expect(reservesStdoutForCommandOutput(["cell", "set", "path"])).toBe(false);
+    // The superseded spellings answer for as long as they are mounted, so
+    // they reserve stdout on the same terms. A refusal reaching stdout is
+    // what this guards, and it corrupts a caller's parse whichever spelling
+    // they wrote.
     expect(reservesStdoutForCommandOutput(["get", "path"])).toBe(true);
     expect(reservesStdoutForCommandOutput(["call", "search"])).toBe(true);
     expect(reservesStdoutForCommandOutput(["set", "path"])).toBe(false);
-    // The piece-mounted spellings are gone, so nothing reserves stdout for
-    // them; a leftover entry would suppress the help an unknown subcommand
-    // prints, and `cf piece set` would answer differently from the other two.
+    // `cf piece get` and `cf piece set` were removed outright rather than
+    // moved, so nothing reserves stdout for them: a leftover entry would
+    // suppress the help an unknown subcommand prints.
     expect(reservesStdoutForCommandOutput(["piece", "get", "path"])).toBe(
       false,
     );
     expect(reservesStdoutForCommandOutput(["piece", "set", "path"])).toBe(
       false,
     );
-    expect(reservesStdoutForCommandOutput(["piece", "call", "verb"])).toBe(
-      false,
-    );
+    // The label commands reserve it under either noun.
+    expect(reservesStdoutForCommandOutput(["cell", "get-label", "path"]))
+      .toBe(true);
+    expect(reservesStdoutForCommandOutput(["cell", "set-label", "path"]))
+      .toBe(true);
     expect(reservesStdoutForCommandOutput(["piece", "get-label", "path"]))
       .toBe(true);
     expect(reservesStdoutForCommandOutput(["piece", "set-label", "path"]))
@@ -252,7 +264,7 @@ describe("call JSON arguments", () => {
     // writes first. The refusal prints the line that works rather than
     // reporting an unknown name.
     const { code, stdout, stderr } = await cf(
-      "call --identity ./missing.key --api-url http://127.0.0.1:1 --space test --piece example search -- --query milk",
+      "piece call --identity ./missing.key --api-url http://127.0.0.1:1 --space test --piece example search -- --query milk",
     );
 
     expect(code).toBe(2);
@@ -260,7 +272,7 @@ describe("call JSON arguments", () => {
     const errors = stripAnsi(stderr.join("\n"));
     expect(errors).toContain('"--query" is not a read option');
     expect(errors).toContain(
-      "write:    cf call --identity ./missing.key --api-url " +
+      "write:    cf piece call --identity ./missing.key --api-url " +
         "http://127.0.0.1:1 --space test --piece example search --query milk",
     );
     expect(errors).not.toContain("pieceCallRawArgs");

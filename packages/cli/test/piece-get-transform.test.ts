@@ -28,7 +28,7 @@ import {
 const signer = await Identity.fromPassphrase("cf-piece-get-transform");
 const space = signer.did();
 
-describe("cf get transforms", () => {
+describe("cf cell get transforms", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 

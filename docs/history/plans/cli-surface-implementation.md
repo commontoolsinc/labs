@@ -1,14 +1,22 @@
+---
+status: historical
+created: 2026-08-07
+archived: 2026-09-01
+reason: "Executed plan; its last live content was Stage 4, which shipped as step 7 putting each command under the noun it acts on."
+superseded-by: docs/plans/cli-surface-shape.md
+---
+
 # The CLI surface — implementation plan
 
-[The CLI surface shape](cli-surface-shape.md) describes what `cf` should look
+[The CLI surface shape](../../plans/cli-surface-shape.md) describes what `cf` should look
 like and lays out seven steps to get there. Steps 1–3 are the read layer, and
-[the verbs plan](verbs-implementation.md) builds them. This plan is steps 4–7:
+[the verbs plan](../../plans/verbs-implementation.md) builds them. This plan is steps 4–7:
 the part that changes what a caller types.
 
 The split is deliberate, though not absolute. The read layer breaks two things,
 both of which it owns and sequences itself. Scoping invocation ids to a session
 makes `--invocation` without one an error — a spelling that works today and that
-[Verbs over the CLI](../common/verbs/over-the-cli.md) teaches — and that lands
+[Verbs over the CLI](../../common/verbs/over-the-cli.md) teaches — and that lands
 alone, ahead of anything that publishes an address. Checking projection keys
 against an allowlist refuses a schema carrying a key that was silently dropped
 before, which is a command that exited zero and now does not.
@@ -24,9 +32,9 @@ quickly.
 ## Where this stands
 
 Stages 1 through 3 are on main, and step 6b has removed the piece-mounted
-`get`, `set` and `call` — `cf get`, `cf set` and `cf call` are the only
+`get`, `set` and `call` — `cf cell get`, `cf cell set` and `cf piece call` are the only
 spellings. Stage 4 is the open work, along with step 7 and the second arc's
-step 10 in [the shape document](cli-surface-shape.md).
+step 10 in [the shape document](../../plans/cli-surface-shape.md).
 
 ## Governing decisions
 
@@ -84,12 +92,12 @@ same way and are queued on the same terms. The rest move:
 | `piece inspect` | merged with `cf inspect piece` | 7 |
 | `piece view`, `piece render` | merged with `cf view` | 7 |
 | `piece map` | merged with `cf inspect graph` | 7 |
-| `piece apply` | merged with `cf set` | 7 |
+| `piece apply` | merged with `cf cell set` | 7 |
 | `piece recreate-root`, `piece set-home` | `cf space …` | 7 |
 
 ## Stage 1 — addresses become positional
 
-**P1. A positional address beside `--piece`.** *(M)* `cf get <addr> [path]`
+**P1. A positional address beside `--piece`.** *(M)* `cf cell get <addr> [path]`
 accepts what `--piece <addr>` accepts, and both spellings work. An entity id, a
 slug, or a URL.
 
@@ -113,7 +121,7 @@ this stage removed nothing.
 
 ## Stage 2 — the honest names
 
-**N1. `cf get`, `cf set`, `cf call`.** *(S)* The data commands take top-level
+**N1. `cf cell get`, `cf cell set`, `cf piece call`.** *(S)* The data commands take top-level
 names. One definition per command, reached by a routing entry rather than
 copied; while both names were mounted, a divergence between them was the defect
 this stage could introduce.
@@ -121,7 +129,7 @@ this stage could introduce.
 **N2. `cf wish` and `cf exec` keep their names** and gain nothing here. They are
 already top-level and already honest.
 
-*Exit:* while both spellings were mounted, `cf get X` and `cf piece get X`
+*Exit:* while both spellings were mounted, `cf cell get X` and `cf piece get X`
 produced byte-identical output for the same input, asserted rather than
 assumed.
 
@@ -167,7 +175,7 @@ piece and a source file.
 pieces. `inspect graph` already produces DOT output and takes a space; `piece
 map` is piece-scoped.
 
-**M4. `piece apply` against `cf set`.** `apply` passes new inputs to a piece;
+**M4. `piece apply` against `cf cell set`.** `apply` passes new inputs to a piece;
 `set` writes a value at a path. Whether "new inputs" is a distinct operation or a
 write to the argument position is the decision.
 

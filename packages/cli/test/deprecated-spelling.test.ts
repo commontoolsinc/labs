@@ -40,25 +40,33 @@ describe("deprecated-spelling", () => {
 
   describe("warnDeprecatedCommandSpelling()", () => {
     it("names the spelling written, the spelling to write, and the end date", () => {
+      // Asserted as one exact string rather than as several `toContain`
+      // fragments. Two fragments that happen to hold the same words survive a
+      // rename sweep that collapses them into one, and the test then passes
+      // while pinning nothing; a whole-message comparison fails loudly
+      // instead.
       const lines: string[] = [];
-      warnDeprecatedCommandSpelling("piece view", "piece view", {
+      warnDeprecatedCommandSpelling("piece set-home", "space set-home", {
         writeError: (text) => lines.push(text),
       });
-      expect(lines).toHaveLength(1);
-      expect(lines[0]).toContain("'cf piece view' is deprecated");
-      expect(lines[0]).toContain("spell it 'cf piece view'");
-      expect(lines[0]).toContain(COMMAND_SPELLING_END_DATE);
+      expect(lines).toEqual([
+        "'cf piece set-home' is deprecated; spell it 'cf space set-home'. " +
+        "The 'cf piece set-home' spelling stops working on 2026-09-11.",
+      ]);
     });
 
-    it("distinguishes the two spellings when they differ", () => {
-      // A notice that printed the same word twice would pass a check that
-      // only looked for the old spelling, so the two are pinned apart.
+    it("names the two spellings separately when one contains the other", () => {
+      // The superseded spelling is a suffix of its replacement here, which is
+      // the case where a notice that printed one word twice would still read
+      // plausibly.
       const lines: string[] = [];
       warnDeprecatedCommandSpelling("get", "cell get", {
         writeError: (text) => lines.push(text),
       });
-      expect(lines[0]).toContain("'cf get' is deprecated");
-      expect(lines[0]).toContain("spell it 'cf cell get'");
+      expect(lines).toEqual([
+        "'cf get' is deprecated; spell it 'cf cell get'. The 'cf get' " +
+        "spelling stops working on 2026-09-11.",
+      ]);
     });
 
     it("writes to stderr and puts nothing on stdout", () => {

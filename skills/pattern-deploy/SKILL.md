@@ -92,13 +92,13 @@ deno task cf piece inspect --cell <ID> --identity cf.key --api-url $CF_API_URL -
 **Test handler via CLI:**
 
 ```bash
-deno task cf call --cell PIECE_ID handlerName
+deno task cf piece call --cell PIECE_ID handlerName
 deno task cf piece step --cell PIECE_ID    # Required! Triggers recomputation
 deno task cf piece inspect --cell PIECE_ID  # Now shows updated state
 ```
 
-**Important:** Always run `piece step` after `cf call` or `cf set`. Without it,
-computed values remain stale and `inspect`/`get` return old data.
+**Important:** Always run `piece step` after `cf piece call` or `cf cell set`.
+Without it, computed values remain stale and `inspect`/`get` return old data.
 
 ## When Deploy Fails
 

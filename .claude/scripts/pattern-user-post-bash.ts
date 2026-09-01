@@ -624,10 +624,10 @@ function suggestionForCommandSegment(words: string[]): string {
   // matching them would widen what the hook accepts without changing what it
   // answers. A verb joins this set when it gains a branch below.
   const GUIDED_TOP_LEVEL_COMMANDS = new Set(["set"]);
-  // The nouns a guided verb can sit under. `set-home` acts on a space and is
-  // reached as `cf space set-home`, so a hook that knew only `piece` would go
-  // quiet on the spelling the documentation now teaches.
-  const NOUN_SEGMENTS = new Set(["piece", "space"]);
+  // The nouns a guided verb can sit under. `set` acts on a cell and
+  // `set-home` on a space, so a hook that knew only `piece` would go quiet
+  // on the spellings the documentation now teaches.
+  const NOUN_SEGMENTS = new Set(["piece", "space", "cell"]);
   const cfIndex = normalizedWords.findIndex((word, index) =>
     word === "cf" &&
     (NOUN_SEGMENTS.has(normalizedWords[index + 1] ?? "") ||
@@ -664,7 +664,7 @@ function suggestionForCommandSegment(words: string[]): string {
     if (!hasTestOption && main && /\.test\.[cm]?[jt]sx?$/.test(main)) {
       return "Test pattern deployed as the executable diagnostic entry. Next, inspect its action and assertion cells.";
     }
-    return `${testSuggestion} Next, use 'cf piece inspect' to view state or 'cf call' to test handlers.`;
+    return `${testSuggestion} Next, use 'cf piece inspect' to view state or 'cf piece call' to test handlers.`;
   }
   if (pieceCommand === "setsrc") {
     return `${testSuggestion} Next, use 'cf piece step' to trigger re-evaluation, then 'cf piece inspect' to verify.`;
@@ -676,7 +676,7 @@ function suggestionForCommandSegment(words: string[]): string {
     return "State set. Run 'cf piece step' to trigger re-evaluation before reading computed values.";
   }
   if (pieceCommand === "inspect") {
-    return "State inspected. Use 'cf call handlerName' to test handlers or 'cf set' to modify state.";
+    return "State inspected. Use 'cf piece call handlerName' to test handlers or 'cf cell set' to modify state.";
   }
   return "";
 }

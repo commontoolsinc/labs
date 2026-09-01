@@ -188,14 +188,14 @@ act "1 · A board, and members filed through its verb"
 say "The board arrives with a name, so no fid is ever typed again."
 run cf piece new "$BOARD_FIXTURE" -s "$SPACE" --slug board
 say "Three members through the verb, one by one —"
-run cf call -q -s "$SPACE" --piece board addMember '{"title":"alpha"}'
-run cf call -q -s "$SPACE" --piece board addMember '{"title":"beta"}'
-run cf call -q -s "$SPACE" --piece board addMember '{"title":"gamma"}'
+run cf piece call -q -s "$SPACE" --piece board addMember '{"title":"alpha"}'
+run cf piece call -q -s "$SPACE" --piece board addMember '{"title":"beta"}'
+run cf piece call -q -s "$SPACE" --piece board addMember '{"title":"gamma"}'
 
 act "2 · Board-sized in one call"
 say "113 matches the motivating Topics board. The remaining 110 arrive as one"
 say "dispatch, because a demo should spend its time surveying, not seeding."
-run cf call -q -s "$SPACE" --piece board seedMembers '{"count":110}'
+run cf piece call -q -s "$SPACE" --piece board seedMembers '{"count":110}'
 
 act "3 · The survey"
 say "One process, the whole collection: a plan row per member, the holder"
@@ -231,7 +231,7 @@ run sh -c "sed -n 2p '$WORK/retarget.jsonl' | jq '{piece, expect, op}'"
 act "6 · The survey is a live read"
 say "File one more member, survey again: the count moves. No cache to"
 say "invalidate, nothing to refresh."
-run cf call -q -s "$SPACE" --piece board addMember '{"title":"delta"}'
+run cf piece call -q -s "$SPACE" --piece board addMember '{"title":"delta"}'
 run_loud cf piece survey -s "$SPACE" --piece board --path items --out "$WORK/after.jsonl"
 run sh -c "head -1 '$WORK/after.jsonl' | jq -c .enumerated"
 

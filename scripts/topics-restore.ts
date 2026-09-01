@@ -19,7 +19,7 @@
  * The restore is whole-topic by construction: `cf piece apply` REPLACES the
  * piece's input document (measured, not assumed — a partial apply zeroes
  * every field it omits), and no narrower CLI write path exists today, since
- * both sides of `cf set` validate the untouched remainder of the document
+ * both sides of `cf cell set` validate the untouched remainder of the document
  * and refuse it — the input side judges the stored `mentionable` link
  * against its declared array type unresolved, and the result side demands
  * session-scoped fields no other session can see. So the script applies the

@@ -1,6 +1,7 @@
 /**
- * Unit tests for `callFromCommand`, the `cf call` action. Every input is an
- * ordinary argument — the command's own arguments, the line past `cf call`,
+ * Unit tests for `callFromCommand`, the `cf piece call` action. Every input is an
+ * ordinary argument — the command's own arguments, the line past
+ * `cf piece call`,
  * and the words past `--` included — so each case drives the whole action over
  * a stub dispatcher, and what the assertions turn on is what the action built
  * from the argv: the arguments it handed the callable, the target it resolved,
@@ -492,7 +493,7 @@ describe("callFromCommand()", () => {
         status: "settled",
         result: { title: "Milk" },
       });
-      expect(hinted[0]).toContain(`cf get --cell ${PIECE}`);
+      expect(hinted[0]).toContain(`cf cell get --cell ${PIECE}`);
     });
 
     it("reports the detached call's recovery beside the receipt it published", async () => {
@@ -518,7 +519,9 @@ describe("callFromCommand()", () => {
       );
       expect(JSON.parse(rendered[0]).status).toBe("committed");
       expect(hinted[0]).toContain("/of:receipt-1");
-      expect(hinted[0]).toContain(`CF_INVOCATION_SESSION=${SESSION} cf call`);
+      expect(hinted[0]).toContain(
+        `CF_INVOCATION_SESSION=${SESSION} cf piece call`,
+      );
     });
 
     it("writes a tool's output and nothing else to stdout", async () => {

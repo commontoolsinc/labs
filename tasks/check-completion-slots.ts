@@ -68,7 +68,8 @@ export const NO_CANDIDATES = new Map<string, string>([
   // callable's section, so its own vocabulary fills this positional. Item 4 of
   // docs/plans/cli-completion-coverage.md builds the candidates and is what
   // will route them here.
-  ["call:tail", "the callable's own vocabulary"],
+  ["piece call:tail", "the callable's own vocabulary"],
+  ["call:tail", "the same, under the superseded spelling"],
   ["exec:tail", "the same"],
 ]);
 
@@ -170,7 +171,9 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   // so its vocabulary is the verb's `outputSchema`. Written past the `--` that
   // closes the callable's section, so the verb already precedes the cursor.
   // Item 6 of docs/plans/cli-completion-coverage.md is what builds it.
-  ["call:select", "the verb's own result shape"],
+  ["piece call:select", "the verb's own result shape"],
+  ["piece call:schema", "the same"],
+  ["call:select", "the same, under the superseded spelling"],
   ["call:schema", "the same"],
   ["exec:select", "the same"],
   ["exec:schema", "the same"],

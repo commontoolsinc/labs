@@ -138,7 +138,7 @@ describe("topics-rehearsal-lib", () => {
 
     it("recognizes the runtime's missing-property failure through cf", () => {
       const error = new Error(
-        "cf get -q --input authorName exited 1\nCannot access path " +
+        "cf cell get -q --input authorName exited 1\nCannot access path " +
           '"authorName" - property "authorName" not found. ' +
           "Available keys: body, title",
       );
@@ -149,7 +149,7 @@ describe("topics-rehearsal-lib", () => {
       expect(
         isAbsentPathError(
           new Error(
-            "cf get -q --input body exited 1\nerror sending request for url " +
+            "cf cell get -q --input body exited 1\nerror sending request for url " +
               "(http://localhost:8020/): connection refused",
           ),
         ),

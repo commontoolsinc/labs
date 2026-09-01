@@ -21,6 +21,7 @@ import {
   setCellCfcLabelFromCommand,
   setQuietMode,
 } from "../commands/piece.ts";
+import { cell } from "../commands/cell.ts";
 import { cf, stripAnsi } from "./utils.ts";
 
 const signer = await Identity.fromPassphrase("cf-piece-label");
@@ -113,12 +114,24 @@ describe("cf piece CFC labels", () => {
   });
 
   it("routes both command actions through their JSON boundaries", async () => {
-    const actionHandler = (name: string): unknown =>
-      (piece.getCommand(name) as unknown as
+    const actionHandler = (
+      // deno-lint-ignore no-explicit-any
+      parent: any,
+      name: string,
+    ): unknown =>
+      (parent.getCommand(name, true) as unknown as
         | { actionHandler?: unknown }
         | undefined)?.actionHandler;
-    expect(actionHandler("get-label")).toBe(getCellCfcLabelFromCommand);
-    expect(actionHandler("set-label")).toBe(setCellCfcLabelFromCommand);
+    expect(actionHandler(cell, "get-label")).toBe(getCellCfcLabelFromCommand);
+    expect(actionHandler(cell, "set-label")).toBe(setCellCfcLabelFromCommand);
+    // The superseded mount runs the same function behind the notice, so its
+    // handler is the wrapper rather than the function itself.
+    expect(actionHandler(piece, "get-label")).not.toBe(
+      getCellCfcLabelFromCommand,
+    );
+    expect(actionHandler(piece, "set-label")).not.toBe(
+      setCellCfcLabelFromCommand,
+    );
 
     const options = {
       apiUrl: "https://example.com",

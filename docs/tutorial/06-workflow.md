@@ -182,9 +182,9 @@ Everything a pattern exports (Chapter 3) is drivable without a browser:
 deno task cf piece ls -s myspace                          # list registered pieces
 deno task cf piece search -s myspace "invoice"            # search registered pieces
 deno task cf piece inspect --cell <ID>                    # dump structure/state
-deno task cf get --cell <ID> items                        # read one exported field
-deno task cf call --cell <ID> addItem '{"title": "Test"}' # send to a stream
-echo '"hello"' | deno task cf set --cell <ID> title       # write a field
+deno task cf cell get --cell <ID> items                        # read one exported field
+deno task cf piece call --cell <ID> addItem '{"title": "Test"}' # send to a stream
+echo '"hello"' | deno task cf cell set --cell <ID> title       # write a field
 deno task cf piece step --cell <ID>                       # force recompute
 deno task cf piece view --cell <ID>                       # render the UI in the terminal
 deno task cf piece link <srcID>/items <dstID>/items       # wire two pieces
@@ -201,7 +201,7 @@ output drives the next command unchanged, even from a shell configured for a
 different space.
 
 On `get`, `set`, and `call`, write the reference in the first positional —
-`cf get /tracker/items`. `--cell` takes the same word where a flag suits
+`cf cell get /tracker/items`. `--cell` takes the same word where a flag suits
 better, and is also where the bare id and slug spellings go (`--cell
 fid1:abc...`, `--cell myslug`); `--piece` is a deprecated name for that same
 flag, still accepted. On the commands that take `--input` (`get` and `set` here), a trailing
@@ -210,7 +210,7 @@ flag, still accepted. On the commands that take `--input` (`get` and `set` here)
 data commands mounted at top level — reading and writing cells is not
 really a piece-management concern, and the spelling says so.
 
-One subtlety: neither `cf set` nor `cf call` refreshes *computed*
+One subtlety: neither `cf cell set` nor `cf piece call` refreshes *computed*
 outputs. `set` writes the cell without running anything; `call` runs the
 handler (so the handler's own writes land and sync), but the scheduler is
 lazy — derived values recompute only when something observes them

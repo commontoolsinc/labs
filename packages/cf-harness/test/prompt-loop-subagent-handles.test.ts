@@ -219,7 +219,7 @@ describe("prompt-loop cross-agent address handles", () => {
         delegateCallTurn("call-delegate", {
           goal: `Inspect ${token} and report what it holds.`,
         }),
-        bashCallTurn("call-child", `cf get ${token}`),
+        bashCallTurn("call-child", `cf cell get ${token}`),
         finalTurn("Child done."),
         finalTurn("Parent done."),
       ]),
@@ -227,8 +227,8 @@ describe("prompt-loop cross-agent address handles", () => {
 
     await loop.runPrompt({ prompt: "Delegate the inspection." });
 
-    const command = dispatchedCommand(sandbox, "cf get ");
-    expect(command).toContain(`cf get ${table.entries[0]!.ref}`);
+    const command = dispatchedCommand(sandbox, "cf cell get ");
+    expect(command).toContain(`cf cell get ${table.entries[0]!.ref}`);
     expect(command).not.toContain(token);
   });
 
@@ -254,7 +254,10 @@ describe("prompt-loop cross-agent address handles", () => {
           context: "The other cell is out of scope for this task.",
         }),
         // A child that guesses at a token it was never handed.
-        bashCallTurn("call-child", `cf get ${sharedToken} ${withheldToken}`),
+        bashCallTurn(
+          "call-child",
+          `cf cell get ${sharedToken} ${withheldToken}`,
+        ),
         finalTurn("Child done."),
         finalTurn("Parent done."),
       ]),
@@ -262,7 +265,7 @@ describe("prompt-loop cross-agent address handles", () => {
 
     await loop.runPrompt({ prompt: "Delegate the inspection." });
 
-    const command = dispatchedCommand(sandbox, "cf get ");
+    const command = dispatchedCommand(sandbox, "cf cell get ");
     expect(command).toContain(table.entries[0]!.ref);
     expect(command).toContain(withheldToken);
     expect(command).not.toContain(HASH_B);
@@ -290,7 +293,7 @@ describe("prompt-loop cross-agent address handles", () => {
         delegateCallTurn("call-delegate", {
           goal: "Summarize the workspace README.",
         }),
-        bashCallTurn("call-child", `cf get ${parentToken}`),
+        bashCallTurn("call-child", `cf cell get ${parentToken}`),
         finalTurn("Child done."),
         finalTurn("Parent done."),
       ]),
@@ -300,7 +303,7 @@ describe("prompt-loop cross-agent address handles", () => {
 
     // A token the child guessed at names nothing in the child, so it reaches
     // the sandbox as the inert text it is rather than as an address.
-    const command = dispatchedCommand(sandbox, "cf get ");
+    const command = dispatchedCommand(sandbox, "cf cell get ");
     expect(command).toContain(parentToken);
     expect(command).not.toContain(HASH_A);
   });
@@ -370,7 +373,7 @@ describe("prompt-loop cross-agent address handles", () => {
         : turn === 4
         ? bashCallTurn(
           "call-parent",
-          `cf get ${firstToken(lastToolContent(3))}`,
+          `cf cell get ${firstToken(lastToolContent(3))}`,
         )
         : finalTurn("Parent done.");
       return Promise.resolve(
@@ -400,9 +403,9 @@ describe("prompt-loop cross-agent address handles", () => {
     expect(
       result.runState.handleTable?.entries.map((entry) => entry.token),
     ).toEqual([parentTokenC]);
-    const command = dispatchedCommand(sandbox, "cf get ");
+    const command = dispatchedCommand(sandbox, "cf cell get ");
     expect(command).toContain(
-      `cf get ${result.runState.handleTable?.entries[0]?.ref}`,
+      `cf cell get ${result.runState.handleTable?.entries[0]?.ref}`,
     );
     expect(command).not.toContain(parentTokenC);
   });
@@ -436,7 +439,7 @@ describe("prompt-loop cross-agent address handles", () => {
         : turn === 4
         ? bashCallTurn(
           "call-parent",
-          `cf get ${firstToken(lastToolContent(3))}`,
+          `cf cell get ${firstToken(lastToolContent(3))}`,
         )
         : finalTurn("Parent done.");
       return Promise.resolve(
@@ -468,8 +471,8 @@ describe("prompt-loop cross-agent address handles", () => {
       .at(-1)?.content ?? "";
     expect(delegateOutput).not.toContain("[handle-token-removed]");
     // And the parent can still address the cell the child reported.
-    expect(dispatchedCommand(sandbox, "cf get ")).toContain(
-      `cf get ${entry?.ref}`,
+    expect(dispatchedCommand(sandbox, "cf cell get ")).toContain(
+      `cf cell get ${entry?.ref}`,
     );
   });
 
@@ -505,7 +508,10 @@ describe("prompt-loop cross-agent address handles", () => {
         : turn === 2
         ? finalTurn(`Also look at ${withheldToken}.`)
         : turn === 3
-        ? bashCallTurn("call-parent", `cf get ${firstToken(delegateOutput())}`)
+        ? bashCallTurn(
+          "call-parent",
+          `cf cell get ${firstToken(delegateOutput())}`,
+        )
         : finalTurn("Parent done.");
       return Promise.resolve(
         new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
@@ -528,7 +534,7 @@ describe("prompt-loop cross-agent address handles", () => {
     expect(delegateOutput).toContain("[handle-token-removed]");
     // The parent has nothing to pick up from the report, so the address the
     // delegation withheld never reaches the parent's own tool call.
-    const command = dispatchedCommand(sandbox, "cf get ");
+    const command = dispatchedCommand(sandbox, "cf cell get ");
     expect(command).not.toContain(HASH_B);
   });
 

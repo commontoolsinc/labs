@@ -342,7 +342,7 @@ describe("pattern-user-post-bash", () => {
 
     it("keeps the recomputation guidance for state writes", () => {
       expect(
-        suggestionForPatternUserCommand("cf set --piece ID title"),
+        suggestionForPatternUserCommand("cf cell set --piece ID title"),
       ).toContain("Run 'cf piece step'");
     });
 
@@ -351,7 +351,7 @@ describe("pattern-user-post-bash", () => {
       // claim a verb this hook has nothing to say about.
       expect(suggestionForPatternUserCommand("cf test")).toBe("");
       expect(suggestionForPatternUserCommand("cf wish '#topic'")).toBe("");
-      expect(suggestionForPatternUserCommand("cf get --piece ID title")).toBe("");
+      expect(suggestionForPatternUserCommand("cf cell get --piece ID title")).toBe("");
     });
 
     it("returns no suggestion for unrelated commands", () => {

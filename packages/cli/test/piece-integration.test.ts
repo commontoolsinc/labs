@@ -1,5 +1,5 @@
 /**
- * Integration tests for `cf get` against a live toolshed. The suite
+ * Integration tests for `cf cell get` against a live toolshed. The suite
  * runs when API_URL names a running toolshed (as in the CI cli-integration
  * jobs) and is skipped otherwise. A throwaway identity keyfile and space are
  * created per run. Run locally with:
@@ -80,7 +80,7 @@ async function waitForContent(
   }
 }
 
-describe("cf get (integration)", { ignore: !API_URL }, () => {
+describe("cf cell get (integration)", { ignore: !API_URL }, () => {
   beforeAll(async () => {
     const { identity, path } = await writeTempIdentity();
     identityPath = path;

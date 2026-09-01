@@ -20,10 +20,10 @@ have landed.
 
 | step | state |
 | --- | --- |
-| 1–5 — the shared read step, the read options on every arrival, `--piece` taking the `of:` form, positional addresses with the `#argument` suffix, and `cf get`/`set`/`call` | on main |
+| 1–5 — the shared read step, the read options on every arrival, `--piece` taking the `of:` form, positional addresses with the `#argument` suffix, and `cf cell get`/`set`/`call` | on main |
 | 6a — the old spellings warn, each naming its end date | on main |
 | 6b — the old spellings are removed | on main |
-| 7 — the duplicated nouns are merged | not started; it is last because each pair is two working commands |
+| 7 — each command sits under the noun it acts on | on main |
 
 **Arc two — how a caller writes what a command acts on.**
 
@@ -82,7 +82,7 @@ of entities and their connections — one live, one offline.
 
 **Two commands, overlapping but not equivalent.** `piece apply` validates a
 whole input against `argumentSchema` and re-executes the pattern with it;
-`cf set` writes at one path. Both target the arguments cell, and the overlap
+`cf cell set` writes at one path. Both target the arguments cell, and the overlap
 invites merging them, but they are not the same operation — which is why any
 merge belongs in the last step rather than among the renames.
 
@@ -266,7 +266,7 @@ Read the target layout against it and every element sits in dependency order,
 `<read opts>` last because the result shape is knowable only once the verb is:
 
 ```text
-cf call <addr> <verb> <payload> <read opts>
+cf piece call <addr> <verb> <payload> <read opts>
 ```
 
 Two things follow, and they are the reason this section exists.
@@ -284,7 +284,7 @@ above is prescriptive on this point: `<read opts>` is a position, not an
 illustration, and a projection written before the verb is refused rather than
 accepted quietly.
 
-`cf call` reads them past the `--` that closes the callable's section, which
+`cf piece call` reads them past the `--` that closes the callable's section, which
 is the position the layout names: everything between the verb and the marker
 belongs to the callable's own schema-derived parser, and the read options
 follow. A projection written before the verb is refused rather than accepted
@@ -409,10 +409,10 @@ a marker is needed for is the boundary the conventional shape does not have: the
 one where the callable's section ends and the read step's begins.
 
 ```text
-cf call <target> <verb> <verb input>
-cf call <target> <verb> <verb input> -- <read opts>
-cf call <target> <verb> -- <read opts>             # a verb that takes none
-cf call <target> <verb> -- --help                  # the verb's own page
+cf piece call <target> <verb> <verb input>
+cf piece call <target> <verb> <verb input> -- <read opts>
+cf piece call <target> <verb> -- <read opts>             # a verb that takes none
+cf piece call <target> <verb> -- --help                  # the verb's own page
 cf exec <mountedFile> <verb input> -- <read opts>
 ```
 
@@ -434,9 +434,9 @@ options from the rest of the line. `call` and `exec` have one, so a marker
 closes it:
 
 ```text
-cf get  <addr> [path]           --select …
+cf cell get  <addr> [path]           --select …
 cf wish <target>                --select …
-cf call <target> <verb> <input> -- --select …
+cf piece call <target> <verb> <input> -- --select …
 cf exec <mountedFile> <input>   -- --select …
 ```
 
@@ -623,15 +623,17 @@ than taking anything away.
 
 1. **Factor out the shared read step** so a single implementation turns a cell
    and a shape into structured output.
-2. **Give every arrival access to it** — `cf call` gains `--select`,
+2. **Give every arrival access to it** — `cf piece call` gains `--select`,
    `--schema` and `--filter`, `wish` gains them, and an address renders identically from each.
 3. **`--piece` accepts the `of:` address form**, so an emitted address composes
    into the next command. This is where addressing stops being piece-flavored
    in practice.
 4. **Add positional addresses and the `#argument` suffix** beside the existing
    flags, keeping both.
-5. **Add `cf get`/`set`/`call`** as aliases of the existing
-   implementations. Same code, honest names, both spellings working.
+5. **Give the data commands top-level names** — `cf get`, `cf set`, `cf call`
+   — as aliases of the existing implementations. Same code, honest names,
+   both spellings working. Step 7 moves them again, under the noun each acts
+   on.
 6a. **Warn on the old spellings**, each warning naming the date its spelling
    stops working — two weeks after this step reaches main. The date is a
    literal, fixed when this step merges, not a window recomputed per run: a
@@ -641,8 +643,18 @@ than taking anything away.
    piece-mounted `get`, `set` and `call`, the 6a notice and its dated
    constant, and the parity coverage that existed only while both spellings
    did, are gone.
-7. **Merge the duplicated nouns** — the two `inspect`s, the two `view`s, `piece
-   map` against `inspect graph`, and `apply` against `set`.
+7. **Put each command under the noun it acts on.** `cf cell` gains `get`,
+   `set`, `get-label` and `set-label`; `piece` gains `call`; `space` gains
+   `recreate-root` and `set-home`. Each moved command stays answerable at the
+   spelling it had, hidden and dated, so a script keeps working while it is
+   migrated.
+
+   The duplicated nouns this step was named for resolve rather than merge.
+   `piece inspect` reports on a live piece and `cf inspect` reads a stored
+   one; `piece map` draws live pieces and `inspect graph` a stored graph;
+   `cf view` pages a source file and `piece view` renders a running piece.
+   Different objects, so the fix was naming. `piece apply` and `cf cell set`
+   stay separate for the reason recorded above.
 
 Steps 1–5 are mechanical. Step 7 needs real decisions and belongs last, because
 each pair is two working commands whose merge changes behavior rather than
@@ -740,19 +752,19 @@ commands and never compose them, so a command that changes changes in the
 script and in both documents together, in one commit.
 
 **Each step carries its own documentation.** `--input`, `--piece`, and
-`cf get` appear across the tutorial, `packages/cli/README.md`, and the
+`cf cell get` appear across the tutorial, `packages/cli/README.md`, and the
 pattern documentation, so a single sweep at the end would leave every
 intermediate state wrong. What each step owes:
 
 | Step | Documentation owed |
 | --- | --- |
-| 2 | The read options gain a second host — `cf call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../common/verbs/over-the-cli.md) |
+| 2 | The read options gain a second host — `cf piece call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../common/verbs/over-the-cli.md) |
 | 3 | Address forms wherever `--piece` is taught: the CLI README and the tutorial's workflow chapter |
 | 4 | `#argument` beside every `--input` example, in the same places |
 | 5 | The new spellings alongside the old ones everywhere both work |
 | 6a | The old spellings marked deprecated wherever they are taught, each carrying the removal date |
 | 6b | Removal of the old spellings, and of the deprecation notes 6a added |
-| 7 | Whatever the merges decide |
+| 7 | The rule and the mapping here, `packages/cli/README.md`'s superseded-spellings table, and every example moved to the new spelling |
 
 **Old spellings stay as redirects, not errors, until the date 6a names.** A
 deprecated spelling that still works costs a line of aliasing; one that fails

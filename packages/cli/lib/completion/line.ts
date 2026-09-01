@@ -48,7 +48,7 @@ export type CompletionSlot =
     readonly index: number;
   }
   /**
-   * A word after `--`, which on `cf call` and `cf exec` is the read step's
+   * A word after `--`, which on `cf piece call` and `cf exec` is the read step's
    * section: `--select`, `--schema` and `--filter`, and `--help` reaching the
    * callable. Item 6 of
    * [CLI completion coverage](../../../../docs/plans/cli-completion-coverage.md)
@@ -186,7 +186,7 @@ function expandBundle(
  * Subcommands that represent real commands.
  *
  * `main` registers `help` with `.global()`, so Cliffy propagates it to every
- * descendant and `hasCommands()` is true even on leaves like `cf call`.
+ * descendant and `hasCommands()` is true even on leaves like `cf piece call`.
  * Taking that at face value would resolve every leaf's positional to a
  * subcommand slot and silently disable all dynamic value completion.
  */
@@ -199,7 +199,7 @@ function realSubcommands(command: AnyCommand): AnyCommand[] {
 /**
  * Whether the command ends its own option parsing at the first positional.
  *
- * `cf call` and `cf exec` are `stopEarly()`, so every word after the
+ * `cf piece call` and `cf exec` are `stopEarly()`, so every word after the
  * callable name belongs to the callable's schema-derived parser and the CLI's
  * own flags are refused there. Cliffy stores the property with no accessor, so
  * it is read off the field: keeping the question where the command declares it
@@ -220,6 +220,11 @@ function stopsEarly(command: AnyCommand): boolean {
  * reason `PRE_PARSE_GLOBALS` is.
  */
 const POSITIONAL_ADDRESS_COMMANDS: ReadonlySet<string> = new Set([
+  "cell get",
+  "cell set",
+  "piece call",
+  // The superseded spellings, which accept the same positional for as long as
+  // they answer at all.
   "get",
   "set",
   "call",

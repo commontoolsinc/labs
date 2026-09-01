@@ -17,7 +17,7 @@
 # snapshot is taken from the store file, not over the API.
 #
 # An identity is minted when CF_IDENTITY names none, the way
-# verbs-over-the-cli.sh does: CI sets no key, and every cf call here needs one.
+# verbs-over-the-cli.sh does: CI sets no key, and every cf piece call here needs one.
 #
 #   API_URL=http://localhost:8000 CF_DRILL_STORE_DIR=cache/memory \
 #     packages/cli/integration/topics-restore-drill.sh
@@ -70,7 +70,7 @@ ENGINE_DIR="$STORE_DIR/engine-v3/engine-v3"
 WORK="$(mktemp -d)"
 SPACE="topics-drill-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:12])')"
 
-# Every cf call below reads CF_IDENTITY from the environment, and CI sets
+# Every cf piece call below reads CF_IDENTITY from the environment, and CI sets
 # none. Mint one for this run rather than failing on the first deploy with
 # nothing to say about why.
 if [ -z "${CF_IDENTITY:-}" ]; then

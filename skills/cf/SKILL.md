@@ -51,26 +51,26 @@ what this looks like when it bites.
 ## Output Conventions (scripts & agents)
 
 - stdout carries command output only; hints, tips and diagnostics go to stderr.
-  `cf get` prints JSON, with no ANSI to strip, and represents an absent value as
-  `null`.
+  `cf cell get` prints JSON, with no ANSI to strip, and represents an absent
+  value as `null`.
 - ANSI colors are emitted only when stdout is a TTY. Force off with `--no-color`
   or `NO_COLOR=1`; force on (e.g. through a pager) with `FORCE_COLOR=1`.
   (`cf view` keeps its own `--color` flag.)
 - `-q/--quiet` (on `piece`/`wish` subcommands) suppresses hints and next-step
   blocks on stderr. To also drop runtime warnings, add `--log-level error` (`-q`
   deliberately leaves the log floor alone — scripts parse those warnings).
-- `cf call` payloads: inline JSON argument, `-` to read stdin
-  (`echo '{...}' | cf call ... handler -`), a bare pipe with no payload
+- `cf piece call` payloads: inline JSON argument, `-` to read stdin
+  (`echo '{...}' | cf piece call ... handler -`), a bare pipe with no payload
   argument, or schema-derived flags in the callable's section — directly after
   the verb, before any `--`. Empty stdin fails loudly.
-- A `cf get` path that doesn't resolve is a data error: one-line message on
+- A `cf cell get` path that doesn't resolve is a data error: one-line message on
   stderr, exit 1 (no usage screen). A `piece link` that fails validation
-  (missing source/target piece or path) reports the same way. So does a `cf get`
-  path that lands on a handler verb: reading a stream refuses — read data, call
-  verbs. A root verb's refusal points at `cf call` (its literal spelling); a
-  nested verb is not directly callable, so it points at reading the parent
-  object or `cf piece verbs`. The verb's parent object still reads, and tool
-  bindings read as data.
+  (missing source/target piece or path) reports the same way. So does a
+  `cf cell get` path that lands on a handler verb: reading a stream refuses —
+  read data, call verbs. A root verb's refusal points at `cf piece call` (its
+  literal spelling); a nested verb is not directly callable, so it points at
+  reading the parent object or `cf piece verbs`. The verb's parent object still
+  reads, and tool bindings read as data.
 
 ## Environment Setup
 
@@ -140,10 +140,10 @@ answer composes into the next command.
   are the same shape. A space embedded in it supplies `--space` when the flag is
   absent, and must agree with it when both are given. **An address printed by
   one command is accepted by the next with no flag beside it.**
-- On `cf get`, `cf set` and `cf call`, write the reference in the first
-  positional — `cf get /tracker items/0/title`. A reference begins with `/` and
-  a relative path never does, so the two cannot collide. This is the spelling to
-  reach for.
+- On `cf cell get`, `cf cell set` and `cf piece call`, write the reference in
+  the first positional — `cf cell get /tracker items/0/title`. A reference
+  begins with `/` and a relative path never does, so the two cannot collide.
+  This is the spelling to reach for.
 - `--cell <reference|id|slug>` takes the same target where a flag suits better,
   and is where the bare id and slug spellings go — there no path competes for
   the position. `--piece` is a deprecated name for that same flag: still
@@ -153,9 +153,9 @@ answer composes into the next command.
   its own: the host becomes `--api-url` and the rest becomes a reference.
 - A target ending `#argument` selects the piece's arguments cell — the same
   selection `--input` makes, and it is accepted exactly where `--input` is:
-  `cf get`, `cf set`, and `cf piece get-label|set-label`. A reference, a bare id
+  `cf cell get`, `cf cell set`, and `cf cell get-label|set-label`. A reference, a bare id
   and a slug all take it, since all three designate the same piece. A command
-  that takes no `--input` refuses the suffix rather than ignoring it, `cf call`
+  that takes no `--input` refuses the suffix rather than ignoring it, `cf piece call`
   among them. A `--url` carries no fragment into the reference it decomposes to,
   whatever the URL names, so a `#argument` written on one is dropped rather than
   refused. A URL naming the piece admits no `--cell` or positional address
@@ -166,29 +166,29 @@ answer composes into the next command.
 ## Where the read options go
 
 `--select`, `--schema` and `--filter` shape what a read returns, and every
-command that returns data carries all three: `cf get`, `cf wish`, `cf call`,
-`cf exec`. `--select` takes a field list, `--schema` a full JSON Schema, and
-naming both on one line is refused rather than resolved.
+command that returns data carries all three: `cf cell get`, `cf wish`,
+`cf piece call`, `cf exec`. `--select` takes a field list, `--schema` a full
+JSON Schema, and naming both on one line is refused rather than resolved.
 
 They come after the thing they shape, on all four. Whether a marker stands in
-between depends on whether a callable's own vocabulary does. `cf get` and
-`cf wish` have none, so the flags follow the target directly. `cf call` and
-`cf exec` have one — the verb, or the mounted file, opens the callable's section
-— so `--` closes that section and the read options follow it:
+between depends on whether a callable's own vocabulary does. `cf cell get` and
+`cf wish` have none, so the flags follow the target directly. `cf piece call`
+and `cf exec` have one — the verb, or the mounted file, opens the callable's
+section — so `--` closes that section and the read options follow it:
 
 ```text
-cf get  <addr> [path]           --select …
+cf cell get  <addr> [path]           --select …
 cf wish <target>                --select …
-cf call <target> <verb> <input> -- --select …
+cf piece call <target> <verb> <input> -- --select …
 cf exec <mountedFile> <input>   -- --select …
 ```
 
 A projection written before the verb is **refused**, and so is one written
 inside the callable's section; each refusal names the section the flag belongs
-to and prints the corrected line. `--` is **refused** on `cf get`, `cf set` and
-`cf wish`: there is no section to close, and the words after it would be set
-aside unread. `--help` past the marker still reaches the callable and prints
-that verb's page.
+to and prints the corrected line. `--` is **refused** on `cf cell get`,
+`cf cell set` and `cf wish`: there is no section to close, and the words after
+it would be set aside unread. `--help` past the marker still reaches the
+callable and prints that verb's page.
 
 **Resolving a wish writes.** `cf wish` commits a cell to the space as part of
 resolving the query, so it is not a free read and not safe to issue
@@ -204,21 +204,21 @@ speculatively against a space you do not intend to touch.
 | Attach a data file | `deno task cf piece new pattern.tsx --test pattern.test.tsx --datafile data/cities.json ...`                                |
 | Update existing    | `deno task cf piece setsrc pattern.tsx --test pattern.test.tsx --root . --repository REPO --cell ID -i key -a url -s space` |
 | Inspect state      | `deno task cf piece inspect --cell ID ...`                                                                                  |
-| Get field          | `deno task cf get --cell ID fieldPath ...`                                                                                  |
-| Filter array       | `deno task cf get --cell ID items --filter '.active == true' ...`                                                           |
-| Project fields     | `deno task cf get --cell ID items --select id,title ...`                                                                    |
-| Read an address    | `deno task cf get --cell ID --select 'topic@,topic.title' ...`                                                              |
-| Read addresses     | `deno task cf get --cell ID items --schema '{"type":"array","items":{"$link":true}}' ...`                                   |
-| Step + get         | `deno task cf get --cell ID fieldPath --step ...`                                                                           |
-| Set field          | `echo '{"data":...}' \| deno task cf set --cell ID path ...`                                                                |
-| Call handler       | `deno task cf call --cell ID handlerName ...`                                                                               |
-| Shape a result     | `deno task cf call --cell ID addTopic ... -- --select topic.title`                                                          |
+| Get field          | `deno task cf cell get --cell ID fieldPath ...`                                                                             |
+| Filter array       | `deno task cf cell get --cell ID items --filter '.active == true' ...`                                                      |
+| Project fields     | `deno task cf cell get --cell ID items --select id,title ...`                                                               |
+| Read an address    | `deno task cf cell get --cell ID --select 'topic@,topic.title' ...`                                                         |
+| Read addresses     | `deno task cf cell get --cell ID items --schema '{"type":"array","items":{"$link":true}}' ...`                              |
+| Step + get         | `deno task cf cell get --cell ID fieldPath --step ...`                                                                      |
+| Set field          | `echo '{"data":...}' \| deno task cf cell set --cell ID path ...`                                                           |
+| Call handler       | `deno task cf piece call --cell ID handlerName ...`                                                                         |
+| Shape a result     | `deno task cf piece call --cell ID addTopic ... -- --select topic.title`                                                    |
 | List verbs         | `deno task cf piece verbs --cell ID --json ...` (`--all` adds wrapper/deprecated; `hidden` counts them)                     |
 | Trigger recompute  | `deno task cf piece step --cell ID ...`                                                                                     |
 | Mint a session     | `export CF_INVOCATION_SESSION="$(deno task cf invocation-session new)"` (once per run; ids deduplicate only within it)      |
-| Replayable call    | `deno task cf call --cell ID --invocation my-id-1 handlerName ...` (same pair retries settle on the original outcome)       |
-| Detached call      | `deno task cf call --cell ID --no-wait --invocation my-id-1 handlerName ...` (exits at commit with `receipt` address)       |
-| Collect a receipt  | `deno task cf get --cell <receipt> ...` (the envelope's `receipt` string, later, from any process)                          |
+| Replayable call    | `deno task cf piece call --cell ID --invocation my-id-1 handlerName ...` (same pair retries settle on the original outcome) |
+| Detached call      | `deno task cf piece call --cell ID --no-wait --invocation my-id-1 handlerName ...` (exits at commit with `receipt` address) |
+| Collect a receipt  | `deno task cf cell get --cell <receipt> ...` (the envelope's `receipt` string, later, from any process)                     |
 | List pieces        | `deno task cf piece ls -i key -a url -s space` (registry only — a handler-created piece appears only if sent to `addPiece`) |
 | Describe a piece   | `deno task cf piece describe --cell ID ...` (name, purpose, state, inputs, verbs; `--json`, `--all`)                        |
 | List slugs         | `deno task cf piece slugs ...`                                                                                              |
@@ -327,20 +327,20 @@ All values to `set` and `call` must be valid JSON:
 
 ```bash
 # Strings need nested quotes
-echo '"hello world"' | deno task cf set ... title
+echo '"hello world"' | deno task cf cell set ... title
 
 # Numbers are bare
-echo '42' | deno task cf set ... count
+echo '42' | deno task cf cell set ... count
 
 # Objects
-echo '{"name": "John"}' | deno task cf set ... user
+echo '{"name": "John"}' | deno task cf cell set ... user
 ```
 
-`cf get` and `wish` always print JSON. Both accept a redundant `--json` so
+`cf cell get` and `wish` always print JSON. Both accept a redundant `--json` so
 callers can request the format explicitly.
 
-`cf get --filter` accepts a jq-inspired predicate over array items: paths, JSON
-literals, comparisons, `and`/`or`/`not`, and parentheses. Only `false` and
+`cf cell get --filter` accepts a jq-inspired predicate over array items: paths,
+JSON literals, comparisons, `and`/`or`/`not`, and parentheses. Only `false` and
 `null` are falsey; stored `undefined` is treated like a missing value and is
 also falsey. Non-array inputs are rejected. Two flags project the output:
 `--select` takes a comma-separated field list, and `--schema` takes an inline
@@ -411,13 +411,13 @@ passed over too, and the read reports the reference itself. A JSON `--schema`
 states a shape of its own rather than naming the source's fields, and is not
 held to that vocabulary.
 
-`cf call` takes the same three flags, past the `--` that closes the callable's
-section, with the same grammar, the same `--select`/`--schema` conflict, and the
-same error messages. They shape the result of the call — a handler's `result`
-inside the Invocation JSON, or a tool's JSON on stdout:
+`cf piece call` takes the same three flags, past the `--` that closes the
+callable's section, with the same grammar, the same `--select`/`--schema`
+conflict, and the same error messages. They shape the result of the call — a
+handler's `result` inside the Invocation JSON, or a tool's JSON on stdout:
 
 ```bash
-deno task cf call --cell ID addTopic '{"title":"Ship it"}' -- --select topic.title
+deno task cf piece call --cell ID addTopic '{"title":"Ship it"}' -- --select topic.title
 ```
 
 A selection shapes a result that already exists; it does not narrow what the
@@ -428,11 +428,12 @@ reactive one carries none). A value-less verb therefore still reports no
 result that does exist is refused, so the two stay distinguishable. A shaped
 call also waits on the CLI runtime's global idle, not just its own handling's
 commit, so on a piece with heavy derived state prefer calling plain (or
-`--no-wait`) and shaping the collect: `cf get --cell <receipt id> --select …`.
-`--no-wait` refuses all three flags, since it skips the receipt readback they
-are answered from. `--show-links` composes with a projection — links are
-collected after the selection, so each address names a position in the value you
-were handed — but not with `--filter`, which moves the positions a link names.
+`--no-wait`) and shaping the collect:
+`cf cell get --cell <receipt id> --select …`. `--no-wait` refuses all three
+flags, since it skips the receipt readback they are answered from.
+`--show-links` composes with a projection — links are collected after the
+selection, so each address names a position in the value you were handed — but
+not with `--filter`, which moves the positions a link names.
 
 `wish` and `exec` take the same three flags too, so all four arrivals shape
 their output the one way. `wish` writes them beside its target and shapes the
@@ -441,32 +442,32 @@ result rather than becoming an error. `exec` writes them **past the marker that
 closes the section the mounted file opened**, since everything between the two
 belongs to the callable's own schema-derived interface — which also means a
 callable run through its own shebang cannot carry them. `exec` settles a handler
-under an invocation of its own and prints the same Invocation JSON `cf call`
-does; a tool's result stays on stdout with its result cell's address on stderr,
-written as an address argument `--cell` takes unchanged.
+under an invocation of its own and prints the same Invocation JSON
+`cf piece call` does; a tool's result stays on stdout with its result cell's
+address on stderr, written as an address argument `--cell` takes unchanged.
 
 ```bash
 deno task cf wish '#profile' -i ./claude.key --select name,avatar
 deno task cf exec /tmp/cf/…/result/search.tool --query milk -- --select id,title
 ```
 
-For `cf call`, options before the callable name configure `cf call`. Arguments
-after the callable name configure the invoked handler or tool, until `--` closes
-that section. The JSON forms match `cf exec`:
+For `cf piece call`, options before the callable name configure `cf piece call`.
+Arguments after the callable name configure the invoked handler or tool, until
+`--` closes that section. The JSON forms match `cf exec`:
 
 ```bash
 # Complete input as an inline JSON value
-deno task cf call --cell ID search --json '{"query":"milk"}'
+deno task cf piece call --cell ID search --json '{"query":"milk"}'
 
 # Complete input from stdin
 printf '%s' '{"query":"milk"}' |
-  deno task cf call --cell ID search --json
+  deno task cf piece call --cell ID search --json
 
 # Machine-readable callable schema
-deno task cf call --cell ID search --help --json
+deno task cf piece call --cell ID search --help --json
 
 # Schema-derived input flags, in the section the callable name opened
-deno task cf call --cell ID search --query milk
+deno task cf piece call --cell ID search --query milk
 ```
 
 A single positional JSON value after the callable is also accepted. Use
@@ -476,30 +477,30 @@ available for JSON tool results. Errors always go to stderr.
 
 ## Gotcha: Always `step` After `set` or `call`
 
-Neither `cf set` nor `cf call` triggers recomputation automatically. You
-**must** run `piece step` after either one to get fresh computed values. When
-the value is session-scoped, use `cf get --step` so recomputation and the read
-happen in the same CLI session; a separate `piece step` process cannot carry
-session-local materialization into the following `cf get` process.
+Neither `cf cell set` nor `cf piece call` triggers recomputation automatically.
+You **must** run `piece step` after either one to get fresh computed values.
+When the value is session-scoped, use `cf cell get --step` so recomputation and
+the read happen in the same CLI session; a separate `piece step` process cannot
+carry session-local materialization into the following `cf cell get` process.
 
 ```bash
 # After setting data:
-echo '[...]' | deno task cf set --cell ID expenses ...
+echo '[...]' | deno task cf cell set --cell ID expenses ...
 deno task cf piece step --cell ID ...  # Required!
-deno task cf get --cell ID totalSpent ...
+deno task cf cell get --cell ID totalSpent ...
 
 # Equivalent one-session read (required for session-scoped computed output):
-deno task cf get --cell ID totalSpent --step ...
+deno task cf cell get --cell ID totalSpent --step ...
 ```
 
-A path-less `cf get` (whole result) degrades outputs it cannot reach — values
-living in another session's/user's scope are simply absent from the returned
-object rather than voiding the whole read. Use `--step` when you need those
-members materialized in your own session.
+A path-less `cf cell get` (whole result) degrades outputs it cannot reach —
+values living in another session's/user's scope are simply absent from the
+returned object rather than voiding the whole read. Use `--step` when you need
+those members materialized in your own session.
 
 ```bash
 # After calling a handler:
-deno task cf call --cell ID addItem '{"title": "Test"}'
+deno task cf piece call --cell ID addItem '{"title": "Test"}'
 deno task cf piece step --cell ID ...  # Required!
 deno task cf piece inspect --cell ID ...
 ```
@@ -522,7 +523,7 @@ deno task cf test pattern.test.tsx
 # 2. Deploy with the test attached
 deno task cf piece new pattern.tsx --test pattern.test.tsx -i key -a url -s space
 # 3. Call a handler
-deno task cf call --cell ID handlerName '{"arg": "value"}' ...
+deno task cf piece call --cell ID handlerName '{"arg": "value"}' ...
 # 4. Step to process
 deno task cf piece step --cell ID ...
 # 5. Inspect result

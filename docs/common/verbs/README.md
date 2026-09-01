@@ -2,7 +2,7 @@
 
 A **verb** is an operation a pattern declares — a `Stream` property, an event
 type in and a result type out — and the only way a pattern changes its own
-state; an operator can write a piece's cells directly with `cf set`, which runs
+state; an operator can write a piece's cells directly with `cf cell set`, which runs
 nothing and which a recomputation may overwrite
 ([the read and write session](../workflows/reading-and-writing.md)).
 These five documents cover driving one from the command line. They divide by
