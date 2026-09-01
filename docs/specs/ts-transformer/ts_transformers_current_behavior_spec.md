@@ -1036,8 +1036,9 @@ The rewriter uses normalized data-flow dependencies and ordered emitters:
 
 The container emitter owns a literal that holds other expressions, and a
 transparent wrapper around one: it rewrites the children and leaves the
-container unwrapped. It reads the transparent wrapper set (parentheses, `as`, `<T>x`, `satisfies`, `!`, and partially emitted nodes), so a wrapped container is owned on the
-same terms as a bare one.
+container unwrapped. It reads the transparent wrapper set (parentheses, `as`,
+`<T>x`, `satisfies`, `!`, and partially emitted nodes), so a wrapped container
+is owned on the same terms as a bare one.
 
 The data-flow analysis behind these emitters reads that same set twice. An
 expression wrapped in it is analyzed as the expression it wraps, which is what
@@ -1046,6 +1047,15 @@ named there falls to the generic child walk, which merges through
 `mergeAnalyses` and drops the hint. Normalization then groups flows by their
 normalized text, and strips the set before comparing, so flows differing only
 by a wrapper collapse into one dependency instead of splitting.
+
+Capture selection reads it a third time. A lift captures the fields its body
+reads, and the dedup deciding that asks each data flow for its root identifier,
+looking through member access, calls, and the wrapper set. A reference whose
+root goes unrecognized is not merely skipped: the free-identifier pass then adds
+that root as a capture of its own, and a whole-object capture subsumes the
+narrower paths beside it. The lift is then applied to the whole object and
+re-runs for any field of it, where it could have been applied to the one field
+the body reads.
 
 Key rewrite rules:
 

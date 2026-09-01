@@ -242,7 +242,8 @@ export class MentionController implements ReactiveController {
         return true;
 
       case "Enter":
-        // Only intercept Enter if a mention will actually be inserted.
+        // A selected row owns this keypress while its destination resolves.
+        // Failure leaves the selection and popup intact for another attempt.
         if (filteredMentions[this._state.selectedIndex]) {
           event.preventDefault();
           this.insertMention(filteredMentions[this._state.selectedIndex]);
@@ -262,11 +263,14 @@ export class MentionController implements ReactiveController {
   }
 
   /**
-   * Insert a mention at the current cursor position.
+   * Inserts a mention at the current cursor position.
    * Resolves the sub-cell to the real piece entity ID at insertion time.
+   * An index row whose piece cannot resolve inserts nothing and remains
+   * selected in the open popup.
    */
   async insertMention(mention: CellHandle<Mentionable>): Promise<void> {
     const markdown = await this.encodePieceAsMarkdown(mention);
+    if (markdown === null) return;
     this.config.onInsert(markdown, mention);
     this.hide();
   }
@@ -302,32 +306,38 @@ export class MentionController implements ReactiveController {
   private _destinationOf(
     mention: CellHandle<Mentionable>,
   ): CellHandle<Mentionable> {
-    const value = mention.get();
-    return value != null && Object.hasOwn(value, "piece")
+    return this._isIndexRow(mention)
       ? mention.key("piece").asSchema<Mentionable>(MentionableSchema)
       : mention;
   }
 
+  /** Whether an entry is an index row standing for its `.piece`. */
+  private _isIndexRow(mention: CellHandle<Mentionable>): boolean {
+    const value = mention.get();
+    return value != null && Object.hasOwn(value, "piece");
+  }
+
   /**
-   * Encode a piece as markdown link [name](/of:entityId).
+   * Encodes a piece as markdown link `[name](/of:entityId)`.
    * Resolves the entry's destination to the real piece entity ID so
    * downstream consumers (LLM tools, read operations) can access the full
    * schema. The display name is the entry's own — for an index row, the
-   * label it lists.
+   * label it lists. Returns `null` when an index row's piece cannot resolve;
+   * a direct entry can still fall back to its own raw reference.
    */
   private async encodePieceAsMarkdown(
     piece: CellHandle<Mentionable>,
-  ): Promise<string> {
+  ): Promise<string | null> {
     const name = piece.get()?.[NAME] || "Unknown";
-    const destination = this._destinationOf(piece);
     try {
+      const destination = this._destinationOf(piece);
       const resolved = await destination.resolveAsCell();
       return `[${name}](/${resolved.ref().id})`;
     } catch {
-      // The ENTRY's href, not the destination's: decode's raw first pass
-      // matches entry refs, so this round-trips even for an index row
-      // whose piece failed to resolve — a `/…/piece` path would match
-      // neither pass.
+      // A direct entry is already the destination, so its raw ref remains a
+      // usable fallback. An index row is only bookkeeping; without its piece
+      // identity there is no valid mention to insert.
+      if (this._isIndexRow(piece)) return null;
       return `[${name}](${this._buildHref(piece.ref())})`;
     }
   }
