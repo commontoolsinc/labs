@@ -143,6 +143,7 @@ export class EngineWaveCommitSink implements WaveCommitSink {
      * The SpaceServer passes the DR1 holder identity. */
     sessionId: string;
 
+    /** The identity that session acts as, where the caller names one. */
     principal?: string;
 
     /** The shared, process-lifetime localSeq counter (see the

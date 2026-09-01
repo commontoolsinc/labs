@@ -105,11 +105,16 @@ export type ReplayLatencySample = {
   selector: number;
   docId: string;
 
-  /** Counter deltas for this single invocation. */
+  /** Schema-call delta for this single invocation. */
   schemaCalls: number;
 
+  /** `anyOf`-branch delta over the same invocation. */
   anyOfBranches: number;
+
+  /** DAG-call delta over the same invocation. */
   dagCalls: number;
+
+  /** Pointer-call delta over the same invocation. */
   pointerCalls: number;
 };
 
