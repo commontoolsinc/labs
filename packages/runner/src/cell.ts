@@ -4247,14 +4247,34 @@ function convertOneToLinks(
     // anything else non-index is genuinely unrepresentable and must still be
     // rejected.
     if (isCellResultForDereferencing(value) && isPlainContainer(value)) {
-      // What these produce is a valid `FabricValueLayer` already, so it wants
-      // no further conversion. Objects need this as much as arrays do -- the
-      // annotation goes on either (see `schema.ts`).
-      container = (Array.isArray(value)
-        ? shallowCleanArray(value, false)
-        : shallowCleanPlainObject(value as object, false)) as
-          | unknown[]
-          | Record<string, unknown>;
+      const isArray = Array.isArray(value);
+
+      if (
+        Object.hasOwn(value, toCell) &&
+        Object.getPrototypeOf(value) ===
+          (isArray ? Array.prototype : Object.prototype)
+      ) {
+        // An annotated container: a plain array or object carrying the
+        // symbol as its own property, and content otherwise. The rebuild
+        // below reads only index and enumerable string keys, so the symbol
+        // does not reach the result and a cleaned copy would be a second
+        // copy of the same content. The prototype check is what lets the
+        // rebuild use the container's own `map()`: a subclass would answer
+        // with a subclass instance.
+        container = value as unknown[] | Record<string, unknown>;
+      } else {
+        // A query-result proxy answers the symbol from a trap rather than an
+        // own property, and its `map()` is the proxy's, not `Array`'s, so it
+        // is read out into a plain copy first. What these produce is a valid
+        // `FabricValueLayer` already, so it wants no further conversion.
+        // Objects need this as much as arrays do -- the annotation goes on
+        // either (see `schema.ts`).
+        container = (isArray
+          ? shallowCleanArray(value, false)
+          : shallowCleanPlainObject(value as object, false)) as
+            | unknown[]
+            | Record<string, unknown>;
+      }
     } else {
       // A native object carrying a fabric form is minted into it here: a
       // `Date` or `Uint8Array` becomes a `FabricPrimitive`, an `Error` a
