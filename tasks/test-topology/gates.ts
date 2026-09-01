@@ -11,7 +11,7 @@
  * else the `Check` job runs is an ordinary selectable gate.
  */
 
-import { collectPathsByScope } from "../typecheck.ts";
+import { collectPathsByScope, scopeOfPath } from "../typecheck.ts";
 import { collectAllPatternFiles, patternKey } from "../pattern-files.ts";
 import {
   claimsIdentity,
@@ -203,6 +203,17 @@ async function typecheckSuite(root: string): Promise<Suite> {
     mandatory: "changed",
     units: scopes,
     unavailable: [],
+    // A group's unit is the scope it checks rather than a path, so the
+    // diff is mapped onto scopes the same way the check itself groups
+    // the paths it walks.
+    unitsForChange(changed) {
+      const touched = new Set<string>();
+      for (const path of changed) {
+        const scope = scopeOfPath(path);
+        if (known.has(scope)) touched.add(scope);
+      }
+      return [...touched];
+    },
     locate(record): Location | undefined {
       if (!claimsIdentity({ recordSurfaces }, record.test)) return undefined;
       // `cfcheck` records under the same kind and its own names, so the

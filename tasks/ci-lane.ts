@@ -219,11 +219,20 @@ export function mandatoryFor(
   }
   for (const suite of suites) {
     const unavailable = new Set(suite.unavailable.map((entry) => entry.unit));
+    // A unit that is a path is made mandatory by the diff naming it. A
+    // unit that is not — a type-check group, a binary — is one the suite
+    // has to map the diff onto itself, because only it knows what its
+    // unit covers.
+    const touched = new Set<string>(
+      suite.unitsForChange !== undefined
+        ? suite.unitsForChange(changed)
+        : suite.units.filter((unit) => changed.has(unit)),
+    );
     for (const unit of suite.units) {
       if (unavailable.has(unit)) continue;
       const reason: SelectionReason | undefined = suite.mandatory === "always"
         ? "always"
-        : changed.has(unit)
+        : touched.has(unit)
         ? "changed"
         : undefined;
       const recorded = identitiesOf.get(`${suite.id}\t${unit}`);

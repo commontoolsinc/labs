@@ -153,6 +153,16 @@ export interface Suite {
    */
   sources?: readonly string[];
 
+  /**
+   * Which units a change makes mandatory. Absent where a unit is a path,
+   * because the diff naming that path is the whole of the question. A
+   * suite whose units are not paths — a type-check group, a binary —
+   * answers it here, and a suite that answers it wrongly runs too much
+   * or too little rather than reporting anything, so the answer errs
+   * toward running.
+   */
+  unitsForChange?(changed: ReadonlySet<string>): readonly Unit[];
+
   /** Whether a record belongs to one of this suite's units, or to it. */
   locate(record: LocatableRecord): Location | undefined;
 

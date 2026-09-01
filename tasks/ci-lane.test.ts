@@ -202,6 +202,47 @@ describe("what a lane must run whatever the score says", () => {
     ).toBe("changed");
   });
 
+  it("asks a suite which of its units a change reaches", () => {
+    // A unit that is not a path — a type-check group, a binary — is one
+    // only its suite can map the diff onto, so the suite is asked rather
+    // than the diff being matched against the unit's name.
+    const binaries = suite({
+      id: "binaries",
+      mandatory: "changed",
+      recordSurfaces: [{ kind: "gate", scope: "repo" }],
+      units: ["toolshed", "cf"],
+      unitsForChange: (changed) =>
+        changed.has("packages/shell/index.ts") ? ["toolshed"] : [],
+    });
+    const manifest = manifestOf([
+      {
+        test: { k: "gate", s: "repo", n: "build-binary toolshed" },
+        suite: "binaries",
+        unit: "toolshed",
+      },
+      {
+        test: { k: "gate", s: "repo", n: "build-binary cf" },
+        suite: "binaries",
+        unit: "cf",
+      },
+    ]);
+    const { mandatory } = mandatoryFor(
+      [binaries],
+      manifest,
+      new Set(["packages/shell/index.ts"]),
+    );
+    expect(
+      mandatory.get(
+        testIdentityKey({ k: "gate", s: "repo", n: "build-binary toolshed" }),
+      ),
+    ).toBe("changed");
+    expect(
+      mandatory.get(
+        testIdentityKey({ k: "gate", s: "repo", n: "build-binary cf" }),
+      ),
+    ).toBeUndefined();
+  });
+
   it("runs every unit of a suite marked always", () => {
     const gates = suite({
       id: "repo-gates",

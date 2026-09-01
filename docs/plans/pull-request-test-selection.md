@@ -366,7 +366,15 @@ why that has to be literal. `"changed"` means an item runs when the pull
 request touches a file the item covers; the per-package type check is the
 natural user, because the store already records one `typecheck` identity
 per package group and the mapping from a changed file to a package is
-direct. Absent the field, the suite is selected purely on value.
+direct.
+
+Answering "what does this item cover" belongs to the suite, because a
+unit that is not a path is one only its suite can map a diff onto. A
+suite whose units are files needs to say nothing: the diff naming the
+file is the whole of the question. A suite whose units are type-check
+groups or binaries maps the diff itself, and a suite that maps it wrongly
+runs too much or too little rather than reporting anything, so the answer
+errs toward running. Absent the field, the suite is selected purely on value.
 
 The `always` set is deliberately tiny, and every member of it is a gate
 whose failure means the tree is broken rather than that one test is
@@ -398,6 +406,8 @@ table is the migration's checklist.
 | `pattern-integration-on` | the server-execution ON arm | `server-execution` | `deno`, `toolshed-baked-on`, `browser` |
 | `pattern-reload` | `Pattern Reload Integration Tests` | — | `deno`, `local-dev-servers`, `browser` |
 | `pattern-unit` | `Pattern Unit Tests (1..4)` | — | `deno`, `cf`, `compile-cache` |
+| `binaries` | the compile inside `Build Binary (toolshed)` and the two beside it | — | `deno` |
+| `binaries-on` | the compile inside `Build Binary (toolshed, server-execution ON shell)` | `server-execution` | `deno` |
 
 When server execution becomes the default, the unmarked
 `package-integration` and `pattern-integration` suites change their commands
@@ -430,8 +440,31 @@ adding a new test. The existing rule that the skip registry must be empty
 when server execution becomes the default remains unchanged.
 
 The build jobs (`Build Binary (toolshed)` and the three beside it) do not
-become suites. They are not tests; they are setup, and they become
-capability providers. The deploy and attestation jobs stay exactly as they
+become suites for the reason they exist today. They are not tests; they
+are setup, and as setup they become capability providers.
+
+They do become suites for a different reason. A pull request runs its
+servers and its command line from source and compiles nothing, so a
+compile that breaks would be found on `main`, after the change that broke
+it has merged — where today it is caught before it lands. So `binaries`
+makes each shipped binary a unit whose test is that it still compiles,
+and `binaries-on` does the same for the toolshed under the
+server-execution define, which is the same build in a different
+configuration and therefore a variant of it rather than a second test.
+
+Every one of those builds passes `--no-check`, so this is not a second
+type check: `deno task check` owns that. What a compile catches that
+nothing else does is resolving the whole import graph from an entry
+point, bundling the browser shell, and embedding each `--include`d asset
+from a path that has to still exist.
+
+A build is expensive and, having caught nothing yet, worth the value
+floor, so the score alone would almost never choose one — and the change
+about to break a compile is exactly the change that would not run it.
+They are therefore `mandatory: "changed"`, against the trees each binary
+is built from. That mapping is coarse, because a compile reaches the
+whole import graph and no short list describes it exactly, so it errs
+toward building. The deploy and attestation jobs stay exactly as they
 are, since they only ever ran on `main`.
 
 **`cli-fuse` carries the fine granularity the rest of this depends on.**
