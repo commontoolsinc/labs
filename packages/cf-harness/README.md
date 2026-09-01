@@ -963,8 +963,8 @@ admitted. Every other path — including a directory, script, reference, asset, 
 package file — refuses the whole acquisition and is returned as sanitized, inert
 refusal metadata. Nothing is silently stripped: prose referring to a missing
 script would be a different and misleading skill. Only after this check does the
-host fetch the pinned raw `SKILL.md` bytes, require non-empty UTF-8, and write
-them to a cell.
+host require root `SKILL.md` to be a regular Git tree file, stream at most 256
+KiB of pinned raw bytes, require non-empty UTF-8, and write them to a cell.
 
 The successful write carries the weaker `kind: "fetch"` `ExternalIngest`
 provenance variant. It records the exact pinned raw URL, commit SHA, fetch time,
@@ -976,10 +976,13 @@ inert acquisition metadata; loading the handle remains a separate
 
 `delegate_task` takes an optional `skillHandle`: a handle the parent holds,
 naming a cell whose string value is skill text for the child. The text is
-materialized on the trusted host side at child spawn — through the same
-resolution contract as every other handle value: table membership mandatory,
-string-only, same-space-only, with a structured refusal naming the reference on
-any miss, delivered before any child exists — and injected into the child's
+materialized on the trusted host side at child spawn. Acquired handles carry the
+`skill-context` capability and only this exact slot can consume one:
+`describe_handle`, browser value binding, ordinary tool-input resolution,
+delegation goal/context seeding, and child-return resolution all refuse or keep
+it opaque. The authorized resolution still requires table membership, a string
+value, and the same Fabric space, with a structured refusal naming the reference
+on any miss before any child exists. The text is injected into the child's
 context as a `<skill_context source="handle:<token>">` block beside the
 profile's registry preload. The parent never reads the text, and the child never
 holds the handle. The return path is mediated too: every parent-facing return of

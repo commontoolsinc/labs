@@ -15,6 +15,7 @@ import { normalize } from "@std/path/posix";
 import { describe, it } from "@std/testing/bdd";
 
 import { CfHarnessEngine } from "../src/engine.ts";
+import { resolveHandleToken } from "../src/handle-table.ts";
 import { SkillsShAcquisitionClient } from "../src/skills-sh/acquisition.ts";
 import { SkillsShSearchClient } from "../src/skills-sh/search-client.ts";
 import type {
@@ -232,8 +233,11 @@ describe("acquire-skill", () => {
         },
       });
 
+      expect(output.skillHandle).toMatch(/^cfh:a:/);
+      const entry = resolveHandleToken(engine.handleTable!, output.skillHandle);
+      expect(entry?.capability).toBe("skill-context");
       const cell = pieces.runtime.getCellFromLink(
-        parseLLMFriendlyLink(output.skillHandle, pieces.getSpace()),
+        parseLLMFriendlyLink(entry!.ref, pieces.getSpace()),
       );
       await cell.sync();
       expect(cell.getRaw()).toBe(MEMBRANE_SKILL_TEXT);

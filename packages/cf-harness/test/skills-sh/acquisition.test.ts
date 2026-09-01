@@ -10,6 +10,7 @@ import { describe, it } from "@std/testing/bdd";
 import type { HarnessFetch } from "../../src/contracts/http-fetch.ts";
 import {
   acquireSkillsShPinnedSkill,
+  SKILLS_SH_MAX_SKILL_BYTES,
   SkillsShAcquisitionError,
 } from "../../src/skills-sh/acquisition.ts";
 import type { SkillsShPinnedAddress } from "../../src/skills-sh/pin.ts";
@@ -144,7 +145,7 @@ describe("skills.sh pinned acquisition", () => {
       },
       sha: MEMBRANE_SHA,
       truncated: true,
-      tree: [{ path: "skills/plaid/SKILL.md", type: "blob" }],
+      tree: [{ path: "skills/plaid/SKILL.md", mode: "100644", type: "blob" }],
     };
     const { fetch, urls } = fixtureFetch({ tree: syntheticTruncatedTree });
 
@@ -161,7 +162,7 @@ describe("skills.sh pinned acquisition", () => {
     const { fetch } = fixtureFetch({
       tree: {
         sha: MEMBRANE_SHA,
-        tree: [{ path: "skills/plaid/SKILL.md", type: "blob" }],
+        tree: [{ path: "skills/plaid/SKILL.md", mode: "100644", type: "blob" }],
       },
     });
 
@@ -191,7 +192,7 @@ describe("skills.sh pinned acquisition", () => {
       tree: {
         sha: MEMBRANE_SHA,
         truncated: false,
-        tree: [{ path: "skills/Plaid/SKILL.md", type: "blob" }],
+        tree: [{ path: "skills/Plaid/SKILL.md", mode: "100644", type: "blob" }],
       },
     });
 
@@ -209,9 +210,11 @@ describe("skills.sh pinned acquisition", () => {
         truncated: false,
         tree: [{
           path: "skills/PLAID/plaid/SKILL.md",
+          mode: "100644",
           type: "blob",
         }, {
           path: "skills/plaid/plaid/SKILL.md",
+          mode: "100644",
           type: "blob",
         }],
       },
@@ -236,8 +239,13 @@ describe("skills.sh pinned acquisition", () => {
       tree: {
         sha: MEMBRANE_SHA,
         truncated: false,
-        tree: [{ path: "skills/plaid/SKILL.md", type: "blob" }, {
+        tree: [{
+          path: "skills/plaid/SKILL.md",
+          mode: "100644",
+          type: "blob",
+        }, {
           path: "skills/Plaid/SKILL.md",
+          mode: "100644",
           type: "blob",
         }],
       },
@@ -260,7 +268,7 @@ describe("skills.sh pinned acquisition", () => {
       tree: {
         sha: MEMBRANE_SHA,
         truncated: false,
-        tree: [{ path: skillPath, type: "blob" }],
+        tree: [{ path: skillPath, mode: "100644", type: "blob" }],
       },
     });
 
@@ -275,8 +283,13 @@ describe("skills.sh pinned acquisition", () => {
       tree: {
         sha: MEMBRANE_SHA,
         truncated: false,
-        tree: [{ path: "skills/plaid/SKILL.md", type: "blob" }, {
+        tree: [{
+          path: "skills/plaid/SKILL.md",
+          mode: "100644",
+          type: "blob",
+        }, {
           path: 42,
+          mode: "100644",
           type: "blob",
         }],
       },
@@ -290,12 +303,16 @@ describe("skills.sh pinned acquisition", () => {
     expect(refusal.message).toContain("malformed tree entry");
   });
 
-  it("refuses a candidate whose root SKILL.md is not a blob", async () => {
+  it("refuses a candidate whose root SKILL.md is not a regular file", async () => {
     const { fetch } = fixtureFetch({
       tree: {
         sha: MEMBRANE_SHA,
         truncated: false,
-        tree: [{ path: "skills/plaid/SKILL.md", type: "tree" }],
+        tree: [{
+          path: "skills/plaid/SKILL.md",
+          mode: "040000",
+          type: "tree",
+        }],
       },
     });
 
@@ -304,7 +321,29 @@ describe("skills.sh pinned acquisition", () => {
     );
 
     expect(refusal.code).toBe("unparseable_response");
-    expect(refusal.message).toContain("SKILL.md is not a blob");
+    expect(refusal.message).toContain("SKILL.md is not a regular file");
+  });
+
+  it("refuses a symlink candidate instead of fetching its target", async () => {
+    const { fetch, urls } = fixtureFetch({
+      tree: {
+        sha: MEMBRANE_SHA,
+        truncated: false,
+        tree: [{
+          path: "skills/plaid/SKILL.md",
+          mode: "120000",
+          type: "blob",
+        }],
+      },
+    });
+
+    const refusal = await refusalOf(
+      acquireSkillsShPinnedSkill(MEMBRANE_PIN, { fetch }),
+    );
+
+    expect(refusal.code).toBe("unparseable_response");
+    expect(refusal.message).toContain("regular file");
+    expect(urls).toEqual([MEMBRANE_TREE_URL]);
   });
 
   it("refuses fetched bytes that are not UTF-8", async () => {
@@ -329,6 +368,24 @@ describe("skills.sh pinned acquisition", () => {
 
     expect(refusal.code).toBe("invalid_skill_text");
     expect(refusal.message).toContain("empty");
+  });
+
+  it("refuses a SKILL.md that exceeds the byte cap while streaming", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(SKILLS_SH_MAX_SKILL_BYTES));
+        controller.enqueue(new Uint8Array([1]));
+        controller.close();
+      },
+    });
+    const { fetch } = fixtureFetch({ skillBody: body });
+
+    const refusal = await refusalOf(
+      acquireSkillsShPinnedSkill(MEMBRANE_PIN, { fetch }),
+    );
+
+    expect(refusal.code).toBe("skill_too_large");
+    expect(refusal.message).toContain(String(SKILLS_SH_MAX_SKILL_BYTES));
   });
 
   it("refuses a raw-content HTTP error", async () => {

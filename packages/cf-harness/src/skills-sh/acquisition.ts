@@ -23,6 +23,8 @@ const GITHUB_API_BASE_URL = "https://api.github.com";
 const GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com";
 const FULL_GIT_COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const MAX_TREE_PATH_CHARS = 4_096;
+/** Maximum exact byte length admitted for an instructions-only SKILL.md. */
+export const SKILLS_SH_MAX_SKILL_BYTES = 256 * 1_024;
 
 export type SkillsShAcquisitionFailureCode =
   | "invalid_pin"
@@ -33,6 +35,7 @@ export type SkillsShAcquisitionFailureCode =
   | "skill_not_found"
   | "skill_ambiguous"
   | "instructions_only"
+  | "skill_too_large"
   | "invalid_skill_text";
 
 export class SkillsShAcquisitionError extends Error {
@@ -77,6 +80,7 @@ export interface AcquireSkillsShPinnedSkillOptions {
 
 interface GithubTreeEntry {
   readonly path: string;
+  readonly mode: "040000" | "100644" | "100755" | "120000" | "160000";
   readonly type: "blob" | "tree" | "commit";
 }
 
@@ -165,9 +169,12 @@ const readTreeEntries = (body: unknown): readonly GithubTreeEntry[] => {
   for (const item of record.tree) {
     const entry = asRecord(item);
     const path = entry?.path;
+    const mode = entry?.mode;
     const type = entry?.type;
     if (
       typeof path !== "string" || !isUsableTreePath(path) ||
+      (mode !== "040000" && mode !== "100644" && mode !== "100755" &&
+        mode !== "120000" && mode !== "160000") ||
       (type !== "blob" && type !== "tree" && type !== "commit")
     ) {
       throw acquisitionError(
@@ -175,7 +182,7 @@ const readTreeEntries = (body: unknown): readonly GithubTreeEntry[] => {
         "GitHub tree carried a malformed tree entry",
       );
     }
-    entries.push({ path, type });
+    entries.push({ path, mode, type });
   }
   return entries;
 };
@@ -206,6 +213,42 @@ const encodedTreePath = (path: string): string =>
 
 const valueDigestOf = (bytes: Uint8Array): string =>
   `sha256:${toUnpaddedBase64url(sha256(bytes))}`;
+
+const readSkillBytes = async (response: Response): Promise<Uint8Array> => {
+  if (response.body === null) return new Uint8Array();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value === undefined || value.byteLength === 0) continue;
+      if (total + value.byteLength > SKILLS_SH_MAX_SKILL_BYTES) {
+        try {
+          await reader.cancel();
+        } catch {
+          // Cancellation is cleanup; it cannot replace the size refusal.
+        }
+        throw acquisitionError(
+          "skill_too_large",
+          `the pinned SKILL.md exceeds the ${SKILLS_SH_MAX_SKILL_BYTES}-byte limit`,
+        );
+      }
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+};
 
 /**
  * Fetches the recursive tree and root `SKILL.md` at exactly `pin.commitSha`.
@@ -274,10 +317,13 @@ export const acquireSkillsShPinnedSkill = async (
 
   const skillPath = candidates[0];
   const skillEntry = entries.find((entry) => entry.path === skillPath);
-  if (skillEntry?.type !== "blob") {
+  if (
+    skillEntry?.type !== "blob" ||
+    (skillEntry.mode !== "100644" && skillEntry.mode !== "100755")
+  ) {
     throw acquisitionError(
       "unparseable_response",
-      "the candidate root SKILL.md is not a blob",
+      "the candidate root SKILL.md is not a regular file",
     );
   }
   const root = candidateRoot(skillPath);
@@ -310,7 +356,7 @@ export const acquireSkillsShPinnedSkill = async (
     sourceUrl,
     "GitHub raw SKILL.md",
   );
-  const bytes = new Uint8Array(await skillResponse.arrayBuffer());
+  const bytes = await readSkillBytes(skillResponse);
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);

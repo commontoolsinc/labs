@@ -192,6 +192,11 @@ export const acquireSkillTool: HarnessToolDefinition<
     if (context.getFabricSession === undefined) {
       return errorOutput("acquire_skill requires a configured fabric session");
     }
+    if (context.mintSkillContextHandle === undefined) {
+      return errorOutput(
+        "acquire_skill requires the host skill-context handle mint",
+      );
+    }
 
     let pin: SkillsShPinnedAddress | undefined;
     try {
@@ -237,10 +242,13 @@ export const acquireSkillTool: HarnessToolDefinition<
         );
       }
       await runtime.idle();
+      const skillHandle = await context.mintSkillContextHandle(
+        createLLMFriendlyLink(link, space),
+      );
       return {
         outputId,
         status: "loaded",
-        skillHandle: createLLMFriendlyLink(link, space),
+        skillHandle,
         pin,
         loaded: {
           skillRoot: acquired.skillRoot,

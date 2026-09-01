@@ -424,6 +424,39 @@ describe("browser", () => {
       expect(output.status).toBe("ok");
     });
 
+    it("refuses a skill-context handle before browser materialization", async () => {
+      const ref = await seedRef("external-skill", "secret instructions");
+      const runner = new FakeProcessRunner([
+        pageAt(`${ALLOWED_ORIGIN}/login`),
+      ]);
+      const engine = createEngine(runner);
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable(engine.getRunState().runId),
+        ref,
+        { capability: "skill-context" },
+      );
+      await engine.recordHandleTable(minted.table);
+
+      const result = await engine.invokeBuiltinTool("browser", {
+        action: "fill",
+        ref: "@e1",
+        valueHandle: minted.token,
+      });
+
+      const output = result.output as BrowserToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toBe(
+        "browser valueHandle cannot consume a skill-context handle; only delegate_task skillHandle can",
+      );
+      expect(runner.calls).toHaveLength(1);
+      expect(runner.calls[0]?.args).toEqual([
+        "--cdp",
+        "http://localhost:9362",
+        "get",
+        "url",
+      ]);
+    });
+
     it("navigates to the URL behind a urlHandle", async () => {
       const ref = await seedRef("target-url", "https://example.com/inbox");
       const runner = new FakeProcessRunner([{

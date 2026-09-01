@@ -154,6 +154,28 @@ const contextWith = (
   }) as unknown as HarnessToolContext;
 
 describe("describe_handle", () => {
+  it("refuses to resolve a skill-context handle", async () => {
+    const minted = await mintAddressHandle(
+      createHarnessHandleTable("run-describe"),
+      REF_A,
+      { capability: "skill-context" },
+    );
+
+    const output = await describeHandleTool.invoke(
+      contextWith(minted.table),
+      { token: minted.token },
+    );
+
+    expect(output).toEqual({
+      outputId: output.outputId,
+      token: minted.token,
+      known: true,
+      hasSchema: false,
+      error:
+        "describe_handle cannot consume a skill-context handle; only delegate_task skillHandle can",
+    });
+  });
+
   it("returns the recorded schema for a known token and nothing but shape", async () => {
     const minted = await mintAddressHandle(
       createHarnessHandleTable("run-describe"),

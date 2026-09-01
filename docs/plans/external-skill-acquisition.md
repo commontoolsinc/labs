@@ -110,16 +110,14 @@ it above.
 **The ranking signal is not imported.** See below; this is load-bearing enough
 to have its own section.
 
-**Egress.** Stage 1 discovery runs on the configured parent surface and returns
-metadata only. Stage 3 moves discovery and acquisition together into a
-dedicated child with web reach and no secrets, using
-`WEB_FETCH_SUBAGENT_PROFILE_CONFIG` as its constrained shape rather than adding
-registry search to the existing hostile-web-text profile. The decomposition is
-the one CT-2078 proved: the acquirer has web reach and no task data, the user
-has task data and no acquisition surface. The residual channel is real and
-unclosed: **a search query can encode anything the searcher knows**, so a parent
-that has read a secret and then chooses what to search for is a channel by
-construction. CT-2068 names this; this plan does not solve it, and the mirror
+**Egress.** Discovery and acquisition are host effects on the configured parent
+surface. Discovery returns metadata only. Acquisition resolves and fetches a
+pinned source, applies the complete-payload refusal, writes the admitted text
+behind a capability-typed handle, and returns that handle without returning the
+text. No model with web reach performs either fetch. The residual channel is
+real and unclosed: **a search query can encode anything the searcher knows**, so
+a parent that has read a secret and then chooses what to search for is a channel
+by construction. CT-2068 names this; this plan does not solve it, and the mirror
 below is what eventually does.
 
 ## Part 2 — Handle-load: the text never reaches the chooser
@@ -129,6 +127,10 @@ below is what eventually does.
 
 - `delegate_task` takes `skillHandle`, a token naming a cell whose value is
   skill text (`packages/cf-harness/src/prompt-loop.ts`).
+- An acquired token carries the `skill-context` handle capability. Exactly the
+  `delegate_task.skillHandle` slot may consume it; browser value bindings,
+  `describe_handle`, generic tool-input swapping, delegation prose, and child
+  returns refuse it or keep it opaque.
 - `resolveHandleValue` materializes it trusted-side
   (`packages/cf-harness/src/tools/handle-values.ts`): handle-table membership
   is mandatory, only a `string` resolves — a number or object is refused

@@ -46,9 +46,10 @@ export interface HarnessToolContext {
 
   /**
    * The run's handle table, as it stands at the invocation. Undefined until
-   * the run mints its first handle. `describe_handle` is the only tool that
-   * reads it: every other tool sees its input with tokens already resolved to
-   * addresses by the prompt loop.
+   * the run mints its first handle. `describe_handle` reads it directly, and
+   * value-handle consumers use it to prove membership and enforce entry
+   * capabilities. Ordinary tool inputs see general tokens resolved to
+   * addresses by the prompt loop; restricted tokens remain opaque.
    */
   handleTable?: HarnessHandleTable;
 
@@ -79,6 +80,9 @@ export interface HarnessToolContext {
    * skill acquisition is not configured, which keeps `acquire_skill` absent.
    */
   getSkillsShAcquisitionClient?: () => Promise<SkillsShAcquisitionClient>;
+
+  /** Mints the sole capability that may enter delegate_task.skillHandle. */
+  mintSkillContextHandle?(ref: string): Promise<string>;
 
   /**
    * Whether a pattern the model authored and ran successfully is published

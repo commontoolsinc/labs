@@ -76,7 +76,11 @@ import {
   createHarnessFabricSessionFactory,
   type HarnessFabricSessionFactory,
 } from "./fabric-session.ts";
-import { assertValidHarnessHandleTable } from "./handle-table.ts";
+import {
+  assertValidHarnessHandleTable,
+  createHarnessHandleTable,
+  mintAddressHandle,
+} from "./handle-table.ts";
 import {
   cacheHarnessPatternIndexClientFactory,
   createHarnessPatternIndexClientFactory,
@@ -1047,6 +1051,17 @@ export class CfHarnessEngine {
     await this.persistRunState();
   }
 
+  /** Mints and records a handle consumable only as delegated skill context. */
+  async mintSkillContextHandle(ref: string): Promise<string> {
+    const minted = await mintAddressHandle(
+      this.handleTable ?? createHarnessHandleTable(this.#runState.runId),
+      ref,
+      { capability: "skill-context" },
+    );
+    await this.recordHandleTable(minted.table);
+    return minted.token;
+  }
+
   async persistRunState(): Promise<string | undefined> {
     return await this.artifactStore?.persistRunState(this.#runState);
   }
@@ -1873,6 +1888,7 @@ export class CfHarnessEngine {
           getSkillsShAcquisitionClient: this.#skillsShAcquisitionClientFactory,
         }
         : {}),
+      mintSkillContextHandle: (ref: string) => this.mintSkillContextHandle(ref),
       ...(this.#taskText !== undefined ? { taskText: this.#taskText } : {}),
       sandbox: this.sandbox,
       hostProcessRunner: this.hostProcessRunner,

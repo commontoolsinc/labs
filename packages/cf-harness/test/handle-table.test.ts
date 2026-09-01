@@ -56,6 +56,28 @@ describe("handle-table", () => {
   });
 
   describe("mintAddressHandle()", () => {
+    it("records and never downgrades the skill-context capability", async () => {
+      const restricted = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+        { capability: "skill-context" },
+      );
+      const reminted = await mintAddressHandle(restricted.table, LINK_A);
+
+      expect(resolveHandleToken(reminted.table, reminted.token)?.capability)
+        .toBe("skill-context");
+
+      const general = await mintAddressHandle(
+        createHarnessHandleTable("run-2"),
+        LINK_A,
+      );
+      const upgraded = await mintAddressHandle(general.table, LINK_A, {
+        capability: "skill-context",
+      });
+      expect(resolveHandleToken(upgraded.table, upgraded.token)?.capability)
+        .toBe("skill-context");
+    });
+
     it("returns a well-formed token drawn from the handle alphabet", async () => {
       const { token } = await mintAddressHandle(
         createHarnessHandleTable("run-1"),
@@ -417,6 +439,18 @@ describe("handle-table", () => {
   });
 
   describe("swapTokensForRefs()", () => {
+    it("leaves skill-context handles opaque to the generic resolver", async () => {
+      const { table, token } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+        { capability: "skill-context" },
+      );
+
+      expect(swapTokensForRefs(table, { handle: token })).toEqual({
+        handle: token,
+      });
+    });
+
     it("restores canonical link text swapped out by `swapLinksForTokens()`", async () => {
       const text = `Read ${LINK_A}/items/0 and of:fid1:${HASH_B} now`;
       const swapped = await swapLinksForTokens(
@@ -673,6 +707,24 @@ describe("handle-table", () => {
       } as unknown as HarnessHandleTable;
       expect(() => assertValidHarnessHandleTable(broken)).toThrow(
         "unknown schemaSource `model`",
+      );
+    });
+
+    it("throws for an entry capability outside the vocabulary", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+      );
+      const broken = {
+        ...table,
+        entries: table.entries.map((entry) => ({
+          ...entry,
+          capability: "browser-value",
+        })),
+      } as unknown as HarnessHandleTable;
+
+      expect(() => assertValidHarnessHandleTable(broken)).toThrow(
+        "unknown capability",
       );
     });
 

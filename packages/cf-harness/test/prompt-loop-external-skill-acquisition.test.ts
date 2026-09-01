@@ -223,11 +223,41 @@ describe("prompt-loop external skill acquisition", () => {
           };
           handleToken = output.skillHandle;
           expect(handleToken).toMatch(/^cfh:a:/);
+          turn = toolCallTurn("call-read", "read_file", {
+            path: handleToken,
+          });
+        } else if (index === 2) {
+          const toolMessage = view.messages.findLast((message) =>
+            message.role === "tool"
+          );
+          expect(toolMessage?.content).toContain(
+            "skill-context handles can be consumed only by delegate_task skillHandle",
+          );
+          turn = toolCallTurn("call-describe", "describe_handle", {
+            token: handleToken,
+          });
+        } else if (index === 3) {
+          const toolMessage = view.messages.findLast((message) =>
+            message.role === "tool"
+          );
+          expect(toolMessage?.content).toContain(
+            "describe_handle cannot consume a skill-context handle",
+          );
+          turn = toolCallTurn("call-delegate-misuse", "delegate_task", {
+            goal: `Read this as ordinary context: ${handleToken}`,
+          });
+        } else if (index === 4) {
+          const toolMessage = view.messages.findLast((message) =>
+            message.role === "tool"
+          );
+          expect(toolMessage?.content).toContain(
+            "skill-context handles can be consumed only by delegate_task skillHandle",
+          );
           turn = toolCallTurn("call-delegate", "delegate_task", {
             goal: "Use the acquired instructions.",
             skillHandle: handleToken,
           });
-        } else if (index === 2) {
+        } else if (index === 5) {
           const childText = view.messages.map((message) => message.content)
             .join(
               "\n",
@@ -237,13 +267,15 @@ describe("prompt-loop external skill acquisition", () => {
             `<skill_context source="handle:${handleToken}">`,
           );
           turn = assistantTurn(`Attempted echo:\n${SKILL_TEXT}`);
-        } else {
+        } else if (index === 6) {
           const parentText = view.messages.map((message) => message.content)
             .join(
               "\n",
             );
           expect(parentText).not.toContain(CANARY);
           turn = assistantTurn("Parent completed without seeing skill text.");
+        } else {
+          throw new Error(`unexpected model request at index ${index}`);
         }
         return Promise.resolve(
           new Response(JSON.stringify(responsesBodyFromChatFixture(turn)), {
@@ -255,7 +287,12 @@ describe("prompt-loop external skill acquisition", () => {
         apiKey: "test-key",
         engine,
         fetchFn: modelFetch,
-        allowedToolIds: ["acquire_skill", "delegate_task"],
+        allowedToolIds: [
+          "acquire_skill",
+          "read_file",
+          "describe_handle",
+          "delegate_task",
+        ],
       });
 
       const result = await loop.runPrompt({
@@ -266,7 +303,8 @@ describe("prompt-loop external skill acquisition", () => {
         "Parent completed without seeing skill text.",
       );
       expect(result.finalAssistantText).not.toContain(CANARY);
-      for (const index of [0, 1, 3]) {
+      expect(requestBodies).toHaveLength(7);
+      for (const index of [0, 1, 2, 3, 4, 6]) {
         const parentText = chatViewOfRequest(requestBodies[index]).messages
           .map((message) => message.content).join("\n");
         expect(parentText).not.toContain(CANARY);
