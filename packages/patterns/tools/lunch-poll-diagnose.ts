@@ -479,7 +479,11 @@ const AUTHORED_SITE = /cf:module\/[^/]+\/(.+:\d+:\d+)$/;
 /** The same identity with no authored site: `cf:module/<identity>:<symbol>`. */
 const ADDRESSED_MODULE = /^cf:module\/[^:]+:(.+)$/;
 
-function compactActionSite(actionId: string): string {
+/**
+ * The readable site of an action, from its id or from the authored source the
+ * graph reports for it.
+ */
+export function compactActionSite(actionId: string): string {
   const authored = AUTHORED_SITE.exec(actionId);
   if (authored) return authored[1];
   if (actionId.startsWith("raw:")) {

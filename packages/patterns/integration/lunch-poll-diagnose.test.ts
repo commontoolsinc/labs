@@ -16,7 +16,11 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
-import { runCase, voterIdentity } from "../tools/lunch-poll-diagnose.ts";
+import {
+  compactActionSite,
+  runCase,
+  voterIdentity,
+} from "../tools/lunch-poll-diagnose.ts";
 
 describe("lunch-poll-diagnose", () => {
   it("measures a poll two voters joined, filled, and voted in", async () => {
@@ -102,6 +106,45 @@ describe("lunch-poll-diagnose", () => {
       expect(() => voterIdentity({ profile: "not a link" })).toThrow(
         "cannot identify",
       );
+    });
+  });
+
+  describe("compactActionSite", () => {
+    // Every site the probe prints comes through here, from a handler id,
+    // which ends in its own authored source, or from the `src` the scheduler
+    // graph reports for a computation, whose id names content instead.
+
+    const IDENTITY = "Rn0PTb8geZO-q7Hg1DIBZI5JFBBLkW4oU3co2N9DLVA";
+
+    it("names the file, line and column of an authored site", () => {
+      expect(
+        compactActionSite(
+          `cf:module/${IDENTITY}/lunch-poll/main.tsx:1366:19`,
+        ),
+      ).toBe("lunch-poll/main.tsx:1366:19");
+    });
+
+    it("names the authored site a handler id ends in", () => {
+      expect(
+        compactActionSite(
+          `handler:cf:module/${IDENTITY}/lunch-poll/card.tsx:62:2`,
+        ),
+      ).toBe("lunch-poll/card.tsx:62:2");
+    });
+
+    it("names the symbol of an action with no authored site", () => {
+      expect(compactActionSite(`cf:module/${IDENTITY}:__cfLift_22:vt-pymUsk`))
+        .toBe("__cfLift_22:vt-pymUsk");
+    });
+
+    it("names a builtin by the builtin it is", () => {
+      expect(compactActionSite("raw:ifElse:ofNy8lcRiR_Z"))
+        .toBe("raw:ifElse:ofNy8lcRiR_Z");
+    });
+
+    it("names the result sink for a sink on the result", () => {
+      expect(compactActionSite(`sink:did:key:z6Mk/of:fid1:AAA/value`))
+        .toBe("sink:result");
     });
   });
 });
