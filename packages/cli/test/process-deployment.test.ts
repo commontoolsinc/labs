@@ -41,6 +41,13 @@ describe("process-deployment", () => {
       );
     });
 
+    it("says how to reach the refused deployment", () => {
+      claimProcessDeployment("https://first.test");
+      expect(() => claimProcessDeployment("https://second.test")).toThrow(
+        "restarting is the deployment switch",
+      );
+    });
+
     it("declines an api url no connection can use, leaving the claim unmade", () => {
       claimProcessDeployment("not-a-url");
       claimProcessDeployment("localhost:8000");

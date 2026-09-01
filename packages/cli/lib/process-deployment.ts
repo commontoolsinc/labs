@@ -43,10 +43,12 @@ function deploymentKey(apiUrl: string): string | null {
  * what every connection after the first does, and passes.
  *
  * A claim stands whether or not the connection it was made for opens, since
- * a connection that fails on the way up has written those settings already.
- * One case cannot have written them: an API URL no connection can be opened
- * over fails before the first of them is set, so it claims nothing and the
- * corrected URL after it still connects.
+ * a connection that fails on the way up has written those settings already:
+ * a well-formed host that answers nothing holds the claim until the process
+ * restarts, which is what the refusal names. One case cannot have written
+ * them: an API URL no connection can be opened over fails before the first
+ * of them is set, so it claims nothing and the corrected URL after it still
+ * connects.
  *
  * What it catches is a second deployment, not a second connection: two
  * connections to one deployment write the same settings and go unremarked,
@@ -64,7 +66,8 @@ export function claimProcessDeployment(apiUrl: string): void {
     `This process is connected to \`${claimed}\`, so a connection to ` +
       `\`${key}\` is refused: the settings a connection writes are the ` +
       `process's rather than the connection's, which is one deployment ` +
-      `per process.`,
+      `per process. Reach \`${key}\` from a separate process — ` +
+      `restarting is the deployment switch.`,
   );
 }
 

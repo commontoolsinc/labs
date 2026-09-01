@@ -357,7 +357,10 @@ scoped to the connection that wrote it. So a connection to a second deployment
 is refused, naming both, rather than rewriting what the first one set while the
 first connection carries on against the new settings. `claimProcessDeployment`
 in `lib/process-deployment.ts` is where that is decided, and `loadPieces` claims
-on the way to opening a connection.
+on the way to opening a connection. Two deployments therefore need two
+processes, and restarting is how one process changes deployment — a claim stands
+whether or not the connection it was made for opened, so a well-formed host that
+answers nothing holds it too.
 
 One invocation of `cf` reaches one deployment, so the limit costs a command
 nothing. What it constrains is a caller holding a connection across many
