@@ -3072,6 +3072,93 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
       assert(!extOrphanRefresh.updates.has(extCellKey));
     }
     assert(!extBase.state.tracker.has(extCellKey));
+
+    // A target both walked by the query schema AND registered by a
+    // crossing manifest retires its registration atomically when its
+    // commit arrives: tracked delivery supersedes the lazy lifecycle in
+    // all three structures.
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(15),
+      authorization,
+      commit: {
+        localSeq: 15,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:shared-cell",
+          value: { value: { derived: "walked and registered" } },
+        }, {
+          op: "set",
+          id: "of:shared-crossing",
+          value: {
+            value: { name: "manifest holder" },
+            internal: [{ link: link("of:shared-cell") }],
+          },
+        }, {
+          op: "set",
+          id: "of:shared-root",
+          value: {
+            value: {
+              kid: link("of:shared-cell"),
+              cross: link("of:shared-crossing"),
+            },
+          },
+        }],
+      },
+    });
+    const sharedTracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:shared-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              kid: {
+                type: "object",
+                properties: { derived: { type: "string" } },
+              },
+              cross: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    const sharedKey = `${space}/space/of:shared-cell`;
+    assert(sharedTracked.state.tracker.has(sharedKey));
+    assert(sharedTracked.state.lazy.has(sharedKey));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(16),
+      authorization,
+      commit: {
+        localSeq: 16,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:shared-cell",
+          value: { value: { derived: "walked and registered, changed" } },
+        }],
+      },
+    });
+    const sharedRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      sharedTracked.state,
+      new Set([toDirtyKey("of:shared-cell")]),
+    );
+    assertExists(sharedRefresh);
+    assert(!sharedTracked.state.lazy.has(sharedKey));
+    assertEquals(sharedTracked.state.lazyBy.get(sharedKey), undefined);
+    assert(
+      ![...sharedTracked.state.lazyOf.values()].some((registered) =>
+        registered.has(sharedKey)
+      ),
+    );
   } finally {
     close(engine);
     await Deno.remove(path);

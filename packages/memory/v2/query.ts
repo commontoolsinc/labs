@@ -1922,7 +1922,10 @@ export const refreshTrackedGraph = (
     const key: QueryDocKey = `${space}/${scopeKey}/${id}`;
     if (!state.lazy.has(key)) continue;
     if (state.tracker.has(key)) {
-      state.lazy.delete(key);
+      // Tracked delivery supersedes the lazy lifecycle: retire the
+      // registration and BOTH attribution directions, not just the flat
+      // membership, or the reverse edges outlive it through clones.
+      retireLazyKey(state, key);
       continue;
     }
     const snapshot = snapshotForDocKey(space, manager, state.branch, key);
