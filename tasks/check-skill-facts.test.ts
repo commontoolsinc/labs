@@ -255,7 +255,7 @@ Deno.test("collectDrift is silent on a doc whose citations all resolve", () => {
     text: [
       "Run `scripts/form-automation.sh` to drive a form.",
       "The cell lives in `packages/runner/src/cell.ts`.",
-      'Import from "@commonfabric/runner" and "@commonfabric/data-model".',
+      'Import from "@commonfabric/runner" and "@commonfabric/data-model/value-hash".',
     ].join("\n"),
   }];
   assertEquals(collectDrift(docs, TREE, EXPORTS), []);
