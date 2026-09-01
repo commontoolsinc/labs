@@ -139,25 +139,25 @@ async function walkTestFiles(
   directory: string,
   found: string[],
 ): Promise<void> {
-  let entries: AsyncIterable<Deno.DirEntry>;
+  // The read is inside the try because `Deno.readDir` raises while its
+  // iterator is consumed rather than when it is made, so a catch around
+  // the call alone never fires. A directory the tree does not hold
+  // contributes nothing; anything else — a permission the walk does not
+  // have, a filesystem error — would silently shorten the list of tests,
+  // so it is raised.
   try {
-    entries = Deno.readDir(directory);
+    for await (const entry of Deno.readDir(directory)) {
+      if (entry.isDirectory) {
+        if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
+        await walkTestFiles(path.join(directory, entry.name), found);
+        continue;
+      }
+      if (entry.isFile && DENO_TEST_FILE.test(entry.name)) {
+        found.push(path.join(directory, entry.name));
+      }
+    }
   } catch (error) {
-    // A directory the tree does not hold contributes nothing. Anything
-    // else — a permission the walk does not have, a filesystem error —
-    // would silently shorten the list of tests, so it is raised.
-    if (error instanceof Deno.errors.NotFound) return;
-    throw error;
-  }
-  for await (const entry of entries) {
-    if (entry.isDirectory) {
-      if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
-      await walkTestFiles(path.join(directory, entry.name), found);
-      continue;
-    }
-    if (entry.isFile && DENO_TEST_FILE.test(entry.name)) {
-      found.push(path.join(directory, entry.name));
-    }
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
   }
 }
 
@@ -259,6 +259,13 @@ export interface MemberTasks {
 
   /** Whether the member defines any test task at all. */
   present: boolean;
+
+  /**
+   * Whether the member has a Deno-only half at all. A member with only a
+   * browser half has nothing for a `deno task test` to run, so it is one
+   * browser unit and no more.
+   */
+  denoHalf: boolean;
 }
 
 /** A manifest's tasks, whichever of the two file names carries them. */
@@ -315,7 +322,7 @@ export async function memberTasks(
   if (tasks[half] === undefined) {
     // A member with only a browser half is still a test surface: it runs
     // whole, as one unit, and its records come from the browser harness.
-    return { browserTest, present: browserTest };
+    return { browserTest, present: browserTest, denoHalf: false };
   }
   const candidates = [half, ...dependenciesOf(half)];
   for (const name of candidates) {
@@ -328,11 +335,13 @@ export async function memberTasks(
         denoTestTask: name,
         browserTest,
         present: true,
+        denoHalf: true,
       };
     }
   }
   return {
     browserTest,
+    denoHalf: true,
     present: true,
     // A member whose only test task echoes that it has none is not a
     // test surface, and saying so here keeps it out of the enumeration.

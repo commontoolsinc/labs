@@ -1040,8 +1040,11 @@ compile-time define baked into the browser shell inside the binary, and a
 source run cannot reproduce that. So that capability has a different
 provider: restore the binary from the Actions cache if the key hits, and
 build it in place if it does not. The lane workflow carries one fixed
-`actions/cache` step covering a single directory, keyed on a hash of the
-sources the binaries are built from. That step is in the workflow rather
+`actions/cache` step covering `.ci-cache`, keyed on a hash of the sources
+the binaries are built from. Everything a lane wants to keep between runs
+sits under that one directory — the built binaries, and the pattern
+compile byte cache — because one step covering one directory is what
+keeps the workflow independent of what the lane turns out to need. That step is in the workflow rather
 than in the runner because the cache service is only reachable through the
 action, and it is written once and never touched again.
 
@@ -2226,7 +2229,7 @@ pr-tests:
       uses: ./.github/actions/deno-install
     - name: ♻️ Restore the built-binary cache
       uses: actions/cache@v4
-      with: { path: .ci-cache/binaries, key: ... }
+      with: { path: .ci-cache, key: ... }
     - name: 🧪 Run the lane
       timeout-minutes: *lane-work-timeout
       run: >-

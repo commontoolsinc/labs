@@ -34,7 +34,7 @@ import {
   type UnitRequest,
 } from "./test-topology/suite.ts";
 import { collectRecords } from "./test-records-gather.ts";
-import { fetchManifest } from "./test-selection/store.ts";
+import { fetchManifest, type ManifestFetch } from "./test-selection/store.ts";
 import {
   plan,
   type Selection,
@@ -379,7 +379,7 @@ interface Outcome {
 }
 
 /** Runs one invocation, with the capabilities' environment around it. */
-async function runInvocation(
+export async function runInvocation(
   invocation: Invocation,
   env: Record<string, string>,
 ): Promise<Outcome> {
@@ -456,7 +456,7 @@ function spoolRecords(spool: string, records: readonly TestRecord[]): void {
  * pass: a repeat is not a retry, and three runs of a test is strictly
  * stricter than one.
  */
-async function runBatch(
+export async function runBatch(
   batch: Batch,
   options: LaneOptions,
   workDir: string,
@@ -516,7 +516,7 @@ async function runBatch(
 }
 
 /** Prints what the lane is about to do, for the job summary. */
-function describePlan(
+export function describePlan(
   options: LaneOptions,
   batches: readonly Batch[],
   capabilities: readonly CapabilityId[],
@@ -555,8 +555,21 @@ function describePlan(
   }
 }
 
+/** What the lane reaches for beyond its own arguments. */
+export interface LaneDeps {
+  /**
+   * Where the manifest comes from. A caller that supplies one is saying
+   * what the store holds, which is how the selected path — the packing,
+   * the skip lists, the summary — is exercised without one.
+   */
+  manifest?: (at: string) => Promise<ManifestFetch>;
+}
+
 /** Runs one lane, and says whether everything in it passed. */
-export async function runLane(options: LaneOptions): Promise<boolean> {
+export async function runLane(
+  options: LaneOptions,
+  deps: LaneDeps = {},
+): Promise<boolean> {
   const suites = await loadTopology(options.root);
   let batches: Batch[];
   let unschedulable: string[] = [];
@@ -567,7 +580,8 @@ export async function runLane(options: LaneOptions): Promise<boolean> {
   } else {
     const moment = await manifestMoment(options);
     if (moment.note !== undefined) console.log(`ci-lane: ${moment.note}`);
-    const manifest = await fetchManifest({ at: moment.at });
+    const manifest = await (deps.manifest ?? ((at: string) =>
+      fetchManifest({ at })))(moment.at);
     fetched = {
       ...(manifest.objectName === undefined
         ? {}
@@ -594,7 +608,9 @@ export async function runLane(options: LaneOptions): Promise<boolean> {
         unknown,
         lanes: options.of,
       });
-      const mine = laid.lanes.find((lane) => lane.lane === options.lane);
+      const mine = laid.lanes.find((lane) =>
+        lane.lane === options.lane
+      );
       batches = batchesOf(suites, manifest.manifest, mine?.selections ?? []);
       // An identity costing more than a lane's hard bound runs nowhere,
       // and a mandatory one that cannot run is a hole in what the pull

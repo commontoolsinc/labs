@@ -211,3 +211,98 @@ describe("the workspace unit suites", () => {
     });
   });
 });
+
+describe("running a member that cannot be handed a subset", () => {
+  it("runs the member's own task, and the skip list still reaches inside", async () => {
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: { test: "deno run --allow-read test/run-tests.ts" },
+        files: ["test/glaze.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    const outputDir = await Deno.makeTempDir({ prefix: "unit-out-" });
+    const [invocation] = await suite.command(
+      [{ unit: "packages/bakery", skip: ["glaze > sets overnight"] }],
+      { root, outputDir },
+    );
+    expect(invocation!.command).toEqual([Deno.execPath(), "task", "test"]);
+    // The environment a task inherits is how the list reaches a member
+    // whose command line cannot be changed.
+    expect(invocation!.env?.[SKIP_LIST_VARIABLE]).toBeDefined();
+  });
+
+  it("runs the browser half through the task that owns it", async () => {
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: {
+          test: { dependencies: ["deno-test", "browser-test"] },
+          "deno-test": "deno test --allow-read test/*.test.ts",
+          "browser-test": "deno run -A ../deno-web-test/cli.ts oven.test.ts",
+        },
+        files: ["test/glaze.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    const outputDir = await Deno.makeTempDir({ prefix: "unit-out-" });
+    const made = await suite.command(
+      [
+        { unit: "packages/bakery#browser-test", skip: [] },
+        { unit: "packages/bakery/test/glaze.test.ts", skip: [] },
+      ],
+      { root, outputDir, coverageDir: "/cov" },
+    );
+    expect(made.length).toBe(2);
+    expect(made.some((i) => i.command.includes("browser-test"))).toBe(true);
+    // Each member's profiles go somewhere of their own, which is what
+    // lets the per-package figures be added up afterwards.
+    expect(made[0]!.env?.DENO_COVERAGE_DIR).toBe("/cov/bakery");
+  });
+
+  it("locates a browser record on the half that produced it", async () => {
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: {
+          test: { dependencies: ["deno-test", "browser-test"] },
+          "deno-test": "deno test test/glaze.test.ts",
+          "browser-test": "deno run -A ../deno-web-test/cli.ts oven.test.ts",
+        },
+        files: ["test/glaze.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    expect(
+      suite.locate({ test: { k: "browser", s: "bakery", n: "oven > heats" } }),
+    ).toEqual({ level: "unit", unit: "packages/bakery#browser-test" });
+  });
+
+  it("gives a member with only a browser half no whole-member unit", async () => {
+    // There is no Deno-only task for a `deno task test` to run, so a
+    // whole-member unit would dispatch a task that does not exist.
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: {
+          "browser-test": "deno run -A ../deno-web-test/cli.ts a.test.ts",
+        },
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    expect(suite.units).toEqual(["packages/bakery#browser-test"]);
+  });
+
+  it("builds nothing for a unit no member holds", async () => {
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: { test: "deno test test/glaze.test.ts" },
+        files: ["test/glaze.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    expect(
+      await suite.command([{ unit: "packages/elsewhere", skip: [] }], {
+        root,
+        outputDir: "/out",
+      }),
+    ).toEqual([]);
+  });
+});

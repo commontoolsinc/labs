@@ -3,7 +3,10 @@ import { describe, it } from "@std/testing/bdd";
 import {
   capabilitiesBySuite,
   claimsFor,
+  identityKeys,
   loadTopology,
+  suiteById,
+  topologyUnits,
 } from "./test-topology.ts";
 import { CAPABILITIES } from "./ci-capabilities.ts";
 import { stepArms } from "./test-topology/cli.ts";
@@ -102,6 +105,34 @@ describe("the test topology", () => {
       "deno-lint",
       "check-test-topology",
     ]);
+  });
+});
+
+describe("reading the topology as a whole", () => {
+  it("finds a suite by the identifier its manifest entries carry", () => {
+    expect(suiteById(suites, "workspace-unit")?.id).toBe("workspace-unit");
+    expect(suiteById(suites, "no-such-suite")).toBeUndefined();
+  });
+
+  it("pairs every unit with the suite that runs it", () => {
+    const units = topologyUnits(suites);
+    expect(units.length).toBe(
+      suites.reduce((total, suite) => total + suite.units.length, 0),
+    );
+    for (const { suite, unit } of units.slice(0, 50)) {
+      expect([unit, suite.units.includes(unit)]).toEqual([unit, true]);
+    }
+  });
+
+  it("keys a set of records the way the store keys them", () => {
+    // A variant is the fourth part of a key, so one identity in two
+    // configurations is two keys rather than one.
+    const keys = identityKeys([
+      { test: { k: "unit", s: "oven", n: "bakes" } },
+      { test: { k: "unit", s: "oven", n: "bakes" } },
+      { test: { k: "unit", s: "oven", n: "bakes", v: "server-execution" } },
+    ]);
+    expect(keys.size).toBe(2);
   });
 });
 

@@ -67,28 +67,28 @@ const ROOTS = ["packages", "tasks", "scripts", "tools"];
 export async function candidateSurfaces(root: string): Promise<string[]> {
   const found: string[] = [];
   const walk = async (relative: string): Promise<void> => {
-    let entries: AsyncIterable<Deno.DirEntry>;
+    // The read is inside the try because `Deno.readDir` raises while its
+    // iterator is consumed rather than when it is made, so a catch around
+    // the call alone never fires. A directory this checkout does not hold
+    // holds no test surface; anything else would shorten the list the
+    // guard checks against, which is the guard failing silently.
     try {
-      entries = Deno.readDir(path.join(root, relative));
+      for await (const entry of Deno.readDir(path.join(root, relative))) {
+        const at = `${relative}/${entry.name}`;
+        if (entry.isDirectory) {
+          if (!SKIPPED.has(entry.name)) await walk(at);
+          continue;
+        }
+        if (!entry.isFile) continue;
+        if (TEST_FILE.test(entry.name)) found.push(at);
+        else if (
+          entry.name.endsWith(".sh") && relative.endsWith("/integration")
+        ) {
+          found.push(at);
+        }
+      }
     } catch (error) {
-      // A directory outside this checkout contributes nothing; anything
-      // else would shorten the list the guard checks against.
-      if (error instanceof Deno.errors.NotFound) return;
-      throw error;
-    }
-    for await (const entry of entries) {
-      const at = `${relative}/${entry.name}`;
-      if (entry.isDirectory) {
-        if (!SKIPPED.has(entry.name)) await walk(at);
-        continue;
-      }
-      if (!entry.isFile) continue;
-      if (TEST_FILE.test(entry.name)) found.push(at);
-      else if (
-        entry.name.endsWith(".sh") && relative.endsWith("/integration")
-      ) {
-        found.push(at);
-      }
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
     }
   };
   for (const start of ROOTS) await walk(start);
@@ -120,6 +120,21 @@ const NOT_A_TEST_SURFACE: ReadonlyArray<{ path: string; reason: string }> = [
   {
     path: "packages/deno-web-test/test/timeout-project/hang.test.ts",
     reason: "a project the harness runs to prove it reports a wedged test",
+  },
+  {
+    path: "packages/cli/integration/bulk-ops-demo.sh",
+    reason: "a tour of the bulk commands, quoted by the documentation the " +
+      "verb-session gate holds to it rather than run as a test",
+  },
+  {
+    path: "packages/cli/integration/read-write-demo.sh",
+    reason: "a tour of the read and write commands, quoted by the " +
+      "documentation the verb-session gate holds to it",
+  },
+  {
+    path: "packages/cli/integration/verb-session-demo.sh",
+    reason: "the walkthrough the verb-session gate holds the documentation " +
+      "to, read rather than run",
   },
 ];
 
@@ -362,7 +377,7 @@ export function checkStore(
 }
 
 /** Reads a run's records out of the files named on the command line. */
-async function readRecords(
+export async function readRecords(
   paths: readonly string[],
 ): Promise<StoredIdentity[]> {
   const resolver = await loadAliasResolver();

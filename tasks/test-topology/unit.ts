@@ -60,6 +60,9 @@ interface Member {
   /** The task that runs the Deno-only half, for a member that runs whole. */
   denoTestTask: string;
 
+  /** Whether the member has a Deno-only half to run at all. */
+  denoHalf: boolean;
+
   /** Whether the member also names a browser half. */
   browserTest: boolean;
 }
@@ -90,6 +93,7 @@ async function readMember(
     scope: memberScope(memberPath),
     files: [],
     denoTestTask: tasks.denoTestTask ?? "test",
+    denoHalf: tasks.denoHalf,
     browserTest: tasks.browserTest,
   };
   if (tasks.denoTest === undefined) return member;
@@ -127,7 +131,9 @@ function unitSuite(
         units.push(file);
         byUnit.set(file, member);
       }
-    } else {
+    } else if (member.denoHalf) {
+      // A member with no Deno-only half has nothing for a `deno task
+      // test` to run, so it contributes only its browser unit below.
       units.push(wholeUnit(member));
       byUnit.set(wholeUnit(member), member);
     }
@@ -161,7 +167,9 @@ function unitSuite(
         return { level: "unit", unit: `${wholeUnit(member)}${BROWSER_SUFFIX}` };
       }
       if (member.files.length === 0) {
-        return { level: "unit", unit: wholeUnit(member) };
+        return member.denoHalf
+          ? { level: "unit", unit: wholeUnit(member) }
+          : undefined;
       }
       // A file the store carries but the tree no longer holds is a test
       // that moved. It is not this suite's to place, and the identity is

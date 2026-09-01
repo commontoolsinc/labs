@@ -1,6 +1,11 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { checkStore, checkTree } from "./check-test-topology.ts";
+import {
+  candidateSurfaces,
+  checkStore,
+  checkTree,
+  readRecords,
+} from "./check-test-topology.ts";
 import type { Suite } from "./test-topology/suite.ts";
 
 /** A suite holding exactly what a case describes. */
@@ -178,5 +183,169 @@ describe("the store half of the drift guard", () => {
       }],
     });
     expect(checkStore([withSkip], [])).toEqual([]);
+  });
+});
+
+describe("what the tree half looks at", () => {
+  /** A tree holding the files a case names. */
+  async function tree(files: readonly string[]): Promise<string> {
+    const root = await Deno.makeTempDir({ prefix: "surfaces-" });
+    for (const file of files) {
+      const at = `${root}/${file}`;
+      await Deno.mkdir(at.slice(0, at.lastIndexOf("/")), { recursive: true });
+      await Deno.writeTextFile(at, "");
+    }
+    return root;
+  }
+
+  it("finds every shape Deno takes for a test file", async () => {
+    const root = await tree([
+      "packages/oven/test/bake.test.ts",
+      "packages/oven/test/glaze.test.tsx",
+      "packages/oven/test/proof_test.ts",
+      "packages/oven/test/test.ts",
+      "packages/oven/src/oven.ts",
+    ]);
+    try {
+      expect(await candidateSurfaces(root)).toEqual([
+        "packages/oven/test/bake.test.ts",
+        "packages/oven/test/glaze.test.tsx",
+        "packages/oven/test/proof_test.ts",
+        "packages/oven/test/test.ts",
+      ]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("finds a shell script only where an integration directory holds it", async () => {
+    const root = await tree([
+      "packages/cli/integration/acl.sh",
+      "packages/cli/support/release.sh",
+    ]);
+    try {
+      expect(await candidateSurfaces(root)).toEqual([
+        "packages/cli/integration/acl.sh",
+      ]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("passes over the directories that hold no surface of their own", async () => {
+    const root = await tree([
+      "packages/oven/node_modules/dep/a.test.ts",
+      "packages/oven/dist/b.test.ts",
+      "packages/oven/test/c.test.ts",
+    ]);
+    try {
+      expect(await candidateSurfaces(root)).toEqual([
+        "packages/oven/test/c.test.ts",
+      ]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("holds a listed exception to still being in the tree", async () => {
+    // A file that gets registered or deleted takes its line with it,
+    // which is what stops the list describing a tree nobody has.
+    const findings = checkTree([], [], {
+      unregistered: [{ path: "packages/gone.test.ts", reason: "moved away" }],
+    });
+    expect(findings.map((finding) => finding.fails)).toEqual([true]);
+    expect(findings[0]!.message).toContain("no longer holds it");
+  });
+
+  it("holds a listed exception to still being unclaimed", () => {
+    const claimed = suite({ id: "workspace-unit", units: ["a.test.ts"] });
+    const findings = checkTree([claimed], ["a.test.ts"], {
+      fixtures: [{ path: "a.test.ts", reason: "a fixture a test drives" }],
+    });
+    expect(findings.map((finding) => finding.fails)).toEqual([true]);
+    expect(findings[0]!.message).toContain("still listed as unclaimed");
+  });
+});
+
+describe("reading a run's records", () => {
+  it("takes every record of every report in a file", async () => {
+    const at = await Deno.makeTempFile({ suffix: ".ndjson" });
+    const context = {
+      schema: 1,
+      line: "context",
+      reportId: "01GATHERTEST000000000000",
+      repo: "commontoolsinc/labs",
+      commit: "c".repeat(40),
+      dirty: false,
+      env: "ci",
+      os: "linux",
+      arch: "x86_64",
+      denoVersion: "2.9.4",
+      startedAt: "2026-08-17T21:00:00.000Z",
+    };
+    await Deno.writeTextFile(
+      at,
+      [
+        JSON.stringify(context),
+        JSON.stringify({
+          line: "record",
+          test: { k: "unit", s: "oven", n: "bakes" },
+          outcome: "pass",
+          durationMs: 1,
+          file: "packages/oven/test/bake.test.ts",
+        }),
+        JSON.stringify({
+          line: "record",
+          test: { k: "unit", s: "oven", n: "glazes", v: "server-execution" },
+          outcome: "fail",
+          durationMs: 2,
+        }),
+      ].join("\n") + "\n",
+    );
+    try {
+      const records = await readRecords([at]);
+      expect(records.map((record) => record.test.n)).toEqual([
+        "bakes",
+        "glazes",
+      ]);
+      // The file the producer knew travels with the record, because it
+      // is what locates a unit identity.
+      expect(records[0]!.file).toBe("packages/oven/test/bake.test.ts");
+      expect(records[1]!.test.v).toBe("server-execution");
+    } finally {
+      await Deno.remove(at);
+    }
+  });
+});
+
+describe("what the guard declines to fail on", () => {
+  it("accepts a declared fixture and reports a declared unrun test", () => {
+    const findings = checkTree([], ["fixture.test.ts", "unrun.test.ts"], {
+      fixtures: [{ path: "fixture.test.ts", reason: "a test drives it" }],
+      unregistered: [{ path: "unrun.test.ts", reason: "no suite runs it" }],
+    });
+    // A fixture is not a test surface and says nothing. A test nothing
+    // runs is a defect, reported so somebody can act on it, and not a
+    // failure, because registering one means deciding where it runs.
+    expect(findings.map((finding) => finding.fails)).toEqual([false]);
+    expect(findings[0]!.message).toContain("runs nowhere");
+  });
+
+  it("counts one recorded identity once, however often it was run", () => {
+    // Re-running a commit ten times says nothing new about whether the
+    // topology claims what it produced.
+    const bakery = suite({
+      id: "workspace-unit",
+      units: ["packages/bakery/test/glaze.test.ts"],
+      locate: () => ({
+        level: "unit",
+        unit: "packages/bakery/test/glaze.test.ts",
+      }),
+    });
+    const record = {
+      test: { k: "unit", s: "bakery", n: "glaze > sets" },
+      file: "packages/bakery/test/glaze.test.ts",
+    };
+    expect(checkStore([bakery], [record, record, record])).toEqual([]);
   });
 });

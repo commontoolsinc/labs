@@ -31,6 +31,18 @@ export type CapabilityId =
   | "local-dev-servers"
   | "compile-cache";
 
+/**
+ * Running a command, as a capability does it: the output on success, and
+ * a throw carrying that output on failure. Setup that half-worked is
+ * worse than setup that did not, because the batch after it fails
+ * somewhere unrelated.
+ */
+export type Exec = (
+  command: string,
+  args: readonly string[],
+  options?: { cwd?: string; env?: Record<string, string> },
+) => Promise<string>;
+
 /** What a capability was given to work with. */
 export interface CapabilityContext {
   /** The repository root, absolute. */
@@ -48,6 +60,14 @@ export interface CapabilityContext {
    * compile cache or a server log.
    */
   workDir: string;
+
+  /**
+   * How a capability runs a command. A caller that supplies one is
+   * saying what the machine would have answered, which is the only way
+   * setup that installs packages and starts servers can be exercised
+   * without a machine that has neither.
+   */
+  exec?: Exec;
 }
 
 /** A capability that has been opened. */
@@ -76,21 +96,19 @@ export interface Capability {
 }
 
 /**
- * Where a built binary is kept between runs, relative to the repository
- * root. The lane's workflow carries one fixed cache step covering this
- * directory, so it has to be a path both of them name and a path that
- * outlives the lane: a directory the lane made for itself would be empty
- * on every run, and the binary would be rebuilt every time.
+ * What a lane keeps between runs, relative to the repository root. The
+ * lane's workflow carries one fixed cache step covering this directory,
+ * so everything a lane wants restored has to sit inside it, and it has
+ * to outlive the lane: a directory the lane made for itself would be
+ * empty on every run, and everything in it would be built again.
  */
-export const BINARY_CACHE_DIR = ".ci-cache/binaries";
+export const CACHE_DIR = ".ci-cache";
 
-/**
- * Where the pattern compile byte cache is kept between runs, relative to
- * the repository root, for the same reason the binaries are: a directory
- * the lane made for itself would be empty every run, so every pattern
- * would be compiled again from nothing.
- */
-export const COMPILE_CACHE_FILE = ".ci-cache/compile/lane.json";
+/** Where a built binary is kept, inside that directory. */
+export const BINARY_CACHE_DIR = `${CACHE_DIR}/binaries`;
+
+/** Where the pattern compile byte cache is kept, inside that directory. */
+export const COMPILE_CACHE_FILE = `${CACHE_DIR}/compile/lane.json`;
 
 /** Nothing to undo. */
 const NOTHING = () => Promise.resolve();
@@ -105,11 +123,7 @@ function exported(env: Record<string, string>): OpenCapability {
  * half-worked is worse than setup that did not, because the batch after
  * it fails somewhere unrelated.
  */
-async function run(
-  command: string,
-  args: readonly string[],
-  options: { cwd?: string; env?: Record<string, string> } = {},
-): Promise<string> {
+const run: Exec = async (command, args, options = {}) => {
   const result = await new Deno.Command(command, {
     args: [...args],
     stdout: "piped",
@@ -123,17 +137,18 @@ async function run(
   throw new Error(
     `${command} ${args.join(" ")} exited ${result.code}\n${stdout}${stderr}`,
   );
+};
+
+/** How this context runs commands. */
+function execOf(context: CapabilityContext): Exec {
+  return context.exec ?? run;
 }
 
 /** Whether a command is already on the path. */
-async function onPath(command: string): Promise<boolean> {
+async function onPath(exec: Exec, command: string): Promise<boolean> {
   try {
-    const result = await new Deno.Command("sh", {
-      args: ["-c", `command -v ${command}`],
-      stdout: "null",
-      stderr: "null",
-    }).output();
-    return result.success;
+    await exec("sh", ["-c", `command -v ${command}`]);
+    return true;
   } catch {
     return false;
   }
@@ -141,16 +156,17 @@ async function onPath(command: string): Promise<boolean> {
 
 /** Installs Debian packages, and does nothing where they are all present. */
 async function apt(
+  exec: Exec,
   packages: readonly string[],
   probes: readonly string[],
 ): Promise<void> {
   let missing = false;
   for (const probe of probes) {
-    if (!await onPath(probe)) missing = true;
+    if (!await onPath(exec, probe)) missing = true;
   }
   if (!missing) return;
-  await run("sudo", ["apt-get", "update"]);
-  await run("sudo", [
+  await exec("sudo", ["apt-get", "update"]);
+  await exec("sudo", [
     "apt-get",
     "install",
     "-y",
@@ -177,13 +193,15 @@ const fuse: Capability = {
   description: "the FUSE headers and tools the CLI's mount suite needs",
   async open(context) {
     if (!context.dryRun) {
+      const exec = execOf(context);
       await apt(
+        exec,
         ["pkg-config", "gcc", "libfuse3-dev", "fuse3"],
         ["pkg-config", "gcc", "fusermount3"],
       );
       // The mount itself needs the device, and the runner image leaves it
       // owned by root.
-      await run("sudo", ["chmod", "666", "/dev/fuse"]);
+      await exec("sudo", ["chmod", "666", "/dev/fuse"]);
     }
     return exported({});
   },
@@ -193,7 +211,7 @@ const jq: Capability = {
   id: "jq",
   description: "jq, which the shell integration suites filter JSON with",
   async open(context) {
-    if (!context.dryRun) await apt(["jq"], ["jq"]);
+    if (!context.dryRun) await apt(execOf(context), ["jq"], ["jq"]);
     return exported({});
   },
 };
@@ -216,7 +234,10 @@ const browser: Capability = {
         // nothing needs relaxing.
         return exported({});
       }
-      await run("sh", ["-c", `printf '0\\n' | sudo tee ${sysctl} >/dev/null`]);
+      await execOf(context)("sh", [
+        "-c",
+        `printf '0\\n' | sudo tee ${sysctl} >/dev/null`,
+      ]);
     }
     return exported({});
   },
@@ -232,12 +253,13 @@ const gitHistory: Capability = {
   description: "an unshallowed checkout",
   async open(context) {
     if (!context.dryRun) {
-      const shallow = (await run("git", [
+      const exec = execOf(context);
+      const shallow = (await exec("git", [
         "rev-parse",
         "--is-shallow-repository",
       ], { cwd: context.root })).trim();
       if (shallow === "true") {
-        await run("git", ["fetch", "--unshallow"], { cwd: context.root });
+        await exec("git", ["fetch", "--unshallow"], { cwd: context.root });
       }
     }
     return exported({});
@@ -286,7 +308,7 @@ async function startToolshed(
   if (context.dryRun) return exported(env);
   const [command, ...args] = options.command;
   const logFile = path.join(context.workDir, `toolshed-${port}.log`);
-  const output = await run(command!, [
+  const output = await execOf(context)(command!, [
     ...args,
     `--port=${port}`,
     "--background",
@@ -376,13 +398,17 @@ const toolshedBakedOn: Capability = {
         present = false;
       }
       if (!present) {
-        await run(Deno.execPath(), ["task", "build-binaries", "toolshed"], {
-          cwd: context.root,
-          env: {
-            ...Deno.env.toObject(),
-            EXPERIMENTAL_SERVER_EXECUTION: "true",
+        await execOf(context)(
+          Deno.execPath(),
+          ["task", "build-binaries", "toolshed"],
+          {
+            cwd: context.root,
+            env: {
+              ...Deno.env.toObject(),
+              EXPERIMENTAL_SERVER_EXECUTION: "true",
+            },
           },
-        });
+        );
         await Deno.mkdir(path.dirname(binary), { recursive: true });
         await Deno.copyFile(
           path.join(context.root, "dist", "toolshed"),
