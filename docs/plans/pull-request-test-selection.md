@@ -1645,9 +1645,9 @@ lanes times 230 seconds each, it fills in four passes.
    no history. An item excluded above comes back into this pass if the
    change touches what it covers, since that is very likely a fix. Every
    item taken here leaves the selectable set, so no later pass can run one
-   of them again. This pass can in principle exceed the budget; when it
-   does, the runner says so in the job summary rather than silently
-   dropping work.
+   of them again. This pass can in principle put a lane past its budget;
+   when it does, the runner says in the job summary how far past, rather
+   than silently dropping work.
 2. **Value first, 60 percent of the remaining budget.** Items in
    descending order of value, ignoring cost. This is what gets the
    expensive, genuinely broken integration test into the run.
@@ -1664,8 +1664,9 @@ behind 40 seconds of setup correctly loses to 40 seconds of tests that
 need nothing.
 
 Repeats are applied last, to items already selected, and are charged their
-full cost. An item that would be repeated but no longer fits runs once
-rather than being dropped: one observation beats none.
+full cost. An item that would be repeated but no longer fits gives up runs
+until it does, down to one, rather than being dropped: one observation
+beats none.
 
 ### Filling the lanes
 
@@ -1678,10 +1679,33 @@ cheapest place to put the next batch that needs it. That is the mechanism
 by which "tests needing the same environment are grouped together" falls
 out of the packing rather than being a special case in it.
 
+The cheapest lane is chosen from among the lanes that can still hold the
+work, which is what makes the 230 seconds a constraint on the packing
+rather than a figure it aims at. When the cheapest lane is full the item
+goes to the next-cheapest one with room for it, so a suite whose overhead
+one lane has already paid collects that lane's share of the suite and no
+more. Each pass spends a share of the whole run's budget and no lane
+passes its own, so the packing ends with all five lanes close to 230
+seconds, and what the pull request waits on is 230 seconds rather than
+whichever lane the grouping favored.
+
+The mandatory pass is the one allowed past a lane's budget. It takes its
+items largest first, so an item filling most of a lane is offered the
+lanes that are still empty; an item offered lanes that are already full
+has nowhere to go but past one lane's budget. When a mandatory item fits
+in no lane it goes where the lane's finishing time rises least, which
+spreads an unavoidable overrun across the five rather than settling it on
+one.
+
 A batch that on its own exceeds a lane's budget is split, paying its
 suite's setup twice. A single *item* cannot be split, so an item costing
 more than the planned budget is given a lane to itself and allowed to run
-up to the hard five-minute bound rather than the planned 230 seconds.
+up to the hard five-minute bound rather than the planned 230 seconds. The
+lane carrying it carries nothing else, because everything else would have
+to fit in what is left under the planned budget and there is nothing left.
+Repeats get no such lane, since a repeat is what an item gives up to fit:
+an item wanting three runs of a hundred seconds runs twice inside the
+planned budget rather than three times inside the bound.
 
 The refreshed census finds one item that does not fit. The `piece-call`
 dispatch section of `packages/cli/integration/integration.sh` took 386
