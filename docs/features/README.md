@@ -94,6 +94,11 @@ Add a line for each new document to the index below.
 - [`host-embedding.md`](host-embedding.md) — the seams a host that is not the
   labs shell may bind to when it mounts our components and patterns, each one
   pinned by a test that goes red if the contract changes
+- [`multi-document-runtime-attachment.md`](multi-document-runtime-attachment.md)
+  — one worker serving several documents: what each of them owns separately,
+  what all of them share, why an attach asserting a different security context
+  is refused rather than merged, and which traffic still reaches only the
+  document that stood the runtime up
 - [`piece-bulk-operations.md`](piece-bulk-operations.md) — retargeting,
   repairing, and reversing many pieces in one space as one reviewable,
   resumable operation: what a plan row means, what each write proves first,
