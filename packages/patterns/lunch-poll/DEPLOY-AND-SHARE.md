@@ -275,8 +275,9 @@ MINE="$PIECE"
 ARG=$(deno task cf get --piece "$MINE" -s "$SPACE" --input --select '@' -q \
   | grep -oE '/of:fid1:[A-Za-z0-9_-]+')
 
-# 3. Copy each PerSpace field except the visit log and the host seat.
-for field in question users options votes; do
+# 3. Copy each PerSpace field except the votes, the visit log and the host seat.
+#    Votes are deliberately not copied — see below.
+for field in question users options; do
   deno task cf get --piece "$LEGACY_PIECE" -s "$SPACE" "$field" --input -q \
     | deno task cf set -s "$SPACE" "$ARG/$field" -q
 done
@@ -297,6 +298,18 @@ deno task cf get --piece "$LEGACY_PIECE" -s "$SPACE" visits --input -q \
 deno task cf piece step --piece "$MINE" -s "$SPACE"
 deno task cf piece inspect --piece "$MINE" -s "$SPACE" --summary
 ```
+
+**The votes do not come across, and copying them would be worse than losing
+them.** A vote lives at an address derived from its key — its voter's profile
+entity and the option — and a whole-list copy writes every row at an address the
+copy minted instead. The handlers address a vote by key, so they cannot reach a
+copied row: the first person to vote again for a place they had already voted
+for gets a second vote beside the copied one, and counts twice in every tally.
+Leaving `votes` out of step 3 starts the new piece empty, and everyone votes
+again. That costs the group nothing they were still looking at, because the poll
+only ever shows the current day's votes. The visit log is a different matter and
+does come across, at step 4: its vote snapshots are frozen records rather than
+live votes, and nothing addresses them by key.
 
 > **Why the copy writes to `$ARG` and not `cf set --input`.** A `cf set --input`
 > write validates the piece's whole input object, and this pattern's `viewer`

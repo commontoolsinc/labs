@@ -81,10 +81,10 @@ mergeable ops plus plain entity edits:
   handler falls the path back to a whole-array diff (see
   `mergeable-collection-writes.md`).
 
-The lunch poll derives a vote's key as `JSON.stringify([voterName, optionId])`
-and an option's key as its generated `id`; castVote, clearMyVote, and the
-removeOption cascade all recompute the same key, so they reach the same entity
-without scanning the list.
+The lunch poll derives a vote's key from the voter's profile entity and the
+option id, and an option's key from its generated `id`; castVote, clearMyVote,
+and the removeOption cascade all recompute the same key through `voteKeyFor`,
+so they reach the same entity without scanning the list.
 
 ## Why this instead of server-side keyed ops
 

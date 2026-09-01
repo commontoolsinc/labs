@@ -167,6 +167,11 @@ console.error(
     `${after.reverts - before.reverts} rolled-back write(s)`,
 );
 
+// `Deno.bench` has no hook for "the file's benchmarks are done", so the ten
+// workers are released at process exit instead, where the listener runs
+// synchronously and `terminate()` is the form that fits.
+globalThis.addEventListener("unload", () => harness.terminate());
+
 let round = 3;
 
 Deno.bench({
