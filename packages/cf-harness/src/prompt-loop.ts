@@ -1168,6 +1168,12 @@ export const scrubHandleSkillTextDeep = (
  * token whose latest delegation completed is not outstanding, so an ordinary
  * run that delegated once and succeeded is never gated.
  *
+ * `running` counts as not completed, which costs nothing while a run is
+ * healthy — tool calls are dispatched one at a time, so a delegation's
+ * terminal ref always supersedes its running ref before the next delegation is
+ * judged — and is the whole answer after a crash, where the running ref is the
+ * only trace the lost delegation left.
+ *
  * Reads the parent's own run state, so the answer survives a resume: nothing
  * about custody lives only in this process.
  */
@@ -1177,10 +1183,6 @@ export const outstandingSkillCustody = (
   const latestCompleted = new Map<string, boolean>();
   for (const run of subagentRuns) {
     if (run.skillHandle === undefined) continue;
-    // A `running` ref is superseded by the terminal ref recorded for the same
-    // delegation, and a delegation still in flight has not failed, so only a
-    // terminal status decides.
-    if (run.status === "running") continue;
     latestCompleted.set(run.skillHandle, run.status === "completed");
   }
   return [...latestCompleted]
