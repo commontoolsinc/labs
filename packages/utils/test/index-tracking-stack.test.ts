@@ -21,12 +21,12 @@ function objects(count: number): object[] {
   return out;
 }
 
-/** How tall a stack has to be for the index to have been built. */
 /**
  * The marks the class arranges itself around, which a test has to straddle.
  */
 const MARKS = IndexTrackingStack.accessForTestingOnly;
 
+/** How tall a stack has to be for the index to have been built. */
 const TALL = MARKS.ADD_INDEX_AT + 5;
 
 /**
