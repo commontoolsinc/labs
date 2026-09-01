@@ -242,7 +242,8 @@ export class MentionController implements ReactiveController {
         return true;
 
       case "Enter":
-        // Only intercept Enter if a mention will actually be inserted.
+        // A selected row owns this keypress while its destination resolves.
+        // Failure leaves the selection and popup intact for another attempt.
         if (filteredMentions[this._state.selectedIndex]) {
           event.preventDefault();
           this.insertMention(filteredMentions[this._state.selectedIndex]);
@@ -262,8 +263,10 @@ export class MentionController implements ReactiveController {
   }
 
   /**
-   * Insert a mention at the current cursor position.
+   * Inserts a mention at the current cursor position.
    * Resolves the sub-cell to the real piece entity ID at insertion time.
+   * An index row whose piece cannot resolve inserts nothing and remains
+   * selected in the open popup.
    */
   async insertMention(mention: CellHandle<Mentionable>): Promise<void> {
     const markdown = await this.encodePieceAsMarkdown(mention);
@@ -315,11 +318,12 @@ export class MentionController implements ReactiveController {
   }
 
   /**
-   * Encode a piece as markdown link [name](/of:entityId).
+   * Encodes a piece as markdown link `[name](/of:entityId)`.
    * Resolves the entry's destination to the real piece entity ID so
    * downstream consumers (LLM tools, read operations) can access the full
    * schema. The display name is the entry's own — for an index row, the
-   * label it lists.
+   * label it lists. Returns `null` when an index row's piece cannot resolve;
+   * a direct entry can still fall back to its own raw reference.
    */
   private async encodePieceAsMarkdown(
     piece: CellHandle<Mentionable>,

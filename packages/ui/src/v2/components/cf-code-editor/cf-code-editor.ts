@@ -612,15 +612,22 @@ export class CFCodeEditor extends BaseElement {
     return matches;
   }
 
-  /** Whether a matching index row is waiting for its piece identity. */
-  private _hasUnresolvedIndexRowFor(query: string): boolean {
+  /** Whether an unresolved index row contains or exactly matches `query`. */
+  private _hasUnresolvedIndexRowFor(
+    query: string,
+    match: "contains" | "exact" = "contains",
+  ): boolean {
     const mentionableData = (this.mentionable?.get() ?? []) as MentionableArray;
     const queryLower = query.toLowerCase();
-    return mentionableData.some((mention, index) =>
-      this._isIndexRow(index) &&
-      !this._resolvedPieceIds.has(index) &&
-      !!mention?.[NAME]?.toLowerCase()?.includes(queryLower)
-    );
+    return mentionableData.some((mention, index) => {
+      if (!this._isIndexRow(index) || this._resolvedPieceIds.has(index)) {
+        return false;
+      }
+      const name = mention?.[NAME]?.toLowerCase();
+      return match === "exact"
+        ? name === queryLower
+        : !!name?.includes(queryLower);
+    });
   }
 
   /** Restarts a backlink query that withheld a matching index row. */
@@ -629,7 +636,7 @@ export class CFCodeEditor extends BaseElement {
     this._backlinkCompletionAwaitingResolution = false;
 
     const view = this._editorView;
-    if (view && this._currentBacklinkQuery(view) !== null) {
+    if (view?.hasFocus && this._currentBacklinkQuery(view) !== null) {
       startCompletion(view);
     }
   }
@@ -660,6 +667,40 @@ export class CFCodeEditor extends BaseElement {
     }
 
     return null;
+  }
+
+  /** Completes an exact mention or creates when no exact row is present. */
+  private _completeBacklinkQuery(view: EditorView, text: string): void {
+    const exactMatch = this._findExactMentionable(text);
+    if (exactMatch) {
+      const [matchCell, matchIndex] = exactMatch;
+      const pieceName = matchCell.key(NAME).get() || text;
+      if (
+        !this._refMode ||
+        !this._completeMentionRef(view, pieceName, matchIndex)
+      ) {
+        const pieceId = this._getPieceId(matchIndex);
+        this._completeBacklinkWithId(view, text, pieceName, pieceId);
+      }
+      return;
+    }
+
+    // An exact row without an identity is an existing piece, not permission
+    // to create another one. Keep the query intact and reopen its completion
+    // after this pass, starting a fresh pass if the previous one failed.
+    if (this._hasUnresolvedIndexRowFor(text, "exact")) {
+      this._backlinkCompletionAwaitingResolution = true;
+      if (!this._mentionResolutionPending) void this._resolvePieceIds();
+      return;
+    }
+
+    if (!this.pattern) return;
+    if (this._refMode) {
+      this._createMentionRefFromPattern(view, text);
+    } else {
+      this._completeBacklinkText(view);
+      this.createBacklinkFromPattern(text, false);
+    }
   }
 
   /**
@@ -2580,31 +2621,7 @@ export class CFCodeEditor extends BaseElement {
           if (query != null) {
             const text = query.trim();
             if (text.length > 0) {
-              // Check for exact match in mentionable
-              const exactMatch = this._findExactMentionable(text);
-
-              if (exactMatch) {
-                // Found exact match - insert complete backlink with stable piece ID
-                const [matchCell, matchIndex] = exactMatch;
-                const pieceName = matchCell.key(NAME).get() || text;
-                if (
-                  !this._refMode ||
-                  !this._completeMentionRef(view, pieceName, matchIndex)
-                ) {
-                  const pieceId = this._getPieceId(matchIndex);
-                  this._completeBacklinkWithId(view, text, pieceName, pieceId);
-                }
-              } else if (this.pattern) {
-                // No exact match - create new piece without navigating
-                if (this._refMode) {
-                  this._createMentionRefFromPattern(view, text);
-                } else {
-                  // First complete the backlink text, then create the piece
-                  this._completeBacklinkText(view);
-                  // createBacklinkFromPattern will insert the ID and emit event
-                  this.createBacklinkFromPattern(text, false);
-                }
-              }
+              this._completeBacklinkQuery(view, text);
               return true;
             }
           }
