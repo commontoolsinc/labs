@@ -14,13 +14,17 @@ export {
   addressKey,
   CELL_SCOPE_VALUES,
   createLLMFriendlyLink,
+  encodeJsonPointer,
   isAliasBinding,
+  isPieceHandle,
   isSigilLink,
   linkPathSegmentToCellPathSegment,
   matchLLMFriendlyLink,
   type NormalizedFullLink,
   parseLLMFriendlyLink,
+  parseReferenceParts,
   parseScopedIdSegment,
+  type ReferenceParts,
 } from "./link-types.ts";
 export {
   isLinkRef,

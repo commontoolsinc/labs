@@ -292,7 +292,7 @@ describe("cli piece parsing", () => {
       apiUrl: API_URL,
       space: SPACE,
       identity: ID,
-      piece: PIECE,
+      cell: PIECE,
     })).toMatchObject(expected);
     expect(parsePieceOptions({
       url: FULL_URL,
@@ -303,7 +303,7 @@ describe("cli piece parsing", () => {
         apiUrl: API_URL,
         space: SPACE,
         identity: ID,
-        piece: PIECE,
+        cell: PIECE,
         json: true,
       }).jsonOutput,
     ).toBe(true);
@@ -314,7 +314,7 @@ describe("cli piece parsing", () => {
       apiUrl: API_URL,
       space: SPACE,
       identity: ID,
-      piece: `${PIECE}@user`,
+      cell: `${PIECE}@user`,
     })).toMatchObject({
       apiUrl: API_URL,
       space: SPACE,
@@ -335,11 +335,11 @@ describe("cli piece parsing", () => {
   });
   it("parsePieceOptions() resolves an LLM-friendly --piece like the bare handle", () => {
     const base = { apiUrl: API_URL, space: SPACE, identity: ID };
-    expect(parsePieceOptions({ ...base, piece: `/${LLM_HANDLE}` })).toEqual(
-      parsePieceOptions({ ...base, piece: LLM_HANDLE }),
+    expect(parsePieceOptions({ ...base, cell: `/${LLM_HANDLE}` })).toEqual(
+      parsePieceOptions({ ...base, cell: LLM_HANDLE }),
     );
     expect(
-      parsePieceOptions({ ...base, piece: `/${LLM_HANDLE}@session` }),
+      parsePieceOptions({ ...base, cell: `/${LLM_HANDLE}@session` }),
     ).toMatchObject({
       piece: LLM_HANDLE,
       pieceScope: "session",
@@ -349,7 +349,7 @@ describe("cli piece parsing", () => {
   it("parsePieceOptions() carries an embedded path only where the command accepts one", () => {
     const base = { apiUrl: API_URL, space: SPACE, identity: ID };
     const config = parsePieceOptions(
-      { ...base, piece: `/${LLM_HANDLE}/items/0` },
+      { ...base, cell: `/${LLM_HANDLE}/items/0` },
       { acceptsPath: true },
     );
     expect(config).toMatchObject({
@@ -358,7 +358,7 @@ describe("cli piece parsing", () => {
     });
     expect(mergePiecePath(config, "title")).toEqual(["items", 0, "title"]);
     expect(mergePiecePath(config)).toEqual(["items", 0]);
-    expect(() => parsePieceOptions({ ...base, piece: `/${LLM_HANDLE}/items` }))
+    expect(() => parsePieceOptions({ ...base, cell: `/${LLM_HANDLE}/items` }))
       .toThrow(/takes a piece id only/);
   });
 
@@ -367,7 +367,7 @@ describe("cli piece parsing", () => {
     expect(parsePieceOptions({
       ...base,
       space: SPACE_DID,
-      piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
+      cell: `/@${SPACE_DID}/${LLM_HANDLE}`,
     })).toMatchObject({
       space: SPACE_DID,
       piece: LLM_HANDLE,
@@ -376,7 +376,7 @@ describe("cli piece parsing", () => {
       parsePieceOptions({
         ...base,
         space: OTHER_SPACE_DID,
-        piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
+        cell: `/@${SPACE_DID}/${LLM_HANDLE}`,
       })
     ).toThrow(
       `Reference names space "${SPACE_DID}" but the command targets ` +
@@ -388,7 +388,7 @@ describe("cli piece parsing", () => {
     expect(parsePieceOptions({
       ...base,
       space: SPACE,
-      piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
+      cell: `/@${SPACE_DID}/${LLM_HANDLE}`,
     })).toMatchObject({
       space: SPACE,
       piece: LLM_HANDLE,
@@ -400,7 +400,7 @@ describe("cli piece parsing", () => {
     const base = { apiUrl: API_URL, identity: ID };
     expect(parseSpaceOptions({
       ...base,
-      piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
+      cell: `/@${SPACE_DID}/${LLM_HANDLE}`,
     })).toMatchObject({
       space: SPACE_DID,
       piece: LLM_HANDLE,
@@ -408,7 +408,7 @@ describe("cli piece parsing", () => {
     });
     // The scope suffix and embedded path ride the same space-carrying token.
     expect(parsePieceOptions(
-      { ...base, piece: `/@${SPACE_DID}/${LLM_HANDLE}@user/items/0` },
+      { ...base, cell: `/@${SPACE_DID}/${LLM_HANDLE}@user/items/0` },
       { acceptsPath: true },
     )).toMatchObject({
       space: SPACE_DID,
@@ -417,29 +417,29 @@ describe("cli piece parsing", () => {
       piecePath: ["items", 0],
     });
     // A reference that names no space supplies none: the requirement stands.
-    expect(() => parseSpaceOptions({ ...base, piece: `/${LLM_HANDLE}` }))
+    expect(() => parseSpaceOptions({ ...base, cell: `/${LLM_HANDLE}` }))
       .toThrow(/--space/);
-    expect(() => parseSpaceOptions({ ...base, piece: PIECE }))
+    expect(() => parseSpaceOptions({ ...base, cell: PIECE }))
       .toThrow(/--space/);
   });
 
   it('parsePieceOptions() honors "#argument" only where a command takes --input', () => {
     const base = { apiUrl: API_URL, space: SPACE, identity: ID };
     expect(parsePieceOptions(
-      { ...base, piece: `/${LLM_HANDLE}#argument` },
+      { ...base, cell: `/${LLM_HANDLE}#argument` },
       { acceptsArgument: true },
     )).toMatchObject({
       piece: LLM_HANDLE,
       pieceInput: true,
     });
     expect(() =>
-      parsePieceOptions({ ...base, piece: `/${LLM_HANDLE}#argument` })
+      parsePieceOptions({ ...base, cell: `/${LLM_HANDLE}#argument` })
     )
       .toThrow(/does not take "--input"/);
     // The alias grammar has no fragments; refusing loudly beats burying the
     // suffix inside an id that later fails as unknown.
-    expect(() => parseSpaceOptions({ ...base, piece: `${PIECE}#argument` }))
-      .toThrow(/canonical reference form/);
+    expect(() => parseSpaceOptions({ ...base, cell: `${PIECE}#argument` }))
+      .toThrow(/rides the reference form/);
   });
 
   it("readTargetPositionals() reads a leading canonical reference as the address", () => {
@@ -452,8 +452,8 @@ describe("cli piece parsing", () => {
       pathString: "items/0",
     });
     // Naming the target twice is refused, like --space beside --url.
-    expect(() => readTargetPositionals({ piece: PIECE }, `/${LLM_HANDLE}`))
-      .toThrow(/"--piece" cannot be provided/);
+    expect(() => readTargetPositionals({ cell: PIECE }, `/${LLM_HANDLE}`))
+      .toThrow(/"--cell" \(or "--piece"\) cannot be provided/);
     // Only an address earns a second positional.
     expect(() => readTargetPositionals({}, "items/0", "title"))
       .toThrow(/Unexpected argument "title"/);
@@ -465,16 +465,144 @@ describe("cli piece parsing", () => {
       tail: ["{}"],
     });
     expect(readCallTarget({}, `/${LLM_HANDLE}`, ["addItem", "{}"])).toEqual({
-      piece: `/${LLM_HANDLE}`,
+      cell: `/${LLM_HANDLE}`,
       callableName: "addItem",
       tail: ["{}"],
     });
-    expect(() =>
-      readCallTarget({ piece: PIECE }, `/${LLM_HANDLE}`, ["addItem"])
-    )
-      .toThrow(/"--piece" cannot be provided/);
+    // The flag does not collide here, it disambiguates: a callable name may
+    // begin with "/", so a written flag makes the positional the callable.
+    // `readTargetPositionals` refuses the same pair, because there the other
+    // reading is a path and a path is never rooted.
+    expect(readCallTarget({ cell: PIECE }, `/${LLM_HANDLE}`, ["addItem"]))
+      .toEqual({ callableName: `/${LLM_HANDLE}`, tail: ["addItem"] });
     expect(() => readCallTarget({}, `/${LLM_HANDLE}`, []))
       .toThrow(/callable name/);
+  });
+
+  it("parseSpaceOptions() names the space and the piece in one reference", () => {
+    const base = { apiUrl: API_URL, identity: ID };
+    // A slug where a handle goes, a name where a DID goes: one token carrying
+    // the whole target, in the spelling a person writes.
+    expect(parsePieceOptions({ ...base, cell: `/@${SPACE}/tracker` }))
+      .toMatchObject({ space: SPACE, piece: "tracker" });
+    // The named space is checked against `--space` rather than ignored, and
+    // two names are settled without a session.
+    expect(() =>
+      parsePieceOptions({
+        ...base,
+        space: "other-space",
+        cell: `/@${SPACE}/tracker`,
+      })
+    ).toThrow(
+      `Reference names space "${SPACE}" but the command targets ` +
+        `space "other-space".`,
+    );
+    // Across spellings only a derivation can compare them, so the reference's
+    // space is carried to the session check instead.
+    expect(
+      parsePieceOptions({ ...base, space: SPACE_DID, cell: "/@n-space/t" }),
+    ).toMatchObject({ space: SPACE_DID, embeddedSpaces: ["n-space"] });
+  });
+
+  it("readTargetPositionals() reads a slug reference as the address", () => {
+    // The rooting is what separates a target from a path, so a slug reaches
+    // this position rooted and a bare word is still read as a path.
+    expect(readTargetPositionals({}, "/tracker", "items/0")).toEqual({
+      address: "/tracker",
+      pathString: "items/0",
+    });
+    expect(readTargetPositionals({}, `/@${SPACE}/tracker`)).toEqual({
+      address: `/@${SPACE}/tracker`,
+    });
+    expect(readTargetPositionals({}, "tracker")).toEqual({
+      pathString: "tracker",
+    });
+  });
+
+  it("readCallTarget() lets a slug reference precede the callable name", () => {
+    expect(readCallTarget({}, "/tracker", ["addItem", "{}"])).toEqual({
+      cell: "/tracker",
+      callableName: "addItem",
+      tail: ["{}"],
+    });
+  });
+
+  it("parseSpaceOptions() decomposes a --url into a transport and a reference", () => {
+    // What `--url` means is an `--api-url` and a reference, so a slug in it
+    // reaches the target the same way a slug written as one does.
+    expect(
+      parsePieceOptions({ url: `${API_URL}/${SPACE}/tracker`, identity: ID }),
+    )
+      .toMatchObject({ apiUrl: API_URL, space: SPACE, piece: "tracker" });
+    // Segments past the piece are that reference's path rather than words the
+    // URL drops without saying so.
+    expect(parsePieceOptions(
+      { url: `${FULL_URL}@user/items/0`, identity: ID },
+      { acceptsPath: true },
+    )).toMatchObject({
+      apiUrl: API_URL,
+      space: SPACE,
+      piece: PIECE,
+      pieceScope: "user",
+      piecePath: ["items", 0],
+    });
+  });
+
+  it("parseSpaceOptions() takes both URL encodings off a path segment", () => {
+    // A URL escapes with percent-encoding and a cell path is a JSON Pointer,
+    // so a key holding "/" or "~" arrives doubly escaped and a segment taken
+    // verbatim names a key nothing has.
+    expect(parsePieceOptions(
+      { url: `${FULL_URL}/foo~1bar/~0tilde`, identity: ID },
+      { acceptsPath: true },
+    )).toMatchObject({ piecePath: ["foo/bar", "~tilde"] });
+    expect(parsePieceOptions(
+      {
+        url: `${API_URL}/${SPACE}/of%3Afid1%3A${"a".repeat(43)}`,
+        identity: ID,
+      },
+    )).toMatchObject({ piece: `of:fid1:${"a".repeat(43)}` });
+  });
+
+  it("parseSpaceOptions() refuses a URL segment that is not valid escaping", () => {
+    // `new URL()` accepts a malformed escape and keeps it in the pathname, so
+    // the decode is where it surfaces — and a URL naming no readable word
+    // names no cell.
+    expect(() => parseSpaceOptions({ url: `${API_URL}/%ZZ`, identity: ID }))
+      .toThrow(/is not valid percent-encoding/);
+    expect(() =>
+      parsePieceOptions(
+        { url: `${FULL_URL}/%E0%A4%A`, identity: ID },
+        { acceptsPath: true },
+      )
+    ).toThrow(/is not valid percent-encoding/);
+  });
+
+  it("parseSpaceOptions() refuses a URL part holding the reference terminator", () => {
+    // Folded into the reference this decomposes to, "#" would read as the
+    // suffix and silently address the arguments cell instead.
+    expect(() =>
+      parsePieceOptions(
+        { url: `${FULL_URL}/foo%23argument`, identity: ID },
+        { acceptsPath: true, acceptsArgument: true },
+      )
+    ).toThrow(/"#" closes a reference/);
+  });
+
+  it("readCallTarget() lets the flag name the target for a rooted callable", () => {
+    // Nothing reserves the shape of a callable name, so a verb may be called
+    // "/archive". The flag is what reaches it: written, it names the target
+    // and the positional is the callable.
+    expect(readCallTarget({ cell: "board" }, "/archive", ["{}"])).toEqual({
+      callableName: "/archive",
+      tail: ["{}"],
+    });
+    // With no flag the rooted word is still the target, as before.
+    expect(readCallTarget({}, `/${LLM_HANDLE}`, ["archive"])).toEqual({
+      cell: `/${LLM_HANDLE}`,
+      callableName: "archive",
+      tail: [],
+    });
   });
 
   it('parseLink() rejects the "#argument" suffix on a link endpoint', () => {
@@ -486,13 +614,13 @@ describe("cli piece parsing", () => {
     // Silently preferring either target is how a caller reads a piece they
     // did not name; before this rule the URL's piece won without a word.
     expect(() =>
-      parseSpaceOptions({ url: FULL_URL, identity: ID, piece: PIECE })
+      parseSpaceOptions({ url: FULL_URL, identity: ID, cell: PIECE })
     ).toThrow(/cannot be provided when the "--url" names a piece/);
     expect(() =>
       parseSpaceOptions({
         url: FULL_URL,
         identity: ID,
-        piece: `/${LLM_HANDLE}`,
+        cell: `/${LLM_HANDLE}`,
       })
     ).toThrow(/cannot be provided when the "--url" names a piece/);
   });
@@ -501,7 +629,7 @@ describe("cli piece parsing", () => {
     expect(parsePieceOptions({
       url: NO_PIECE_FULL_URL,
       identity: ID,
-      piece: PIECE,
+      cell: PIECE,
     })).toMatchObject({
       apiUrl: API_URL,
       space: SPACE,
@@ -514,7 +642,7 @@ describe("cli piece parsing", () => {
       {
         url: NO_PIECE_FULL_URL,
         identity: ID,
-        piece: `/@${SPACE_DID}/${LLM_HANDLE}@user/items/0`,
+        cell: `/@${SPACE_DID}/${LLM_HANDLE}@user/items/0`,
       },
       { acceptsPath: true },
     )).toMatchObject({
@@ -593,7 +721,7 @@ describe("cli piece parsing", () => {
     // integration writes a whole input cell with `piece set "" --input` —
     // so it stays a valid spelling, in both target forms.
     await setCellValueFromCommand(
-      { ...base, piece: `/${LLM_HANDLE}`, input: true },
+      { ...base, cell: `/${LLM_HANDLE}`, input: true },
       "",
       undefined,
       deps,
@@ -609,7 +737,7 @@ describe("cli piece parsing", () => {
       .rejects.toThrow(/A path is required/);
     await expect(
       setCellValueFromCommand(
-        { ...base, piece: `/${LLM_HANDLE}` },
+        { ...base, cell: `/${LLM_HANDLE}` },
         undefined,
         undefined,
         deps,
@@ -640,45 +768,45 @@ describe("cli piece parsing", () => {
       parsePieceOptions({
         apiUrl: API_URL,
         space: SPACE,
-        piece: PIECE,
+        cell: PIECE,
       })
     ).toThrow(/--identity/);
     expect(() =>
       parsePieceOptions({
         apiUrl: API_URL,
         identity: ID,
-        piece: PIECE,
+        cell: PIECE,
       })
     ).toThrow(/--space/);
     expect(() =>
       parsePieceOptions({
         space: SPACE,
         identity: ID,
-        piece: PIECE,
+        cell: PIECE,
       })
     ).toThrow(/--api-url/);
     expect(() =>
       parsePieceOptions({
         identity: ID,
-        piece: PIECE,
+        cell: PIECE,
       })
     ).toThrow();
     expect(() =>
       parsePieceOptions({
         space: SPACE,
-        piece: PIECE,
+        cell: PIECE,
       })
     ).toThrow();
     expect(() =>
       parsePieceOptions({
         apiUrl: API_URL,
-        piece: PIECE,
+        cell: PIECE,
       })
     ).toThrow();
     expect(() =>
       parsePieceOptions({
         url: FULL_URL,
-        piece: PIECE,
+        cell: PIECE,
       })
     ).toThrow();
   });
@@ -1659,7 +1787,7 @@ describe("cli piece parsing", () => {
         .catch((error) => error);
       expect(error).toBeInstanceOf(PieceVerbReadError);
       expect((error as Error).message).toBe(
-        `Path resolves to a verb; use 'cf call --piece ${PIECE} addItem' instead.`,
+        `Path resolves to a verb; use 'cf call --cell ${PIECE} addItem' instead.`,
       );
 
       // A root verb on the input cell redirects the same way: the dispatcher
@@ -1772,7 +1900,7 @@ describe("cli piece parsing", () => {
         "Path resolves to a verb that is not directly callable: verbs are " +
           "invoked at the piece's root surface. Read the parent object " +
           "instead, or list the callable verbs with " +
-          `'cf piece verbs --piece ${PIECE}'.`,
+          `'cf piece verbs --cell ${PIECE}'.`,
       );
       expect((error as Error).message).not.toContain("cf call");
     });
@@ -2067,7 +2195,7 @@ describe("cli piece parsing", () => {
         apiUrl: API_URL,
         space: SPACE,
         identity: "/tmp/test.key",
-        piece: PIECE,
+        cell: PIECE,
         mainExport: "named",
         repository: "https://github.com/commontoolsinc/labs",
         root: "/repo",
@@ -2112,7 +2240,7 @@ describe("cli piece parsing", () => {
         apiUrl: API_URL,
         space: SPACE,
         identity: "/tmp/test.key",
-        piece: PIECE,
+        cell: PIECE,
         mainExport: "named",
         repository: "https://github.com/commontoolsinc/labs",
         root: "/repo",
@@ -2159,7 +2287,7 @@ describe("cli piece parsing", () => {
         apiUrl: API_URL,
         space: SPACE,
         identity: "/tmp/test.key",
-        piece: PIECE,
+        cell: PIECE,
       },
       "/repo/pattern.tsx",
       {

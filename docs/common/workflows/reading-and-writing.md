@@ -67,12 +67,13 @@ read out of that one declaration. Any other command is refused by name, `cf
 call` among them, so a call cannot quietly be aimed at a cell no handler
 reads.
 
-The suffix rides the canonical reference form — `/of:fid1:…#argument` — and
-nothing else. On a slug or a bare id it is refused, because there is no
-reference there for it to attach to. On a `--url` it is not refused: a URL
-fragment is not part of the path a URL's piece is read out of, so it is
-dropped without comment and the read goes to the result cell. With a `--url`
-or a bare id, `--input` is the only spelling that reaches the arguments cell.
+The suffix rides the reference form — `/of:fid1:…#argument`,
+`/thermostat#argument` — and nothing else. On a bare id or an unrooted slug it
+is refused, because there is no reference there for it to attach to. On a
+`--url` it is not refused: a URL fragment is not part of the path a URL's piece
+is read out of, so it is dropped without comment and the read goes to the
+result cell. With a `--url` or a bare id, `--input` is the only spelling that
+reaches the arguments cell.
 
 ### Nothing here runs the program
 
@@ -255,10 +256,11 @@ echo '30' | cf set -s demo "$ADDRESS#argument" target
 cf get -s demo --piece thermostat target --input
 ```
 
-Two refusals bound it. A slug or a bare id carries no canonical reference, so
-the suffix has nothing to attach to and is refused rather than folded into the
-id — which is the failure it is guarding against, since an id with a fragment
-buried in it fails later as an unknown piece.
+Two refusals bound it. Written bare — unrooted — a slug or an id is not a
+reference, so the suffix has nothing to attach to and is refused rather than
+folded into the id, which is the failure it is guarding against: an id with a
+fragment buried in it fails later as an unknown piece. Rooted, the same slug is
+a reference and takes the suffix.
 
 ```bash
 cf get -s demo --piece 'thermostat#argument' target

@@ -49,7 +49,7 @@ const OPTIONS = {
   apiUrl: "http://localhost:8000",
   identity: "/tmp/test-identity.pem",
   space: "home",
-  piece: "board",
+  cell: "board",
   quiet: true,
 };
 
@@ -314,7 +314,7 @@ describe("piece-survey", () => {
       let request: SurveyRunRequest | undefined;
       await captureStdout(() =>
         surveyFromCommand(
-          { ...OPTIONS, piece: undefined, list: ["of:fid1:x"] },
+          { ...OPTIONS, cell: undefined, list: ["of:fid1:x"] },
           {
             runSurvey: (_config, req) => {
               request = req;
@@ -363,13 +363,13 @@ describe("piece-survey", () => {
     it("throws for a scoped holder or a scoped list entry", async () => {
       await expect(
         surveyFromCommand(
-          { ...OPTIONS, piece: "board@user", path: "topics" },
+          { ...OPTIONS, cell: "board@user", path: "topics" },
           { runSurvey: () => Promise.resolve(COMPLETE) },
         ),
       ).rejects.toThrow("scope");
       await expect(
         surveyFromCommand(
-          { ...OPTIONS, piece: undefined, list: ["fid1:x@user"] },
+          { ...OPTIONS, cell: undefined, list: ["fid1:x@user"] },
           { runSurvey: () => Promise.resolve(COMPLETE) },
         ),
       ).rejects.toThrow("scope");
@@ -379,7 +379,7 @@ describe("piece-survey", () => {
       let request: SurveyRunRequest | undefined;
       await captureStdout(() =>
         surveyFromCommand(
-          { ...OPTIONS, piece: undefined, list: [`/of:fid1:${HANDLE}`] },
+          { ...OPTIONS, cell: undefined, list: [`/of:fid1:${HANDLE}`] },
           {
             runSurvey: (_config, req) => {
               request = req;
@@ -416,7 +416,7 @@ describe("piece-survey", () => {
           {
             ...OPTIONS,
             space: undefined,
-            piece: undefined,
+            cell: undefined,
             list: [
               withEmbedded,
             ],
@@ -436,7 +436,7 @@ describe("piece-survey", () => {
           {
             ...OPTIONS,
             space: SPACE_DID,
-            piece: undefined,
+            cell: undefined,
             list: [
               withEmbedded,
             ],
@@ -449,7 +449,7 @@ describe("piece-survey", () => {
       // A --space name: the comparison defers to the session open.
       await captureStdout(() =>
         surveyFromCommand(
-          { ...OPTIONS, piece: undefined, list: [withEmbedded] },
+          { ...OPTIONS, cell: undefined, list: [withEmbedded] },
           deps as never,
         )
       );
@@ -463,7 +463,7 @@ describe("piece-survey", () => {
           {
             ...OPTIONS,
             space: OTHER_SPACE_DID,
-            piece: undefined,
+            cell: undefined,
             list: [`/@${SPACE_DID}/of:fid1:${HANDLE}`],
           },
           { runSurvey: () => Promise.resolve(COMPLETE) },
@@ -476,7 +476,7 @@ describe("piece-survey", () => {
           {
             ...OPTIONS,
             space: undefined,
-            piece: undefined,
+            cell: undefined,
             list: [
               `/@${SPACE_DID}/of:fid1:${HANDLE}`,
               `/@${OTHER_SPACE_DID}/of:fid1:${HANDLE}`,
@@ -497,7 +497,7 @@ describe("piece-survey", () => {
       ) {
         await expect(
           surveyFromCommand(
-            { ...OPTIONS, piece: undefined, list: [entry] },
+            { ...OPTIONS, cell: undefined, list: [entry] },
             { runSurvey: () => Promise.resolve(COMPLETE) },
           ),
         ).rejects.toThrow(message);

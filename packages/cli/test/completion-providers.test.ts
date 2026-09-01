@@ -373,7 +373,7 @@ Deno.test("provider keys report which commands each option provider answers on",
   // answers on those and is silent everywhere else, which is the difference
   // between a slot that was decided about and one that only looks decided.
   const { options, arguments: positionals } = completionProviderKeys();
-  assertEquals(options.get("piece"), null);
+  assertEquals(options.get("cell"), null);
   assertEquals(options.get("from"), ["space clone"]);
   assertEquals(options.get("to"), ["space clone"]);
   assertEquals(options.get("scope"), ["wish"]);

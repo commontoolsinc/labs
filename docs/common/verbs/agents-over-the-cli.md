@@ -5,7 +5,7 @@ getting one, and about what an answer is worth once you have it.
 
 That is the shape of an agent's problem rather than a person's. A person opens a
 space in the shell and sees what is in it; an agent gets a space name and a key,
-and every command it can run takes a `--piece` it does not yet have. The
+and every command it can run takes a target it does not yet have. The
 commands that close that gap exist and are current — this collects them, names
 what bounds each one, and states the conclusions a caller is not entitled to
 draw from them.
@@ -26,7 +26,7 @@ Five ways to reach a piece, each bounded by something different:
 | a name someone assigned | `cf piece slugs` | the slug index |
 | text you expect to be in the data | `cf piece search <query>` | registered pieces, matched client-side |
 | a convention a pattern publishes | `cf wish <target>` | the collection that target names |
-| an address you were handed | `--piece <reference>` | nothing — this is not discovery |
+| an address you were handed | `cf get <reference>` | nothing — this is not discovery |
 
 All but the last are partial views, and they are partial in different
 directions, so an empty result from one says nothing about the others.
@@ -66,7 +66,7 @@ and what it can do — with every sentence compiled from the pattern's own doc
 comments:
 
 ```bash
-cf piece describe --piece <piece>
+cf piece describe --cell <piece>
 ```
 
 ```text
@@ -134,7 +134,7 @@ run:
 
 ```bash
 export CF_INVOCATION_SESSION=$(cf invocation-session new)
-cf call --piece <piece> --invocation add-glaze-1 addGlaze '{"name":"maple"}'
+cf call --cell <piece> --invocation add-glaze-1 addGlaze '{"name":"maple"}'
 ```
 
 Replaying that id within that session returns the original result and writes
@@ -144,7 +144,7 @@ it.
 
 **Carry addresses forward instead of searching again.** A verb that creates
 something can hand back the piece it created; `--show-links` adds the address of
-each document behind the result, and `--piece` takes such an address exactly as
+each document behind the result, and a target position takes such an address exactly as
 emitted. Filing a thing and then searching a collection for it is a guess the
 moment two callers write concurrently.
 

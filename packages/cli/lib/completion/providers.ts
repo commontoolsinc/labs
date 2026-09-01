@@ -7,7 +7,7 @@
  *
  * Every provider resolves its fabric context from the half-typed line first and
  * the environment second, which is what lets
- * `cf call -s other-space --piece <TAB>` list the pieces of `other-space`
+ * `cf call -s other-space --cell <TAB>` list the pieces of `other-space`
  * rather than whatever `CF_SPACE`-shaped default the shell happens to carry.
  *
  * Failure is always silent and always empty. A completion request runs while
@@ -104,12 +104,13 @@ export function resolveSpaceContext(
 }
 
 /**
- * The target reference the line names, in whichever of the four spellings it
- * was written: `--piece`, a positional canonical address, or the piece a
- * `--url` carries.
+ * The target the line names, in whichever spelling it was written: the
+ * `--cell`/`--piece` flag, a positional reference, or the piece a `--url`
+ * carries. Cliffy keys the flag by its leading name, so one lookup answers
+ * for both of its spellings.
  */
 function writtenPieceRef(line: CompletionLine): string | undefined {
-  const piece = line.options.get("piece") ?? line.address;
+  const piece = line.options.get("cell") ?? line.address;
   if (piece) return piece;
   const url = line.options.get("url");
   if (!url) return undefined;
@@ -124,9 +125,9 @@ function writtenPieceRef(line: CompletionLine): string | undefined {
  * Same as `resolveSpaceContext`, plus the target the line already names —
  * parsed through the same grammar the command's own intake parses it with.
  *
- * `normalizeLLMFriendlyRef` reads the canonical reference: the embedded space,
- * the `@scope` suffix, an embedded path, and the `#argument` suffix that
- * selects the arguments cell the way `--input` does. What it does not
+ * `normalizeLLMFriendlyRef` reads the reference: the embedded space, the
+ * `@scope` suffix, an embedded path, and the `#argument` suffix that selects
+ * the arguments cell the way `--input` does. What it does not
  * recognize falls through to the alias grammar, which is `id[@scope]`. Taking
  * the word verbatim as a piece id — which this did — meant every documented
  * spelling but the bare id resolved to a listing call that could not succeed,
@@ -176,7 +177,7 @@ function resolvePieceContext(line: CompletionLine): PieceConfig | null {
 }
 
 /**
- * What the `--piece` slot accepts: every slug the space's index records, then
+ * What the `--cell` slot accepts: every slug the space's index records, then
  * every piece id.
  *
  * Both are values the flag takes, and the slug is the readable half of that
@@ -261,7 +262,7 @@ export function shapeSlugCandidates(
   });
 }
 
-/** Callables (handlers and streams) exposed by the line's `--piece`. */
+/** Callables (handlers and streams) exposed by the line's `--cell`. */
 async function callableCandidates(
   line: CompletionLine,
 ): Promise<ProviderResult> {
@@ -907,7 +908,9 @@ function patternFiles(): Promise<ProviderResult> {
  * own file completion only when the option is path-shaped.
  */
 const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
-  piece: pieceCandidates,
+  // `--piece` is a deprecated name for the same option, and Cliffy keys it by
+  // the leading one, so this entry serves both spellings.
+  cell: pieceCandidates,
   select: onlyOn(
     PROJECTION_SOURCE_COMMANDS,
     projectionFieldCandidates("select"),
@@ -935,7 +938,7 @@ const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
     () => Promise.resolve(directive({ kind: "dirs" })),
   ),
   // `--list` names a piece to survey or repair instead of a collection, so it
-  // takes what `--piece` takes. Scoped, because a `--list` elsewhere would
+  // takes what `--cell` takes. Scoped, because a `--list` elsewhere would
   // mean something else entirely.
   list: onlyOn(["piece survey", "piece repair"], pieceCandidates),
   // `cf piece survey --validator` reads a JSON-schema file.
@@ -1025,7 +1028,7 @@ const ARGUMENT_PROVIDERS: Readonly<
   // Naming an existing slug re-points it, which is the case completion helps
   // with; a slug being coined for the first time is a word nothing can offer.
   "piece set-slug:slug": slugCandidates,
-  // The target a slug redirects to takes what `--piece` takes.
+  // The target a slug redirects to takes what `--cell` takes.
   "piece set-slug:source": pieceCandidates,
   "piece new:main": patternFiles,
   "piece setsrc:main": patternFiles,

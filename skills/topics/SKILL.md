@@ -52,9 +52,9 @@ reference edge, take no `agentName`, and return no value.
 The running piece is authoritative. Orient before mutating it:
 
 ```bash
-cf piece describe --piece "$TOPICS_BOARD"
-cf piece verbs --piece "$TOPICS_BOARD" --json
-cf call --piece "$TOPICS_BOARD" addTopic --help --json
+cf piece describe --cell "$TOPICS_BOARD"
+cf piece verbs --cell "$TOPICS_BOARD" --json
+cf call --cell "$TOPICS_BOARD" addTopic --help --json
 ```
 
 Repeat `describe`, `verbs`, and `call <verb> --help --json` after selecting a
@@ -97,11 +97,11 @@ or edit the emitted address.
 Read one Topic's durable input before changing it:
 
 ```bash
-cf get --piece "$TOPIC" title --input
-cf get --piece "$TOPIC" body --input
-cf get --piece "$TOPIC" comments --input \
+cf get --cell "$TOPIC" title --input
+cf get --cell "$TOPIC" body --input
+cf get --cell "$TOPIC" comments --input \
   --select sentAt,author.kind,author.name,body
-cf get --piece "$TOPIC" links --input \
+cf get --cell "$TOPIC" links --input \
   --select kind,url,label,addedAt,addedBy.kind,addedBy.name
 ```
 
@@ -122,11 +122,11 @@ project the returned Topic to its address:
 
 ```bash
 export CF_INVOCATION_SESSION="$(cf invocation-session new)"
-CREATE="$(cf call --piece "$TOPICS_BOARD" \
+CREATE="$(cf call --cell "$TOPICS_BOARD" \
   --invocation '<unique-topic-create-id>' \
-  --schema '{"properties":{"topic":{"$link":true}}}' \
   addTopic \
-  '{"title":"<title>","body":"<initial living document>","agentName":"Sol"}')"
+  '{"title":"<title>","body":"<initial living document>","agentName":"Sol"}' \
+  -- --schema '{"properties":{"topic":{"$link":true}}}')"
 TOPIC="$(printf '%s\n' "$CREATE" | jq -r '.result.topic["$link"] // empty')"
 ```
 
@@ -143,7 +143,7 @@ recover its `$link` there rather than blindly creating another Topic.
 
 ```bash
 cf get "$TOPICS_BOARD" index --step --select @,title
-cf get --piece "$TOPIC" title --input
+cf get --cell "$TOPIC" title --input
 ```
 
 Use one invocation session per agent run and an explicit invocation id per
@@ -154,13 +154,13 @@ pair. The full retry and receipt model is in `skills/cf/SKILL.md` and
 ## Update through Topic verbs
 
 ```bash
-cf call --piece "$TOPIC" --invocation '<unique-set-title-id>' setTitle \
+cf call --cell "$TOPIC" --invocation '<unique-set-title-id>' setTitle \
   '{"title":"<complete new title>","agentName":"Sol"}'
-cf call --piece "$TOPIC" --invocation '<unique-set-body-id>' setBody \
+cf call --cell "$TOPIC" --invocation '<unique-set-body-id>' setBody \
   '{"body":"<complete revised body>","agentName":"Sol"}'
-cf call --piece "$TOPIC" --invocation '<unique-add-comment-id>' addComment \
+cf call --cell "$TOPIC" --invocation '<unique-add-comment-id>' addComment \
   '{"body":"<point-in-time update>","agentName":"Sol"}'
-cf call --piece "$TOPIC" --invocation '<unique-add-link-id>' addLink \
+cf call --cell "$TOPIC" --invocation '<unique-add-link-id>' addLink \
   '{"url":"<PR URL>","kind":"pr","label":"<label>","agentName":"Sol"}'
 ```
 
@@ -179,9 +179,9 @@ the index row for the Topic being referenced:
 
 ```bash
 export OTHER_TOPIC='<canonical /of:... address from another index row>'
-cf call --piece "$TOPIC" --invocation '<unique-mention-id>' mention \
+cf call --cell "$TOPIC" --invocation '<unique-mention-id>' mention \
   "{\"topic\":\"$OTHER_TOPIC\"}"
-cf call --piece "$TOPIC" --invocation '<unique-unmention-id>' unmention \
+cf call --cell "$TOPIC" --invocation '<unique-unmention-id>' unmention \
   "{\"topic\":\"$OTHER_TOPIC\"}"
 ```
 

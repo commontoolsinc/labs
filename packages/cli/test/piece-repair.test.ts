@@ -44,7 +44,7 @@ const OPTIONS = {
   apiUrl: "http://localhost:8000",
   identity: "/tmp/test-identity.pem",
   space: "home",
-  piece: "board",
+  cell: "board",
   quiet: true,
   fixer: "fix-seeds.ts",
 };
