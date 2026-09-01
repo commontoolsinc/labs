@@ -462,7 +462,7 @@ defect. To title a region of a file or a class, use a section marker; see
 ### The blank line above
 
 A doc comment takes a blank line above it, except where it is the first thing
-in its file or bracketed block, and except in the two constructs `deno fmt`
+in its file or bracketed block, and except in the three constructs `deno fmt`
 will not keep one in.
 
 That blank line is what separates a documented declaration from whatever
