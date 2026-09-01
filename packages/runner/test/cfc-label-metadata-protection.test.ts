@@ -17,7 +17,10 @@ import {
   containsCfcFieldCommitment,
 } from "../src/cfc/label-representation.ts";
 import type { CfcLabelMetadataProtectionMode } from "../src/cfc/mod.ts";
-import { CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE } from "../src/cfc/types.ts";
+import {
+  CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
+  runtimeWritePolicyAuthorization,
+} from "../src/cfc/types.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -505,7 +508,7 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
             id: resultLink.id,
             path: [],
           }],
-        });
+        }, runtimeWritePolicyAuthorization);
         substrate.set({ copied: `${raw.secret}!` });
         tx.prepareCfc();
         expect((await tx.commit()).ok).toBeDefined();

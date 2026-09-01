@@ -14,6 +14,7 @@ import { CFC_LABEL_READ_FAILED_ATOM } from "../src/cfc/observation.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
+  runtimeWritePolicyAuthorization,
 } from "../src/cfc/types.ts";
 import type { JSONSchema, Pattern } from "../src/builder/types.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
@@ -162,8 +163,10 @@ const writerFitDiagnostics = (
   tx: { getCfcState(): { diagnostics: string[] } },
 ) => tx.getCfcState().diagnostics.filter((d) => d.includes("writer-fit"));
 
-// The marker the runner records for each document it instantiates a piece
-// into, naming the piece's result document as the source.
+// The marker the runner records for each document it sets a piece up in,
+// naming the piece's result document as the source. `authorized` stands for
+// who recorded it: the runtime passes its authorization, and code that merely
+// holds a transaction cannot.
 const recordPieceSubstrate = (
   tx: ReturnType<Runtime["edit"]>,
   resultCell: {
@@ -177,6 +180,7 @@ const recordPieceSubstrate = (
       path: readonly string[];
     };
   },
+  authorized = true,
 ): void => {
   const result = resultCell.getAsNormalizedFullLink();
   const substrate = substrateCell.getAsNormalizedFullLink();
@@ -195,7 +199,7 @@ const recordPieceSubstrate = (
       id: result.id,
       path: [],
     }],
-  });
+  }, authorized ? runtimeWritePolicyAuthorization : undefined);
 };
 
 describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
@@ -1644,6 +1648,55 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
             .filter((entry) => entry.origin === "declared")
             .flatMap((entry) => entry.label.confidentiality ?? []),
         ).toContainEqual(ownPersonalSpace);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("rejects a substrate write whose marker the runtime did not record", async () => {
+      // `recordCfcWritePolicyInput` is on the public transaction interface,
+      // and pattern-authored code reaches the transaction its cells are bound
+      // to, so a marker naming any document at all can be recorded by
+      // anything holding one. Without the runtime's authorization the route
+      // does not fire, and the document keeps the ceiling it resolves to.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-seam-forged-source");
+
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-forged-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-forged-result",
+          undefined,
+          tx,
+        );
+        const bystander = runtime.getCell<{ note?: string }>(
+          signer.did(),
+          "writer-fit-seam-forged-bystander",
+          undefined,
+          tx,
+        );
+        recordPieceSubstrate(tx, result, bystander, false);
+        bystander.set({ note: `${raw.secret}!` });
+        const bystanderId = bystander.getAsNormalizedFullLink().id;
+        tx.prepareCfc();
+        const committed = await tx.commit();
+        expect(committed.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(committed.error?.message).toContain(`for ${bystanderId} at /`);
+        expect(storedDocument(storageManager, bystanderId)).toBeUndefined();
       } finally {
         await runtime.dispose();
         await storageManager.close();

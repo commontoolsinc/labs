@@ -165,6 +165,7 @@ import {
   CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type ImplementationIdentity,
+  runtimeWritePolicyAuthorization,
 } from "./cfc/types.ts";
 import {
   prepareSourceClosureVerification,
@@ -954,6 +955,10 @@ const recordSetupProjectionPolicyInputs = (
  * document, and that document is its owner's store rather than this piece's.
  * The address goes on verbatim, path included, and the fit check takes the
  * marker only where it names a whole document.
+ *
+ * The marker carries the runtime's authorization, which is what the fit check
+ * asks for: the method that records it is reachable from anything holding a
+ * cell, so an unmarked marker naming the same document counts for nothing.
  */
 const recordPieceSubstrate = (
   tx: IExtendedStorageTransaction,
@@ -976,7 +981,7 @@ const recordPieceSubstrate = (
       scope: result.scope,
       path: [...result.path],
     }],
-  });
+  }, runtimeWritePolicyAuthorization);
 };
 
 /** Whether two links name the same document, each at that document's root. */

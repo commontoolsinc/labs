@@ -825,11 +825,20 @@ const writeIsPatternSetupInitialization = (
  * each piece's argument document, and the internal documents its result
  * projects to.
  *
+ * The route below ACTS on these markers rather than measuring them, so who
+ * recorded one decides whether it counts. `recordCfcWritePolicyInput` is on
+ * the public transaction interface and pattern-authored code reaches the
+ * transaction its cells are bound to, so an input's own fields say only what
+ * its recorder wrote: a marker without the runtime's mark names nothing here.
+ * The two sibling markers in this file corroborate against transaction state
+ * instead, which suits a claim about a write that has already happened; this
+ * one is a claim about whose write it is.
+ *
  * A marker whose address carries a path names part of a document rather than
- * the document, and is ignored: the route below declares a policy for the
- * whole store, so it may only take a marker that claims the whole store. The
- * setup path records the empty path for every document it mints from a
- * piece's result cell, so this excludes only an argument link that was stored
+ * the document, and is ignored too: the route declares a policy for the whole
+ * store, so it may only take a marker that claims the whole store. The setup
+ * path records the empty path for every document it mints from a piece's
+ * result cell, so this excludes only an argument link that was stored
  * pointing into some other document.
  */
 const pieceSetupSubstrateDocuments = (
@@ -840,7 +849,8 @@ const pieceSetupSubstrateDocuments = (
     if (
       input.kind === "structural-provenance" &&
       input.claim === CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE &&
-      canonicalizeLogicalPath(input.target.path).length === 0
+      canonicalizeLogicalPath(input.target.path).length === 0 &&
+      tx.isRuntimeWritePolicyInput(input)
     ) {
       documents.add(targetKey(input.target));
     }

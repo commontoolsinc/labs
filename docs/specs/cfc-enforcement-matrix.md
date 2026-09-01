@@ -324,10 +324,19 @@ The strict-only delta is:
 
   Five conditions bound it:
 
-  - **The marker.** Only a document the runner named through its
-    piece-substrate write-policy input is reached, and only where that
-    marker's address names the whole document rather than a path inside
-    one. Every other document keeps the ceiling it resolves to, and a
+  - **The marker, and who recorded it.** Only a document the runner named
+    through its piece-substrate write-policy input is reached, and only
+    where the runtime itself recorded that input and its address names the
+    whole document rather than a path inside one. The recording method is
+    on the public transaction interface, and pattern-authored code reaches
+    the transaction its cells are bound to, so an input's own fields say
+    only what its recorder wrote; the runtime passes an authorization
+    alongside, the way `setMetaRaw` marks a meta write, and an unmarked
+    marker naming the same document counts for nothing. That is the
+    difference between a gate that ACTS on an input and one that measures
+    it: the two sibling markers in the same file corroborate against
+    transaction state, which suits a claim about a write that has already
+    happened, while this one is a claim about whose write it is. Every other document keeps the ceiling it resolves to, and a
     misfit there is refused as before, with the §8.12.5 remedy in the
     reason. The runner records only addresses it MINTS from the piece's
     result cell: the argument address it would derive, and each derived

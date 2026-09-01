@@ -75,9 +75,11 @@ export type {
   OrderedWriteAttempt,
   PostCommitSideEffect,
   PreparedDigestInput,
+  RuntimeWritePolicyAuthorization,
   TrustSnapshot,
   WritePolicyInput,
 } from "./types.ts";
+export { runtimeWritePolicyAuthorization } from "./types.ts";
 export {
   cfcCanonicalClauseDigest,
   collectDeclaredMonotonicityViolations,
