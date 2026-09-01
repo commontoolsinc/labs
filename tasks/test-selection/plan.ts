@@ -430,8 +430,10 @@ export function plan(input: PlanInput): Plan {
     // budget: it takes a lane that can hold the work where there is one,
     // and the lane it leaves shortest where there is not.
     const spots = spotsFor(input, lanes, entry, 1, laneBudget, bound);
-    const spot = spots.fitting ?? spots.shortest;
-    if (spot === undefined) continue;
+    // Every lane is a candidate for work that fits in none of them, so a
+    // lane list with anything in it yields a shortest lane, and the list
+    // is one this function built.
+    const spot = spots.fitting ?? spots.shortest!;
     taken.add(key);
     place(input, spot, entry, reason, 1);
   }
