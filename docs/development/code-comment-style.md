@@ -470,7 +470,7 @@ precedes it, and within those bounds it holds uniformly: a function after
 another function, an interface property after another property, an array
 element after another element.
 
-Two positions have nothing above to separate from, and so take no blank line:
+Three positions have nothing above to separate from, and so take no blank line:
 
 - **The first line of a file**, where a file header opens the file. A shebang
   or a file-scoped pragma is something above, though, and takes the blank line
@@ -478,6 +478,11 @@ Two positions have nothing above to separate from, and so take no blank line:
 - **Directly under an opening bracket** — `{`, `(`, or `[` — where the doc
   comment belongs to the first member, parameter, or element of the block. The
   bracket is the separator.
+- **Directly under the `=` of a type alias**, where the doc comment belongs to
+  the first arm of the union or intersection that follows. The `=` opens the
+  declaration the way a bracket opens a block, and the arms after the first are
+  exempt under the formatter rule below. Note that `deno fmt` will keep a blank
+  line in this one position, so the convention is the whole of what holds it.
 
 The dense cases are the ones the rule is for. An interface whose properties
 each carry a one-line doc comment reads as an undifferentiated run of lines
