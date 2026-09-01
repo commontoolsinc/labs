@@ -4327,10 +4327,7 @@ function convertOneToLinks(
     ));
   } finally {
     // `popExpect()` instead of just `pop()`, as defense-in-depth against bugs
-    // elsewhere in the code: this walk is the only thing pushing onto
-    // `ancestors`, so what comes off has to be what this frame put on. A stack
-    // answers by position, and one unbalanced pair leaves every depth after it
-    // wrong by one, silently.
+    // elsewhere in the code.
     ancestors.popExpect(original);
   }
 }
