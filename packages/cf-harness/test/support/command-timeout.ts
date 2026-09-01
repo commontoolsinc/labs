@@ -66,12 +66,17 @@ export const commandStatusWithTimeout = async (
   ]);
   if (cleanupTimeoutId !== undefined) clearTimeout(cleanupTimeoutId);
 
-  if (cleanupResult === "cleanup-timed-out") {
+  if (cleanupResult !== "closed") {
+    // The reap did not land, whether it ran out of time or failed outright, so
+    // the child does not get to hold the process open on its own.
     child.unref();
-  } else if (cleanupResult !== "closed") {
-    killError = killError === undefined
-      ? `child status failed after timeout: ${cleanupResult.message}`
-      : `${killError}; child status failed after timeout: ${cleanupResult.message}`;
+    if (cleanupResult !== "cleanup-timed-out") {
+      killError = appendError(
+        killError,
+        "child status failed after timeout",
+        cleanupResult.message,
+      );
+    }
   }
 
   return killError === undefined
