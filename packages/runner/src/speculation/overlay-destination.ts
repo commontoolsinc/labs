@@ -374,7 +374,7 @@ export class SpeculationOverlayDestination
   readonly #intentSidecarStates = new Map<string, { hints: Set<number> }>();
 
   /** DIAGNOSTIC counter (tests): intent checks run. The `commonfabric.*`
-   * surface reads none of these counters; it reads the logger keys —
+   * surface reads no counter here; it reads the logger keys —
    * `speculation-overlay/intent-*`. */
   #intentCheckCount = 0;
 

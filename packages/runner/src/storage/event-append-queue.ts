@@ -202,8 +202,8 @@ export class EventAppendQueue {
    * pending forever, wedging dispose-time sanitizers). */
   #retryRelease: (() => void) | undefined;
 
-  /** OW27 pacing: the rate and burst the buckets refill on, or undefined
-   * when pacing is disabled. */
+  /** OW27 pacing: the parameters the buckets refill on, or undefined when
+   * pacing is disabled. */
   readonly #pacing: EventAppendPacing | undefined;
 
   /** The per-stream token buckets, keyed by sidecar doc id — one per
