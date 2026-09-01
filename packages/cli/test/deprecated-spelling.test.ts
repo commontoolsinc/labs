@@ -3,8 +3,9 @@ import { expect } from "@std/expect";
 
 import {
   COMMAND_SPELLING_END_DATE,
+  commandSpellingNotice,
+  noCommandSpellingNotice,
   warnDeprecatedCommandSpelling,
-  withDeprecatedCommandSpelling,
 } from "../lib/deprecated-spelling.ts";
 
 describe("deprecated-spelling", () => {
@@ -91,19 +92,16 @@ describe("deprecated-spelling", () => {
     });
   });
 
-  describe("withDeprecatedCommandSpelling()", () => {
+  describe("commandSpellingNotice()", () => {
     it("emits the notice before running the action", () => {
       const events: string[] = [];
       const realError = console.error;
       try {
         console.error = () => events.push("notice");
-        const wrapped = withDeprecatedCommandSpelling(
-          "acl ls",
-          "space acl ls",
-          () => {
+        const wrapped = commandSpellingNotice("acl ls", "space acl ls")
+          .action(() => {
             events.push("action");
-          },
-        );
+          });
         wrapped();
       } finally {
         console.error = realError;
@@ -115,11 +113,8 @@ describe("deprecated-spelling", () => {
       const realError = console.error;
       try {
         console.error = () => {};
-        const wrapped = withDeprecatedCommandSpelling(
-          "view",
-          "source view",
-          (n: number) => n * 2,
-        );
+        const wrapped = commandSpellingNotice("view", "source view")
+          .action((n: number) => n * 2);
         expect(wrapped(21)).toBe(42);
       } finally {
         console.error = realError;
@@ -131,13 +126,10 @@ describe("deprecated-spelling", () => {
       const realError = console.error;
       try {
         console.error = () => {};
-        const wrapped = withDeprecatedCommandSpelling(
-          "view",
-          "source view",
-          (...args: unknown[]) => {
+        const wrapped = commandSpellingNotice("view", "source view")
+          .action((...args: unknown[]) => {
             seen.push(...args);
-          },
-        );
+          });
         wrapped({ json: true }, "first", "second");
       } finally {
         console.error = realError;
@@ -151,18 +143,87 @@ describe("deprecated-spelling", () => {
       const realError = console.error;
       try {
         console.error = () => {};
-        const wrapped = withDeprecatedCommandSpelling(
-          "call",
-          "piece call",
-          function (this: { literalArgs: string[] }) {
+        const wrapped = commandSpellingNotice("call", "piece call")
+          .action(function (this: { literalArgs: string[] }) {
             return this.literalArgs;
-          },
-        );
+          });
         const receiver = { literalArgs: ["a", "b"], run: wrapped };
         expect(receiver.run()).toEqual(["a", "b"]);
       } finally {
         console.error = realError;
       }
+    });
+
+    it("gives a help page the notice after the page it asked for", () => {
+      // `--help` renders and exits before any action, so the page is the only
+      // place a caller who is only asking what the command is gets told.
+      const events: string[] = [];
+      const realError = console.error;
+      try {
+        console.error = () => events.push("notice");
+        const command = commandSpellingNotice("get", "cell get").helpPage({
+          showHelp: () => events.push("page"),
+        });
+        command.showHelp();
+      } finally {
+        console.error = realError;
+      }
+      expect(events).toEqual(["page", "notice"]);
+    });
+
+    it("hands the help page the options it was called with", () => {
+      // Cliffy's own help action passes `{ long }`, and a page rendered
+      // without it is a different page.
+      const seen: unknown[] = [];
+      const realError = console.error;
+      try {
+        console.error = () => {};
+        const command = commandSpellingNotice("get", "cell get").helpPage({
+          showHelp: (options?: unknown) => seen.push(options),
+        });
+        command.showHelp({ long: true });
+      } finally {
+        console.error = realError;
+      }
+      expect(seen).toEqual([{ long: true }]);
+    });
+
+    it("says the notice once when a run reaches both the action and the page", () => {
+      // The line cliffy answers with both: an action that throws a validation
+      // error is followed by the command's help page. Told twice, a caller
+      // learns to skim it.
+      const notices: string[] = [];
+      const realError = console.error;
+      try {
+        console.error = (text: string) => notices.push(text);
+        const notice = commandSpellingNotice("set", "cell set");
+        const command = notice.helpPage({ showHelp: () => {} });
+        notice.action(() => {})();
+        command.showHelp();
+      } finally {
+        console.error = realError;
+      }
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toContain("'cf set' is deprecated");
+    });
+
+    it("leaves a blessed mount's action and help page silent", () => {
+      // The same builder is mounted twice, and only the superseded mount
+      // carries a notice — a canonical spelling that warned about itself
+      // would tell every caller to stop writing the right thing.
+      const events: string[] = [];
+      const realError = console.error;
+      try {
+        console.error = (text: string) => events.push(text);
+        const command = noCommandSpellingNotice.helpPage({
+          showHelp: () => events.push("page"),
+        });
+        noCommandSpellingNotice.action(() => events.push("action"))();
+        command.showHelp();
+      } finally {
+        console.error = realError;
+      }
+      expect(events).toEqual(["action", "page"]);
     });
   });
 });

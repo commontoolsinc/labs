@@ -996,7 +996,7 @@ describe("cli piece parsing", () => {
   });
 
   it("shows recreate-root as a space-scoped command", async () => {
-    const { code, stdout, stderr } = await cf("piece recreate-root --help");
+    const { code, stdout, stderr } = await cf("space recreate-root --help");
     checkStderr(stderr);
     const output = stripAnsi(stdout.join("\n"));
     expect(output).toContain(

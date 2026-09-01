@@ -1073,10 +1073,11 @@ never typed at a prompt.
 Each command sits under the noun it acts on. Where that moved a command, the
 spelling it had is still accepted and still completes its own flags and
 arguments, so a script written against it keeps working; it is hidden from
-`cf --help` and never offered as a completion, and it says on every run what to
-write instead. **These spellings are not guaranteed to work after 2026-09-11**,
-so migrate before then: a later change removes them, and nothing holds them open
-past that date.
+`cf --help` and never offered as a completion, and every run says on stderr what
+to write instead — including `--help`, whose page is otherwise a screen of
+examples in the spelling that is going away. **These spellings are not
+guaranteed to work after 2026-09-11**, so migrate before then: a later change
+removes them, and nothing holds them open past that date.
 
 | Write this               | Instead of               |
 | ------------------------ | ------------------------ |

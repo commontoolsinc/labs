@@ -59,8 +59,9 @@ import {
 } from "../lib/cell-selection.ts";
 import { cliCommand, cliText } from "../lib/cli-name.ts";
 import {
-  warnDeprecatedCommandSpelling,
-  withDeprecatedCommandSpelling,
+  type CommandSpellingNotice,
+  commandSpellingNotice,
+  noCommandSpellingNotice,
 } from "../lib/deprecated-spelling.ts";
 import type { FabricValue } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model";
@@ -1549,19 +1550,22 @@ export function withNoSectionMarker<
 }
 
 /**
- * An action wrapped with the step-7 notice when it is reached through a
- * superseded spelling, and left alone when it is not.
+ * The step-7 notice this mount carries, which is none when the mount is the
+ * blessed one.
  *
  * `replacedBy` is what distinguishes the two mounts of one builder: the
- * blessed spelling passes nothing and stays silent.
+ * blessed spelling passes nothing and stays silent. Each builder takes the
+ * notice through both halves — around its action, and around the command it
+ * returns — so a caller is told whether they ran the command or only asked
+ * what it is.
  */
-function maybeDeprecated<
-  // deno-lint-ignore no-explicit-any
-  F extends (this: any, ...args: any[]) => unknown,
->(spelling: string, replacedBy: string | undefined, action: F): F {
+function mountNotice(
+  spelling: string,
+  replacedBy: string | undefined,
+): CommandSpellingNotice {
   return replacedBy === undefined
-    ? action
-    : withDeprecatedCommandSpelling(spelling, replacedBy, action);
+    ? noCommandSpellingNotice
+    : commandSpellingNotice(spelling, replacedBy);
 }
 
 /**
@@ -1574,7 +1578,9 @@ function buildGetCommand(
   spelling: string,
   replacedBy?: string,
 ): Command<any> {
-  return new Command()
+  const notice = mountNotice(spelling, replacedBy);
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
     .description(
       `Get a value from a piece at a specific path. Omit path to return the full result.
 
@@ -1688,12 +1694,13 @@ arguments cell the way --input does, on any of them.`,
       { conflicts: ["select"] },
     )
     .arguments("[addressOrPath:string] [path:string]")
+    // The notice is outermost, so a line that is refused before the action
+    // runs is told too: the refusal quotes the spelling the caller wrote,
+    // which is the one thing on screen that must not stand unqualified.
     .action(
-      withNoSectionMarker(
-        spelling,
-        maybeDeprecated(spelling, replacedBy, getCellValueFromCommand),
-      ),
+      notice.action(withNoSectionMarker(spelling, getCellValueFromCommand)),
     );
+  return notice.helpPage(command);
 }
 
 /**
@@ -1704,7 +1711,9 @@ function buildSetCommand(
   spelling: string,
   replacedBy?: string,
 ): Command<any> {
-  return new Command()
+  const notice = mountNotice(spelling, replacedBy);
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
     .description(
       cliText(
         `Set a value in a piece at a specific path. Reads JSON from stdin.
@@ -1749,12 +1758,13 @@ does, on any of them.`,
         '"#argument" suffix on the target spells the same selection)',
     )
     .arguments("[addressOrPath:string] [path:string]")
+    // The notice is outermost, so a line that is refused before the action
+    // runs is told too: the refusal quotes the spelling the caller wrote,
+    // which is the one thing on screen that must not stand unqualified.
     .action(
-      withNoSectionMarker(
-        spelling,
-        maybeDeprecated(spelling, replacedBy, setCellValueFromCommand),
-      ),
+      notice.action(withNoSectionMarker(spelling, setCellValueFromCommand)),
     );
+  return notice.helpPage(command);
 }
 
 /**
@@ -1766,7 +1776,9 @@ function buildCallCommand(
   spelling: string,
   replacedBy?: string,
 ): Command<any> {
-  return new Command()
+  const notice = mountNotice(spelling, replacedBy);
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
     .description(
       `Invoke a callable within a piece.
 
@@ -1928,17 +1940,15 @@ reference names the piece by handle or by slug, and may carry the space
     )
     .stopEarly()
     .arguments("<callable:string> [tail...:string]")
-    .action(function (
+    .action(notice.action(function (
       options: PieceCallCLIOptions,
       callableArg: string,
       ...tailArgs: string[]
     ) {
-      // Emitted from the action rather than from `callFromCommand`, so the
-      // notice fires when the command runs and never when a test drives the
-      // tail directly.
-      if (replacedBy !== undefined) {
-        warnDeprecatedCommandSpelling(spelling, replacedBy);
-      }
+      // Wrapped here rather than around `callFromCommand`, so the notice
+      // fires when the command runs and never when a test drives the tail
+      // directly.
+      //
       // Both argv-derived arrays are returned by methods on the command
       // Cliffy binds as this action's `this`, so they are read here and
       // handed on as values: the raw arguments a grammar refusal quotes
@@ -1952,7 +1962,8 @@ reference names the piece by handle or by slug, and may carry the space
         this.getRawArgs(),
         this.getLiteralArgs(),
       );
-    });
+    }));
+  return notice.helpPage(command);
 }
 
 /**
@@ -2021,6 +2032,7 @@ export function buildRecreateRootCommand(
   spelling: string,
   replacedBy?: string,
 ): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
   const act = async (options: SpaceCommandCLIOptions) => {
     refuseJsonOutput(spelling, options);
     setQuietMode(!!options.quiet);
@@ -2048,13 +2060,8 @@ export function buildRecreateRootCommand(
       cliText(`cf ${spelling} ${EX_ID} ${EX_URL}`),
       `Recreate the root pattern for "${EX_SPACE}".`,
     );
-  return targetOptions(
-    command.action(
-      replacedBy === undefined
-        ? act
-        : withDeprecatedCommandSpelling(spelling, replacedBy, act),
-    ),
-    { global: false },
+  return notice.helpPage(
+    targetOptions(command.action(notice.action(act)), { global: false }),
   );
 }
 
@@ -2070,6 +2077,7 @@ export function buildSetHomeCommand(
   spelling: string,
   replacedBy?: string,
 ): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
   const act = async (options: SpaceCommandCLIOptions, main?: string) => {
     refuseJsonOutput(spelling, options);
     setQuietMode(!!options.quiet);
@@ -2164,13 +2172,8 @@ export function buildSetHomeCommand(
       { collect: true },
     )
     .arguments("[main:string]");
-  return targetOptions(
-    command.action(
-      replacedBy === undefined
-        ? act
-        : withDeprecatedCommandSpelling(spelling, replacedBy, act),
-    ),
-    { global: false },
+  return notice.helpPage(
+    targetOptions(command.action(notice.action(act)), { global: false }),
   );
 }
 
@@ -2185,6 +2188,7 @@ export function buildGetLabelCommand(
   spelling: string,
   replacedBy?: string,
 ): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
   // deno-lint-ignore no-explicit-any
   const command: Command<any> = new Command()
     .description(
@@ -2213,11 +2217,11 @@ declared, derived, and link-carried labels. Omit path to inspect the root.`,
       "Select JSON output explicitly. This command always outputs JSON.",
     )
     .arguments("[path:string]");
-  return targetOptions(
-    command.action(
-      maybeDeprecated(spelling, replacedBy, getCellCfcLabelFromCommand),
+  return notice.helpPage(
+    targetOptions(
+      command.action(notice.action(getCellCfcLabelFromCommand)),
+      { global: false },
     ),
-    { global: false },
   );
 }
 
@@ -2232,6 +2236,7 @@ export function buildSetLabelCommand(
   spelling: string,
   replacedBy?: string,
 ): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
   // deno-lint-ignore no-explicit-any
   const command: Command<any> = new Command()
     .description(
@@ -2273,11 +2278,11 @@ updated effective label view.`,
       "Select JSON output explicitly. This command always outputs JSON.",
     )
     .arguments("[path:string]");
-  return targetOptions(
-    command.action(
-      maybeDeprecated(spelling, replacedBy, setCellCfcLabelFromCommand),
+  return notice.helpPage(
+    targetOptions(
+      command.action(notice.action(setCellCfcLabelFromCommand)),
+      { global: false },
     ),
-    { global: false },
   );
 }
 

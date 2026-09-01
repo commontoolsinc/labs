@@ -8,6 +8,7 @@ import { join } from "@std/path";
 import { exec } from "../commands/exec.ts";
 import { test as testCommand } from "../commands/test-command.ts";
 import { cf, checkStderr, stripAnsi, withEnv } from "./utils.ts";
+import { COMMAND_SPELLING_END_DATE } from "../lib/deprecated-spelling.ts";
 
 class ExitError extends Error {
   constructor(readonly code: number) {
@@ -273,6 +274,49 @@ describe("main command", () => {
     for (const superseded of ["get", "set", "call"]) {
       expect(named(main, true)).toContain(superseded);
       expect(named(main, false)).not.toContain(superseded);
+    }
+  });
+
+  it("carries the migration notice on a superseded spelling's help page", async () => {
+    // The page is where a caller learning a command looks, and a superseded
+    // mount's page teaches its own spelling in every example. `--help` exits
+    // before any action runs, so the notice cannot ride the action alone.
+    //
+    // Both halves are asserted together: the notice on the superseded page,
+    // and silence on the blessed one. A notice fired from the shared builder
+    // rather than from the mount would put it on both, and a test that only
+    // read the superseded page would call that a pass.
+    for (
+      const [superseded, blessed] of [
+        ["get", "cell get"],
+        ["set", "cell set"],
+        ["call", "piece call"],
+        ["piece get-label", "cell get-label"],
+        ["piece set-label", "cell set-label"],
+        ["piece recreate-root", "space recreate-root"],
+        ["piece set-home", "space set-home"],
+      ] as const
+    ) {
+      const old = await cf(`${superseded} --help`);
+      expect(old.code, superseded).toBe(0);
+      // One line, on stderr, naming both spellings and the date. Asserted on
+      // stderr because the page itself is stdout: a notice written there
+      // would corrupt the machine-readable output these commands reserve it
+      // for.
+      expect(old.stderr.join("\n"), superseded).toContain(
+        `'cf ${superseded}' is deprecated; spell it 'cf ${blessed}'.`,
+      );
+      expect(old.stderr.join("\n"), superseded).toContain(
+        COMMAND_SPELLING_END_DATE,
+      );
+      expect(old.stdout.join("\n"), superseded).not.toContain("is deprecated");
+
+      const current = await cf(`${blessed} --help`);
+      expect(current.code, blessed).toBe(0);
+      checkStderr(current.stderr);
+      expect(current.stderr.join("\n"), blessed).not.toContain(
+        "is deprecated",
+      );
     }
   });
 

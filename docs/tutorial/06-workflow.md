@@ -200,15 +200,15 @@ space needs no `-s` beside it: the embedded space supplies the target, and a
 output drives the next command unchanged, even from a shell configured for a
 different space.
 
-On `get`, `set`, and `call`, write the reference in the first positional —
-`cf cell get /tracker/items`. `--cell` takes the same word where a flag suits
-better, and is also where the bare id and slug spellings go (`--cell
-fid1:abc...`, `--cell myslug`); `--piece` is a deprecated name for that same
-flag, still accepted. On the commands that take `--input` (`get` and `set` here), a trailing
-`#argument` selects the piece's arguments cell the way that flag does;
-`call` takes no `--input` and refuses the suffix. The three are the piece
-data commands mounted at top level — reading and writing cells is not
-really a piece-management concern, and the spelling says so.
+On `cell get`, `cell set`, and `piece call`, write the reference in the first
+positional — `cf cell get /tracker/items`. `--cell` takes the same word where
+a flag suits better, and is also where the bare id and slug spellings go
+(`--cell fid1:abc...`, `--cell myslug`); `--piece` is a deprecated name for
+that same flag, still accepted. On the commands that take `--input` (`cell
+get` and `cell set` here), a trailing `#argument` selects the piece's
+arguments cell the way that flag does; `piece call` takes no `--input` and
+refuses the suffix. Each of the three sits under the noun it acts on: `get`
+and `set` name a cell, and `call` invokes a verb on a piece.
 
 One subtlety: neither `cf cell set` nor `cf piece call` refreshes *computed*
 outputs. `set` writes the cell without running anything; `call` runs the
@@ -216,7 +216,8 @@ handler (so the handler's own writes land and sync), but the scheduler is
 lazy — derived values recompute only when something observes them
 (Chapter 8), and nothing in the ephemeral CLI session does. Run
 `cf piece step --cell <ID>` — which pulls the piece, forcing
-recomputation — before inspecting computed fields with `get`/`inspect`.
+recomputation — before inspecting computed fields with `cell get` or
+`piece inspect`.
 
 This CLI surface is also exactly how *agents* drive the system — same
 streams, same cells. The browser shell is just one more client.

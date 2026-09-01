@@ -42,8 +42,8 @@ function envStatus(): string {
     // a space and do not read this, so a blanket "no need to pass --space"
     // would be wrong exactly where a caller is most surprised to be asked.
     lines.push(
-      `  CF_SPACE    = ${space} (set, no need to pass --space on piece, ` +
-        `get/set/call, wish, acl, deps)`,
+      `  CF_SPACE    = ${space} (set, no need to pass --space on cell, ` +
+        `piece, space, wish, acl, deps)`,
     );
   }
   return lines.join("\n");
@@ -60,7 +60,7 @@ FIRST TIME SETUP:
   cf id new > claude.key            # Create identity key
   export CF_IDENTITY=./claude.key   # Set default identity
   export CF_API_URL=http://localhost:${ports.toolshed}  # Set default API URL
-  export CF_SPACE=my-space          # Default space for piece/get/set/call,
+  export CF_SPACE=my-space          # Default space for cell, piece, space,
                                     # wish, acl and deps (--space overrides)
 
 SHELL COMPLETION:

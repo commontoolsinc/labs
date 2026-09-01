@@ -210,7 +210,7 @@ describe("JSON command contracts", () => {
   });
 
   it("documents redundant --json options on JSON-only reads", async () => {
-    const pieceGet = await cf("get --help");
+    const pieceGet = await cf("cell get --help");
     const wish = await cf("wish --help");
 
     expect(pieceGet.code).toBe(0);
