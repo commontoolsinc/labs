@@ -57,14 +57,18 @@ const bounded = (text: string): string =>
  * compiler error renders as the empty string.
  */
 const errorClassSummary = (message: string): string => {
+  // Keyed by the whole line: two errors that share a long prefix are two
+  // classes, and bounding before the count merges them into a wrong one.
   const counts = new Map<string, number>();
   for (const [, text] of message.matchAll(COMPILER_ERROR_LINE)) {
-    const error = bounded(text.trim());
+    const error = text.trim();
     counts.set(error, (counts.get(error) ?? 0) + 1);
   }
   if (counts.size === 0) return "";
   const named = [...counts.entries()].slice(0, SUMMARY_ERROR_CLASS_LIMIT)
-    .map(([error, count]) => count > 1 ? `"${error}" x${count}` : `"${error}"`);
+    .map(([error, count]) =>
+      count > 1 ? `"${bounded(error)}" x${count}` : `"${bounded(error)}"`
+    );
   const unnamed = counts.size - named.length;
   const total = [...counts.values()].reduce((sum, count) => sum + count, 0);
   return `${total} ${total === 1 ? "error" : "errors"}: ${named.join("; ")}${

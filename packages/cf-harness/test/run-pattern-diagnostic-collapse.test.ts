@@ -138,6 +138,28 @@ describe("collapseSupersededRunPatternDiagnostics()", () => {
     );
   });
 
+  it("counts two errors sharing a long prefix as two classes", () => {
+    const prefix = `Type '{ ${"donut: string; ".repeat(12)}}' is not `;
+    const transcript = [
+      runPatternFailure(
+        "call-1",
+        "out-1",
+        [
+          `[ERROR] ${prefix}assignable to parameter of type 'Glaze'.`,
+          `[ERROR] ${prefix}assignable to parameter of type 'Fryer'.`,
+        ].join("\n"),
+      ),
+      runPatternFailure("call-2", "out-2"),
+    ];
+
+    collapseSupersededRunPatternDiagnostics(transcript);
+
+    const message = parseContent(transcript[0]).message as string;
+    expect(message).toContain("2 errors:");
+    expect(message).not.toContain("x2");
+    expect(message.split(`"${prefix.slice(0, 100)}..."`).length - 1).toBe(2);
+  });
+
   it("leaves a diagnostic shorter than its own summary verbatim", () => {
     const transcript = [
       runPatternFailure("call-1", "out-1", "[ERROR] Cannot find name 'x'."),
