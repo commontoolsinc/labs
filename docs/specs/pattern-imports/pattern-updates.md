@@ -413,14 +413,14 @@ prior state rather than a schema.
 
 ## System-source patterns — the loop
 
-**Toolshed side (memoized per file for the process lifetime; patterns are fixed
-for a toolshed's lifetime).** Add a `?identity` query param to the pattern route
-(`patterns.routes.ts`). For a requested file: walk its authored import closure
-via single-file reads (works in a compiled binary — no directory enumeration) →
-hash the **pristine** authored bytes → return the entry identity. **No
-type-check, no emit** — the light computation (`resolveEntryIdentity` in the
-runner). The worker independently checks the result by compiling the downloaded
-closure and comparing its compiler-produced entry identity.
+**Serving side (memoized per file for the process lifetime; patterns are fixed
+for a host's lifetime).** The pattern route answers a `?identity` query param.
+For a requested file: walk its authored import closure via single-file reads
+(works in a compiled binary — no directory enumeration) → hash the **pristine**
+authored bytes → return the entry identity. **No type-check, no emit** — the
+light computation (`resolveEntryIdentity` in the runner). The worker
+independently checks the result by compiling the downloaded closure and
+comparing its compiler-produced entry identity.
 
 Two implementation facts make the light identity equal what the worker stores as
 `patternIdentity`, verified by a parity test against the real `default-app.tsx`
@@ -433,9 +433,12 @@ and `home.tsx`:
 - **Name modules by their URL pathname.** A module's identity folds in its
   authored path (`computeModuleHashes`). The worker compiles system patterns
   over HTTP, where `HttpProgramResolver` names every module by its URL pathname
-  (`/api/patterns/…`). The toolshed therefore computes `?identity` over
+  (`/api/patterns/…`). The route therefore computes `?identity` over
   pathname-prefixed names — **not** patterns-root-relative names — or the two
-  identities never match and the check re-updates forever.
+  identities never match and the check re-updates forever. That computation is
+  the runner's `PatternsRoute`, which every host mounts rather than reproduces,
+  because a host whose answer differed by a byte would be one no runtime could
+  adopt.
 
 Both the `?identity` representation and every source-module representation use
 strong checksum `ETag`s with `Cache-Control: public, no-cache`. The identity
