@@ -1681,11 +1681,15 @@ function localBindingCanCarryReactiveValue(
 }
 
 /**
- * Whether an assignment writes to the binding itself rather than through it.
- * `flag = value` targets `flag`; `bag[flag] = value` targets `bag` and only
- * reads `flag` as a key, so a reference scan over the whole left-hand side
- * would misread the second as rebinding the first. A destructuring pattern
- * has no single target identifier, so it keeps the reference scan.
+ * Whether an assignment can put a value into the binding.
+ *
+ * `flag = value` writes the binding itself. `bag.flag = value` and
+ * `bag[key] = value` write into `bag`, which is equally a way for a reactive
+ * value to reach a collected aggregate, so the base receiver counts. The
+ * subscript does not: `key` is read to address the slot, never written, and
+ * scanning the whole left-hand side for a mention would misread it as
+ * rebound. A destructuring pattern has no single target, so it keeps the
+ * reference scan.
  */
 function assignmentTargetsSymbol(
   target: ts.Expression,
@@ -1700,7 +1704,7 @@ function assignmentTargetsSymbol(
     ts.isPropertyAccessExpression(current) ||
     ts.isElementAccessExpression(current)
   ) {
-    return false;
+    return assignmentTargetsSymbol(current.expression, symbol, checker);
   }
   return expressionReferencesSymbol(current, symbol, checker);
 }
