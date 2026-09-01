@@ -19,12 +19,17 @@ Every cell ran `gpt-5.6-sol` against a fabric server at
 `origin/main`, under `enforce-explicit` CFC. The deployed index held 29
 discoverable entries before and after every counted cell.
 
-The pre-registration and the two parent prompts under test are committed
-beside this record at
+The pre-registration, the two parent prompts under test, and the append-only
+analysis ledger every number below was drawn from are committed beside this
+record at
 `packages/cf-harness/.cf-harness-console/measurements/2026-09-02-round4/`. The
-rest of the evidence is not: that tree is otherwise git-ignored, so the per-cell
-batch reports, the analysis ledger the findings below were drawn from, and every
-run transcript remain on the machine that produced them, under
+ledger carries the per-cell flag checks, the counts and their provenance, the
+operator rulings as they were made, and the corrections — including one
+browser verdict that was recorded as a failure before being retested.
+
+The raw artifacts behind it are not committed: that tree is otherwise
+git-ignored, so the per-cell batch reports and every run transcript remain on
+the machine that produced them, under
 `packages/cf-harness/.cf-harness-console*/` in the worktree
 `/Users/ben/.bb/worktrees/env_m69fg39nps/labs` — one console directory per
 condition, plus `.cf-harness-skill-cli` and `.cf-harness-skill-cli2` for the
