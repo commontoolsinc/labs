@@ -76,7 +76,7 @@ a default is the only one of them a board can grant itself.
 | --- | --- | --- |
 | A | compatible updates: verb and event prose, the describe layer, `setTitle`, a compact `addTopic` result | landed and deployed |
 | B | one rehearsed break, four items batched | landed and deployed |
-| C | items gated on platform work | designed for, not started |
+| C | retraction and edit, plus items waiting on a review or on usage | one item built, the rest not started |
 
 ### Stage A
 

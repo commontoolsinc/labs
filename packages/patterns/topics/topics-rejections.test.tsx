@@ -2,16 +2,16 @@
  * Rejection-path tests for the Topics mutating verbs (verb contract rule 4,
  * docs/plans/pattern-verb-contract.md: rejection is a value, never a silent
  * no-op). Every action here makes a verb throw, so the runtime errors are
- * required (`expectRuntimeErrors: 17` — exact count, so a rejection quietly
+ * required (`expectRuntimeErrors: 19` — exact count, so a rejection quietly
  * reverting to a silent return fails the suite); each assertion then verifies
  * the write did NOT land. Happy and legacy paths live in topics.test.tsx — including the UI
  * composer wrappers, whose silent guards are correct behavior (an empty draft
  * is a non-event in a composer, not a headless mutation).
  */
-import { action, assert, TESTS } from "commonfabric";
+import { action, assert, TESTS, Writable } from "commonfabric";
 import { pattern } from "commonfabric";
 import Topics from "./main.tsx";
-import Topic from "./topic.tsx";
+import Topic, { type TopicComment } from "./topic.tsx";
 
 export default pattern(() => {
   const board = Topics({});
@@ -132,6 +132,33 @@ export default pattern(() => {
   // and unlike its elders, a MISSING agentName is as rejected as a blank one:
   // the verb postdates the unsigned-caller era and carries no legacy path.
   const directTopic = Topic({ title: "Keep this title" });
+  // A reference is not enough: it must reference one of THIS topic's own
+  // records. A cell that reads back as an object satisfies "is a reference"
+  // while belonging to something else, and a verb that stamped it would write
+  // into a document this topic does not own — silently, since the caller's own
+  // cell would show the change and nothing here would.
+  const foreignComment = new Writable<TopicComment>({
+    body: "elsewhere",
+    sentAt: 1,
+  });
+  const action_remove_foreign_comment = action(() => {
+    seedTopic.removeComment.send({
+      comment: foreignComment,
+      agentName: "Sol",
+    });
+  });
+  const action_edit_foreign_comment = action(() => {
+    seedTopic.editComment.send({
+      comment: foreignComment,
+      body: "rewritten from outside",
+      agentName: "Sol",
+    });
+  });
+  const assert_foreign_comment_untouched = assert(() =>
+    foreignComment.get().removedAt === undefined &&
+    foreignComment.get().body === "elsewhere"
+  );
+
   const action_rename_blank_title = action(() => {
     directTopic.setTitle.send({ title: "   ", agentName: "Sol" });
   });
@@ -175,7 +202,7 @@ export default pattern(() => {
     // means a
     // single verb quietly reverting to a silent early-return fails this suite;
     // the no-write assertions then prove the throw also blocked the write.
-    expectRuntimeErrors: 17,
+    expectRuntimeErrors: 19,
     [TESTS]: [
       { action: action_seed_topic },
       { assertion: assert_seeded },
@@ -213,6 +240,10 @@ export default pattern(() => {
       { assertion: assert_direct_title_unchanged },
       { action: action_rename_unsigned },
       { assertion: assert_direct_title_unchanged },
+      { action: action_remove_foreign_comment },
+      { assertion: assert_foreign_comment_untouched },
+      { action: action_edit_foreign_comment },
+      { assertion: assert_foreign_comment_untouched },
     ],
   };
 });

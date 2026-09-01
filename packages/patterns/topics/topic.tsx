@@ -305,6 +305,29 @@ export interface TopicLink {
   removedBy?: TopicAuthor;
 }
 
+/**
+ * Whether `candidate` is one of `array`'s own elements.
+ *
+ * "Is a reference" is not the check these verbs need. A cell that reads back
+ * as an object satisfies that while belonging to another piece entirely, and a
+ * verb that then stamps it writes into a document this topic does not own. So
+ * membership is proved by identity against the stored positions, which is the
+ * `equals()` addressing `TopicComment` names in place of a synthetic key.
+ */
+const isElementOf = (
+  array: {
+    get(): readonly unknown[];
+    key(index: number): { equals(other: object): boolean };
+  },
+  candidate: object,
+): boolean => {
+  const stored = array.get();
+  for (let index = 0; index < stored.length; index++) {
+    if (array.key(index).equals(candidate)) return true;
+  }
+  return false;
+};
+
 /** Whether a stamped record is still live.
  *
  * Exported for readers outside a reactive read — a test, a script. Inside a
@@ -522,12 +545,20 @@ export interface TopicPiece extends TopicSummary {
   /** The living document, verbatim Markdown. `setBody` replaces it whole. */
   body: string | Default<"">;
 
-  /** The thread, in arrival order: append-only point-in-time records, each
-   * carrying its author snapshot and `sentAt`. */
+  /** The thread, in arrival order, each record carrying its author snapshot
+   * and `sentAt`.
+   *
+   * MEMBERSHIP is append-only; a record is not. Nothing is ever removed from
+   * this array — `removeComment` stamps `removedAt` and leaves the record in
+   * place, and `editComment` revises a body and stamps `editedAt` — so a
+   * reader that wants the live thread filters on `removedAt` rather than
+   * taking the array as it stands. `commentCount` is that filtered count. */
   comments: TopicComment[];
 
-  /** Typed outbound links, in arrival order, each carrying its author
-   * snapshot and `addedAt`. */
+  /** Typed outbound links, in arrival order, each carrying its author snapshot
+   * and `addedAt`. Append-only in membership on the same terms as `comments`:
+   * `removeLink` stamps rather than removes, and a stamped link additionally
+   * stops resolving into `mentions`. */
   links: TopicLink[];
 
   /** Every piece this topic's prose and links point at, as references.
@@ -602,8 +633,11 @@ export interface TopicPiece extends TopicSummary {
  * to sibling pieces.
  *
  * Durable conclusions get folded up into the body — revise it whole with
- * `setBody`; the thread holds the deliberation as append-only, point-in-time
- * `addComment` records. Sign every authored-content mutation with `agentName`:
+ * `setBody`; the thread holds the deliberation as point-in-time `addComment`
+ * records. The thread only ever grows: `removeComment` and `removeLink` stamp
+ * a record as retracted and leave it where it is, and `editComment` revises a
+ * body in place, so what a reader shows is the array filtered rather than the
+ * array itself. Sign every authored-content mutation with `agentName`:
  * Fabric records the human principal behind the key; the name says which
  * agent acted under it. Reference-only `mention` and `unmention` calls carry
  * no content signature. The session-draft cells and `submit*` streams below
@@ -1236,6 +1270,9 @@ export default pattern<TopicInput, TopicOutput>(
         if (!comment || comment.get() === undefined) {
           rejectMutation("removeComment", "comment must be a reference");
         }
+        if (!isElementOf(comments, comment)) {
+          rejectMutation("removeComment", "comment is not on this topic");
+        }
         if (comment.get()?.removedAt !== undefined) {
           rejectMutation("removeComment", "comment is already retracted");
         }
@@ -1261,6 +1298,9 @@ export default pattern<TopicInput, TopicOutput>(
         }
         if (!comment || comment.get() === undefined) {
           rejectMutation("editComment", "comment must be a reference");
+        }
+        if (!isElementOf(comments, comment)) {
+          rejectMutation("editComment", "comment is not on this topic");
         }
         if (comment.get()?.removedAt !== undefined) {
           rejectMutation("editComment", "comment is retracted");
@@ -1304,6 +1344,8 @@ export default pattern<TopicInput, TopicOutput>(
           }
         } else if (target.get() === undefined) {
           rejectMutation("removeLink", "link must be a reference");
+        } else if (!isElementOf(links, target)) {
+          rejectMutation("removeLink", "link is not on this topic");
         } else if (target.get()?.removedAt !== undefined) {
           rejectMutation("removeLink", "link is already retracted");
         }
