@@ -346,6 +346,42 @@ describe("turning a lane's selections into batches", () => {
     }]);
     expect(batches[0]!.repeats).toBe(3);
   });
+
+  it("holds the most runs when a later identity asks for fewer", () => {
+    // The count answers for every identity in the unit, so one asking
+    // for a single run after another asked for three still gets three.
+    const manifest = manifestOf([
+      {},
+      { test: { k: "unit", s: "bakery", n: "glaze > browns" } },
+    ]);
+    const batches = batchesOf([bakery], manifest, [
+      { entry: manifest.entries[0]!, reason: "value", repeats: 3 },
+      { entry: manifest.entries[1]!, reason: "value", repeats: 1 },
+    ]);
+    expect(batches[0]!.repeats).toBe(3);
+  });
+
+  it("holds the most runs across the units of one batch", () => {
+    // A batch runs its units together under one count, so a unit asking
+    // for fewer cannot cut short the one that asked for more.
+    const twoUnits = suite({
+      id: "workspace-unit",
+      units: ["packages/bakery/glaze.test.ts", "packages/bakery/ice.test.ts"],
+    });
+    const manifest = manifestOf([
+      {},
+      {
+        test: { k: "unit", s: "bakery", n: "ice > sets" },
+        unit: "packages/bakery/ice.test.ts",
+      },
+    ]);
+    const batches = batchesOf([twoUnits], manifest, [
+      { entry: manifest.entries[0]!, reason: "value", repeats: 4 },
+      { entry: manifest.entries[1]!, reason: "value", repeats: 2 },
+    ]);
+    expect(batches.length).toBe(1);
+    expect(batches[0]!.repeats).toBe(4);
+  });
 });
 
 describe("running everything", () => {
