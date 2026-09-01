@@ -1809,6 +1809,76 @@ describe("setup/start", () => {
     expect(result).toBe(resultCell);
   });
 
+  it("runSynced returns the untyped cell when the durable pattern cannot be loaded", async () => {
+    // After post-commit work, the returned view is re-typed by the pattern
+    // that is durable NOW. When that pattern cannot be loaded, the answer is
+    // the raw cell rather than a stale schema. What the branch responds to is
+    // the load's answer, so the load is answered directly instead of staging
+    // the timing that would produce it.
+    const resultCell = runtime.getCell(space, "runSynced unloadable winner");
+    const pattern = await compileReceiptPattern(runtime, "unloadable");
+    await runtime.runSynced(resultCell, pattern, {});
+    expect(getPatternIdentityRef(resultCell)).toBeDefined();
+
+    const manager = runtime.patternManager;
+    const originalLoad = manager.loadPatternByIdentity.bind(manager);
+    manager.loadPatternByIdentity = () => Promise.resolve(undefined);
+
+    try {
+      const result = await runtime.runSynced(resultCell, pattern, {});
+      expect(result).toBe(resultCell);
+    } finally {
+      manager.loadPatternByIdentity = originalLoad;
+    }
+  });
+
+  it("runSynced follows the durable identity when it moves during the schema load", async () => {
+    // The recheck after each load is what makes the loop settle on the
+    // pattern that is durable now: a pointer that moved while its pattern
+    // loaded restarts the resolution instead of typing the view by the
+    // pattern that was current a moment ago. The move is performed from
+    // inside the load itself, which is the window the recheck exists for.
+    const resultCell = runtime.getCell(space, "runSynced moving winner");
+    const first = await compileReceiptPattern(runtime, "moving-first");
+    const second = await compileReceiptPattern(runtime, "moving-second");
+    const secondRef = runtime.patternManager.getArtifactEntryRef(second);
+    if (secondRef === undefined) {
+      throw new Error("the compiled pattern has no entry ref");
+    }
+    await runtime.runSynced(resultCell, first, {});
+    expect(getPatternIdentityRef(resultCell)).toBeDefined();
+
+    const manager = runtime.patternManager;
+    const originalLoad = manager.loadPatternByIdentity.bind(manager);
+    let moved = false;
+    manager.loadPatternByIdentity = async (identity, symbol, loadSpace) => {
+      if (!moved) {
+        moved = true;
+        const { error } = await runtime.editWithRetry((tx) => {
+          resultCell.withTx(tx).setMetaRaw(
+            "patternIdentity",
+            secondRef,
+            rawMetaWriteAuthorization,
+          );
+        });
+        if (error !== undefined) throw error;
+      }
+      return await originalLoad(identity, symbol, loadSpace);
+    };
+
+    try {
+      const result = await runtime.runSynced(resultCell, first, {});
+
+      expect(moved).toBe(true);
+      expect(getPatternIdentityRef(resultCell)).toEqual(secondRef);
+      expect(result.getAsNormalizedFullLink().schema).toEqual(
+        second.resultSchema,
+      );
+    } finally {
+      manager.loadPatternByIdentity = originalLoad;
+    }
+  });
+
   it("runSyncedWithCommit returns the pattern accepted by its setup transaction", async () => {
     const resultCell = runtime.getCell(space, "runSynced commit receipt");
     const initialPattern = await compileReceiptPattern(runtime, "v1");
