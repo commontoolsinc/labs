@@ -216,8 +216,8 @@ describe("transparent wrapper consistency", () => {
     // subsumes the narrower paths beside it. The lift then re-runs for any
     // field of the object rather than for the one field it reads.
     //
-    // These spellings parenthesize the whole wrapper and asserts to the
-    // receiver's own type. `(obj) as S` would not do: appending `.b` to it
+    // The assertion spellings parenthesize the whole wrapper and assert it to
+    // the receiver's own type. `(obj) as S` would not do: appending `.b` to it
     // parses as the qualified type name `S.b`, not a read of the cast value.
     const RECEIVERS: Readonly<Record<string, string>> = {
       bare: "obj",
@@ -281,6 +281,18 @@ describe("transparent wrapper consistency", () => {
         expect(hasKeyPathRead(root, "b", "obj")).toBe(true);
       });
     }
+
+    it("captures only the field read behind an angle-bracket assertion", async () => {
+      const output = await transformFiles({
+        "/m.ts": source("(<S>obj)"),
+      }, { types: COMMONFABRIC_TYPES });
+      const root = parseModule(output["/m.ts"]!, ts.ScriptKind.TS);
+      const values = objCaptureValues(root);
+
+      expect(values.length).toBeGreaterThan(0);
+      expect(values.some((value) => ts.isIdentifier(value))).toBe(false);
+      expect(hasKeyPathRead(root, "b", "obj")).toBe(true);
+    });
   });
 
   describe("normalizeDataFlows()", () => {
