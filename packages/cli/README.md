@@ -1073,9 +1073,13 @@ never typed at a prompt.
 Each command sits under the noun it acts on. Where that moved a command, the
 spelling it had is still accepted and still completes its own flags and
 arguments, so a script written against it keeps working; it is hidden from
-`cf --help` and never offered as a completion, and every run says on stderr what
-to write instead — including `--help`, whose page is otherwise a screen of
-examples in the spelling that is going away. **These spellings are not
+`cf --help` and never offered as a completion, and a run that reaches it says on
+stderr what to write instead — its help page included, whether `--help` asked
+for that page or a refusal printed it, since the page is otherwise a screen of
+examples in the spelling that is going away. A line refused during argument
+parsing never reaches the command, and carries the notice only where the refusal
+prints a help page with it — the reads that reserve stdout for machine-readable
+output print none, so `cf get --bogus` says nothing. **These spellings are not
 guaranteed to work after 2026-09-11**, so migrate before then: a later change
 removes them, and nothing holds them open past that date.
 

@@ -4,10 +4,18 @@
  * Step 7 of the CLI surface shape moves commands under the noun they act on,
  * and each moved command stays mounted at the spelling it had. That mount is
  * a migration aid rather than a second surface: it is hidden from help and
- * from completion's command suggestions, and every run says what to write
- * instead and the day after which the old spelling is no longer guaranteed —
- * the runs that only ask for the help page included, since a page full of
- * examples in the superseded spelling is the loudest way to teach it.
+ * from completion's command suggestions, and a run that reaches the command
+ * says on stderr what to write instead and the day after which the old
+ * spelling is no longer guaranteed. That covers the command's own help page —
+ * `--help`, `-h`, and the page a refusal prints — where a screen of examples
+ * in the superseded spelling would otherwise stand unqualified.
+ *
+ * A line refused during argument parsing never reaches the command, so the
+ * only notice such a line can carry is the one riding the help page the
+ * refusal prints — and the reads that reserve stdout for machine-readable
+ * output print no page there, because their own error handler keeps it off
+ * stdout. Deliberately not chased further: the caller is retyping that line
+ * anyway, and meets the notice on the run that works.
  *
  * This is deliberately not the rule for `--piece`, which is a deprecated name
  * for `--cell` with no end date, no removal condition, and no notice. A flag

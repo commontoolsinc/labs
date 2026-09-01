@@ -41,9 +41,13 @@ function envStatus(): string {
     // Named rather than promised generally: `ingest`, `fuse` and `check` take
     // a space and do not read this, so a blanket "no need to pass --space"
     // would be wrong exactly where a caller is most surprised to be asked.
+    //
+    // `space` is named by subcommand for the same reason. Two of its six read
+    // this; the other four take a rehearsal clone's directory, so the bare
+    // noun would promise something `cf space clone` disproves in one line.
     lines.push(
       `  CF_SPACE    = ${space} (set, no need to pass --space on cell, ` +
-        `piece, space, wish, acl, deps)`,
+        `piece, wish, acl, deps, space recreate-root/set-home)`,
     );
   }
   return lines.join("\n");
@@ -60,8 +64,9 @@ FIRST TIME SETUP:
   cf id new > claude.key            # Create identity key
   export CF_IDENTITY=./claude.key   # Set default identity
   export CF_API_URL=http://localhost:${ports.toolshed}  # Set default API URL
-  export CF_SPACE=my-space          # Default space for cell, piece, space,
-                                    # wish, acl and deps (--space overrides)
+  export CF_SPACE=my-space          # Default space for cell, piece, wish, acl,
+                                    # deps and space recreate-root/set-home
+                                    # (--space overrides)
 
 SHELL COMPLETION:
   source <(cf completion zsh)      # add to ~/.zshrc  (bash: completion bash)

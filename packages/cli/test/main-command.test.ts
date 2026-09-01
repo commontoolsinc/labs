@@ -320,40 +320,124 @@ describe("main command", () => {
     }
   });
 
+  it("says nothing on a line refused before the command is reached", async () => {
+    // The boundary of the claim the README makes, pinned because it is the
+    // one a reader can disprove. `--bogus` is refused in argument parsing, so
+    // neither the action nor a help page runs on a read that reserves stdout:
+    // its own error handler keeps the page off the stream it reserves.
+    //
+    // `set` reserves nothing, so the same refusal prints a page and the notice
+    // rides it. Both are asserted, because a test that read only the silent
+    // half would pass with the notice removed altogether.
+    const reserved = await cf("get --bogus");
+    expect(reserved.code).toBe(2);
+    expect(reserved.stderr.join("\n")).toContain('Unknown option "--bogus"');
+    expect(reserved.stderr.join("\n")).not.toContain("is deprecated");
+    expect(reserved.stdout).toEqual([]);
+
+    const unreserved = await cf("set --bogus");
+    expect(unreserved.code).toBe(2);
+    expect(unreserved.stderr.join("\n")).toContain(
+      "'cf set' is deprecated; spell it 'cf cell set'.",
+    );
+  });
+
   it("registers visible commands and reports configured environment defaults", async () => {
     await withEnv("CF_IDENTITY", "./identity.key", async () => {
       await withEnv("CF_API_URL", "http://127.0.0.1:8000", async () => {
-        const { main } = await import(
-          "../commands/main.ts?main-command-test"
-        );
+        await withEnv("CF_SPACE", "ambient", async () => {
+          const { main } = await import(
+            "../commands/main.ts?main-command-test"
+          );
 
-        const commandNames = main.getCommands().map((command) =>
-          command.getName()
-        );
-        expect(commandNames).toContain("view");
-        // A command that is not registered is invisible: `cf ingest` would
-        // simply not exist, with no error anywhere to say why.
-        expect(commandNames).toContain("ingest");
-        expect(commandNames).toContain("fuse-daemon");
-        expect(commandNames).toContain("fuse-supervisor");
-        expect(commandNames).not.toContain("dev");
-        expect(commandNames).not.toContain("deploy");
+          const commandNames = main.getCommands().map((command) =>
+            command.getName()
+          );
+          expect(commandNames).toContain("view");
+          // A command that is not registered is invisible: `cf ingest` would
+          // simply not exist, with no error anywhere to say why.
+          expect(commandNames).toContain("ingest");
+          expect(commandNames).toContain("fuse-daemon");
+          expect(commandNames).toContain("fuse-supervisor");
+          expect(commandNames).not.toContain("dev");
+          expect(commandNames).not.toContain("deploy");
 
-        const allCommandNames = main.getCommands(true).map((command) =>
-          command.getName()
-        );
-        expect(allCommandNames).not.toContain("dev");
-        expect(allCommandNames).not.toContain("deploy");
-        main.getHelp();
+          const allCommandNames = main.getCommands(true).map((command) =>
+            command.getName()
+          );
+          expect(allCommandNames).not.toContain("dev");
+          expect(allCommandNames).not.toContain("deploy");
+          main.getHelp();
 
-        const description = main.getDescription();
-        expect(description).toContain("ENVIRONMENT:");
-        expect(description).toContain(
-          "CF_IDENTITY = ./identity.key (set, no need to pass --identity)",
-        );
-        expect(description).toContain(
-          "CF_API_URL  = http://127.0.0.1:8000 (set, no need to pass --api-url)",
-        );
+          const description = main.getDescription();
+          expect(description).toContain("ENVIRONMENT:");
+          expect(description).toContain(
+            "CF_IDENTITY = ./identity.key (set, no need to pass --identity)",
+          );
+          expect(description).toContain(
+            "CF_API_URL  = http://127.0.0.1:8000 (set, no need to pass --api-url)",
+          );
+
+          // The CF_SPACE line promises "no need to pass --space" per command,
+          // so every name on it has to be one the variable actually reaches.
+          // Read back off the rendered line rather than restated here: a list
+          // restated in the test is a list that agrees with itself while
+          // disagreeing with the CLI.
+          //
+          // A bare noun is claimable only when the noun itself declares
+          // CF_SPACE or all of its subcommands do. `space` fails that on both
+          // counts — `clone`, `verify`, `reset` and `fingerprint` take a
+          // rehearsal clone's directory — which is why the line names its two
+          // server-touching subcommands instead of the noun.
+          const spaceLine = description.split("\n").find((text: string) =>
+            text.includes("CF_SPACE    = ambient")
+          );
+          expect(spaceLine).toBeDefined();
+          const named = spaceLine!
+            .replace(/^.*no need to pass --space on /, "")
+            .replace(/\)\s*$/, "")
+            .split(", ")
+            .map((entry) => entry.trim());
+          expect(named.length).toBeGreaterThan(0);
+
+          // deno-lint-ignore no-explicit-any
+          const readsSpace = (command: any): boolean =>
+            // deno-lint-ignore no-explicit-any
+            command.getEnvVars(true).some((envVar: any) =>
+              envVar.names.includes("CF_SPACE")
+            );
+          // deno-lint-ignore no-explicit-any
+          const resolve = (path: string[]): any =>
+            // deno-lint-ignore no-explicit-any
+            path.reduce((command: any, name: string) =>
+              command?.getCommands(true).find((child: { getName(): string }) =>
+                child.getName() === name
+              ), main);
+
+          for (const entry of named) {
+            // "space recreate-root/set-home" names two commands under one noun.
+            const [head, ...rest] = entry.split(" ");
+            const paths = rest.length === 0
+              ? [[head]]
+              : rest.join(" ").split("/").map((leaf) => [head, leaf]);
+            for (const path of paths) {
+              const where = path.join(" ");
+              const command = resolve(path);
+              expect(command, where).toBeDefined();
+              if (readsSpace(command)) continue;
+              // deno-lint-ignore no-explicit-any
+              const children = command.getCommands(true).filter((
+                child: { getName(): string },
+              ) => child.getName() !== "help");
+              expect(children.length, where).toBeGreaterThan(0);
+              for (const child of children) {
+                expect(readsSpace(child), `${where} ${child.getName()}`).toBe(
+                  true,
+                );
+              }
+            }
+          }
+        });
       });
     });
   });
