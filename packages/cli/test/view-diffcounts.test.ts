@@ -306,6 +306,30 @@ describe("diffcounts", () => {
     expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });
   });
 
+  it("does not treat comments inside omitted indented Markdown as syntax", () => {
+    const diff = [
+      "diff --git a/readme.md b/readme.md",
+      "--- a/readme.md",
+      "+++ b/readme.md",
+      "@@ -2 +2 @@",
+      "-old prose",
+      "+new prose",
+      "",
+    ].join("\n");
+    const counts = countsFor(diff, [{
+      oldLines: contextLines("readme.md", [
+        "    <!-- literal example",
+        "old prose",
+      ]),
+      newLines: contextLines("readme.md", [
+        "    <!-- literal example",
+        "new prose",
+      ]),
+    }]);
+
+    expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });
+  });
+
   it("tracks multiline fallback comments across diff hunks", () => {
     const diff = [
       "diff --git a/main.rs b/main.rs",

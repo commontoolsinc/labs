@@ -113,9 +113,8 @@ export function diffSource(
     fileText: expectedFiles,
     hunks: saveHunks,
   };
-  const countContexts = buildDiffCountContexts(edit);
   const diffCountContexts = (text: string) =>
-    text === edit.sourceText ? countContexts : undefined;
+    buildDiffCountContexts(edit, text);
 
   // No file on disk backs this diff (nothing resolved or verified): read-only.
   // A deletion of an entire file has no new-side lines, but its empty workspace
@@ -486,10 +485,11 @@ export function diffSource(
 
 function buildDiffCountContexts(
   edit: DiffEdit,
+  text: string,
 ): readonly DiffCountFileContext[] {
-  const model = parseDiff(edit.sourceText ?? "");
+  const model = parseDiff(text);
   if (!model) return [];
-  const raw = (edit.sourceText ?? "").split("\n");
+  const raw = text.split("\n");
   return model.files.map((file, fileIndex) => {
     const oldLines = edit.oldFileLines[fileIndex] ?? undefined;
     const newText = oldLines
@@ -515,6 +515,12 @@ function reconstructNewSide(
   diffLines: readonly DiffLine[],
 ): string {
   const lines = oldLines.map((line) => line.text);
+  const oldTrailingNewline = lines.length > 1 && lines.at(-1) === "";
+  const oldLineCount = lines.length === 1 && lines[0] === ""
+    ? 0
+    : lines.length - (oldTrailingNewline ? 1 : 0);
+  let trailingNewline = oldTrailingNewline;
+  let newLineCount = oldLineCount;
   const hunks = [...file.hunks].sort((a, b) =>
     sideStart(b.oldStart, b.oldCount) - sideStart(a.oldStart, a.oldCount) ||
     b.headerLine - a.headerLine
@@ -524,16 +530,50 @@ function reconstructNewSide(
     for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
       const kind = diffLines[i]?.kind;
       if (kind === "ctx" || kind === "add") {
-        replacement.push((raw[i] ?? "").slice(1));
+        let text = (raw[i] ?? "").slice(1);
+        if (raw[hunk.headerLine]?.endsWith("\r") && text.endsWith("\r")) {
+          text = text.slice(0, -1);
+        }
+        replacement.push(text);
       }
     }
+    const start = sideStart(hunk.oldStart, hunk.oldCount);
+    if (start + hunk.oldCount === oldLineCount) {
+      const oldNoNewline = hunkSideHasNoNewline(hunk, "old", raw, diffLines);
+      const newNoNewline = hunkSideHasNoNewline(hunk, "new", raw, diffLines);
+      if (oldNoNewline || newNoNewline) trailingNewline = !newNoNewline;
+    }
     lines.splice(
-      sideStart(hunk.oldStart, hunk.oldCount),
+      start,
       hunk.oldCount,
       ...replacement,
     );
+    newLineCount += hunk.newCount - hunk.oldCount;
   }
+  if (newLineCount === 0) trailingNewline = false;
+  if (trailingNewline && lines.at(-1) !== "") lines.push("");
+  if (!trailingNewline && lines.length > 1 && lines.at(-1) === "") lines.pop();
   return lines.join("\n");
+}
+
+function hunkSideHasNoNewline(
+  hunk: DiffHunk,
+  side: "old" | "new",
+  raw: readonly string[],
+  diffLines: readonly DiffLine[],
+): boolean {
+  for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
+    const kind = diffLines[i]?.kind;
+    const belongs = kind === "ctx" || side === "old" && kind === "del" ||
+      side === "new" && kind === "add";
+    if (
+      belongs &&
+      raw[i + 1]?.replace(/\r$/u, "") === "\\ No newline at end of file"
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** The commit a save would amend when changed text represents HEAD. */

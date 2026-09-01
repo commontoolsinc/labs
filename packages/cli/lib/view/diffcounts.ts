@@ -351,7 +351,7 @@ function scanCompleteLines(
   state: CommentState,
 ): void {
   for (let i = start; i < end && i < lines.length; i++) {
-    if (shouldScanFallback(syntax, lines[i], state)) {
+    if (shouldScanFallback(syntax, lines[i], state, false)) {
       stripCommonComments(lines[i].text, syntax, state);
     }
   }
@@ -458,21 +458,22 @@ function shouldScanFallback(
   syntax: CommentSyntax,
   line: Line | undefined,
   state: CommentState,
+  hasDiffMarker = true,
 ): boolean {
   if (!syntax.skipHighlightedCode || state.block !== undefined || !line) {
     return true;
   }
-  const source = [...line.text].slice(1).join("");
+  const source = hasDiffMarker ? [...line.text].slice(1).join("") : line.text;
   if (/^(?: {4}|\t)/u.test(source)) return false;
 
   let first = true;
   let foundCode = false;
   for (const span of line.spans) {
     let text = span.text;
-    if (first) {
+    if (first && hasDiffMarker) {
       text = [...text].slice(1).join("");
-      first = false;
     }
+    first = false;
     if (withoutWhitespace(text).length === 0) continue;
     if (span.cls !== "string" && span.cls !== "template") return true;
     foundCode = true;

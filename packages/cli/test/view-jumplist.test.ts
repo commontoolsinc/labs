@@ -403,7 +403,7 @@ Deno.test("jumplist: counts use syntax before the first hunk", () => {
   ]);
 });
 
-Deno.test("jumplist: complete count context expires after an edit", () => {
+Deno.test("jumplist: complete count context rebuilds after an edit", () => {
   const diff = [
     "diff --git a/main.rs b/main.rs",
     "--- a/main.rs",
@@ -425,7 +425,51 @@ Deno.test("jumplist: complete count context expires after an edit", () => {
   const source = diffSource(ws, edit);
 
   assert(source.diffCountContexts?.(diff) !== undefined);
-  assertEquals(source.diffCountContexts?.(`${diff} `), undefined);
+  const edited = diff.replace("+ * new note", "+ * newer note");
+  const context = source.diffCountContexts?.(edited);
+  assert(context !== undefined);
+  assertEquals(context[0].newLines?.[2].text, " * newer note");
+});
+
+Deno.test("jumplist: complete count context retains final-newline changes", () => {
+  const contexts = (diff: string, fileText: string) => {
+    const ws: DiffWorkspace = {
+      resolve: (path) => path === "main.rs" ? path : null,
+      read: (path) => path === "main.rs" ? fileText : null,
+    };
+    const model = parseDiff(diff)!;
+    const { edit } = buildDiffDocument(diff, model, ws);
+    return diffSource(ws, edit).diffCountContexts?.(diff)?.[0];
+  };
+  const addsNewline = [
+    "diff --git a/main.rs b/main.rs",
+    "--- a/main.rs",
+    "+++ b/main.rs",
+    "@@ -1 +1 @@",
+    "-old",
+    "\\ No newline at end of file",
+    "+new",
+    "",
+  ].join("\n");
+  const removesNewline = [
+    "diff --git a/main.rs b/main.rs",
+    "--- a/main.rs",
+    "+++ b/main.rs",
+    "@@ -1 +1 @@",
+    "-old",
+    "+new",
+    "\\ No newline at end of file",
+    "",
+  ].join("\n");
+
+  assertEquals(
+    contexts(addsNewline, "new\n")?.newLines?.map((line) => line.text),
+    ["new", ""],
+  );
+  assertEquals(
+    contexts(removesNewline, "new")?.newLines?.map((line) => line.text),
+    ["new"],
+  );
 });
 
 Deno.test("jumplist: escape cancels and leaves the viewport put", () => {
