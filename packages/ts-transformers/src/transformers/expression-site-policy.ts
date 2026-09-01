@@ -1848,8 +1848,14 @@ function mapResultStaysOnRenderPath(
 ): boolean {
   let current: ts.Expression = call;
   while (
-    current.parent && ts.isParenthesizedExpression(current.parent) &&
-    current.parent.expression === current
+    current.parent &&
+    (
+      ts.isParenthesizedExpression(current.parent) ||
+      ts.isAsExpression(current.parent) ||
+      ts.isTypeAssertionExpression(current.parent) ||
+      ts.isSatisfiesExpression(current.parent) ||
+      ts.isNonNullExpression(current.parent)
+    ) && current.parent.expression === current
   ) {
     current = current.parent;
   }

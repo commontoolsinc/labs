@@ -604,7 +604,7 @@ Diagnostics emitted in all modes:
     spec's "bare dynamic key access in top-level pattern-facing code" =
     Unsupported). The same access is fine inside JSX, a computation callback, a
     collection callback, or a structural binding form.
-  - three dedicated messages cover an unsupported plain-array `map`
+  - four dedicated messages cover an unsupported plain-array `map`
     wrapper-site shape, and each reports once per map call, anchored on the
     call, however many reactive spellings the callback holds:
     - a render-collecting callback whose collected view nodes carry

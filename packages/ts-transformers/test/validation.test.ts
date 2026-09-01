@@ -3743,6 +3743,35 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
+    "allows a satisfies-wrapped render local on the render path",
+    async () => {
+      const source = `      import { Default, pattern, UI } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ target: string | Default<""> }>(
+        ({ target }) => {
+          const rows = VALUES.map((v) => (
+            <span>{v === target ? "y" : "n"}</span>
+          )) satisfies unknown[];
+          return { [UI]: <div>{rows}</div> };
+        },
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "a type wrapper between the map and its binding is spelling, not a " +
+          "departure from the render path",
+      );
+    },
+  );
+
+  await t.step(
     "allows reactive view nodes selected by a conditional on the render path",
     async () => {
       const source = `      import { Default, pattern, UI } from "commonfabric";
