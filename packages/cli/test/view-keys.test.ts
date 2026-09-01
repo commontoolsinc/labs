@@ -43,6 +43,7 @@ Deno.test("decode: SGR mouse wheel reports", () => {
   assertEquals(names(bytes("\x1b[<65;12;7M")), ["wheel-down"]);
   assertEquals(names(bytes("\x1b[<68;12;7M")), ["wheel-up"]);
   assertEquals(names(bytes("\x1b[<69;12;7M")), ["wheel-down"]);
+  assertEquals(names(bytes("\x1b[<0;12;7M")), ["unknown"]);
   assertEquals(names(bytes("\x1b[<65;12;7m")), ["unknown"]);
 });
 
