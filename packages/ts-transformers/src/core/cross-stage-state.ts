@@ -115,11 +115,14 @@ export class CrossStageState {
   }
 
   /**
-   * Bare cross-package channels (the published boundary contract). Read
-   * directly by the schema-generator package as plain WeakMaps; they must NOT
-   * be folded into `nodeLinks`. See `core/mod.ts`.
+   * One of the two bare cross-package channels making up the published
+   * boundary contract, `schemaHints` below being the other. Both are read
+   * directly by the schema-generator package as plain WeakMaps, and so must
+   * NOT be folded into `nodeLinks`. See `core/mod.ts`.
    */
   readonly typeRegistry: TypeRegistry = new WeakMap();
+
+  /** The other such channel, held to the same contract. */
   readonly schemaHints: SchemaHints = new WeakMap();
 
   /**
@@ -137,6 +140,7 @@ export class CrossStageState {
 
   /** Marker family — keyed by node/symbol identity; cache-coupled via context. */
   readonly mapCallbackRegistry = new WeakSet<ts.Node>();
+
   readonly syntheticComputeCallbackRegistry = new WeakSet<ts.Node>();
   readonly syntheticComputeOwnedNodeRegistry = new WeakSet<ts.Node>();
   readonly syntheticReactiveCollectionRegistry:

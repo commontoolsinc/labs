@@ -14,6 +14,7 @@ import { type Environment, recordsDir } from "./paths.ts";
 
 /** Fragment files are `fragment-<ulid>.ndjson` inside the spool. */
 export const FRAGMENT_PREFIX = "fragment-";
+
 export const FRAGMENT_SUFFIX = ".ndjson";
 
 const encoder = new TextEncoder();

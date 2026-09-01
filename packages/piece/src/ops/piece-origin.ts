@@ -51,6 +51,7 @@ export type PieceOriginKind = "system" | "fabric-piece" | "fabric-pattern";
 export interface PieceOrigin {
   /** The canonical origin URL. */
   url: string;
+
   kind: PieceOriginKind;
 
   /**
@@ -106,6 +107,7 @@ export interface PieceSourceState {
 
   /** Ordered, append-only source and origin states accepted by the piece. */
   history: PieceSourceRevisionState[];
+
   currentRevisionId?: string;
 }
 

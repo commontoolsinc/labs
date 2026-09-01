@@ -504,6 +504,7 @@ export interface PatternCompatibilityReport {
 
   /** Every issue joined, or `undefined` when compatible. */
   message?: string;
+
   candidate: { identity: string; symbol: string };
 }
 

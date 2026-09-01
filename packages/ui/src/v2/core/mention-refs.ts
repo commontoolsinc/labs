@@ -47,6 +47,7 @@ const KEY_LENGTH = 6;
 
 /** Longest key {@link mintRefKey} widens to before it gives up. */
 const MAX_KEY_LENGTH = 10;
+
 const KEY_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
 
 /** Samples drawn at one length before widening. */

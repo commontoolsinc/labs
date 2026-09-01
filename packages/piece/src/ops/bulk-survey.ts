@@ -55,6 +55,7 @@ export type PieceSelector =
 
     /** The path to the collection within the chosen document. */
     path: readonly (string | number)[];
+
     side?: "input" | "result";
   }
   | { kind: "list"; pieces: readonly string[] };
@@ -370,6 +371,7 @@ export async function surveyPieces(
 export interface PiecePin {
   /** The piece's canonical address. */
   piece: string;
+
   patternIdentity: string;
 
   /** The entry export the identity runs. */

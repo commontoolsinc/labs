@@ -49,6 +49,7 @@ export class TransformationContext {
    * `TransformationContext` built from these options joins the same run.
    */
   readonly state: CrossStageState;
+
   readonly cfHelpers: CFHelpers;
   readonly diagnostics: TransformationDiagnostic[] = [];
   readonly tsContext: ts.TransformationContext;

@@ -146,6 +146,7 @@ export interface ConflictError extends Error {
 
   /** The commit that was rejected. */
   transaction: ClientCommit;
+
   conflict: Conflict;
   retryAfterSeq?: number;
   readyToRetry?: () => Promise<void>;
