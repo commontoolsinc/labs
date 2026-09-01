@@ -23,7 +23,6 @@ import {
   friendlyError,
   github,
   performanceGithub,
-  SPARK_FADE,
   sparkline,
 } from "./lib.ts";
 import { GitHubRateLimitBudgetError } from "./github-rate-limit.ts";
@@ -2833,7 +2832,7 @@ function renderSeries(
     values,
     CHART_LINE,
     undefined,
-    SPARK_FADE[status],
+    true,
     xs,
     {
       trim: PERFORMANCE_HISTORY_SCALE_TRIM,

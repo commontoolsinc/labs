@@ -8,13 +8,7 @@
  */
 
 import type { Status } from "./types.ts";
-import {
-  LIGHT_SPARK_FADE,
-  LIGHT_STATUS_TEXT,
-  SPARK_FADE,
-  STATUS_COLOR,
-  STATUS_TEXT,
-} from "./palette.ts";
+import { LIGHT_STATUS_TEXT, STATUS_COLOR, STATUS_TEXT } from "./palette.ts";
 
 export type DashboardTheme = "dark" | "light";
 export type DashboardThemeMode = DashboardTheme | "system";
@@ -82,7 +76,6 @@ const STATUSES: readonly Status[] = ["good", "warn", "bad", "unknown"];
 function variables(
   colors: ThemeColors,
   statusText: Record<Status, string>,
-  sparkFade: Record<Status, string>,
   statusIndicator: Record<Status, string>,
 ): string {
   const neutral = Object.entries(colors).map(([name, value]) =>
@@ -91,7 +84,6 @@ function variables(
   const statuses = STATUSES.flatMap((status) => [
     `--status-${status}:${statusIndicator[status]}`,
     `--status-${status}-text:${statusText[status]}`,
-    `--spark-fade-${status}:${sparkFade[status]}`,
   ]);
   return [...neutral, ...statuses].join(";");
 }
@@ -99,13 +91,11 @@ function variables(
 const DARK_VARIABLES = variables(
   DARK_COLORS,
   STATUS_TEXT,
-  SPARK_FADE,
   STATUS_COLOR,
 );
 const LIGHT_VARIABLES = variables(
   LIGHT_THEME_COLORS,
   LIGHT_STATUS_TEXT,
-  LIGHT_SPARK_FADE,
   LIGHT_STATUS_TEXT,
 );
 

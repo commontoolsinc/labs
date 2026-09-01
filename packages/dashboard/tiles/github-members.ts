@@ -12,7 +12,6 @@ import {
   friendlyError,
   github,
   multiSparkline,
-  SPARK_FADE,
   thin,
 } from "../lib.ts";
 import { themedChartSeries } from "../theme.ts";
@@ -191,7 +190,7 @@ export function createGithubMembers(): Tile {
             label: String(collaborators),
           },
         ],
-        { fadeFrom: SPARK_FADE.good },
+        { fade: true },
       );
       const swatch = (color: string) =>
         `<span class="swatch" style="background:${escapeHtml(color)}"></span>`;

@@ -76,7 +76,7 @@ describe("spend", () => {
   it("ends a lagging source at its own known day instead of padding it with zeros", () => {
     const github = source(run("2026-01-01", 20, 1), 2, "#58a6ff");
     const secondary = source(run("2026-01-01", 19, 2), 1, "#f59e0b");
-    const { chart, duration } = spendChart([github, secondary], NOW, "good");
+    const { chart, duration } = spendChart([github, secondary], NOW);
     expect(duration).toBe(20 * DAY);
     const lines = polylines(chart);
     expect(lines.length).toBe(2);
@@ -92,7 +92,7 @@ describe("spend", () => {
 
   it("charts a settled quiet stretch as zeros and stops at the settled horizon", () => {
     const github = source(run("2026-01-01", 10, 18), 2, "#58a6ff");
-    const { chart, duration } = spendChart([github], NOW, "good");
+    const { chart, duration } = spendChart([github], NOW);
     expect(duration).toBe(18 * DAY);
     const lines = polylines(chart);
     expect(lines.length).toBe(1);
@@ -107,7 +107,7 @@ describe("spend", () => {
 
   it("leaves a source alone whose newest day is already its settled horizon", () => {
     const gcp = source(run("2026-01-01", 19, 3), 1, "#4285f4");
-    const { chart, duration } = spendChart([gcp], NOW, "good");
+    const { chart, duration } = spendChart([gcp], NOW);
     expect(duration).toBe(19 * DAY);
     const lines = polylines(chart);
     expect(lines.length).toBe(1);
@@ -118,7 +118,7 @@ describe("spend", () => {
   it("aligns each line's highlight to the shared trailing window", () => {
     const github = source(run("2026-01-01", 20, 1), 2, "#58a6ff");
     const secondary = source(run("2026-01-01", 19, 2), 1, "#f59e0b");
-    const { chart } = spendChart([github, secondary], NOW, "good", 5);
+    const { chart } = spendChart([github, secondary], NOW, 5);
     const lines = polylines(chart);
     // Two bases, then the two bright trailing slices.
     expect(lines.length).toBe(4);
@@ -145,7 +145,7 @@ describe("spend", () => {
       "#58a6ff",
       ["2025-11", "2026-01"],
     );
-    const { chart, duration } = spendChart([github], GAP_NOW, "good");
+    const { chart, duration } = spendChart([github], GAP_NOW);
     expect(duration).toBe(45 * DAY);
     const lines = polylines(chart);
     // Two pieces of base line, then the bright trailing slice.
@@ -168,7 +168,7 @@ describe("spend", () => {
       "#58a6ff",
       ["2025-11", "2025-12", "2026-01"],
     );
-    const { chart } = spendChart([github], GAP_NOW, "good");
+    const { chart } = spendChart([github], GAP_NOW);
     const lines = polylines(chart);
     // One unbroken base line, then the bright trailing slice.
     expect(lines.length).toBe(2);
@@ -188,7 +188,6 @@ describe("spend", () => {
     const { chart, duration } = spendChart(
       [github],
       new Date("2026-09-02T09:00:00Z"),
-      "good",
       14,
     );
     expect(duration).toBe(45 * DAY);
@@ -206,7 +205,7 @@ describe("spend", () => {
       ["2025-11", "2026-01"],
     );
     const continuous = source(run("2025-11-20", 45, 2), 2, "#f59e0b");
-    const { chart } = spendChart([github, continuous], GAP_NOW, "good", 20);
+    const { chart } = spendChart([github, continuous], GAP_NOW, 20);
     const lines = polylines(chart);
     // Two pieces of the holed base line, one whole base line, then a slice of
     // each.
@@ -225,7 +224,7 @@ describe("spend", () => {
     // December was read and January was not, so on 5 January a 2-day lag
     // settles no January day. The line ends on 31 December.
     const github = source(run("2025-12-01", 20, 5), 2, "#58a6ff", ["2025-12"]);
-    const { chart, duration } = spendChart([github], GAP_NOW, "good");
+    const { chart, duration } = spendChart([github], GAP_NOW);
     expect(duration).toBe(31 * DAY);
     const lines = polylines(chart);
     // One base line over December, then the bright trailing slice.
@@ -253,7 +252,6 @@ describe("spend", () => {
     const { chart } = spendChart(
       [github],
       new Date("2026-01-03T09:00:00Z"),
-      "good",
     );
     const lines = polylines(chart);
     // November is the only run of days long enough to draw a line through.

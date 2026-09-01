@@ -25,7 +25,7 @@
  */
 
 import type { Status, Tile, TileView } from "../types.ts";
-import { serviceName, SPARK_FADE, sparkline } from "../lib.ts";
+import { serviceName, sparkline } from "../lib.ts";
 import { CHART_HIGHLIGHT, CHART_LINE } from "../theme.ts";
 
 const RECENT_MS = 12 * 60 * 60 * 1000; // headline number: last 12 hours
@@ -155,7 +155,7 @@ export const prodErrors: Tile = {
       status,
       value: rate === undefined ? "—" : `${rate.toFixed(2)}%`,
       sub: rate === undefined ? "no traces · last 12h" : `${recentErr} err / ${recentTotal} spans · last 12h`,
-      extra: sparkline(series, CHART_LINE, highlight, SPARK_FADE[status]),
+      extra: sparkline(series, CHART_LINE, highlight, true),
       duration: span,
     };
   },

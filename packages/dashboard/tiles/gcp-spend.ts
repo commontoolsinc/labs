@@ -317,7 +317,6 @@ export const gcpSpend: Tile = {
         lagDays: history.lagDays,
       }],
       now,
-      status,
       summary.estimateDays,
     );
 

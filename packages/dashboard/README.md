@@ -266,11 +266,12 @@ on one wash washes out on another.
 
 `palette.ts` holds all of this, and it is the only place any of it is chosen.
 A status color that appears anywhere — a tile, a dot, a headline, a run cell,
-a sparkline's fade, a drill-down row, the favicon — comes from there. A shade
-that follows from another, like the one a sparkline fades up out of, is worked
-out there too rather than written down beside it, so a change to a color or to
-a tile's wash carries to it without a second edit. The shape a dot takes is
-geometry rather than color, and lives with the rest of the tile's CSS.
+a drill-down row, the favicon — comes from there. A shade that follows from
+another is worked out there too rather than written down beside it, so a change
+to a color carries without a second edit. Sparkline strokes fade from a
+transparent version of their own series color over the shared chart axis. The
+shape a dot takes is geometry rather than color, and lives with the rest of the
+tile's CSS.
 
 Think about how a tile makes someone feel before you think about what it
 measures. Prefer an honest gray "unknown" over a false green — a tile that
