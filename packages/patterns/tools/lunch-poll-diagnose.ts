@@ -34,6 +34,7 @@ interface TraceAddressSummary {
 
 interface ActionRunTraceSummary {
   actionId: string;
+  site: string;
   actionType: string;
   durationMs: number;
   declaredWrites: readonly TraceAddressSummary[];
@@ -51,7 +52,7 @@ interface DiagnosticsSummary {
     demanded: number;
     liveEffects: number;
     pullDemandRoots: number;
-    topReadNodes: readonly { id: string; type: string; readCount: number }[];
+    topReadNodes: readonly { site: string; type: string; readCount: number }[];
   };
   settle: {
     totalHistoryEntries: number;
@@ -330,18 +331,24 @@ function traceAddressSummary(value: unknown): TraceAddressSummary {
   };
 }
 
-function traceEntrySummary(value: unknown): ActionRunTraceSummary {
+function traceEntrySummary(
+  value: unknown,
+  siteOf: (actionId: string) => string,
+): ActionRunTraceSummary {
   if (!isObjectNotArray(value)) {
     return {
       actionId: "",
+      site: "",
       actionType: "",
       durationMs: 0,
       declaredWrites: [],
       actualWrites: [],
     };
   }
+  const actionId = asString(value.actionId);
   return {
-    actionId: asString(value.actionId),
+    actionId,
+    site: siteOf(actionId),
     actionType: asString(value.actionType),
     durationMs: asNumber(value.durationMs),
     declaredWrites: Array.isArray(value.declaredWrites)
@@ -388,9 +395,20 @@ function diagnosticsSummary(
   let demanded = 0;
   let liveEffects = 0;
   let pullDemandRoots = 0;
+
+  // Where each action was authored, for the ids that carry it. A handler's id
+  // holds its own authored site; a lift's is content-addressed, so its site
+  // reaches this probe only through the graph.
+  const authoredSites = new Map<string, string>();
+  for (const node of diagnostics.graph.nodes) {
+    if (node.src !== undefined) authoredSites.set(node.id, node.src);
+  }
+  const siteOf = (actionId: string): string =>
+    compactActionSite(authoredSites.get(actionId) ?? actionId);
+
   const topReadNodes = diagnostics.graph.nodes
     .map((node) => ({
-      id: node.id,
+      site: siteOf(node.id),
       type: node.type,
       readCount: (node.reads?.length ?? 0) + (node.shallowReads?.length ?? 0),
     }))
@@ -410,7 +428,7 @@ function diagnosticsSummary(
   const previousTraceLength = traceCursors.get(label) ?? 0;
   traceCursors.set(label, diagnostics.actionRunTrace.length);
   const newTrace = diagnostics.actionRunTrace.slice(previousTraceLength)
-    .map(traceEntrySummary);
+    .map((entry) => traceEntrySummary(entry, siteOf));
   const newWritesByPath: Record<string, number> = {};
   for (const entry of newTrace) {
     for (const write of entry.actualWrites) {
@@ -451,19 +469,26 @@ function diagnosticsSummary(
 const maxOf = (values: readonly number[]): number =>
   values.length === 0 ? 0 : Math.max(...values);
 
+/**
+ * An authored source location, as the module identity carries it:
+ * `cf:module/<identity>/<path>:<line>:<col>`. A handler's action id ends in
+ * one; so does the `src` the graph reports for a computation.
+ */
+const AUTHORED_SITE = /cf:module\/[^/]+\/(.+:\d+:\d+)$/;
+
+/** The same identity with no authored site: `cf:module/<identity>:<symbol>`. */
+const ADDRESSED_MODULE = /^cf:module\/[^:]+:(.+)$/;
+
 function compactActionSite(actionId: string): string {
-  const marker = `lunch-poll/${matrixProgram}:`;
-  const markerIndex = actionId.indexOf(marker);
-  if (markerIndex >= 0) {
-    const rest = actionId.slice(markerIndex + marker.length);
-    const [line = "?", column = "?"] = rest.split(":");
-    return `${matrixProgram}:${line}:${column}`;
-  }
+  const authored = AUTHORED_SITE.exec(actionId);
+  if (authored) return authored[1];
   if (actionId.startsWith("raw:")) {
     return actionId.split(":").slice(0, 3).join(":");
   }
   if (actionId.startsWith("pull:")) return "pull:result";
   if (actionId.startsWith("sink:")) return "sink:result";
+  const addressed = ADDRESSED_MODULE.exec(actionId);
+  if (addressed) return addressed[1];
   return actionId.slice(0, 80);
 }
 
@@ -475,10 +500,9 @@ function compactTopReadSites(
     { site: string; readCount: number; type: string }
   >();
   for (const node of diagnostics.graph.topReadNodes) {
-    const site = compactActionSite(node.id);
-    const previous = bySite.get(site);
-    bySite.set(site, {
-      site,
+    const previous = bySite.get(node.site);
+    bySite.set(node.site, {
+      site: node.site,
       readCount: (previous?.readCount ?? 0) + node.readCount,
       type: previous?.type ?? node.type,
     });
@@ -531,7 +555,7 @@ function compactSessionSample(
       newTraceEntries: diagnostics.actions.newTraceEntries,
       slowestNew: slowest
         ? {
-          site: compactActionSite(slowest.actionId),
+          site: slowest.site,
           durationMs: slowest.durationMs,
           actualWrites: slowest.actualWrites.length,
         }
