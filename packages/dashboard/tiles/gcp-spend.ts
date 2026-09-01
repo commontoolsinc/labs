@@ -321,11 +321,14 @@ export const gcpSpend: Tile = {
       summary.estimateDays,
     );
 
+    const value = `~${usd(summary.projected)}/mo`;
+    const mtd = `${usd(history.paidMtd)} MTD`;
     return {
       label,
       status,
-      value: `~${usd(summary.projected)}/mo`,
-      aside: `<span class="hmtd">${usd(history.paidMtd)} MTD</span>`,
+      value,
+      valueLabel: value,
+      aside: `<span class="hmtd" title="${mtd}">${mtd}</span>`,
       sub: "billing account spend",
       extra: chart.chart,
       duration: chart.duration,

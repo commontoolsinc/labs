@@ -168,7 +168,8 @@ Deno.test("github spend: projects the month from the settled daily rate, against
   // lag), carried across all 31 -> $1171. The quiet 11th-18th count; the
   // unsettled 19th-20th do not.
   assertEquals(v.value, "~$1171/mo");
-  assertEquals(v.aside, '<span class="hmtd">$680 MTD</span>');
+  assertEquals(v.valueLabel, v.value);
+  assertEquals(v.aside, '<span class="hmtd" title="$680 MTD">$680 MTD</span>');
   // Both products' budgets, since the figure they are held against covers both.
   assertEquals(v.sub, undefined);
   assertStringIncludes(v.extra ?? "", "Budget $3000");
@@ -243,7 +244,7 @@ Deno.test("github spend: every metered product lands in the one GitHub figure", 
   assertEquals(v.status, "good");
   // $700 over the 18 settled days, carried across all 31.
   assertEquals(v.value, "~$1206/mo");
-  assertEquals(v.aside, '<span class="hmtd">$700 MTD</span>');
+  assertEquals(v.aside, '<span class="hmtd" title="$700 MTD">$700 MTD</span>');
   assertStringIncludes(v.extra ?? "", "<polyline");
 });
 
@@ -261,7 +262,7 @@ Deno.test("github spend: a quiet week reads as $0 days while the report is writt
   });
   assertEquals(v.status, "good");
   assertEquals(v.value, "~$310/mo"); // $180 over the 18 settled days, across 31
-  assertEquals(v.aside, '<span class="hmtd">$180 MTD</span>');
+  assertEquals(v.aside, '<span class="hmtd" title="$180 MTD">$180 MTD</span>');
   assertStringIncludes(v.extra ?? "", "<polyline");
 });
 
@@ -385,7 +386,7 @@ Deno.test("github spend: a product with no budget of its own never trips the lig
   // The headline and the month-to-date total still carry every dollar: the
   // Copilot spend is out of the comparison, not out of the figure.
   assertEquals(v.value, "~$3754/mo");
-  assertEquals(v.aside, '<span class="hmtd">$2180 MTD</span>');
+  assertEquals(v.aside, '<span class="hmtd" title="$2180 MTD">$2180 MTD</span>');
   // The ceiling shown covers what the headline covers: Actions' $400, plus
   // Copilot's own $3444 projection standing in for the budget it lacks. A bare
   // $400 next to a $3754 headline would read as an overrun on a green tile.
@@ -424,7 +425,7 @@ Deno.test("github spend: an undated row weighs on the comparison as it does on t
   // $280 over the 18 settled days across 31, in the headline and against the
   // budget alike. Counting only the dated $180 would project $310 and pass.
   assertEquals(v.value, "~$482/mo");
-  assertEquals(v.aside, '<span class="hmtd">$280 MTD</span>');
+  assertEquals(v.aside, '<span class="hmtd" title="$280 MTD">$280 MTD</span>');
   assertEquals(v.status, "warn"); // $482 of a $400 Actions budget
   assertStringIncludes(v.extra ?? "", "Budget $400");
 });
@@ -488,7 +489,7 @@ Deno.test("github spend: early in the month the rate comes from last month's tai
   // Window = $40 over 2 days here + $120 over the last 12 of December = $160/14
   // days -> $354 across 31. Rating the two days alone would claim $620.
   assertEquals(v.value, "~$354/mo");
-  assertEquals(v.aside, '<span class="hmtd">$40 MTD</span>');
+  assertEquals(v.aside, '<span class="hmtd" title="$40 MTD">$40 MTD</span>');
   // November is fetched only to fill the chart, which spans at most 45 days back
   // from the last day with a figure (January 2nd).
   assertEquals(v.duration, 45 * D);
@@ -541,7 +542,7 @@ Deno.test("github spend: an unavailable prior month is not zero-spend history", 
     [budgetsPath()]: { budgets: [productBudget("actions", 400)] },
   });
   assertEquals(v.value, "~$620/mo");
-  assertEquals(v.aside, '<span class="hmtd">$40 MTD</span>');
+  assertEquals(v.aside, '<span class="hmtd" title="$40 MTD">$40 MTD</span>');
   assertEquals(v.status, "bad");
   assertEquals(v.duration, 2 * D);
 });
@@ -583,7 +584,7 @@ Deno.test("github spend: a row whose date is unreadable leaves the chart out", a
     },
   });
   assertEquals(v.value, "~$344/mo");
-  assertEquals(v.aside, '<span class="hmtd">$200 MTD</span>');
+  assertEquals(v.aside, '<span class="hmtd" title="$200 MTD">$200 MTD</span>');
   assertStringIncludes(v.extra ?? "", "GitHub $200");
   assertEquals(v.extra?.includes("<polyline"), false);
   assertEquals(v.duration, 0);
@@ -651,7 +652,7 @@ Deno.test("github spend: both billing endpoints unreachable -> gray with a calm 
   );
   assertEquals(
     v.extra,
-    `<p class="sub">${themedSwatch("#58a6ff")} GitHub $???</p>`,
+    `<p class="sub" title="GitHub $???">${themedSwatch("#58a6ff")} GitHub $???</p>`,
   );
 });
 

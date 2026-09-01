@@ -5,6 +5,8 @@
  * threshold is tuned here rather than in the tile that applies it.
  */
 
+export { TRUST_RUNS_MAX } from "./ci-trust-layout.ts";
+
 export const PORT = Number(Deno.env.get("DASHBOARD_PORT") ?? "8731");
 export const REPO = Deno.env.get("DASHBOARD_REPO") ?? "commontoolsinc/labs";
 export const CI_WORKFLOW = "deno.yml";
@@ -27,8 +29,6 @@ export const CI_RUNS_MAX_AGE_DAYS = 60; // ~2 months
 
 // Tile display windows and status thresholds (tune here).
 export const TRUST_GOOD = 90, TRUST_WARN = 75; // first-try-green %
-export const TRUST_RUNS_MAX = 160; // newest runs scored and shown by ci-trust
-export const TRUST_COLS = 40; // columns in the ci-trust cell grid (more = smaller cells)
 export const DUR_GOOD = 12, DUR_WARN = 20; // median CI minutes
 // ci-duration median window — the larger of these two (more runs wins).
 export const DUR_MIN_RUNS = 20;

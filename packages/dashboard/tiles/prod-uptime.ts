@@ -528,16 +528,21 @@ function view(results: readonly TargetResult[]): TileView {
       (status !== "bad" && result.target.http?.kind === "health"),
   );
   const rows = visible.map(resultRow).join("");
+  const listAttributes = visible.length > 1
+    ? ` aria-label="Production target details; scroll for more" title="Scroll for more details"`
+    : ` aria-label="Production target details"`;
+  const value = headline ??
+    `${
+      results.filter((result) => result.status === "good").length
+    }/${results.length} hosts up`;
   return {
     label: "production",
     status,
-    value: headline ??
-      `${
-        results.filter((result) => result.status === "good").length
-      }/${results.length} hosts up`,
+    value,
+    valueLabel: value,
     extra: rows === ""
       ? undefined
-      : `<div style="display:grid;grid-template-columns:auto 1fr;gap:7px 10px;margin-top:11px;font-size:12px;line-height:1.35">${rows}</div>`,
+      : `<div class="tile-detail-list" role="region" tabindex="0"${listAttributes} style="display:grid;grid-template-columns:auto 1fr;gap:7px 10px;margin-top:11px;font-size:12px;line-height:1.35">${rows}</div>`,
   };
 }
 

@@ -954,7 +954,7 @@ Everything below is a tunable constant in `config.ts`:
 
 - **Status thresholds:** `TRUST_GOOD`/`TRUST_WARN` (first-try-green %), `DUR_GOOD`/`DUR_WARN` (median CI minutes).
 - **Data windows:** The shared fetch returns at most `CI_RUNS_MAX=200` workflow runs and stops at `CI_RUNS_MAX_AGE_DAYS=60` days. CI trust uses the newest `TRUST_RUNS_MAX=160` fetched runs. CI duration uses whichever is larger: `DUR_MIN_RUNS=20` passing runs or `DUR_MAX_AGE_HOURS=6` hours. The benchmark trend uses the same larger-of-the-two idea in days: `BENCH_TREND_MIN_RUNS=20` runs or `BENCH_TREND_MAX_AGE_DAYS=14` days. Recent runs shows `RECENT_DISPLAY=50` entries.
-- **ci-trust cell grid:** `TRUST_COLS=40` sets the column count. The grid has up to `TRUST_RUNS_MAX=160` cells, one for every run in the four-row trust window. First-try successes are green. In-progress runs are blue. Completed runs that lower the trust percentage are red. Ignored runs are gray.
+- **ci-trust cell grid:** The grid has up to `TRUST_RUNS_MAX=160` square cells in rows of `TRUST_COLS=40`. On wide tiles, the squares stop growing and the columns spread out to keep the grid clear of the subheading while preserving its equal left, right, and bottom insets. First-try successes are green. In-progress runs are blue. Completed runs that lower the trust percentage are red. Ignored runs are gray.
 
 ## Local development
 
