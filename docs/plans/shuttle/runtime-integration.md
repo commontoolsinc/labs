@@ -287,21 +287,21 @@ Each of these is small and lands on its own; together they are what decision
    scoping: **shuttle v1 holds one connection per process**, revisited
    when multiple places arrive ([`futures.md`](futures.md) candidate 3).
    Three kinds of state are the process's rather than a connection's, and
-   the first kind is what a
-   connection writes for itself — the endpoint `setLLMUrl` holds, written
-   by `loadPieces` and by `PiecesController.initialize` in another
-   package; the base URL `getPatternEnvironment()` hands a pattern's
-   relative `fetch`, which the `remoteClient` preset pins from `apiUrl`;
-   and the ambient experimental flags a `Runtime` applies as it is built
-   (`modernCellRep`, `contentAddressedSchemas`,
-   `readerSchemaPrecedence`), which for a CLI connection come from the
-   deployment itself. The second is the posture a caller sets: `quietMode`,
-   which each `FromCommand` entry writes and which therefore stands as the
-   last caller left it. The third is a memo of work already done:
-   `receipted` (`lib/write-receipt.ts`), so a shell holding a connection
-   names a space once and stays silent for every write after, and the
-   version-skew note `deferSkewNoteUntilFailureExit` holds for a failure
-   exit, which is one note about one server and prints at process end.
+   the first kind is what a connection writes for itself — the endpoint
+   `setLLMUrl` holds, written by `loadPieces` and by
+   `PiecesController.initialize` in another package; the base URL
+   `getPatternEnvironment()` hands a pattern's relative `fetch`, which the
+   `remoteClient` preset pins from `apiUrl`; and the ambient experimental
+   flags a `Runtime` applies as it is built (`modernCellRep`,
+   `contentAddressedSchemas`, `readerSchemaPrecedence`), which for a CLI
+   connection come from the deployment itself. The second is the posture a
+   caller sets: `quietMode`, which each `FromCommand` entry writes and
+   which therefore stands as the last caller left it. The third is a memo
+   of work already done: `receipted` (`lib/write-receipt.ts`), so a shell
+   holding a connection names a space once and stays silent for every
+   write after, and the version-skew note `deferSkewNoteUntilFailureExit`
+   holds for a failure exit, which is one note about one server and prints
+   at process end.
 
    What a check can reach is narrower than the limit, and the two are not
    the same claim. `claimProcessDeployment` (`lib/process-deployment.ts`)
@@ -321,9 +321,9 @@ Each of these is small and lands on its own; together they are what decision
    writes begin. The globals in `packages/llm` and `packages/runner`
    belong to other packages and say nothing about it, so this inventory is
    the only record of them — and the part of it that goes stale first if
-   nobody reads it back against those files.
-   `packages/cli/README.md` records the limit for a caller of the library
-   seams, and a shuttle process holds the one connection the limit allows.
+   nobody reads it back against those files. `packages/cli/README.md`
+   records the limit for a caller of the library seams, and a shuttle
+   process holds the one connection the limit allows.
 7. **Disposal.** `withRuntimeCleanupOnFailure` disposes only on throw; the
    success path relies on process exit. In a long-lived shell every
    un-injected call leaks a runtime, a storage manager, and a WebSocket —
