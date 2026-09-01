@@ -624,17 +624,21 @@ function suggestionForCommandSegment(words: string[]): string {
   // matching them would widen what the hook accepts without changing what it
   // answers. A verb joins this set when it gains a branch below.
   const GUIDED_TOP_LEVEL_COMMANDS = new Set(["set"]);
+  // The nouns a guided verb can sit under. `set-home` acts on a space and is
+  // reached as `cf space set-home`, so a hook that knew only `piece` would go
+  // quiet on the spelling the documentation now teaches.
+  const NOUN_SEGMENTS = new Set(["piece", "space"]);
   const cfIndex = normalizedWords.findIndex((word, index) =>
     word === "cf" &&
-    (normalizedWords[index + 1] === "piece" ||
+    (NOUN_SEGMENTS.has(normalizedWords[index + 1] ?? "") ||
       GUIDED_TOP_LEVEL_COMMANDS.has(normalizedWords[index + 1] ?? ""))
   );
   if (cfIndex < 0) return "";
 
   const commandWords = normalizedWords.slice(cfIndex);
-  // An optional `piece` segment shifts the verb one word along, so the verb is
+  // An optional noun segment shifts the verb one word along, so the verb is
   // located by what precedes it rather than by a fixed index.
-  const pieceCommand = commandWords[1] === "piece"
+  const pieceCommand = NOUN_SEGMENTS.has(commandWords[1] ?? "")
     ? commandWords[2]
     : commandWords[1];
   const testOptions = commandWords.flatMap((word, index) => {

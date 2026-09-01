@@ -311,7 +311,7 @@ intentional breaking migration.
 ### Source location metadata
 
 The local-source deployment commands `piece new`, `piece setsrc`, and custom
-`piece set-home` accept repeatable `--test` flags as well as `--root` and
+`space set-home` accept repeatable `--test` flags as well as `--root` and
 `--repository`. Attach every authored pattern test. Use the repository checkout
 root for `--root`; this preserves `source.entry` as a path inside the
 repository. `--repository` is stored exactly as supplied in `source.repository`

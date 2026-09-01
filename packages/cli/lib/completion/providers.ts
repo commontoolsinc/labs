@@ -866,7 +866,10 @@ function onlyOn(
 const ROOT_DIRECTORY_COMMANDS: readonly string[] = [
   "check",
   "piece new",
+  // Both mounts of `set-home`: the superseded one keeps completing its own
+  // flags for a caller who has not migrated, it is only never suggested.
   "piece set-home",
+  "space set-home",
   "piece setsrc",
   "piece survey",
   "test",
@@ -1045,6 +1048,7 @@ const ARGUMENT_PROVIDERS: Readonly<
   "id did:keypath": () =>
     Promise.resolve(directive({ kind: "files", glob: "*.key" })),
   "piece set-home:main": patternFiles,
+  "space set-home:main": patternFiles,
   "piece getsrc:outpath": () => Promise.resolve(directive({ kind: "files" })),
   "deps update:file": () => Promise.resolve(directive({ kind: "files" })),
   "fuse mount:mountpoint": () => Promise.resolve(directive({ kind: "dirs" })),

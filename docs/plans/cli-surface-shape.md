@@ -152,23 +152,32 @@ instead; see
 
 ## What it should look like
 
+**The noun is what the verb acts on, not what it ranges over.** `ls` lists
+pieces, so it sits under `piece`; the space it ranges over is context the
+command reads rather than the thing it acts on. The same test taken from the
+other end: if a command's target wants to be spelled `--cell`, it is a cell
+command. That rule is what decides where a command goes, and it is worth more
+than the individual placements below, which are only its output.
+
 Reading is one operation reached from several starting points, so the surface
 wants one read command and distinct commands for the distinct ways of arriving:
 
 ```
 # <read opts> = [--select S | --schema S] [--filter P] — identical everywhere
 
-cf get   <addr> [path]           <read opts>
-cf call  <addr> <verb> <payload> <read opts>
-cf wish  <query>                 <read opts>   # a query, not an address
-cf exec  <mountedFile> [args]    <read opts>   # reached through a filesystem mount
+cf cell get  <addr> [path]            <read opts>
+cf cell set  <addr> [path]                       # writes; nothing to shape
+cf cell get-label|set-label <addr>
 
-cf set   <addr> [path]                         # writes; nothing to shape
+cf piece call <addr> <verb> <payload> <read opts>
+cf wish  <query>                      <read opts>  # a query, not an address
+cf exec  <mountedFile> [args]         <read opts>  # through a filesystem mount
 
-cf piece new|setsrc|getsrc|rm|ls|search|verbs|set-slug   # deploying and listing
-cf space … | cf id … | cf acl … | cf fuse …
-cf inspect …                                          # offline forensics
-cf check | test | view | init | deps                  # working on source
+cf piece new|setsrc|getsrc|rm|ls|search|verbs|set-slug|step|link|inspect|…
+cf space recreate-root|set-home|clone|verify|reset|fingerprint
+cf id … | cf acl … | cf fuse …
+cf inspect …                                     # offline forensics
+cf check | test | view | init | deps             # working on source
 ```
 
 Three properties earn their place.
@@ -178,23 +187,55 @@ with a suffix for navigating within it — `<addr>#argument` in place of the
 `--input` flag. An address printed by one command is accepted by the next
 without reshaping, which is not true today.
 
-**Arrivals stay separate; the tail is shared.** `get`, `call`, `wish`, and
-`exec` are genuinely different operations and none should absorb another.
-But all of them finish by turning a cell into structured output, so they take
-the same read options and an address renders the same way however you arrived at
-it. A command that returns data gets the whole tail, not a subset — a result
-worth shaping is a result worth filtering. `set` is the exception, because it
-writes rather than returns. Today each command grew its own output handling and
-they have drifted.
+**Arrivals stay separate; the tail is shared.** `cell get`, `piece call`,
+`wish`, and `exec` are genuinely different operations and none should absorb
+another. But all of them finish by turning a cell into structured output, so
+they take the same read options and an address renders the same way however you
+arrived at it. A command that returns data gets the whole tail, not a subset — a
+result worth shaping is a result worth filtering. `cell set` is the exception,
+because it writes rather than returns.
 
-**`piece` keeps only what is genuinely about pieces.** Deploying, updating,
-removing, listing, searching, slugs, and listing a piece's verbs. Reading and
-writing cells are not piece operations and stop presenting themselves as ones.
-`recreate-root` and `set-home` are space-level operations sitting under `piece`;
-they belong under `space`, and moving them is part of step 7 rather than
-something this shape decides. `get-label` and `set-label` (#5673) postdate this
-accounting: whether CFC labels stay a piece subcommand or become a surface of
-their own is a step-7-class decision this document leaves open.
+**Each noun keeps only what acts on it.** `piece` deploys, updates, removes,
+lists, searches, and inspects a piece. `cell` reads and writes a cell, which is
+what `get` and `set` were always doing. `space` rebuilds a space's root and home
+patterns and manages rehearsal clones of its store.
+
+### The exceptions, and why they are exceptions
+
+**`inspect` and `space` both act on a store, and the rule cannot separate
+them.** They stay apart on a contract instead: `inspect` is read-only — it
+explains, it never reproduces or replays — and that is what makes it
+trustworthy, while `space` exists to write. One object, two nouns, divided by
+what each promises rather than by what each addresses. Anything read-only over
+stored state belongs under `inspect`; anything that writes a store belongs under
+`space`.
+
+**`space verify` and `space reset` take a clone directory, not a space.** A
+rehearsal copy is identified by where it was written, so their argument names
+the copy rather than the space it is a copy of. The noun does not resolve that,
+and naming it here is cheaper than leaving a reader to wonder whether it was
+noticed.
+
+**`acl` stays a noun of its own.** The rule would fold it under `space`, since
+an access-control list is a property of one. It is left alone because nothing is
+confusing about `cf acl` today and the fold buys a reader nothing.
+
+**`set-slug` stays under `piece`.** A slug names a piece within a space, so the
+rule reads it either way. It acts on the piece — the space is where the name has
+to be unique, which is range, not target.
+
+**The authoring commands stay at top level.** `check`, `test`, `view`, `init`
+and `deps` act on source files, and the rule would gather them under a `source`
+noun. That is deliberately deferred rather than rejected: they are the commands
+with the most prose written about them, so the move is by far the most expensive
+in the surface, and no one has been confused about where `cf check` lives. A
+future reader who wants the noun can have it; this records that it was
+considered and priced, so it need not be re-derived.
+
+**`cell` costs some callers a second migration.** `get` and `set` reached top
+level recently and move again under `cell`. That cost was measured and accepted:
+the cell/piece distinction is the entire content of the rule, and a rule that
+cannot tell a cell from a piece has nothing left to say.
 
 `--select` and `--schema` everywhere, split per the reasons above.
 

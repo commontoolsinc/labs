@@ -46,6 +46,20 @@ export const NO_PROSE = new Map<string, string>([
     "fuse-supervisor",
     "the same, for the process that supervises the FUSE child",
   ],
+  // The step-7 mounts kept only so a caller who learned the old spelling
+  // keeps working. Documenting one would teach the spelling being retired,
+  // and the command says on every run what to write instead. These entries
+  // go when the mounts do: the check fails on an allowance naming a command
+  // the tree no longer accepts, so the removal cannot leave them behind.
+  [
+    "piece recreate-root",
+    "superseded by `cf space recreate-root`; the mount survives for callers " +
+    "who have not migrated and the command itself names its replacement",
+  ],
+  [
+    "piece set-home",
+    "superseded by `cf space set-home`, on the same terms",
+  ],
 ]);
 
 /**

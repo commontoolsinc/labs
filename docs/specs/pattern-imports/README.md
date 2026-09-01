@@ -178,7 +178,7 @@ separate fields:
   place be checked again?"; `source.ref` answers "which exact bytes are
   running?"
 
-`cf piece new`, `cf piece setsrc`, and custom `cf piece set-home` accept
+`cf piece new`, `cf piece setsrc`, and custom `cf space set-home` accept
 `--repository <locator>` alongside `--root`. `new` and custom `set-home` stamp
 the locator on the new piece. `setsrc` replaces it when the flag is present and
 preserves the existing locator when the flag is omitted. `set-home --reset`

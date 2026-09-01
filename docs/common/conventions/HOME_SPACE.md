@@ -133,11 +133,11 @@ the CF CLI:
 cf test ./my-home.test.tsx
 
 # Deploy a custom home pattern with the test attached
-cf piece set-home -i ./my.key -a http://localhost:8000 \
+cf space set-home -i ./my.key -a http://localhost:8000 \
   --test ./my-home.test.tsx ./my-home.tsx
 
 # Reset to the system default
-cf piece set-home -i ./my.key -a http://localhost:8000 --reset
+cf space set-home -i ./my.key -a http://localhost:8000 --reset
 ```
 
 Write automated tests for new or changed home-pattern behavior. Repeat
@@ -181,7 +181,7 @@ To share identity between browser and CLI:
 deno run -A packages/cli/mod.ts id from-mnemonic -- phrase.txt > ./browser.key
 
 # 3. Use that key with cf, retaining the tested source package
-cf piece set-home -i ./browser.key -a http://localhost:8000 \
+cf space set-home -i ./browser.key -a http://localhost:8000 \
   --test ./my-home.test.tsx ./my-home.tsx
 ```
 
@@ -218,7 +218,7 @@ Both the home pattern and the default app pattern follow the same mechanism:
    source URL is stamped as `patternSource` for future updates
 4. `recreateDefaultPattern()` can replace it — either with a URL-based pattern,
    which also stamps `patternSource`, or a custom `RuntimeProgram` (used by
-   `cf piece set-home`), which remains untracked by the URL updater and may carry
+   `cf space set-home`), which remains untracked by the URL updater and may carry
    a separate repository locator
 5. Before an existing eligible root starts, it is reconciled in place. A root
    with stored `patternSource` tracks that source. A pre-provenance root is

@@ -69,7 +69,7 @@ describe("pattern-user-post-bash", () => {
     it("warns when a custom home pattern omits attached tests", () => {
       expect(
         suggestionForPatternUserCommand(
-          "cf piece set-home --identity key main.tsx",
+          "cf space set-home --identity key main.tsx",
         ),
       ).toContain("No tests were attached");
     });
@@ -77,7 +77,7 @@ describe("pattern-user-post-bash", () => {
     it("does not require tests when resetting the home pattern", () => {
       expect(
         suggestionForPatternUserCommand(
-          "cf piece set-home --identity key --reset",
+          "cf space set-home --identity key --reset",
         ),
       ).toBe("");
     });
@@ -308,7 +308,7 @@ describe("pattern-user-post-bash", () => {
     it("does not let a reset exempt another custom home deployment", () => {
       expect(
         suggestionForPatternUserCommand(
-          "cf piece set-home --reset; cf piece set-home main.tsx",
+          "cf space set-home --reset; cf space set-home main.tsx",
         ),
       ).toContain("No tests were attached");
     });

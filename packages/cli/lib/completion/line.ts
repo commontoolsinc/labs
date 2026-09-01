@@ -239,12 +239,27 @@ function isPositionalAddress(
     isReference(token);
 }
 
+/**
+ * Subcommands a caller can reach, hidden ones included.
+ *
+ * A superseded spelling is hidden so that nothing offers it, and stays mounted
+ * so that a caller who already types it still works. Completion follows that
+ * split: suggestion lists only what {@link realSubcommands} returns, while
+ * resolving a typed name and walking the tree for slots see everything
+ * reachable — otherwise the old spelling would complete none of its own flags.
+ */
+function reachableSubcommands(command: AnyCommand): AnyCommand[] {
+  return command.getCommands(true).filter((child) =>
+    child.getName() !== "help"
+  );
+}
+
 /** Resolve a subcommand by name or alias, skipping Cliffy's own `help`. */
 function findSubcommand(
   command: AnyCommand,
   name: string,
 ): AnyCommand | undefined {
-  return command.getCommands(false).find((child) =>
+  return reachableSubcommands(command).find((child) =>
     child.getName() === name || child.getAliases().includes(name)
   );
 }
@@ -621,7 +636,7 @@ export function declaredSlots(root: AnyCommand): DeclaredSlots {
         index,
       });
     });
-    for (const child of realSubcommands(command)) {
+    for (const child of reachableSubcommands(command)) {
       walk(child, [...path, child.getName()]);
     }
   };

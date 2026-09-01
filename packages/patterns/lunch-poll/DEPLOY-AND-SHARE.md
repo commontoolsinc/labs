@@ -98,7 +98,7 @@ with `Could not load pattern <identity>#default`, and `cf piece new` with:
 ```
 Could not initialize the space's default pattern: ...
 The new piece cannot be registered in the space's piece list without it.
-If this space's root pattern predates a runtime format change, repair it with: cf piece recreate-root
+If this space's root pattern predates a runtime format change, repair it with: cf space recreate-root
 ```
 
 Commands that address a piece by id and never read the registry still work
@@ -106,7 +106,7 @@ there: `cf get` and `cf piece getsrc` both do. The poll piece that used to serve
 this space does not start either — a nested `participant-identity-card` argument
 is missing a required field, so setup refuses it (see "A piece that saved its
 source and will not start"). Re-establishing a poll on this host means repairing
-the space root first, with `cf piece recreate-root`, and then `cf piece new`.
+the space root first, with `cf space recreate-root`, and then `cf piece new`.
 `recreate-root` rewrites the space's root pattern for everyone in it, so agree
 on it before running it against a shared space.
 

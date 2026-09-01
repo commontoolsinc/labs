@@ -58,6 +58,7 @@ import {
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
 import { cliCommand, cliText } from "../lib/cli-name.ts";
+import { withDeprecatedCommandSpelling } from "../lib/deprecated-spelling.ts";
 import type { FabricValue } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model";
 import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
@@ -1925,6 +1926,198 @@ export function pieceDataCommand(name: "get" | "set" | "call"): Command<any> {
   return targetOptions(builders[name](name), { global: false });
 }
 
+/**
+ * Refuse `--json` on a command that has no machine-readable output.
+ *
+ * `cf space` declares `--json` globally, so its two target-scoped subcommands
+ * inherit an option they have nothing to answer with. Accepting it silently
+ * would hand a caller human text where they asked for something to parse.
+ */
+function refuseJsonOutput(spelling: string, options: { json?: boolean }): void {
+  if (!options.json) return;
+  throw new ValidationError(
+    `'cf ${spelling}' has no machine-readable output, so '--json' does ` +
+      `nothing here. Drop it, and read the printed result.`,
+    { exitCode: 1 },
+  );
+}
+
+/**
+ * The shared target options, plus the flags the two space-level commands add.
+ *
+ * `quiet` and `reset` reach an action from Cliffy's parse rather than from
+ * {@link PieceCLIOptions}, which describes only what a target is named with.
+ */
+interface SpaceCommandCLIOptions extends PieceCLIOptions {
+  quiet?: boolean;
+  reset?: boolean;
+}
+
+/**
+ * `recreate-root`, which rebuilds a space's root pattern.
+ *
+ * `spelling` is how the command names itself in its own help and examples.
+ * `replacedBy`, when given, names the spelling that supersedes this mount and
+ * makes it carry the step-7 notice.
+ *
+ * The target options are attached per command rather than globally, because
+ * `cf space` is not a target-scoped noun the way `cf piece` is: its other
+ * subcommands read a store on disk and take no server, identity or space.
+ */
+// deno-lint-ignore no-explicit-any
+export function buildRecreateRootCommand(
+  spelling: string,
+  replacedBy?: string,
+): Command<any> {
+  const act = async (options: SpaceCommandCLIOptions) => {
+    refuseJsonOutput(spelling, options);
+    setQuietMode(!!options.quiet);
+    const spaceConfig = parseSpaceOptions(options);
+    const pieceId = await recreateSpaceRootPattern(spaceConfig);
+    render(pieceId);
+    hint(cliText(`NEXT STEPS:
+  → Open space in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${pieceId}
+  → Inspect state:         cf piece inspect --cell ${pieceId} ...`));
+  };
+  // The options arrive from targetOptions() below, after this chain is built,
+  // so the chain is named as `Command<any>` rather than letting Cliffy infer
+  // an empty option set for the action from what it can see here.
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
+    .description(
+      "Recreate the root pattern for the explicitly targeted space.",
+    )
+    .usage(spaceUsage)
+    .example(
+      cliText(`cf ${spelling} ${EX_ID} ${EX_COMP}`),
+      `Recreate the root pattern for "${EX_SPACE}".`,
+    )
+    .example(
+      cliText(`cf ${spelling} ${EX_ID} ${EX_URL}`),
+      `Recreate the root pattern for "${EX_SPACE}".`,
+    );
+  return targetOptions(
+    command.action(
+      replacedBy === undefined
+        ? act
+        : withDeprecatedCommandSpelling(spelling, replacedBy, act),
+    ),
+    { global: false },
+  );
+}
+
+/**
+ * `set-home`, which deploys a custom home-space pattern or resets the
+ * identity's home space to the system default.
+ *
+ * `spelling` and `replacedBy` carry the meanings they have in
+ * {@link buildRecreateRootCommand}.
+ */
+// deno-lint-ignore no-explicit-any
+export function buildSetHomeCommand(
+  spelling: string,
+  replacedBy?: string,
+): Command<any> {
+  const act = async (options: SpaceCommandCLIOptions, main?: string) => {
+    refuseJsonOutput(spelling, options);
+    setQuietMode(!!options.quiet);
+
+    if (!options.reset && !main) {
+      throw new ValidationError(
+        "Provide a pattern file path or use --reset.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && main) {
+      throw new ValidationError(
+        "Cannot use --reset with a pattern file path.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && options.repository !== undefined) {
+      throw new ValidationError(
+        "Cannot use --repository with --reset.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && options.test !== undefined) {
+      throw new ValidationError(
+        "Cannot use --test with --reset.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && options.datafile !== undefined) {
+      throw new ValidationError(
+        "Cannot use --datafile with --reset.",
+        { exitCode: 1 },
+      );
+    }
+
+    const baseConfig = parseSetHomeOptions(options);
+
+    if (options.reset) {
+      await resetHomePattern(baseConfig);
+      render("Reset home pattern to system default.");
+    } else {
+      await setHomePattern(baseConfig, localPatternEntry(main!, options));
+      render("Deployed custom home pattern.");
+    }
+
+    hint(cliText(`NEXT STEPS:
+  → Open home in browser: ${baseConfig.apiUrl}
+  → Reset to default:     cf ${spelling} --reset ...`));
+  };
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
+    .description(
+      "Deploy a custom home-space pattern or reset the identity's home space to system default.",
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} -a http://localhost:${ports.toolshed} ./my-home.tsx`,
+      ),
+      `Deploy a custom pattern to the identity's home space.`,
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} -a http://localhost:${ports.toolshed} --reset`,
+      ),
+      `Reset the identity's home space to the system default pattern.`,
+    )
+    .option("--reset", "Reset to the system default home pattern")
+    .option(
+      "--main-export <export:string>",
+      'Named export from entry for pattern definition. Defaults to "default".',
+    )
+    .option(
+      "--root <path:string>",
+      "Root directory for imports and authored source paths. Use a repository root to preserve repository-relative paths.",
+    )
+    .option(
+      "--repository <repository:string>",
+      "Repository locator associated with the authored source (stored exactly as supplied).",
+    )
+    .option(
+      "--test <path:string>",
+      "Attach a test pattern source file to the deployed source package. Repeatable.",
+      { collect: true },
+    )
+    .option(
+      "--datafile <path:string>",
+      "Attach a data file to the deployed source package. Repeatable.",
+      { collect: true },
+    )
+    .arguments("[main:string]");
+  return targetOptions(
+    command.action(
+      replacedBy === undefined
+        ? act
+        : withDeprecatedCommandSpelling(spelling, replacedBy, act),
+    ),
+    { global: false },
+  );
+}
+
 export const piece = targetOptions(
   new Command()
     .name("piece")
@@ -2849,118 +3042,17 @@ updated effective label view.`),
     await removePiece(pieceConfig);
     render(`Removed piece ${pieceConfig.piece}`);
   })
-  /* piece recreate-root */
+  /* piece recreate-root — moved to `cf space recreate-root` */
   .command(
     "recreate-root",
-    "Recreate the root pattern for the explicitly targeted space.",
+    buildRecreateRootCommand("piece recreate-root", "space recreate-root")
+      .hidden(),
   )
-  .usage(spaceUsage)
-  .example(
-    cliText(`cf piece recreate-root ${EX_ID} ${EX_COMP}`),
-    `Recreate the root pattern for "${EX_SPACE}".`,
-  )
-  .example(
-    cliText(`cf piece recreate-root ${EX_ID} ${EX_URL}`),
-    `Recreate the root pattern for "${EX_SPACE}".`,
-  )
-  .action(async (options) => {
-    setQuietMode(!!options.quiet);
-    const spaceConfig = parseSpaceOptions(options);
-    const pieceId = await recreateSpaceRootPattern(spaceConfig);
-    render(pieceId);
-    hint(cliText(`NEXT STEPS:
-  → Open space in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${pieceId}
-  → Inspect state:         cf piece inspect --cell ${pieceId} ...`));
-  })
-  /* piece set-home */
+  /* piece set-home — moved to `cf space set-home` */
   .command(
     "set-home",
-    "Deploy a custom home-space pattern or reset the identity's home space to system default.",
-  )
-  .example(
-    cliText(
-      `cf piece set-home ${EX_ID} -a http://localhost:${ports.toolshed} ./my-home.tsx`,
-    ),
-    `Deploy a custom pattern to the identity's home space.`,
-  )
-  .example(
-    cliText(
-      `cf piece set-home ${EX_ID} -a http://localhost:${ports.toolshed} --reset`,
-    ),
-    `Reset the identity's home space to the system default pattern.`,
-  )
-  .option("--reset", "Reset to the system default home pattern")
-  .option(
-    "--main-export <export:string>",
-    'Named export from entry for pattern definition. Defaults to "default".',
-  )
-  .option(
-    "--root <path:string>",
-    "Root directory for imports and authored source paths. Use a repository root to preserve repository-relative paths.",
-  )
-  .option(
-    "--repository <repository:string>",
-    "Repository locator associated with the authored source (stored exactly as supplied).",
-  )
-  .option(
-    "--test <path:string>",
-    "Attach a test pattern source file to the deployed source package. Repeatable.",
-    { collect: true },
-  )
-  .option(
-    "--datafile <path:string>",
-    "Attach a data file to the deployed source package. Repeatable.",
-    { collect: true },
-  )
-  .arguments("[main:string]")
-  .action(async (options, main?: string) => {
-    setQuietMode(!!options.quiet);
-
-    if (!options.reset && !main) {
-      throw new ValidationError(
-        "Provide a pattern file path or use --reset.",
-        { exitCode: 1 },
-      );
-    }
-    if (options.reset && main) {
-      throw new ValidationError(
-        "Cannot use --reset with a pattern file path.",
-        { exitCode: 1 },
-      );
-    }
-    if (options.reset && options.repository !== undefined) {
-      throw new ValidationError(
-        "Cannot use --repository with --reset.",
-        { exitCode: 1 },
-      );
-    }
-    if (options.reset && options.test !== undefined) {
-      throw new ValidationError(
-        "Cannot use --test with --reset.",
-        { exitCode: 1 },
-      );
-    }
-    if (options.reset && options.datafile !== undefined) {
-      throw new ValidationError(
-        "Cannot use --datafile with --reset.",
-        { exitCode: 1 },
-      );
-    }
-
-    const baseConfig = parseSetHomeOptions(options);
-
-    if (options.reset) {
-      await resetHomePattern(baseConfig);
-      render("Reset home pattern to system default.");
-    } else {
-      await setHomePattern(baseConfig, localPatternEntry(main!, options));
-      render("Deployed custom home pattern.");
-    }
-
-    hint(cliText(`NEXT STEPS:
-  → Open home in browser: ${baseConfig.apiUrl}
-  → Reset to default:     cf piece set-home --reset ...`));
-  });
+    buildSetHomeCommand("piece set-home", "space set-home").hidden(),
+  );
 
 /** Shared flags accepted by piece commands that resolve a target or source. */
 export interface PieceCLIOptions {

@@ -42,6 +42,7 @@ import {
   setsrcSuccessLine,
 } from "../commands/piece.ts";
 import { normalizeApiUrl } from "../lib/api-url.ts";
+import { space } from "../commands/space.ts";
 import {
   CellSelectionError,
   parseCellSelectionOptions,
@@ -1229,9 +1230,13 @@ describe("cli piece parsing", () => {
   });
 
   it("shows source-location options for every local deployment command", () => {
-    const optionFlags = (command: string) =>
-      piece.getCommand(command)!.getOptions().flatMap((option) => option.flags);
-    const newFlags = optionFlags("new");
+    // `set-home` is reached through `cf space` now; the hidden `cf piece`
+    // mount is the same definition and is pinned against it below.
+    const pieceFlags = (command: string) =>
+      piece.getCommand(command, true)!.getOptions().flatMap((o) => o.flags);
+    const spaceFlags = (command: string) =>
+      space.getCommand(command)!.getOptions().flatMap((o) => o.flags);
+    const newFlags = pieceFlags("new");
     expect(newFlags).toContain("--slug");
     expect(newFlags).toContain("--root");
     expect(newFlags).toContain("--repository");
@@ -1239,16 +1244,70 @@ describe("cli piece parsing", () => {
     expect(newFlags).toContain("--datafile");
     expect(newFlags).toContain("--dangerously-allow-incompatible-schema");
 
-    for (const command of ["setsrc", "set-home"]) {
-      const flags = optionFlags(command);
+    for (const flags of [pieceFlags("setsrc"), spaceFlags("set-home")]) {
       expect(flags).toContain("--root");
       expect(flags).toContain("--repository");
       expect(flags).toContain("--test");
       expect(flags).toContain("--datafile");
     }
-    expect(optionFlags("setsrc")).toContain(
+    expect(pieceFlags("setsrc")).toContain(
       "--dangerously-allow-incompatible-schema",
     );
+  });
+
+  it("declares the same options on both mounts of a moved command", () => {
+    // One builder, two mount points: a caller who has not migrated yet meets
+    // the surface the new spelling has, not a copy that can drift from it.
+    // Compared on each command's own declarations, because the two nouns
+    // contribute different globals -- see the `--json` case below.
+    const own = (command: { getBaseOptions(): { flags: string[] }[] }) =>
+      command.getBaseOptions().flatMap((o) => o.flags).sort();
+    for (const moved of ["set-home", "recreate-root"]) {
+      expect(own(piece.getCommand(moved, true)!)).toEqual(
+        own(space.getCommand(moved)!),
+      );
+    }
+  });
+
+  it("refuses `--json` on a moved command rather than ignoring it", async () => {
+    const { code, stdout, stderr } = await cf(
+      "space recreate-root --json -i ./k.key -s s -a http://localhost:8000",
+    );
+    expect(code).not.toBe(0);
+    expect(stdout).toEqual([]);
+    expect(stripAnsi(stderr.join("\n"))).toContain(
+      "has no machine-readable output",
+    );
+  });
+
+  it("inherits `--json` on the `cf space` mount and refuses it", () => {
+    // `cf space` declares --json globally for the store commands, so the two
+    // target-scoped ones inherit an option they have no output to answer
+    // with. Pinned rather than left implicit: the refusal is what keeps it
+    // from silently printing human text to a caller who asked to parse it.
+    const all = (command: { getOptions(): { flags: string[] }[] }) =>
+      command.getOptions().flatMap((o) => o.flags);
+    expect(all(space.getCommand("set-home")!)).toContain("--json");
+    expect(all(piece.getCommand("set-home", true)!)).not.toContain("--json");
+  });
+
+  it("hides the superseded `cf piece` mounts from help", () => {
+    // Hidden is what keeps the old spelling working without teaching it: it
+    // stays reachable for a caller who already wrote it, and is offered to
+    // nobody new.
+    const names = (
+      // deno-lint-ignore no-explicit-any
+      command: any,
+      includeHidden: boolean,
+    ): string[] =>
+      command.getCommands(includeHidden).map((c: { getName(): string }) =>
+        c.getName()
+      );
+    for (const moved of ["set-home", "recreate-root"]) {
+      expect(names(piece, true)).toContain(moved);
+      expect(names(piece, false)).not.toContain(moved);
+      expect(names(space, false)).toContain(moved);
+    }
   });
 
   it("offers computed transforms for piece reads", () => {
