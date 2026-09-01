@@ -236,6 +236,7 @@ export interface StructureNode {
 
   /** Character offset of the node end, read the same way. */
   readonly endOffset: number;
+
   readonly depth: number;
   readonly children: StructureNode[];
 
