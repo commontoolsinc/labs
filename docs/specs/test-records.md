@@ -180,13 +180,23 @@ test-selection publisher rather than by anything recording:
 ```
 <repo>/test-selection/v1/manifest-<ISO 8601 timestamp>-<ULID>.json.gz
 <repo>/test-selection/v1/state/<yyyy-mm-dd>-<ULID>.json.gz
+<repo>/test-selection/v1/pins/<workflow-run-id>.json.gz
 ```
 
-The timestamp leads a manifest's name, so a lexical listing is a
-chronological one and a reader takes the newest that is not after the
-moment it asks about. There is no name meaning "the current one": the
-writer holds create and nothing else, so nothing can be overwritten, and
-that is the property the whole store rests on.
+The leading timestamp keeps manifest names chronologically useful, but it
+does not decide publication order. A workflow without a manifest pin lists
+object metadata once on its first attempt, chooses the object with the
+newest server-assigned `timeCreated`, using the object name to break a tie,
+and stores its exact object name, generation, and validated contents in a
+create-only run pin. The generation is a canonical digits-only decimal
+string, not a JSON number. An empty or failed listing stores an explicit
+unselected result. An absent pin on a later attempt also produces
+unselected rather than another listing. Pin retention exceeds the full
+workflow rerun period. Readers and later workflow attempts use the embedded
+result rather than resolving "newest" or depending on source-manifest
+retention. There is no object name meaning "the current one": writers hold
+create and nothing else, so nothing can be overwritten, and that is the
+property the whole store rests on.
 
 A local object's date partition comes from its run's start. The CI relay
 currently takes the date from the workflow run's `run_started_at`. That

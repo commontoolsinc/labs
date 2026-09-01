@@ -222,10 +222,40 @@ writing one unasked is not.
 The packing function is pure. No clock, no unseeded randomness, no
 dependence on anything but the manifest, the diff, and the lane number.
 That is what lets every lane compute its own share and agree with the
-others by construction, with no job ahead of them deciding and no lane
-waiting on one. The exploration draw's seed comes from the manifest, so
-the draw is the same in every lane and different between manifests.
+others by construction. The exploration draw's seed comes from the
+manifest, so the draw is the same in every lane and different between
+manifests.
 
-A consumer resolves the manifest as the newest one generated at or before
-its run's start time, rather than at or before now, which is what makes
-re-running one failed lane run the same set as the lane it replaces.
+Before the lanes start, a selector calls a trusted reusable workflow by its
+default-branch ref. The reusable workflow checks out no repository code and
+has a Workload Identity credential with create-only access restricted to
+the pin prefix. The identity condition also requires the Labs repository's
+immutable GitHub `repository_id`, so another repository cannot invoke the
+workflow to obtain the credential. The reusable workflow derives the
+repository and workflow run id from GitHub's trusted context, not caller
+inputs. It recovers the public create-only object for that run id. On the
+first attempt only, no pin makes it list the public manifest objects once,
+choose the object with the newest server-assigned storage creation time,
+and create a compressed envelope containing the selected object's name,
+generation, and complete validated manifest. A failed or empty listing
+creates an explicit unselected envelope. No pin on a later attempt also
+creates unselected instead of selecting again.
+
+Pin retention exceeds the full workflow rerun period. Embedding the
+manifest makes source-manifest deletion irrelevant. The selector completes
+successfully only after a valid selected or unselected pin exists. If it
+cannot read an existing pin or create a new one, it fails and dependent
+lanes do not start. Pull-request jobs have no credential that can write or
+replace pin objects.
+
+A pin is untrusted input when read. Its workflow run id must match the
+reader. A selected pin must carry a source name under the trusted manifest
+prefix, an object generation encoded as a canonical digits-only decimal
+string, and a manifest that passes the normal whole-object validation. The
+generation is never coerced to a JavaScript number. Any mismatch rejects
+the pin.
+
+The workflow run id is stable across attempts. A later attempt with its pin
+available therefore runs the same set rather than resolving newest again.
+A missing later pin deliberately creates an unselected result. Neither path
+depends on an ordering between GitHub's clock and Cloud Storage's clock.
