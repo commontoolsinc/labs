@@ -2,9 +2,12 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import {
   candidateSurfaces,
+  check,
   checkStore,
   checkTree,
+  parseCheckArgs,
   readRecords,
+  report,
 } from "./check-test-topology.ts";
 import type { Suite } from "./test-topology/suite.ts";
 
@@ -347,5 +350,51 @@ describe("what the guard declines to fail on", () => {
       file: "packages/bakery/test/glaze.test.ts",
     };
     expect(checkStore([bakery], [record, record, record])).toEqual([]);
+  });
+});
+
+describe("running the check and saying what it found", () => {
+  it("runs the store half only when a run's records are named", () => {
+    expect(parseCheckArgs([], "/repo")).toEqual({ root: "/repo" });
+    expect(parseCheckArgs(["--records", "a.ndjson", "b.ndjson"], "/repo"))
+      .toEqual({ root: "/repo", records: ["a.ndjson", "b.ndjson"] });
+  });
+
+  it("says a tree it accounts for is accounted for", () => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const passed = report([], 20, {
+      out: (line) => out.push(line),
+      err: (line) => err.push(line),
+    });
+    expect(passed).toBe(true);
+    expect(out[0]).toContain("20 suites");
+    expect(err).toEqual([]);
+  });
+
+  it("separates what fails from what is only reported", () => {
+    // A surface nobody registered fails; a test that runs nowhere is
+    // reported, because registering one means deciding where it runs.
+    const out: string[] = [];
+    const err: string[] = [];
+    const passed = report(
+      [
+        { fails: false, message: "a.test.ts runs nowhere" },
+        { fails: true, message: "b.test.ts is claimed by no suite" },
+      ],
+      20,
+      { out: (line) => out.push(line), err: (line) => err.push(line) },
+    );
+    expect(passed).toBe(false);
+    expect(out).toEqual(["topology (reported): a.test.ts runs nowhere"]);
+    expect(err[0]).toBe("topology: b.test.ts is claimed by no suite");
+    expect(err[1]).toContain("1 test surface(s)");
+  });
+
+  it("accounts for this repository's own tree", async () => {
+    // The check the repository runs on itself, run the way it runs it.
+    const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+    const findings = await check({ root });
+    expect(findings.filter((finding) => finding.fails)).toEqual([]);
   });
 });

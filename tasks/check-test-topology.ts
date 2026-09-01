@@ -404,43 +404,84 @@ export async function readRecords(
   return records;
 }
 
-async function main(): Promise<void> {
-  const recordPaths: string[] = [];
+/** What the check was asked to do. */
+export interface CheckOptions {
+  /** The tree to walk. */
+  root: string;
+
+  /** Files holding a run's records, for the store half. */
+  records?: readonly string[];
+}
+
+/** Reads the command line into what the check should do. */
+export function parseCheckArgs(
+  args: readonly string[],
+  root: string,
+): CheckOptions {
+  const records: string[] = [];
   let reading = false;
-  for (const arg of Deno.args) {
+  for (const arg of args) {
     if (arg === "--records") {
       reading = true;
       continue;
     }
-    if (reading) recordPaths.push(arg);
+    if (reading) records.push(arg);
   }
-  const root = Deno.cwd();
-  const suites = await loadTopology(root);
-  const findings = checkTree(suites, await candidateSurfaces(root), {
-    fixtures: NOT_A_TEST_SURFACE,
-    unregistered: UNREGISTERED_SURFACES,
-  });
-  if (recordPaths.length > 0) {
-    findings.push(...checkStore(suites, await readRecords(recordPaths)));
+  return records.length === 0 ? { root } : { root, records };
+}
+
+/**
+ * Runs whichever halves the options ask for. The tree half always runs,
+ * because it needs nothing but the checkout; the store half runs when a
+ * run's records are named.
+ */
+export async function check(options: CheckOptions): Promise<Finding[]> {
+  const suites = await loadTopology(options.root);
+  const findings = checkTree(
+    suites,
+    await candidateSurfaces(options.root),
+    { fixtures: NOT_A_TEST_SURFACE, unregistered: UNREGISTERED_SURFACES },
+  );
+  if (options.records !== undefined) {
+    findings.push(...checkStore(suites, await readRecords(options.records)));
   }
+  return findings;
+}
+
+/** Prints what was found, and says whether anything failed. */
+export function report(
+  findings: readonly Finding[],
+  suites: number,
+  write: { out: (line: string) => void; err: (line: string) => void } = {
+    out: console.log,
+    err: console.error,
+  },
+): boolean {
   for (const finding of findings) {
-    console[finding.fails ? "error" : "log"](
-      `${
-        finding.fails ? "topology" : "topology (reported)"
-      }: ${finding.message}`,
-    );
+    const line = `${
+      finding.fails ? "topology" : "topology (reported)"
+    }: ${finding.message}`;
+    if (finding.fails) write.err(line);
+    else write.out(line);
   }
   const failures = findings.filter((finding) => finding.fails).length;
   if (failures === 0) {
-    console.log(
-      `Topology accounts for every test surface (${suites.length} suites).`,
+    write.out(
+      `Topology accounts for every test surface (${suites} suites).`,
     );
-    return;
+    return true;
   }
-  console.error(
+  write.err(
     `${failures} test surface(s) the topology does not account for.`,
   );
-  Deno.exit(1);
+  return false;
+}
+
+async function main(): Promise<void> {
+  const options = parseCheckArgs(Deno.args, Deno.cwd());
+  const findings = await check(options);
+  const suites = (await loadTopology(options.root)).length;
+  if (!report(findings, suites)) Deno.exit(1);
 }
 
 if (import.meta.main) {

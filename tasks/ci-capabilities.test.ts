@@ -196,6 +196,32 @@ describe("ci capabilities", () => {
     expect(closed).toEqual(["deno"]);
   });
 
+  it("runs a real command, and carries its output into the failure", async () => {
+    // The default runner, which is what a lane uses. Setup that
+    // half-worked is worse than setup that did not, so a command that
+    // fails throws with what it said rather than being read as success.
+    const repo = await Deno.makeTempDir({ prefix: "capability-git-" });
+    await new Deno.Command("git", { args: ["init", "-q"], cwd: repo }).output();
+    const opened = await openCapabilities(["git-history"], {
+      root: repo,
+      dryRun: false,
+      workDir: repo,
+    });
+    await opened.close();
+
+    // The same runner against a repository that is not one.
+    const empty = await Deno.makeTempDir({ prefix: "capability-nogit-" });
+    await expect(
+      openCapabilities(["git-history"], {
+        root: empty,
+        dryRun: false,
+        workDir: empty,
+      }),
+    ).rejects.toThrow("git rev-parse");
+    await Deno.remove(repo, { recursive: true });
+    await Deno.remove(empty, { recursive: true });
+  });
+
   it("reads the process a background launch detached", () => {
     expect(
       pidOfBackgroundLaunch(

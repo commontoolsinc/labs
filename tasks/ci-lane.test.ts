@@ -874,3 +874,43 @@ describe("what a lane records about itself", () => {
     expect(lines.join("\n")).toContain("past the");
   });
 });
+
+describe("the last corners of a lane's bookkeeping", () => {
+  it("puts two identities of one unit in one batch, and skips neither", () => {
+    const manifest = manifestOf([
+      {},
+      { test: { k: "unit", s: "bakery", n: "glaze > browns" } },
+    ]);
+    const bakery = suite({
+      id: "workspace-unit",
+      units: ["packages/bakery/glaze.test.ts"],
+    });
+    const batches = batchesOf(
+      [bakery],
+      manifest,
+      manifest.entries.map((entry) => ({
+        entry,
+        reason: "value" as const,
+        repeats: 1,
+      })),
+    );
+    expect(batches.length).toBe(1);
+    expect(batches[0]!.units).toEqual([{
+      unit: "packages/bakery/glaze.test.ts",
+      skip: [],
+    }]);
+  });
+
+  it("drops a selection whose suite the topology no longer has", () => {
+    // A manifest naming a suite this tree does not declare is a
+    // manifest written before the suite was renamed or removed.
+    const manifest = manifestOf([{ suite: "a-suite-that-left" }]);
+    expect(
+      batchesOf([], manifest, [{
+        entry: manifest.entries[0]!,
+        reason: "value",
+        repeats: 1,
+      }]),
+    ).toEqual([]);
+  });
+});
