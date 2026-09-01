@@ -317,14 +317,14 @@ only ever shows the current day's votes. The visit log is a different matter and
 does come across, at step 4: its vote snapshots are frozen records rather than
 live votes, and nothing addresses them by key.
 
-> **Why the copy writes to `$ARG` and not `cf cell set --input`.** A `cf cell set --input`
-> write validates the piece's whole input object, and this pattern's `viewer`
-> slot is a per-user allocation site rather than a plain value. Every field
-> fails on that slot rather than on the field being written, which bites any
-> lunch-poll piece, including one created seconds ago, and a nested path
-> (`users/0/name`) fails alongside a top-level one. A write addressed to the
-> argument document itself is not validated that way, which is what step 2
-> resolves and what the loop above uses.
+> **Why the copy writes to `$ARG` and not `cf cell set --input`.** A
+> `cf cell set --input` write validates the piece's whole input object, and this
+> pattern's `viewer` slot is a per-user allocation site rather than a plain
+> value. Every field fails on that slot rather than on the field being written,
+> which bites any lunch-poll piece, including one created seconds ago, and a
+> nested path (`users/0/name`) fails alongside a top-level one. A write
+> addressed to the argument document itself is not validated that way, which is
+> what step 2 resolves and what the loop above uses.
 
 > **Why the host seat is left behind.** The name-keyed predecessor has no
 > profile-cell host identity worth carrying. Leave the new seat empty: the first

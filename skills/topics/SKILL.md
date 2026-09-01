@@ -99,8 +99,7 @@ retained deliberately.
 
 `editComment` and `removeComment` name their target by REFERENCE, and a comment
 is not a piece: it has no fid to write into an inline JSON event, so these are
-reachable from a reader that holds the row, not from a bare `cf
-call`.
+reachable from a reader that holds the row, not from a bare `cf piece call`.
 `removeLink` is the exception and takes `url` for exactly that reason,
 retracting the most recently added link still present with that URL — so
 retracting twice retracts two rather than re-stamping one.
