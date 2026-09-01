@@ -26,10 +26,15 @@ const LOOKUPS = [
 ] as const;
 
 /**
- * The two states a lookup can be answered from, as the height a stack is
- * padded to before a case's own values go onto it.
+ * The two heights every question is asked at, as what a stack is padded to
+ * before a case's own values go onto it. Named for the height rather than for
+ * what answers there: which structure does is the one thing a test cannot
+ * see, and the point of asking twice is that it makes no difference.
  */
-const ARMS = [["scanning", 0], ["indexed", TALL]] as const;
+const ARMS = [
+  ["below the high water mark", 0],
+  ["above the high water mark", TALL],
+] as const;
 
 /** Distinct objects, as many as asked for. */
 function objects(count: number): object[] {
@@ -119,7 +124,7 @@ describe("IndexTrackingStack", () => {
       expect(() => stack.pop()).toThrow();
     });
 
-    it("returns the values it pops from an indexed stack", () => {
+    it("returns the values it pops from above the high water mark", () => {
       const held = objects(3);
       const stack = stackOf(TALL, held);
 
@@ -155,7 +160,7 @@ describe("IndexTrackingStack", () => {
       expect(stack.popElseUndefined()).toBeUndefined();
     });
 
-    it("maintains the index, given an indexed stack", () => {
+    it("leaves the right positions behind, above the high water mark", () => {
       const twice = {};
       const stack = stackOf(TALL, [twice, {}, twice]);
 
@@ -218,7 +223,7 @@ describe("IndexTrackingStack", () => {
       expect(stack.lastIndexOf(held[1]!)).toBe(1);
     });
 
-    it("maintains the index, given an indexed stack", () => {
+    it("leaves the right positions behind, above the high water mark", () => {
       const twice = {};
       const stack = stackOf(TALL, [twice, {}, twice]);
 
@@ -402,11 +407,12 @@ describe("IndexTrackingStack", () => {
     });
   }
 
-  describe("special values through an index that is already live", () => {
-    // Three different pieces of code key the index: the build sweeps a whole
-    // stack, `push()` keys one value onto a live index, and `pop()` keys one
-    // off. A suite that reaches only the build passes while either of the
-    // others is broken, so each gets its own group here.
+  describe("special values across the high water mark", () => {
+    // A value can reach the far side of the mark three ways -- pushed onto a
+    // stack already past it, popped off one, or already on the stack when it
+    // was passed -- and internally each is a different piece of code keying
+    // the same value. A suite that covers one passes while the others are
+    // broken, so each gets its own group here.
 
     /** A stack tall enough to hold an index, holding it, and holding a `0`. */
     function indexedStack() {
@@ -420,7 +426,7 @@ describe("IndexTrackingStack", () => {
     }
 
     describe("push()", () => {
-      it("keys a `NaN` pushed onto an already-indexed stack", () => {
+      it("finds a `NaN` pushed on past the high water mark", () => {
         const stack = indexedStack();
 
         stack.push(NaN);
@@ -429,7 +435,7 @@ describe("IndexTrackingStack", () => {
         expect(stack.lastIndexOf(NaN)).toBe(TALL + 1);
       });
 
-      it("keys a `-0` apart from a `0` the stack already holds", () => {
+      it("tells a `-0` pushed on past the mark from a `0` already held", () => {
         const stack = indexedStack();
 
         stack.push(-0);
@@ -464,9 +470,10 @@ describe("IndexTrackingStack", () => {
     });
 
     describe("indexOf()", () => {
-      // The build runs here, a lookup being what triggers one, so these are
-      // the cases where a value was already on the stack when it was keyed.
-      it("sweeps a `-0` and a `0` into separate entries as it builds", () => {
+      // A lookup is what reckons with everything already on the stack, so
+      // these are the cases where the values were there before the mark was
+      // passed.
+      it("tells a `-0` from a `0` held since before the mark was passed", () => {
         const stack = new IndexTrackingStack();
 
         stack.push(0);
@@ -478,7 +485,7 @@ describe("IndexTrackingStack", () => {
         expect(stack.indexOf(-0)).toBe(1);
       });
 
-      it("sweeps a `NaN` into its own entry as it builds", () => {
+      it("finds a `NaN` held since before the mark was passed", () => {
         const stack = new IndexTrackingStack();
 
         stack.push(NaN);
@@ -492,8 +499,8 @@ describe("IndexTrackingStack", () => {
     });
   });
 
-  describe("crossing the threshold", () => {
-    it("answers the same after coming back down as a stack that never went up", () => {
+  describe("crossing the water marks", () => {
+    it("behaves after climbing past the marks and back as one that never did", () => {
       // The index outlives the height that built it, so from here on the two
       // implementations are being compared directly on the same question.
       const held = objects(4);
@@ -515,7 +522,7 @@ describe("IndexTrackingStack", () => {
       expect(climbed.indexOf({})).toBe(flat.indexOf({}));
     });
 
-    it("answers from the scan again once the index has been dropped", () => {
+    it("reports the same positions after falling below the low water mark", () => {
       // Coming back down past the low mark drops the index, so what is used
       // afterwards is the scan -- over a stack that a `Map` was tracking a
       // moment ago, and has to have stopped tracking cleanly.
@@ -534,7 +541,7 @@ describe("IndexTrackingStack", () => {
       expect(stack.indexOf({})).toBe(-1);
     });
 
-    it("builds the index again when it grows back past the threshold", () => {
+    it("reports the same positions after a second climb past the high mark", () => {
       // A rebuild from a stack that has held an index before is a different
       // path from the first build, and it has to arrive at the same answers.
       const twice = {};
@@ -552,7 +559,7 @@ describe("IndexTrackingStack", () => {
       expect(stack.lastIndexOf(twice)).toBe(1);
     });
 
-    it("carries both positions of a value already held twice into the index", () => {
+    it("reports both positions of a value held twice since before the climb", () => {
       // The index is built by grouping the stack as it stands, so a value
       // already holding two positions is the case where that grouping has to
       // produce a pair rather than overwrite.
