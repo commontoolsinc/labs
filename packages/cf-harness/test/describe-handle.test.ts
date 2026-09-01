@@ -7,7 +7,10 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { FabricValue } from "@commonfabric/data-model";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
+import type { URI } from "@commonfabric/memory/interface";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -41,6 +44,20 @@ import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import type { HarnessToolContext } from "../src/tools/types.ts";
 
 const signer = await Identity.fromPassphrase("cf-harness describe-handle");
+
+/**
+ * The schema the label fixture's CFC metadata names. Stored metadata carries
+ * a schema reference the commit boundary verifies like any other, so a
+ * fixture that seeds label state installs this document beside it.
+ */
+const LABEL_SEED_SCHEMA = {
+  type: "object",
+  title: "cf-harness-describe-handle-label-seed",
+} as const;
+
+const LABEL_SEED_SCHEMA_HASH: string = internSchemaAsTaggedHashString(
+  LABEL_SEED_SCHEMA,
+);
 
 const HASH_A = "A".repeat(43);
 const REF_A = `/of:fid1:${HASH_A}/summary`;
@@ -653,6 +670,106 @@ describe("describe_handle", () => {
       const reply = JSON.stringify(output);
       expect(reply).not.toContain("Spending Overview");
       expect(reply).not.toContain("groceries");
+    });
+
+    /**
+     * Seeds a document carrying the stored CFC labels `labels`, and returns a
+     * reference to it. The metadata names a schema document the commit
+     * boundary can verify, which is installed in the same transaction — a
+     * seeded label with an unbacked schema reference is refused like any
+     * other.
+     */
+    const seedLabelledCell = async (
+      labels: { confidentiality: unknown[]; integrity: unknown[] },
+    ): Promise<string> => {
+      const space = session.pieces.getSpace();
+      const seed = runtime.edit();
+      const cell = runtime.getCell(
+        space,
+        "describe-handle-labels",
+        undefined,
+        seed,
+      );
+      const id = cell.getAsNormalizedFullLink().id;
+      seed.writeOrThrow({
+        space,
+        scope: "space",
+        id: `cid:${LABEL_SEED_SCHEMA_HASH}` as URI,
+        path: [],
+      }, { value: LABEL_SEED_SCHEMA } as FabricValue);
+      seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+        value: { note: "a value nothing here reads" },
+        cfc: {
+          version: 1,
+          schemaHash: LABEL_SEED_SCHEMA_HASH,
+          labelMap: {
+            version: 1,
+            entries: [{ path: [], label: labels }],
+          },
+        },
+      } as unknown as FabricValue);
+      expect((await seed.commit()).ok).toBeDefined();
+      return `/${id}`;
+    };
+
+    it("discloses the atom types of a labelled cell, and keeps a disjunction a disjunction", async () => {
+      // What a handle demands of whoever holds it is the other half of what a
+      // handle is, and it is not on the schema: a cell states its labels in
+      // its own metadata. A disjunctive clause is one requirement satisfiable
+      // several ways, so it stays one entry naming its alternatives — listing
+      // them side by side would report a weaker requirement as a stronger one.
+      const ref = await seedLabelledCell({
+        confidentiality: [
+          "https://commonfabric.org/cfc/atom/Space",
+          {
+            anyOf: [
+              {
+                type: "https://commonfabric.org/cfc/atom/Resource",
+                class: "operator-chosen-class",
+                subject: "operator-chosen-subject",
+              },
+              "https://commonfabric.org/cfc/atom/Builtin",
+            ],
+          },
+        ],
+        integrity: [
+          {
+            type: "https://commonfabric.org/cfc/atom/ExternalIngest",
+            source: "operator-chosen-source",
+          },
+        ],
+      });
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable("run-describe"),
+        ref,
+      );
+
+      const output = await describeHandleTool.invoke(
+        contextWith(minted.table, session),
+        { token: minted.token },
+      );
+
+      const label = output.labels?.find((entry) => entry.path === undefined);
+      expect(label?.integrity).toEqual([
+        "https://commonfabric.org/cfc/atom/ExternalIngest",
+      ]);
+      expect(label?.confidentiality).toContainEqual([
+        "https://commonfabric.org/cfc/atom/Space",
+      ]);
+      // The clause's alternatives arrive in the runtime's canonical order,
+      // which is not the order they were written in; what matters is that the
+      // two stayed one clause.
+      expect(label?.confidentiality.map((clause) => [...clause].sort()))
+        .toContainEqual([
+          "https://commonfabric.org/cfc/atom/Builtin",
+          "https://commonfabric.org/cfc/atom/Resource",
+        ]);
+      // An atom's other fields say what a label was computed FROM, which is
+      // the thing a handle exists to withhold.
+      const reply = JSON.stringify(output);
+      expect(reply).not.toContain("operator-chosen-class");
+      expect(reply).not.toContain("operator-chosen-subject");
+      expect(reply).not.toContain("operator-chosen-source");
     });
 
     it("answers what the space says about a cell's labels, so unlabelled and unread are different answers", async () => {

@@ -1088,6 +1088,54 @@ describe("console/server", () => {
         "each input cell needs a string name and ref",
       );
     });
+
+    it("answers 400 for input cells that are not a list at all", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: { itinerary: `/${CELL_ID}/days` },
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe("inputCells must be an array");
+    });
+
+    it("answers 400 for an input cell that is not an object", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [`itinerary=/${CELL_ID}/days`],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "each input cell must be an object",
+      );
+    });
+
+    it("answers 400 for a name the request uses twice", async () => {
+      // Two references under one name is a request that has not said which
+      // cell the model's `itinerary` is.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [
+          { name: "itinerary", ref: `/${CELL_ID}/days` },
+          { name: "itinerary", ref: `/${CELL_ID}/nights` },
+        ],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "inputCells names `itinerary` twice",
+      );
+    });
+
+    it("starts a task that names no input cells at all", async () => {
+      const started = await startTask({
+        text: "track my books",
+        inputCells: null,
+      });
+
+      expect(started.turnId).toBeDefined();
+    });
   });
 
   describe("GET /api/events", () => {

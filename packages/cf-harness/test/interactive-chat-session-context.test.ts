@@ -146,6 +146,45 @@ describe("interactive chat session context", () => {
     expect(announced?.content).not.toContain("/of:fid1:x/days");
   });
 
+  it("runs the turn when its space will not hand over its grants", async () => {
+    // A grant is an entitlement the run did not ask for, so a session that
+    // will not connect still answers the request — its tools surface the same
+    // failure if the turn reaches for one.
+    const seen: HarnessTranscriptMessage[][] = [];
+    const engine = stubEngine({ inputCells: [] });
+    const refusing = {
+      ...engine,
+      config: engine.config,
+      fabricSessionAvailable: true,
+      establishWellKnownGrants: () =>
+        Promise.reject(new Error("no route to the fabric")),
+      establishInputCells: () => Promise.resolve([]),
+    } as unknown as CfHarnessEngine;
+    const service = new HarnessInteractiveChatService({
+      basePromptLoopOptions: { engine: refusing },
+      createPromptLoop: recordingLoop(seen),
+    });
+    await service.handleRequest({
+      type: HARNESS_CHAT_REQUEST_TYPE,
+      protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+      requestId: "req-session",
+      method: "start_session",
+      params: {
+        sessionId: "session-1",
+        workspace: { hostPath: "/workspace" },
+        model: "gpt-test",
+      },
+    });
+
+    await runTurn(service, "turn-1", "what is in this space?");
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].at(-1)?.content).toBe("what is in this space?");
+    expect(
+      seen[0].some((message) => message.content.includes("cfh:a:grant")),
+    ).toBe(false);
+  });
+
   it("names cells per turn, so a following turn carries only its own", async () => {
     const options: (readonly HarnessInputCellSpec[] | undefined)[] = [];
     const service = new HarnessInteractiveChatService({
