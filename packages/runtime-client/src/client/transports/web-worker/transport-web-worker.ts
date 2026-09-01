@@ -5,6 +5,7 @@ import {
 import { defer } from "@commonfabric/utils/defer";
 import { isDeno } from "@commonfabric/utils/env";
 import {
+  ClientTransportNotificationType,
   ErrorNotification,
   IPCClientMessage,
   IPCClientNotification,
@@ -69,6 +70,29 @@ export class WebWorkerRuntimeTransport
     // connection without passing through one of those, of which
     // `PageCreateRequest.argument` is the field to know about.
     this.#worker.postMessage(realmFromFabricValue(data));
+  }
+
+  /**
+   * Hands the worker a duplex for a further document to reach the runtime
+   * over, and gives up this page's end of it.
+   *
+   * Only the page holding this transport can do so: it spawned the worker, and
+   * who else may speak to the runtime is its decision. What the far end of
+   * `port` does next is send an `Attach` asserting the security context it
+   * believes the runtime runs under, which the runtime refuses if it is not
+   * its own.
+   *
+   * The port travels the transfer list rather than the message beside it -- a
+   * port is no `FabricValue` and has no encoding -- and is neutered here by
+   * the transfer, so this page cannot go on speaking over it.
+   */
+  attachClientPort(port: MessagePort): void {
+    this.#worker.postMessage(
+      realmFromFabricValue({
+        type: ClientTransportNotificationType.AttachPort,
+      }),
+      [port],
+    );
   }
 
   /** @inheritDoc */

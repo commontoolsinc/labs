@@ -66,11 +66,17 @@ import {
   type PieceSourceView,
   type PieceUpdateSourceResponse,
   RequestType,
+  type RuntimeSecurityContext,
   type SpaceAclCapability,
   type SpaceAclView,
   TelemetryNotification,
   type UploadBlobResponse,
 } from "./protocol/mod.ts";
+import { assertNoKeyMaterial } from "./shared/key-material.ts";
+import {
+  normalizeOrigin,
+  normalizeSpaceHostMap,
+} from "./shared/security-context.ts";
 import { cellRefToInstanceId } from "./shared/utils.ts";
 
 export interface RuntimeClientOptions
@@ -78,6 +84,35 @@ export interface RuntimeClientOptions
   apiUrl: URL;
   identity: Identity;
   spaceIdentity?: Identity;
+}
+
+/**
+ * What a client needs to join a runtime someone else stood up.
+ *
+ * Its own type rather than {@link RuntimeClientOptions} because of one field:
+ * `identity` is a DID here, never an `Identity`. An attaching client states
+ * which principal the runtime acts as and supplies no signer, so a document
+ * holding one of these structurally cannot hand a key across -- there is no
+ * key in it to hand. `RuntimeClientOptions` keeps the `Identity`, and is what
+ * initialization takes.
+ *
+ * The rest is the security posture this client asserts. Nothing here is
+ * declared to the runtime: the runtime is running under a posture of its own,
+ * and an assertion that differs anywhere is refused.
+ */
+export interface RuntimeAttachOptions extends
+  Omit<
+    RuntimeSecurityContext,
+    "apiUrl" | "spaceHostMap" | "identity"
+  > {
+  /** The backend this client believes the runtime reads from. */
+  apiUrl: URL;
+
+  /** The per-space hosts this client believes the runtime resolves against. */
+  spaceHostMap?: Record<string, string>;
+
+  /** The principal this client believes the runtime acts as. */
+  identity: DID;
 }
 
 export type RuntimeClientEvents = {
@@ -89,7 +124,51 @@ export type RuntimeClientEvents = {
   eventneedsattention: [EventAttentionNotice];
 };
 
+/**
+ * The same posture, in the form a client that joins a runtime states it.
+ *
+ * Written out field by field rather than spread, because what is dropped is
+ * the point: the acting principal becomes the DID it derives to, and both
+ * `Identity` values -- the signer and the space identity -- are left behind.
+ * A client that attaches asserts which principal the runtime acts as and
+ * supplies no key, and this is where a page's signer stops.
+ */
+export function attachOptionsFrom(
+  options: RuntimeClientOptions,
+): RuntimeAttachOptions {
+  return {
+    apiUrl: options.apiUrl,
+    spaceHostMap: options.spaceHostMap,
+    identity: options.identity.did(),
+    spaceDid: options.spaceDid,
+    experimental: options.experimental,
+    cfcEnforcementMode: options.cfcEnforcementMode,
+    cfcFlowLabels: options.cfcFlowLabels,
+    renderDeclassificationPolicy: options.renderDeclassificationPolicy,
+    renderConfidentialityCeiling: options.renderConfidentialityCeiling,
+    trustSnapshot: options.trustSnapshot,
+  };
+}
+
 export const $conn = Symbol("$request");
+
+/**
+ * Refuses a render-declassification policy that names no known posture.
+ *
+ * It is a security knob, so a host's own config error surfaces here, early and
+ * loudly. The worker side additionally fails CLOSED -- an unknown value there
+ * becomes `deny` -- for peers that do not come through this entry point.
+ *
+ * @throws If `policy` is present and is neither `allow` nor `deny`.
+ */
+function assertRenderDeclassificationPolicy(policy: unknown): void {
+  if (policy === undefined || policy === "allow" || policy === "deny") return;
+  throw new Error(
+    `Invalid renderDeclassificationPolicy: ${
+      JSON.stringify(policy)
+    } (expected "allow" or "deny")`,
+  );
+}
 
 /**
  * RuntimeClient provides a main-thread interface to a Runtime running elsewhere.
@@ -106,11 +185,11 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   private constructor(
     conn: InitializedRuntimeConnection,
-    _options: RuntimeClientOptions,
+    principal: DID | undefined,
   ) {
     super();
     this.#conn = conn;
-    this.#principal = _options.identity?.did();
+    this.#principal = principal;
     this.#conn.on("console", this.#onConsole);
     this.#conn.on("navigaterequest", this.#onNavigateRequest);
     this.#conn.on("error", this.#onError);
@@ -272,25 +351,53 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return this.#conn.signal;
   }
 
+  /**
+   * Joins a runtime a first client already stood up, over a transport already
+   * connected to that runtime's worker.
+   *
+   * What `options` says of the runtime's security posture is asserted rather
+   * than declared: the runtime is running under a posture of its own, and an
+   * attach whose assertion differs anywhere is refused. Everything else in
+   * `options` describes this client, and reaches nothing across the wire.
+   *
+   * @throws If the runtime refuses the attach, or if there is no runtime to
+   *   attach to.
+   */
+  static async attach(
+    transport: RuntimeTransport,
+    options: RuntimeAttachOptions,
+  ): Promise<RuntimeClient> {
+    assertRenderDeclassificationPolicy(options.renderDeclassificationPolicy);
+    const context: RuntimeSecurityContext = {
+      identity: options.identity,
+      // Normalized as the runtime normalizes what it was initialized with, so
+      // that agreeing on a backend does not depend on agreeing on how to spell
+      // one.
+      apiUrl: normalizeOrigin(options.apiUrl.toString()),
+      spaceHostMap: normalizeSpaceHostMap(options.spaceHostMap),
+      spaceDid: options.spaceDid,
+      experimental: options.experimental,
+      cfcEnforcementMode: options.cfcEnforcementMode,
+      cfcFlowLabels: options.cfcFlowLabels,
+      renderDeclassificationPolicy: options.renderDeclassificationPolicy,
+      renderConfidentialityCeiling: options.renderConfidentialityCeiling,
+      trustSnapshot: options.trustSnapshot,
+    };
+    // The far side refuses this too, and refusing before the send is what
+    // matters for a shell: `key-material.ts` records why, and the short of it
+    // is that a `MessagePort` between two WKWebViews throws `DataCloneError`
+    // on a key rather than carrying it. A frame refused here never reaches a
+    // port, so that failure has nothing to happen to.
+    assertNoKeyMaterial(context);
+    const attached = await (new RuntimeConnection(transport)).attach(context);
+    return new RuntimeClient(attached, options.identity);
+  }
+
   static async initialize(
     transport: RuntimeTransport,
     options: RuntimeClientOptions,
   ): Promise<RuntimeClient> {
-    // renderDeclassificationPolicy is a security knob: reject unknown values
-    // loudly here, where the host's own config error can surface early. The
-    // worker side additionally fails CLOSED (treats unknown as "deny") for
-    // peers that don't go through this entry point.
-    const renderPolicy = options.renderDeclassificationPolicy;
-    if (
-      renderPolicy !== undefined && renderPolicy !== "allow" &&
-      renderPolicy !== "deny"
-    ) {
-      throw new Error(
-        `Invalid renderDeclassificationPolicy: ${
-          JSON.stringify(renderPolicy)
-        } (expected "allow" or "deny")`,
-      );
-    }
+    assertRenderDeclassificationPolicy(options.renderDeclassificationPolicy);
     const initialized = await (new RuntimeConnection(transport)).initialize({
       apiUrl: options.apiUrl.toString(),
       spaceHostMap: options.spaceHostMap,
@@ -308,7 +415,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       patternCoverage: options.patternCoverage,
       concurrentWatchRefresh: options.concurrentWatchRefresh,
     });
-    return new RuntimeClient(initialized, options);
+    return new RuntimeClient(initialized, options.identity?.did());
   }
 
   getCellFromRef<T>(

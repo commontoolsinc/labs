@@ -11,7 +11,11 @@ import {
   defaultRenderConfidentialityCeiling,
   RuntimeInternals,
 } from "@commonfabric/lib-shell";
-import { TransportNotificationType } from "@commonfabric/runtime-client";
+import {
+  EventEmitter,
+  type RuntimeTransport,
+  TransportNotificationType,
+} from "@commonfabric/runtime-client";
 
 type MockRuntimeClientEvents = {
   console: [unknown];
@@ -934,6 +938,122 @@ describe("RuntimeInternals", () => {
           { pageId: "piece-1", runIt: true, space: otherDid },
           { pageId: "piece-1", runIt: true, space: otherDid },
         ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+  });
+
+  describe("an embedder-supplied transport", () => {
+    // A shell page normally boots a dedicated worker of its own. A page whose
+    // runtime is already running in another document's worker is handed a
+    // connection instead, and `attach` is what says which of the two this
+    // page is: the client that stands a runtime up, or one joining the
+    // runtime already there.
+
+    type SentRequest = { type: string; data?: Record<string, unknown> };
+
+    /**
+     * A transport that answers every request with a bare ack, recording what
+     * was asked. It stands for a connection already made, which is what an
+     * embedder supplies.
+     */
+    class StubTransport extends EventEmitter<{ message: [unknown] }> {
+      readonly sent: SentRequest[] = [];
+      disposals = 0;
+
+      send(message: unknown): void {
+        // A transport is handed the envelope itself; encoding it is the
+        // business of the transports that cross a realm boundary.
+        const envelope = message as { msgId?: number; data?: SentRequest };
+        if (envelope.data) this.sent.push(envelope.data);
+        if (typeof envelope.msgId !== "number") return;
+        queueMicrotask(() => this.emit("message", { msgId: envelope.msgId }));
+      }
+
+      dispose(): Promise<void> {
+        this.disposals += 1;
+        return Promise.resolve();
+      }
+    }
+
+    /** Fails the test if anything reaches for a dedicated worker. */
+    async function withNoWorkerConstructible<T>(
+      run: () => Promise<T>,
+    ): Promise<T> {
+      const OriginalWorker = (globalThis as { Worker: unknown }).Worker;
+      (globalThis as { Worker: unknown }).Worker = class {
+        constructor() {
+          throw new Error("a supplied transport must spawn no worker");
+        }
+      };
+      try {
+        return await run();
+      } finally {
+        (globalThis as { Worker: unknown }).Worker = OriginalWorker;
+      }
+    }
+
+    it("attaches over the supplied transport, spawning no worker", async () => {
+      const identity = await Identity.generate({ implementation: "noble" });
+      const transport = new StubTransport();
+      const runtime = await withNoWorkerConstructible(() =>
+        RuntimeInternals.create({
+          identity,
+          apiUrl: new URL("http://shell.test/"),
+          transport: transport as unknown as RuntimeTransport,
+          attach: true,
+        })
+      );
+      try {
+        expect(transport.sent).toHaveLength(1);
+        expect(transport.sent[0].type).toBe("attach");
+        // The acting principal crosses as the DID it derives to. An attach
+        // asserts which principal the runtime acts as; it supplies no signer.
+        expect(transport.sent[0].data?.identity).toBe(identity.did());
+        expect(transport.sent[0].data?.spaceDid).toBe(identity.did());
+        expect(transport.sent[0].data?.cfcEnforcementMode).toBe(
+          "enforce-explicit",
+        );
+        // The backend is posture, not routing: a document believing it reads
+        // from somewhere else is as wrong about what it joined as one
+        // believing another enforcement mode.
+        expect(transport.sent[0].data?.apiUrl).toBe("http://shell.test/");
+        // And no signer went with it. The initialize frame carries the key
+        // pair; an attach carries a DID and nothing else of the identity.
+        expect(transport.sent[0].data?.spaceIdentity).toBeUndefined();
+        expect(typeof transport.sent[0].data?.identity).toBe("string");
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("refuses to attach with no transport to attach over", async () => {
+      const identity = await Identity.generate({ implementation: "noble" });
+      await expect(
+        withNoWorkerConstructible(() =>
+          RuntimeInternals.create({
+            identity,
+            apiUrl: new URL("http://shell.test/"),
+            attach: true,
+          })
+        ),
+      ).rejects.toThrow("`attach` needs a `transport`");
+    });
+
+    it("initializes over the supplied transport when not attaching", async () => {
+      const identity = await Identity.generate({ implementation: "noble" });
+      const transport = new StubTransport();
+      const runtime = await withNoWorkerConstructible(() =>
+        RuntimeInternals.create({
+          identity,
+          apiUrl: new URL("http://shell.test/"),
+          transport: transport as unknown as RuntimeTransport,
+        })
+      );
+      try {
+        expect(transport.sent).toHaveLength(1);
+        expect(transport.sent[0].type).toBe("initialize");
       } finally {
         await runtime.dispose();
       }

@@ -84,7 +84,21 @@ export enum RequestType {
   Initialize = "initialize",
 
   /**
-   * Tears the worker's runtime down. Requests arriving after it are acked in
+   * Joins a client to the runtime a first client already stood up, over a
+   * duplex of its own. It carries the {@link RuntimeSecurityContext} the
+   * joining client believes it is joining, and is refused when that disagrees
+   * with the one the runtime runs under -- a runtime acts as one principal
+   * under one enforcement configuration, and an attach never merges a second.
+   * Refused too before any {@link RequestType.Initialize}: an attach joins a
+   * runtime rather than standing one up.
+   */
+  Attach = "attach",
+
+  /**
+   * Tears down what the requesting client owns. From the client that
+   * initialized the runtime that is the runtime itself; from an attached one
+   * it is that client's own subscriptions and mounts, the runtime and every
+   * other client's work left running. Requests arriving after it are acked in
    * silence rather than refused, teardown running concurrently with whatever
    * the client had in flight.
    */
@@ -510,6 +524,34 @@ export enum TransportNotificationType {
 }
 
 /**
+ * Main-thread-to-worker signals the worker entry acts on itself, rather than
+ * handing to the runtime. The mirror of {@link TransportNotificationType}, and
+ * its own enum for the same reason: this is the channel's traffic, and no
+ * `RuntimeProcessor` ever sees it.
+ */
+export enum ClientTransportNotificationType {
+  /**
+   * Hands the worker one end of a duplex a further client will speak over;
+   * see {@link AttachPortNotification}.
+   */
+  AttachPort = "client:attach-port",
+}
+
+/**
+ * Gives the worker a duplex for a new client. The port itself rides the
+ * `postMessage` transfer list rather than this message -- a port is not a
+ * `FabricValue` and has no encoding -- so what crosses here is the marker that
+ * says what the transferred port is for.
+ *
+ * Accepted only from the client that initialized the runtime, which is the one
+ * that owns the worker. A client that arrived over a port does not get to
+ * enlarge the family it joined.
+ */
+export type AttachPortNotification = {
+  type: ClientTransportNotificationType.AttachPort;
+};
+
+/**
  * A request together with the id its answer will carry. The only shape the
  * client sends that expects a reply -- a notification carries neither.
  */
@@ -820,6 +862,64 @@ export type InitializeRequest = BaseRequest & {
    * What the runtime is stood up from.
    */
   data: InitializationData;
+};
+
+/**
+ * The part of an {@link InitializationData} a runtime's security posture is
+ * made of: whom it acts as, and under which enforcement configuration. One
+ * runtime carries exactly one of these, fixed by the client that initialized
+ * it, and every client attached to that runtime shares it.
+ *
+ * `identity` is the acting principal's DID rather than the key pair
+ * {@link InitializationData} carries, because an attach states which principal
+ * it believes the runtime acts as and never supplies a signer of its own.
+ * Every other field is the initialization field of the same name, so what an
+ * attach asserts and what initialization declared compare directly.
+ *
+ * `apiUrl` and `spaceHostMap` are here as posture rather than as routing: a
+ * document believing it reads from a different backend than the runtime does
+ * is as wrong about what it is joined to as one believing a different
+ * enforcement mode, and the reads would silently go to the runtime's hosts.
+ * Both are normalized before they are stored or asserted, so two spellings of
+ * one origin are one posture.
+ *
+ * **Every field here holds plain JSON-shaped values only.** They are compared
+ * with `deepEqual`, which compares a class instance by its enumerable own
+ * properties -- so a `FabricValue`-carrying field would compare EQUAL between
+ * two different values whose state lives in private fields, and an attach
+ * asserting a different one would be accepted. A field that must carry such a
+ * value needs `valueEqual` from `data-model` and a deliberate decision about
+ * what equality means for it; adding one without that is a false accept, not
+ * a missing check.
+ */
+export type RuntimeSecurityContext =
+  & Pick<
+    InitializationData,
+    | "apiUrl"
+    | "spaceHostMap"
+    | "spaceDid"
+    | "experimental"
+    | "cfcEnforcementMode"
+    | "cfcFlowLabels"
+    | "renderDeclassificationPolicy"
+    | "renderConfidentialityCeiling"
+    | "trustSnapshot"
+  >
+  & {
+    /** The principal the runtime acts as. */
+    identity: DID;
+  };
+
+/**
+ * The {@link RequestType.Attach} request. Its `data` is the context the
+ * joining client asserts, which the worker compares field for field against
+ * the running runtime's and refuses on any disagreement.
+ */
+export type AttachRequest = BaseRequest & {
+  type: RequestType.Attach;
+
+  /** The security context this client believes it is joining. */
+  data: RuntimeSecurityContext;
 };
 
 /** The {@link RequestType.Dispose} request, which carries no payload. */
@@ -2676,6 +2776,7 @@ export type VDomMountResponse = {
  */
 export type IPCClientRequest =
   | InitializeRequest
+  | AttachRequest
   | DisposeRequest
   | CellGetRequest
   | CellPullRequest
@@ -3251,6 +3352,10 @@ export type Commands = {
   // Runtime requests
   [RequestType.Initialize]: {
     request: InitializeRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.Attach]: {
+    request: AttachRequest;
     response: EmptyResponse;
   };
   [RequestType.Dispose]: {

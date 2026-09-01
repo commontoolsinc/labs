@@ -1,5 +1,9 @@
 import { CompilerStackLoadError } from "@commonfabric/runner";
-import { NotificationType, RuntimeErrorCode } from "@/protocol/mod.ts";
+import {
+  type ErrorNotification,
+  NotificationType,
+  RuntimeErrorCode,
+} from "@/protocol/mod.ts";
 import { postToClient } from "./post-to-client.ts";
 
 function runtimeErrorCode(error: Error): RuntimeErrorCode | undefined {
@@ -8,15 +12,24 @@ function runtimeErrorCode(error: Error): RuntimeErrorCode | undefined {
     : undefined;
 }
 
-/** Post an asynchronous renderer error to the shell. */
-export function postRuntimeError(error: Error): void {
+/**
+ * The report an asynchronous renderer error crosses as. Built rather than
+ * posted, so that a caller holding one client of several sends it to that
+ * client instead of to the worker's own global.
+ */
+export function runtimeErrorPost(error: Error): ErrorNotification {
   const code = runtimeErrorCode(error);
-  postToClient({
+  return {
     type: NotificationType.ErrorReport,
     message: error.message,
     ...(code ? { code } : {}),
     stackTrace: error.stack,
-  });
+  };
+}
+
+/** Post an asynchronous renderer error to the shell. */
+export function postRuntimeError(error: Error): void {
+  postToClient(runtimeErrorPost(error));
 }
 
 type ContextualRuntimeError = Error & {

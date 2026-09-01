@@ -4,7 +4,11 @@ import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FabricBytes,
+  FabricKeyPair,
+} from "@commonfabric/data-model/fabric-primitives";
+import type { DID } from "@commonfabric/identity";
 import { toValuePath } from "@commonfabric/memory/v2";
 import { getLogger } from "@commonfabric/utils/logger";
 import { RuntimeConnection } from "@/client/connection.ts";
@@ -17,6 +21,7 @@ import {
   type OperationUpdateNotification,
   RequestType,
   RuntimeErrorCode,
+  type RuntimeSecurityContext,
 } from "@/protocol/mod.ts";
 import type {
   RuntimeTransport,
@@ -667,5 +672,46 @@ describe("connection", () => {
       expect(captured.data.body.slice()).toEqual(new Uint8Array([1, 2, 3]));
       expect(body.slice()).toEqual(new Uint8Array([1, 2, 3]));
     });
+  });
+});
+
+describe("RuntimeConnection.attach()", () => {
+  // The choke point: the last thing before a frame reaches a transport. A
+  // caller holding a `RuntimeConnection` directly does not pass through
+  // `RuntimeClient.attach`, so the guarantee that no key material crosses a
+  // port has to live here rather than only there.
+
+  const context: RuntimeSecurityContext = {
+    identity: "did:key:z6Mk-connection-attach" as DID,
+    apiUrl: "http://connection.test/",
+    spaceDid: "did:key:z6Mk-connection-attach" as DID,
+  };
+
+  it("sends the asserted context and marks the connection usable", async () => {
+    const transport = new FakeTransport();
+    const conn = new RuntimeConnection(transport);
+    await conn.attach(context);
+    expect(transport.sent).toHaveLength(1);
+    expect(transport.sent[0]).toMatchObject({
+      data: { type: RequestType.Attach, data: context },
+    });
+  });
+
+  it("refuses a context holding key material, sending nothing", async () => {
+    const transport = new FakeTransport();
+    const conn = new RuntimeConnection(transport);
+    const keyPair = new FabricKeyPair(
+      "Ed25519",
+      new Uint8Array(32),
+      new Uint8Array(32),
+    );
+    await expect(conn.attach({
+      ...context,
+      trustSnapshot: {
+        id: "principal",
+        signer: keyPair,
+      } as unknown as RuntimeSecurityContext["trustSnapshot"],
+    })).rejects.toThrow("no key material");
+    expect(transport.sent).toEqual([]);
   });
 });

@@ -30,11 +30,13 @@ import {
   OperationUpdateNotification,
   PendingWritesNotification,
   RequestType,
+  type RuntimeSecurityContext,
   SerializedDomEvent,
   TelemetryNotification,
   VDomBatchNotification,
   VDomMountResponse,
 } from "@/protocol/mod.ts";
+import { assertNoKeyMaterial } from "@/shared/key-material.ts";
 import { RuntimeTransport } from "./transport.ts";
 import { EventEmitter } from "./emitter.ts";
 import { $onCellUpdate, CellHandle } from "@/cell-handle.ts";
@@ -237,12 +239,42 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     return this as InitializedRuntimeConnection;
   }
 
+  /**
+   * Joins the runtime already running behind this transport, asserting the
+   * security context it is believed to run under.
+   *
+   * @throws If the context holds key material, if the runtime refuses the
+   *   assertion, or if no runtime is running behind the transport to join.
+   */
+  async attach(
+    context: RuntimeSecurityContext,
+  ): Promise<InitializedRuntimeConnection> {
+    // The last thing before the frame reaches a transport, which is why the
+    // invariant is enforced here and not only in `RuntimeClient.attach`: this
+    // class is exported, so a caller can hold one directly, and a context
+    // read through getters between that check and this send is not the one
+    // that was checked. `key-material.ts` states what is being kept out and
+    // why the platform is not left to decide it.
+    assertNoKeyMaterial(context);
+    await this.request<RequestType.Attach>({
+      type: RequestType.Attach,
+      data: context,
+    });
+    this.#initialized = true;
+    return this as InitializedRuntimeConnection;
+  }
+
   request<
     T extends keyof Commands,
   >(
     data: CommandRequest<T>,
   ): Promise<CommandResponse<T>> {
-    if (!this.#initialized && data.type !== RequestType.Initialize) {
+    // Initialize and Attach are the two requests that make a connection
+    // usable, so each is the one thing an unusable connection may send.
+    if (
+      !this.#initialized && data.type !== RequestType.Initialize &&
+      data.type !== RequestType.Attach
+    ) {
       throw new Error("RuntimeConnection is uninitialized.");
     }
     const signal = this.#lifetime.signal;
