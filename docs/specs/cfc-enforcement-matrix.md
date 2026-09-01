@@ -307,9 +307,12 @@ The strict-only delta is:
   passes and the store's promise becomes the audience of what it holds.
 
   Declaring is what makes the route sound where an exemption would not be.
-  The atoms persist as store policy, so readers of the substrate consume
-  them, and go on consuming them after an overwrite clears the derived stamp
-  that carried them. The cost is the ratchet §8.12.2 asks for: a substrate
+  The declared clauses persist as store policy, so readers of the substrate
+  consume them, and go on consuming them after an overwrite clears the
+  derived stamp. They are the clauses the ceiling did not already cover
+  rather than the whole join: a clause the residency alternative satisfies
+  lands in the stamp and not in the declaration, because the store already
+  answers for it. The cost is the ratchet §8.12.2 asks for: a substrate
   document that once held data derived from a labeled read keeps that clause
   after the read stops. The direction is over-taint.
 

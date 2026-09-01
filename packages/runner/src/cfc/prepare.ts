@@ -5836,9 +5836,9 @@ export const prepareBoundaryCommit = (
     // observation feeds it; its atoms commit like any others if they later
     // flow into a foreign target through the join). The §8.12.5 route-2
     // declaration below is the one `declared` entry that IS eligible: its
-    // content is the flow join rather than an author's schema, so leaving
-    // it verbatim beside a committed derived stamp of the same atoms would
-    // publish in one entry what the other protects.
+    // content comes from the flow join rather than from an author's schema,
+    // so leaving it verbatim beside a committed derived stamp carrying those
+    // same clauses would publish in one entry what the other protects.
     const crossSpaceEligible = labelProtectionMode !== "off"
       ? new Set<LabelMapEntry>()
       : undefined;
@@ -6836,7 +6836,9 @@ export const prepareBoundaryCommit = (
             // transaction, a policy covering it. What lands is the ceiling
             // resolved above plus exactly the clauses that had nowhere to
             // go, so the store's promise becomes the audience of what it
-            // holds. A piece's substrate is filled by the runtime out of
+            // holds. What lands is what the ceiling did not already cover,
+            // so a clause residency satisfies stays in the stamp alone.
+            // A piece's substrate is filled by the runtime out of
             // what the setup transaction read — the argument document, and
             // the internal documents and streams its result projects to —
             // and no value schema can carry that declaration, because the
