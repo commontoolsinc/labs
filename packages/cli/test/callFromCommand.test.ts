@@ -572,7 +572,7 @@ describe("callFromCommand()", () => {
       expect(printed).toEqual([`Called handler "addItem" on piece ${PIECE}`]);
       expect(escaped).toEqual([]);
       expect(rendered).toEqual([]);
-      expect(hinted[0]).toContain(`cf get --cell ${PIECE}`);
+      expect(hinted[0]).toContain(`cf cell get --cell ${PIECE}`);
     });
 
     it("throws a dispatch's usage failure out to Cliffy rather than exiting", async () => {

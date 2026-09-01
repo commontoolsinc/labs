@@ -271,7 +271,7 @@ Each of these is small and lands on its own; together they are what decision
      its whole body in it, so any v1 verb can reach both.
    - The navigate callback inside `loadPieces` writes three lines, and
      one of them goes to **`console.log` — raw stdout** — whenever
-     `jsonOutput` is false, which is every `cf call` without `--json`.
+     `jsonOutput` is false, which is every `cf piece call` without `--json`.
      Behind a full-screen frame that corrupts the drawing, and it lands
      in the machine surface besides. It is the one on this list to fix
      first.
