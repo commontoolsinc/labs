@@ -5552,3 +5552,49 @@ Deno.test("CellBridge stops tracking a synthetic error.log the source takes over
   );
   assertEquals(errors.lines.length, 1);
 });
+
+Deno.test("CellBridge.finalizeSourceWritePath reports the refresh warning when the rebuild fails", async () => {
+  // A committed write can fail twice: the piece refresh, carried by the
+  // receipt, and then the projection rebuild here. The second failure must
+  // not eat the first's message — "the source saved and the piece is not
+  // running it" is the receipt's fact, not the rebuild's — so it is reported
+  // even as the rebuild's own failure propagates to become the caller's
+  // projection warning.
+  const bridge = new CellBridge(new FsTree(), "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "space", []);
+  const pieceIno = bridge.tree.addDir(state.piecesIno, "notes");
+  state.pieceInos.set("notes", pieceIno);
+  (bridge as unknown as { buildSourceTree: () => Promise<void> })
+    .buildSourceTree = () => Promise.reject(new Error("rebuild failed"));
+
+  const errors = captureConsoleErrors();
+  try {
+    await assertRejects(
+      () =>
+        bridge.finalizeSourceWritePath(
+          sourceWritePath("space", "notes", pieceIno),
+          {
+            status: "committed",
+            ref: { identity: "A".repeat(43), symbol: "default" },
+            revisionId: "revision-2",
+            detachedOrigin: null,
+            refresh: {
+              status: "failed",
+              warning: "dependency unavailable",
+            },
+          },
+        ),
+      Error,
+      "rebuild failed",
+    );
+  } finally {
+    errors.restore();
+  }
+
+  assertEquals(
+    errors.lines.filter((line) =>
+      line.includes("refreshing the running piece failed")
+    ).length,
+    1,
+  );
+});

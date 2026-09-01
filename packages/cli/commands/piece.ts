@@ -143,9 +143,9 @@ function hint(message: string, showQuietTip = true) {
 
 /**
  * A fact the operator is owed whether or not they asked for quiet: what a
- * run deliberately left out of what it was asked to do. A hint is advice and
- * `--quiet` silences it; this is not advice, and a quiet script is the
- * caller most in need of it.
+ * run deliberately left out of what it was asked to do, or a caveat on what
+ * it did. A hint is advice and `--quiet` silences it; this is not advice,
+ * and a quiet script is the caller most in need of it.
  */
 function note(message: string) {
   console.error(message);
@@ -4701,12 +4701,12 @@ export async function applyPieceSourceCommandAction(
   (deps.render ?? render)(setsrcSuccessLine(config, update));
   const refreshWarning = setsrcRefreshWarning(update);
   if (refreshWarning !== undefined) {
-    (deps.warn ?? console.error)(refreshWarning);
+    (deps.warn ?? note)(refreshWarning);
   }
   (deps.hint ?? hint)(cliText(`NEXT STEPS:
   → Test in browser: ${config.apiUrl}/${config.space}/${config.piece}
-  → Test a callable: cf call --piece ${config.piece} <callableName> ...
-  → Check state:     cf piece inspect --piece ${config.piece} ...`));
+  → Test a callable: cf call --cell ${config.piece} <callableName> ...
+  → Check state:     cf piece inspect --cell ${config.piece} ...`));
 }
 
 /**

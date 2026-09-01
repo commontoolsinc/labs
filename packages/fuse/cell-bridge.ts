@@ -48,6 +48,7 @@ import {
   encodeFuseComponent,
   encodeFusePathSegments,
 } from "./path-codec.ts";
+import { committedSourceWarning } from "./source-write-finalize.ts";
 import {
   buildFsProjection,
   buildJsonTree,
@@ -374,9 +375,10 @@ export function sourceRefreshWarning(
   receipt: PatternUpdateReceipt | undefined,
 ): string | undefined {
   return receipt?.refresh.status === "failed"
-    ? `Source revision ${receipt.revisionId} committed as ` +
-      `cf:module/${receipt.ref.identity}#${receipt.ref.symbol}, but ` +
-      `refreshing the running piece failed: ${receipt.refresh.warning}`
+    ? committedSourceWarning(
+      receipt,
+      `refreshing the running piece failed: ${receipt.refresh.warning}`,
+    )
     : undefined;
 }
 
@@ -2320,25 +2322,34 @@ export class CellBridge {
     writePath: SourceWritePath,
     receipt?: PatternUpdateReceipt,
   ): Promise<void> {
-    const state = this.spaces.get(writePath.spaceName);
-    const pieceIno = state?.pieceInos.get(writePath.pieceName);
-    if (state && pieceIno !== undefined) {
-      await this.buildSourceTree(
-        pieceIno,
-        writePath.piece,
-        state,
-        writePath.pieceName,
-      );
-      await this.refreshPiecePatternMetadata(
-        state,
-        writePath.piece,
-        pieceIno,
+    try {
+      const state = this.spaces.get(writePath.spaceName);
+      const pieceIno = state?.pieceInos.get(writePath.pieceName);
+      if (state && pieceIno !== undefined) {
+        await this.buildSourceTree(
+          pieceIno,
+          writePath.piece,
+          state,
+          writePath.pieceName,
+        );
+        await this.refreshPiecePatternMetadata(
+          state,
+          writePath.piece,
+          pieceIno,
+        );
+      }
+    } finally {
+      // Reported whether or not the rebuild survived: "the source saved and
+      // the piece is not running it" is exactly the message a projection
+      // failure must not eat, and it is the receipt's, not the rebuild's.
+      // On a failed rebuild the console line still fires and the file half
+      // lands wherever a synthetic log is standing; the rebuild's own failure
+      // propagates to the caller and is reported as its own warning there.
+      this.reportSourceRefreshWarning(
+        writePath,
+        sourceRefreshWarning(receipt),
       );
     }
-    this.reportSourceRefreshWarning(
-      writePath,
-      sourceRefreshWarning(receipt),
-    );
   }
 
   /**
@@ -2382,20 +2393,19 @@ export class CellBridge {
    * file and overwrite the mounted copy of committed source with a
    * diagnostic, which the mount would then be able to save back.
    *
-   * Reports whether the write landed, so a caller can say so by another
-   * route when the piece has no synthetic log to write into.
+   * A piece with no synthetic log gets no file write and no error: the
+   * console lines its callers already emit are the report such a piece gets.
    */
-  writeSourceErrorLog(writePath: SourceWritePath, text: string): boolean {
+  writeSourceErrorLog(writePath: SourceWritePath, text: string): void {
     const state = this.spaces.get(writePath.spaceName);
     const errorLogIno = state?.srcErrorLogInos.get(writePath.pieceName);
-    if (errorLogIno === undefined) return false;
+    if (errorLogIno === undefined) return;
     // The map is dropped whenever `.src` is rebuilt, so a tracked inode names
     // a live file. Checked anyway: a write through a stale one throws, which
     // would turn a committed source update into a failed one at the mount.
     const node = this.tree.getNode(errorLogIno);
-    if (node?.kind !== "file") return false;
+    if (node?.kind !== "file") return;
     this.tree.updateFile(errorLogIno, text);
-    return true;
   }
 
   invalidateHandlerTarget(target: HandlerTarget): void {

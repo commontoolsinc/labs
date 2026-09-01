@@ -1,6 +1,19 @@
 import type { PatternUpdateReceipt } from "@commonfabric/piece/ops";
 
 /**
+ * The sentence a committed source update reports when later work fails: the
+ * durable outcome first — the revision and the pattern pointer it committed —
+ * then the failure that did not undo it.
+ */
+export function committedSourceWarning(
+  receipt: PatternUpdateReceipt,
+  failure: string,
+): string {
+  return `Source revision ${receipt.revisionId} committed as ` +
+    `cf:module/${receipt.ref.identity}#${receipt.ref.symbol}, but ${failure}`;
+}
+
+/**
  * Run local FUSE projection work after a source transaction has committed.
  *
  * A failure here cannot undo the receipt and therefore must not reject the
@@ -18,9 +31,10 @@ export async function finalizeCommittedSourceWrite(
     const message = error instanceof Error ? error.message : String(error);
     return {
       status: "failed" as const,
-      warning: `Source revision ${receipt.revisionId} committed as ` +
-        `cf:module/${receipt.ref.identity}#${receipt.ref.symbol}, but ` +
+      warning: committedSourceWarning(
+        receipt,
         `refreshing the FUSE projection failed: ${message}`,
+      ),
       error,
     };
   }
