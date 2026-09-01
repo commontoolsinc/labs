@@ -242,8 +242,20 @@ export const acquireSkillTool: HarnessToolDefinition<
         );
       }
       await runtime.idle();
+      // The same host-observed facts the mark on the write carries, kept on
+      // the handle entry as well: the mark travels with the cell and the
+      // entry travels with the token, and it is the token a later delegation
+      // resolves when it writes the child's activation record.
       const skillHandle = await context.mintSkillContextHandle(
         createLLMFriendlyLink(link, space),
+        {
+          registryId: resolvedPin.id,
+          commitSha: resolvedPin.commitSha,
+          sourceUrl: acquired.sourceUrl,
+          verification: "git-commit-sha",
+          valueDigest: acquired.valueDigest,
+          receivedAt,
+        },
       );
       return {
         outputId,

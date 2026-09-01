@@ -140,7 +140,8 @@ below is what eventually does.
   renders no part of the value.
 - `loadHarnessSkillContextFromText` wraps the payload in a
   `<skill_context source="handle:<token>">` block and returns an activation
-  carrying the token and a sha256 digest of the exact text injected
+  carrying the token, a sha256 digest of the exact text injected, and — for a
+  handle an acquisition minted — the pin that acquisition recorded
   (`packages/cf-harness/src/skills/registry.ts`).
 - `scrubHandleSkillText` strips the payload from the child's final text
   **before** handle-token resolution, so the child cannot echo its skill back
@@ -148,6 +149,34 @@ below is what eventually does.
   embedded token and walk the echoed payload straight past the scrub.
 
 So the load path is done. What this plan adds is only what fills the cell.
+
+**The pin rides with the token, not with the text.** The handle-table entry an
+acquisition mints carries the discovery id, commit SHA, source URL,
+verification method, host-computed digest, and receive time. It is the only
+durable place that knows: the parent holds a token and the child holds text,
+and neither can name the commit. Carrying it on the entry is what lets a
+delegation write it into the child's activation record, so a reader of the run
+can say which bytes shaped the work. No model surface exposes the field — a
+model can neither write it nor read it.
+
+**Custody survives a failed delegation.** A child that dies takes nothing with
+it: the handle stays the parent's, and the harness will not attach it to the
+next child on its own, because choosing which child reads untrusted text is
+the decision `delegate_task` exists to record. What it refuses is the decision
+going unmade. While a run holds a token whose most recent delegation did not
+complete, a `delegate_task` that omits both `skillHandle` and
+`withoutSkillHandle` is refused, naming the outstanding token. The parent
+either carries the handle again or states that this child runs without it, and
+either way the run state says which.
+
+The refusal asks a question once. A delegation that declares
+`withoutSkillHandle` discharges what was outstanding when it was made, so a
+run does not carry the flag for the rest of its life because one child died —
+though custody a later delegation goes on to incur is its own question, asked
+again. Both the outstanding set and the discharge are read off the parent's
+own subagent run refs rather than held in memory, so they survive a resume;
+a delegation left `running` by a crash is the case that most needs this, and
+counts as outstanding.
 
 **The acquisition step.** The host-side `acquire_skill` effect resolves a
 discovery id, fetches a skill from a **pinned** address, verifies its complete

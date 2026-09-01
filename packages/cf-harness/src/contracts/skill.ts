@@ -191,6 +191,36 @@ export type HarnessSkillActivationSource =
   | "subagent-inherit"
   | "skill-handle";
 
+/**
+ * Where a handle-delivered skill's text was fetched from, as the trusted host
+ * recorded it at acquisition. Every field is host-computed or host-observed:
+ * none is read out of the fetched bytes, which is what lets a reader treat
+ * this as provenance rather than as a claim the skill makes about itself.
+ *
+ * It grants nothing. Its job is to make acting under an externally acquired
+ * skill's influence a legible event, so a reader of the activation record can
+ * name the commit whose bytes shaped the run.
+ */
+export interface HarnessSkillAcquisition {
+  /** Discovery id the pin was resolved from, in `owner/repo/slug` form. */
+  registryId: string;
+
+  /** Full commit SHA of the immutable tree the bytes were read from. */
+  commitSha: string;
+
+  /** The exact pinned URL fetched. */
+  sourceUrl: string;
+
+  /** How the address was pinned. */
+  verification: "git-commit-sha";
+
+  /** Digest the host computed over the fetched bytes. */
+  valueDigest: string;
+
+  /** Host wall-clock time the bytes were received (ISO 8601). */
+  receivedAt: string;
+}
+
 export interface HarnessSkillActivation {
   name: string;
   source: HarnessSkillActivationSource;
@@ -219,11 +249,22 @@ export interface HarnessSkillActivation {
 
   /**
    * The parent-held handle token a `skill-handle` activation's text was
-   * materialized through. Together with {@link digest} this is the
-   * activation's provenance: which reference supplied the skill, and the
-   * exact text it resolved to at activation time.
+   * materialized through. With {@link digest} it says which reference
+   * supplied the skill and the exact text it resolved to at activation time —
+   * the whole provenance for a handle the harness did not fetch. Where the
+   * handle came from an acquisition, {@link HarnessSkillActivation.acquisition}
+   * carries the rest of it, and a reader after the external source wants that
+   * field rather than this one.
    */
   handleToken?: string;
+
+  /**
+   * Where the skill text came from, for a `skill-handle` activation whose
+   * handle was minted by an external acquisition. Absent when the handle
+   * names a cell this harness did not fetch — an operator-seeded skill cell,
+   * say — where there is no external source to name.
+   */
+  acquisition?: HarnessSkillAcquisition;
 }
 
 export interface HarnessSkillActivations {

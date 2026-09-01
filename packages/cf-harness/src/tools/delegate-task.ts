@@ -87,7 +87,12 @@ export const delegateTaskTool: HarnessToolDefinition<
         skillHandle: {
           type: "string",
           description:
-            "Optional handle (cfh:a:… token) naming a cell whose string value is skill text for the child. The text is materialized on the trusted host side and injected into the child's context; this run never sees it.",
+            "Optional handle (cfh:a:… token) naming a cell whose string value is skill text for the child. The text is materialized on the trusted host side and injected into the child's context; this run never sees it. A delegation that failed does not carry its handle forward: re-issuing it means passing the same token again.",
+        },
+        withoutSkillHandle: {
+          type: "boolean",
+          description:
+            "States that this delegation deliberately runs with no acquired skill. Required only after a delegation carrying a skillHandle failed, where omitting both fields is refused: the harness cannot tell a considered choice from a dropped one, and the child's work would carry no record either way. It attaches nothing and permits nothing.",
         },
       },
     },

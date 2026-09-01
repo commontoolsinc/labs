@@ -51,6 +51,7 @@ import {
   type HarnessToolPolicyDecision,
 } from "./contracts/run-report.ts";
 import type {
+  HarnessSkillAcquisition,
   HarnessSkillActivation,
   HarnessSkillRegistry,
 } from "./contracts/skill.ts";
@@ -71,6 +72,7 @@ import {
   type HarnessSubagentProfileConfig,
   type HarnessSubagentResult,
   type HarnessSubagentRunManifest,
+  type HarnessSubagentRunRef,
   type HarnessSubagentRunStateSummary,
   type HarnessSubagentStructuredReturn,
   isHarnessSubagentProfile,
@@ -829,6 +831,28 @@ const parseDelegateTaskInput = (
       },
     };
   }
+  if (
+    input.withoutSkillHandle !== undefined &&
+    typeof input.withoutSkillHandle !== "boolean"
+  ) {
+    return {
+      invalid: {
+        field: "withoutSkillHandle",
+        expected: "`true` to state the delegation carries no skill, or omit it",
+      },
+    };
+  }
+  // Both together is a call that says two things at once, and the harness
+  // would have to pick one. Refusing states which fields disagree instead.
+  if (input.skillHandle !== undefined && input.withoutSkillHandle === true) {
+    return {
+      invalid: {
+        field: "withoutSkillHandle",
+        expected:
+          "omitted when `skillHandle` is supplied; a delegation carries a skill or states it does not",
+      },
+    };
+  }
   let parsedReturnSchema: ReturnType<typeof parseSubagentReturnSchema>;
   try {
     parsedReturnSchema = parseSubagentReturnSchema(input.returnSchema);
@@ -876,6 +900,9 @@ const parseDelegateTaskInput = (
       ...(patternRefs !== undefined ? { patternRefs } : {}),
       ...(typeof input.skillHandle === "string"
         ? { skillHandle: input.skillHandle.trim() }
+        : {}),
+      ...(input.withoutSkillHandle === true
+        ? { withoutSkillHandle: true }
         : {}),
     },
   };
@@ -1128,6 +1155,48 @@ export const scrubHandleSkillTextDeep = (
     );
   }
   return value;
+};
+
+/**
+ * The skill-context tokens this run acquired, delegated, and has not yet seen
+ * a completed delegation for — in first-delegated order.
+ *
+ * A token is outstanding when the most recent delegation carrying it did not
+ * complete. That is the state a model-driven retry appears in: the child died,
+ * the parent will issue the task again, and a re-issue that drops the token
+ * produces work no record connects to the skill the run acquired for it. A
+ * token whose latest delegation completed is not outstanding, so an ordinary
+ * run that delegated once and succeeded is never gated.
+ *
+ * `running` counts as not completed, which costs nothing while a run is
+ * healthy — tool calls are dispatched one at a time, so a delegation's
+ * terminal ref always supersedes its running ref before the next delegation is
+ * judged — and is the whole answer after a crash, where the running ref is the
+ * only trace the lost delegation left.
+ *
+ * A delegation that declared `withoutSkillHandle` discharges everything
+ * outstanding when it is reached. The refusal exists to make the parent answer
+ * once; a run that answered is not asked again, and does not carry the flag
+ * for the rest of its life because one child died.
+ *
+ * Reads the parent's own run state, so the answer survives a resume: nothing
+ * about custody lives only in this process.
+ */
+export const outstandingSkillCustody = (
+  subagentRuns: readonly HarnessSubagentRunRef[],
+): readonly string[] => {
+  const latestCompleted = new Map<string, boolean>();
+  for (const run of subagentRuns) {
+    if (run.withoutSkillHandle === true) {
+      latestCompleted.clear();
+      continue;
+    }
+    if (run.skillHandle === undefined) continue;
+    latestCompleted.set(run.skillHandle, run.status === "completed");
+  }
+  return [...latestCompleted]
+    .filter(([, completed]) => !completed)
+    .map(([token]) => token);
 };
 
 const resolveChildHandleTokens = (
@@ -3622,6 +3691,41 @@ export class CfHarnessPromptLoop {
         };
       }
       policyDecisionReasonCodes.push("subagent_profile_allowed");
+      if (
+        delegateInput.skillHandle === undefined &&
+        delegateInput.withoutSkillHandle !== true
+      ) {
+        // Custody, not carry-forward: the harness will not attach an acquired
+        // skill to a child the parent did not choose to give it, because
+        // choosing which child reads untrusted text is the decision
+        // `delegate_task` exists to record. What it refuses to accept is the
+        // decision going unmade — a delegation that neither carries the
+        // outstanding handle nor says it is running without one.
+        const outstanding = outstandingSkillCustody(
+          this.engine.getRunState().subagentRuns ?? [],
+        );
+        if (outstanding.length > 0) {
+          return await this.#rejectInvalidToolCall({
+            toolCall,
+            invalid: {
+              reason: "invalid-argument",
+              toolId: "delegate_task",
+              field: "skillHandle",
+              expected:
+                `either \`skillHandle\` set to a handle whose delegation did not complete (${
+                  outstanding.join(", ")
+                }), or \`withoutSkillHandle\` set to \`true\` to state this child runs with no acquired skill`,
+            },
+            sequence,
+            startedAt: activityStartedAt,
+            effectClass: tool.descriptor.effectClass,
+            ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
+            toolInputSummary,
+            policyEventIndexes,
+            recordActivity,
+          });
+        }
+      }
       if (delegateInput.skillHandle !== undefined) {
         // Trusted-side materialization, refused BEFORE dispatch: a handle
         // this run does not hold is a model-written-call mistake (the same
@@ -3685,6 +3789,9 @@ export class CfHarnessPromptLoop {
         resolvedDelegateSkill = {
           text: resolution.value.trimEnd(),
           token: entry!.token,
+          ...(entry!.acquisition !== undefined
+            ? { acquisition: entry!.acquisition }
+            : {}),
         };
       }
     }
@@ -4082,8 +4189,15 @@ export class CfHarnessPromptLoop {
     toolCall: HarnessToolCall;
     input: DelegateTaskToolInput;
 
-    /** The materialized skillHandle text + token, resolved before dispatch. */
-    resolvedSkill?: { text: string; token: string };
+    /**
+     * The materialized skillHandle text, its token, and the acquisition the
+     * token's entry records, all resolved before dispatch.
+     */
+    resolvedSkill?: {
+      text: string;
+      token: string;
+      acquisition?: HarnessSkillAcquisition;
+    };
 
     model: string;
     promptSlotBinding?: PromptSlotBinding;
@@ -4274,6 +4388,12 @@ export class CfHarnessPromptLoop {
       childRunId,
       status: "running",
       manifest,
+      ...(options.resolvedSkill !== undefined
+        ? { skillHandle: options.resolvedSkill.token }
+        : {}),
+      ...(delegateInput.withoutSkillHandle === true
+        ? { withoutSkillHandle: true }
+        : {}),
     });
     const childLoop = new CfHarnessPromptLoop({
       engine: childEngine,
@@ -4352,6 +4472,9 @@ export class CfHarnessPromptLoop {
         const handleSkill = await loadHarnessSkillContextFromText({
           text: options.resolvedSkill.text,
           handleToken: options.resolvedSkill.token,
+          ...(options.resolvedSkill.acquisition !== undefined
+            ? { acquisition: options.resolvedSkill.acquisition }
+            : {}),
           runId: childRunId,
           activatedAt: childCreatedState.updatedAt,
         });
@@ -4501,6 +4624,12 @@ export class CfHarnessPromptLoop {
       status: subagent.status,
       summary: subagent.summary,
       manifest,
+      ...(options.resolvedSkill !== undefined
+        ? { skillHandle: options.resolvedSkill.token }
+        : {}),
+      ...(delegateInput.withoutSkillHandle === true
+        ? { withoutSkillHandle: true }
+        : {}),
       runState: subagent.runState,
       ...(structuredReturn !== undefined ? { structuredReturn } : {}),
     });
