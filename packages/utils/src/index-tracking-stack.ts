@@ -192,11 +192,12 @@ export class IndexTrackingStack<T> {
     if (positions !== undefined) {
       const key = IndexTrackingStack.#keyFor(value);
 
-      // Not an optional lookup: while an index exists, every value in the
-      // stack has an entry in it. The build takes the whole stack, and the
-      // only two places that change the stack are this one and `push()`, both
-      // of which maintain it. Asserting rather than testing is deliberate --
-      // a test here would skip silently, and leave a corrupt index behind.
+      // Non-nullish type assertion (`!`) below, because `key` is in the map
+      // by construction: while an index exists, every value in the stack has
+      // an entry in it. The build takes the whole stack, and the only two
+      // places that change the stack are this one and `push()`, both of which
+      // maintain it. Asserting rather than testing is deliberate -- a test
+      // here would skip silently, and leave a corrupt index behind.
       const found = positions.get(key)!;
 
       // The positions of one value ascend, and what came off the stack is the
