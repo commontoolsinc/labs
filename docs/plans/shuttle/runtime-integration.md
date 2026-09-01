@@ -214,17 +214,32 @@ Each of these is small and lands on its own; together they are what decision
    rendering. `callFromCommand` reports its payload rejection from inside
    the dispatch's promise chain, so it records that an exit ran and rethrows
    rather than describing the shim's own throw as a second failure.
-5. **Output capture.** Every seam a v1 verb reaches routes its output —
-   the value or page, the next steps, and a failure's report — through
-   `render`, `hint`, and `printError` deps. The `console.error` calls in
-   `lib/piece.ts` do not: the navigate wiring and the phase trace sit
-   inside `loadPieces`, which takes a config and no deps, and the rest
-   belong to `setsrc` and `piece map`. `noteWroteTo`
-   (`lib/write-receipt.ts`) is the write receipt, which `--quiet`
-   deliberately does not silence, so it wants a sink of its own rather
-   than the hint stream — and a memo per process rather than per
-   connection, which is item 6's subject. Sweep as views need them
-   captured.
+5. **Output capture.** What a caller captures today is the seam's own
+   output: for every seam a v1 verb reaches, the value or page goes to
+   `render`, the next steps to `hint`, and a failure's report to
+   `printError`. What the seam prints, the caller decides where.
+
+   Three streams reach the process's stderr regardless, and a caller
+   holding one of its own cannot redirect them. The **write receipt**,
+   `noteWroteTo` (`lib/write-receipt.ts`), which `set`, `link` and `call`
+   all reach: it wants a sink of its own rather than the hint stream,
+   because `--quiet` deliberately does not silence it, and a memo per
+   connection rather than per process, which is item 6's subject. The
+   **invocation announcement** and the **`--verbose` span stream** from
+   `callFromCommand`: each names a fact about this process — the pair to
+   retry with, the wall clock — rather than the call's outcome, so
+   neither is the failure report `printError` carries, and capturing them
+   wants a sink named for what they are.
+
+   The `console.error` calls in `lib/piece.ts` are outside a v1 verb's
+   path or outside a seam's reach. The navigate wiring sits inside
+   `loadPieces`, which takes a config and no deps; the pin-rewrite report
+   belongs to `piece new` and to `setsrc` either side of `--check`, and
+   the inspect warning to `piece map`. The phase trace wraps operations
+   throughout the module, `linkPieces` among them, but writes nothing
+   unless `CF_CLI_TRACE_TIMINGS=1` asks it to.
+
+   Sweep each as views need it captured.
 6. **Module-global state.** `quietMode` is a file-level `let` set on every
    `FromCommand` entry; `setLLMUrl` is a global written by both `loadPieces`
    and `PiecesController.initialize`, so two connections on different API

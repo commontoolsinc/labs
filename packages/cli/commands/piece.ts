@@ -3242,6 +3242,11 @@ export async function callFromCommand(
   const invocationId = identity.id;
   const waitControl = resolveWaitControl({ ...options, ...readback });
   let phase: InvocationPhase = "initial_sync";
+  // The span stream keeps the process's stderr rather than taking a sink from
+  // `deps`. The three the caller supplies carry the call's outcome — its
+  // value, its next steps, its failure — and a wall-clock span is a fact
+  // about this process instead, so `printError` would be reporting a failure
+  // that has not happened. Capturing spans wants a sink named for them.
   const observer = pieceCallPhaseObserver(
     !!options.verbose,
     (next) => phase = next,
@@ -3307,6 +3312,11 @@ export async function callFromCommand(
           skipReadback: waitControl.mode === "commit",
           showLinks: !!options.showLinks,
           ...(selection === undefined ? {} : { selection }),
+          // The announcement keeps the process's stderr for the reason the
+          // span stream does: the pair it names is what a caller retries
+          // with, published as the dispatch happens and whether or not the
+          // call goes on to fail, so it is not the failure report
+          // `printError` is the sink for.
           onPhase: invocationPhaseReporter(
             identity,
             observer.onPhase,
@@ -3329,7 +3339,7 @@ export async function callFromCommand(
       result,
       callableName,
       pieceConfig.piece,
-      { render: deps.render, hint: deps.hint },
+      { render: deps.render, hint: deps.hint, printError: deps.printError },
       { detached: waitControl.mode === "commit", invocation: identity },
     );
   } catch (error) {

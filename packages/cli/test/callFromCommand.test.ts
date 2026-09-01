@@ -535,6 +535,37 @@ describe("callFromCommand()", () => {
       expect(rendered).toEqual(['{"found":1}']);
     });
 
+    it("hands a JSON-input handler's confirmation to the caller's error sink", async () => {
+      // A payload given as JSON puts the confirmation on stderr, so that
+      // stdout stays the machine surface — and stderr, for a caller holding
+      // one, is its own `printError` rather than this process's. The
+      // captured lines are what says the confirmation went to the sink
+      // instead of past it.
+
+      const dispatches: Dispatch[] = [];
+      const { deps, printed, hinted, rendered } = exitSinks();
+      const escaped = await captureStderr(() =>
+        callFromCommand(
+          options,
+          "call",
+          "addItem",
+          ['{"title":"Milk"}'],
+          ["--cell", PIECE, "addItem", '{"title":"Milk"}'],
+          [],
+          {
+            ...deps,
+            executePieceCallable: stubExecutor(dispatches, {
+              parsed: { usedJsonInput: true },
+            } as Partial<ExecutedPieceCallable>),
+          },
+        )
+      );
+      expect(printed).toEqual([`Called handler "addItem" on piece ${PIECE}`]);
+      expect(escaped).toEqual([]);
+      expect(rendered).toEqual([]);
+      expect(hinted[0]).toContain(`cf get --cell ${PIECE}`);
+    });
+
     it("throws a dispatch's usage failure out to Cliffy rather than exiting", async () => {
       await expect(
         callFromCommand(
