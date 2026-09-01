@@ -4,11 +4,18 @@
  * value pushed is at index `0`, and an index does not change while things are
  * pushed above it.
  *
- * Values are compared the way `Map` compares its keys: by identity for an
- * object, by value for a primitive, and `NaN` matching itself. That is not
- * what `Array.prototype.indexOf` does -- it compares strictly, and so never
- * finds a `NaN` -- which matters here because both are used, and the two have
- * to agree.
+ * Values are compared as `Object.is` compares them: by identity for an object,
+ * by value for a primitive, `NaN` matching itself, and `-0` distinct from `0`.
+ * Neither structure beneath does that on its own -- `Array.prototype.indexOf`
+ * compares strictly, so it finds a `0` for a `-0` and never finds a `NaN`, and
+ * a `Map` normalizes a `-0` key to `0`. Both are given the comparison instead:
+ * the scan through {@link #same}, and the index through {@link #keyFor}, which
+ * stands a symbol in for each of the two values a `Map` cannot key as
+ * `Object.is` would have it. Two values take the same key exactly when
+ * `Object.is` calls them the same value.
+ *
+ * `===` and `Object.is` part company on numbers alone, so a `typeof` check is
+ * all an ordinary stack pays for any of it.
  *
  * Both lookups are answered by scanning while the stack is short, and by an
  * index once it has reached {@link #ADD_INDEX_AT} values. Which one is used
@@ -38,9 +45,10 @@ export class IndexTrackingStack<T> {
 
   /**
    * The positions each value occupies, ascending, while the stack is tall
-   * enough to want them, and `undefined` otherwise.
+   * enough to want them, and `undefined` otherwise. Keyed by
+   * {@link #keyFor}, not by the value itself.
    */
-  #positions: Map<T, number[]> | undefined;
+  #positions: Map<unknown, number[]> | undefined;
 
   /**
    * How deep the stack is: how many values it holds, which is also the index
@@ -58,12 +66,14 @@ export class IndexTrackingStack<T> {
     const positions = this.#positions;
 
     if (positions !== undefined) {
-      return positions.get(value)?.[0] ?? -1;
-    } else if (value === value) {
-      return this.#stack.indexOf(value);
+      return positions.get(IndexTrackingStack.#keyFor(value))?.[0] ?? -1;
+    } else if (typeof value === "number") {
+      return this.#stack.findIndex((held) =>
+        IndexTrackingStack.#same(held, value)
+      );
     }
 
-    return this.#stack.findIndex((held) => held !== held);
+    return this.#stack.indexOf(value);
   }
 
   /**
@@ -74,14 +84,16 @@ export class IndexTrackingStack<T> {
     const positions = this.#positions;
 
     if (positions !== undefined) {
-      const found = positions.get(value);
+      const found = positions.get(IndexTrackingStack.#keyFor(value));
 
       return (found === undefined) ? -1 : found[found.length - 1]!;
-    } else if (value === value) {
-      return this.#stack.lastIndexOf(value);
+    } else if (typeof value === "number") {
+      return this.#stack.findLastIndex((held) =>
+        IndexTrackingStack.#same(held, value)
+      );
     }
 
-    return this.#stack.findLastIndex((held) => held !== held);
+    return this.#stack.lastIndexOf(value);
   }
 
   /**
@@ -123,10 +135,7 @@ export class IndexTrackingStack<T> {
 
     const top = this.#stack[this.#stack.length - 1] as T;
 
-    // Compared as the index compares, rather than with `!==`, so that a `NaN`
-    // expectation is met by a `NaN` on top. An empty stack has been refused
-    // above, so this is not reading past the bottom for it.
-    if (!((top === expected) || ((top !== top) && (expected !== expected)))) {
+    if (!IndexTrackingStack.#same(top, expected)) {
       throw new Error("The top of the stack is not the expected value.");
     }
 
@@ -140,22 +149,23 @@ export class IndexTrackingStack<T> {
     this.#stack.push(value);
 
     if (this.#positions !== undefined) {
-      const found = this.#positions.get(value);
+      const key = IndexTrackingStack.#keyFor(value);
+      const found = this.#positions.get(key);
 
       if (found === undefined) {
-        this.#positions.set(value, [at]);
+        this.#positions.set(key, [at]);
       } else {
         found.push(at);
       }
     } else if (this.#stack.length >= IndexTrackingStack.ADD_INDEX_AT) {
-      const positions = new Map<T, number[]>();
+      const positions = new Map<unknown, number[]>();
 
       for (let index = 0; index < this.#stack.length; index++) {
-        const value = this.#stack[index] as T;
-        const found = positions.get(value);
+        const key = IndexTrackingStack.#keyFor(this.#stack[index] as T);
+        const found = positions.get(key);
 
         if (found === undefined) {
-          positions.set(value, [index]);
+          positions.set(key, [index]);
         } else {
           found.push(index);
         }
@@ -170,15 +180,22 @@ export class IndexTrackingStack<T> {
    */
   #popNonEmpty(): T {
     const value = this.#stack.pop() as T;
-    const found = this.#positions?.get(value);
+    const positions = this.#positions;
 
-    if (found !== undefined) {
-      // The positions of one value ascend, and what came off the stack is the
-      // highest of them, so it is the last of these.
-      found.pop();
+    // Nothing below is reached, nor the key computed for it, while there is no
+    // index -- which is the whole of what a short stack does here.
+    if (positions !== undefined) {
+      const key = IndexTrackingStack.#keyFor(value);
+      const found = positions.get(key);
 
-      if (found.length === 0) {
-        this.#positions!.delete(value);
+      if (found !== undefined) {
+        // The positions of one value ascend, and what came off the stack is
+        // the highest of them, so it is the last of these.
+        found.pop();
+
+        if (found.length === 0) {
+          positions.delete(key);
+        }
       }
 
       if (this.#stack.length < IndexTrackingStack.DROP_INDEX_BELOW) {
@@ -194,6 +211,18 @@ export class IndexTrackingStack<T> {
   //
 
   /**
+   * Stands in for `NaN` as an index key, so that nothing rests on how a `Map`
+   * happens to treat one.
+   */
+  static readonly #NAN = Symbol("NaN");
+
+  /**
+   * Stands in for `-0` as an index key. A `Map` normalizes a `-0` key to `0`,
+   * so the two would share an entry and become indistinguishable.
+   */
+  static readonly #NEGATIVE_ZERO = Symbol("negative zero");
+
+  /**
    * The height at which an index is built. Set well below the height at which
    * a scan and a keyed lookup cost the same, so that reaching it never costs
    * more than not having reached it.
@@ -206,4 +235,32 @@ export class IndexTrackingStack<T> {
    * over and over: a stack has to swing across the whole of it to rebuild.
    */
   static readonly DROP_INDEX_BELOW = 32;
+
+  /**
+   * Whether two values are the same one, which is what this class compares by.
+   */
+  static #same(a: unknown, b: unknown): boolean {
+    return (typeof a === "number") ? Object.is(a, b) : (a === b);
+  }
+
+  /**
+   * The index key for the given value: the value itself, except for the two a
+   * `Map` does not key as {@link #same} would have it. A `NaN` needs no
+   * standing in as `Map` is written today, and gets one anyway, so that the
+   * pair is read as one rule rather than as one rule and one coincidence.
+   *
+   * The `typeof` runs first and settles it for everything that is not a
+   * number, which is what keeps this off the cost of an ordinary stack.
+   */
+  static #keyFor(value: unknown): unknown {
+    if (typeof value !== "number") {
+      return value;
+    } else if (value !== value) {
+      return IndexTrackingStack.#NAN;
+    } else if (Object.is(value, -0)) {
+      return IndexTrackingStack.#NEGATIVE_ZERO;
+    }
+
+    return value;
+  }
 }

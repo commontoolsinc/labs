@@ -300,11 +300,76 @@ describe("IndexTrackingStack", () => {
           expect(stack.lastIndexOf(NaN)).toBe(height + 2);
         });
 
-        it("treats `-0` and `0` as one value, as a `Map` key would", () => {
+        it("finds `0` where `0` was pushed, and not where `-0` was", () => {
+          const stack = stackOfAny([-0, 0]);
+
+          expect(stack.indexOf(0)).toBe(height + 1);
+          expect(stack.lastIndexOf(0)).toBe(height + 1);
+        });
+
+        it("finds `-0` where `-0` was pushed, and not where `0` was", () => {
+          const stack = stackOfAny([0, -0]);
+
+          expect(stack.indexOf(-0)).toBe(height + 1);
+          expect(stack.lastIndexOf(-0)).toBe(height + 1);
+        });
+
+        it("holds `-0` and `0` apart across every position of each", () => {
+          const stack = stackOfAny([-0, 0, -0, 0]);
+
+          expect(stack.indexOf(-0)).toBe(height);
+          expect(stack.lastIndexOf(-0)).toBe(height + 2);
+          expect(stack.indexOf(0)).toBe(height + 1);
+          expect(stack.lastIndexOf(0)).toBe(height + 3);
+        });
+
+        it("does not find a `-0` for a `NaN`, nor either for the other", () => {
+          const stack = stackOfAny([NaN]);
+
+          expect(stack.indexOf(-0)).toBe(-1);
+          expect(stack.indexOf(0)).toBe(-1);
+          expect(stack.lastIndexOf(-0)).toBe(-1);
+        });
+
+        it("finds neither `0` nor `-0` in a stack holding neither", () => {
+          const stack = stackOfAny([1, {}]);
+
+          expect(stack.indexOf(0)).toBe(-1);
+          expect(stack.indexOf(-0)).toBe(-1);
+          expect(stack.lastIndexOf(0)).toBe(-1);
+          expect(stack.lastIndexOf(-0)).toBe(-1);
+        });
+
+        it("pops an expected `-0` and refuses an expected `0` for it", () => {
           const stack = stackOfAny([-0]);
 
+          expect(() => stack.popExpect(0)).toThrow();
+          expect(stack.depth).toBe(height + 1);
+
+          stack.popExpect(-0);
+
+          expect(stack.depth).toBe(height);
+        });
+
+        it("pops an expected `0` and refuses an expected `-0` for it", () => {
+          const stack = stackOfAny([0]);
+
+          expect(() => stack.popExpect(-0)).toThrow();
+
+          stack.popExpect(0);
+
+          expect(stack.depth).toBe(height);
+        });
+
+        it("stops finding a popped `-0` while keeping a `0` below it", () => {
+          // The stand-in key the index gives `-0` has to come off with it, and
+          // to have been a different entry from the one `0` holds.
+          const stack = stackOfAny([0, -0]);
+
+          stack.pop();
+
+          expect(stack.indexOf(-0)).toBe(-1);
           expect(stack.indexOf(0)).toBe(height);
-          expect(stack.lastIndexOf(-0)).toBe(height);
         });
 
         it("pops an expected `undefined` off the top", () => {
