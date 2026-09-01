@@ -13,7 +13,7 @@ import {
   type TileView,
 } from "../types.ts";
 import { strip } from "../lib.ts";
-import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO, TRUST_COLS, TRUST_GOOD, TRUST_RUNS_MAX, TRUST_WARN } from "../config.ts";
+import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO, TRUST_GOOD, TRUST_RUNS_MAX, TRUST_WARN } from "../config.ts";
 
 type TrustOutcome = "green" | "red" | "run" | "gray";
 
@@ -59,7 +59,7 @@ function makeCiTrust(opts: { id: string; label: string; repo: string; workflow: 
         status: s,
         value: `${pct.toFixed(1)}%`,
         sub: `first-try green · ${runSummary}`,
-        extra: strip(cells, TRUST_COLS, spanMs > 0),
+        extra: strip(cells, spanMs > 0),
         duration: spanMs,
         alignChartBottom: true,
       };

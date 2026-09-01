@@ -113,7 +113,7 @@ Deno.test(
     assertEquals(cells, 160);
     assertStringIncludes(
       view.extra ?? "",
-      "grid-template-columns:repeat(40,1fr)",
+      'class="cells"',
     );
     assertEquals(
       view.sub,

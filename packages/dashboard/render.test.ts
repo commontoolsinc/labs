@@ -222,12 +222,18 @@ Deno.test("shell: labeled cell grids share the sparkline label baseline", () => 
   const html = shell("", "", 0, 30_000, TEST_VERSION, "good");
   assertStringIncludes(
     html,
-    `.cells.labeled{margin-top:9px;height:28px;box-sizing:border-box;padding-bottom:9px;align-content:start;transform:translateY(-2px)}`,
+    `.cells.labeled{margin-top:9px;height:28px;align-content:end;align-items:start;transform:translateY(-2px)}`,
   );
   assertStringIncludes(
     html,
-    `.cells.labeled .cell{aspect-ratio:auto;height:4px}`,
+    `.cells.labeled .cell{width:100%}`,
   );
+  assertStringIncludes(
+    html,
+    `.cells{display:grid;grid-template-columns:repeat(auto-fill,minmax(4px,1fr))`,
+  );
+  assertStringIncludes(html, `.chart>span:last-child{bottom:2px!important}`);
+  assertStringIncludes(html, `.cells.labeled+span{font-weight:700;text-shadow:`);
   assertStringIncludes(html, `.tile.bottom-chart{display:flex;flex-direction:column}`);
   assertStringIncludes(html, `.tile.bottom-chart .chart{margin-top:auto}`);
   assertStringIncludes(html, TILE_LABEL_RULE);

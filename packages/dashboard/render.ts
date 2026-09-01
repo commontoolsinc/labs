@@ -13,7 +13,6 @@ import {
   tileContentRules,
 } from "./chart-layout.ts";
 import {
-  DURATION_LABEL_HEIGHT,
   escapeHtml,
   SPARKLINE_HEIGHT,
   STATUS_DOT,
@@ -255,7 +254,7 @@ ${TILE_RULES}
   .tile.unknown .texture::before{${DOT_TEXTURE}}
   .tile.warn .texture::before{${WAVE_TEXTURE};--turn:120deg}
   .tile.bad .texture::before{${ZIGZAG_TEXTURE}}
-  ${tileContentRules(SPARKLINE_HEIGHT, DURATION_LABEL_HEIGHT)}
+  ${tileContentRules(SPARKLINE_HEIGHT)}
   ${BIG_RULES}
   a.cell{display:block}
   a.cell:hover{outline:1px solid var(--accent);outline-offset:-1px}

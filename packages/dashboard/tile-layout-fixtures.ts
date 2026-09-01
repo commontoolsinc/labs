@@ -14,7 +14,7 @@ const history = () =>
 const twoLines = () =>
   `<div style="position:relative;margin-top:9px;height:${SPARKLINE_HEIGHT}px"><svg viewBox="0 0 220 34" width="calc(100% - 24px)" height="${SPARKLINE_HEIGHT}" preserveAspectRatio="none" style="display:block"><polyline points="0,20 55,12 110,16 165,4 220,8" fill="none" stroke="#7aa2ff" stroke-width="2"></polyline><polyline points="0,24 55,20 110,16 165,20 220,12" fill="none" stroke="#be95ff" stroke-width="2"></polyline></svg></div>`;
 const trustStrip = (prefix: string, badEvery: number) =>
-  `<div class="cells labeled" style="grid-template-columns:repeat(40,1fr)">${
+  `<div class="cells labeled">${
     Array.from(
       { length: 160 },
       (_, index) =>

@@ -876,11 +876,9 @@ export function thin<T>(arr: T[], max: number): T[] {
 }
 
 // A grid of small run-outcome cells (one per run, oldest first) laid out in
-// `cols` fixed columns. Each cell links to that run's CI results. Cells shrink
-// to fit width.
+// responsive columns. Each cell links to that run's CI results.
 export function strip(
   cells: { outcome: string; href: string }[],
-  cols: number,
   labelSpace = false,
 ): string {
   if (!cells.length) return "";
@@ -896,7 +894,7 @@ export function strip(
     `<a class="cell" href="${escapeHtml(c.href)}" target="_blank" rel="noopener" style="background:${col(c.outcome)}"></a>`
   ).join("");
   const className = labelSpace ? "cells labeled" : "cells";
-  return `<div class="${className}" style="grid-template-columns:repeat(${cols},1fr)">${html}</div>`;
+  return `<div class="${className}">${html}</div>`;
 }
 
 // The PR that landed a commit: squash titles end "(#123)", merge commits start
