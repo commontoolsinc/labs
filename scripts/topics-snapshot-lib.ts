@@ -16,6 +16,7 @@
  * which stays free of this dependency — `topics-rehearsal-lib.test.ts` holds
  * a check that it did.
  */
+
 import { decodedLinkOf } from "@commonfabric/state-inspector";
 
 /**

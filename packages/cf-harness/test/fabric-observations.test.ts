@@ -4,6 +4,7 @@
  * that arrive without a pattern frame, the exclusion of busy-window markers
  * that defer nothing, and sequence-scoped windows.
  */
+
 import { describe, it } from "@std/testing/bdd";
 
 import { expect } from "@std/expect";

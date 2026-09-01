@@ -16,6 +16,7 @@
  *   refusal leaves when the commit boundary decides it is retryable rather
  *   than terminal and so never puts it on the error channel at all.
  */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { expect } from "@std/expect";

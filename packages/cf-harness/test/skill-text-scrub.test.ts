@@ -8,6 +8,7 @@
  * "scrub every string in this structure" rather than one with a silent gap
  * that a future validator change could expose.
  */
+
 import { describe, it } from "@std/testing/bdd";
 
 import { expect } from "@std/expect";

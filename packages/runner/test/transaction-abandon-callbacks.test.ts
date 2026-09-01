@@ -7,6 +7,7 @@
  * transaction's part is narrow: dispatch once, never after a commit succeeded,
  * and never through a wrapper standing for work whose outcome nobody acts on.
  */
+
 import { expect } from "@std/expect";
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";

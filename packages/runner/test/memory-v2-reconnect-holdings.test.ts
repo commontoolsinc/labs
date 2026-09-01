@@ -7,6 +7,7 @@
  * extrapolated one (04-protocol.md §4.1.2; `SpaceReplica.holdings`;
  * 09-invariants.md INV-14).
  */
+
 import { assert } from "@std/assert";
 
 import { expect } from "@std/expect";
