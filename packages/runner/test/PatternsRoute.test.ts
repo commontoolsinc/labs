@@ -76,10 +76,21 @@ describe("PatternsRoute", () => {
     });
   });
 
-  it("answers 404 for a file the tree does not hold", async () => {
-    await withRoute({ "main.tsx": ENTRY }, async (route) => {
-      const response = await route.serve(get("/api/patterns/absent.tsx"));
-      expect(response?.status).toBe(404);
+  it("answers 404 for a path that names no file", async () => {
+    // The three ways a path fails to name one. Each reports itself
+    // differently to the read, and the route serves files, never a listing.
+
+    await withRoute({ "system/main.tsx": ENTRY }, async (route) => {
+      for (
+        const path of [
+          "/api/patterns/absent.tsx",
+          "/api/patterns/system",
+          "/api/patterns/system/main.tsx/below.ts",
+        ]
+      ) {
+        const response = await route.serve(get(path));
+        expect(response?.status).toBe(404);
+      }
     });
   });
 

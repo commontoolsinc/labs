@@ -83,14 +83,25 @@ export class PatternsRoute {
     }));
   }
 
-  /** A pattern file's content as bytes. */
+  /**
+   * A pattern file's content as bytes.
+   *
+   * A path that names no file is not found, whichever of the three ways it
+   * fails to name one: nothing is there, it names a directory, or it
+   * continues below a file. The read reports each differently, and a caller
+   * asking for a pattern has the same answer for all three.
+   */
   async get(filename: string): Promise<Uint8Array> {
     const url = this.#resolve(filename);
 
     try {
       return await Deno.readFile(url);
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
+      if (
+        error instanceof Deno.errors.NotFound ||
+        error instanceof Deno.errors.IsADirectory ||
+        error instanceof Deno.errors.NotADirectory
+      ) {
         throw new Error(`Pattern file not found: ${filename}`);
       }
       throw error;

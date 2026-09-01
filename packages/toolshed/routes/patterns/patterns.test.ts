@@ -63,6 +63,19 @@ describe("Patterns API", () => {
       );
       expect(response.status).toBe(404);
     });
+
+    it("returns 404 for a path naming a directory or reaching below a file", async () => {
+      // Neither names a file this route can serve, and the route lists no
+      // directories, so both are absent rather than a fault of this server.
+
+      const directory = await app.request("/api/patterns/system");
+      expect(directory.status).toBe(404);
+
+      const belowAFile = await app.request(
+        "/api/patterns/record.tsx/below.ts",
+      );
+      expect(belowAFile.status).toBe(404);
+    });
   });
 
   describe("subdirectory imports", () => {
