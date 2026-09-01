@@ -657,16 +657,25 @@ export class SpeculationOverlayDestination
       return { ok: {} };
     }
     const inner = tx.tx;
-    if (inner.sealInto === undefined) {
+    if (
+      inner.sealInto === undefined ||
+      inner.markWholeDocumentWrites === undefined
+    ) {
       // Fail CLOSED: a transport without seal support must not fall
       // back to committing a derivation — that would re-open the
       // client derivation-commit path this destination exists to
-      // remove (speculation.md §6's FORBIDDEN list).
+      // remove (speculation.md §6's FORBIDDEN list). One without the
+      // whole-document mark is refused on the same footing: a seal whose
+      // ops were patches would compose with the layer beneath them, and
+      // swallowing an unsupported mark makes that silent.
+      const missing = inner.sealInto === undefined
+        ? "sealing"
+        : "whole-document writes (speculation.md §1)";
       return {
         error: {
           name: "StorageTransactionAborted",
           message: "speculative derivation refused: the storage " +
-            "transaction does not support sealing, and committing a " +
+            `transaction does not support ${missing}, and committing a ` +
             "derivation client-side is forbidden under " +
             "EXPERIMENTAL_SERVER_EXECUTION (speculation.md §6)",
           reason: new Error("speculation-seal-unsupported"),
@@ -786,6 +795,12 @@ export class SpeculationOverlayDestination
     };
     let result: Result<Unit, CommitError>;
     try {
+      // An entry's ops say what the run computed, not how it differed from
+      // the layer it ran over, because that layer moves under them
+      // (speculation.md §1; IStorageTransaction.markWholeDocumentWrites).
+      // Inside the same try as the seal it precedes, which refuses a
+      // read-only transaction the same way.
+      inner.markWholeDocumentWrites();
       result = await inner.sealInto(collector);
     } catch (cause) {
       // A REJECTED sealInto (review thread r3739139536): without the

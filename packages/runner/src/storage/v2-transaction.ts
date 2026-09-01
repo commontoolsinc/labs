@@ -977,6 +977,13 @@ export class V2StorageTransaction implements IStorageTransaction {
   // state never had, and `replace` cannot create them).
   // Set by effect-completion writebacks under the serving posture; one-way.
   #authoritativeWrites = false;
+  // Whole-document-writes mode (see
+  // IStorageTransaction.markWholeDocumentWrites): the emission half of
+  // authoritative mode on its own — set/delete rather than patches and
+  // mergeable ops — with the no-op elision left in place. Set by the client
+  // speculation overlay's seal, whose entries layer their ops over a
+  // confirmed value that moves under them. One-way.
+  #wholeDocumentWrites = false;
   #commitOrder?: readonly MemorySpace[];
   // Spaces written to, in first-write order. Used as the default commit order.
   #writtenSpaces: MemorySpace[] = [];
@@ -1047,6 +1054,17 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   isAuthoritativeWrites(): boolean {
     return this.#authoritativeWrites;
+  }
+
+  markWholeDocumentWrites(): void {
+    this.#assertWritable("markWholeDocumentWrites()");
+    this.#wholeDocumentWrites = true;
+  }
+
+  /** Whether a document's write is emitted as a whole-document set/delete.
+   * Authoritative mode implies it; whole-document mode is that half alone. */
+  get #emitsWholeDocuments(): boolean {
+    return this.#authoritativeWrites || this.#wholeDocumentWrites;
   }
 
   static create(manager: IStorageManager): IStorageTransaction {
@@ -1350,10 +1368,16 @@ export class V2StorageTransaction implements IStorageTransaction {
       // each, builtin-owned); completions already carry basisSeq=NOW
       // (no per-doc CAS — the hash guards arbitrate), so doc-level
       // last-writer-wins is the ruled posture, not a widening. The
-      // mergeable fast path is skipped too: no completion writeback
-      // records mergeable deltas, and folding them with a whole-doc
-      // set would double-apply.
-      if (!this.#authoritativeWrites) {
+      // mergeable fast path is skipped too: folding a mergeable op with
+      // a whole-doc set would apply its delta twice. A completion
+      // writeback can record one — llm-dialog's marked update pushes
+      // onto the message list — so the intents it recorded are
+      // abandoned below with the ops they would have produced.
+      //
+      // A whole-document transaction (markWholeDocumentWrites — the
+      // client speculation overlay's seal) takes the same emission,
+      // for the reason on that declaration.
+      if (!this.#emitsWholeDocuments) {
         const mergeable = this.#buildMergeableOps(doc);
         const patch = this.#buildPatchOperation(
           id,
@@ -1382,6 +1406,8 @@ export class V2StorageTransaction implements IStorageTransaction {
           operations.push(patch);
           continue;
         }
+      } else {
+        this.#abandonMergeableOps(doc);
       }
 
       operations.push(
@@ -3337,6 +3363,30 @@ export class V2StorageTransaction implements IStorageTransaction {
       (doc.mergeableOpsPoisoned ??= new Set()).add(pathKey);
     }
     return { ops, suppress };
+  }
+
+  // Abandons every mergeable intent a document recorded, for a commit that
+  // emits the document whole. An intent narrows the reads incidental to its op
+  // out of the commit's read set (`commitReadActivities` in ./v2.ts), which is
+  // sound only while the op is what carries that region: a mergeable op
+  // resolves against durable state, so the value it read does not constrain
+  // it. A whole-document set carries the region instead, and it is the value
+  // the run computed from what it read — so those reads are real dependencies
+  // and have to stay. Abandoning is the delete-and-poison shape
+  // `poisonMergeableOp` uses, and it runs inside getNativeCommit, which
+  // precedes the narrowing, so both sides see the same intents.
+  //
+  // For a speculative seal the read set is what the entry's retirement floor
+  // and its pending-read documents are built from, so an intent surviving here
+  // retires the entry against a watermark that never covered what the run read.
+  #abandonMergeableOps(doc: WritableDocumentEntry): void {
+    if (!doc.mergeableOps?.size) {
+      return;
+    }
+    for (const pathKey of [...doc.mergeableOps.keys()]) {
+      doc.mergeableOps.delete(pathKey);
+      (doc.mergeableOpsPoisoned ??= new Set()).add(pathKey);
+    }
   }
 
   // The working / initial state at one intent's path, which its builder turns

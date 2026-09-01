@@ -23,6 +23,25 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   not-yet-consequenced event) or `input(bindingId)` (live UI input echo).
 - The overlay is process-memory only. It is NEVER serialized, synced, or
   committed. On reload it is empty and the store is the truth.
+- The seal emits an entry's document operations as WHOLE-DOCUMENT
+  set/delete (`markWholeDocumentWrites`), and refuses a transaction that
+  cannot. The ops are materialized over the confirmed value on every
+  read, and that value moves under them: the space's serving runtime
+  commits the authoritative derivation for the same document, and it
+  arrives before the coverage that retires the entry (§4). A positional
+  array splice re-applied over an array that already carries what it
+  inserts duplicates that element, one that removed elements drops one,
+  and a mergeable append double-applies — so an entry says what its run
+  computed rather than how that differed from the layer it ran over. The
+  mergeable intents the run recorded are abandoned with the ops they
+  would have produced, so the reads those ops would have narrowed out of
+  the commit stay in the entry's read set, which is what its retirement
+  floor and its pending-read documents are built from. Pinned in
+  `speculation-overlay.test.ts` and `array-push-mergeable.test.ts`.
+- A standing entry therefore masks a concurrent authoritative change to
+  any other path of the same document, until the entry retires and the
+  arrived value renders. What a reader sees while it stands is a value
+  some run computed, whole.
 
 ## 2. What may speculate
 

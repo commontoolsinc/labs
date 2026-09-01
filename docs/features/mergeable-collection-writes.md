@@ -55,8 +55,9 @@ Carry the append intent through the transaction so the commit emits a
 tail-relative, mergeable operation instead of a reconstructed whole-array diff.
 
 An append commits as a dedicated `append` patch op (`{ op: "append", path,
-values }`). On the server this op inserts its elements at the array's *live*
-tail, creating the array (and the path to it) if it is absent. Because the
+values }`), except from a transaction that emits whole documents (below). On
+the server this op inserts its elements at the array's *live* tail, creating
+the array (and the path to it) if it is absent. Because the
 position is resolved on the server against durable state, the op is correct
 regardless of what the committing session had loaded locally — empty, short, or
 up to date.
@@ -359,6 +360,25 @@ first, since the op carries only the delta.
   asserts a conflict outcome that depends on it. It is kept because the
   guarantee should not rest on that coincidence: nothing obliges a reshape to
   read what it overwrites.
+
+- **A whole-document transaction abandons every intent it holds.** A
+  transaction marked `markWholeDocumentWrites` — or `markAuthoritativeWrites`,
+  which implies it — emits each written document as a whole-document `set` or
+  `delete` and sends no mergeable op at all, so the same rule applies to all of
+  them at once: `getNativeCommit` deletes and poisons every recorded path
+  before the narrowing runs. Here the reads are not belt and braces. The
+  whole-document write is the value the run computed from what it read, so an
+  intent left standing would drop a real dependency.
+
+  Two marks reach this. The client speculation overlay's seal takes it because
+  an entry's operations are layered above a confirmed value that moves under
+  them, and its read set is what the entry's retirement floor is built from
+  (`docs/specs/server-side-execution/speculation.md` §1). Effect-completion
+  writebacks under the serving posture take it through
+  `markAuthoritativeWrites`, and they can hold an intent — llm-dialog's marked
+  update pushes onto the message list. Their commit carries `basisSeq` of NOW
+  and does not export its read set, so what changes there is which local
+  dependencies the transaction registers, not what the server arbitrates.
 
 - **A `removeByValue` that does not account for the whole local array falls back
   too.** Its suppression is `subtree: true` — the array path and everything under
