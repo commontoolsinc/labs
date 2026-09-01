@@ -79,14 +79,22 @@ drawing its own screen. The bulk seams — survey, repair, retarget,
 Each threaded seam carries the test the override makes possible: an
 injected exit that throws, and the report read back as a value.
 
-**A5 — module-global state.** `quietMode` is a file-level `let`;
-`setLLMUrl` is written by both `loadPieces` and
-`PiecesController.initialize`; `receipted` (`lib/write-receipt.ts`)
-memoizes the write receipt per process, so a shell names a space once and
-says nothing for the writes after. Either scope them per connection, or
-land a recorded limit: one connection per process for shuttle v1,
-revisited when multiple places arrive. The cheap honest move is the
-recorded limit; the PR is whichever the review rules.
+**A5 — module-global state.** Done, as the recorded limit rather than as
+scoping: **one deployment per process**. `quietMode` (`commands/piece.ts`)
+is the process's hint posture and `receipted` (`lib/write-receipt.ts`)
+memoizes the write receipt for the life of the process, while a
+connection's own settings — the LLM endpoint, the base URL a pattern's
+relative `fetch` resolves against, and the ambient experimental flags a
+`Runtime` applies — land in globals under `packages/llm` and
+`packages/runner` that no connection owns. Each declaration carries the
+limit, and `claimProcessDeployment` (`lib/process-deployment.ts`) enforces
+the half a check can see: `loadPieces` claims the deployment it opens
+against, so a connection to a second one fails naming both, where two
+connections to one deployment write the same settings and are what a `cf`
+verb already does. Scoping them is part of multi-space sessions
+([`futures.md`](futures.md) candidate 3), and
+[`runtime-integration.md`](runtime-integration.md) item 6 carries the
+list and the bound.
 
 ## Stage B — the shuttle package
 

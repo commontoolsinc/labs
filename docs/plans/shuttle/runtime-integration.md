@@ -254,7 +254,7 @@ Each of these is small and lands on its own; together they are what decision
    and `call` all reach. It wants a sink of its own rather than the hint
    stream, because `--quiet` deliberately does not silence it, and a memo
    per connection rather than per process — its `receipted` set, which
-   item 6 names beside the other two globals.
+   item 6 names among the state one process's callers share.
 
    The second is **lib-internal warnings no seam reaches**, all in
    `lib/piece.ts`, and the sweep is of every `console.*` there rather
@@ -283,13 +283,40 @@ Each of these is small and lands on its own; together they are what decision
    them, but writes nothing unless `CF_CLI_TRACE_TIMINGS=1` asks it to.
 
    Sweep each as views need it captured.
-6. **Module-global state.** `quietMode` is a file-level `let` set on every
-   `FromCommand` entry; `setLLMUrl` is a global written by both `loadPieces`
-   and `PiecesController.initialize`, so two connections on different API
-   URLs would fight; and `receipted` (`lib/write-receipt.ts`) memoizes the
-   write receipt per process, so a long-lived shell names a space once and
-   stays silent for every write after. Scope them, or accept
-   one-connection-per-process for v1 and record the limit.
+6. **Module-global state.** Done, as the recorded limit rather than as
+   scoping: **one deployment per process**. Three kinds of state are the
+   process's rather than a connection's, and the first kind is what a
+   connection writes for itself — the endpoint `setLLMUrl` holds, written
+   by `loadPieces` and by `PiecesController.initialize` in another
+   package; the base URL `getPatternEnvironment()` hands a pattern's
+   relative `fetch`, which the `remoteClient` preset pins from `apiUrl`;
+   and the ambient experimental flags a `Runtime` applies as it is built
+   (`modernCellRep`, `contentAddressedSchemas`,
+   `readerSchemaPrecedence`), which for a CLI connection come from the
+   deployment itself. The second is the posture a caller sets: `quietMode`,
+   which each `FromCommand` entry writes and which therefore stands as the
+   last caller left it. The third is a memo of work already done:
+   `receipted` (`lib/write-receipt.ts`), so a shell holding a connection
+   names a space once and stays silent for every write after, and the
+   version-skew note `deferSkewNoteUntilFailureExit` holds for a failure
+   exit, which is one note about one server and prints at process end.
+
+   `claimProcessDeployment` (`lib/process-deployment.ts`) holds the limit
+   where a check can reach it: `loadPieces` claims the deployment it opens
+   against, and a connection to a different one throws naming both rather
+   than rewriting the first's settings. Two bounds on that. A second
+   connection to the *same* deployment is unremarked — it writes the same
+   settings, and it is what a verb reaching an un-injected library
+   function already does — so the posture and the two memos are held by
+   the limit rather than by the check. And a connection opened through
+   `PiecesController.initialize` directly, as `packages/fuse` and
+   `packages/cf-harness` open one, passes no claim. The declarations carry
+   the limit too, which is where a maintainer reading one finds it, and
+   `packages/cli/README.md` records it for a caller of the library seams.
+
+   A shuttle process therefore serves one deployment, and scoping these
+   per connection is part of multi-space sessions
+   ([`futures.md`](futures.md) candidate 3).
 7. **Disposal.** `withRuntimeCleanupOnFailure` disposes only on throw; the
    success path relies on process exit. In a long-lived shell every
    un-injected call leaks a runtime, a storage manager, and a WebSocket —

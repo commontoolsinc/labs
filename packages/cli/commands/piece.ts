@@ -126,9 +126,14 @@ import {
 import { absPath } from "../lib/utils.ts";
 import { noteWroteTo } from "../lib/write-receipt.ts";
 
-// Hint system: print helpful next-step suggestions after operations
+// Hint system: print helpful next-step suggestions after operations. The
+// posture is the process's rather than one call's, so it stands as the last
+// caller left it until the next caller sets it. That is sound while one
+// command is in flight at a time, which is what
+// `docs/plans/shuttle/runtime-integration.md` holds a long-lived caller to.
 let quietMode = false;
 
+/** Sets whether hints print, for every caller in this process. */
 export function setQuietMode(quiet: boolean) {
   quietMode = quiet;
 }
