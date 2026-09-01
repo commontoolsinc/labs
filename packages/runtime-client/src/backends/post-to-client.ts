@@ -33,10 +33,23 @@ const MAX_UNDELIVERABLE_RENDER = 512;
  * does not.
  */
 export function postToClient(message: IPCRemotePost): boolean {
+  // `self` is read at call time rather than captured at module load, so that a
+  // test driving this without a real worker can substitute its own.
+  return postThrough((encoded) => self.postMessage(encoded), message);
+}
+
+/**
+ * Posts one message through `send`, which is what a client other than the
+ * worker's owner is reached by: its own port rather than the worker's global.
+ * Everything the doc above says of {@link postToClient} is said of this, which
+ * is where it happens.
+ */
+export function postThrough(
+  send: (encoded: unknown) => void,
+  message: IPCRemotePost,
+): boolean {
   try {
-    // `self` is read at call time rather than captured at module load, so
-    // that a test driving this without a real worker can substitute its own.
-    self.postMessage(realmFromFabricValue(message));
+    send(realmFromFabricValue(message));
     return true;
   } catch (error) {
     // Defense in depth, and the mirror of the two decodes. Both steps above
@@ -50,9 +63,7 @@ export function postToClient(message: IPCRemotePost): boolean {
     // where a throw is an uncaught error rather than something that becomes
     // an error reply. Losing one message loudly beats taking the worker's
     // dispatch with it.
-    self.postMessage(
-      realmFromFabricValue(undeliverableMessageFrom(message, error)),
-    );
+    send(realmFromFabricValue(undeliverableMessageFrom(message, error)));
     return false;
   }
 }

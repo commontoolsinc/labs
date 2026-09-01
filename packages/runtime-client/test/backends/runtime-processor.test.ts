@@ -71,6 +71,7 @@ import {
   getCell,
   mapCellRefsToSigilLinks,
 } from "@/backends/utils.ts";
+import type { WorkerClient } from "@/backends/worker-client.ts";
 
 const cfcSigner = await Identity.fromPassphrase(
   "runtime-processor-cfc-label-tests",
@@ -4268,7 +4269,7 @@ describe("runtime-processor", () => {
       const dispatched: unknown[] = [];
       const processor = {
         vdomMounts: new Map([[
-          "mount-1",
+          "0 mount-1",
           {
             reconciler: {
               dispatchEvent: (_handlerId: string, event: unknown) => {
@@ -5200,8 +5201,10 @@ describe("runtime-processor", () => {
 
       const state = {
         runtime,
+        // Keyed as the processor keys a mount: by the mounting client's
+        // scoped mount id, which for a call naming no client is the owner's.
         vdomMounts: new Map<
-          number,
+          string,
           { reconciler: unknown; cancel: () => void }
         >(),
         vdomBatchIdCounter: 0,
@@ -5220,7 +5223,7 @@ describe("runtime-processor", () => {
           mountId: 1,
           cell: cell.getAsNormalizedFullLink() as unknown as CellRef,
         });
-        const mount = state.vdomMounts.get(1);
+        const mount = state.vdomMounts.get("0 1");
         expect(mount).toBeDefined();
         const policy = (mount!.reconciler as { rootRenderPolicy?: unknown })
           .rootRenderPolicy as RootRenderPolicy;
@@ -5276,9 +5279,9 @@ describe("runtime-processor", () => {
 
     function makeState(dispatchResult: boolean, calls: unknown[][]) {
       return {
-        vdomMounts: new Map<number, { reconciler: unknown }>([
+        vdomMounts: new Map<string, { reconciler: unknown }>([
           [
-            7,
+            "0 7",
             {
               reconciler: {
                 dispatchEvent(handlerId: number, event: unknown): boolean {
@@ -5370,7 +5373,7 @@ describe("runtime-processor", () => {
         RuntimeProcessor.prototype,
       ) as RuntimeProcessor;
       (processor as unknown as { vdomMounts: unknown }).vdomMounts = new Map([[
-        1,
+        "0 1",
         {
           reconciler: {
             dispatchEvent: (handlerId: number, event: unknown) =>
@@ -6115,6 +6118,343 @@ describe("runtime-processor", () => {
         cell: ref,
         sql: "DELETE FROM notes",
       })).resolves.toBeUndefined();
+    });
+  });
+
+  describe("RuntimeProcessor multi-client namespacing", () => {
+    // One worker runs one runtime and serves several documents at once. Every
+    // id a client supplies is minted inside that document -- a VDOM mount id
+    // comes from a counter that starts at 1 in each of them -- so what one
+    // client calls mount 1 and what another calls mount 1 are two mounts, and
+    // a cell two documents both watch is two subscriptions. Each test here
+    // holds one client's work still while another client's is set up, torn
+    // down, or fed.
+
+    type PostedMessage = Record<string, unknown>;
+
+    function testClient(id: number) {
+      const posted: PostedMessage[] = [];
+      const client: WorkerClient = {
+        id,
+        post: (message) => {
+          posted.push(message as PostedMessage);
+          return true;
+        },
+      };
+      return { client, posted };
+    }
+
+    const cellRef = {
+      space: cfcSigner.did(),
+      id: `of:${fid("multi-client-cell")}`,
+      path: [],
+      type: "application/json",
+    } as unknown as CellRef;
+
+    describe("cell subscriptions", () => {
+      function subscriptionHarness() {
+        const cancelled: number[] = [];
+        const sinks: Array<(value: unknown, cfcLabel: unknown) => void> = [];
+        const processor = {
+          subscriptions: new Map<string, () => void>(),
+          runtime: {
+            getCellFromLink: () => ({
+              sink: (
+                callback: (value: unknown, cfcLabel: unknown) => void,
+              ) => {
+                const nth = sinks.push(callback);
+                return () => cancelled.push(nth);
+              },
+            }),
+          },
+        } as unknown as RuntimeProcessor;
+        return { processor, sinks, cancelled };
+      }
+
+      const subscribe = (
+        processor: RuntimeProcessor,
+        client: WorkerClient,
+      ) =>
+        RuntimeProcessor.prototype.handleCellSubscribe.call(processor, {
+          type: RequestType.CellSubscribe,
+          cell: cellRef,
+        }, client);
+
+      const unsubscribe = (
+        processor: RuntimeProcessor,
+        client: WorkerClient,
+      ) =>
+        RuntimeProcessor.prototype.handleCellUnsubscribe.call(processor, {
+          type: RequestType.CellUnsubscribe,
+          cell: cellRef,
+        }, client);
+
+      it("gives each client its own subscription to the same cell", () => {
+        const { processor, sinks } = subscriptionHarness();
+        expect(subscribe(processor, testClient(1).client)).toEqual({
+          value: true,
+        });
+        expect(subscribe(processor, testClient(2).client)).toEqual({
+          value: true,
+        });
+        expect(sinks).toHaveLength(2);
+      });
+
+      it("returns `false` for a second subscription by the same client", () => {
+        const { processor, sinks } = subscriptionHarness();
+        const { client } = testClient(1);
+        expect(subscribe(processor, client)).toEqual({ value: true });
+        expect(subscribe(processor, client)).toEqual({ value: false });
+        expect(sinks).toHaveLength(1);
+      });
+
+      it("keeps one client's feed running when another unsubscribes the same cell", async () => {
+        const { processor, sinks, cancelled } = subscriptionHarness();
+        const first = testClient(1);
+        const second = testClient(2);
+        subscribe(processor, first.client);
+        subscribe(processor, second.client);
+
+        expect(unsubscribe(processor, first.client)).toEqual({ value: true });
+        expect(cancelled).toEqual([1]);
+
+        sinks[1]({ n: 2 }, undefined);
+        // The sink posts from a microtask, so the subscription response
+        // returns before the notification.
+        await Promise.resolve();
+
+        expect(second.posted).toHaveLength(1);
+        expect(second.posted[0].type).toBe(NotificationType.CellUpdate);
+        expect(first.posted).toEqual([]);
+      });
+
+      it("returns `false` for an unsubscribe of another client's subscription", () => {
+        const { processor, cancelled } = subscriptionHarness();
+        subscribe(processor, testClient(1).client);
+        expect(unsubscribe(processor, testClient(2).client)).toEqual({
+          value: false,
+        });
+        expect(cancelled).toEqual([]);
+      });
+    });
+
+    describe("VDOM mounts", () => {
+      const handleVDomMount = (RuntimeProcessor.prototype as unknown as {
+        handleVDomMount: (
+          this: unknown,
+          request: unknown,
+          client: WorkerClient,
+        ) => unknown;
+      }).handleVDomMount;
+      const handleVDomUnmount = RuntimeProcessor.prototype.handleVDomUnmount;
+
+      async function mountState() {
+        const { runtime } = createRuntime();
+        const space = cfcSigner.did();
+        const tx = runtime.edit();
+        const cell = runtime.getCell<string>(
+          space,
+          "multi-client-vdom-mount",
+          undefined,
+          tx,
+        );
+        cell.set("hello");
+        const commit = await tx.commit();
+        expect(commit.ok !== undefined).toBe(true);
+
+        const state = {
+          runtime,
+          vdomMounts: new Map<
+            string,
+            { reconciler: unknown; cancel: () => void }
+          >(),
+          vdomBatchIdCounter: 0,
+          renderDeclassificationPolicy: "allow",
+          renderConfidentialityCeiling: undefined,
+          handleVDomUnmount,
+        };
+        const link = cell.getAsNormalizedFullLink() as unknown as CellRef;
+        return { runtime, state, link };
+      }
+
+      it("keeps one client's mount when another mounts under the same mount id", async () => {
+        const { runtime, state, link } = await mountState();
+        const first = testClient(1);
+        const second = testClient(2);
+        const hadPostMessage = "postMessage" in globalThis;
+        const originalPostMessage =
+          (globalThis as { postMessage?: unknown }).postMessage;
+        (globalThis as { postMessage?: unknown }).postMessage = () => {};
+        try {
+          handleVDomMount.call(state, {
+            type: RequestType.VDomMount,
+            mountId: 1,
+            cell: link,
+          }, first.client);
+          handleVDomMount.call(state, {
+            type: RequestType.VDomMount,
+            mountId: 1,
+            cell: link,
+          }, second.client);
+
+          expect(state.vdomMounts.size).toBe(2);
+        } finally {
+          await runtime.dispose();
+          if (hadPostMessage) {
+            (globalThis as { postMessage?: unknown }).postMessage =
+              originalPostMessage;
+          } else {
+            delete (globalThis as { postMessage?: unknown }).postMessage;
+          }
+        }
+      });
+
+      it("sends each mount's batches to the client that mounted it", async () => {
+        const { runtime, state, link } = await mountState();
+        const first = testClient(1);
+        const second = testClient(2);
+        const hadPostMessage = "postMessage" in globalThis;
+        const originalPostMessage =
+          (globalThis as { postMessage?: unknown }).postMessage;
+        const strayPosts: unknown[] = [];
+        (globalThis as { postMessage?: unknown }).postMessage = (
+          message: unknown,
+        ) => {
+          strayPosts.push(message);
+        };
+        try {
+          handleVDomMount.call(state, {
+            type: RequestType.VDomMount,
+            mountId: 1,
+            cell: link,
+          }, first.client);
+          handleVDomMount.call(state, {
+            type: RequestType.VDomMount,
+            mountId: 1,
+            cell: link,
+          }, second.client);
+          // The reconciler flushes its ops on a microtask.
+          await Promise.resolve();
+          await Promise.resolve();
+
+          const batches = (posted: PostedMessage[]) =>
+            posted.filter((message) =>
+              message.type === NotificationType.VDomBatch
+            );
+          expect(batches(first.posted).length).toBeGreaterThan(0);
+          expect(batches(second.posted).length).toBeGreaterThan(0);
+          expect(strayPosts).toEqual([]);
+        } finally {
+          await runtime.dispose();
+          if (hadPostMessage) {
+            (globalThis as { postMessage?: unknown }).postMessage =
+              originalPostMessage;
+          } else {
+            delete (globalThis as { postMessage?: unknown }).postMessage;
+          }
+        }
+      });
+    });
+
+    describe("event routing", () => {
+      function eventState() {
+        const dispatched: Array<{ mount: string; handlerId: number }> = [];
+        const acknowledged: Array<{ mount: string; batchId: number }> = [];
+        const reconciler = (mount: string) => ({
+          dispatchEvent: (handlerId: number) => {
+            dispatched.push({ mount, handlerId });
+            return true;
+          },
+          acknowledgeBatchApplied: (batchId: number) => {
+            acknowledged.push({ mount, batchId });
+          },
+          unmount: () => {},
+        });
+        const processor = Object.create(
+          RuntimeProcessor.prototype,
+        ) as RuntimeProcessor;
+        (processor as unknown as { vdomMounts: unknown }).vdomMounts = new Map([
+          ["1 1", { reconciler: reconciler("first"), cancel: () => {} }],
+          ["2 1", { reconciler: reconciler("second"), cancel: () => {} }],
+        ]);
+        return { processor, dispatched, acknowledged };
+      }
+
+      it("routes a DOM event to the mount of the client that sent it", () => {
+        const { processor, dispatched } = eventState();
+        processor.handleNotification({
+          type: ClientNotificationType.VDomEvent,
+          mountId: 1,
+          handlerId: 7,
+          event: { type: "click" } as never,
+          nodeId: 3,
+        }, testClient(2).client);
+        expect(dispatched).toEqual([{ mount: "second", handlerId: 7 }]);
+      });
+
+      it("routes a batch acknowledgement to the mount of the client that sent it", () => {
+        const { processor, acknowledged } = eventState();
+        processor.handleNotification({
+          type: ClientNotificationType.VDomBatchApplied,
+          mountId: 1,
+          batchId: 42,
+        }, testClient(1).client);
+        expect(acknowledged).toEqual([{ mount: "first", batchId: 42 }]);
+      });
+    });
+
+    describe("disposeClient()", () => {
+      function departureState() {
+        const cancelled: string[] = [];
+        const unmounted: string[] = [];
+        const processor = Object.create(
+          RuntimeProcessor.prototype,
+        ) as RuntimeProcessor;
+        const state = processor as unknown as {
+          subscriptions: Map<string, () => void>;
+          operationSubscriptions: Map<string, unknown>;
+          operationSessions: Map<string, unknown>;
+          vdomMounts: Map<string, unknown>;
+          runtime: unknown;
+        };
+        state.subscriptions = new Map([
+          ["1 cell-a", () => cancelled.push("first/cell-a")],
+          ["2 cell-a", () => cancelled.push("second/cell-a")],
+        ]);
+        state.operationSubscriptions = new Map();
+        state.operationSessions = new Map();
+        state.vdomMounts = new Map([
+          ["1 1", {
+            reconciler: { unmount: () => unmounted.push("first/1") },
+            cancel: () => cancelled.push("first/mount-1"),
+          }],
+          ["2 1", {
+            reconciler: { unmount: () => unmounted.push("second/1") },
+            cancel: () => cancelled.push("second/mount-1"),
+          }],
+        ]);
+        state.runtime = {
+          dispose: () => {
+            throw new Error("the runtime must outlive a departing client");
+          },
+        };
+        return { processor, state, cancelled, unmounted };
+      }
+
+      it("cancels only the departing client's subscriptions and mounts", () => {
+        const { processor, state, cancelled, unmounted } = departureState();
+        processor.disposeClient(testClient(1).client);
+        expect(cancelled).toEqual(["first/cell-a", "first/mount-1"]);
+        expect(unmounted).toEqual(["first/1"]);
+        expect([...state.subscriptions.keys()]).toEqual(["2 cell-a"]);
+        expect([...state.vdomMounts.keys()]).toEqual(["2 1"]);
+      });
+
+      it("leaves the runtime running", () => {
+        const { processor } = departureState();
+        expect(() => processor.disposeClient(testClient(1).client)).not
+          .toThrow();
+      });
     });
   });
 });

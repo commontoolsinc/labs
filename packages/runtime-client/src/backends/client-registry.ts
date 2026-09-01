@@ -1,0 +1,437 @@
+/**
+ * The clients of one worker's runtime, and the message loop each of them is
+ * served by.
+ *
+ * A worker runs exactly one runtime. The first client to arrive stands it up;
+ * every later client attaches to the one already running, over a duplex of its
+ * own. What a client owns is namespaced by the client -- its subscriptions,
+ * its mounts, what its departure takes down -- and what governs it is not: the
+ * runtime's security context is settled at initialization, and an attach
+ * asserting a different one is refused rather than merged.
+ *
+ * How a duplex reaches this worker is deliberately not this module's business.
+ * {@link RuntimeClients.attach} takes anything shaped like a `MessagePort`, so
+ * a port carried by a page's opener, one relayed by a native shell, and one a
+ * test builds from a `MessageChannel` are the same thing here.
+ */
+
+import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
+import { CompilerStackLoadError } from "@commonfabric/runner";
+import {
+  type InitializationData,
+  type IPCClientMessage,
+  type IPCRemotePost,
+  type IPCRemoteResponse,
+  isAttachPortNotification,
+  isIPCClientMessage,
+  isIPCClientNotification,
+  NotificationType,
+  RequestType,
+  RuntimeErrorCode,
+} from "@/protocol/mod.ts";
+import { RuntimeProcessor } from "@/backends/mod.ts";
+import { postThrough } from "./post-to-client.ts";
+import { describeFailure } from "@/shared/utils.ts";
+import {
+  type ClientId,
+  OWNER_CLIENT_ID,
+  ownerClient,
+  type WorkerClient,
+} from "./worker-client.ts";
+
+// Count-only ledger of request traffic as seen by the worker: one
+// `received/<type>` per request that reached this message handler and one
+// `responded/<type>` (or `responded-error/<type>`) per reply posted back.
+// Counts increment even while the logger is disabled and the lazy args are
+// never evaluated, so this costs ~nothing per request. Read back through
+// `getLoggerCounts()`, and paired with the main thread's pending-request
+// table it classifies a stuck request: absent from `received` means delivery
+// starved; received without a matching `responded` means the handler never
+// returned; both present means the response was lost in transit.
+const ipcLogger = getLogger("runtime-worker.ipc", { enabled: false });
+
+// Worker-side request decomposition, recorded into timing stats (they record
+// even while the logger is disabled) under a `runner.`-prefixed logger so the
+// integration-test load summaries pick them up:
+//   runner.ipc/delivery/<type> — postMessage send → this handler running,
+//     i.e. how long the request sat in the worker's macrotask queue. Uses the
+//     envelope's `sentEpochMs` (timeOrigin-based, comparable across threads).
+//   runner.ipc/handle/<type>   — handleRequest start → settled.
+// A slow client round-trip decomposes as delivery (worker starved) vs handle
+// (handler awaited something slow) vs the residue (response return path).
+const ipcTimingLogger = getLogger("runner.ipc", { enabled: false });
+
+/**
+ * How much of an unreadable request to render in the report about it. Enough
+ * to recognize which message it was, short enough that a hostile payload
+ * cannot flood the channel it is being reported on.
+ */
+const MAX_INVALID_REQUEST_RENDER = 512;
+
+/**
+ * The far end of one client's duplex, as much of a `MessagePort` as this
+ * worker uses. Declared as a shape rather than as the class so that what
+ * arrives is a duplex and not a story about how it got here.
+ */
+export interface ClientDuplex {
+  postMessage(message: unknown): void;
+
+  addEventListener(
+    type: "message",
+    listener: (event: MessageEvent) => void,
+  ): void;
+
+  /**
+   * Begins delivery. A `MessagePort` queues everything sent to it until this
+   * is called, which is what lets a listener be installed without racing the
+   * messages already in flight.
+   */
+  start?(): void;
+}
+
+export interface RuntimeClientsOptions {
+  /**
+   * Turns the worker's console forwarding on and off. It patches the worker's
+   * own `console`, which is the worker entry's to own, so it arrives from
+   * there rather than being done here.
+   */
+  setConsoleBridge: (enabled: boolean) => void;
+
+  /**
+   * The client that owns the worker. Defaults to the one speaking over the
+   * worker's own global, which is what a real worker has.
+   */
+  owner?: WorkerClient;
+
+  /**
+   * Stands the runtime up. Resolved at call time rather than captured, so a
+   * caller substituting {@link RuntimeProcessor.initialize} still reaches its
+   * substitute.
+   */
+  initializeRuntime?: (data: InitializationData) => Promise<RuntimeProcessor>;
+}
+
+/** One connected client and whether its attach has been settled. */
+type RegisteredClient = {
+  client: WorkerClient;
+  attached: boolean;
+};
+
+export class RuntimeClients {
+  #runtime: RuntimeProcessor | undefined;
+  #initialization: Promise<RuntimeProcessor> | undefined;
+  #attachedClients = new Map<ClientId, RegisteredClient>();
+  #nextClientId: ClientId = OWNER_CLIENT_ID + 1;
+
+  readonly #owner: WorkerClient;
+  readonly #setConsoleBridge: (enabled: boolean) => void;
+  readonly #initializeRuntime: (
+    data: InitializationData,
+  ) => Promise<RuntimeProcessor>;
+
+  constructor(options: RuntimeClientsOptions) {
+    this.#owner = options.owner ?? ownerClient;
+    this.#setConsoleBridge = options.setConsoleBridge;
+    this.#initializeRuntime = options.initializeRuntime ??
+      ((data) => RuntimeProcessor.initialize(data));
+  }
+
+  /** The client that owns the worker and initializes its runtime. */
+  get owner(): WorkerClient {
+    return this.#owner;
+  }
+
+  /**
+   * Serves a further client over `duplex`, returning the client it becomes.
+   * The client is registered but not yet attached: until its
+   * {@link RequestType.Attach} is accepted it may ask for nothing else.
+   */
+  attach(duplex: ClientDuplex): WorkerClient {
+    const id = this.#nextClientId++;
+    const client: WorkerClient = {
+      id,
+      post: (message) =>
+        postThrough((encoded) => duplex.postMessage(encoded), message),
+    };
+    this.#attachedClients.set(id, { client, attached: false });
+    duplex.addEventListener("message", (event: MessageEvent) => {
+      void this.handleMessage(client, event);
+    });
+    duplex.start?.();
+    return client;
+  }
+
+  /**
+   * Handles one message that arrived on `client`'s duplex.
+   *
+   * Every failure below reports or replies rather than throwing: this runs
+   * from a listener, where a throw surfaces as an unhandled rejection and
+   * takes the worker's dispatch with it.
+   */
+  async handleMessage(
+    client: WorkerClient,
+    event: MessageEvent,
+  ): Promise<void> {
+    // Decoded whole, so what arrives is what was sent rather than whatever
+    // structured cloning preserved of it. The encoding end is
+    // `WebWorkerRuntimeTransport.send()`.
+    //
+    // What a decode returns is deep-frozen, so a handler owns what its request
+    // carries and may cede it, but does not edit it -- which is what
+    // `BaseRequest` states as one contract.
+    //
+    // Typed as a request rather than as the `FabricValue` a decode returns:
+    // the guards below are what actually vet it, and every use here is behind
+    // one of them or inside the `catch`, which wants the id of whatever
+    // failed.
+    let message: IPCClientMessage;
+
+    try {
+      message = fabricFromRealmValue(event.data) as IPCClientMessage;
+    } catch (error) {
+      // Defense in depth, as at the other end. Nothing undecodable should
+      // reach here, and if something does there is no `msgId` to answer under
+      // -- so this reports rather than replies, and the request it belonged to
+      // is left to time out.
+      client.post({
+        type: NotificationType.ErrorReport,
+        message: `Undecodable message from the client: ${
+          describeFailure(error)
+        }`,
+      });
+      return;
+    }
+
+    // A port handed over for a further client. It is the channel's own
+    // traffic: the port rides the transfer list rather than the message, so it
+    // is recognized before anything looks at the runtime.
+    if (isAttachPortNotification(message)) {
+      this.#handleAttachPort(client, event);
+      return;
+    }
+
+    // One-way notifications carry no msgId and get no response. Drop them once
+    // the worker is gone or disposed; in teardown the main thread may still be
+    // flushing fire-and-forget signals.
+    if (isIPCClientNotification(message)) {
+      try {
+        if (this.#runtime && !this.#runtime.isDisposed()) {
+          this.#runtime.handleNotification(message, client);
+        }
+      } catch (error) {
+        console.error("[RuntimeWorker] Notification error:", error);
+      }
+      return;
+    }
+
+    try {
+      if (!isIPCClientMessage(message)) {
+        // Rendered by `value-debug` rather than `JSON.stringify`, which is
+        // wrong for exactly what the decode above admits: it throws on a
+        // `bigint` anywhere in the tree -- replacing this report with one that
+        // names nothing -- and renders a `FabricPrimitive` as `{}`.
+        throw new Error(
+          `Invalid IPC request: ${
+            toCompactDebugString(message, MAX_INVALID_REQUEST_RENDER)
+          }`,
+        );
+      }
+      const { msgId, data: request } = message;
+      ipcLogger.debug(`received/${request.type}`, () => []);
+      const receivedAt = performance.now();
+      const sentEpochMs = (message as { sentEpochMs?: number }).sentEpochMs;
+      if (typeof sentEpochMs === "number") {
+        const deliveryMs = performance.timeOrigin + receivedAt - sentEpochMs;
+        if (deliveryMs > 0) {
+          ipcTimingLogger.time(
+            receivedAt - deliveryMs,
+            receivedAt,
+            "delivery",
+            request.type,
+          );
+        }
+      }
+
+      if (request.type === RequestType.Initialize) {
+        if (client.id !== this.#owner.id) {
+          throw new Error(
+            "Only the client that owns the worker may initialize its runtime.",
+          );
+        }
+        if (this.#initialization) {
+          throw new Error("Initialization of WorkerRuntime already attempted.");
+        }
+        this.#setConsoleBridge(request.data.forwardWorkerConsole === true);
+        this.#initialization = this.#initializeRuntime(request.data);
+        this.#runtime = await this.#initialization;
+        this.#reply({ msgId: message.msgId }, request.type, client);
+        return;
+      }
+
+      if (request.type === RequestType.Attach) {
+        if (client.id === this.#owner.id) {
+          throw new Error(
+            "The client that owns the worker initializes its runtime rather " +
+              "than attaching to it.",
+          );
+        }
+        // An attach joins a runtime; it never stands one up. Answered with
+        // the same words an ordinary request gets before initialization,
+        // because it is the same fact about the worker.
+        if (!this.#runtime) {
+          throw new Error("WorkerRuntime not initialized.");
+        }
+        this.#runtime.assertAttachable(request.data);
+        const registered = this.#attachedClients.get(client.id);
+        if (registered) registered.attached = true;
+        this.#reply({ msgId }, request.type, client);
+        return;
+      }
+
+      // Toggling console forwarding is handled here, not in the
+      // RuntimeProcessor, because the console patch lives in the worker entry.
+      // It is independent of runtime initialization, so it is answered before
+      // the init check. The owner's alone: what the bridge forwards goes to
+      // the worker's own global, which is the owner's end of the IPC.
+      if (request.type === RequestType.SetForwardWorkerConsole) {
+        if (client.id !== this.#owner.id) {
+          throw new Error(
+            "Only the client that owns the worker may forward its console.",
+          );
+        }
+        this.#setConsoleBridge(request.enabled);
+        this.#reply({ msgId }, request.type, client);
+        return;
+      }
+
+      if (client.id !== this.#owner.id) {
+        const registered = this.#attachedClients.get(client.id);
+        if (!registered?.attached) {
+          throw new Error("Client is not attached to the WorkerRuntime.");
+        }
+      }
+
+      if (!this.#runtime) {
+        throw new Error("WorkerRuntime not initialized.");
+      }
+      const runtime = this.#runtime;
+      if (runtime.isDisposed()) {
+        // After disposal, silently ack any late-arriving requests.
+        // Components may still be unsubscribing or finishing in-flight
+        // operations during teardown — no point erroring on these.
+        this.#reply({ msgId }, request.type, client);
+        return;
+      }
+
+      // A `Dispose` from an attached client is that client leaving, not the
+      // runtime ending: the runtime belongs to the worker, and the worker to
+      // the owner. Only the owner's `Dispose` reaches the runtime's own.
+      if (
+        request.type === RequestType.Dispose && client.id !== this.#owner.id
+      ) {
+        runtime.disposeClient(client);
+        this.#attachedClients.delete(client.id);
+        this.#reply({ msgId }, request.type, client);
+        return;
+      }
+
+      const handleStart = performance.now();
+      let response;
+      try {
+        response = await runtime.handleRequest(request, client);
+      } finally {
+        // Record handling latency whether or not the request threw, so
+        // error-heavy periods do not silently underreport it.
+        ipcTimingLogger.time(handleStart, "handle", request.type);
+      }
+      const payload: IPCRemoteResponse = response !== undefined
+        ? { msgId, data: response }
+        : { msgId };
+      this.#reply(payload, request.type, client);
+    } catch (error) {
+      console.error("[RuntimeWorker] Error:", error);
+      const type = isIPCClientMessage(message) ? message.data.type : "invalid";
+      ipcLogger.debug(`responded-error/${type}`, () => []);
+      const code = error instanceof CompilerStackLoadError
+        ? RuntimeErrorCode.CompilerStackLoadFailed
+        : undefined;
+
+      // A reply is addressed by `msgId`, and what reaches here need not have
+      // one: the decode above admits every `FabricValue`, `undefined` and a
+      // `bigint` among them, and `Invalid IPC request` is thrown precisely for
+      // what is no message at all. Reading `msgId` off that would throw from
+      // inside this `catch`, which is the one place a throw has nowhere to go
+      // -- out of an async listener it surfaces as an unhandled rejection,
+      // taking with it the report it was in the middle of making.
+      const msgId = isObjectNotArray(message) &&
+          typeof message.msgId === "number"
+        ? message.msgId
+        : undefined;
+      if (msgId === undefined) {
+        client.post({
+          type: NotificationType.ErrorReport,
+          message: `Malformed message from the client: ${
+            describeFailure(error)
+          }`,
+        });
+        return;
+      }
+
+      client.post({
+        msgId,
+        error: describeFailure(error),
+        ...(code ? { code } : {}),
+      });
+    }
+  }
+
+  /**
+   * Takes the port transferred alongside an attach-port message and serves a
+   * further client over it.
+   *
+   * Only the owner may hand one over. A client that arrived over a port does
+   * not get to enlarge the family it joined -- the worker belongs to the page
+   * that spawned it, and who else may speak to the runtime is that page's
+   * decision.
+   */
+  #handleAttachPort(client: WorkerClient, event: MessageEvent): void {
+    if (client.id !== this.#owner.id) {
+      client.post({
+        type: NotificationType.ErrorReport,
+        message:
+          "Only the client that owns the worker may hand it a client port.",
+      });
+      return;
+    }
+    const port = event.ports?.[0];
+    if (!port) {
+      client.post({
+        type: NotificationType.ErrorReport,
+        message: "An attach-port message arrived with no port to attach.",
+      });
+      return;
+    }
+    this.attach(port);
+  }
+
+  /**
+   * Posts one reply and records it in the ledger by what actually went. An
+   * encoding failure substitutes an error reply, and counting that as a
+   * response would say the request succeeded.
+   */
+  #reply(
+    payload: IPCRemoteResponse,
+    type: RequestType,
+    client: WorkerClient,
+  ): void {
+    const delivered = client.post(payload as IPCRemotePost);
+    ipcLogger.debug(
+      `${delivered ? "responded" : "responded-error"}/${type}`,
+      () => [],
+    );
+  }
+}
