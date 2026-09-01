@@ -1919,14 +1919,12 @@ refresh without waiting.
 
 The job:
 
-1. Reads the newest state object, which holds, per day in the window, the
-   set of workflow run identifiers already folded in and the aggregate
-   they produced.
-2. Lists each day's prefix and fetches only the objects whose run
-   identifier is not already in that day's set. Object names carry the run
-   identifier, so this is exact rather than a timestamp heuristic, and it
-   handles a relay re-ship of an old run correctly. In the steady state
-   this is about 2,000 objects per run.
+1. Reads the newest state object, which holds the submission object names
+   and source-and-date rollup receipts already folded, along with the
+   aggregate they produced.
+2. Applies the one input plan described below. In the steady state this is
+   about 2,000 objects per run until the arrival index replaces the
+   partition listing.
 3. Folds them in, ages the decayed counters by a day, classifies each new
    failure as a catch or as flake evidence, scores everything, reads back
    the lane timing records to update the corrections, calls `plan()` with
@@ -1940,10 +1938,84 @@ the volume the store now takes, sixty days of them is hundreds of
 thousands. The bootstrap is a manual dispatch with `--bootstrap --days 60`
 and high concurrency, run once; after that the incremental path keeps up.
 If the compactor is provisioned first, the bootstrap reads a manifest and
-its shards for each closed day — some hundreds of objects across the
-window — and seven days of raw records, which is a much better starting
-position, is the reason to do it in that order, and is what makes any
-horizon longer than this one affordable later.
+its shards for each closed CI day — some hundreds of objects across the
+window — and reads recent CI records and all local records raw. That is a
+much better starting position, is the reason to do it in that order, and
+is what makes any horizon longer than this one affordable later.
+
+### One input plan for bootstrap and ordinary publishing
+
+In the replacement publisher, bootstrap is permission to start from an
+empty aggregate and a larger default window. It is not a second way to
+choose inputs. Both modes apply the same rule independently to each source
+and date:
+
+1. A source-and-date receipt already in the aggregate says its rollup
+   baseline and covered arrival position are folded. Continue with journal
+   entries after that position.
+2. When no raw object from the source and date has been folded, a complete
+   rollup carrying a journal position may supply the initial baseline.
+   Record a receipt scoped to that source and date, then consume later
+   journal entries.
+3. Once any raw object from the source and date is in the aggregate,
+   continue from individually unseen arrivals. Do not switch to a rollup
+   written later, because its records overlap those raw contributions.
+4. A version-one rollup has no coverage position or source-object list. An
+   exact run takes the raw path rather than combining it with later raw
+   arrivals whose overlap cannot be determined.
+
+An existing aggregate seeded from version-one rollups cannot enter this
+path in place. Its date receipt cannot identify which journal entries are
+already in its shards. Migration builds a fresh aggregate from raw objects
+or from the next rollup format and its later journal entries. The current
+manifest remains newest until that bootstrap publishes its replacement.
+
+The current rollups cover CI only. Local submissions always take the raw
+path. A date-only `compactedDays` receipt is therefore not sufficient: it
+can make a CI rollup suppress local submissions from the same date. The
+receipt becomes source-scoped before the common input plan uses it.
+
+After the next rollup format lands, this rule lets an ordinary publisher
+use a rollup for a previously unseen old date, such as one reached while
+catching up after an outage or after a window expands. It does not make a
+steady-state publisher switch a date from raw objects to a rollup seven
+days later, after the raw contributions are already in its aggregate.
+
+The exact steady-state path adds a Cloud Storage object-finalize
+notification feeding an immutable arrival journal. A journal writer
+assigns the next position and atomically deduplicates both object and
+generation and the logical submission identity. For CI that identity is
+the repository, workflow run, attempt, and artifact; for local records it
+is the repository and report id. The writer then acknowledges the
+notification. An event delivered late is appended after what is already
+present; it cannot appear behind a cursor a publisher has passed. The
+uploader does not perform a second write which can fail after its record
+succeeds.
+
+The notification consumer and the backfill accept only canonical raw
+objects under the CI and local submission prefixes. They reject aggregated
+rollups, test-selection outputs, and the journal's own objects. The journal
+therefore cannot ingest a derived output or recursively ingest itself.
+
+The aggregate carries the last contiguous journal position whose effects
+it contains, in the same immutable state object as those effects. The
+compactor builds the next rollup format from journal entries through a
+position. Its manifest means that every eligible journal entry through the
+position for that source and date was accounted for exactly once in its
+named shards. The common input plan can then fold that baseline and consume
+every later journal entry. The two-day listing becomes a bounded integrity
+audit rather than a heuristic that decides which new data exists. A rollup
+manifest carrying its exact source object names can prove overlap, but
+cannot discover later arrivals without the index or another listing of
+that partition.
+
+The arrival index depends on canonical object identity. Before it lands,
+each CI artifact gains the immutable start time of the attempt that
+produced it. GitHub's workflow-run `run_started_at` advances on a rerun;
+using its current value for earlier artifacts changes their date prefix
+and can turn an intended create collision into a duplicate object. The
+relay uses the artifact's attempt number and stable attempt start for both
+its context and its object name.
 
 The publisher needs a writer credential for its own prefix. That is a new
 service account with `objectCreator` on `labs/test-selection/`, reached
@@ -3000,6 +3072,37 @@ answers somewhere people can see them.
       offline against recorded manifests.
 - [x] `tasks/test-selection-publish.ts` and
       `.github/workflows/test-selection.yml`, on a four-hourly cron.
+- [ ] Put an immutable attempt start in each CI artifact and use it for
+      that artifact's context and object name. A later relay of an earlier
+      attempt must collide with its first shipment even when a rerun
+      crossed a date boundary.
+- [ ] Provision the storage-generated arrival journal. Assign contiguous
+      positions and deduplicate object and generation and logical
+      submission identity atomically before acknowledging notifications.
+      Persist the consumed position with the publisher aggregate.
+- [ ] Backfill the journal from the raw object listing while live storage
+      notifications are connected. Deduplicate cross-date CI copies by
+      repository, workflow run, attempt, and artifact. Keep the
+      first-created valid object, record later copies as excluded, and
+      report disagreements in artifact-derived records or stable context.
+      The object-and-generation key deduplicates the listing from live
+      notifications at the handover.
+- [ ] Publish the journal's genesis receipt only after the notification
+      subscription covers the whole listing interval, the listing has
+      completed without a missing page, every listed object is committed,
+      and every notification from the handover is committed or still
+      durably pending. Readers do not use the journal before that receipt.
+- [ ] Build the next rollup format from journal entries through a recorded
+      position, accounting exactly once for every eligible entry through
+      that position for its source and date. Give bootstrap and ordinary
+      publishing one source-and-date input planner over those rollups and
+      later journal entries. Replace the date-only compacted receipt and
+      keep local records on their raw path until they have rollups of their
+      own.
+- [ ] Rebuild aggregates seeded from version-one rollups; do not migrate
+      their ambiguous date receipts into journal cursors.
+- [ ] Once readers have migrated to the journal, keep partition listing as
+      an integrity audit rather than the discovery authority.
 - [ ] The one-off bootstrap dispatch.
 - [x] Repeat the record census after `main` emitted server-execution
       variant records, and replace the plan's projection inputs.
