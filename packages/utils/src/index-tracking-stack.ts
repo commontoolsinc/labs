@@ -235,7 +235,7 @@ export class IndexTrackingStack<T> {
   static #keyFor(value: unknown): unknown {
     if (typeof value !== "number") {
       return value;
-    } else if (value !== value) {
+    } else if (Number.isNaN(value)) {
       return IndexTrackingStack.#NAN;
     } else if (Object.is(value, -0)) {
       return IndexTrackingStack.#NEGATIVE_ZERO;
