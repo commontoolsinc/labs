@@ -35,9 +35,9 @@ import {
   type StreamLinkRef,
 } from "@commonfabric/memory/v2";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
-import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
+import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   type Immutable,
@@ -4163,7 +4163,7 @@ export function convertCellsToLinks(
  * Recursive worker for {@link convertCellsToLinks}, carrying the state of the
  * walk in progress.
  *
- * `ancestors` holds the chain of values the walk is inside, so what it
+ * `ancestors` holds the stack of values the walk is inside, so what it
  * recognizes is a cycle. A value reachable twice by different paths is not one:
  * it is shared, and each position gets its own conversion. Returning a
  * back-link for a shared reference would rewrite one of its positions into a
