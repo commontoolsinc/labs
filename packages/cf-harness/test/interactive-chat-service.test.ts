@@ -328,6 +328,36 @@ Deno.test("interactive Codex services require one matching process owner", () =>
   );
 });
 
+Deno.test("interactive service refuses a turn run-id mapper with an injected engine", () => {
+  assertThrows(
+    () =>
+      new HarnessInteractiveChatService({
+        basePromptLoopOptions: {
+          engine: new CfHarnessEngine({
+            sandboxRuntime: new StubSandboxRuntime(),
+          }),
+        },
+        runIdForTurn: (_sessionId, turnId) => turnId,
+      }),
+    Error,
+    "turn run-id mapping cannot be combined with an injected engine",
+  );
+});
+
+Deno.test("interactive service refuses a turn run-id mapper with an injected run state", () => {
+  assertThrows(
+    () =>
+      new HarnessInteractiveChatService({
+        basePromptLoopOptions: {
+          runState: {} as HarnessPromptLoopResult["runState"],
+        },
+        runIdForTurn: (_sessionId, turnId) => turnId,
+      }),
+    Error,
+    "turn run-id mapping cannot be combined with an injected run state",
+  );
+});
+
 Deno.test("Loom-local interactive services require an explicit matching provider", () => {
   const credentialOwner = {
     type: "cf-harness.credential-owner-ref" as const,
