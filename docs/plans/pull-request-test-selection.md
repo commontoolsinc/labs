@@ -3372,6 +3372,12 @@ exercised on the branch on its own.
       part. `packages/cli/test/integration-sections.test.ts` holds the
       dispatch table to that property, and to every step being scheduled
       by some group rather than only by name.
+- [x] `tasks/test-topology/binaries.ts`: each shipped binary is a unit
+      whose test is that it still compiles, and the toolshed under the
+      server-execution define is a variant of that rather than a second
+      test. A pull request runs its servers and its command line from
+      source and compiles nothing, so without these a broken compile
+      would be found only on `main`.
 - [x] `tasks/check-test-topology.ts`, both halves, wired into
       `repo-gates`, with exact variant matching and one source-item claim
       allowed per variant. Its first run found ten test files that

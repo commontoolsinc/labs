@@ -2,6 +2,13 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { testIdentityKey } from "@commonfabric/test-support/records";
 import { loadTopology } from "./test-topology.ts";
+
+/**
+ * The repository, found from this file rather than from the process's
+ * own directory: a package's tests run with that package as the working
+ * directory, and the paths the topology reads are the repository's.
+ */
+const REPOSITORY = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 import {
   batchesOf,
   changedFiles,
@@ -389,7 +396,7 @@ describe("running everything", () => {
 });
 
 describe("running a lane's work", () => {
-  const lane = { lane: 1, of: 5, full: false, dryRun: false, root: Deno.cwd() };
+  const lane = { lane: 1, of: 5, full: false, dryRun: false, root: REPOSITORY };
 
   /** A suite that runs the command a case gives it. */
   function runnable(command: readonly string[], id = "probe"): Suite {
@@ -533,7 +540,7 @@ describe("planning a lane without running it", () => {
         of: 5,
         full: true,
         dryRun: true,
-        root: Deno.cwd(),
+        root: REPOSITORY,
       });
     } finally {
       console.log = log;
@@ -548,7 +555,7 @@ describe("planning a lane without running it", () => {
 });
 
 describe("planning a lane the manifest chose", () => {
-  const root = Deno.cwd();
+  const root = REPOSITORY;
 
   /** What a lane prints, with the store answering as a case describes. */
   async function planned(
@@ -632,7 +639,7 @@ describe("planning a lane the manifest chose", () => {
 });
 
 describe("the lane's own housekeeping", () => {
-  const root = Deno.cwd();
+  const root = REPOSITORY;
 
   it("reads the two flags that carry no value", () => {
     const options = parseLaneArgs(["--full", "--dry-run", "--lane", "2"]);
@@ -733,7 +740,7 @@ describe("the lane's own housekeeping", () => {
 });
 
 describe("what a lane records about itself", () => {
-  const lane = { lane: 1, of: 5, full: false, dryRun: false, root: Deno.cwd() };
+  const lane = { lane: 1, of: 5, full: false, dryRun: false, root: REPOSITORY };
 
   it("records what each batch cost, beside the records it gathered", async () => {
     // The publisher fits the suite overheads and corrections from these,
@@ -846,7 +853,7 @@ describe("what a lane records about itself", () => {
           of: 5,
           full: false,
           dryRun: true,
-          root: Deno.cwd(),
+          root: REPOSITORY,
           at: "2026-09-01T00:00:00Z",
         },
         {
