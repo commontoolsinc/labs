@@ -98,10 +98,12 @@ import {
   prepareCfcGrantWrite,
   preparedDigestFor,
   type PreparedDigestInput,
+  type RuntimeWritePolicyAuthorization,
   type SinkMaxConfidentiality,
   type TrustSnapshot,
   type WritePolicyInput,
 } from "../cfc/mod.ts";
+import { runtimeWritePolicyAuthorized } from "../cfc/types.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
 import { isTerminalRefusal, plainReason } from "../cfc/verdict-reason.ts";
 import {
@@ -433,6 +435,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // ECMAScript-private (#) so handler code reaching cell.tx cannot enter the
   // scope via `(cell.tx as any)` — `as any` cannot touch a `#private` member.
   #privilegedSystemWriteDepth = 0;
+
+  // The write-policy inputs the runtime recorded, by reference to the frozen
+  // record. `#`-private, so nothing outside this class can add to it; the one
+  // writer is `recordCfcWritePolicyInput` handed the runtime's mark.
+  #runtimeWritePolicyInputs = new WeakSet<WritePolicyInput>();
   // Per-transaction cache of `Cell.get()` results, keyed by stable cell view.
   // Replaced wholesale on any write (see `#invalidateReadResultCache`), so a hit
   // is only ever served when nothing has been written since the cached read.
@@ -1418,7 +1425,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
-  recordCfcWritePolicyInput(input: WritePolicyInput): void {
+  recordCfcWritePolicyInput(
+    input: WritePolicyInput,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): void {
     // Freeze on entry: from this point on the record is owned by the tx and
     // identity-stable, which lets `hashStringOf()` cache its hash on the
     // existing WeakMap. The within-sort tiebreaker in
@@ -1432,9 +1442,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       frozen,
       this.#cfcState.implementationIdentity,
     );
+    // And remember whether the RUNTIME recorded it. The set is private and
+    // holds the frozen record itself, so `isRuntimeWritePolicyInput` answers
+    // for exactly the records that arrived with the mark.
+    if (runtimeWritePolicyAuthorized(authorization)) {
+      this.#runtimeWritePolicyInputs.add(frozen);
+    }
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-policy-input-added");
     }
+  }
+
+  isRuntimeWritePolicyInput(input: WritePolicyInput): boolean {
+    return this.#runtimeWritePolicyInputs.has(input);
   }
 
   recordCfcConsultedGrant(consulted: ConsultedGrant): void {
@@ -3133,8 +3153,15 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.#wrapped.setCfcImplementationIdentity(identity);
   }
 
-  recordCfcWritePolicyInput(input: WritePolicyInput): void {
-    this.#wrapped.recordCfcWritePolicyInput(input);
+  recordCfcWritePolicyInput(
+    input: WritePolicyInput,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): void {
+    this.#wrapped.recordCfcWritePolicyInput(input, authorization);
+  }
+
+  isRuntimeWritePolicyInput(input: WritePolicyInput): boolean {
+    return this.#wrapped.isRuntimeWritePolicyInput(input);
   }
 
   recordCfcConsultedGrant(consulted: ConsultedGrant): void {

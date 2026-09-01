@@ -71,6 +71,7 @@ import type {
   ConsultedPolicyManifest,
   ImplementationIdentity,
   PostCommitSideEffect,
+  RuntimeWritePolicyAuthorization,
   TrustSnapshot,
   WritePolicyInput,
 } from "../cfc/mod.ts";
@@ -1885,7 +1886,21 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * contract and to enable the within-sort tiebreaker cache in
    * `compareWritePolicyInput`.
    */
-  recordCfcWritePolicyInput(input: WritePolicyInput): void;
+  recordCfcWritePolicyInput(
+    input: WritePolicyInput,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): void;
+
+  /**
+   * Whether `input` was recorded by the runtime, under
+   * `runtimeWritePolicyAuthorization`.
+   *
+   * `recordCfcWritePolicyInput` is on this interface, and pattern-authored
+   * code reaches the transaction its cells are bound to, so an input's own
+   * fields say only what its recorder wrote. A gate that ACTS on an input
+   * asks this; a gate that measures one does not need to.
+   */
+  isRuntimeWritePolicyInput(input: WritePolicyInput): boolean;
 
   /**
    * Records a grant document consulted by policyState-guarded boundary

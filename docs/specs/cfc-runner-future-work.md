@@ -265,13 +265,21 @@ Not new machinery so much as turning the system on:
   reject: the SC-18b writer-fit misfit. The per-transaction flow join landing on
   a written document must fit that document's declared store policy; under
   strict a misfit rejects the commit, and under every mode below it persists the
-  measurement and flags a diagnostic. Implemented in `prepareBoundaryCommit`
+  measurement and flags a diagnostic. One seam answers a misfit by declaring
+  rather than rejecting: a document the runtime is setting a piece up in
+  takes the §8.12.5 route-2 upgrade, declaring a policy that covers the join
+  in the same transaction that writes it. Implemented in
+  `prepareBoundaryCommit`
   ([`prepare.ts`](../../packages/runner/src/cfc/prepare.ts)), contract in
   [`cfc-enforcement-matrix.md`](./cfc-enforcement-matrix.md) §4, asserted under
   both modes in
   [`cfc-writer-fit.test.ts`](../../packages/runner/test/cfc-writer-fit.test.ts).
   What remains is picking the conforming default deployment states from that
-  matrix's §3 progression and moving the shipped hosts onto them. Strict
+  matrix's §3 progression and moving the shipped hosts onto them. A piece's
+  RUNNING graph is not on that seam: a lift or handler writing in a later
+  transaction records no setup marker, so its target — commonly a `computed:`
+  document — measures against its own ceiling, and strict refuses those
+  writes until they have a route of their own. Strict
   presupposes `cfcFlowLabels: persist`: §18.6.3's conformance matrix marks
   `enforce-strict` without `persist` non-conforming, and the writer-fit
   measurement exists only where the flow join is stamped. §18.6.3 also puts the

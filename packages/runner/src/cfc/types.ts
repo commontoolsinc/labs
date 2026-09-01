@@ -36,6 +36,60 @@ export const CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION =
 export const CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION =
   "runtime.setup.seed-materialization";
 
+// A document a piece is being set up in: its argument document, or an
+// internal document or stream its result projects to. `target` is the
+// document, minted from the piece's result cell; `sources` is that result
+// document. The prepare gate reads it for the §8.12.5 route-2 declaration
+// described in `docs/specs/cfc-enforcement-matrix.md` §4, and takes it only
+// where `target` names a whole document AND the input was recorded under
+// {@link runtimeWritePolicyAuthorization}.
+export const CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE =
+  "runtime.setup.piece-substrate";
+
+/**
+ * Marks a write-policy input as one the runtime itself recorded.
+ *
+ * `recordCfcWritePolicyInput` is on the public transaction interface, and
+ * pattern-authored code runs in the runtime's own realm holding runtime cells,
+ * so it reaches `cell.tx` and can record an input naming whatever it likes.
+ * An input a gate ACTS on — rather than one a gate measures — therefore has to
+ * say who recorded it. This is the mark, and it works the way
+ * `rawMetaWriteAuthorization` does: a symbol cannot be named by a module that
+ * did not import it, and the sandbox hands pattern code the builder namespace
+ * rather than the runner's modules.
+ */
+export const RUNTIME_WRITE_POLICY_INPUT: unique symbol = Symbol(
+  "runtime-write-policy-input",
+);
+
+/** The authorization a runtime-recorded write-policy input carries. */
+export interface RuntimeWritePolicyAuthorization {
+  readonly [RUNTIME_WRITE_POLICY_INPUT]: true;
+}
+
+/**
+ * The authorization the runtime passes beside an input a gate acts on.
+ *
+ * It travels as an argument of the one call that carries it, so it marks that
+ * input and no other — including no input recorded on the same transaction in
+ * the meantime.
+ *
+ * In-package callers only: `cfc/mod.ts` re-exports the type and not this
+ * value, so it stays out of the package's public entry points, and holding it
+ * is what naming a piece's substrate takes.
+ */
+export const runtimeWritePolicyAuthorization: RuntimeWritePolicyAuthorization =
+  Object.freeze(
+    { [RUNTIME_WRITE_POLICY_INPUT]: true } as RuntimeWritePolicyAuthorization,
+  );
+
+/** Whether an authorization argument carries the runtime's mark. */
+export const runtimeWritePolicyAuthorized = (value: unknown): boolean =>
+  typeof value === "object" && value !== null &&
+  (value as Partial<RuntimeWritePolicyAuthorization>)[
+      RUNTIME_WRITE_POLICY_INPUT
+    ] === true;
+
 export type CfcEnforcementMode =
   | "disabled"
   | "observe"
