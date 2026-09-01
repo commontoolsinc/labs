@@ -30,6 +30,7 @@ export {
   getLoweredArrayMethodName,
   getOwnReturnExpressions,
   getPatternBuilderCallbackArgument,
+  getSynchronousIifeCall,
   hasReactiveCollectionProvenance,
   isCallbackReference,
   isConsumedByTerminalChainCall,

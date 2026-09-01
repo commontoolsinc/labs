@@ -177,7 +177,16 @@ export class PatternContextValidationTransformer
     }
     this.reportedPlainArrayMapCalls.add(decision.call);
 
-    const message = decision.reason === "result-not-direct-jsx"
+    const message = decision.reason === "reactive-jsx-escapes-render"
+      ? `This plain-array map collects view nodes whose props or children ` +
+        `carry reactive values, and the collected array leaves the render ` +
+        `path. An ordinary consumer reads through a view node to those ` +
+        `members the same way it reads through an object literal, and a ` +
+        `reactive member is an object that is truthy whatever it ` +
+        `represents. Keep the collected nodes on the render path — ` +
+        `rendered as JSX children — or move the consuming computation ` +
+        `into computed(() => ...).`
+      : decision.reason === "result-not-direct-jsx"
       ? `This plain-array map callback returns a reactive value, so the ` +
         `collected array holds cells rather than values, and only a ` +
         `direct JSX child rendering can read them. An ordinary consumer ` +

@@ -1181,7 +1181,7 @@ function flowsDirectlyToJsxChild(expression: ts.Expression): boolean {
   }
 }
 
-function getSynchronousIifeCall(
+export function getSynchronousIifeCall(
   owner: ts.Node,
 ): ts.CallExpression | undefined {
   if (

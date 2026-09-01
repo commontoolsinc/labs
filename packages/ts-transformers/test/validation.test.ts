@@ -3649,6 +3649,129 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
+    "errors when collected view nodes with reactive props leave the render path",
+    async () => {
+      const source = `      import { Default, pattern } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      const hasActiveProp = (n: unknown): boolean =>
+        Boolean(
+          (n as { props?: Record<string, unknown> }).props?.["data-active"],
+        );
+
+      export default pattern<
+        { target: string | Default<""> },
+        { kept: unknown }
+      >(({ target }) => {
+        const rows = VALUES.map((v) => <span data-active={v === target} />);
+        const kept = rows.filter(hasActiveProp);
+        return { kept };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "collects view nodes",
+      );
+    },
+  );
+
+  await t.step(
+    "errors when collected view nodes with reactive children leave the render path",
+    async () => {
+      const source = `      import { Default, pattern } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      const readsIt = (n: unknown): boolean => Boolean(n);
+
+      export default pattern<
+        { target: string | Default<""> },
+        { kept: unknown }
+      >(({ target }) => {
+        const rows = VALUES.map((v) => (
+          <span>{v === target ? "y" : "n"}</span>
+        ));
+        const kept = rows.filter(readsIt);
+        return { kept };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "collects view nodes",
+      );
+    },
+  );
+
+  await t.step(
+    "allows inert view nodes through ordinary consumers",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      const readsIt = (n: unknown): boolean => Boolean(n);
+
+      export default pattern<{ title: string }, { kept: unknown }>(
+        ({ title }) => {
+          const rows = VALUES.map((v) => <span>{v}</span>);
+          return { kept: rows.filter(readsIt), title };
+        },
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "view nodes with no reactive content are ordinary data, so ordinary " +
+          "consumers may read them",
+      );
+    },
+  );
+
+  await t.step(
+    "allows reactive view nodes selected by a conditional on the render path",
+    async () => {
+      const source = `      import { Default, pattern, UI } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<
+        { target: string | Default<"">; show: boolean }
+      >(({ target, show }) => {
+        const rows = VALUES.map((v) => (
+          <span>{v === target ? "y" : "n"}</span>
+        ));
+        return { [UI]: <div>{show ? rows : null}</div> };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "a conditional selecting the binding on the way to a JSX child is " +
+          "part of the render path",
+      );
+    },
+  );
+
+  await t.step(
     "errors when a mutating call puts a reactive value in a collected aggregate",
     async () => {
       const source = `      import { pattern, Writable } from "commonfabric";

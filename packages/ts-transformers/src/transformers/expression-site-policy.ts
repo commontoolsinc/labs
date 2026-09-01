@@ -6,6 +6,7 @@ import {
   detectCallKind,
   getCallArgumentPosition,
   getOwnReturnExpressions,
+  getSynchronousIifeCall,
   getTypeAtLocationWithFallback,
   hasAuthoredSourceSite,
   hasReactiveCollectionProvenance,
@@ -121,6 +122,7 @@ export interface UnsupportedPlainArrayMapDecision {
   kind: "unsupported-plain-array-map";
   reason:
     | "result-not-direct-jsx"
+    | "reactive-jsx-escapes-render"
     | "async-callback"
     | "generator-callback";
   call: ts.CallExpression;
@@ -1780,6 +1782,203 @@ function expressionReferencesSymbol(
   return referencesSymbol;
 }
 
+/**
+ * True when a returned JSX tree carries reactive content: a prop or child
+ * expression the analyzer reports as reactive, a spread prop that does, or a
+ * function-valued prop, which lowering turns into an applied handler — a
+ * reactive artifact sitting in the collected node's props.
+ *
+ * The scan stops at nested functions: the function itself is the collected
+ * content; what its body reads is its own concern.
+ */
+function jsxReturnsCarryReactiveContent(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  return getOwnReturnExpressions(callback).some((returnExpression) => {
+    const value = unwrapExpression(returnExpression);
+    if (
+      !ts.isJsxElement(value) && !ts.isJsxSelfClosingElement(value) &&
+      !ts.isJsxFragment(value)
+    ) {
+      return false;
+    }
+    let reactive = false;
+    const inspect = (expression: ts.Expression): void => {
+      if (reactive) return;
+      const inner = unwrapExpression(expression);
+      if (ts.isArrowFunction(inner) || ts.isFunctionExpression(inner)) {
+        reactive = true;
+        return;
+      }
+      if (analyze(inner).containsReactive) {
+        reactive = true;
+      }
+    };
+    const walk = (node: ts.Node): void => {
+      if (reactive) return;
+      if (ts.isJsxExpression(node) && node.expression) {
+        inspect(node.expression);
+        return;
+      }
+      if (ts.isJsxSpreadAttribute(node)) {
+        inspect(node.expression);
+        return;
+      }
+      ts.forEachChild(node, walk);
+    };
+    walk(value);
+    return reactive;
+  });
+}
+
+/**
+ * Whether the map call's collected result is consumed only by rendering.
+ *
+ * The call sitting in a render position settles it directly. Stored in a
+ * `const`, the binding's references decide: every one must sit in a render
+ * position itself. A mutable binding is not followed — what it holds at a
+ * use is not what the declaration says — and a destructured one has no
+ * single name to follow.
+ */
+function mapResultStaysOnRenderPath(
+  call: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  let current: ts.Expression = call;
+  while (
+    current.parent && ts.isParenthesizedExpression(current.parent) &&
+    current.parent.expression === current
+  ) {
+    current = current.parent;
+  }
+  const parent = current.parent;
+  if (
+    parent && ts.isVariableDeclaration(parent) &&
+    parent.initializer === current
+  ) {
+    const declarationList = parent.parent;
+    if (
+      !ts.isVariableDeclarationList(declarationList) ||
+      (declarationList.flags & ts.NodeFlags.Const) === 0 ||
+      !ts.isIdentifier(parent.name)
+    ) {
+      return false;
+    }
+    const symbol = context.checker.getSymbolAtLocation(parent.name);
+    if (!symbol) {
+      return false;
+    }
+    let scope: ts.Node | undefined = parent;
+    while (scope && !ts.isFunctionLike(scope) && !ts.isSourceFile(scope)) {
+      scope = scope.parent;
+    }
+    if (!scope) {
+      return false;
+    }
+    let offRenderPath = false;
+    const visit = (node: ts.Node): void => {
+      if (offRenderPath) return;
+      if (
+        ts.isIdentifier(node) && node !== parent.name &&
+        context.checker.getSymbolAtLocation(node) === symbol &&
+        !expressionStaysOnRenderPath(node)
+      ) {
+        offRenderPath = true;
+        return;
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(scope, visit);
+    return !offRenderPath;
+  }
+  return expressionStaysOnRenderPath(call);
+}
+
+/**
+ * Whether an expression's value flows to a JSX child, read through the
+ * positions rendering owns: transparent wrappers, conditional and logical
+ * selection, and the direct return of a synchronous JSX-local IIFE. A JSX
+ * attribute is not a render position — props leave through the applicator to
+ * whatever reads them.
+ */
+function expressionStaysOnRenderPath(expression: ts.Expression): boolean {
+  let current: ts.Expression = expression;
+  while (true) {
+    while (
+      current.parent &&
+      (
+        ts.isParenthesizedExpression(current.parent) ||
+        ts.isAsExpression(current.parent) ||
+        ts.isTypeAssertionExpression(current.parent) ||
+        ts.isSatisfiesExpression(current.parent) ||
+        ts.isNonNullExpression(current.parent)
+      ) && current.parent.expression === current
+    ) {
+      current = current.parent;
+    }
+
+    const parent = current.parent;
+    if (!parent) {
+      return false;
+    }
+    if (
+      ts.isJsxExpression(parent) && parent.expression === current &&
+      (ts.isJsxElement(parent.parent) || ts.isJsxFragment(parent.parent))
+    ) {
+      return true;
+    }
+    if (ts.isConditionalExpression(parent)) {
+      if (parent.whenTrue === current || parent.whenFalse === current) {
+        current = parent;
+        continue;
+      }
+      return false;
+    }
+    if (ts.isBinaryExpression(parent)) {
+      const operator = parent.operatorToken.kind;
+      if (
+        operator === ts.SyntaxKind.AmpersandAmpersandToken &&
+        parent.right === current
+      ) {
+        current = parent;
+        continue;
+      }
+      if (
+        (operator === ts.SyntaxKind.BarBarToken ||
+          operator === ts.SyntaxKind.QuestionQuestionToken) &&
+        (parent.left === current || parent.right === current)
+      ) {
+        current = parent;
+        continue;
+      }
+      return false;
+    }
+    if (ts.isReturnStatement(parent) && parent.expression === current) {
+      let owner: ts.Node | undefined = parent.parent;
+      while (owner && !ts.isFunctionLike(owner)) {
+        owner = owner.parent;
+      }
+      const iifeCall = owner && getSynchronousIifeCall(owner);
+      if (!iifeCall) {
+        return false;
+      }
+      current = iifeCall;
+      continue;
+    }
+    if (ts.isArrowFunction(parent) && parent.body === current) {
+      const iifeCall = getSynchronousIifeCall(parent);
+      if (!iifeCall) {
+        return false;
+      }
+      current = iifeCall;
+      continue;
+    }
+    return false;
+  }
+}
+
 function plainArrayMapDecisionNeedsDiagnostic(
   decision: Exclude<
     ReturnType<typeof classifyPlainArrayMapWrapperSite>,
@@ -1857,7 +2056,7 @@ export function classifyUnsupportedPlainArrayMapCall(
     context.checker,
     (sourceFile) => context.isSourceFileDefaultLibrary(sourceFile),
   );
-  if (decision === undefined || decision === "supported") {
+  if (decision === undefined) {
     return undefined;
   }
 
@@ -1870,6 +2069,25 @@ export function classifyUnsupportedPlainArrayMapCall(
   }
 
   if (mapReceiverHasReactiveCollectionProvenance(call, context)) {
+    return undefined;
+  }
+
+  if (decision === "supported") {
+    // A render-collecting callback earns its unrestricted flow because the
+    // collected array holds view nodes — but a view node whose props or
+    // children carry reactive values is itself a record an ordinary consumer
+    // can read through, the same way it reads through an object literal. Such
+    // a map is safe exactly while its result stays on the render path.
+    if (
+      jsxReturnsCarryReactiveContent(callback, context, analyze) &&
+      !mapResultStaysOnRenderPath(call, context)
+    ) {
+      return {
+        kind: "unsupported-plain-array-map",
+        reason: "reactive-jsx-escapes-render",
+        call,
+      };
+    }
     return undefined;
   }
 

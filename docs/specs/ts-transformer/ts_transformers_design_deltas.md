@@ -93,7 +93,9 @@ body carries pattern-owned expression sites when its collected values stay on
 the render path. What the callback returns decides how far the result may
 travel: a render-collecting callback — directly returning JSX, `null`, the
 global `undefined` value, or a literal constant — embeds every lowered value in
-its view nodes, so its result may flow anywhere; a value-collecting callback
+its view nodes, and its result may flow anywhere while those nodes carry no
+reactive content (nodes that do are classified like records; see below); a
+value-collecting callback
 can return a lowered value, so its map call must be the JSX child itself or the
 direct return of a synchronous IIFE — concise arrow body or explicit `return`
 — whose call is the child.
@@ -155,7 +157,13 @@ truthiness is never in question, but an ordinary consumer reads through it —
 `map((v) => ({ v, flag })).filter(({ flag }) => flag)` interprets the member,
 not the record — so every member is classified the way the whole return is.
 Computed property names are included because native record construction must
-interpret them too. A rejected-flow map whose returns are all plain collects
+interpret them too. A returned view node is itself classified like a record:
+one whose props or children carry reactive values may travel only the render
+path — the map call in a JSX-child position, or a `const` binding whose every
+reference sits in one, read through conditional and logical selection and
+synchronous JSX-local IIFE returns — because an ordinary consumer reads
+through a node to its members exactly as it reads through an object literal.
+A node with no reactive content stays ordinary data. A rejected-flow map whose returns are all plain collects
 ordinary data; a reactive computation inside one is a standard
 non-escaping site and keeps the standard "wrap it in `computed()`"
 classification instead. A

@@ -607,6 +607,11 @@ Diagnostics emitted in all modes:
   - three dedicated messages cover an unsupported plain-array `map`
     wrapper-site shape, and each reports once per map call, anchored on the
     call, however many reactive spellings the callback holds:
+    - a render-collecting callback whose collected view nodes carry
+      reactive props or children while the map result leaves the render path
+      ("collects view nodes…"; the render path is the JSX-child positions a
+      `const` binding's references may sit in, read through conditional and
+      logical selection and synchronous JSX-local IIFE returns)
     - a value-collecting callback whose result leaves the direct JSX-child
       flow ("returns a reactive value…"; guidance: make the map the JSX
       child, move conditional/logical selection inside a concrete returned
@@ -743,8 +748,13 @@ What the callback returns then decides how far its result may travel:
 - A **render-collecting** callback directly returns JSX, `null`, the global
   `undefined` value, or a literal constant. Every lowered value it creates is
   embedded in the returned view nodes, so the collected array holds view nodes
-  and plain values, and the result may flow anywhere ordinary data flows:
-  through a local, a filter, a JSX attribute, or a conditional.
+  and plain values. A collected node with no reactive props or children is
+  ordinary data and may flow anywhere. A node whose props or children carry
+  reactive values — including a function-valued prop, which lowers to an
+  applied handler — is a record an ordinary consumer can read through, so its
+  map may travel only the render path: the call in a JSX-child position, or a
+  `const` binding every one of whose references sits in one, read through
+  conditional and logical selection and synchronous JSX-local IIFE returns.
 - A **value-collecting** callback can return a lowered value itself, so the
   collected array holds bare cells. Only the JSX-child rendering path knows
   how to read those, so the map call must be the JSX child expression itself,
