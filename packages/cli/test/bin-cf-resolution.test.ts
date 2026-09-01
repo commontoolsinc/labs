@@ -250,7 +250,11 @@ Deno.test("`which` is only intercepted as the first argument", async () => {
     const labs = join(dir, "labs");
     await makeCheckout(labs);
 
-    const { code, out } = await resolveFrom(labs, {}, ["call", "which"]);
+    const { code, out } = await resolveFrom(labs, {}, [
+      "piece",
+      "call",
+      "which",
+    ]);
     assertEquals(code, 0);
     // The stub launcher ran, so the argument was forwarded rather than caught.
     assertEquals(out, labs);

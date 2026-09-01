@@ -26,7 +26,7 @@ mutation style. Don't.
 
 3. **Check recompute.** Via the CLI, `cf cell set` does not trigger computed
    re-evaluation — run `piece step` first (see
-   [cli-debugging](../cli-debugging.md#stale-computed-values-after-cf-set)).
+   [cli-debugging](../cli-debugging.md#stale-computed-values-after-cf-cell-set)).
 
 4. **Only then isolate the rendering issue.** If state changed but the UI did
    not, build a minimal repro of the render path (missing `computed()`,

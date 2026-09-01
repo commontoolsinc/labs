@@ -162,7 +162,7 @@ and so should you. It takes the line and the cursor offset, and prints what the
 shell would have offered:
 
 ```bash
-cf completion complete --shell zsh --line "cf piece call --piece x " --point 18
+cf completion complete --shell zsh --line "cf piece call --piece x " --point 24
 ```
 
 The shell functions themselves are a separate surface and are exercised by

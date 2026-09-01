@@ -200,7 +200,8 @@ fi
 # The child is what a path crossing a link boundary crosses into, and what the
 # shadowed-name step calls. --show-links names the document behind /item, which
 # is the address form --piece takes back in.
-ADDED=$($CF call --quiet --show-links --piece board $ARGS --invocation add-1 \
+ADDED=$($CF piece call --quiet --show-links --piece board $ARGS \
+  --invocation add-1 \
   addItem '{"title":"First item"}' 2>/dev/null)
 ITEM=$(echo "$ADDED" | jq -r '.links["/item"] // empty')
 ITEM_ID=${ITEM#/of:}
@@ -211,7 +212,7 @@ fi
 # The space DID, read off a stored link rather than assumed: a space NAME
 # derives its DID one way, so nothing on the line carries it. The canonical
 # reference's space-qualified spelling needs it.
-SPACE_DID=$($CF get --quiet --piece board $ARGS items 2>/dev/null |
+SPACE_DID=$($CF cell get --quiet --piece board $ARGS items 2>/dev/null |
   jq -r '.[0].record["/"]["link@1"].space // empty')
 if [ -n "$SPACE_DID" ]; then ok "the space resolves to $SPACE_DID"; else
   bad "no space DID on the child's stored link"
@@ -228,7 +229,8 @@ READABLE=0
 UNREADABLE=0
 while IFS= read -r target; do
   [ -z "$target" ] && continue
-  if [ "$(succeeds $CF get --quiet --piece "$target" $ARGS '$NAME')" = "1" ]
+  if [ "$(succeeds $CF cell get --quiet --piece "$target" $ARGS '$NAME')" \
+    = "1" ]
   then
     READABLE=$((READABLE + 1))
   else
@@ -271,13 +273,13 @@ CANONICAL="/of:$BOARD"
 QUALIFIED="/@$SPACE_DID/of:$BOARD"
 VERBS="addItem,legacyAdd,noteAll,renameItem,sweep"
 check "Completion fixture" \
-  "$($CF get --quiet --piece "$CANONICAL" $ARGS '$NAME' 2>/dev/null | tr -d '"')" \
+  "$($CF cell get --quiet --piece "$CANONICAL" $ARGS '$NAME' 2>/dev/null | tr -d '"')" \
   "the canonical reference is a --piece value the command accepts"
 check "$VERBS" "$(candidates_at "cf piece call $LINE_ARGS --piece $CANONICAL ")" \
   "and the verb slot behind it offers the same verbs"
 
 check "Completion fixture" \
-  "$($CF get --quiet --piece "$QUALIFIED" $ARGS '$NAME' 2>/dev/null | tr -d '"')" \
+  "$($CF cell get --quiet --piece "$QUALIFIED" $ARGS '$NAME' 2>/dev/null | tr -d '"')" \
   "its space-qualified spelling is accepted too"
 check "$VERBS" "$(candidates_at "cf piece call $LINE_ARGS --piece $QUALIFIED ")" \
   "and completes the same"
@@ -288,12 +290,13 @@ check "$VERBS" "$(candidates_at \
   "and supplies the space when the line names none"
 
 check "Completion fixture" \
-  "$($CF get --quiet $ARGS "$CANONICAL" '$NAME' 2>/dev/null | tr -d '"')" \
+  "$($CF cell get --quiet $ARGS "$CANONICAL" '$NAME' 2>/dev/null | tr -d '"')" \
   "a positional canonical address is a target the command accepts"
 check "$VERBS" "$(candidates_at "cf piece call $LINE_ARGS $CANONICAL ")" \
   "and the callable after it completes, index shifted the way the command shifts it"
 
-check "1" "$(succeeds $CF get --quiet --piece "$CANONICAL#argument" $ARGS)" \
+check "1" \
+  "$(succeeds $CF cell get --quiet --piece "$CANONICAL#argument" $ARGS)" \
   "the #argument suffix is a --piece value the command accepts"
 ARGUMENT_KEYS=$(candidates_at "cf cell get $LINE_ARGS --piece $CANONICAL#argument ")
 check "$ARGUMENT_KEYS" \
@@ -332,7 +335,7 @@ check "addItem,noteAll,renameItem,sweep" \
 check "[deprecated] handler" \
   "$(annotation_at "cf piece call $LINE_ARGS --piece board " legacyAdd)" \
   "the verb the listing held back is offered marked"
-check "1" "$(succeeds $CF call --quiet --piece board $ARGS \
+check "1" "$(succeeds $CF piece call --quiet --piece board $ARGS \
   --invocation legacy-1 legacyAdd '{"title":"Legacy item"}')" \
   "and it is callable, which is why it is offered at all"
 # The annotation column carries what the author said the verb is FOR, which is
@@ -349,7 +352,7 @@ step "7. Past the callable name, cf's own flags are not offered"
 # `cf piece call` is stopEarly(), so the first positional ends option parsing and
 # every later word belongs to the callable's schema-derived parser. A flag the
 # command refuses there is a candidate that teaches a caller something false.
-check "0" "$(succeeds $CF call --quiet --piece board $ARGS addItem \
+check "0" "$(succeeds $CF piece call --quiet --piece board $ARGS addItem \
   --invocation late)" "the command refuses a cf flag after the callable name"
 check "" "$(complete_at "cf piece call $LINE_ARGS --piece board addItem --")" \
   "and nothing is offered there"
@@ -369,12 +372,13 @@ check "pinned,title" "$($CF piece verbs --piece board $ARGS --json 2>/dev/null |
   jq -r '.verbs[] | select(.name == "addItem") | .inputSchema.properties |
     keys | sort | join(",")')" \
   "addItem declares the fields its flags are named for"
-HELP=$($CF call --piece board $ARGS addItem --help 2>/dev/null)
+HELP=$($CF piece call --piece board $ARGS addItem --help 2>/dev/null)
 check "1" "$(printf '%s\n' "$HELP" | grep -c -- '^  --title <string>')" \
   "and its help page names the flag each one is written as"
 check "1" "$(printf '%s\n' "$HELP" | grep -c -- '^  --pinned | --no-pinned')" \
   "including both spellings of a boolean field"
-check "1" "$(succeeds $CF call --quiet --piece board $ARGS --invocation flags-1 \
+check "1" "$(succeeds $CF piece call --quiet --piece board $ARGS \
+  --invocation flags-1 \
   addItem --title 'Flagged item')" "and the parser accepts them as flags"
 gap "cf piece call $LINE_ARGS --piece board addItem --" \
   "a verb's fields inside the section the verb opens"
@@ -387,7 +391,7 @@ check "1" "$(complete_at "cf cell get $LINE_ARGS --piece board " |
 check "settings/density,settings/theme" \
   "$(candidates_at "cf cell get $LINE_ARGS --piece board settings/")" \
   "a nested object offers its keys, each carrying the path already typed"
-check "cozy" "$($CF get --quiet --piece board $ARGS settings/density \
+check "cozy" "$($CF cell get --quiet --piece board $ARGS settings/density \
   2>/dev/null | tr -d '"')" "and the completed path is one cf cell get reads"
 
 step "10. A cell path follows a \$link boundary rather than stopping at it"
@@ -396,12 +400,12 @@ step "10. A cell path follows a \$link boundary rather than stopping at it"
 check "1" "$(complete_at "cf cell get $LINE_ARGS --piece board items/0/" |
   grep -c '^items/0/label$')" \
   "the keys past the boundary are the child's own"
-check "First item" "$($CF get --quiet --piece board $ARGS items/0/label \
+check "First item" "$($CF cell get --quiet --piece board $ARGS items/0/label \
   2>/dev/null | tr -d '"')" \
   "and the path crossing the boundary is one cf cell get reads"
 # The same slot also offers names cf cell get refuses: a callable is not a value,
 # and reading one is redirected to cf piece call.
-check "0" "$(succeeds $CF get --quiet --piece board $ARGS addItem)" \
+check "0" "$(succeeds $CF cell get --quiet --piece board $ARGS addItem)" \
   "reading a callable's name is refused"
 check "1" "$(complete_at "cf cell get $LINE_ARGS --piece board " |
   grep -c '^addItem$')" \
@@ -411,7 +415,7 @@ step "11. Result field paths complete in the projection's own grammar"
 # --step because the board carries a computed value and a projection reads
 # through the whole result: the same reason the verb walkthrough steps before
 # it projects.
-check "dark" "$($CF get --quiet --piece board $ARGS --step \
+check "dark" "$($CF cell get --quiet --piece board $ARGS --step \
   --select settings.theme 2>/dev/null | jq -r '.settings.theme')" \
   "a --select field path is a projection the command reads"
 # Both spellings of a position, plus the bare suffix naming the read's own
@@ -429,7 +433,7 @@ check "revision,settings,revision,settings@" \
 # each element. An index there is refused by the command.
 check "1" "$(complete_at "cf cell get $LINE_ARGS --piece board --select items." |
   grep -cx 'items.label')" "a position below an array offers the element's fields"
-check "0" "$(succeeds $CF get --quiet --piece board $ARGS --step \
+check "0" "$(succeeds $CF cell get --quiet --piece board $ARGS --step \
   --select items.0.label)" "and an index in that position is refused"
 # `--schema` reads the same field list, and reads two other things that are
 # recognized by their first character.
@@ -442,7 +446,8 @@ check "" "$(complete_at "cf cell get $LINE_ARGS --piece board --schema @")" \
 check "@,density,density@,theme,theme@" \
   "$(candidates_at "cf cell get $LINE_ARGS --piece board settings --select ")" \
   "a path positional moves the projection's own root with it"
-check "dark" "$($CF get --quiet --piece board $ARGS settings --select theme \
+check "dark" "$($CF cell get --quiet --piece board $ARGS settings \
+  --select theme \
   2>/dev/null | jq -r '.theme')" "and the command reads it from there too"
 # A verb's result is a different vocabulary and is not this one; `cf piece call`'s
 # projection stays empty until the verb before it can be read. Written past
@@ -458,11 +463,12 @@ step "12. A name on two cells completes against the one the dispatcher reaches"
 # does something else.
 check "record" "$(candidates_at "cf piece call $LINE_ARGS --piece $ITEM_ID ")" \
   "the shadowed name is offered exactly once"
-BOARD_REVISION=$($CF get --quiet --piece board $ARGS revision 2>/dev/null)
-check "1" "$($CF call --quiet --piece "$ITEM_ID" $ARGS --invocation rec-1 \
+BOARD_REVISION=$($CF cell get --quiet --piece board $ARGS revision 2>/dev/null)
+check "1" "$($CF piece call --quiet --piece "$ITEM_ID" $ARGS \
+  --invocation rec-1 \
   record '{"text":"first"}' 2>/dev/null | jq -r '.result.recorded')" \
   "calling it reaches the result cell's callable"
-check "$BOARD_REVISION" "$($CF get --quiet --piece board $ARGS revision \
+check "$BOARD_REVISION" "$($CF cell get --quiet --piece board $ARGS revision \
   2>/dev/null)" \
   "and not the one the arguments cell carries, which writes elsewhere"
 

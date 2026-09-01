@@ -686,7 +686,8 @@ this document stops being read.
 addresses and the top-level names land first, and can start as soon as the read
 layer has merged; they touch the same commands, so starting earlier means
 resolving the same files twice. Every spelling it retires is dated rather than
-conditional: each notice names the day the spelling it replaces stops working.
+conditional: each notice names the day after which the spelling it replaces is
+no longer guaranteed.
 
 **Retention and CFC execution provenance** —
 [its own plan](retention-and-provenance.md). Gated on a CFC review that has not

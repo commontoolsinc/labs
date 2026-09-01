@@ -612,8 +612,14 @@ export interface DeclaredSlots {
 
 /**
  * Every slot the tree offers a value at, walked the way `resolveCompletionLine`
- * walks it: `realSubcommands` decides which children are commands, and
- * `takesValue` decides which options have a value to complete.
+ * walks it: {@link reachableSubcommands} decides which children are commands,
+ * and `takesValue` decides which options have a value to complete.
+ *
+ * Reachable rather than suggestible, which is the same split resolving a typed
+ * name follows: a superseded spelling is hidden from {@link realSubcommands},
+ * so nothing offers it, and it still owns every slot below it — a caller who
+ * types it completes its flags, and a slot reached only through it is one the
+ * provider tables have to answer for.
  *
  * Both keys the provider tables use fall out of this walk, which is what lets
  * a check subtract the tables from the tree — in either direction — rather

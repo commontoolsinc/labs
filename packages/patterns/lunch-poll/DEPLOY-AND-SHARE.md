@@ -178,8 +178,9 @@ which is why both the test commands and the flags are required.
 
 **Command spellings:** the data commands are `cf cell get`, `cf cell set` and
 `cf piece call`. The piece-lifecycle commands keep the `cf piece` prefix: `new`,
-`setsrc`, `getsrc`, `step`, `inspect`, `render`, `ls`, `rm`, `verbs`,
-`recreate-root`.
+`setsrc`, `getsrc`, `step`, `inspect`, `render`, `ls`, `rm`, `verbs`.
+`recreate-root` rebuilds a space rather than a piece, so it is
+`cf space recreate-root`.
 
 ## Option A — ordinary compatible source updates
 

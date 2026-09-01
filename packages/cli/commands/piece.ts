@@ -1537,6 +1537,17 @@ export function targetOptions(
  * declares `stopEarly()` and its action reads what the marker set aside, which
  * is the boundary the marker is for.
  */
+export function withNoSectionMarker<
+  // deno-lint-ignore no-explicit-any
+  F extends (this: any, ...args: any[]) => unknown,
+>(spelling: string, action: F): F {
+  // deno-lint-ignore no-explicit-any
+  return function (this: any, ...args: any[]) {
+    refuseSectionMarker(spelling, this.getRawArgs());
+    return action.apply(this, args);
+  } as F;
+}
+
 /**
  * An action wrapped with the step-7 notice when it is reached through a
  * superseded spelling, and left alone when it is not.
@@ -1553,20 +1564,10 @@ function maybeDeprecated<
     : withDeprecatedCommandSpelling(spelling, replacedBy, action);
 }
 
-export function withNoSectionMarker<
-  // deno-lint-ignore no-explicit-any
-  F extends (this: any, ...args: any[]) => unknown,
->(spelling: string, action: F): F {
-  // deno-lint-ignore no-explicit-any
-  return function (this: any, ...args: any[]) {
-    refuseSectionMarker(spelling, this.getRawArgs());
-    return action.apply(this, args);
-  } as F;
-}
-
 /**
- * The definition of `get`, mounted at top level as `cf cell get`. `spelling` is
- * only how the command names itself in its own help.
+ * The definition of `get`, blessed as `cf cell get` and mounted a second time
+ * at the superseded `cf get`. `spelling` is only how the command names itself
+ * in its own help; `replacedBy` is what makes a mount carry the step-7 notice.
  */
 // deno-lint-ignore no-explicit-any
 function buildGetCommand(
@@ -2114,9 +2115,13 @@ export function buildSetHomeCommand(
       render("Deployed custom home pattern.");
     }
 
+    // The hint names the spelling to write next, which is the blessed one
+    // even when this run arrived through the superseded mount: a next step
+    // that teaches the spelling the notice just told the caller to stop
+    // writing is the notice arguing with itself.
     hint(cliText(`NEXT STEPS:
   → Open home in browser: ${baseConfig.apiUrl}
-  → Reset to default:     cf ${spelling} --reset ...`));
+  → Reset to default:     cf ${replacedBy ?? spelling} --reset ...`));
   };
   // deno-lint-ignore no-explicit-any
   const command: Command<any> = new Command()

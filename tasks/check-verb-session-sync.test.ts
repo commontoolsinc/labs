@@ -414,7 +414,7 @@ describe("check-verb-session-sync", () => {
       // The other half: a document that quotes only the command half leaves
       // a reader with a `cf cell set` that hangs waiting on stdin.
       const demo = `run_stdin '25' cf cell set --piece a target\n`;
-      const halved = "```bash\ncf set --piece a target\n```";
+      const halved = "```bash\ncf cell set --piece a target\n```";
       expect(findViolations(demo, halved).length).toBe(1);
     });
 

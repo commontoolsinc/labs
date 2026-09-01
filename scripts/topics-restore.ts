@@ -148,7 +148,14 @@ async function liveValue(field: string): Promise<unknown> {
   // field, so a read that never landed must stop the run rather than be
   // forgiven as one.
   try {
-    return await cfJson<unknown>(["get", "-q", ...addr, "--input", field]);
+    return await cfJson<unknown>([
+      "cell",
+      "get",
+      "-q",
+      ...addr,
+      "--input",
+      field,
+    ]);
   } catch (error) {
     if (isAbsentPathError(error)) return undefined;
     throw error;
@@ -170,6 +177,7 @@ const boardFid = export_.board?.fid;
 const missingLinks: string[] = [];
 for (const field of structural) {
   const live = await cfJson<unknown>([
+    "cell",
     "get",
     "-q",
     ...addr,
@@ -244,6 +252,7 @@ for (const field of Object.keys(restoreDoc)) {
 }
 for (const field of structural) {
   const after = await cfJson<unknown>([
+    "cell",
     "get",
     "-q",
     ...addr,

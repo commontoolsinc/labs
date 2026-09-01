@@ -112,14 +112,17 @@ describe("section-marker", () => {
       // Without the guard this parse reaches the action with an empty
       // `--select` and returns an unprojected value — the silent wrong answer
       // the refusal is for.
-      const { text, exitCode } = await outputFrom(pieceDataCommand("get"), [
-        "addr",
-        "--",
-        "--select",
-        "title",
-      ]);
+      const { text, exitCode } = await outputFrom(
+        pieceDataCommand("get", { spelling: "cell get" }),
+        ["addr", "--", "--select", "title"],
+      );
       expect(text).toContain("closes a callable's section");
       expect(text).toContain("--select title");
+      // The refusal writes the corrected line back in the spelling its mount
+      // carries, so the line a caller is handed is one they can paste: the
+      // canonical spelling, not the superseded top-level one the same builder
+      // also answers at.
+      expect(text).toContain("cf cell get addr --select title");
       // 2 is cliffy's exit for a validation error, which is what this is —
       // the point being that it is not 0, which is what the silent discard
       // returned.
@@ -127,13 +130,12 @@ describe("section-marker", () => {
     });
 
     it("refuses a marker on `set`", async () => {
-      const { text } = await outputFrom(pieceDataCommand("set"), [
-        "addr",
-        "--",
-        "--json",
-        "1",
-      ]);
+      const { text } = await outputFrom(
+        pieceDataCommand("set", { spelling: "cell set" }),
+        ["addr", "--", "--json", "1"],
+      );
       expect(text).toContain("closes a callable's section");
+      expect(text).toContain("cf cell set addr --json 1");
     });
 
     it("refuses a marker on `wish`", async () => {
@@ -147,13 +149,22 @@ describe("section-marker", () => {
     });
 
     it("refuses a trailing marker on every command that has no section", async () => {
-      // `cf cell get addr --` sets no words aside, so the literal arguments are
-      // empty and look exactly like `cf cell get addr`. Each of these three would
-      // have been accepted by a guard reading what followed the marker.
+      // `cf cell get addr --` sets no words aside, so the literal arguments
+      // are empty and look exactly like `cf cell get addr`. Each of these
+      // three would have been accepted by a guard reading what followed the
+      // marker.
       for (
         const [name, command, args] of [
-          ["get", pieceDataCommand("get"), ["addr", "--"]],
-          ["set", pieceDataCommand("set"), ["addr", "--"]],
+          [
+            "get",
+            pieceDataCommand("get", { spelling: "cell get" }),
+            ["addr", "--"],
+          ],
+          [
+            "set",
+            pieceDataCommand("set", { spelling: "cell set" }),
+            ["addr", "--"],
+          ],
           ["wish", wish, ["#profile", "--"]],
         ] as const
       ) {
@@ -167,7 +178,10 @@ describe("section-marker", () => {
       // The guard must not become the error every incomplete line reports:
       // this one is refused too, but for the identity and api-url it never
       // named.
-      const { text } = await outputFrom(pieceDataCommand("get"), ["addr"]);
+      const { text } = await outputFrom(
+        pieceDataCommand("get", { spelling: "cell get" }),
+        ["addr"],
+      );
       expect(text).not.toContain("closes a callable's section");
     });
 
@@ -175,13 +189,10 @@ describe("section-marker", () => {
       // `call` declares stopEarly() and its action reads the literal
       // arguments, so the marker is the boundary it exists for. A refusal
       // here would take away the spelling the design prescribes.
-      const { text } = await outputFrom(pieceDataCommand("call"), [
-        "addr",
-        "verb",
-        "--",
-        "--select",
-        "title",
-      ]);
+      const { text } = await outputFrom(
+        pieceDataCommand("call", { spelling: "piece call" }),
+        ["addr", "verb", "--", "--select", "title"],
+      );
       expect(text).not.toContain("closes a callable's section");
     });
   });

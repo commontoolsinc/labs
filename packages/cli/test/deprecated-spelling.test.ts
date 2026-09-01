@@ -51,7 +51,8 @@ describe("deprecated-spelling", () => {
       });
       expect(lines).toEqual([
         "'cf piece set-home' is deprecated; spell it 'cf space set-home'. " +
-        "The 'cf piece set-home' spelling stops working on 2026-09-11.",
+        "The 'cf piece set-home' spelling is not guaranteed to work after " +
+        "2026-09-11.",
       ]);
     });
 
@@ -65,7 +66,7 @@ describe("deprecated-spelling", () => {
       });
       expect(lines).toEqual([
         "'cf get' is deprecated; spell it 'cf cell get'. The 'cf get' " +
-        "spelling stops working on 2026-09-11.",
+        "spelling is not guaranteed to work after 2026-09-11.",
       ]);
     });
 

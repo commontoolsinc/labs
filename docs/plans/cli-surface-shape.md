@@ -20,10 +20,11 @@ have landed.
 
 | step | state |
 | --- | --- |
-| 1–5 — the shared read step, the read options on every arrival, `--piece` taking the `of:` form, positional addresses with the `#argument` suffix, and `cf cell get`/`set`/`call` | on main |
+| 1–5 — the shared read step, the read options on every arrival, `--piece` taking the `of:` form, positional addresses with the `#argument` suffix, and the data commands, spelled `cf cell get`/`set` and `cf piece call` since step 7 | on main |
 | 6a — the old spellings warn, each naming its end date | on main |
 | 6b — the old spellings are removed | on main |
 | 7 — each command sits under the noun it acts on | on main |
+| 7b — the superseded spellings are removed | not started; they are guaranteed only through 2026-09-11 |
 
 **Arc two — how a caller writes what a command acts on.**
 
@@ -44,8 +45,8 @@ itself part of the problem.
 | --- | --- |
 | **Authoring** — work on source files, never touching a live space | `check`, `test`, `view` (pager), `init`, `deps update` |
 | **Identity and access** — who you are, and who may do what | `id` (new/did/derive/from-mnemonic), `acl` (ls/set/remove) |
-| **Live data** — reading and writing running state | `get`/`set`/`call`, `piece apply`/`link`/`step`/`verbs`/`inspect`/`get-label`/`set-label`, `wish` |
-| **Piece lifecycle** — deploying and managing running programs | `piece new`/`setsrc`/`getsrc`/`rm`/`ls`/`search`/`map`/`set-slug`/`recreate-root`/`set-home` |
+| **Live data** — reading and writing running state | `cell get`/`set`/`get-label`/`set-label`, `piece call`/`apply`/`link`/`step`/`verbs`/`inspect`, `wish` |
+| **Piece and space lifecycle** — deploying and managing running programs, and rebuilding a space's own patterns | `piece new`/`setsrc`/`getsrc`/`rm`/`ls`/`search`/`map`/`set-slug`, `space recreate-root`/`set-home` |
 | **Rendering** — turning things into something to look at | `piece view` (terminal), `piece render` (HTML), `view` (source pager) |
 | **Storage forensics** — reading the database directly, mostly offline (`inspect pull` fetches from a remote) | `inspect` (22 subcommands), `space` (clone/verify/reset/fingerprint) |
 | **Filesystem projection** — exposing cells as files | `fuse` (mount/unmount/status), `exec` |
@@ -131,8 +132,8 @@ with the address suffix (`--select 'topic@,topic.title'`), and leaves "shape"
 free as the word for what a caller asks for — covering both spellings rather
 than competing with one of them.
 
-Both spellings are carried on every command that reads — `get`, `call`,
-`wish` and `exec` — and a command naming both is refused rather
+Both spellings are carried on every command that reads — `cell get`,
+`piece call`, `wish` and `exec` — and a command naming both is refused rather
 than resolved, because it has not said which shape it wants.
 
 **What a reader may not supply, in either syntax.** `asCell`, `default`,
@@ -647,7 +648,9 @@ than taking anything away.
    `set`, `get-label` and `set-label`; `piece` gains `call`; `space` gains
    `recreate-root` and `set-home`. Each moved command stays answerable at the
    spelling it had, hidden and dated, so a script keeps working while it is
-   migrated.
+   migrated. The date bounds a guarantee rather than schedules an execution:
+   removing those mounts is 7b, a separate change, the way 6b was separate
+   from 6a.
 
    The duplicated nouns this step was named for resolve rather than merge.
    `piece inspect` reports on a live piece and `cf inspect` reads a stored

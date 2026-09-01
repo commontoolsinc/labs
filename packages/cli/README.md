@@ -147,10 +147,10 @@ reference, and both are read on exactly as if they had been written, so
 `--url https://cf.dev/my-space/tracker/items` means
 `--api-url https://cf.dev /@my-space/tracker/items`.
 
-Those three are top-level commands: reading and writing cells is not a
-piece-management concern, and the spelling says so. They were once mounted under
-`cf piece` as well; those spellings are removed
-(docs/plans/cli-surface-shape.md, step 6b).
+Those three each sit under the noun they act on: `get` and `set` name a cell, so
+they are `cf cell` subcommands, while `call` invokes a verb on a piece and is a
+`cf piece` one. The bare `cf get`, `cf set` and `cf call` still answer, hidden
+and superseded — see [Superseded spellings](#superseded-spellings).
 
 A target may also end in `#argument`, which selects the piece's arguments cell
 the way `--input` does — on a reference, on a bare id, and on a slug alike,
@@ -1074,7 +1074,9 @@ Each command sits under the noun it acts on. Where that moved a command, the
 spelling it had is still accepted and still completes its own flags and
 arguments, so a script written against it keeps working; it is hidden from
 `cf --help` and never offered as a completion, and it says on every run what to
-write instead. **These spellings stop working on 2026-09-11.**
+write instead. **These spellings are not guaranteed to work after 2026-09-11**,
+so migrate before then: a later change removes them, and nothing holds them open
+past that date.
 
 | Write this               | Instead of               |
 | ------------------------ | ------------------------ |
@@ -1087,7 +1089,7 @@ write instead. **These spellings stop working on 2026-09-11.**
 | `cf space set-home`      | `cf piece set-home`      |
 
 This is a migration aid rather than a second surface: nothing here teaches the
-left column as an alternative spelling to keep using. `--piece` is a different
+right column as an alternative spelling to keep using. `--piece` is a different
 case — a deprecated name for `--cell` that carries no end date and no notice.
 
 ## Evaluating patterns from another tool

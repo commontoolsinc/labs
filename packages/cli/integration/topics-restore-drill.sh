@@ -17,7 +17,8 @@
 # snapshot is taken from the store file, not over the API.
 #
 # An identity is minted when CF_IDENTITY names none, the way
-# verbs-over-the-cli.sh does: CI sets no key, and every cf piece call here needs one.
+# verbs-over-the-cli.sh does: CI sets no key, and every cf command here needs
+# one.
 #
 #   API_URL=http://localhost:8000 CF_DRILL_STORE_DIR=cache/memory \
 #     packages/cli/integration/topics-restore-drill.sh
@@ -70,7 +71,7 @@ ENGINE_DIR="$STORE_DIR/engine-v3/engine-v3"
 WORK="$(mktemp -d)"
 SPACE="topics-drill-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:12])')"
 
-# Every cf piece call below reads CF_IDENTITY from the environment, and CI sets
+# Every cf command below reads CF_IDENTITY from the environment, and CI sets
 # none. Mint one for this run rather than failing on the first deploy with
 # nothing to say about why.
 if [ -z "${CF_IDENTITY:-}" ]; then
@@ -99,7 +100,7 @@ BOARD="$(
 
 step "seed: one topic with markdown body, two comments, one link"
 BODY='# Drill\n\n    indented code block\n    second line\n\ntrailing prose'
-$CF call -q --piece "$BOARD" --space "$SPACE" --api-url "$API_URL" \
+$CF piece call -q --piece "$BOARD" --space "$SPACE" --api-url "$API_URL" \
   addTopic "{\"title\":\"Drill: alpha\",\"body\":\"$BODY\",\"agentName\":\"drill\"}" \
   > "$WORK/create.json" 2> /dev/null
 TOPIC_ALIAS="$(jq -r '.result.topic["$link"] // empty' "$WORK/create.json")"
@@ -108,7 +109,7 @@ TOPIC_ALIAS="$(jq -r '.result.topic["$link"] // empty' "$WORK/create.json")"
 # board-published topic address when present, else re-read it.
 if [ -z "$TOPIC_ALIAS" ]; then
   TOPIC_ALIAS="$(
-    $CF get -q --piece "$BOARD" --space "$SPACE" --api-url "$API_URL" \
+    $CF cell get -q --piece "$BOARD" --space "$SPACE" --api-url "$API_URL" \
       topics --input --select '@' 2> /dev/null | jq -r '.[0]["$link"]'
   )"
 fi
@@ -116,13 +117,13 @@ fi
   bad "no topic address"
   exit 1
 }
-$CF call -q --piece "$TOPIC_ALIAS" --space "$SPACE" \
+$CF piece call -q --piece "$TOPIC_ALIAS" --space "$SPACE" \
   --api-url "$API_URL" addComment \
   '{"body":"first drill comment","agentName":"drill"}' > /dev/null 2>&1
-$CF call -q --piece "$TOPIC_ALIAS" --space "$SPACE" \
+$CF piece call -q --piece "$TOPIC_ALIAS" --space "$SPACE" \
   --api-url "$API_URL" addComment \
   '{"body":"second drill comment","agentName":"drill"}' > /dev/null 2>&1
-$CF call -q --piece "$TOPIC_ALIAS" --space "$SPACE" \
+$CF piece call -q --piece "$TOPIC_ALIAS" --space "$SPACE" \
   --api-url "$API_URL" addLink \
   '{"kind":"pr","url":"https://example.com/pr/1","label":"PR 1","agentName":"drill"}' \
   > /dev/null 2>&1
@@ -169,7 +170,7 @@ echo '{"title":"CLOBBERED","body":"gone","comments":[]}' |
   $CF piece apply -q --piece "$TOPIC" --space "$SPACE" \
     --api-url "$API_URL" > /dev/null 2>&1
 CLOBBERED_TITLE="$(
-  $CF get -q --piece "$TOPIC" --space "$SPACE" --api-url "$API_URL" \
+  $CF cell get -q --piece "$TOPIC" --space "$SPACE" --api-url "$API_URL" \
     title --input 2> /dev/null
 )"
 [ "$CLOBBERED_TITLE" = '"CLOBBERED"' ] && ok "clobber landed" ||
@@ -185,19 +186,19 @@ deno run --allow-run --allow-read --allow-env \
 }
 
 step "verify: byte-exact content, live board link, idempotent rerun"
-$CF get -q --piece "$TOPIC" --space "$SPACE" --api-url "$API_URL" \
+$CF cell get -q --piece "$TOPIC" --space "$SPACE" --api-url "$API_URL" \
   body --input > "$WORK/live-body.json" 2> /dev/null
 jq -e --slurpfile live "$WORK/live-body.json" \
   '.topics[0].content.body == $live[0]' "$WORK/export.json" > /dev/null &&
   ok "body byte-exact, markdown intact" || bad "body differs from export"
 LIVE_COMMENTS="$(
-  $CF get -q --piece "$TOPIC" --space "$SPACE" --api-url "$API_URL" \
+  $CF cell get -q --piece "$TOPIC" --space "$SPACE" --api-url "$API_URL" \
     comments --input 2> /dev/null | jq 'length'
 )"
 [ "$LIVE_COMMENTS" = "2" ] && ok "both comments back" ||
   bad "comments: $LIVE_COMMENTS"
 MENTION_TITLES="$(
-  $CF get -q --piece "$TOPIC" --space "$SPACE" --api-url "$API_URL" \
+  $CF cell get -q --piece "$TOPIC" --space "$SPACE" --api-url "$API_URL" \
     --input mentionable --select title 2> /dev/null | jq 'length'
 )"
 [ "$MENTION_TITLES" = "1" ] && ok "mentionable resolves through the board" ||

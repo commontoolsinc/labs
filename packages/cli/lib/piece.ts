@@ -1393,7 +1393,7 @@ export async function newPiece(
         `The new piece cannot be registered in the space's piece list ` +
         `without it.\n` +
         `If this space's root pattern predates a runtime format change, ` +
-        `repair it with: ${cliCommand(["piece", "recreate-root"])}`,
+        `repair it with: ${cliCommand(["space", "recreate-root"])}`,
       { cause: error },
     );
   }
