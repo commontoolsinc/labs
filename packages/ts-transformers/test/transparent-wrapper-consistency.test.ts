@@ -16,6 +16,11 @@ import { expect } from "@std/expect";
 import ts from "typescript";
 
 import { transformFiles, transformSource, validateSource } from "./utils.ts";
+import {
+  callsMatching,
+  hasKeyPathRead,
+  parseModule,
+} from "./transformed-ast.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
 import { normalizeDataFlows } from "../src/ast/normalize.ts";
@@ -232,26 +237,48 @@ describe("transparent wrapper consistency", () => {
       }));
     `;
 
-    /** The capture object the second lift is applied to, whitespace-flattened.
-     *  Sliced by width rather than matched to a closing paren, because the
-     *  captures themselves contain parentheses (`obj.key("b")`). */
-    const captureArgumentOf = (output: string): string => {
-      const flattened = output.replace(/\s+/g, " ");
-      const start = flattened.indexOf("__cfLift_2(");
-      expect(start).toBeGreaterThanOrEqual(0);
-      return flattened.slice(start, start + 120);
+    /** The value each emitted lift captures under `obj`, queried from the
+     *  parsed output rather than matched against printed text, per this
+     *  directory's "assert on structure, not printed text" convention. Both
+     *  lifts in the source capture `obj` — the `a` projection for `x`, and
+     *  the value under test for `y` — so two entries come back. */
+    const objCaptureValues = (root: ts.SourceFile): ts.Expression[] => {
+      const values: ts.Expression[] = [];
+      for (const call of callsMatching(root, /^__cfLift_\d+$/)) {
+        const captures = call.arguments[0];
+        if (!captures || !ts.isObjectLiteralExpression(captures)) continue;
+        for (const property of captures.properties) {
+          if (
+            ts.isShorthandPropertyAssignment(property) &&
+            property.name.text === "obj"
+          ) {
+            values.push(property.name);
+          }
+          if (
+            ts.isPropertyAssignment(property) &&
+            ts.isIdentifier(property.name) && property.name.text === "obj"
+          ) {
+            values.push(property.initializer);
+          }
+        }
+      }
+      return values;
     };
 
     for (const [name, receiver] of Object.entries(RECEIVERS)) {
       it(`captures only the field read behind a ${name} receiver`, async () => {
-        const captures = captureArgumentOf(
+        const root = parseModule(
           await transformSource(source(receiver), {
             types: COMMONFABRIC_TYPES,
           }),
         );
+        const values = objCaptureValues(root);
 
-        expect(captures).toContain('obj.key("b")');
-        expect(captures).not.toContain("obj: obj");
+        expect(values.length).toBeGreaterThan(0);
+        // The bug shape: the whole object captured as a bare identifier.
+        expect(values.some((value) => ts.isIdentifier(value))).toBe(false);
+        // The shrunk shape: a capture projects `b` off `obj` with `.key("b")`.
+        expect(hasKeyPathRead(root, "b", "obj")).toBe(true);
       });
     }
   });
