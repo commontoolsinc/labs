@@ -1274,6 +1274,19 @@ export type TraversalContext = {
   scopeKeyIdentity: ScopeKeyIdentity;
 
   includeMeta: boolean;
+
+  /**
+   * Whether a document the traversal loads mid-walk chases its metadata
+   * family (`loadMetaLinkedDocs`). On by default: a runtime traversal that
+   * loads a document generally intends to interpret it. The memory server's
+   * graph-query walk turns this off and chases only the documents a query
+   * NAMES as roots — a crossing-reached document is delivered under the
+   * selector that reached it, without its family, because chasing at every
+   * load multiplies a wide walk by each visited piece's whole doc set.
+   * Consulted only where `includeMeta` already gates the chase; it does not
+   * affect `traverseCells`, which `includeMeta` also carries.
+   */
+  chaseLoadedMeta: boolean;
   metaDocsVisited: Set<string>;
 
   /**
@@ -1329,12 +1342,14 @@ export function createTraversalContext(
   ) => void,
   schemaDocsLoaded: Set<string> = new Set<string>(),
   schemaDocsAvailable: Set<string> = new Set<string>(),
+  chaseLoadedMeta: boolean = true,
 ): TraversalContext {
   return {
     tracker,
     schemaTracker,
     scopeKeyIdentity,
     includeMeta,
+    chaseLoadedMeta,
     metaDocsVisited,
     onMissingLinkTarget,
     schemaDocsLoaded,
@@ -2575,8 +2590,9 @@ function trackVisitedDoc(
     );
   }
   // Load the metadata-linked docs recursively unless the address holds no
-  // value.
-  if (context.includeMeta) {
+  // value, or the context reserves the chase for the documents a caller
+  // names (`chaseLoadedMeta`).
+  if (context.includeMeta && context.chaseLoadedMeta) {
     // Loading metadata requires the full doc. Ignore this read for scheduling.
     const { ok: fullDoc } = tx.read(
       { ...target, path: [] },

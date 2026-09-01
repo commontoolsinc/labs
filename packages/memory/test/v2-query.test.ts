@@ -2326,3 +2326,107 @@ Deno.test("memory v2 extendTrackedGraph attributes the roots it adds", async () 
     await Deno.remove(path);
   }
 });
+
+Deno.test("memory v2 query chases metadata for named roots, not crossings", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-meta-roots";
+  const link = (id: string) => ({ "/": { "link@1": { id, path: [], space } } });
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:root-family",
+          value: { value: { kind: "root pattern" } },
+        }, {
+          op: "set",
+          id: "of:target-family",
+          value: { value: { kind: "target pattern" } },
+        }, {
+          op: "set",
+          id: "of:crossing-target",
+          value: {
+            value: { name: "target" },
+            pattern: link("of:target-family"),
+          },
+        }, {
+          op: "set",
+          id: "of:meta-root",
+          value: {
+            value: { child: link("of:crossing-target") },
+            pattern: link("of:root-family"),
+          },
+        }],
+      },
+    });
+
+    const identity = { principal: "did:key:alice", sessionId: "session:alice" };
+    const rooted = queryGraph(
+      space,
+      engine,
+      {
+        roots: [{
+          id: "of:meta-root",
+          selector: {
+            path: [],
+            schema: {
+              type: "object",
+              properties: {
+                child: {
+                  type: "object",
+                  properties: { name: { type: "string" } },
+                },
+              },
+            },
+          },
+        }],
+      },
+      undefined,
+      identity,
+    );
+
+    const ids = new Set(rooted.entities.map((entity) => entity.id));
+    // The named root arrives with its metadata family; the document the
+    // walk reaches through the `child` crossing arrives under the reader's
+    // narrowing, without its own family.
+    assert(ids.has("of:meta-root"));
+    assert(ids.has("of:crossing-target"));
+    assert(ids.has("of:root-family"));
+    assert(!ids.has("of:target-family"));
+
+    const targetRooted = queryGraph(
+      space,
+      engine,
+      {
+        roots: [{
+          id: "of:crossing-target",
+          selector: {
+            path: [],
+            schema: {
+              type: "object",
+              properties: { name: { type: "string" } },
+            },
+          },
+        }],
+      },
+      undefined,
+      identity,
+    );
+    const targetIds = new Set(
+      targetRooted.entities.map((entity) => entity.id),
+    );
+    // The same document, NAMED as a root, chases its family: intent to
+    // load rides the naming, not the reachability.
+    assert(targetIds.has("of:crossing-target"));
+    assert(targetIds.has("of:target-family"));
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});

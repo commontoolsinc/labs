@@ -194,6 +194,18 @@ export class GraphQueryWalk {
             : this.#keyOverrides.get(referrerKey) ?? referrerKey,
         );
       },
+      undefined,
+      undefined,
+      // Documents this walk loads through link crossings do not chase
+      // their metadata families; only the document a `visit()` call names
+      // does, through the loadMetaLinkedDocs call in `visit()` itself. A
+      // caller that intends to load and run what it named — a piece
+      // resume, a setsrc staging read — names it as a root, so a root's
+      // pattern/source/cfc family still arrives with it. A crossing-
+      // reached document is one the query did not name, and chasing its
+      // family multiplies a wide walk by every visited piece's whole doc
+      // set while delivering documents nothing asked to interpret.
+      false,
     );
     this.#memo = options.memo ?? createSchemaMemo();
     this.stats = options.stats ?? createGraphQueryWalkStats();
@@ -201,8 +213,10 @@ export class GraphQueryWalk {
 
   /**
    * Walks `document` under `selector`, recording every document the schema
-   * reaches — including the metadata documents a reader needs to interpret
-   * them — in the walk's schema tracker.
+   * reaches in the walk's schema tracker. The named document's own metadata
+   * family — pattern, source, cfc, and the rest — is recorded with it;
+   * documents the walk merely reaches through link crossings are recorded
+   * under the selectors that reached them, without their families.
    *
    * The document records under `schemaTrackerKey` over the walk's identity
    * unless the caller passes `docKey`: a caller that named an explicit
@@ -277,6 +291,11 @@ export class GraphQueryWalk {
       this.#addTraverserStats(traverser);
     }
 
+    // The named document's family, chased here regardless of the context's
+    // includeMeta — that flag governs the traverser's link crossings above,
+    // and it is off so a crossing-reached document is delivered without its
+    // family. What a caller names, it may intend to load; what a walk merely
+    // reaches, it does not.
     loadMetaLinkedDocs(
       tx,
       {
