@@ -1653,9 +1653,9 @@ function localBindingCanCarryReactiveValue(
     }
   }
 
-  let reactiveAssignment = false;
+  let reactiveWrite = false;
   const visit = (node: ts.Node): void => {
-    if (reactiveAssignment || ts.isFunctionLike(node)) {
+    if (reactiveWrite || ts.isFunctionLike(node)) {
       return;
     }
     if (
@@ -1671,13 +1671,64 @@ function localBindingCanCarryReactiveValue(
         nextSeenBindings,
       )
     ) {
-      reactiveAssignment = true;
+      reactiveWrite = true;
+      return;
+    }
+    if (
+      ts.isCallExpression(node) &&
+      callCanPutValueInBinding(node, symbol, context.checker) &&
+      node.arguments.some((argument) =>
+        collectedValueEscapes(
+          argument,
+          callback,
+          context,
+          analyze,
+          nextSeenBindings,
+        )
+      )
+    ) {
+      reactiveWrite = true;
       return;
     }
     ts.forEachChild(node, visit);
   };
   ts.forEachChild(callback.body, visit);
-  return reactiveAssignment;
+  return reactiveWrite;
+}
+
+/**
+ * Whether a call could put one of its arguments into `symbol`.
+ *
+ * An assignment is not the only way a reactive value reaches a collected
+ * aggregate: `record.push(active)` stores one without ever naming `record` on
+ * a left-hand side, and `store(record, active)` can do the same out of sight.
+ * Both shapes count — the binding as the call's receiver, or the binding
+ * passed alongside the value — because this is a may-escape check and neither
+ * one can be shown not to store.
+ */
+function callCanPutValueInBinding(
+  call: ts.CallExpression,
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+): boolean {
+  const callee = unwrapExpression(call.expression);
+  if (
+    ts.isPropertyAccessExpression(callee) ||
+    ts.isElementAccessExpression(callee)
+  ) {
+    const receiver = unwrapExpression(getLeftmostMemberBase(callee.expression));
+    if (
+      ts.isIdentifier(receiver) &&
+      checker.getSymbolAtLocation(receiver) === symbol
+    ) {
+      return true;
+    }
+  }
+  return call.arguments.some((argument) => {
+    const value = unwrapExpression(argument);
+    return ts.isIdentifier(value) &&
+      checker.getSymbolAtLocation(value) === symbol;
+  });
 }
 
 /**

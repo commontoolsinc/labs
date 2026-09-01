@@ -3649,6 +3649,70 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
+    "errors when a mutating call puts a reactive value in a collected aggregate",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ active: Writable<boolean> }, { kept: unknown }>(
+        ({ active }) => {
+          const kept = VALUES.map((value) => {
+            const record: unknown[] = [value];
+            record.push(active);
+            return record;
+          });
+          return { kept };
+        },
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "returns a reactive value",
+      );
+    },
+  );
+
+  await t.step(
+    "errors when a collected aggregate is passed to a mutator with a reactive value",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      const store = (into: unknown[], value: unknown) => {
+        into.push(value);
+      };
+
+      export default pattern<{ active: Writable<boolean> }, { kept: unknown }>(
+        ({ active }) => {
+          const kept = VALUES.map((value) => {
+            const record: unknown[] = [value];
+            store(record, active);
+            return record;
+          });
+          return { kept };
+        },
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "returns a reactive value",
+      );
+    },
+  );
+
+  await t.step(
     "does not read a write through a binding as rebinding it",
     async () => {
       // `bag[key] = active` writes into `bag`; `key` is only the subscript,
