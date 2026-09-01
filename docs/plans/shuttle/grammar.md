@@ -229,10 +229,8 @@ Three spellings, and no fourth:
   payload from stdin. The verb name opens the callable's section, so its
   schema-derived flags follow bare — `call topics/3 search --query milk` —
   and `--` closes the section. That is
-  [`../cli-surface-shape.md`](../cli-surface-shape.md) step 10's form;
-  `cf` today still spells it with `--` opening the section, and shuttle
-  speaks step 10 from the start rather than teaching a spelling the arc
-  retires.
+  [`../cli-surface-shape.md`](../cli-surface-shape.md) step 10's form, which
+  `cf` speaks as well, so the two surfaces read one grammar rather than two.
 - `call <piece-handle> <name> [input]` — a piece handle stands wherever a
   typed reference stands, so this is the typed form with the receiver
   already in hand: `call %3 add-reply --body "shipped"` off a listing

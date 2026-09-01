@@ -39,13 +39,20 @@ possible — a controller stub driving the function's body against a doubled
 piece, with no socket and no server behind it — which is the PR's
 standalone value.
 
-**A3 — extract `callFromCommand`.** `buildCallCommand`'s action is inline
-and bound to Cliffy's `this` (`getLiteralArgs`); its constituents are
-already exported. The extraction makes the literal-args array a parameter
-and gives `call` the same named-export shape as its siblings. Independent
-value: an inline action body is uncoverable and everything registered
-after it sits in coverage shadow, so extraction retires debt in the
-package where coverage debt is a standing cost.
+**A3 — extract `callFromCommand`.** Done (#6682). `call` carries the
+named-export shape its siblings have: the mount's spelling and the two
+arrays Cliffy splits the argv into — this command's own arguments, the
+line past `cf call`, which a grammar refusal reprints, and the words past
+`--`, which the read step parses — are parameters beside the options and
+the positionals, so nothing under the action line needs the binding. The
+dispatch and the `render`/`hint` sinks ride a deps bag, which holds
+collaborators and no data. Its unit tests drive the whole action over a
+stub dispatcher and reach the success tail, which is what the extraction
+is worth in coverage: seven lines of `commands/piece.ts`, measured, and no
+other tracked file moves. The package's coverage shadow is real and lies
+elsewhere — it opens inside the chained `piece` command expression, around
+its first inline action, and `buildCallCommand` is a standalone function
+well before it.
 
 **A4 — exit and output seams audit.** Every seam shuttle calls must accept
 an exit override (`exitWithDataError` / `exitPieceCallFailure` call

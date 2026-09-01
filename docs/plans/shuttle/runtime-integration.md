@@ -173,13 +173,21 @@ injection point that lets a lib function reuse a held controller:
   shuttle-v1 verb reaches one, so each is a conversion for the milestone
   that first calls it.
 
-`call` is the one verb with no seam at all: `buildCallCommand`'s action is
-inline and bound to Cliffy's `this` (`getLiteralArgs`). Its constituents are
-already exported and library-grade (`executePieceCallable`,
-`pieceCallRawArgs`, `pieceCallInvocation`, `resolveInvocationIdentity`,
+`call` has the family's shape too, in `callFromCommand`
+(`commands/piece.ts`). Cliffy splits an invocation into the two arrays it
+holds on the command object bound as an action's `this` — this command's
+own arguments, the line past `cf call` (`getRawArgs`), which a grammar
+refusal reprints after prepending that prefix itself, and the words past
+`--` (`getLiteralArgs`), which the read step parses — so both are
+parameters of the named export, beside the mount's spelling, and the action
+is the two reads that hand them on. The constituents underneath are
+exported and library-grade (`executePieceCallable`, `pieceCallRawArgs`,
+`pieceCallInvocation`, `resolveInvocationIdentity`,
 `pieceCallPhaseObserver`, `resolveWaitControl`, `parsePieceCallSelection`,
-`boundedSettlement`, `renderPieceCallOutcome`), so extraction is mechanical:
-the literal-args array becomes a parameter.
+`boundedSettlement`, `renderPieceCallOutcome`). Its deps bag holds
+collaborators only — the `render`/`hint` sinks and the dispatch itself —
+so a caller holding a connection passes an `executePieceCallable` bound to
+it rather than opening one per call.
 
 ## Prerequisite work in `packages/cli`
 
@@ -193,7 +201,9 @@ Each of these is small and lands on its own; together they are what decision
    it.** Everything a shuttle-v1 verb reaches takes it; what is left is the
    set the inventory above names, each converting for the milestone that
    first calls it.
-3. **Extract `callFromCommand`** from `buildCallCommand`'s inline action.
+3. **`callFromCommand`.** Done. `buildCallCommand`'s action reads the two
+   argv arrays off the command bound to it and hands them on; everything
+   below that line is the named export, which needs no binding.
 4. **Exit discipline.** `exitWithDataError` and `exitPieceCallFailure` call
    `Deno.exit(1)` (typed `never`); `getCellValueFromCommand` reaches the
    former on a data error, which would kill the shell. Both take a `deps`

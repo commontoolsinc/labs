@@ -1055,9 +1055,14 @@ export function pieceCallPhaseObserver(
 }
 
 /**
- * The success tail of `cf call`, extracted from the command action so
- * it is unit-coverable — command action bodies never execute under the unit
- * suite, the same convention that keeps `cf test` out of its action body
+ * The success tail of `cf call`: a settled invocation's JSON, a tool's
+ * output, or a help page, through the `render`/`hint` sinks a caller
+ * supplies. Standing apart from the action is what lets a test drive each
+ * outcome shape directly rather than through argv and a dispatch; the action
+ * body does run under the unit suite, so what that buys is reaching the
+ * cases, not reaching the lines. `cf test` sits in
+ * `commands/test-command.ts` for a different reason — `deno coverage` drops
+ * a source file whose path ends in `test.ts` from the report
  * (docs/development/COVERAGE.md). Help output returns BEFORE the observer
  * finishes: no invocation ran, so there is no span to close.
  */
@@ -1853,138 +1858,24 @@ reference names the piece by handle or by slug, and may carry the space
     )
     .stopEarly()
     .arguments("<callable:string> [tail...:string]")
-    .action(async function (
-      // Spelled out because `targetOptions` attaches the target options
-      // after the builder returns, so what the builder declares on its own
-      // is not the whole surface the action receives.
-      options:
-        & PieceCLIOptions
-        & PieceCallReadbackFlags
-        & {
-          quiet?: boolean;
-          verbose?: boolean;
-          await?: boolean;
-          wait?: number | boolean;
-          invocation?: string;
-          invocationSession?: string;
-        },
+    .action(function (
+      options: PieceCallCLIOptions,
       callableArg: string,
       ...tailArgs: string[]
     ) {
-      // The grammar and the positional-address intake come first, and both
-      // are facts about the argv alone: a projection written before the verb,
-      // the words past the marker, and an address standing where `--cell`
-      // would, are all settled before an invocation exists for a refusal to
-      // name a phase to retry from.
-      refuseProjectionBeforeSection(
-        spelling,
-        "the verb",
-        this.getRawArgs(),
+      // Both argv-derived arrays are returned by methods on the command
+      // Cliffy binds as this action's `this`, so they are read here and
+      // handed on as values: the raw arguments a grammar refusal quotes
+      // back, and the words past `--` the read step parses. Nothing below
+      // this line needs the binding.
+      return callFromCommand(
         options,
-      );
-      const literalArgs = this.getLiteralArgs();
-      // `-- --help` reaches the verb's own page rather than this command's,
-      // so those words rejoin the section rather than being read here.
-      const asksVerbHelp = readSectionAsksVerbHelp(literalArgs);
-      const readSection = asksVerbHelp ? {} : await parseReadSection(
         spelling,
-        this.getRawArgs(),
-        literalArgs,
-      );
-      const { cell, callableName, tail: sectionTail } = readCallTarget(
-        options,
         callableArg,
         tailArgs,
+        this.getRawArgs(),
+        this.getLiteralArgs(),
       );
-      // Into the section, at the position the verb's parser reads `--help`.
-      // The address intake runs first, since it may take the section's own
-      // first word as the callable name.
-      const tail = asksVerbHelp
-        ? sectionWithVerbHelp(sectionTail, literalArgs)
-        : sectionTail;
-      const readback = { ...readSection, showLinks: options.showLinks };
-      const identity = resolveInvocationIdentity(
-        options.invocation,
-        options.invocationSession,
-      );
-      const invocationId = identity.id;
-      const waitControl = resolveWaitControl({ ...options, ...readback });
-      let phase: InvocationPhase = "initial_sync";
-      const observer = pieceCallPhaseObserver(
-        !!options.verbose,
-        (next) => phase = next,
-      );
-      setQuietMode(!!options.quiet);
-      // Read outside the invocation's failure wrapper below. Nothing is
-      // dispatched here — no callable resolved, no id spent — so a malformed
-      // selection is a data error about the flags, the same one `cf get`
-      // reports. Inside the wrapper it would name an id and a phase to retry
-      // from for a call that was never made; a selection that fails against a
-      // RESULT does sit inside it, and does name one.
-      let selection: CellSelection | undefined;
-      try {
-        selection = await parsePieceCallSelection(readback);
-      } catch (error) {
-        // Both exits below leave without reaching the action's catch, so the
-        // verbose in-flight span is closed here.
-        observer.finish("failed");
-        if (error instanceof CellSelectionError) {
-          exitWithDataError({ message: error.message });
-        }
-        throw error;
-      }
-      try {
-        const invocation = pieceCallInvocation(tail);
-        const pieceConfig = parsePieceOptions({
-          ...options,
-          ...(cell !== undefined && { cell }),
-          json: invocation.jsonOutput,
-        });
-        const result = await boundedSettlement(
-          executePieceCallable(
-            pieceConfig,
-            callableName,
-            invocation.rawArgs,
-            {
-              invocation: identity,
-              // The verb help page names the mount that was invoked, so the
-              // blessed spelling never renders usage lines teaching the
-              // deprecated one — and the deprecated mount names itself,
-              // beside its own notice.
-              helpCommandPrefix: cliCommand(
-                [...spelling.split(" "), "...", callableName],
-              ),
-              skipReadback: waitControl.mode === "commit",
-              showLinks: !!options.showLinks,
-              ...(selection === undefined ? {} : { selection }),
-              onPhase: invocationPhaseReporter(
-                identity,
-                observer.onPhase,
-                undefined,
-                Boolean(Deno.env.get("CF_TEST_ANNOUNCE_INVOCATION_PHASES")),
-              ),
-            },
-          ).catch((error) =>
-            reportVerbInputErrorOrRethrow(
-              error,
-              pieceConfig.piece,
-              undefined,
-              observer,
-            )
-          ),
-          waitControl.boundSeconds,
-        );
-        renderPieceCallOutcome(
-          observer,
-          result,
-          callableName,
-          pieceConfig.piece,
-          {},
-          { detached: waitControl.mode === "commit", invocation: identity },
-        );
-      } catch (error) {
-        exitPieceCallFailure(observer, error, invocationId, phase);
-      }
     });
 }
 
@@ -3199,6 +3090,189 @@ export async function setCellValueFromCommand(
       `TIP: Computed values may be stale. Run 'cf piece step --cell ${pieceConfig.piece} ...' to trigger recomputation.`,
     ),
   );
+}
+
+/**
+ * The flags `cf call` reads. Spelled out rather than read off the command
+ * chain because `targetOptions` attaches the target options after the builder
+ * returns, so what the builder declares on its own is not the whole surface
+ * the action receives.
+ */
+export interface PieceCallCLIOptions
+  extends PieceCLIOptions, PieceCallReadbackFlags {
+  /** Suppress hints and next-step suggestions. */
+  quiet?: boolean;
+
+  /** Stream one wall-clock span per observed phase transition to stderr. */
+  verbose?: boolean;
+
+  /**
+   * The explicit spelling of the default wait, which `wait: false`
+   * contradicts.
+   */
+  await?: boolean;
+
+  /**
+   * Patience bound in seconds, or `false` for `--no-wait`, which exits once
+   * this handling's commit is acknowledged and skips the receipt readback.
+   */
+  wait?: number | boolean;
+
+  /** Idempotency key for this dispatch, which needs a session beside it. */
+  invocation?: string;
+
+  /**
+   * Session the invocation id was chosen within, over
+   * `CF_INVOCATION_SESSION`.
+   */
+  invocationSession?: string;
+}
+
+/** The collaborators {@link callFromCommand} dispatches and reports through. */
+export interface PieceCallCommandDependencies {
+  /** The dispatch, which a caller holding its own connection supplies. */
+  executePieceCallable?: typeof executePieceCallable;
+
+  /** Where the outcome goes, stdout unless the caller says otherwise. */
+  render?: typeof render;
+
+  /** Where the next steps go, stderr unless the caller says otherwise. */
+  hint?: typeof hint;
+}
+
+/**
+ * The `cf call` action: settle the grammar against the argv, resolve the
+ * target, dispatch the named callable, and report what came back.
+ *
+ * `spelling` is how the mount names itself, the word a caller writes after
+ * `cf`. Both the corrected line a grammar refusal prints and the callable's
+ * own help page are written in terms of it.
+ *
+ * `rawArgs` is this command's own arguments — the line past `cf <spelling>`,
+ * as they were typed — and `literalArgs` the words past `--`, as Cliffy split
+ * them. A refusal prepends `cf <spelling>` itself, so a caller handing in the
+ * whole line gets it printed twice; nothing checks the two arrays against
+ * each other either, so they come from one split or the corrected line names
+ * words the caller never wrote. Taking both as parameters leaves every input
+ * an ordinary argument, so a caller with no command to bind drives the whole
+ * action: a test over a stubbed dispatch, or a sibling holding a connection
+ * of its own.
+ */
+export async function callFromCommand(
+  options: PieceCallCLIOptions,
+  spelling: string,
+  callableArg: string,
+  tailArgs: string[],
+  rawArgs: readonly string[],
+  literalArgs: readonly string[],
+  deps: PieceCallCommandDependencies = {},
+): Promise<void> {
+  // The grammar and the positional-address intake come first, and both are
+  // facts about the argv alone: a projection written before the verb, the
+  // words past the marker, and an address standing where `--cell` would, are
+  // all settled before an invocation exists for a refusal to name a phase to
+  // retry from.
+  refuseProjectionBeforeSection(spelling, "the verb", rawArgs, options);
+  // `-- --help` reaches the verb's own page rather than this command's, so
+  // those words rejoin the section rather than being read here.
+  const asksVerbHelp = readSectionAsksVerbHelp(literalArgs);
+  const readSection = asksVerbHelp
+    ? {}
+    : await parseReadSection(spelling, rawArgs, literalArgs);
+  const { cell, callableName, tail: sectionTail } = readCallTarget(
+    options,
+    callableArg,
+    tailArgs,
+  );
+  // Into the section, at the position the verb's parser reads `--help`. The
+  // address intake runs first, since it may take the section's own first word
+  // as the callable name.
+  const tail = asksVerbHelp
+    ? sectionWithVerbHelp(sectionTail, literalArgs)
+    : sectionTail;
+  const readback = { ...readSection, showLinks: options.showLinks };
+  const identity = resolveInvocationIdentity(
+    options.invocation,
+    options.invocationSession,
+  );
+  const invocationId = identity.id;
+  const waitControl = resolveWaitControl({ ...options, ...readback });
+  let phase: InvocationPhase = "initial_sync";
+  const observer = pieceCallPhaseObserver(
+    !!options.verbose,
+    (next) => phase = next,
+  );
+  setQuietMode(!!options.quiet);
+  // Read outside the invocation's failure wrapper below. Nothing is
+  // dispatched here — no callable resolved, no id spent — so a malformed
+  // selection is a data error about the flags, the same one `cf get` reports.
+  // Inside the wrapper it would name an id and a phase to retry from for a
+  // call that was never made; a selection that fails against a RESULT does sit
+  // inside it, and does name one.
+  let selection: CellSelection | undefined;
+  try {
+    selection = await parsePieceCallSelection(readback);
+  } catch (error) {
+    // Both exits below leave without reaching the catch clause underneath, so
+    // the verbose in-flight span is closed here.
+    observer.finish("failed");
+    if (error instanceof CellSelectionError) {
+      exitWithDataError({ message: error.message });
+    }
+    throw error;
+  }
+  try {
+    const invocation = pieceCallInvocation(tail);
+    const pieceConfig = parsePieceOptions({
+      ...options,
+      ...(cell !== undefined && { cell }),
+      json: invocation.jsonOutput,
+    });
+    const result = await boundedSettlement(
+      (deps.executePieceCallable ?? executePieceCallable)(
+        pieceConfig,
+        callableName,
+        invocation.rawArgs,
+        {
+          invocation: identity,
+          // The verb help page names the mount that was invoked, so the
+          // blessed spelling never renders usage lines teaching the
+          // deprecated one — and the deprecated mount names itself, beside
+          // its own notice.
+          helpCommandPrefix: cliCommand(
+            [...spelling.split(" "), "...", callableName],
+          ),
+          skipReadback: waitControl.mode === "commit",
+          showLinks: !!options.showLinks,
+          ...(selection === undefined ? {} : { selection }),
+          onPhase: invocationPhaseReporter(
+            identity,
+            observer.onPhase,
+            undefined,
+            Boolean(Deno.env.get("CF_TEST_ANNOUNCE_INVOCATION_PHASES")),
+          ),
+        },
+      ).catch((error) =>
+        reportVerbInputErrorOrRethrow(
+          error,
+          pieceConfig.piece,
+          undefined,
+          observer,
+        )
+      ),
+      waitControl.boundSeconds,
+    );
+    renderPieceCallOutcome(
+      observer,
+      result,
+      callableName,
+      pieceConfig.piece,
+      { render: deps.render, hint: deps.hint },
+      { detached: waitControl.mode === "commit", invocation: identity },
+    );
+  } catch (error) {
+    exitPieceCallFailure(observer, error, invocationId, phase);
+  }
 }
 
 export async function getCellCfcLabelFromCommand(
