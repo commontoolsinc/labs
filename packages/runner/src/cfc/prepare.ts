@@ -127,7 +127,6 @@ import { cfcSchemaEntries } from "./schema-label-view.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import { createTrustResolver } from "./trust.ts";
 import {
-  CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type CfcAddress,
@@ -137,6 +136,7 @@ import {
   type ImplementationIdentity,
   type LabelMapEntry,
   type LabelObservationClass,
+  runtimeWritePolicyAuthorization,
   type WritePolicyInput,
 } from "./types.ts";
 import {
@@ -1057,44 +1057,6 @@ const writeIsPatternSetupInitialization = (
       );
     })
   );
-};
-
-/**
- * The documents this transaction is setting a piece up in, as target keys —
- * each piece's argument document, and the internal documents its result
- * projects to.
- *
- * The route below ACTS on these markers rather than measuring them, so who
- * recorded one decides whether it counts. `recordCfcWritePolicyInput` is on
- * the public transaction interface and pattern-authored code reaches the
- * transaction its cells are bound to, so an input's own fields say only what
- * its recorder wrote: a marker without the runtime's mark names nothing here.
- * The two sibling markers in this file corroborate against transaction state
- * instead, which suits a claim about a write that has already happened; this
- * one is a claim about whose write it is.
- *
- * A marker whose address carries a path names part of a document rather than
- * the document, and is ignored too: the route declares a policy for the whole
- * store, so it may only take a marker that claims the whole store. The setup
- * path records the empty path for every document it mints from a piece's
- * result cell, so this excludes only an argument link that was stored
- * pointing into some other document.
- */
-const pieceSetupSubstrateDocuments = (
-  tx: IExtendedStorageTransaction,
-): Set<string> => {
-  const documents = new Set<string>();
-  for (const input of tx.getCfcState().writePolicyInputs) {
-    if (
-      input.kind === "structural-provenance" &&
-      input.claim === CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE &&
-      canonicalizeLogicalPath(input.target.path).length === 0 &&
-      tx.isRuntimeWritePolicyInput(input)
-    ) {
-      documents.add(targetKey(input.target));
-    }
-  }
-  return documents;
 };
 
 const storedMetadataFor = (
@@ -6041,16 +6003,12 @@ export const prepareBoundaryCommit = (
     );
   }
   const targetKeys = new Set([...candidates.keys(), ...linkWrites.keys()]);
-  // Computed once: the §8.12.5 route-2 seam is a property of the transaction,
-  // and the persist loop below asks about it per target.
-  // The §8.12.5 route-2 seam is a property of the transaction, so it is read
-  // once. Only the strict rung's declaration consults it, and only where the
-  // flow join is stamped, so no other posture pays for the scan — and every
-  // rung below keeps the persist-and-flag diagnostic that is its rollout
-  // signal, storing no declared policy it could never take back.
-  const pieceSubstrateDocuments = flowPersist && writerFitRejects
-    ? pieceSetupSubstrateDocuments(tx)
-    : new Set<string>();
+  // Only the strict rung's §8.12.5 route-2 declaration asks whether a target
+  // is a store the runtime owns, and only where the flow join is stamped, so
+  // no other posture pays for the question — and every rung below keeps the
+  // persist-and-flag diagnostic that is its rollout signal, storing no
+  // declared policy it could never take back.
+  const askRuntimeOwnership = flowPersist && writerFitRejects;
   // A vouched ingest writes its provenance mark even when the payload write
   // carries no schema candidate and flow labels are off, so the ingest target
   // must enter the persist loop on its own. The anchor is the cell the helper
@@ -6984,11 +6942,26 @@ export const prepareBoundaryCommit = (
         )
         : [];
       // Whether a misfit below is answered by declaring a covering policy
-      // (§8.12.5 route 2) instead of refusing: this document is one the
-      // runner named as a piece's substrate, at a rung that would reject.
+      // (§8.12.5 route 2) instead of refusing: this document is a store the
+      // runtime owns, at a rung that would reject.
       // `cfc-enforcement-matrix.md` §4 states the route; the rest of the
       // conditions on it are at the mint below.
-      const pieceSetupSubstrate = pieceSubstrateDocuments.has(key);
+      //
+      // The route ACTS on the runtime's claim rather than measuring it, which
+      // is why the transaction answers only for markers that arrived carrying
+      // the runtime's authorization. `recordCfcWritePolicyInput` is on the
+      // public transaction interface and pattern-authored code reaches the
+      // transaction its cells are bound to, so an input's own fields say only
+      // what its recorder wrote. The two sibling markers in this file
+      // corroborate against transaction state instead, which suits a claim
+      // about a write that has already happened; this one is a claim about
+      // whose write it is.
+      const runtimeOwnedStore = askRuntimeOwnership &&
+        tx.isRuntimeOwnedStore(
+          target.space,
+          id,
+          runtimeWritePolicyAuthorization,
+        );
       // SC-4, freeze-at-creation form: a path's shape (existence) entry is
       // minted ONCE — at creation, or at the one-time migration of legacy
       // pre-class entries (whose accumulated confidentiality is absorbed
@@ -7136,7 +7109,7 @@ export const prepareBoundaryCommit = (
             ],
           );
           if (
-            offending.length > 0 && pieceSetupSubstrate &&
+            offending.length > 0 && runtimeOwnedStore &&
             // A schema that declares at this exact path owns the store's
             // policy there; widening it from the join would make the walk's
             // own re-mint non-monotone on the next write and brick the path
@@ -7172,19 +7145,41 @@ export const prepareBoundaryCommit = (
             // go, so the store's promise becomes the audience of what it
             // holds. What lands is what the ceiling did not already cover,
             // so a clause residency satisfies stays in the stamp alone.
-            // A piece's substrate is filled by the runtime out of
-            // what the setup transaction read — the argument document, and
-            // the internal documents and streams its result projects to —
-            // and no value schema can carry that declaration, because the
-            // atoms are a property of the transaction rather than of the
-            // pattern.
+            // A store the runtime owns is filled by the runtime out of what
+            // the writing transaction read — a piece's argument document,
+            // the internal documents and streams its result projects to,
+            // and the state documents a builtin mints from its own node's
+            // cause — and no value schema can carry that declaration,
+            // because the atoms are a property of the transaction rather
+            // than of the pattern.
             //
-            // The declaration only ever grows, which is what §8.12.1 asks
-            // of a declared component. `declaredCeiling` resolves over the
-            // entries this walk is about to persist, carried-forward stored
-            // declared entries among them, so the union below contains
-            // every clause the path already declared, and adding clauses is
-            // the restricting direction.
+            // The declaration only ever grows by CLAUSE, which is what
+            // §8.12.1 asks of a declared component. `declaredCeiling`
+            // resolves over the entries this walk is about to persist,
+            // carried-forward stored declared entries among them, so the
+            // union below contains every clause the path already declared,
+            // and adding clauses is the restricting direction.
+            //
+            // Growing a stored clause's ALTERNATIVES would be the other
+            // thing: it enlarges that clause's reader set, which §8.12.7
+            // and safety invariant 1 admit only through a grant record or
+            // an intent-gated declassification event. `foldedUnique` folds
+            // clause LISTS — `normalizeClause` works inside one clause and
+            // never merges two — so a stored disjunction comes back with
+            // the alternatives it went in with.
+            //
+            // Growth is also what makes the route safe to run on every
+            // write rather than only while the runtime is setting a piece
+            // up. A clause list is read two ways, and the two agree: as a
+            // ceiling §8.12.4's `canWrite` admits a label clause when SOME
+            // declared clause subsumes it, and as a reader's floor that
+            // same section taints a reader with at least the declared
+            // label. Subsumption means satisfying the declared clause
+            // implies satisfying the label, so a reader of this store
+            // satisfies every clause the store admits. Adding a clause
+            // therefore admits more data AND narrows the audience by the
+            // same step, however many times it happens — §8.12.5's own
+            // argument for option 2, applied per write.
             //
             // Marked like a flow stamp rather than like an authored
             // declaration: the content is the join, so it carries whatever
@@ -7200,7 +7195,7 @@ export const prepareBoundaryCommit = (
               origin: "declared",
             }));
             tx.noteCfcDiagnostic(
-              `writer-fit(piece-substrate-declared): ${id} at /${
+              `writer-fit(runtime-owned-store-declared): ${id} at /${
                 path.join("/")
               } (§8.12.5 route 2): ${offending.map(renderCfcAtom).join(", ")}`,
             );

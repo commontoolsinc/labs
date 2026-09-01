@@ -10,7 +10,8 @@ import type { Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
 import { narrowestScope } from "../scope.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
+import { ownedCell } from "./runtime-owned-store.ts";
+import { resolvedCellScope } from "./scope-policy.ts";
 
 /**
  * Compile a pattern/module and run it.
@@ -102,32 +103,35 @@ export function compileAndRun(
       if (cellsInitialized && cellScope !== outputScope) {
         previousCallHash = undefined;
       }
-      const basePending = runtime.getCell<boolean>(
-        parentCell.space,
+      pending = ownedCell<boolean>(
+        runtime,
+        tx,
+        parentCell,
         { compile: { pending: cause } },
         undefined,
-        tx,
+        outputScope,
       );
-      pending = scopedCell(runtime, tx, basePending, outputScope);
       pending.send(false);
 
-      const baseResult = runtime.getCell<string | undefined>(
-        parentCell.space,
+      result = ownedCell<string | undefined>(
+        runtime,
+        tx,
+        parentCell,
         { compile: { result: cause } },
         undefined,
-        tx,
+        outputScope,
       );
-      result = scopedCell(runtime, tx, baseResult, outputScope);
 
-      const baseError = runtime.getCell<string | undefined>(
-        parentCell.space,
+      error = ownedCell<string | undefined>(
+        runtime,
+        tx,
+        parentCell,
         { compile: { error: cause } },
         undefined,
-        tx,
+        outputScope,
       );
-      error = scopedCell(runtime, tx, baseError, outputScope);
 
-      const baseErrors = runtime.getCell<
+      errors = ownedCell<
         | Array<
           {
             line: number;
@@ -139,12 +143,13 @@ export function compileAndRun(
         >
         | undefined
       >(
-        parentCell.space,
+        runtime,
+        tx,
+        parentCell,
         { compile: { errors: cause } },
         undefined,
-        tx,
+        outputScope,
       );
-      errors = scopedCell(runtime, tx, baseErrors, outputScope);
 
       sendResult(tx, { pending, result, error, errors });
       cellsInitialized = true;

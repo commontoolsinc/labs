@@ -113,7 +113,7 @@ import {
   LLMToolSchema,
 } from "./llm-schemas.ts";
 import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
-import { scopedCell } from "./scope-policy.ts";
+import { ownedCell, recordRuntimeOwnedStore } from "./runtime-owned-store.ts";
 
 // Message schema that mints the `LlmDerived` provenance stamp (Epic D1).
 // Recorded as the schema write-policy input for each model-produced message's
@@ -3372,25 +3372,27 @@ export function llmDialog(
       // previously existing results. Note that we might not yet have it loaded
       // and that this function will be called again once the data is loaded
       // (but this if branch will be skipped then).
-      const baseResult = runtime.getCell(
-        parentCell.space,
+      result = ownedCell(
+        runtime,
+        tx,
+        parentCell,
         { llmDialog: { result: cause } },
         resultSchema,
-        tx,
+        outputScope,
       );
-      result = scopedCell(runtime, tx, baseResult, outputScope);
       result.sync(); // Kick off sync, no need to await
 
       // Create another cell to store the internal state. This isn't returned to
       // the caller. But again, the predictable cause means all instances tied
       // to the same input cells will coordinate via the same cell.
-      const baseInternal = runtime.getCell(
-        parentCell.space,
+      internal = ownedCell(
+        runtime,
+        tx,
+        parentCell,
         { llmDialog: { internal: cause } },
         internalSchema,
-        tx,
+        outputScope,
       );
-      internal = scopedCell(runtime, tx, baseInternal, outputScope);
       internal.sync(); // Kick off sync, no need to await
 
       // Create pinnedCells cell to store the internal pinned cells state
@@ -3405,13 +3407,14 @@ export function llmDialog(
           required: ["path", "name"],
         },
       } as const;
-      const basePinnedCells = runtime.getCell(
-        parentCell.space,
+      pinnedCells = ownedCell(
+        runtime,
+        tx,
+        parentCell,
         { llmDialog: { pinnedCells: cause } },
         pinnedCellsSchema,
-        tx,
+        outputScope,
       );
-      pinnedCells = scopedCell(runtime, tx, basePinnedCells, outputScope);
       pinnedCells.sync(); // Kick off sync, no need to await
 
       const pending = result.key("pending");
@@ -3510,6 +3513,21 @@ export function llmDialog(
             tx,
             messagesBase.scope,
           );
+          // Each message is its own document, minted from this node's cause
+          // and named by nobody's schema. It is filled by the transaction that
+          // mints it, so the marker alone reaches it — enrolling a per-message
+          // store would grow the runtime's set for as long as the piece runs
+          // (`runtime-owned-store.ts`).
+          //
+          // The document is minted in the resolved messages array's space,
+          // which need not be this node's. Where it is not, the marker names
+          // nothing: a store in another space belongs to whoever holds that
+          // space's replicas, so this node's flow join has no business
+          // becoming its declared policy. A labeled write to such a transcript
+          // is refused, as it was before this route existed; admitting it
+          // needs a cross-space release decision, which is not a write-side
+          // fit check's to make.
+          recordRuntimeOwnedStore(tx, result, messageCell);
           messageCell.withTx(tx).set(
             // Cast because we can't yet express ArrayBuffer in JSON Schema
             { ...event } as Schema<typeof LLMMessageSchema>,
@@ -3835,6 +3853,9 @@ async function startRequest(
           tx,
           base.scope,
         );
+        // Per-message store: named for this transaction, not enrolled. See
+        // the sibling in `addMessage` and `runtime-owned-store.ts`.
+        recordRuntimeOwnedStore(tx, result, messageCell);
         messageCell.withTx(tx).set(message);
         return messageCell;
       }),
@@ -4090,6 +4111,8 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
               tx,
               errorBase.scope,
             );
+            // Per-message store: named for this transaction, not enrolled.
+            recordRuntimeOwnedStore(tx, result, errorCell);
             errorCell.withTx(tx).set(
               errorMessage as Schema<typeof LLMMessageSchema>,
             );

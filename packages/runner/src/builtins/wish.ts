@@ -46,6 +46,10 @@ import {
   isStorageTransactionInconsistent,
 } from "../storage/rejection.ts";
 import { onSchemaRegistryClear } from "../schema-registry.ts";
+import {
+  enrollRuntimeOwnedStore,
+  recordRuntimeOwnedStore,
+} from "./runtime-owned-store.ts";
 import { scopedCell } from "./scope-policy.ts";
 import { rawMetaWriteAuthorization } from "../meta-seam.ts";
 
@@ -1258,6 +1262,8 @@ function resolveSpaceTarget(
         undefined,
         ctx.tx,
       );
+      recordRuntimeOwnedStore(ctx.tx, ctx.parentCell, cell);
+      enrollRuntimeOwnedStore(ctx.tx, ctx.parentCell, cell);
       const existing = cell.withTx(ctx.tx).sample();
       if (existing == null) {
         cell.withTx(ctx.tx).set(
@@ -2107,6 +2113,8 @@ export function wish(
       tx,
     );
     const scoped = scopedCell(runtime, tx, baseCell, outputScope);
+    recordRuntimeOwnedStore(tx, parentCell, scoped);
+    enrollRuntimeOwnedStore(tx, parentCell, scoped);
     if (scoped !== baseCell) {
       // Copy the meta result link from the base cell into our new scoped cell
       const resultLink = getMetaLink(baseCell.withTx(tx), "result");
@@ -2611,6 +2619,8 @@ export function wish(
         undefined,
         tx,
       );
+      recordRuntimeOwnedStore(tx, parentCell, slot.readyCell);
+      enrollRuntimeOwnedStore(tx, parentCell, slot.readyCell);
     }
     slot.readyCell.get();
 

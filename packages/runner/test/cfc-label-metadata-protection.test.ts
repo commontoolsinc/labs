@@ -18,7 +18,7 @@ import {
 } from "../src/cfc/label-representation.ts";
 import type { CfcLabelMetadataProtectionMode } from "../src/cfc/mod.ts";
 import {
-  CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
+  CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   runtimeWritePolicyAuthorization,
 } from "../src/cfc/types.ts";
 import { parseLink } from "../src/link-utils.ts";
@@ -463,8 +463,8 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
       }
     });
 
-    it("commits the piece-substrate declaration built from that same join", async () => {
-      // The §8.12.5 route-2 declaration a piece's setup mints carries the
+    it("commits the runtime-owned-store declaration built from that same join", async () => {
+      // The §8.12.5 route-2 declaration a store the runtime owns mints carries the
       // flow join as its content, so it is the one `declared` entry the
       // transform applies to. Leaving it verbatim beside the committed
       // derived stamp of the same atoms would publish in one entry what the
@@ -501,7 +501,7 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
             id: substrateLink.id,
             path: [],
           },
-          claim: CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
+          claim: CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
           sources: [{
             space: resultLink.space,
             scope: resultLink.scope,

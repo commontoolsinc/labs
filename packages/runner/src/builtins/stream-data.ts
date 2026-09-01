@@ -7,11 +7,11 @@ import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { effectTargetKey } from "../executor/effect-completion.ts";
 import { settleAbandonedRequest } from "./abandoned-request.ts";
+import { ownedCell } from "./runtime-owned-store.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import type { Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { scopedCell } from "./scope-policy.ts";
 
 /**
  * Stream data from a URL, used for querying Synopsys.
@@ -68,34 +68,37 @@ export function streamData(
       if (cellsInitialized && cellScope !== outputScope) {
         previousCall = "";
       }
-      const basePending = runtime.getCell<boolean>(
-        parentCell.space,
+      pending = ownedCell<boolean>(
+        runtime,
+        tx,
+        parentCell,
         { streamData: { pending: cause } },
         undefined,
-        tx,
+        outputScope,
       );
-      pending = scopedCell(runtime, tx, basePending, outputScope);
       pending.send(false);
 
-      const baseResult = runtime.getCell<any | undefined>(
-        parentCell.space,
+      result = ownedCell<any | undefined>(
+        runtime,
+        tx,
+        parentCell,
         {
           streamData: { result: cause },
         },
         undefined,
-        tx,
+        outputScope,
       );
-      result = scopedCell(runtime, tx, baseResult, outputScope);
 
-      const baseError = runtime.getCell<any | undefined>(
-        parentCell.space,
+      error = ownedCell<any | undefined>(
+        runtime,
+        tx,
+        parentCell,
         {
           streamData: { error: cause },
         },
         undefined,
-        tx,
+        outputScope,
       );
-      error = scopedCell(runtime, tx, baseError, outputScope);
 
       // Link the new result cells to the parent result cell
       setResultCell(pending, parentCell);

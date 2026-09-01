@@ -9,11 +9,8 @@ import { listElementLink } from "./list-element-link.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { listResultSchema } from "./list-result-schema.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
-import {
-  narrowestCellScope,
-  outputSpotFromBinding,
-  scopedCell,
-} from "./scope-policy.ts";
+import { ownedCell } from "./runtime-owned-store.ts";
+import { narrowestCellScope, outputSpotFromBinding } from "./scope-policy.ts";
 
 /** The three list coordinators, by the builtin ref name each registers. */
 export type ListOp = "map" | "filter" | "flatMap";
@@ -123,13 +120,14 @@ export function listCoordinatorPlan(
   const resultSchema = op === "map"
     ? listResultSchema(opPattern.resultSchema)
     : listResultSchema();
-  const baseResult = runtime.getCell<any[]>(
-    parentCell.space,
+  const container = ownedCell<any[]>(
+    runtime,
+    tx,
+    parentCell,
     { [op]: parentCell.entityId, outputSpot },
     resultSchema,
-    tx,
+    scope,
   );
-  const container = scopedCell(runtime, tx, baseResult, scope);
   const elementKeys = Array.isArray(list)
     ? listElementKeys(list)
     : new Map<number, string>();

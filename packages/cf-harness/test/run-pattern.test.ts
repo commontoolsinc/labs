@@ -1757,12 +1757,18 @@ describe("run-pattern", () => {
     it("commits no unlabelled copy when a pattern-body map reads labelled values inline", async () => {
       // A pattern-body `.map()` runs as the built-in map, whose coordinator
       // reads the list raw. With the labelled values inline in that list, the
-      // read carries their confidentiality, so under enforce-strict the
-      // coordinator's own container write into an ordinary document is
-      // refused and nothing lands: the labelled text exists at rest only in
-      // the seeded source document, and the tool reports the commit refusal —
-      // the coordinator carries the piece's observation identity, which is
-      // what attributes a `raw:map` action's refusal to its piece.
+      // read carries their confidentiality into the stores the map writes —
+      // its result container and one result document per element. Those are
+      // stores the runtime owns, so each declares that confidentiality
+      // (§8.12.5 route 2) rather than refusing the write, and the run
+      // commits. Nothing copies the text even so: each element result is a
+      // link into the labelled source path, so the labelled text exists at
+      // rest only in the seeded source document.
+      //
+      // What the labels stop is the ANSWER. The model's context is outside
+      // every space, so the answer ceiling withholds the value the tool would
+      // return, and the handle it returns instead names a result that stays
+      // in the space.
       const { runtime, pieces, space, dispose } = await createStrictFabric();
       try {
         const seed = runtime.edit();
@@ -1824,21 +1830,25 @@ describe("run-pattern", () => {
             ),
           },
         });
-        const output = result.output as RunPatternToolErrorOutput;
-        expect(output.status).toBe("error");
-        expect(output.message).toContain("policy refused to commit");
-        expect(output.rawCauseMessage).toContain(
-          "writer-fit confidentiality misfit",
-        );
-        const pieceId = output.pieceId;
-        expect(pieceId).toBeDefined();
+        const output = result.output as RunPatternToolSuccessOutput;
+        // The run commits and returns its handle; the answer ceiling gates the
+        // VALUE, which stays in the space. The sibling below reaches the same
+        // outcome from the linked shape, so inline values and linked ones now
+        // differ only in which document holds the text.
+        expect(output.status).toBe("ok");
+        expect(output.value).toBeUndefined();
+        expect(output.policyRefusal).toBeUndefined();
         await runtime.idle();
         await pieces.synced();
 
-        const piece = await pieces.get(pieceId!);
-        expect(await piece.result.get([])).toBeUndefined();
-        expect(docsHolding(runtime, space, `of:${pieceId}`, "alpha-secret"))
-          .toEqual([sourceId]);
+        const piece = await pieces.get(output.pieceId);
+        expect(await piece.result.get(["notes"])).toEqual([
+          "alpha-secret",
+          "beta-secret",
+        ]);
+        expect(
+          docsHolding(runtime, space, `of:${output.pieceId}`, "alpha-secret"),
+        ).toEqual([sourceId]);
       } finally {
         await dispose();
       }

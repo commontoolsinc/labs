@@ -103,7 +103,14 @@ import {
   type TrustSnapshot,
   type WritePolicyInput,
 } from "../cfc/mod.ts";
-import { runtimeWritePolicyAuthorized } from "../cfc/types.ts";
+import {
+  runtimeOwnedStoreKey,
+  type RuntimeOwnedStores,
+} from "../cfc/runtime-owned-stores.ts";
+import {
+  CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
+  runtimeWritePolicyAuthorized,
+} from "../cfc/types.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
 import { isTerminalRefusal, plainReason } from "../cfc/verdict-reason.ts";
 import {
@@ -441,6 +448,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // record. `#`-private, so nothing outside this class can add to it; the one
   // writer is `recordCfcWritePolicyInput` handed the runtime's mark.
   #runtimeWritePolicyInputs = new WeakSet<WritePolicyInput>();
+  // The stores the runtime owns that a marker named on THIS transaction, by
+  // {@link runtimeOwnedStoreKey}. A store the runtime mints and fills in one
+  // go needs no more than this.
+  #markedOwnedStores = new Set<string>();
+  // The stores the runtime owns that outlive the transaction that minted them,
+  // shared with every other transaction of the same runtime (`Runtime.edit`
+  // hands the same object to each). Absent on a transaction the runtime did
+  // not configure, which leaves only this transaction's own markers.
+  #runtimeOwnedStores: RuntimeOwnedStores | undefined;
   // Per-transaction cache of `Cell.get()` results, keyed by stable cell view.
   // Replaced wholesale on any write (see `#invalidateReadResultCache`), so a hit
   // is only ever served when nothing has been written since the cached read.
@@ -1448,6 +1464,23 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // for exactly the records that arrived with the mark.
     if (runtimeWritePolicyAuthorized(authorization)) {
       this.#runtimeWritePolicyInputs.add(frozen);
+      // An authorized marker naming a WHOLE document in the OWNER's own space
+      // says the runtime owns that store, for the rest of this transaction.
+      // Both tests are the ones enrollment applies: a marker carrying a path
+      // names part of a document, and ownership is a claim about the whole
+      // store; and a store outside the owner's space belongs to whoever holds
+      // that space's replicas, so declaring a policy on it from this piece's
+      // join would put another space's bytes behind this one's promise.
+      if (
+        frozen.kind === "structural-provenance" &&
+        frozen.claim === CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE &&
+        canonicalizeLogicalPath(frozen.target.path).length === 0 &&
+        frozen.sources?.[0]?.space === frozen.target.space
+      ) {
+        this.#markedOwnedStores.add(
+          runtimeOwnedStoreKey(frozen.target.space, frozen.target.id),
+        );
+      }
     }
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-policy-input-added");
@@ -1456,6 +1489,59 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   isRuntimeWritePolicyInput(input: WritePolicyInput): boolean {
     return this.#runtimeWritePolicyInputs.has(input);
+  }
+
+  /**
+   * One-shot handover of the runtime's owned-store enrollment, called by
+   * `Runtime.edit` for every transaction it creates. The same set reaches
+   * every transaction, which is what carries an enrollment past the
+   * transaction that made it.
+   */
+  configureRuntimeOwnedStores(stores: RuntimeOwnedStores): void {
+    if (this.#runtimeOwnedStores !== undefined) {
+      throw new Error(
+        "Runtime-owned stores are already configured for this transaction",
+      );
+    }
+    this.#runtimeOwnedStores = stores;
+  }
+
+  enrollRuntimeOwnedStore(
+    target: CfcAddress,
+    owner: string,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): void {
+    // The same mark the write-policy marker carries. An enrollment outlives
+    // every transaction, so it is at least as much the runtime's to make.
+    if (!runtimeWritePolicyAuthorized(authorization)) return;
+    // The same path test the marker applies: ownership is a claim about a
+    // whole store. `runtimeOwnedStoreOwnerKey` applies the other one, refusing
+    // to name an owner for a store outside its own space.
+    if (canonicalizeLogicalPath(target.path).length > 0) return;
+    // Deliberately not transactional. Which store the runtime owns does not
+    // depend on whether a write landed, and an abandoned attempt that enrolled
+    // one named an address derived from its own piece's cause, which nothing
+    // else mints. The piece's release is what takes it out again.
+    this.#runtimeOwnedStores?.add(
+      runtimeOwnedStoreKey(target.space, target.id),
+      owner,
+    );
+  }
+
+  isRuntimeOwnedStore(
+    space: string,
+    id: string,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): boolean {
+    // Answers about the whole runtime's enrollment, not this transaction's, so
+    // it takes the runtime's mark like the recorders do. Every store id here
+    // is derivable from a piece's cause, so an ungated answer would tell
+    // pattern-authored code — which reaches `cell.tx` — whether a given piece
+    // is running in this runtime.
+    if (!runtimeWritePolicyAuthorized(authorization)) return false;
+    const key = runtimeOwnedStoreKey(space, id);
+    return this.#markedOwnedStores.has(key) ||
+      (this.#runtimeOwnedStores?.has(key) ?? false);
   }
 
   recordCfcConsultedGrant(consulted: ConsultedGrant): void {
@@ -3163,6 +3249,22 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   isRuntimeWritePolicyInput(input: WritePolicyInput): boolean {
     return this.#wrapped.isRuntimeWritePolicyInput(input);
+  }
+
+  enrollRuntimeOwnedStore(
+    target: CfcAddress,
+    owner: string,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): void {
+    this.#wrapped.enrollRuntimeOwnedStore(target, owner, authorization);
+  }
+
+  isRuntimeOwnedStore(
+    space: string,
+    id: string,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): boolean {
+    return this.#wrapped.isRuntimeOwnedStore(space, id, authorization);
   }
 
   recordCfcConsultedGrant(consulted: ConsultedGrant): void {
