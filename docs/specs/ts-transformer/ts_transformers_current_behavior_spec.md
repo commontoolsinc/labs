@@ -604,7 +604,7 @@ Diagnostics emitted in all modes:
     spec's "bare dynamic key access in top-level pattern-facing code" =
     Unsupported). The same access is fine inside JSX, a computation callback, a
     collection callback, or a structural binding form.
-  - four dedicated messages cover an unsupported plain-array `map`
+  - five dedicated messages cover an unsupported plain-array `map`
     wrapper-site shape, and each reports once per map call, anchored on the
     call, however many reactive spellings the callback holds:
     - a render-collecting callback whose collected view nodes carry
@@ -627,6 +627,11 @@ Diagnostics emitted in all modes:
       owner. The per-read `pattern-context:get-call` and
       `pattern-context:optional-chaining` diagnostics inside the reported
       callback defer to this single report
+    - a reactive value passed alongside the callback ("passes a reactive
+      value alongside its callback…"): `map(callback, thisArg)` binds the
+      second argument as `this`, a route into the collected array that none
+      of the callback-shape checks can see, so any reactive extra argument
+      fails the map outright whatever the callback's own shape
     - an async callback containing reactive work ("resumes outside pattern
       construction…"), regardless of what the callback returns
     - a generator callback containing reactive work ("does not execute a
@@ -789,8 +794,11 @@ What the callback returns then decides how far its result may travel:
   and the diagnostic does not apply. The check therefore consults
   `hasReactiveCollectionProvenance` and `getSiteLiftedCollectionLocalSymbol`,
   the same two questions the closure stage asks. Provenance an earlier stage
-  has not recorded yet is invisible this early, which can only withhold the
-  diagnostic, never invent one. A rejected-flow map whose
+  has not recorded yet is invisible this early; a miss in that direction lets
+  a diagnostic through on a map the closure stage still lowers, so the guard
+  narrows the false-positive class rather than eliminating it. Both the
+  call-level check and the per-expression computation classifier apply this
+  guard. A rejected-flow map whose
   returns are all plain stays ordinary JavaScript and keeps the standard
   non-escaping diagnostics for anything reactive inside it. Async and
   generator callbacks containing reactive work are rejected independently of

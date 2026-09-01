@@ -123,6 +123,7 @@ export interface UnsupportedPlainArrayMapDecision {
   reason:
     | "result-not-direct-jsx"
     | "reactive-jsx-escapes-render"
+    | "reactive-this-arg"
     | "async-callback"
     | "generator-callback";
   call: ts.CallExpression;
@@ -1625,6 +1626,16 @@ function collectedValueEscapes(
   return analyze(value).containsReactive;
 }
 
+/**
+ * Whether a binding referenced in collected content can hold a reactive
+ * value: its initializer carries one, or a statement in the callback stores
+ * one into it by assignment or by call.
+ *
+ * Stores are resolved by the binding named at the store site. An alias of a
+ * member — `const values = record.values; values.push(active)` — names the
+ * alias, not `record`, so that store is not visible from `record`: the scan
+ * follows no alias edges.
+ */
 function localBindingCanCarryReactiveValue(
   identifier: ts.Identifier,
   callback: ts.ArrowFunction | ts.FunctionExpression,
@@ -1703,10 +1714,11 @@ function localBindingCanCarryReactiveValue(
  *
  * An assignment is not the only way a reactive value reaches a collected
  * aggregate: `record.push(active)` stores one without ever naming `record` on
- * a left-hand side, and `store(record, active)` can do the same out of sight.
- * Both shapes count — the binding as the call's receiver, or the binding
- * passed alongside the value — because this is a may-escape check and neither
- * one can be shown not to store.
+ * a left-hand side, and `store(record, active)` or
+ * `store(record.values, active)` can do the same out of sight. All of these
+ * count — the binding as the call's receiver, or at the base of any
+ * argument's member path — because this is a may-escape check and none of
+ * them can be shown not to store.
  */
 function callCanPutValueInBinding(
   call: ts.CallExpression,
@@ -1727,7 +1739,9 @@ function callCanPutValueInBinding(
     }
   }
   return call.arguments.some((argument) => {
-    const value = unwrapExpression(argument);
+    const value = unwrapExpression(
+      getLeftmostMemberBase(unwrapExpression(argument)),
+    );
     return ts.isIdentifier(value) &&
       checker.getSymbolAtLocation(value) === symbol;
   });
@@ -1793,7 +1807,6 @@ function expressionReferencesSymbol(
  */
 function jsxReturnsCarryReactiveContent(
   callback: ts.ArrowFunction | ts.FunctionExpression,
-  context: TransformationContext,
   analyze: AnalyzeFn,
 ): boolean {
   return getOwnReturnExpressions(callback).some((returnExpression) => {
@@ -2078,6 +2091,22 @@ export function classifyUnsupportedPlainArrayMapCall(
     return undefined;
   }
 
+  // Every check below reads the callback's parameters and body, so a
+  // reactive value bound as `this` through the call's second argument would
+  // reach the collected array without any of them seeing it. Any reactive
+  // extra argument therefore fails the map outright.
+  if (
+    call.arguments.slice(1).some((argument) =>
+      analyze(argument).containsReactive
+    )
+  ) {
+    return {
+      kind: "unsupported-plain-array-map",
+      reason: "reactive-this-arg",
+      call,
+    };
+  }
+
   if (decision === "supported") {
     // A render-collecting callback earns its unrestricted flow because the
     // collected array holds view nodes — but a view node whose props or
@@ -2085,7 +2114,7 @@ export function classifyUnsupportedPlainArrayMapCall(
     // can read through, the same way it reads through an object literal. Such
     // a map is safe exactly while its result stays on the render path.
     if (
-      jsxReturnsCarryReactiveContent(callback, context, analyze) &&
+      jsxReturnsCarryReactiveContent(callback, analyze) &&
       !mapResultStaysOnRenderPath(call, context)
     ) {
       return {
@@ -2126,8 +2155,12 @@ export function classifyUnsupportedPlainArrayMapCall(
  * Asking the same provenance question the lowering asks keeps the diagnostic
  * to the receivers that really do stay native. The stage-13 registries are
  * empty this early, so provenance an earlier stage has not recorded yet is
- * not visible; that direction only withholds the diagnostic, never invents
- * one.
+ * not visible; a miss in that direction lets a diagnostic through on a map
+ * the closure stage will still lower, inventing a false positive, so the
+ * guard narrows that class rather than eliminating it. The opposite failure
+ * — claiming provenance that is not there and withholding a true diagnostic
+ * — needs a site-lifted local reassigned to a plain array, which the type
+ * system rejects.
  */
 function mapReceiverHasReactiveCollectionProvenance(
   call: ts.CallExpression,
@@ -2245,6 +2278,18 @@ export function classifyRestrictedReactiveComputation(
       context.checker,
       (sourceFile) => context.isSourceFileDefaultLibrary(sourceFile),
     );
+    // The same provenance guard the call-level check applies: a receiver
+    // the closure stage will lower reactively is not a plain map, whatever
+    // its static type says. The rewrite turns the callback into a
+    // sub-pattern whose computations the reactive machinery owns — the same
+    // end state a reactive-typed receiver reaches — so validation stands
+    // aside for the whole callback.
+    if (
+      mapSiteDecision !== undefined &&
+      mapReceiverHasReactiveCollectionProvenance(callbackContext.call, context)
+    ) {
+      return { kind: "allowed" };
+    }
     if (
       mapSiteDecision !== undefined && mapSiteDecision !== "supported" &&
       reactiveContext.kind === "pattern" &&

@@ -194,6 +194,12 @@ export class PatternContextValidationTransformer
         `Make the map the JSX child, move conditional or logical selection ` +
         `inside a concrete returned JSX node, or move the whole consuming ` +
         `computation into computed(() => ...).`
+      : decision.reason === "reactive-this-arg"
+      ? `This plain-array map passes a reactive value alongside its ` +
+        `callback, where it binds as \`this\` and can reach the collected ` +
+        `array without appearing in the callback's own body flows. Capture ` +
+        `the value in the callback body instead of passing it as a map ` +
+        `argument.`
       : decision.reason === "async-callback"
       ? `An async plain-array map callback resumes outside pattern ` +
         `construction, so it cannot own reactive computations. Keep the ` +

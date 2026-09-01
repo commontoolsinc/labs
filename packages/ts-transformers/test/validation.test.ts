@@ -3532,6 +3532,103 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
+    "does not claim a computation inside a reactive-provenance map callback",
+    async () => {
+      // Same receiver family as above, but the reactive spelling sits inside
+      // the callback as a computation stored through a local, so the check
+      // runs through the per-expression classifier rather than the
+      // call-level one. Both consult the same provenance guard.
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      interface Row { a: string }
+
+      export default pattern<
+        { rows: Writable<Row[]>; target: Writable<string> },
+        { flags: unknown }
+      >(({ rows, target }) => {
+        const items: Row[] = rows.get();
+        const flags = items.map((row) => row.a === target);
+        return { flags };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (error) => error.type === "pattern-context:computation",
+      );
+      assertEquals(
+        errors.length,
+        0,
+        "the per-expression classifier applies the same provenance guard " +
+          "as the call-level check",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on a reactive value passed as a map thisArg",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ active: Writable<boolean> }, { kept: unknown }>(
+        ({ active }) => {
+          const kept = VALUES.map(function (this: Writable<boolean>) {
+            return this;
+          }, active).filter(Boolean);
+          return { kept };
+        },
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "passes a reactive value alongside its callback",
+      );
+    },
+  );
+
+  await t.step(
+    "errors when a mutating call reaches an aggregate through a member path",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      const store = (into: unknown[], value: unknown) => {
+        into.push(value);
+      };
+
+      export default pattern<{ active: Writable<boolean> }, { kept: unknown }>(
+        ({ active }) => {
+          const kept = VALUES.map((value) => {
+            const record = { values: [value] as unknown[] };
+            store(record.values, active);
+            return record;
+          });
+          return { kept };
+        },
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "returns a reactive value",
+      );
+    },
+  );
+
+  await t.step(
     "errors on a reactive value spread into a collected literal",
     async () => {
       const source = `      import { pattern, Writable } from "commonfabric";
