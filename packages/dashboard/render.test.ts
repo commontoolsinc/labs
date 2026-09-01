@@ -230,7 +230,7 @@ Deno.test("shell: labeled cell grids share the sparkline label baseline", () => 
   );
   assertStringIncludes(
     html,
-    `.cells{display:grid;grid-template-columns:repeat(auto-fill,minmax(4px,1fr))`,
+    `.cells{display:grid;grid-template-columns:repeat(40,min(7.5px,`,
   );
   assertStringIncludes(html, `.chart>span:last-child{bottom:2px!important}`);
   assertStringIncludes(html, `.cells.labeled+span{font-weight:700;text-shadow:`);

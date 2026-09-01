@@ -143,9 +143,11 @@ function assertStandardTileLayout(
       const grid = tile.querySelector<HTMLElement>(".cells.labeled");
       const firstCell = grid?.querySelector<HTMLElement>(".cell");
       const lastCell = grid?.querySelector<HTMLElement>(".cell:last-child");
+      const trustSub = tile.querySelector<HTMLElement>(".sub");
       assertExists(grid);
       assertExists(firstCell);
       assertExists(lastCell);
+      assertExists(trustSub);
       assertExists(duration);
       const gridRect = grid.getBoundingClientRect();
       const firstCellRect = firstCell.getBoundingClientRect();
@@ -162,12 +164,15 @@ function assertStandardTileLayout(
         `${id} commit grid must align to its bottom edge at ${width}px`,
       );
       assert(
-        firstCellRect.top >= gridRect.top - 0.05,
-        `${id} commit grid must stay inside its top edge at ${width}px`,
+        firstCellRect.top >= trustSub.getBoundingClientRect().bottom,
+        `${id} commit grid must not overlap its subheading at ${width}px: ${
+          pixel(firstCellRect.top)
+        }px vs ${pixel(trustSub.getBoundingClientRect().bottom)}px`,
       );
       const leftInset = gridRect.left - tileRect.left;
+      const rightInset = tileRect.right - gridRect.right;
       assertPixelAligned(
-        tileRect.right - gridRect.right,
+        rightInset,
         leftInset,
         `${id} commit grid must have equal side insets at ${width}px`,
       );
@@ -188,6 +193,30 @@ function assertStandardTileLayout(
         getComputedStyle(duration).textShadow,
         "none",
         `${id} duration must carry a readable grid outline at ${width}px`,
+      );
+      const cells = [...grid.querySelectorAll<HTMLElement>(".cell")];
+      assertEquals(cells.length, 160);
+      const fortiethRect = cells[39].getBoundingClientRect();
+      const fortyFirstRect = cells[40].getBoundingClientRect();
+      assertPixelAligned(
+        firstCellRect.left,
+        gridRect.left,
+        `${id} first cell must reach the grid's left edge at ${width}px`,
+      );
+      assert(
+        Math.abs(fortiethRect.right - gridRect.right) < 0.5,
+        `${id} fortieth cell must reach the grid's right edge at ${width}px: ${
+          pixel(fortiethRect.right)
+        }px vs ${pixel(gridRect.right)}px`,
+      );
+      assertPixelAligned(
+        fortiethRect.top,
+        firstCellRect.top,
+        `${id} first row must contain 40 cells at ${width}px`,
+      );
+      assert(
+        fortyFirstRect.top > firstCellRect.top,
+        `${id} forty-first cell must start the second row at ${width}px`,
       );
     }
     assert(

@@ -1,6 +1,9 @@
+import { TRUST_COLS } from "./ci-trust-layout.ts";
+
 export const LABELED_CELL_GRID_MARGIN_TOP = 9;
 export const CHART_BOTTOM_INSET = 2;
-export const CELL_GRID_MIN_SIZE = 4;
+const CELL_GRID_GAP = 1;
+const CELL_GRID_MAX_SIZE = 7.5;
 export const DASHBOARD_GRID_RULE =
   `.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:12px}`;
 export const TILE_BOX_RULE =
@@ -35,7 +38,9 @@ export function tileContentRules(
   }px;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable}
   .tile-detail-list>div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .chart>span:last-child{bottom:${CHART_BOTTOM_INSET}px!important}
-  .cells{display:grid;grid-template-columns:repeat(auto-fill,minmax(${CELL_GRID_MIN_SIZE}px,1fr));gap:1px;margin-top:10px}
+  .cells{display:grid;grid-template-columns:repeat(${TRUST_COLS},min(${CELL_GRID_MAX_SIZE}px,calc((100% - ${
+    (TRUST_COLS - 1) * CELL_GRID_GAP
+  }px)/${TRUST_COLS})));column-gap:${CELL_GRID_GAP}px;row-gap:${CELL_GRID_GAP}px;justify-content:space-between;margin-top:10px}
   ${labeledCellGridRule(chartHeight)}
   .cells.labeled .cell{width:100%}
   .cells.labeled+span{font-weight:700;text-shadow:-1px -1px 0 var(--surface),1px -1px 0 var(--surface),-1px 1px 0 var(--surface),1px 1px 0 var(--surface),0 0 4px var(--surface);z-index:1}
