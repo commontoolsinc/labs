@@ -402,3 +402,24 @@ describe("a registry that cannot be opened in any order", () => {
     );
   });
 });
+
+describe("the compile cache a lane hands the pattern suites", () => {
+  it("makes the directory the workflow's cache step restores into", async () => {
+    // The compiler is pointed at a file, and it cannot write one into a
+    // directory that is not there — so a cache that was never restored
+    // has to become an empty one rather than a failure.
+    const root = await Deno.makeTempDir({ prefix: "compile-cache-" });
+    const opened = await openCapabilities(["compile-cache"], {
+      root,
+      dryRun: false,
+      workDir: root,
+    });
+    expect(opened.env.CF_COMPILE_CACHE_FILE).toBe(
+      `${root}/${COMPILE_CACHE_FILE}`,
+    );
+    expect((await Deno.stat(`${root}/${CACHE_DIR}/compile`)).isDirectory)
+      .toBe(true);
+    await opened.close();
+    await Deno.remove(root, { recursive: true });
+  });
+});

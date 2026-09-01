@@ -695,7 +695,7 @@ export async function main(
   return await runLane(options, deps) ? 0 : 1;
 }
 
-if (import.meta.main) {
-  const status = await main();
-  if (status !== 0) Deno.exit(status);
-}
+// `Deno.exitCode` rather than `Deno.exit`, which would end the process
+// before the unload handlers run — and one of those is what writes a
+// test run's name map into its spool.
+if (import.meta.main) Deno.exitCode = await main();

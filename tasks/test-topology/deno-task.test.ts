@@ -270,3 +270,18 @@ describe("a member holding a file where a directory would go", () => {
     expect(files).toEqual(["src/a.test.ts"]);
   });
 });
+
+describe("a task naming a dependency that is not there", () => {
+  it("passes over it rather than reading it as a command", async () => {
+    const dir = await member({
+      tasks: {
+        test: { dependencies: ["check", "just-test"] },
+        "just-test": "deno test --allow-read",
+      },
+    });
+    // `check` is named and not defined; what matters is that the
+    // dependency that is defined is still found.
+    const tasks = await memberTasks(dir);
+    expect(tasks.denoTestTask).toBe("just-test");
+  });
+});

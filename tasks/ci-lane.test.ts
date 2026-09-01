@@ -732,10 +732,22 @@ describe("the lane's own housekeeping", () => {
   it("runs a lane that was given no share of the work", async () => {
     // The whole path, with nothing in it: no capability is opened, no
     // batch runs, and the directory the lane made for itself goes.
-    const before = new Set<string>();
-    for await (const entry of Deno.readDir("/tmp")) {
-      if (entry.name.startsWith("ci-lane-")) before.add(entry.name);
-    }
+    //
+    // The lane is given a temporary root of its own to make that in.
+    // The shared one is a namespace every test file writes to at once,
+    // so a check over it would answer about its neighbours rather than
+    // about this lane.
+    // The spool is made before the temporary root is redirected, so it
+    // does not end up inside the directory this then checks and clears.
+    const spool = await Deno.makeTempDir({ prefix: "lane-spool-" });
+    const temp = await Deno.makeTempDir({ prefix: "lane-tmp-" });
+    const previous = Deno.env.get("TMPDIR");
+    Deno.env.set("TMPDIR", temp);
+    // The spool is what makes the lane reach the point where it would
+    // record what its setup cost. It opened nothing, so there is
+    // nothing to record.
+    const previousSpool = Deno.env.get("CF_TEST_RECORDS_DIR");
+    Deno.env.set("CF_TEST_RECORDS_DIR", spool);
     const log = console.log;
     console.log = () => {};
     let ok: boolean;
@@ -749,16 +761,29 @@ describe("the lane's own housekeeping", () => {
       });
     } finally {
       console.log = log;
+      if (previous === undefined) Deno.env.delete("TMPDIR");
+      else Deno.env.set("TMPDIR", previous);
+      if (previousSpool === undefined) Deno.env.delete("CF_TEST_RECORDS_DIR");
+      else Deno.env.set("CF_TEST_RECORDS_DIR", previousSpool);
     }
     expect(ok).toBe(true);
-    for await (const entry of Deno.readDir("/tmp")) {
-      if (entry.name.startsWith("ci-lane-")) {
-        expect([entry.name, before.has(entry.name)]).toEqual([
-          entry.name,
-          true,
-        ]);
-      }
-    }
+    // Named rather than counted: the private root keeps other test
+    // files out, and anything else this process makes a temporary
+    // directory for lands here too.
+    const left = (await Array.fromAsync(Deno.readDir(temp)))
+      .map((entry) => entry.name)
+      .filter((name) => name.startsWith("ci-lane-"));
+    expect(left).toEqual([]);
+    // Narrower than an empty spool: anything else in this process that
+    // records writes there too once the variable is set.
+    const spooled = (await Promise.all(
+      (await Array.fromAsync(Deno.readDir(spool)))
+        .filter((entry) => entry.isFile)
+        .map((entry) => Deno.readTextFile(`${spool}/${entry.name}`)),
+    )).join("");
+    expect(spooled).not.toContain("ci-lane setup");
+    await Deno.remove(temp, { recursive: true });
+    await Deno.remove(spool, { recursive: true });
   });
 });
 
