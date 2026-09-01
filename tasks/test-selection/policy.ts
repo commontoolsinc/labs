@@ -174,11 +174,12 @@ export const SAME_COMMIT_REACH_DAYS = 2;
  * whole corpus: one measured day of the store holds 2.6 million
  * identity-and-commit pairs, of which 23 carry a failure and 13 carry
  * both a pass and a failure. Remembering all of them costs 442MB for one
- * day, which is more than a string can hold. What slides out of the
- * window keeps the identities the failure witness still names, so a test
- * that has already failed stays exact until the commit itself ages out
- * at `SAME_COMMIT_REACH_DAYS` — which is the shorter of the two spans
- * whenever the breadth window is the longer one.
+ * day, which is more than a string can hold.
+ *
+ * What slides out of the window keeps the identities the failure witness
+ * still names. So a test that has already failed goes on being exact,
+ * and stops when `SAME_COMMIT_REACH_DAYS` drops the commit — that span,
+ * not the witness's own, is what bounds it.
  */
 export const FLAKE_COMMIT_REACH = 8;
 
