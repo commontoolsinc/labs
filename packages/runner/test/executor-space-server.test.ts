@@ -19,6 +19,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { getLogger } from "@commonfabric/utils/logger";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import {
@@ -49,7 +50,7 @@ import {
   SpaceServer,
   STRUCTURE_LOAD_STUCK_AFTER,
 } from "../src/executor/space-server.ts";
-import { stampWaveRunContext } from "../src/executor/wave.ts";
+import { stampWaveRunContext, waveRunContextOf } from "../src/executor/wave.ts";
 import {
   emptyServingLoopStats,
   type ServingLoopStats,
@@ -536,6 +537,77 @@ describe("stage G SpaceServer recovery seams", () => {
       15_000,
     );
     expect(stats.watermarkClamped).toBe(3);
+  });
+
+  it("holds the watermark when its bookkeeping transaction fails, then advances on fresh input", async () => {
+    const created = newSpaceServer();
+    expect(await created.activate()).toBe(true);
+
+    const runtime = servingRuntime!;
+    const edit = runtime.edit.bind(runtime);
+    const watermarkFailureCount = () =>
+      getLogger("space-server").countsByKey["watermark-seal-failed"]?.warn ??
+        0;
+    const failuresBefore = watermarkFailureCount();
+    let failedWatermarkCommits = 0;
+    runtime.edit = (options) => {
+      const tx = edit(options);
+      const commit = tx.commit.bind(tx);
+      tx.commit = () => {
+        if (
+          failedWatermarkCommits === 0 &&
+          waveRunContextOf(tx)?.actionId === "server-execution/watermark"
+        ) {
+          failedWatermarkCommits += 1;
+          const reason = new Error("injected watermark commit failure");
+          return Promise.resolve({
+            error: {
+              name: "StorageTransactionAborted" as const,
+              message: reason.message,
+              reason,
+            },
+          });
+        }
+        return commit();
+      };
+      return tx;
+    };
+
+    const first = await server.writeDocument(
+      space,
+      "of:watermark-failure-first",
+      { n: 1 },
+    );
+    created.enqueueCommit({
+      space,
+      seq: first.seq,
+      class: "authored",
+      sessionId: "session:watermark-failure",
+      writes: [{ id: "of:watermark-failure-first", scopeKey: "space" }],
+    });
+    await waitUntil(
+      () => watermarkFailureCount() > failuresBefore,
+      "the failed watermark transaction to be reported",
+    );
+    expect(failedWatermarkCommits).toBe(1);
+    expect(created.watermark).toBeLessThan(first.seq);
+
+    const second = await server.writeDocument(
+      space,
+      "of:watermark-failure-second",
+      { n: 2 },
+    );
+    created.enqueueCommit({
+      space,
+      seq: second.seq,
+      class: "authored",
+      sessionId: "session:watermark-failure",
+      writes: [{ id: "of:watermark-failure-second", scopeKey: "space" }],
+    });
+    await waitUntil(
+      () => created.watermark >= second.seq,
+      "the watermark to advance after fresh input",
+    );
   });
 
   it("fires an EFFECT-ONLY batch on a quiet space: an all-no-op tx's deferred effects close a vacuous wave instead of starving until park (round-2 thread 1)", async () => {
