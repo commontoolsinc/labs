@@ -307,8 +307,8 @@ export function planLines(
   }
   if (result.overBudgetSeconds > 0) {
     lines.push(
-      `the mandatory set alone overran by ` +
-        `${result.overBudgetSeconds.toFixed(1)}s`,
+      `the mandatory set alone puts a lane ` +
+        `${result.overBudgetSeconds.toFixed(1)}s past its budget`,
     );
   }
   for (const entry of result.unschedulable) {

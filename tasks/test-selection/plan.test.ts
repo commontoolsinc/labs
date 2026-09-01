@@ -2,8 +2,14 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { testIdentityKey } from "@commonfabric/test-support/records";
 
-import { plan, type PlanInput, seededOrder, type Selection } from "./plan.ts";
-import type { Manifest, ManifestEntry } from "./manifest.ts";
+import {
+  plan,
+  type PlanInput,
+  seededOrder,
+  type Selection,
+  type SelectionReason,
+} from "./plan.ts";
+import type { Calibration, Manifest, ManifestEntry } from "./manifest.ts";
 import { sampleEntry, sampleManifest } from "./testing.ts";
 import { LANES, VALUE_FLOOR } from "./policy.ts";
 
@@ -44,12 +50,27 @@ function keysOf(result: ReturnType<typeof plan>): string[] {
   return selected(result).map((s) => testIdentityKey(s.entry.test)).sort();
 }
 
+/** Every identity of a manifest, mandatory, in the manifest's own order. */
+function everything(manifest: Manifest): Map<string, SelectionReason> {
+  return new Map(
+    manifest.entries.map((entry) => [
+      testIdentityKey(entry.test),
+      "changed" as const,
+    ]),
+  );
+}
+
 describe("plan", () => {
   describe("the partition", () => {
     it("fills exactly the lanes it was asked for", () => {
       const result = run(sampleManifest({ entries: entries(20) }));
       expect(result.lanes.length).toBe(LANES);
       expect(result.lanes.map((lane) => lane.lane)).toEqual([1, 2, 3, 4, 5]);
+    });
+
+    it("refuses to pack into no lanes at all", () => {
+      const manifest = sampleManifest({ entries: entries(3) });
+      expect(() => run(manifest, { lanes: 0 })).toThrow(RangeError);
     });
 
     it("puts no identity in two lanes", () => {
@@ -102,14 +123,26 @@ describe("plan", () => {
       const manifest = sampleManifest({
         entries: entries(4, () => ({ cost: 100 })),
       });
-      const mandatory = new Map(
-        manifest.entries.map((entry) =>
-          [testIdentityKey(entry.test), "changed" as const] as const
-        ),
-      );
-      const result = run(manifest, { mandatory, budgetSeconds: 10 });
-      expect(result.overBudgetSeconds).toBeCloseTo(350, 6);
+      const result = run(manifest, {
+        mandatory: everything(manifest),
+        budgetSeconds: 10,
+      });
+      expect(result.overBudgetSeconds).toBeCloseTo(90, 6);
       expect(selected(result).length).toBe(4);
+    });
+
+    it("says a lane is past its budget where the run's total fits", () => {
+      // Six identities at 120 seconds, in five lanes of 230. The six fit
+      // the run's 1,150 seconds between them, and the sixth still fits no
+      // lane: five of them are carrying 120 seconds each already.
+      const manifest = sampleManifest({
+        entries: entries(6, () => ({ cost: 120 })),
+      });
+      const result = run(manifest, {
+        mandatory: everything(manifest),
+        budgetSeconds: 230,
+      });
+      expect(result.overBudgetSeconds).toBeCloseTo(10, 6);
     });
   });
 
@@ -203,6 +236,101 @@ describe("plan", () => {
       const result = run(manifest, { lanes: 1, budgetSeconds: 4 });
       expect(selected(result).length).toBe(3);
       expect(selected(result).every((s) => s.repeats >= 1)).toBe(true);
+    });
+  });
+
+  describe("the lane budget", () => {
+    // A suite charging an overhead every lane that opens it pays. That is
+    // what makes the lane which has already paid it the cheapest place
+    // for the rest of the suite, and so what a per-lane budget has to
+    // overrule.
+    const grouped: Calibration = {
+      setupCost: {},
+      suites: { "workspace-unit": { overhead: 10, correction: 1 } },
+      unitOverhead: {},
+      prologue: 0,
+    };
+
+    it("gives no lane more work than one lane's budget", () => {
+      const manifest = sampleManifest({
+        entries: entries(500, () => ({ cost: 1 })),
+        calibration: grouped,
+      });
+      for (const lane of run(manifest, { budgetSeconds: 20 }).lanes) {
+        expect(lane.projectedSeconds).toBeLessThanOrEqual(20);
+      }
+    });
+
+    it("fills every lane rather than one lane five times over", () => {
+      const manifest = sampleManifest({
+        entries: entries(500, () => ({ cost: 1 })),
+        calibration: grouped,
+      });
+      for (const lane of run(manifest, { budgetSeconds: 40 }).lanes) {
+        expect(lane.projectedSeconds).toBeCloseTo(40, 6);
+      }
+    });
+
+    it("gives an identity larger than a lane's budget a lane to itself", () => {
+      const manifest = sampleManifest({
+        entries: entries(60, (i) => (i === 0 ? { cost: 250 } : { cost: 1 })),
+        calibration: grouped,
+      });
+      const result = run(manifest, { budgetSeconds: 230, boundSeconds: 300 });
+      const alone = result.lanes.find((lane) =>
+        lane.selections.some((s) => s.entry.test.n === "case 0")
+      )!;
+      expect(alone.selections.length).toBe(1);
+      expect(alone.projectedSeconds).toBeCloseTo(260, 6);
+    });
+
+    it("holds a repeated identity to the budget rather than the bound", () => {
+      // The lane to itself is for an identity that cannot be split. Three
+      // runs of a hundred seconds do not fit a lane's budget and two do,
+      // so the identity gives up a run rather than the lane its budget.
+      const manifest = sampleManifest({
+        entries: entries(1, () => ({ cost: 100, repeats: 3 })),
+      });
+      const result = run(manifest, { budgetSeconds: 230, boundSeconds: 300 });
+      expect(selected(result)[0]!.repeats).toBe(2);
+      expect(result.lanes[0]!.projectedSeconds).toBeCloseTo(200, 6);
+    });
+
+    it("takes the largest mandatory identity before the small ones", () => {
+      // Nine identities that between them fill most of the lanes, and one
+      // costing most of a lane on its own. Taken in the order the caller
+      // listed them, the nine leave the tenth no lane it fits inside;
+      // taken largest first, all ten fit.
+      const manifest = sampleManifest({
+        entries: entries(10, (i) => (i === 9 ? { cost: 90 } : { cost: 18 })),
+      });
+      const result = run(manifest, {
+        mandatory: everything(manifest),
+        budgetSeconds: 100,
+      });
+      expect(selected(result).length).toBe(10);
+      for (const lane of result.lanes) {
+        expect(lane.projectedSeconds).toBeLessThanOrEqual(100);
+      }
+    });
+
+    it("spreads a mandatory set no lane can hold over all of them", () => {
+      // Twenty identities that must run, costing between them nearly
+      // twice what the five lanes hold. Each lane carries four of them,
+      // rather than one lane carrying the whole overrun.
+      const manifest = sampleManifest({
+        entries: entries(20, () => ({ cost: 30 })),
+        calibration: grouped,
+      });
+      const result = run(manifest, {
+        mandatory: everything(manifest),
+        budgetSeconds: 70,
+      });
+      for (const lane of result.lanes) {
+        expect(lane.selections.length).toBe(4);
+        expect(lane.projectedSeconds).toBeCloseTo(130, 6);
+      }
+      expect(result.overBudgetSeconds).toBeCloseTo(60, 6);
     });
   });
 
