@@ -258,6 +258,7 @@ function fallbackCommentLines(
         previous,
         remaining,
         oldState,
+        oldSyntax,
         "old",
       );
       reconcileStateAfterGap(
@@ -266,6 +267,7 @@ function fallbackCommentLines(
         previous,
         remaining,
         newState,
+        newSyntax,
         "new",
       );
     }
@@ -304,6 +306,7 @@ function reconcileStateAfterGap(
   previous: DiffFile["hunks"][number],
   remaining: readonly DiffFile["hunks"][number][],
   state: CommentState,
+  syntax: CommentSyntax | undefined,
   side: "old" | "new",
 ): void {
   const current = remaining[0];
@@ -326,11 +329,17 @@ function reconcileStateAfterGap(
     }
   }
   const block = state.block;
-  if (block && !texts.some((text) => hasUnquotedToken(text, block.close))) {
+  if (
+    block &&
+    !texts.some((text) => hasVisibleClose(text, block.close, syntax))
+  ) {
     state.block = undefined;
   }
   const literalClose = state.literalClose;
-  if (literalClose && !texts.some((text) => text.includes(literalClose))) {
+  if (
+    literalClose &&
+    !texts.some((text) => hasVisibleClose(text, literalClose, syntax))
+  ) {
     state.literalClose = undefined;
   }
   const heredocs = state.heredocs;
@@ -344,7 +353,11 @@ function reconcileStateAfterGap(
   }
 }
 
-function hasUnquotedToken(text: string, token: string): boolean {
+function hasVisibleClose(
+  text: string,
+  token: string,
+  syntax: CommentSyntax | undefined,
+): boolean {
   let quote = "";
   let tokenInsideCurrentQuote = false;
   for (let i = 0; i < text.length;) {
@@ -361,12 +374,17 @@ function hasUnquotedToken(text: string, token: string): boolean {
         }
         i++;
       }
-    } else if (ch === '"' || ch === "'" || ch === "`") {
-      quote = ch;
-      tokenInsideCurrentQuote = false;
-      i++;
     } else {
+      if (
+        syntax?.lines.some((marker) => startsLineComment(text, i, marker))
+      ) {
+        return false;
+      }
       if (text.startsWith(token, i)) return true;
+      if (ch === '"' || ch === "'" || ch === "`") {
+        quote = ch;
+        tokenInsideCurrentQuote = false;
+      }
       i++;
     }
   }

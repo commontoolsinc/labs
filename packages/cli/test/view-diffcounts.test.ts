@@ -301,6 +301,27 @@ describe("diffcounts", () => {
     expect(counts.comments.totals).toEqual({ adds: 0, dels: 0 });
   });
 
+  it("ignores a block closer in a later line comment", () => {
+    const diff = [
+      "diff --git a/main.rs b/main.rs",
+      "--- a/main.rs",
+      "+++ b/main.rs",
+      "@@ -1,2 +1,2 @@",
+      " /*",
+      "- * old note",
+      "+ * new note",
+      "@@ -20,2 +20,2 @@",
+      "-run_old();",
+      "+run_new();",
+      ' // say "hello */',
+      "",
+    ].join("\n");
+
+    const counts = countsFor(diff);
+
+    expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });
+  });
+
   it("preserves comment markers inside Rust raw strings", () => {
     const diff = [
       "diff --git a/main.rs b/main.rs",
@@ -524,6 +545,27 @@ describe("diffcounts", () => {
     const counts = countsFor(diff);
 
     expect(counts.comments.totals).toEqual({ adds: 2, dels: 2 });
+  });
+
+  it("ignores raw-string closer text in a later ordinary string", () => {
+    const diff = [
+      "diff --git a/main.rs b/main.rs",
+      "--- a/main.rs",
+      "+++ b/main.rs",
+      "@@ -1,2 +1,2 @@",
+      ' let text = r#"',
+      "-old raw data",
+      "+new raw data",
+      "@@ -20,2 +20,2 @@",
+      "-// old comment",
+      "+// new comment",
+      ' let marker = "not a raw close: \\"#";',
+      "",
+    ].join("\n");
+
+    const counts = countsFor(diff);
+
+    expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });
   });
 
   it("does not start shell heredocs from quoted operators", () => {
