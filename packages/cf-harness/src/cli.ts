@@ -66,8 +66,8 @@ import { CfHarnessEngine } from "./engine.ts";
 import type { HarnessFabricSessionFactory } from "./fabric-session.ts";
 import {
   establishHarnessSessionContext,
-  harnessSessionEngineOptions,
   type HarnessSessionConfig,
+  harnessSessionEngineOptions,
 } from "./session-assembly.ts";
 import {
   CFC_INVOCATION_CONTEXT_DIR_ENV,

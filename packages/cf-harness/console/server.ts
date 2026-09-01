@@ -18,15 +18,17 @@
  * caller cannot send and a rebound origin cannot obtain. Do not put this
  * behind a public address.
  *
- * Two pieces of configuration are what make a run able to finish with a link
- * rather than a transcript. The fabric session — API URL, identity keyfile,
- * space *name* — reaches the engine as `fabricSession` in the base prompt-loop
- * options, which is what backs `run_pattern` and `assign_slug`; the space has
- * to be a name because `assign_slug` composes its URL from one and offers no
- * URL at all for a space named by `did:key`. The chat policy then has to name
- * those tools: the default parent tool surface does not include them, so a
- * session started with the default policy has a fabric session and no way to
- * use it.
+ * What a task runs under is not decided here. This server resolves flags, the
+ * environment and the request body into a `HarnessSessionConfig` — the same
+ * description the batch CLI resolves argv into — and `src/session-assembly.ts`
+ * turns that into the run. So a capability configurable on the CLI is
+ * configurable here by the same name, and the tools a session offers are
+ * derived from what it can back rather than listed by this file.
+ *
+ * The one piece of configuration this surface insists on is the fabric
+ * session, whose space has to be a name rather than a `did:key`: `assign_slug`
+ * composes a piece's URL from the name and offers none for a DID, and finishing
+ * with a link rather than a transcript is what this surface is for.
  */
 
 import { parseArgs } from "@std/cli/parse-args";
@@ -77,8 +79,8 @@ import { parseHostMountSpecs } from "../src/host-mounts.ts";
 import { parseInputCellArgument } from "../src/input-cells.ts";
 import {
   harnessSessionChatPolicy,
-  harnessSessionEngineOptions,
   type HarnessSessionConfig,
+  harnessSessionEngineOptions,
 } from "../src/session-assembly.ts";
 import {
   createHarnessInteractiveChatService,
@@ -662,8 +664,11 @@ export const resolveConsoleConfig = async (
       DEFAULT_SUBAGENT_PROFILE,
       PATTERN_AUTHOR_SUBAGENT_PROFILE,
     ],
-    subagentCompositionGuidance:
-      parsed["no-child-composition-guidance"] !== true,
+    // Stated only when it is being turned off: guidance is what the profile
+    // ships with, so saying so restates a default rather than configuring one.
+    ...(parsed["no-child-composition-guidance"] === true
+      ? { subagentCompositionGuidance: false }
+      : {}),
   };
 };
 

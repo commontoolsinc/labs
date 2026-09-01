@@ -44,10 +44,10 @@ export interface ParsedInputCellArgument {
 }
 
 /**
- * Parses one `--input-cell` argument of the form `<name>=<link>`. A cell's
- * shape is not stated here: an input cell carries its own declared schema in
- * the fabric, and `describe_handle` answers from that — one source of truth,
- * on the cell, where its labels also live.
+ * Parses one `--input-cell` argument of the form `<name>=<link>`. Neither a
+ * cell's shape nor its labels are stated here: both live on the cell in the
+ * fabric, and `describe_handle` answers from there — one source of truth, on
+ * the cell, rather than an operator's account of it.
  *
  * @throws Error naming the defect when the argument does not fit the
  * grammar; the caller surfaces it as a usage error before any run starts.
@@ -74,7 +74,7 @@ export const parseInputCellArgument = (
   if (ref.includes(";")) {
     const option = ref.slice(ref.indexOf(";") + 1).trim();
     throw new Error(
-      `--input-cell \`${name}\` carries an option \`${option}\`; the flag takes none — a cell's shape and labels live on its declared schema in the fabric`,
+      `--input-cell \`${name}\` carries an option \`${option}\`; the flag takes none — a cell's shape and labels live on the cell in the fabric`,
     );
   }
   return { name, ref };

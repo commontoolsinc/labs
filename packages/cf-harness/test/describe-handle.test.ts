@@ -655,6 +655,31 @@ describe("describe_handle", () => {
       expect(reply).not.toContain("groceries");
     });
 
+    it("answers what the space says about a cell's labels, so unlabelled and unread are different answers", async () => {
+      // The distinction is the whole point of reading them through the
+      // session: a cell the space holds no label for answers with an empty
+      // list, while a run that never reached a space answers with no list at
+      // all. Collapsing the two would let a handle a run could not read about
+      // pass for one carrying nothing.
+      const resultRef = await createPiece();
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable("run-describe"),
+        resultRef,
+      );
+
+      const read = await describeHandleTool.invoke(
+        contextWith(minted.table, session),
+        { token: minted.token },
+      );
+      const unread = await describeHandleTool.invoke(
+        contextWith(minted.table),
+        { token: minted.token },
+      );
+
+      expect(read.labels).toEqual([]);
+      expect(unread.labels).toBeUndefined();
+    });
+
     it("reports an address in another space as shapeless even though the runtime could read it", async () => {
       // The session's authority ends at its own space. The neighbouring space
       // is on this very runtime and its piece declares a shape, so an answer

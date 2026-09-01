@@ -89,6 +89,25 @@ Every environment variable has a flag, and the flag wins:
 | `--space-db`            | `CF_HARNESS_SPACE_DB`                | the space's own database, discovered  |
 | `--max-model-turns`     | `CF_HARNESS_CONSOLE_MAX_MODEL_TURNS` | the prompt loop's default             |
 | `--skills-root`         | `CF_HARNESS_CONSOLE_SKILLS_ROOT`     | the repository's `skills/` tree       |
+| `--host-mount`          | —                                    | none; repeatable                      |
+
+Publishing to the index is configured the way the CLI configures it, by the same
+names:
+
+| Flag                                   | Environment                                       | Default               |
+| -------------------------------------- | ------------------------------------------------- | --------------------- |
+| `--no-pattern-index-publish`           | `CF_HARNESS_PATTERN_INDEX_PUBLISH=0`              | publishing is on      |
+| `--pattern-index-publish-discoverable` | `CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE=1` | recorded, not offered |
+
+A pattern a session authors and runs is recorded against the index unless
+publishing is turned off, and is offered to search only when discoverability is
+asked for — which is for deliberate corpus seeding, since discoverability is
+otherwise earned from later evidence.
+
+`--host-mount name=<name>,source=<host path>,target=<sandbox path>[,mode=readonly|writable]`
+takes the same spec the CLI takes, and is repeatable. It is how a reference tree
+— a corpus to work from, a checkout to read — reaches the sandbox a task runs
+in.
 
 Every turn scans the skills root and records the registry on its run before the
 first model call, so `read_skill_resource` can answer and a delegated
@@ -135,6 +154,27 @@ and HTTP reachability, configuration, or factory existence says nothing about
 whether a retained session can complete an operation. The field does not spend a
 provider turn or make a Fabric round trip. A caller needing proven substrate
 liveness must perform a separate probe.
+
+A task body carries the text, optionally the session to continue, and optionally
+the cells the task is to be computed over:
+
+```json
+{
+  "text": "summarize this trip",
+  "sessionId": "…",
+  "inputCells": [
+    { "name": "itinerary", "ref": "/of:fid1:…/days" }
+  ]
+}
+```
+
+An input cell is named per task rather than per session, because a turn is its
+own run with its own handle table: the tokens the model is given are the ones
+that turn's run minted. What the model receives is a token and the caller's own
+name for it — never the reference, and never what the cell holds. The reference
+grammar is `--input-cell`'s, so a spelling the CLI refuses is refused here with
+a 400, and a cell that cannot be minted fails the turn rather than starting it
+without what the caller attached.
 
 The completed-turn result is:
 
@@ -498,16 +538,19 @@ Three panes:
 
 ## How the configuration reaches the run
 
-`CreateHarnessPromptLoopOptions` extends the engine's options, which extend the
-config resolver's, and the interactive chat service spreads its
-`basePromptLoopOptions` into every turn. So `fabricSession`, `patternIndex`, and
-`skillsSh` set once at startup hold for the whole session, and the engine builds
-each lazily-cached client factory from them.
+This server resolves its flags and environment into a `HarnessSessionConfig` —
+the same description the batch CLI resolves argv into — and
+`src/session-assembly.ts` turns that into the run. So a capability the CLI can
+configure is configurable here under the same name, and the two surfaces cannot
+drift apart over what a session is.
 
-Configuration alone is not enough: the default chat policy's tool surface does
-not include `run_pattern`, `assign_slug`, `search_patterns`, `record_feedback`,
-or `search_skills`. The server names them in the policy it starts each session
-with, and the prompt loop withholds each again if its backing is absent — so a
-missing index means the two index tools are simply not offered, and a missing
-public skill registry means `search_skills` is not offered, rather than either
-surface being offered and failing.
+The tools a session offers are derived from what it can back rather than listed
+here: the default surface plus `run_pattern` and `assign_slug` for a fabric
+session, `search_patterns` and `record_feedback` for an index, `search_skills`
+for a registry, and `acquire_skill` for a run holding both. A tool whose backing
+is absent is not offered, rather than offered and failing.
+
+Each turn is its own run, so what that run holds is established per turn and
+announced in the messages it opens with: the skills registry scanned from the
+skills root, the well-known grants of the session's space — which is what lets a
+task explore what the space holds — and the input cells the request attached.

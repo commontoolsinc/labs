@@ -24,6 +24,7 @@ import {
 } from "../../src/interactive-chat-service.ts";
 import { openSqliteHarnessChatSessionStore } from "../../src/sqlite-session-store.ts";
 import type {
+  CreateHarnessPromptLoopOptions,
   HarnessPromptLoopResult,
   RunHarnessTranscriptOptions,
 } from "../../src/prompt-loop.ts";
@@ -104,6 +105,9 @@ const advancingClock = () => {
 
 /** The identity the proxied index client signs with in these tests. */
 const signer = await Identity.fromPassphrase("cf-harness console index proxy");
+
+/** An entity id of the shape an input-cell reference has to carry. */
+const CELL_ID = `of:fid1:${"A".repeat(43)}`;
 
 const config = () =>
   resolveConsoleConfig(
@@ -1027,6 +1031,62 @@ describe("console/server", () => {
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toBe("sessionId must be a string");
+    });
+
+    it("attaches the task's input cells to the run that answers it", async () => {
+      // The weaver flow: a caller names cells it wants the task computed
+      // over, by reference and under its own names. What reaches the run is
+      // the specification; the run mints the tokens the model sees.
+      const loopOptions: CreateHarnessPromptLoopOptions[] = [];
+      const capturing = new ConsoleServer(
+        await config(),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: (options) => {
+              loopOptions.push(options);
+              return answeringLoop(options);
+            },
+            now: advancingClock(),
+            onEvent,
+          }),
+      );
+      const page = await capturing.handle(getRequest("/"));
+      await page.body?.cancel();
+      const capturedCookie = page.headers.get("set-cookie")!.split(";")[0];
+
+      const response = await capturing.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [{ name: "itinerary", ref: `/${CELL_ID}/days` }],
+      }, { cookie: capturedCookie }));
+      expect(response.status).toBe(200);
+      const started = await response.json();
+      await capturing.service.waitForTurn(started.sessionId, started.turnId);
+
+      expect(loopOptions.at(-1)?.inputCells).toEqual([
+        { name: "itinerary", ref: `/${CELL_ID}/days` },
+      ]);
+    });
+
+    it("answers 400 for an input cell the flag's own grammar refuses", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [{ name: "not a name", ref: `/${CELL_ID}/days` }],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain("--input-cell name");
+    });
+
+    it("answers 400 for input cells that are not a list of name and ref", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [{ name: "itinerary" }],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "each input cell needs a string name and ref",
+      );
     });
   });
 
