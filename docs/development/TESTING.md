@@ -61,12 +61,20 @@ real browser but not a running shell, toolshed, or piece. The name is the whole
 of the wiring. Every package that splits its tests this way matches
 `*.browser.test.ts` twice: once as an `--ignore` pattern that keeps the file out
 of plain `deno test` discovery, and once as the argument list handed to
-`deno-web-test`. The two need not sit in one task line — `packages/dashboard`
-spreads them across the runner script its test task starts and the
-`test-browser` task that runner then calls — but they are the same glob, so
-adding a browser test means naming the file and nothing further. The
-package-level task remains the one command authors and the root workspace
-runner invoke; it owns every step.
+`deno-web-test`. Adding a browser test means naming the file and nothing
+further.
+
+The two matches need not sit on one task line. `packages/dashboard` spreads
+them across the runner script its test task starts and the `test-browser` task
+that runner then calls. What matters is that both are the same glob, so neither
+can fall behind the other. The package-level task remains the one command
+authors and the root workspace runner invoke, and it owns every step.
+
+The glob hands its files to `deno-web-test` in the order the shell expands
+them, which is alphabetical rather than the order anyone chose. Tests in one
+file share a browser with the tests in the others, so a file that only passes
+after some particular sibling has run is relying on something no longer written
+down anywhere. Each file has to stand on its own.
 
 A package whose tests all need a browser, `packages/identity` among them, hands
 its whole test directory to `deno-web-test` and has no such split to get wrong.
