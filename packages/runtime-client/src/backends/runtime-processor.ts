@@ -639,6 +639,22 @@ export const hasExplicitSubscriptionSchema = (schema: unknown): boolean =>
     typeof schema === "object" && schema !== null &&
     Object.keys(schema).length > 0);
 
+/**
+ * Where a mount's render errors go: the client that mounted it, and no other.
+ *
+ * A render error belongs to the document showing the tree rather than to
+ * whichever client happens to own the worker, and a reconciler reports one
+ * from deep inside a render. Named here so that rule is one a test can state,
+ * the render failures that raise it being reachable only through a pattern.
+ */
+export function mountErrorSink(
+  client: WorkerClient,
+): (error: Error) => void {
+  return (error) => {
+    client.post(runtimeErrorPost(error));
+  };
+}
+
 export function securityContextFrom(
   data: InitializationData,
   identity: DID,
@@ -2935,7 +2951,7 @@ export class RuntimeProcessor {
         });
         return batchId;
       },
-      onError: (error) => client.post(runtimeErrorPost(error)),
+      onError: mountErrorSink(client),
     });
 
     // Mount the cell - the reconciler will subscribe and emit initial ops

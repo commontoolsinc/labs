@@ -80,6 +80,20 @@ describe("findKeyMaterial()", () => {
     expect(findKeyMaterial({ atoms: new Set([keyPair]) })).toBe("atoms{}");
   });
 
+  it("walks past a map and a set holding none, and finds what follows", () => {
+    // The containers are walked through rather than around: an innocent one
+    // neither refuses the frame nor stops the search before what comes after
+    // it.
+    expect(findKeyMaterial({ hosts: new Map([["a", "http://h/"]]) }))
+      .toBeUndefined();
+    expect(findKeyMaterial({ atoms: new Set(["public"]) })).toBeUndefined();
+    expect(findKeyMaterial({
+      hosts: new Map([["a", "http://h/"]]),
+      atoms: new Set(["public"]),
+      signer: keyPair,
+    })).toBe("signer");
+  });
+
   it("returns `undefined` for a cycle holding no key material", () => {
     // A context built on this side of the wire has not been through a decode,
     // so nothing has flattened it into a tree first.

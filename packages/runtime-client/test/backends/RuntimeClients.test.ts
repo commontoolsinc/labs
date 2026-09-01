@@ -115,6 +115,7 @@ function harness(
   const owner = testClient(0);
   const consoleBridge: boolean[] = [];
   let release: (() => void) | undefined;
+  let initializeCount = 0;
   const held = options.initializeSlowly
     ? new Promise<void>((resolve) => (release = resolve))
     : Promise.resolve();
@@ -122,6 +123,7 @@ function harness(
     owner: owner.client,
     setConsoleBridge: (enabled) => consoleBridge.push(enabled),
     initializeRuntime: async () => {
+      initializeCount += 1;
       await held;
       if (options.failInitialization) throw new Error("init exploded");
       return fake.processor;
@@ -152,6 +154,7 @@ function harness(
     deliver,
     initialize,
     releaseInitialization: () => release?.(),
+    initializeCount: () => initializeCount,
   };
 }
 
@@ -380,6 +383,93 @@ describe("RuntimeClients", () => {
         channel.port1.close();
         expect(received).toHaveLength(1);
         expect(received[0].error).toContain("acting principal");
+      });
+
+      it("refuses an `Initialize` from a client that does not own the worker", async () => {
+        // An attached document asking to stand the runtime up would be
+        // re-deciding the identity and posture every other client is already
+        // running under.
+        const h = harness();
+        await h.initialize(1);
+        const joiner = attachDirect(h);
+        await h.deliver(joiner.client, {
+          msgId: 1,
+          data: { type: RequestType.Attach, data: runningContext },
+        });
+        joiner.posted.length = 0;
+
+        await h.deliver(joiner.client, {
+          msgId: 2,
+          data: {
+            type: RequestType.Initialize,
+            data: initializationData,
+          },
+        });
+
+        expect(joiner.posted).toHaveLength(1);
+        expect(joiner.posted[0].error).toContain(
+          "Only the client that owns the worker may initialize",
+        );
+        // And the runtime it was already serving is the one still serving.
+        expect(h.initializeCount()).toBe(1);
+      });
+
+      it("refuses console forwarding from a client that does not own the worker", async () => {
+        // What the bridge forwards goes to the worker's own global, which is
+        // the owner's end of the IPC, so an attached client turning it on
+        // would be redirecting the owner's console.
+        const h = harness();
+        await h.initialize(1);
+        const joiner = attachDirect(h);
+        await h.deliver(joiner.client, {
+          msgId: 1,
+          data: { type: RequestType.Attach, data: runningContext },
+        });
+        h.consoleBridge.length = 0;
+        joiner.posted.length = 0;
+
+        await h.deliver(joiner.client, {
+          msgId: 2,
+          data: { type: RequestType.SetForwardWorkerConsole, enabled: true },
+        });
+
+        expect(joiner.posted).toHaveLength(1);
+        expect(joiner.posted[0].error).toContain(
+          "Only the client that owns the worker may forward its console",
+        );
+        // The refusal is the whole of it: the bridge was never toggled.
+        expect(h.consoleBridge).toEqual([]);
+      });
+
+      it("refuses a second attach on a channel whose first was already refused", async () => {
+        // A client may have two attaches in flight. The first refusal lets go
+        // of the client, and the second has to find it already gone without
+        // failing over it.
+        const h = harness();
+        await h.initialize(1);
+        const joiner = attachDirect(h);
+        const wrong = {
+          ...runningContext,
+          identity: "did:key:z6Mk-someone-else" as DID,
+        };
+
+        await h.deliver(joiner.client, {
+          msgId: 1,
+          data: { type: RequestType.Attach, data: wrong },
+        });
+        await h.deliver(joiner.client, {
+          msgId: 2,
+          data: { type: RequestType.Attach, data: wrong },
+        });
+
+        // Both are refused by name. Letting go of a client does not turn a
+        // later attach on that channel into silence: an attach is answered on
+        // its merits whether or not the worker still holds a registration,
+        // and the second `#drop` finds nothing to drop without failing.
+        expect(joiner.posted).toHaveLength(2);
+        expect(joiner.posted[0].error).toContain("Attach refused");
+        expect(joiner.posted[1].error).toContain("Attach refused");
+        expect(h.clients.attachedClientCount).toBe(0);
       });
 
       it("refuses an attach to a runtime that has been disposed", async () => {

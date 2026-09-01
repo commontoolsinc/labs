@@ -11,6 +11,7 @@ import {
   RequestType,
 } from "@/protocol/mod.ts";
 import { MessagePortRuntimeTransport } from "@/client/transports/message-port/transport-message-port.ts";
+import type { MessagePortLike } from "@/shared/message-port-like.ts";
 
 /**
  * Both ends of a real channel: the transport speaks over one, and the test
@@ -77,6 +78,27 @@ describe("MessagePortRuntimeTransport", () => {
       });
     });
 
+    describe("[Symbol.asyncDispose]()", () => {
+      it("disposes the transport at the end of an `await using` block", async () => {
+        const channel = new MessageChannel();
+        let transport: MessagePortRuntimeTransport;
+        {
+          await using held = new MessagePortRuntimeTransport({
+            port: channel.port1,
+          });
+          transport = held;
+        }
+        // The block ended, so the transport is disposed: a message from the
+        // far end reaches no listener.
+        const seen: unknown[] = [];
+        transport.on("message", (message) => seen.push(message));
+        channel.port2.postMessage(realmFromFabricValue({ msgId: 1 } as never));
+        await Promise.resolve();
+        expect(seen).toEqual([]);
+        channel.port2.close();
+      });
+    });
+
     describe("message handling", () => {
       it("emits a decoded response from the far end", async () => {
         const { transport, far } = connectedPair();
@@ -97,6 +119,37 @@ describe("MessagePortRuntimeTransport", () => {
           await transport.dispose();
           far.close();
         }
+      });
+
+      it("emits nothing after disposal over a duplex it cannot close", async () => {
+        // `close` is optional on a duplex, so a transport cannot rely on the
+        // channel going quiet when it lets go. What it can do is stop
+        // emitting, which is what a consumer torn down alongside it needs.
+        let deliver: ((event: MessageEvent) => void) | undefined;
+        const uncloseable: MessagePortLike = {
+          postMessage: () => {},
+          addEventListener: (_type, listener) => (deliver = listener),
+        };
+        const transport = new MessagePortRuntimeTransport({
+          port: uncloseable,
+        });
+        const seen: unknown[] = [];
+        transport.on("message", (message) => seen.push(message));
+
+        deliver?.(
+          new MessageEvent("message", {
+            data: realmFromFabricValue({ msgId: 1 } as never),
+          }),
+        );
+        expect(seen).toHaveLength(1);
+
+        await transport.dispose();
+        deliver?.(
+          new MessageEvent("message", {
+            data: realmFromFabricValue({ msgId: 2 } as never),
+          }),
+        );
+        expect(seen).toHaveLength(1);
       });
 
       it("reports a message that does not decode as an error notification", async () => {

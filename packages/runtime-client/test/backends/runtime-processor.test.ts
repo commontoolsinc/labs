@@ -47,6 +47,7 @@ import { StorageManager as WorkerStorageManager } from "@commonfabric/runner/sto
 
 import { parseLink } from "@commonfabric/runner";
 import * as V2Storage from "@commonfabric/runner/storage/v2";
+import { CompilerStackLoadError } from "@commonfabric/runner";
 import {
   type CellRef,
   type CfcLabelView,
@@ -54,10 +55,12 @@ import {
   type GetPatternSourcesRequest,
   NotificationType,
   RequestType,
+  RuntimeErrorCode,
 } from "@/protocol/mod.ts";
 import {
   assertServerExecutionPostureAgreement,
   browserWorkerParamsFromInitializationData,
+  mountErrorSink,
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
   RuntimeProcessor,
@@ -6309,6 +6312,42 @@ describe("runtime-processor", () => {
         }
       });
 
+      it("replaces a client's own mount when it mounts that id again", async () => {
+        // Scoping the key changed which mounts collide, not what a collision
+        // does: one client re-using its own mount id still replaces what was
+        // there, and is left holding one mount rather than two.
+        const { runtime, state, link } = await mountState();
+        const { client } = testClient(1);
+        const hadPostMessage = "postMessage" in globalThis;
+        const originalPostMessage =
+          (globalThis as { postMessage?: unknown }).postMessage;
+        (globalThis as { postMessage?: unknown }).postMessage = () => {};
+        try {
+          handleVDomMount.call(state, {
+            type: RequestType.VDomMount,
+            mountId: 1,
+            cell: link,
+          }, client);
+          const first = state.vdomMounts.get("1 1");
+          handleVDomMount.call(state, {
+            type: RequestType.VDomMount,
+            mountId: 1,
+            cell: link,
+          }, client);
+
+          expect(state.vdomMounts.size).toBe(1);
+          expect(state.vdomMounts.get("1 1")).not.toBe(first);
+        } finally {
+          await runtime.dispose();
+          if (hadPostMessage) {
+            (globalThis as { postMessage?: unknown }).postMessage =
+              originalPostMessage;
+          } else {
+            delete (globalThis as { postMessage?: unknown }).postMessage;
+          }
+        }
+      });
+
       it("sends each mount's batches to the client that mounted it", async () => {
         const { runtime, state, link } = await mountState();
         const first = testClient(1);
@@ -6353,6 +6392,28 @@ describe("runtime-processor", () => {
             delete (globalThis as { postMessage?: unknown }).postMessage;
           }
         }
+      });
+    });
+
+    describe("mountErrorSink()", () => {
+      it("posts a render error to the client that mounted, and no other", () => {
+        const mounting = testClient(1);
+        const other = testClient(2);
+        mountErrorSink(mounting.client)(new Error("render blew up"));
+        expect(mounting.posted).toHaveLength(1);
+        expect(mounting.posted[0].type).toBe(NotificationType.ErrorReport);
+        expect(mounting.posted[0].message).toBe("render blew up");
+        expect(other.posted).toEqual([]);
+      });
+
+      it("carries a compiler-stack failure's code, so the shell can act on it", () => {
+        const mounting = testClient(1);
+        mountErrorSink(mounting.client)(
+          new CompilerStackLoadError(new TypeError("chunk fetch failed")),
+        );
+        expect(mounting.posted[0].code).toBe(
+          RuntimeErrorCode.CompilerStackLoadFailed,
+        );
       });
     });
 
@@ -6493,7 +6554,12 @@ describe("runtime-processor", () => {
         const state = processor as unknown as {
           subscriptions: Map<string, () => void>;
           operationSubscriptions: Map<string, unknown>;
-          operationSessions: Map<string, unknown>;
+          operationSessions: Map<string, {
+            cellKey: string;
+            target: unknown;
+            subscriptions: Set<string>;
+            clientId: number;
+          }>;
           vdomMounts: Map<string, unknown>;
           runtime: unknown;
         };
@@ -6501,8 +6567,34 @@ describe("runtime-processor", () => {
           ["1 cell-a", () => cancelled.push("first/cell-a")],
           ["2 cell-a", () => cancelled.push("second/cell-a")],
         ]);
-        state.operationSubscriptions = new Map();
-        state.operationSessions = new Map();
+        state.operationSubscriptions = new Map([
+          ["op-of-first", {
+            cancelled: false,
+            cancel: () => cancelled.push("first/op"),
+            client: testClient(1).client,
+            sessionKey: "session-of-first",
+          }],
+          ["op-of-second", {
+            cancelled: false,
+            cancel: () => cancelled.push("second/op"),
+            client: testClient(2).client,
+            sessionKey: "session-of-second",
+          }],
+        ]);
+        state.operationSessions = new Map([
+          ["session-of-first", {
+            cellKey: "cell",
+            target: {},
+            subscriptions: new Set(["op-of-first"]),
+            clientId: 1,
+          }],
+          ["session-of-second", {
+            cellKey: "cell",
+            target: {},
+            subscriptions: new Set(["op-of-second"]),
+            clientId: 2,
+          }],
+        ]);
         state.vdomMounts = new Map([
           ["1 1", {
             reconciler: { unmount: () => unmounted.push("first/1") },
@@ -6524,10 +6616,49 @@ describe("runtime-processor", () => {
       it("cancels only the departing client's subscriptions and mounts", () => {
         const { processor, state, cancelled, unmounted } = departureState();
         processor.disposeClient(testClient(1).client);
-        expect(cancelled).toEqual(["first/cell-a", "first/mount-1"]);
+        expect(cancelled).toEqual([
+          "first/cell-a",
+          "first/op",
+          "first/mount-1",
+        ]);
         expect(unmounted).toEqual(["first/1"]);
         expect([...state.subscriptions.keys()]).toEqual(["2 cell-a"]);
         expect([...state.vdomMounts.keys()]).toEqual(["2 1"]);
+      });
+
+      it("stops the departing client's operation feeds and no other's", () => {
+        const { processor, state } = departureState();
+        processor.disposeClient(testClient(1).client);
+        expect([...state.operationSubscriptions.keys()]).toEqual([
+          "op-of-second",
+        ]);
+      });
+
+      it("forgets the departing client's operation sessions and no other's", () => {
+        const { processor, state } = departureState();
+        processor.disposeClient(testClient(1).client);
+        expect([...state.operationSessions.keys()]).toEqual([
+          "session-of-second",
+        ]);
+      });
+
+      it("forgets a session the departing client opened and never subscribed on", () => {
+        // The unsubscribes reap a session as its last subscription goes, so
+        // this sweep is what a session with none of its own needs: it holds a
+        // target address nobody is reading, and nothing else would remove it.
+        const { processor, state } = departureState();
+        state.operationSessions.set("session-never-used", {
+          cellKey: "cell",
+          target: {},
+          subscriptions: new Set<string>(),
+          clientId: 1,
+        });
+
+        processor.disposeClient(testClient(1).client);
+
+        expect([...state.operationSessions.keys()]).toEqual([
+          "session-of-second",
+        ]);
       });
 
       it("leaves the runtime running", () => {
