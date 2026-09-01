@@ -869,9 +869,10 @@ export class CFPieceMenu extends BaseElement {
   /** The piece the menu addresses. */
   declare cell?: CellHandle;
 
-  /** Where the click landed, in client coordinates. */
+  /** Client X coordinate of where the click landed. */
   declare x: number;
 
+  /** Client Y coordinate, read the same way. */
   declare y: number;
 
   static override properties = {

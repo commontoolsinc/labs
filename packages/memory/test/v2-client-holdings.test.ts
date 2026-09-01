@@ -6,8 +6,8 @@
  * longer has the session. The session itself holds no documents; the
  * statement is the consumer's, through `holdingsProvider`.
  */
-import { assert } from "@std/assert";
 
+import { assert } from "@std/assert";
 import { expect } from "@std/expect";
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { defer } from "@commonfabric/utils/defer";
