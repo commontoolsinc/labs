@@ -249,11 +249,21 @@ Applies only to patterns with multiple people or a "current user" concept. **N/A
 |-------|----------------|-----|
 | people rendered as data | a person shown as `{name}` text or a raw `<img>` | render **every** participant with `cf-profile-badge` bound to their profile cell; `cf-avatar` + snapshot only as an explicit offline fallback |
 | others rendered as `cf-avatar` when a live cell exists | `cf-avatar` used for co-participants even though their `#profile` cell is (or could be) stored on join | store each joiner's profile cell in the shared roster and badge it — cross-space reads resolve (CT-1667/1687). `cf-avatar` is only for snapshot-only cases |
-| current viewer | a "type your name" / "who am I" text field used as the viewer's identity | resolve via `wish({ query: "#profile" })` (+ `#profileName` / `#profileAvatar`) |
+| current viewer | a "type your name" / "who am I" text field used as the viewer's identity | resolve via one `wish<{ initialNameApplied?: string; avatar?: string }>({ query: "#profile" })` — both display fields off a single resolution |
 | per-user isolation | stored DIDs / user-ids / name strings used to fake isolation | use `PerUser` / `PerSpace` scope; let the scope select the instance |
 | roster construction | a participant list built from typed names | join by profile cell: each viewer pushes their own live `#profile` cell (plus a `{ displayName, avatar }` snapshot fallback) into the shared roster |
 | identity comparison | dedup or "is this me?" by display-name equality | compare a cell reference with `equals()`, never the mutable name |
 | ownership / authorship | "who created / wrote this" stored as a bare name | snapshot the actor's profile, or attest with CFC `AuthoredByCurrentUser` / `RepresentsCurrentUser` |
+
+On the viewer wish: `initialNameApplied` and `name` are not two spellings of
+one field. `name` is the profile's owner-protected `Writable` — asking for it
+hands out a write-capable cell, not a display string. `initialNameApplied` is
+the derived read-only string, and it is what `#profileName` resolves. A
+display surface wants the derived one; declare it optional, as
+`packages/patterns/shared-profile-demo` does.
+
+Separate `#profileName` / `#profileAvatar` wishes remain correct; they just
+cost a resolution each for fields one `#profile` wish already carries.
 
 See `docs/common/patterns/multi-user-patterns.md#presenting-identity` and `docs/common/components/COMPONENTS.md#identity-components`. Severity: a forgeable / dead-string **current-viewer** identity is MAJOR (wrong behavior across users); rendering others as name strings is MINOR–MAJOR per case; rendering a co-participant with `cf-avatar` when their live profile cell is available is MINOR (misses the trusted seal and live data).
 
