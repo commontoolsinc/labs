@@ -2381,6 +2381,17 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
           value: {
             value: { child: link("of:crossing-target") },
             pattern: link("of:root-family"),
+            internal: [{
+              link: {
+                "/": {
+                  "link@1": {
+                    id: "of:foreign-root-cell",
+                    path: [],
+                    space: "did:key:z6Mk-memory-v2-query-meta-other",
+                  },
+                },
+              },
+            }],
           },
         }],
       },
@@ -2685,6 +2696,18 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
         key.includes("foreign-cell")
       ),
     );
+    // The eager paths hold the same-space rule too: a NAMED root's foreign
+    // manifest entry selects nothing and creates no tracker entry.
+    assert(
+      ![...lazyTracked.state.tracker].some(([key]) =>
+        key.includes("foreign-root-cell")
+      ),
+    );
+    assert(
+      ![...lazyTracked.state.lazy].some((key) =>
+        key.includes("foreign-root-cell")
+      ),
+    );
 
     // A registration whose document is DELETED before promotion stays
     // registered: the deletion's refresh delivers nothing, and the
@@ -2938,6 +2961,117 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
     assertExists(survivorRefresh);
     assertExists(survivorRefresh.updates.get(cellKey));
     assert(twoRefTracked.state.tracker.has(cellKey));
+
+    // A registration made through INCREMENTAL extension carries the same
+    // attribution as one made at initial tracking: extend into a crossing,
+    // drop its manifest entry, and the registration retires — a later
+    // commit to the target delivers nothing.
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(12),
+      authorization,
+      commit: {
+        localSeq: 12,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:ext-cell",
+          value: { value: { derived: "extension cell" } },
+        }, {
+          op: "set",
+          id: "of:ext-crossing",
+          value: {
+            value: { name: "extension crossing" },
+            internal: [{ link: link("of:ext-cell") }],
+          },
+        }, {
+          op: "set",
+          id: "of:ext-root",
+          value: { value: { child: link("of:ext-crossing") } },
+        }],
+      },
+    });
+    const extBase = trackGraph(space, engine, {
+      roots: [{
+        id: "of:target-result",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: { computed: { type: "string" } },
+          },
+        },
+      }],
+    });
+    extendTrackedGraph(space, engine, extBase.state, {
+      roots: [{
+        id: "of:ext-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              child: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    const extCellKey = `${space}/space/of:ext-cell`;
+    assert(extBase.state.lazy.has(extCellKey));
+    assertExists(extBase.state.lazyBy.get(extCellKey));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(13),
+      authorization,
+      commit: {
+        localSeq: 13,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:ext-crossing",
+          value: {
+            value: { name: "extension crossing, unhooked" },
+            internal: [],
+          },
+        }],
+      },
+    });
+    const extDropRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      extBase.state,
+      new Set([toDirtyKey("of:ext-crossing")]),
+    );
+    assertExists(extDropRefresh);
+    assert(!extBase.state.lazy.has(extCellKey));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(14),
+      authorization,
+      commit: {
+        localSeq: 14,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:ext-cell",
+          value: { value: { derived: "extension cell, orphaned" } },
+        }],
+      },
+    });
+    const extOrphanRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      extBase.state,
+      new Set([toDirtyKey("of:ext-cell")]),
+    );
+    if (extOrphanRefresh !== null) {
+      assert(!extOrphanRefresh.updates.has(extCellKey));
+    }
+    assert(!extBase.state.tracker.has(extCellKey));
   } finally {
     close(engine);
     await Deno.remove(path);

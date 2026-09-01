@@ -2783,6 +2783,21 @@ function loadMetaLinkedDocFromLink(
   linkObj: SigilLink,
 ) {
   const link = parseLink(linkObj, valueEntry.address)!;
+  // A metadata family is a same-space structure (05-queries.md): a link
+  // resolving to another space selects nothing on the eager path exactly
+  // as on the key-only sink — the per-space engine could not read it.
+  if (link.space !== valueEntry.address.space) {
+    logger.warn(
+      "traverse",
+      () => [
+        "Foreign-space metadata link ignored in",
+        valueEntry.address,
+        "->",
+        link.space,
+      ],
+    );
+    return undefined;
+  }
   const address = {
     space: link.space,
     id: link.id!,

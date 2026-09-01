@@ -1651,7 +1651,7 @@ export const extendTrackedGraph = (
         state.memo,
         stats,
         undefined,
-        (key) => state.lazy.add(key),
+        (key, referrerKey) => recordLazy(state, key, referrerKey),
       );
       // The visit chased the named document's full family; an absent
       // root records nothing, so its later creation re-evaluates it.
