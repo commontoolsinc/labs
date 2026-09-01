@@ -6,6 +6,7 @@ export const TILE_BOX_RULE =
   `.tile{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;position:relative;isolation:isolate;overflow:hidden}`;
 export const BOTTOM_CHART_RULES =
   `.tile.bottom-chart{display:flex;flex-direction:column}
+  a.tile.link.bottom-chart{display:flex}
   .tile.bottom-chart .chart{margin-top:auto}`;
 export const TILE_LABEL_RULE =
   `.lbl{font-size:11px;line-height:15px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin:0 0 7px;display:flex;align-items:center;gap:7px;white-space:nowrap}`;

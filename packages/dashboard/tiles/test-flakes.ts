@@ -30,6 +30,11 @@ function shortName(test: { s: string; n: string; v?: string }): string {
   return `${test.s}: ${name}${variant}`;
 }
 
+function fullName(test: { k: string; s: string; n: string; v?: string }): string {
+  const variant = test.v === undefined ? "" : ` (${test.v})`;
+  return `${test.k} · ${test.s}: ${test.n}${variant}`;
+}
+
 /** Builds the tile against a store, so a test can supply its own. */
 export function makeTestFlakes(
   options: { fetchImpl?: typeof fetch } = {},
@@ -73,10 +78,10 @@ async function flakesView(
       ? ""
       : `<div class="tile-detail-list" role="region" tabindex="0"${listAttributes}>${
         named.map((entry) => {
-          const line = `${(entry.flakeRate * 100).toFixed(1)}% · ${
-            shortName(entry.test)
-          }`;
-          return `<div title="${escapeHtml(line)}">${escapeHtml(line)}</div>`;
+          const rate = `${(entry.flakeRate * 100).toFixed(1)}%`;
+          const line = `${rate} · ${shortName(entry.test)}`;
+          const title = `${rate} · ${fullName(entry.test)}`;
+          return `<div title="${escapeHtml(title)}">${escapeHtml(line)}</div>`;
         }).join("")
       }</div>`;
     return {

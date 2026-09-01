@@ -123,68 +123,12 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
     },
   },
   {
-    id: "github-ci-spend",
-    subSelector: ".sub",
+    id: "loom-metric-placeholder",
     view: {
-      label: "github ci spend",
+      label: "YOUR METRIC HERE",
       status: "good",
-      value: "~$3059/mo",
-      valueLabel: "~$3059/mo",
-      aside: `<span class="hmtd" title="$1644 MTD">$1644 MTD</span>`,
-      extra: spendSub("GitHub · Budget $3100") + history(),
-      duration: 30 * DAY,
-      hint: "billing ↗",
-      href: "https://example.com/billing",
-    },
-  },
-  {
-    id: "prod-uptime",
-    view: {
-      label: "production",
-      status: "bad",
-      value: "common.tools down",
-      valueLabel: "common.tools down",
-      extra:
-        `<div class="tile-detail-list" tabindex="0" role="region" aria-label="Production target details; scroll for more" title="Scroll for more details" style="display:grid;grid-template-columns:auto 1fr;gap:7px 10px;margin-top:11px;font-size:12px;line-height:1.35">${
-          [
-            "common.tools",
-            "estuary",
-            "rapids",
-            "bastion",
-            "prod shell",
-            "stage shell",
-            "LLM",
-            "sandbox",
-          ].map((name) =>
-            `<span style="display:inline-flex;align-items:center;gap:6px;font-weight:600"><span class="dot red"></span>${name}</span><span style="color:var(--text-muted);font-variant-numeric:tabular-nums">connection refused</span>`
-          ).join("")
-        }</div>`,
-    },
-  },
-  {
-    id: "prod-errors",
-    view: {
-      label: "production errors",
-      status: "good",
-      value: "0.24%",
-      sub: "12 err / 5000 spans · last 12h",
-      extra: history(),
-      duration: 30 * DAY,
-      hint: "traces ↗",
-      href: "https://example.com/traces",
-    },
-  },
-  {
-    id: "dau",
-    view: {
-      label: "dau",
-      status: "good",
-      value: "244",
-      sub: "active identities · toolshed-production",
-      extra: history(),
-      duration: 30 * DAY,
-      hint: "traces ↗",
-      href: "https://example.com/identities",
+      value: "–",
+      sub: "no metric selected for this tile",
     },
   },
   {
@@ -216,29 +160,38 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
     },
   },
   {
-    id: "model-spend",
-    subSelector: ".sub",
+    id: "testing-metric-placeholder",
     view: {
-      label: "model spend",
+      label: "YOUR METRIC HERE",
       status: "good",
-      value: "~$820/mo",
-      valueLabel: "~$820/mo",
-      aside: `<span class="hmtd" title="$440 MTD">$440 MTD</span>`,
-      extra: spendSub("OpenAI • Anthropic • OR $0") + twoLines(),
-      duration: 30 * DAY,
+      value: "–",
+      sub: "no metric selected for this tile",
     },
   },
   {
-    id: "gcp-spend",
+    id: "prod-errors",
     view: {
-      label: "gcp spend",
+      label: "production errors",
       status: "good",
-      value: "~$410/mo",
-      valueLabel: "~$410/mo",
-      aside: `<span class="hmtd" title="$220 MTD">$220 MTD</span>`,
-      sub: "billing account spend",
+      value: "0.24%",
+      sub: "12 err / 5000 spans · last 12h",
       extra: history(),
       duration: 30 * DAY,
+      hint: "traces ↗",
+      href: "https://example.com/traces",
+    },
+  },
+  {
+    id: "dau",
+    view: {
+      label: "dau",
+      status: "good",
+      value: "244",
+      sub: "active identities · toolshed-production",
+      extra: history(),
+      duration: 30 * DAY,
+      hint: "traces ↗",
+      href: "https://example.com/identities",
     },
   },
   {
@@ -263,6 +216,80 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
       duration: 30 * DAY,
       hint: "people ↗",
       href: "https://example.com/people",
+    },
+  },
+  {
+    id: "prod-uptime",
+    view: {
+      label: "production",
+      status: "bad",
+      value: "common.tools down",
+      valueLabel: "common.tools down",
+      extra:
+        `<div class="tile-detail-list" tabindex="0" role="region" aria-label="Production target details; scroll for more" title="Scroll for more details" style="display:grid;grid-template-columns:auto 1fr;gap:7px 10px;margin-top:11px;font-size:12px;line-height:1.35">${
+          [
+            "common.tools",
+            "estuary",
+            "rapids",
+            "bastion",
+            "prod shell",
+            "stage shell",
+            "LLM",
+            "sandbox",
+          ].map((name) =>
+            `<span style="display:inline-flex;align-items:center;gap:6px;font-weight:600"><span class="dot red"></span>${name}</span><span style="color:var(--text-muted);font-variant-numeric:tabular-nums">connection refused</span>`
+          ).join("")
+        }</div>`,
+    },
+  },
+  {
+    id: "gcp-spend",
+    view: {
+      label: "gcp spend",
+      status: "good",
+      value: "~$410/mo",
+      valueLabel: "~$410/mo",
+      aside: `<span class="hmtd" title="$220 MTD">$220 MTD</span>`,
+      sub: "billing account spend",
+      extra: history(),
+      duration: 30 * DAY,
+    },
+  },
+  {
+    id: "github-ci-spend",
+    subSelector: ".sub",
+    view: {
+      label: "github ci spend",
+      status: "good",
+      value: "~$3059/mo",
+      valueLabel: "~$3059/mo",
+      aside: `<span class="hmtd" title="$1644 MTD">$1644 MTD</span>`,
+      extra: spendSub("GitHub · Budget $3100") + history(),
+      duration: 30 * DAY,
+      hint: "billing ↗",
+      href: "https://example.com/billing",
+    },
+  },
+  {
+    id: "model-spend",
+    subSelector: ".sub",
+    view: {
+      label: "model spend",
+      status: "good",
+      value: "~$820/mo",
+      valueLabel: "~$820/mo",
+      aside: `<span class="hmtd" title="$440 MTD">$440 MTD</span>`,
+      extra: spendSub("OpenAI • Anthropic • OR $0") + twoLines(),
+      duration: 30 * DAY,
+    },
+  },
+  {
+    id: "spend-metric-placeholder",
+    view: {
+      label: "YOUR METRIC HERE",
+      status: "good",
+      value: "–",
+      sub: "no metric selected for this tile",
     },
   },
   {

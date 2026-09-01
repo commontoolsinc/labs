@@ -165,6 +165,36 @@ Deno.test("every standard tile shares text baselines and fits under benchmarks",
   }
 });
 
+Deno.test("a linked bottom-chart tile keeps its flex layout", async () => {
+  const fixture = document.createElement("div");
+  fixture.innerHTML = `<style>
+    ${TILE_BOX_RULE}
+    ${BOTTOM_CHART_RULES}
+    ${tileContentRules(SPARKLINE_HEIGHT, DURATION_LABEL_HEIGHT)}
+  </style>${
+    renderTile({
+      label: "linked history",
+      status: "good",
+      value: "42",
+      sub: "representative linked tile",
+      extra: `<div style="height:${SPARKLINE_HEIGHT}px"></div>`,
+      duration: 30 * 86_400_000,
+      href: "/details",
+      alignChartBottom: true,
+    })
+  }`;
+  document.body.append(fixture);
+
+  try {
+    await new Promise(requestAnimationFrame);
+    const tile = fixture.querySelector<HTMLElement>(".tile");
+    assertExists(tile);
+    assertEquals(getComputedStyle(tile).display, "flex");
+  } finally {
+    fixture.remove();
+  }
+});
+
 Deno.test("the trust grid preserves tile text and moves above its duration label", async () => {
   const cells = Array.from(
     { length: 160 },

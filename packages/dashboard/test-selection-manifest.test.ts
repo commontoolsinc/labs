@@ -152,7 +152,8 @@ Deno.test("the flake tile is green when nothing is withheld as flaky", async () 
 });
 
 Deno.test("the flake tile counts what selection held back, and names the worst", async () => {
-  const noisy = sampleEntry({ k: "unit", s: "memory", n: "space > flakes" }, {
+  const longName = "space > flakes with a name that keeps going past the tile limit";
+  const noisy = sampleEntry({ k: "unit", s: "memory", n: longName }, {
     flakeRate: 0.4,
   });
   const manifest = sampleManifest({
@@ -167,7 +168,13 @@ Deno.test("the flake tile counts what selection held back, and names the worst",
   assertEquals(view.extra?.includes('role="region"'), true);
   assertEquals(view.extra?.includes('tabindex="0"'), true);
   assertEquals(view.extra?.includes("scroll for more"), false);
-  assertEquals(view.extra?.includes("40.0% · memory: space &gt; flakes"), true);
+  assertEquals(
+    view.extra?.includes(
+      `title="40.0% · unit · memory: ${longName.replace(">", "&gt;")}"`,
+    ),
+    true,
+  );
+  assertEquals(view.extra?.includes("…</div>"), true);
 });
 
 Deno.test("the selection tile says what share of the corpus would run", async () => {
