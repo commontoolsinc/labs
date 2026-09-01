@@ -32,6 +32,7 @@ function connectedPair() {
     transport,
     far: channel.port2,
     received,
+
     /** Settles on the next message the far end reads. */
     next: () => new Promise<void>((resolve) => (arrived = resolve)),
   };

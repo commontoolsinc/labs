@@ -117,11 +117,6 @@ export const cellLabelView = (cell: ConsoleCellFacts): ConsoleCellLabelView => {
 };
 
 /**
- * The classes the chip wears. `labelled` is an atom from either fact;
- * `derived` is the space saying the value was computed, which no count of
- * atoms establishes.
- */
-/**
  * Whether the card may say the space holds no label for this cell.
  *
  * The one positive claim the card makes about the space, and the only state
@@ -138,6 +133,11 @@ export const spaceHoldsNoLabel = (view: ConsoleCellLabelView): boolean =>
   view.recorded && !view.partial &&
   view.confidentiality.length === 0 && view.integrity.length === 0;
 
+/**
+ * The classes the chip wears. `labelled` is an atom from either fact;
+ * `derived` is the space saying the value was computed, which no count of
+ * atoms establishes.
+ */
 export const cellChipClasses = (cell: ConsoleCellFacts): string => {
   const view = cellLabelView(cell);
   const labelled = view.onCall.length > 0 || view.confidentiality.length > 0 ||

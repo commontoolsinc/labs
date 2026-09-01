@@ -1223,6 +1223,7 @@ export const runPatternTool: HarnessToolDefinition<
     // the created piece carries a pointer another runtime can load. A session
     // built without an instantiation recorder asks nothing.
     const instantiationStart = session.instantiations?.sequence() ?? 0;
+
     /**
      * Reports this invocation's outcome to the index, when the pattern came
      * from there. A cancelled run reports nothing: it neither succeeded nor

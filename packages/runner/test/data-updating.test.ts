@@ -1049,6 +1049,7 @@ describe("data-updating", () => {
     // business rather than the walk's, so these pin both at once: the write
     // happens, and what it carries is not something the caller can go on
     // mutating.
+
     /**
      * The transaction with the authoritative posture reported. The real setter
      * is gated on a configured seal destination, which is serving-posture
