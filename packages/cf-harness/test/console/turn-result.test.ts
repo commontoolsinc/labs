@@ -151,6 +151,35 @@ describe("console/turn-result", () => {
     }
   });
 
+  it("ignores run-report timeline entries that are not transcript messages", async () => {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-console-result-",
+    });
+    try {
+      const turnId = "turn-with-other-timeline-entries";
+      await writeTranscript(artifactRoot, turnId, [
+        { role: "user", content: "calculate the total" },
+        { role: "assistant", content: "The total is 42." },
+      ]);
+      const reportPath = join(artifactRoot, turnId, "run-report.json");
+      const report = JSON.parse(await Deno.readTextFile(reportPath));
+      report.timeline.unshift({ kind: "tool_activity", status: "ok" });
+      await Deno.writeTextFile(reportPath, JSON.stringify(report));
+
+      await expect(readConsoleTurnResult({
+        artifactRoot,
+        turnId,
+        spaceName: "console-test",
+      })).resolves.toEqual({
+        pieces: [],
+        spaceName: "console-test",
+        finalText: "The total is 42.",
+      });
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  });
+
   it("rejects a run report whose generated transcript index is out of bounds", async () => {
     const artifactRoot = await Deno.makeTempDir({
       prefix: "cf-harness-console-result-",
