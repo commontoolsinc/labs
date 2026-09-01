@@ -56,7 +56,7 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
    *
    * Whether cycles are guarded at all is the format's decision, made by
    * whether this method enters a node: a format whose input it parses for
-   * itself cannot be handed a cycle, so it enters none and this act's chain
+   * itself cannot be handed a cycle, so it enters none and this act's stack
    * of values in progress is never allocated.
    *
    * An implementation that does guard owes the act one thing: every object it
@@ -79,7 +79,7 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
    *
    * Whether a format guards cycles at all is decided by whether its walk
    * calls this: a format whose input it parses for itself is handed a tree by
-   * construction, so it never does, and its chain of values in progress is
+   * construction, so it never does, and its stack of values in progress is
    * never allocated. One handed a tree it did not build enters every node it
    * descends through.
    *

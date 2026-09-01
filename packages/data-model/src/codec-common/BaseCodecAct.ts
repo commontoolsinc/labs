@@ -78,7 +78,7 @@ export abstract class BaseCodecAct<Encoded> {
    * means is up to the caller, so each subclass wraps this with its own
    * reading: encoding refuses a cycle outright, where decoding reports one.
    *
-   * The chain behind this is created here rather than in the constructor, so
+   * The stack behind this is created here rather than in the constructor, so
    * that walking a lone self-representing value -- much the commonest case,
    * and the one where a fixed cost shows up most -- allocates nothing beyond
    * the act itself.
