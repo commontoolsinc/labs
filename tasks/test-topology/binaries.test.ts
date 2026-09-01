@@ -37,28 +37,14 @@ describe("the binary build suites", () => {
     ).toEqual({ level: "unit", unit: "toolshed" });
   });
 
-  it("builds a binary when the change reaches what it is built from", () => {
-    const binaries = byId("binaries");
-    expect(binaries.unitsForChange!(new Set(["packages/cli/mod.ts"])))
-      .toEqual(["cf"]);
-    // The browser shell is bundled into the toolshed binary, so a change
-    // to the shell can break that compile and nothing else's.
-    expect(binaries.unitsForChange!(new Set(["packages/shell/index.ts"])))
-      .toEqual(["toolshed"]);
-  });
-
-  it("builds every binary that embeds a changed asset", () => {
-    // The static assets are embedded in all three.
-    expect(
-      byId("binaries").unitsForChange!(
-        new Set(["packages/static/assets/types/es2023.d.ts"]),
-      ),
-    ).toEqual(["toolshed", "bg-piece-service", "cf"]);
-  });
-
-  it("builds nothing for a change that reaches no binary", () => {
-    expect(byId("binaries").unitsForChange!(new Set(["docs/README.md"])))
-      .toEqual([]);
+  it("forces no build, leaving the score to choose", () => {
+    // A binary the store has never seen is unknown and therefore runs
+    // once. After that a build earns its place the way every other test
+    // does, and a compile that breaks on `main` is what lifts it.
+    for (const suite of suites) {
+      expect([suite.id, suite.mandatory]).toEqual([suite.id, undefined]);
+      expect([suite.id, suite.unitsForChange]).toEqual([suite.id, undefined]);
+    }
   });
 
   it("runs each binary as its own invocation", () => {

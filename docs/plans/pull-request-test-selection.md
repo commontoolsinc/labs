@@ -458,13 +458,22 @@ nothing else does is resolving the whole import graph from an entry
 point, bundling the browser shell, and embedding each `--include`d asset
 from a path that has to still exist.
 
-A build is expensive and, having caught nothing yet, worth the value
-floor, so the score alone would almost never choose one — and the change
-about to break a compile is exactly the change that would not run it.
-They are therefore `mandatory: "changed"`, against the trees each binary
-is built from. That mapping is coarse, because a compile reaches the
-whole import graph and no short list describes it exactly, so it errs
-toward building. The deploy and attestation jobs stay exactly as they
+Nothing forces a build to run. A binary the store has never seen is
+unknown and therefore mandatory, so each is built once; after that it
+sits at the value floor until it catches something. When a compile does
+break, `main` catches it, and a `main` catch is weighted half again for
+being exactly the escape this system exists to stop — one of them lifts a
+build from the floor to several times it, which is enough to be chosen
+against a corpus where almost nothing has ever failed.
+
+The alternative was a map from changed paths to the binaries they can
+break. It is the kind of transcribed table [sharding stops being written
+down](#sharding-stops-being-written-down) exists to delete: a compile
+reaches the whole import graph from an entry point, no short list
+describes that, and the list would go stale the first time an import
+moved. The cost of leaving it out is that the first compile to break
+reaches `main`, which is the trade this design makes everywhere else and
+is what the feedback loop then closes. The deploy and attestation jobs stay exactly as they
 are, since they only ever ran on `main`.
 
 **`cli-fuse` carries the fine granularity the rest of this depends on.**

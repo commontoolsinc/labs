@@ -10,6 +10,18 @@
  * an identity, it accumulates a record of what it has caught, and the
  * packer can choose it.
  *
+ * Nothing forces one to run. A binary the store has never seen is
+ * unknown and therefore mandatory, so each is built once; after that it
+ * sits at the value floor until it catches something. When a compile
+ * does break, `main` catches it, and a `main` catch is weighted half
+ * again for being exactly the escape this system exists to stop — one of
+ * them lifts a build from the floor to several times it, which is enough
+ * to be chosen against a corpus where almost nothing has ever failed.
+ * That feedback loop is the mechanism. A hand-maintained map from
+ * changed paths to binaries would be the kind of transcribed table this
+ * design exists to delete, and it would go stale the first time an
+ * import moved.
+ *
  * What a compile catches that nothing else does is worth naming, because
  * every one of these builds passes `--no-check`. Type errors belong to
  * `deno task check`. What is left is everything else the compile does:
@@ -34,45 +46,6 @@ const PREFIX = "build-binary";
 /** The one record surface these suites share. */
 const SURFACE = [{ kind: "gate", scope: "repo" }] as const;
 
-/**
- * The trees whose change can break each binary's compile: its own
- * package, and whatever the build embeds into it. Deliberately coarse —
- * a compile reaches the whole import graph from an entry point, and no
- * short list describes that exactly — so this errs toward building. What
- * it must not do is miss the package a binary is built from, which is
- * why each entry names that package first.
- */
-const BUILT_FROM: Record<BinaryName, readonly string[]> = {
-  toolshed: [
-    "packages/toolshed",
-    // The browser shell is bundled into the binary, and the static
-    // assets and pattern sources are embedded beside it.
-    "packages/shell",
-    "packages/static",
-    "packages/patterns",
-  ],
-  "bg-piece-service": [
-    "packages/background-piece-service",
-    "packages/static",
-  ],
-  cf: [
-    "packages/cli",
-    "packages/fuse",
-    "packages/static",
-    "docs/common",
-  ],
-};
-
-/** Whether a changed path sits inside one of these trees. */
-function touches(changed: ReadonlySet<string>, trees: readonly string[]) {
-  for (const path of changed) {
-    if (trees.some((tree) => path === tree || path.startsWith(`${tree}/`))) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /** One suite over a set of binaries, in one configuration. */
 function binarySuite(
   id: string,
@@ -89,18 +62,8 @@ function binarySuite(
     recordSurfaces: SURFACE,
     ...(options.variant === undefined ? {} : { variant: options.variant }),
     needs: ["deno"],
-    // A change to what a binary is built from runs its build. Left to the
-    // score alone a build would almost never be chosen — it is expensive
-    // and, having caught nothing yet, worth the floor — so the change
-    // that is about to break one is exactly the change that would not
-    // run it.
-    mandatory: "changed",
     units: [...binaries],
     unavailable: [],
-
-    unitsForChange(changed) {
-      return binaries.filter((binary) => touches(changed, BUILT_FROM[binary]));
-    },
 
     locate(record): Location | undefined {
       if (!claimsIdentity(surfaces, record.test)) return undefined;
