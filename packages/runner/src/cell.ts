@@ -37,6 +37,7 @@ import {
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
+import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   type Immutable,
@@ -4150,14 +4151,19 @@ export function convertCellsToLinks(
   value: CellLinkInput,
   options: CellLinkOptions = {},
 ): FabricValue {
-  return convertOneToLinks(value, options, [], new Map());
+  return convertOneToLinks(
+    value,
+    options,
+    [],
+    new IndexTrackingStack<object>(),
+  );
 }
 
 /**
  * Recursive worker for {@link convertCellsToLinks}, carrying the state of the
  * walk in progress.
  *
- * `ancestors` holds the ancestors of the value being converted, so what it
+ * `ancestors` holds the stack of values the walk is inside, so what it
  * recognizes is a cycle. A value reachable twice by different paths is not one:
  * it is shared, and each position gets its own conversion. Returning a
  * back-link for a shared reference would rewrite one of its positions into a
@@ -4167,11 +4173,12 @@ export function convertCellsToLinks(
  *
  * `stack` is the path to `value`, held as one array that the walk pushes to and
  * pops from rather than as a fresh array per position. A back-link is the only
- * thing that reads a path, so what an ancestor records is its depth into that
- * stack, and the path is cut from the stack where a cycle asks for one. The
- * cut is correct because an entry sits in `ancestors` only while the walk is
- * inside it, which is exactly while the stack still holds its own path as a
- * prefix.
+ * thing that reads a path, so what a cycle needs is the depth its ancestor
+ * sits at, and the path is cut from the stack there. The cut is correct
+ * because an entry sits in `ancestors` only while the walk is inside it, which
+ * is exactly while the stack still holds its own path as a prefix -- and the
+ * two are pushed and popped together, so an ancestor's index in the one is its
+ * depth into the other.
  *
  * Each container is frozen as the walk returns it, and each link as it is
  * minted, which is what makes the whole answer deeply frozen.
@@ -4180,12 +4187,12 @@ function convertOneToLinks(
   value: CellLinkInput,
   options: CellLinkOptions,
   stack: string[],
-  ancestors: Map<object, number>,
+  ancestors: IndexTrackingStack<object>,
 ): FabricValue {
   if (isObjectOrArray(value)) {
-    const depth = ancestors.get(value);
+    const depth = ancestors.indexOf(value);
 
-    if (depth !== undefined) {
+    if (depth >= 0) {
       return deepFreeze(linkRefFrom({ path: stack.slice(0, depth) }));
     }
   }
@@ -4201,8 +4208,8 @@ function convertOneToLinks(
 
   // At this point `value` is a non-`null` object(ish) thing.
 
-  // What `ancestors` is keyed on -- and cleared of on the way back out -- is
-  // the object as given.
+  // What goes onto `ancestors` -- and comes off again on the way back out --
+  // is the object as given.
   const original = value as object;
 
   // Only a container reaches the walk below: everything else has returned or
@@ -4210,7 +4217,7 @@ function convertOneToLinks(
   let container: unknown[] | Record<string, unknown>;
 
   // Tracked for circularity, at the depth a back-link to it names.
-  ancestors.set(original, stack.length);
+  ancestors.push(original);
 
   // Everything past the line above runs inside this `try`, so that EVERY way
   // out clears the ancestor just recorded -- the exits that return a value
@@ -4319,7 +4326,9 @@ function convertOneToLinks(
       }),
     ));
   } finally {
-    ancestors.delete(original);
+    // `popExpect()` instead of just `pop()`, as defense-in-depth against bugs
+    // elsewhere in the code.
+    ancestors.popExpect(original);
   }
 }
 
