@@ -42,12 +42,13 @@
  * changes and the vote count holds at a hundred throughout; no iteration leaves
  * a state the next one starts from differently.
  *
- * Ten runtimes is the largest footprint of any benchmark in the job. Measured
- * on a four-core CI host with 15.6GB of memory: the whole file takes 89 seconds
- * and peaks at 4.76GB resident, which is under a third of that host and leaves
- * the rest of the job room. The peak is held to the end of the process, because
- * the workers are released at exit rather than when this file's benchmarks
- * finish, so it is a floor under everything measured after it.
+ * Ten runtimes is the largest footprint of any benchmark in the job. On a
+ * default hosted runner — four cores, 15.6GB — the whole file takes 89 seconds
+ * and peaks at 4.76GB resident, under a third of that host; the group the
+ * benchmarks workflow runs on is larger still. The peak is held to the end of
+ * the process, because the workers are released at exit rather than when this
+ * file's benchmarks finish, so it is a floor under everything measured after
+ * it.
  *
  * `CF_LUNCH_POLL_VOTERS` and `CF_LUNCH_POLL_OPTIONS` resize it for a local run
  * asking how the burst scales. The size is part of the measurement and names

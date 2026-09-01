@@ -324,14 +324,18 @@ Four things follow from that shape:
   is written to stderr.
 
 Ten runtimes is the largest footprint of any benchmark in the job, and the cost
-is worth knowing before adding a voter to it. **Measured on a four-core CI host
-with 15.6GB of memory: 89 seconds for the file, peaking at 4.76GB resident** —
-under a third of that host, with around 9GB still free, so it runs with room
-rather than close to the edge. A developer machine with far more memory peaks
-higher, at 5.4GB, because the figure is a working set rather than a leak: the
-same run under `--max-old-space-size=512` completes in 3.5GB at roughly double
-the per-iteration time, so what it reaches depends on the headroom the heap is
-given rather than on what it needs.
+is worth knowing before adding a voter to it. **Measured on a default hosted
+runner — four cores, 15.6GB — the file takes 89 seconds and peaks at 4.76GB
+resident**, under a third of that host with around 9GB still free. The runner
+group this workflow uses is a larger machine than that one, so the share it
+takes there is smaller again.
+
+Read that peak as a working set rather than as a requirement. The same run
+under `--max-old-space-size=512` completes in 3.5GB at roughly double the
+per-iteration time, and a developer machine with far more memory peaks higher,
+at 5.4GB. So the absolute figure rises with the headroom the heap is offered
+while the fraction of the host falls, and it is the fraction that decides
+whether this belongs beside the other benchmarks.
 
 That peak is a floor under everything measured after it. The workers are
 released at process exit — `Deno.bench` offers no seam for "this file's
