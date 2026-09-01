@@ -5484,6 +5484,80 @@ Deno.test("CfHarnessPromptLoop truncates large model-facing bash output in obser
   assertEquals(content.exitCode, 0);
 });
 
+Deno.test("CfHarnessPromptLoop bounds a large model-facing read_file result more tightly than bash output", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const document = `${"a".repeat(20_000)}MIDDLE${"z".repeat(20_000)}`;
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        { stdout: document, stderr: "", exitCode: 0 },
+      ]),
+      runId: "run-large-read-file",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "observe",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-large-read-file",
+                type: "function",
+                function: {
+                  name: "read_file",
+                  arguments: JSON.stringify({ path: "/workspace/guide.md" }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: { role: "assistant", content: "Read the guide." },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+          status: 200,
+        }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Read the guide.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(result.finalAssistantText, "Read the guide.");
+  const secondRequest = JSON.parse(String(fetchCalls[1]?.body)) as {
+    messages: Array<{ role: string; content: string }>;
+  };
+  const toolMessage = chatViewOfRequest(secondRequest).messages.at(-1);
+  assertEquals(toolMessage?.role, "tool");
+  const content = JSON.parse(toolMessage!.content);
+  assertEquals(
+    content.outputId,
+    createToolOutputId("run-large-read-file", "read_file", 1),
+  );
+  assertEquals(content.contentTruncated, true);
+  assertEquals(content.contentOriginalLength, document.length);
+  // 8,000 characters of head and 2,000 of tail, well under the 80,000 a bash
+  // stream keeps, with the marker naming the artifact holding the whole file.
+  assert(content.content.startsWith("a".repeat(8_000)));
+  assert(content.content.endsWith("z".repeat(2_000)));
+  assert(content.content.includes("omitted 30006 characters"));
+  assert(content.content.includes("run-large-read-file:read_file:1"));
+  assert(content.content.length < 11_000);
+});
+
 Deno.test("CfHarnessPromptLoop denies bash output without CFC metadata in enforce mode", async () => {
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
