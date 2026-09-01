@@ -1,3 +1,9 @@
+/**
+ * An integration fixture: two cell arrays, one of numbers and one of
+ * objects, each exposed alongside a handler that pushes a single value
+ * onto it.
+ */
+
 import {
   cell,
   computed,
