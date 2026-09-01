@@ -114,7 +114,7 @@ export interface PlanInput {
    */
   unknown?: ReadonlyMap<string, { suite: string; unit: string }>;
 
-  /** How many lanes to fill. Defaults to the dial. */
+  /** How many lanes to fill, at least one. Defaults to the dial. */
   lanes?: number;
 
   /** Seconds each lane may fill. Defaults to the dial. */
@@ -328,6 +328,13 @@ function place(
 export function plan(input: PlanInput): Plan {
   const manifest = input.manifest;
   const laneCount = input.lanes ?? LANES;
+  // Every pass below reaches for a lane to put work in, so there has to
+  // be one.
+  if (laneCount < 1) {
+    throw new RangeError(
+      `a plan needs a lane to fill, and was asked for ${laneCount}`,
+    );
+  }
   const laneBudget = input.budgetSeconds ?? LANE_BUDGET_SECONDS;
   const budget = laneBudget * laneCount;
   const lanes: Filling[] = Array.from({ length: laneCount }, (_, i) => ({
@@ -430,9 +437,8 @@ export function plan(input: PlanInput): Plan {
     // budget: it takes a lane that can hold the work where there is one,
     // and the lane it leaves shortest where there is not.
     const spots = spotsFor(input, lanes, entry, 1, laneBudget, bound);
-    // Every lane is a candidate for work that fits in none of them, so a
-    // lane list with anything in it yields a shortest lane, and the list
-    // is one this function built.
+    // Every lane is a candidate for work that fits in none of them, and
+    // there is at least one lane, so there is always a shortest.
     const spot = spots.fitting ?? spots.shortest!;
     taken.add(key);
     place(input, spot, entry, reason, 1);

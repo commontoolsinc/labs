@@ -68,6 +68,11 @@ describe("plan", () => {
       expect(result.lanes.map((lane) => lane.lane)).toEqual([1, 2, 3, 4, 5]);
     });
 
+    it("refuses to pack into no lanes at all", () => {
+      const manifest = sampleManifest({ entries: entries(3) });
+      expect(() => run(manifest, { lanes: 0 })).toThrow(RangeError);
+    });
+
     it("puts no identity in two lanes", () => {
       const result = run(sampleManifest({ entries: entries(200) }));
       const keys = keysOf(result);
