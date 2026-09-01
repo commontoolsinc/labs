@@ -644,7 +644,7 @@ describe("callFromCommand()", () => {
           "call",
           "addItem",
           [],
-          ["--piece", PIECE, "addItem", "--", "--filter", "title ="],
+          ["--cell", PIECE, "addItem", "--", "--filter", "title ="],
           ["--filter", "title ="],
           { ...deps, executePieceCallable: stubExecutor(dispatches) },
         ),
@@ -663,7 +663,7 @@ describe("callFromCommand()", () => {
           "call",
           "addItem",
           [],
-          ["--piece", PIECE, "addItem"],
+          ["--cell", PIECE, "addItem"],
           [],
           {
             ...deps,
@@ -679,7 +679,7 @@ describe("callFromCommand()", () => {
       expect(printed).toEqual([
         'Invalid input for "addItem": missing required property title',
       ]);
-      expect(hinted[0]).toContain(`cf piece verbs --piece ${PIECE}`);
+      expect(hinted[0]).toContain(`cf piece verbs --cell ${PIECE}`);
       expect(exited).toEqual([1]);
     });
 
@@ -692,7 +692,7 @@ describe("callFromCommand()", () => {
             "call",
             "addItem",
             [],
-            ["--piece", PIECE, "addItem"],
+            ["--cell", PIECE, "addItem"],
             [],
             {
               ...deps,
@@ -719,7 +719,7 @@ describe("callFromCommand()", () => {
             "call",
             "addItem",
             [],
-            ["--piece", PIECE, "addItem"],
+            ["--cell", PIECE, "addItem"],
             [],
             {
               ...deps,

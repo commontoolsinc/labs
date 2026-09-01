@@ -535,7 +535,7 @@ describe("piece-describe", () => {
         },
       });
       expect(rendered).toContain("NAME    Work tracker");
-      expect(hinted[0]).toContain("cf piece verbs --piece board");
+      expect(hinted[0]).toContain("cf piece verbs --cell board");
     });
 
     it("is the action the piece command registers for describe", () => {
