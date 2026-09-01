@@ -38,8 +38,8 @@ export interface DiffCounts {
 
 /** Complete file text available to resolve syntax across omitted diff lines. */
 export interface DiffCountFileContext {
-  readonly oldLines?: readonly string[];
-  readonly newLines?: readonly string[];
+  readonly oldLines?: readonly Line[];
+  readonly newLines?: readonly Line[];
 }
 
 interface ChangedLine {
@@ -344,14 +344,16 @@ function sideStart(start: number, count: number): number {
 }
 
 function scanCompleteLines(
-  lines: readonly string[],
+  lines: readonly Line[],
   start: number,
   end: number,
   syntax: CommentSyntax,
   state: CommentState,
 ): void {
   for (let i = start; i < end && i < lines.length; i++) {
-    stripCommonComments(lines[i], syntax, state);
+    if (shouldScanFallback(syntax, lines[i], state)) {
+      stripCommonComments(lines[i].text, syntax, state);
+    }
   }
 }
 

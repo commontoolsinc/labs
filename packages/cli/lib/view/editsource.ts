@@ -91,7 +91,9 @@ export interface EditableSource {
   readonly isDiff?: boolean;
 
   /** Complete diff sides used to scan syntax hidden between visible hunks. */
-  readonly diffCountContexts?: readonly DiffCountFileContext[];
+  diffCountContexts?(
+    text: string,
+  ): readonly DiffCountFileContext[] | undefined;
 
   /** False when there is no underlying file to edit or the selected language
    * is read-only. `reason` is shown when a cursor move is attempted on a

@@ -9,6 +9,11 @@ import {
 } from "../lib/view/diffcounts.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument } from "../lib/view/diffdoc.ts";
+import { languageForFile } from "../lib/view/languages/language.ts";
+
+function contextLines(path: string, lines: readonly string[]) {
+  return languageForFile(path).highlightLines(lines.join("\n"), path);
+}
 
 /** Computes every count policy over one highlighted diff. */
 function countsFor(
@@ -189,8 +194,18 @@ describe("diffcounts", () => {
       "",
     ].join("\n");
     const counts = countsFor(diff, [{
-      oldLines: ["/*", " * hidden note", " * old note", " */"],
-      newLines: ["/*", " * hidden note", " * new note", " */"],
+      oldLines: contextLines("main.rs", [
+        "/*",
+        " * hidden note",
+        " * old note",
+        " */",
+      ]),
+      newLines: contextLines("main.rs", [
+        "/*",
+        " * hidden note",
+        " * new note",
+        " */",
+      ]),
     }]);
 
     expect(counts.comments.totals).toEqual({ adds: 0, dels: 0 });
@@ -211,8 +226,18 @@ describe("diffcounts", () => {
       "",
     ].join("\n");
     const counts = countsFor(diff, [{
-      oldLines: ["/*", " * old note", " */", "run_old();"],
-      newLines: ["/*", " * new note", " */", "run_new();"],
+      oldLines: contextLines("main.rs", [
+        "/*",
+        " * old note",
+        " */",
+        "run_old();",
+      ]),
+      newLines: contextLines("main.rs", [
+        "/*",
+        " * new note",
+        " */",
+        "run_new();",
+      ]),
     }]);
 
     expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });
@@ -234,20 +259,48 @@ describe("diffcounts", () => {
       "",
     ].join("\n");
     const counts = countsFor(diff, [{
-      oldLines: [
+      oldLines: contextLines("main.rs", [
         "/*",
         " * old note",
         " */",
         "run_old();",
         '// say "hello */',
-      ],
-      newLines: [
+      ]),
+      newLines: contextLines("main.rs", [
         "/*",
         " * new note",
         " */",
         "run_new();",
         '// say "hello */',
-      ],
+      ]),
+    }]);
+
+    expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });
+  });
+
+  it("does not treat comments inside omitted Markdown code as syntax", () => {
+    const diff = [
+      "diff --git a/readme.md b/readme.md",
+      "--- a/readme.md",
+      "+++ b/readme.md",
+      "@@ -4 +4 @@",
+      "-old prose",
+      "+new prose",
+      "",
+    ].join("\n");
+    const counts = countsFor(diff, [{
+      oldLines: contextLines("readme.md", [
+        "```html",
+        "<!-- literal example",
+        "```",
+        "old prose",
+      ]),
+      newLines: contextLines("readme.md", [
+        "```html",
+        "<!-- literal example",
+        "```",
+        "new prose",
+      ]),
     }]);
 
     expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });

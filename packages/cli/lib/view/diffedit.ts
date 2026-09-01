@@ -19,7 +19,13 @@ import {
   type DiffWorkspace,
   type WorkspaceCache,
 } from "./diffdoc.ts";
-import { type DiffHunk, type DiffModel, parseDiff } from "./diff.ts";
+import {
+  type DiffFile,
+  type DiffHunk,
+  type DiffLine,
+  type DiffModel,
+  parseDiff,
+} from "./diff.ts";
 import type { DiffCountFileContext } from "./diffcounts.ts";
 import {
   type CommitHeader,
@@ -107,11 +113,9 @@ export function diffSource(
     fileText: expectedFiles,
     hunks: saveHunks,
   };
-  const diffCountContexts = buildDiffCountContexts(
-    edit,
-    saveHunks,
-    expectedFiles,
-  );
+  const countContexts = buildDiffCountContexts(edit);
+  const diffCountContexts = (text: string) =>
+    text === edit.sourceText ? countContexts : undefined;
 
   // No file on disk backs this diff (nothing resolved or verified): read-only.
   // A deletion of an entire file has no new-side lines, but its empty workspace
@@ -482,25 +486,54 @@ export function diffSource(
 
 function buildDiffCountContexts(
   edit: DiffEdit,
-  hunks: readonly MutableHunk[],
-  fileText: ReadonlyMap<string, string>,
 ): readonly DiffCountFileContext[] {
   const model = parseDiff(edit.sourceText ?? "");
   if (!model) return [];
-  let hunkIndex = 0;
+  const raw = (edit.sourceText ?? "").split("\n");
   return model.files.map((file, fileIndex) => {
-    let absPath: string | null = null;
-    for (const _hunk of file.hunks) {
-      const hunk = hunks[hunkIndex++];
-      absPath ??= hunk?.absPath ?? null;
-    }
-    const oldLines = edit.oldFileLines[fileIndex]?.map((line) => line.text);
-    const newText = absPath ? fileText.get(absPath) : undefined;
+    const oldLines = edit.oldFileLines[fileIndex] ?? undefined;
+    const newText = oldLines
+      ? reconstructNewSide(file, oldLines, raw, model.lines)
+      : undefined;
+    const newLines = newText === undefined
+      ? undefined
+      : languageForFile(file.newPath ?? file.oldPath).highlightLines(
+        newText,
+        file.newPath ?? file.oldPath,
+      );
     return {
-      oldLines: oldLines ?? undefined,
-      newLines: newText?.split("\n"),
+      oldLines,
+      newLines,
     };
   });
+}
+
+function reconstructNewSide(
+  file: DiffFile,
+  oldLines: readonly Line[],
+  raw: readonly string[],
+  diffLines: readonly DiffLine[],
+): string {
+  const lines = oldLines.map((line) => line.text);
+  const hunks = [...file.hunks].sort((a, b) =>
+    sideStart(b.oldStart, b.oldCount) - sideStart(a.oldStart, a.oldCount) ||
+    b.headerLine - a.headerLine
+  );
+  for (const hunk of hunks) {
+    const replacement: string[] = [];
+    for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
+      const kind = diffLines[i]?.kind;
+      if (kind === "ctx" || kind === "add") {
+        replacement.push((raw[i] ?? "").slice(1));
+      }
+    }
+    lines.splice(
+      sideStart(hunk.oldStart, hunk.oldCount),
+      hunk.oldCount,
+      ...replacement,
+    );
+  }
+  return lines.join("\n");
 }
 
 /** The commit a save would amend when changed text represents HEAD. */

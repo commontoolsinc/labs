@@ -403,6 +403,31 @@ Deno.test("jumplist: counts use syntax before the first hunk", () => {
   ]);
 });
 
+Deno.test("jumplist: complete count context expires after an edit", () => {
+  const diff = [
+    "diff --git a/main.rs b/main.rs",
+    "--- a/main.rs",
+    "+++ b/main.rs",
+    "@@ -3 +3 @@",
+    "- * old note",
+    "+ * new note",
+    "",
+  ].join("\n");
+  const ws: DiffWorkspace = {
+    resolve: (path) => path === "main.rs" ? path : null,
+    read: (path) =>
+      path === "main.rs"
+        ? ["/*", " * hidden note", " * new note", " */", ""].join("\n")
+        : null,
+  };
+  const model = parseDiff(diff)!;
+  const { edit } = buildDiffDocument(diff, model, ws);
+  const source = diffSource(ws, edit);
+
+  assert(source.diffCountContexts?.(diff) !== undefined);
+  assertEquals(source.diffCountContexts?.(`${diff} `), undefined);
+});
+
 Deno.test("jumplist: escape cancels and leaves the viewport put", () => {
   const s = diffSession(SHOW);
   press(s, "down"); // move the viewport off line 0
