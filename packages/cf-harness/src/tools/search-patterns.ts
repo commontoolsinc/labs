@@ -15,6 +15,8 @@ import { schemaToTypeString } from "@commonfabric/runner";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type {
   PatternIndexClient,
+  PatternIndexPatternKind,
+  PatternIndexQuality,
   PatternIndexSignals,
 } from "../pattern-index/client.ts";
 import type { HarnessToolDefinition } from "./types.ts";
@@ -40,10 +42,16 @@ export interface SearchPatternsToolResult {
   hashtags: readonly string[];
   signals?: PatternIndexSignals;
 
+  /** Whether its published argument schema classifies it as a part or app. */
+  kind: PatternIndexPatternKind;
+
+  /** Evidence tier the index computed from recorded run outcomes. */
+  quality: PatternIndexQuality;
+
   /**
-   * With a text query: how many of its terms this hit carries, out of
-   * `queryTerms`. Matching is disjunctive and ranked — a hit with a low
-   * ratio is a distant cousin, not an answer.
+   * With a text query: how many stopword-free terms this hit carries, out of
+   * `queryTerms`. Matching is disjunctive and ranked — a hit with a low ratio
+   * is a distant cousin, not an answer.
    */
   matchedTerms?: number;
 
@@ -78,11 +86,19 @@ export type SearchPatternsToolOutput =
   | SearchPatternsToolSuccessOutput
   | SearchPatternsToolErrorOutput;
 
+/** Narrows a raw tool result to a successful search response. */
+export const isSearchPatternsToolSuccessOutput = (
+  output: unknown,
+): output is SearchPatternsToolSuccessOutput =>
+  typeof output === "object" && output !== null &&
+  "status" in output && output.status === "ok" &&
+  "results" in output && Array.isArray(output.results);
+
 export const searchPatternsToolDescriptor: HarnessToolDescriptor = {
   toolId: "search_patterns",
   title: "Search Patterns",
   description:
-    "Search the pattern index for published Common Fabric patterns by hashtag or free text. Answers with each pattern's id, description, declared argument and result shapes, and the import specifier that composes it — never its source. Run one with run_pattern's patternId argument.",
+    "Search the pattern index for published Common Fabric patterns by hashtag or free text. Answers with each pattern's id, kind, evidence quality, description, import specifier, and stopword-free match ratio; the leading results also carry declared argument and result shapes — never source. Run one with run_pattern's patternId argument.",
   effectClass: "read",
   inputSchema: {
     type: "object",
@@ -91,12 +107,12 @@ export const searchPatternsToolDescriptor: HarnessToolDescriptor = {
         type: "array",
         items: { type: "string" },
         description:
-          "Hashtags a pattern must carry. Omit to search on text alone.",
+          "Hashtags to match. Any supplied hashtag can surface a result. Omit to search on text alone.",
       },
       text: {
         type: "string",
         description:
-          "Free text matched against pattern descriptions, keywords, and tags. Matching is disjunctive and ranked: results carry matchedTerms out of queryTerms, so more words widen the net rather than narrowing it. Omit to search on tags alone.",
+          "A short set of distinctive capability words. English stopwords are removed, then whole words are matched with light suffix handling against pattern descriptions, keywords, and hashtags. One content term can surface a result; adding generic words adds distant OR matches. Results carry matchedTerms out of the stopword-free queryTerms. Omit to search on tags alone.",
       },
     },
     additionalProperties: false,
@@ -124,13 +140,32 @@ export const searchPatternsToolDescriptor: HarnessToolDescriptor = {
                 required: ["uses", "score"],
                 additionalProperties: false,
               },
+              kind: {
+                type: "string",
+                enum: ["part", "app"],
+                description:
+                  "Whether the published argument schema classifies the pattern as a reusable part or whole app.",
+              },
+              quality: {
+                type: "string",
+                enum: ["penalized", "unproven", "proven"],
+                description:
+                  "Evidence tier from recorded outcomes: penalized is net-negative, unproven has no recorded success, and proven has at least one recorded success or positive rating without a net-negative score.",
+              },
               matchedTerms: { type: "number" },
               queryTerms: { type: "number" },
               importHint: { type: "string" },
               argumentType: { type: "string" },
               resultType: { type: "string" },
             },
-            required: ["patternId", "description", "hashtags", "importHint"],
+            required: [
+              "patternId",
+              "description",
+              "hashtags",
+              "kind",
+              "quality",
+              "importHint",
+            ],
             additionalProperties: false,
           },
         },
@@ -243,6 +278,8 @@ export const searchPatternsTool: HarnessToolDefinition<
         description: hit.description,
         hashtags: hit.hashtags,
         ...(hit.signals !== undefined ? { signals: hit.signals } : {}),
+        kind: hit.kind,
+        quality: hit.quality,
         ...(hit.matchedTerms !== undefined && hit.queryTerms !== undefined
           ? { matchedTerms: hit.matchedTerms, queryTerms: hit.queryTerms }
           : {}),

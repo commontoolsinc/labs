@@ -104,6 +104,14 @@ The current package provides:
   name-based selection retired for the delegated path — and the child's
   activation records `source: "skill-handle"` with the token and the digest of
   the injected text;
+- pattern references by search record: `delegate_task` takes up to eight
+  optional `{ patternId, note? }` entries and resolves each id only from
+  successful `search_patterns` results retained by that parent prompt loop. A
+  known id contributes a neutral child-context block containing the trusted
+  record's kind, quality, description, match evidence, import hint, argument
+  shape, result shape, and the parent note verbatim; an unknown id is omitted
+  and named in `patternRefRefusals` as `not-searched-by-parent`. Delegation does
+  not refetch the index;
 - shape captured where it is free and read back by token: a handle entry may
   carry the schema of its referent — a `run_pattern` result reference records
   the compiled pattern's result schema, marked `schemaSource: "harness"` — while
@@ -180,24 +188,28 @@ The current package provides:
   session configuration: index requests are signed with the session identity
   under the CF1 first-party scheme, and an indexed pattern runs in the session's
   space. It adds the `search_patterns` tool, which finds published patterns by
-  hashtag or free text and reports each hit's description, hashtags, usage
-  signals, declared argument and result shapes, and the `cf:pattern:<patternId>`
-  import specifier that composes it. It also extends `run_pattern`, which takes
-  exactly one of `sourceText` and `patternId`: with a `patternId` the published
-  program is fetched host-side and compiled down the same path, and neither its
-  source nor a compile diagnostic quoting it reaches model context — the
-  diagnostic is retained in the run artifact instead. The run reports
-  `instantiated` and then `run_succeeded` or `run_failed` back to the index,
-  best-effort, so a reporting failure never bears on the tool result. It adds
-  the `record_feedback` tool, which votes a pattern up or down with an optional
-  note, so the index learns which of the patterns it holds were worth offering.
-  And it closes the loop the other way: source the model authored and ran
-  successfully is recorded under the identity the compile recorded for it,
-  carrying the `description` and `hashtags` the call named, the run's own task
-  as the request the pattern answers, the compiled argument and result schemas,
-  and the published patterns the source imports. Automatic publication records
-  the entry without offering it to search; discoverability is earned from later
-  evidence. Curated seeding may offer a passing run immediately by setting
+  hashtag or free text and reports each hit's kind, evidence quality,
+  description, hashtags, usage signals, declared argument and result shapes, and
+  the `cf:pattern:<patternId>` import specifier that composes it. Free-text
+  search removes stopwords, matches whole words plus light suffix variants, and
+  is disjunctive: one content term may return a hit, so extra terms can admit
+  generic matches. `matchedTerms` and `queryTerms` count the stopword-free
+  terms. It also extends `run_pattern`, which takes exactly one of `sourceText`
+  and `patternId`: with a `patternId` the published program is fetched host-side
+  and compiled down the same path, and neither its source nor a compile
+  diagnostic quoting it reaches model context — the diagnostic is retained in
+  the run artifact instead. The run reports `instantiated` and then
+  `run_succeeded` or `run_failed` back to the index, best-effort, so a reporting
+  failure never bears on the tool result. It adds the `record_feedback` tool,
+  which votes a pattern up or down with an optional note, so the index learns
+  which of the patterns it holds were worth offering. And it closes the loop the
+  other way: source the model authored and ran successfully is recorded under
+  the identity the compile recorded for it, carrying the `description` and
+  `hashtags` the call named, the run's own task as the request the pattern
+  answers, the compiled argument and result schemas, and the published patterns
+  the source imports. Automatic publication records the entry without offering
+  it to search; discoverability is earned from later evidence. Curated seeding
+  may offer a passing run immediately by setting
   `CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE=1`, while a render-gate failure
   remains recorded and non-discoverable with the gate's reason. Publication is
   best-effort in the same way — never awaited, never a failure of a run that

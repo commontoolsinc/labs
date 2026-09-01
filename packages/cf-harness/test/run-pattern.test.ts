@@ -650,8 +650,9 @@ describe("run-pattern", () => {
       );
       const output = result.output as RunPatternToolErrorOutput;
       expect(output.status).toBe("error");
-      expect(output.message).toContain("only be opened by this session");
-      expect(output.message).toContain("computed()");
+      expect(output.message).toContain("detected");
+      expect(output.message).toContain("session-only pattern pointer");
+      expect(output.message).not.toContain("computed()");
       expect(output.message).not.toContain("keyless:zStranded");
       expect(output.rawCauseMessage).toContain("keyless:zStranded");
     });

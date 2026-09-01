@@ -227,6 +227,24 @@ describe("prompt-loop invalid tool calls", () => {
         field: "maxModelTurns",
       },
       {
+        name: "too-many-pattern-refs",
+        arguments: {
+          goal: "Inspect",
+          patternRefs: Array.from({ length: 9 }, (_, index) => ({
+            patternId: `pattern-${index}`,
+          })),
+        },
+        field: "patternRefs",
+      },
+      {
+        name: "pattern-ref-note-too-long",
+        arguments: {
+          goal: "Inspect",
+          patternRefs: [{ patternId: "pattern-1", note: "x".repeat(501) }],
+        },
+        field: "patternRefs",
+      },
+      {
         name: "unknown-profile",
         arguments: { goal: "Inspect", profile: "unknown" },
         field: "profile",

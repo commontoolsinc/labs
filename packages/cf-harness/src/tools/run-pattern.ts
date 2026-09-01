@@ -296,7 +296,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
       sourceText: {
         type: "string",
         description:
-          "Pattern source (TypeScript/TSX). At most 256 KiB. The pattern factory must return its result object literal directly (computed() wrapping individual fields at most); a factory that returns a computed() or other derived wrapper as the whole result creates a piece no other runtime can load.",
+          "Pattern source (TypeScript/TSX). At most 256 KiB. Return a durable result object directly. A whole-result derived wrapper is a known smell, but not a deterministic failure: after the run the harness checks the actual pattern pointer and refuses any piece materialized under a session-only identity.",
       },
       patternId: {
         type: "string",
@@ -1303,7 +1303,7 @@ export const runPatternTool: HarnessToolDefinition<
       return {
         ...errorOutput(
           "error",
-          `the pattern ran, but the piece it created can only be opened by this session, so the run is reported as a failure. This is the shape a factory takes when it returns a derived wrapper — a computed() or a lift() over the whole result — instead of the result itself: the wrapper becomes the piece's own body, and nothing durable names it. Return the result object literal directly and put computed() on the individual fields that derive from an input`,
+          `the pattern ran, but the harness detected a session-only pattern pointer in the created piece's graph, so the run is reported as a failure. The detected pointer cannot be opened by another runtime. Return a durable result object directly`,
         ),
         pieceId: piece.id,
         rawCauseMessage:
