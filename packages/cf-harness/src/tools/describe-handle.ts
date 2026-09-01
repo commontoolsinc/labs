@@ -267,23 +267,29 @@ const describeInFabric = async (
       schema: undefined,
     });
     await root.sync();
+    // The labels are the synced document's own metadata, narrowed to the
+    // referent's path by the view, so they cost no read beyond the one the
+    // shape already needed.
     const referent =
       (link.path.length === 0 ? root : root.key(...link.path)) as Cell<unknown>;
-    if (link.path.length > 0) {
-      await referent.sync();
-    }
     const labels = describedLabels(referent);
     const documentSchema = root.getMetaRaw("schema") as JSONSchema | undefined;
-    const schema = link.path.length === 0
-      ? documentSchema ?? root.schema
-      : documentSchema !== undefined
+    if (link.path.length === 0) {
+      const schema = documentSchema ?? root.schema;
+      return { labels, ...(schema !== undefined ? { schema } : {}) };
+    }
+    if (documentSchema !== undefined) {
       // Narrowing a declared schema by a path is a walk over the schema, so
       // the referent's shape is in hand without going near its value.
-      ? ((root.asSchema(documentSchema) as Cell<unknown>)
-        .key(...link.path) as Cell<unknown>).schema
-      // With no declared schema there is nothing to walk, and only the
-      // referent itself can state a shape.
-      : referent.schema;
+      const schema = ((root.asSchema(documentSchema) as Cell<unknown>).key(
+        ...link.path,
+      ) as Cell<unknown>).schema;
+      return { labels, ...(schema !== undefined ? { schema } : {}) };
+    }
+    // With no declared schema there is nothing to walk, and only the referent
+    // itself can state a shape.
+    await referent.sync();
+    const schema = referent.schema;
     return { labels, ...(schema !== undefined ? { schema } : {}) };
   } catch {
     return {};
