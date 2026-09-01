@@ -3968,7 +3968,8 @@ function maybeConvertArrayPathToDataURILink(
  * value itself.
  */
 function containsCycle(value: unknown): boolean {
-  const ancestors = new Set<object>();
+  // The containers the walk is inside, which is what a cycle leads back to.
+  const ancestors = new IndexTrackingStack<object>();
   // Nodes already walked to completion without finding a cycle. Without this
   // memo the walk is exponential on shared acyclic references (a diamond per
   // level doubles the work), and candidate values are user-controlled.
@@ -3982,12 +3983,17 @@ function containsCycle(value: unknown): boolean {
     }
     if (completed.has(node)) return false;
     if (ancestors.has(node)) return true;
-    ancestors.add(node);
-    const values = Array.isArray(node) ? node : Object.values(node);
-    for (const child of values) {
-      if (walk(child)) return true;
+    ancestors.push(node);
+    // Every way out of the descent, the early return on a cycle included,
+    // takes the node back off the stack.
+    try {
+      const values = Array.isArray(node) ? node : Object.values(node);
+      for (const child of values) {
+        if (walk(child)) return true;
+      }
+    } finally {
+      ancestors.popExpect(node);
     }
-    ancestors.delete(node);
     completed.add(node);
     return false;
   };
@@ -3995,20 +4001,16 @@ function containsCycle(value: unknown): boolean {
 }
 
 /**
- * Validates that a value contains only static data (no cells or cell-like objects)
- * and has no circular references. Used by Cell.of() to ensure only serializable
- * static data is passed.
+ * Validates that `value` holds only static data: no cell or cell-like object
+ * anywhere in it, and no cycle. A value reached by two paths is shared rather
+ * than cyclic, and passes. This is what `Cell.of()` vets its initial value
+ * with.
  *
- * Note: Shared references (same object at multiple paths) are allowed.
- * Only true cycles (object referencing an ancestor) are rejected.
- *
- * @param value - The value to validate
- * @throws Error if value contains cells or has circular references
+ * @throws If `value` holds a cell or cell-like object, or a cycle.
  */
 function validateStaticData(value: unknown): void {
-  // Track ancestors in current path (for cycle detection)
-  // Shared references are fine - only cycles back to ancestors are errors
-  const ancestors = new Set<object>();
+  // The containers the walk is inside, which is what a cycle leads back to.
+  const ancestors = new IndexTrackingStack<object>();
 
   function traverse(val: unknown, path: string[]): void {
     // Primitives are always fine
@@ -4036,7 +4038,6 @@ function validateStaticData(value: unknown): void {
       );
     }
 
-    // Check for cycles - only ancestors in current path, not all seen objects
     if (ancestors.has(obj)) {
       throw new Error(
         `Cell.of() does not accept circular references. Cycle detected at path '${
@@ -4046,41 +4047,46 @@ function validateStaticData(value: unknown): void {
       );
     }
 
-    ancestors.add(obj);
+    ancestors.push(obj);
 
-    // A `FabricPrimitive` reaches here and survives, correctly: it has zero
-    // enumerable own properties, so `Object.keys()` is empty and the descent
-    // ends -- and a leaf holds no cell for this validation to find.
-    //
-    // A `FabricInstance` is refused instead. Its codec contents can hold a
-    // `Cell`, which is exactly what this validation exists to reject, and those
-    // contents are not reachable by property name -- so passing one through
-    // _smuggles_ a cell into static data past the check meant to stop it.
-    // That is not a completeness gap; it is the validation failing open.
-    //
-    // Nothing reaches this in production today, de facto rather than by
-    // construction: a `FabricError` is ungated and exposed to pattern authors,
-    // so what keeps this safe is that nothing yet puts one in `Cell.of()` data.
-    //
-    // TODO(danfuzz): descend by codec-mediated traversal into instance state,
-    // at which point this becomes a walk rather than a refusal.
-    if (obj instanceof FabricInstance) {
-      refuseFabricInstance(obj, `in \`Cell.of()\` static data`);
-    }
-
-    // Traverse arrays and objects
-    if (Array.isArray(obj)) {
-      for (let i = 0; i < obj.length; i++) {
-        traverse(obj[i], [...path, String(i)]);
+    // Every way out of the descent, a refusal thrown from inside it included,
+    // takes the object back off the stack.
+    try {
+      // A `FabricPrimitive` reaches here and survives, correctly: it has zero
+      // enumerable own properties, so `Object.keys()` is empty and the
+      // descent ends -- and a leaf holds no cell for this validation to find.
+      //
+      // A `FabricInstance` is refused instead. Its codec contents can hold a
+      // `Cell`, which is exactly what this validation exists to reject, and
+      // those contents are not reachable by property name -- so passing one
+      // through _smuggles_ a cell into static data past the check meant to
+      // stop it. That is not a completeness gap; it is the validation failing
+      // open.
+      //
+      // Nothing reaches this in production today, de facto rather than by
+      // construction: a `FabricError` is ungated and exposed to pattern
+      // authors, so what keeps this safe is that nothing yet puts one in
+      // `Cell.of()` data.
+      //
+      // TODO(danfuzz): descend by codec-mediated traversal into instance
+      // state, at which point this becomes a walk rather than a refusal.
+      if (obj instanceof FabricInstance) {
+        refuseFabricInstance(obj, `in \`Cell.of()\` static data`);
       }
-    } else {
-      for (const key of Object.keys(obj)) {
-        traverse((obj as Record<string, unknown>)[key], [...path, key]);
-      }
-    }
 
-    // Remove from ancestors when backtracking (shared refs at other paths are ok)
-    ancestors.delete(obj);
+      // Traverse arrays and objects
+      if (Array.isArray(obj)) {
+        for (let i = 0; i < obj.length; i++) {
+          traverse(obj[i], [...path, String(i)]);
+        }
+      } else {
+        for (const key of Object.keys(obj)) {
+          traverse((obj as Record<string, unknown>)[key], [...path, key]);
+        }
+      }
+    } finally {
+      ancestors.popExpect(obj);
+    }
   }
 
   traverse(value, []);
