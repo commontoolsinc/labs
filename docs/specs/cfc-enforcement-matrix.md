@@ -279,6 +279,55 @@ The strict-only delta is:
   piece is then un-updatable under strict because the pattern updater,
   `setsrc`, and setup over an existing piece all stamp meta.
 
+  Computed cells are outside the check at every rung too, and it is the same
+  rule over a document rather than over a path. A computed cell is the
+  derived internal cell the runtime materializes to hold a derivation's
+  result, under its own URI scheme (`computed:fid1:<hash>`; see
+  [`computed-cell-identity.md`](./computed-cell-identity.md)). A pattern
+  names the data it declares policy on, and it does not name the
+  intermediates the reactive graph materializes for it, so their ceiling is
+  the empty one and measuring them refuses every derivation that reads
+  labeled data and writes its result — ordinary reactive computation, not an
+  edge case. One predicate covers both surfaces (`isDeclarablePolicyPath` in
+  `prepare.ts`), because they answer one question: could a schema have
+  declared a policy here.
+
+  The skip is scoped to a join the target's own space produced. Every clause
+  the join carries comes from a document some read resolved, and the join
+  records which space each of those lived in; where any of them lived
+  elsewhere, a computed target is measured like any other document. So the
+  residency half of the ceiling still holds for the direction it was written
+  for — a derivation cannot carry another space's labeled value into a local
+  document by materializing it — while a derivation over its own space's data
+  proceeds. Within one space the source and the computed cell share a replica
+  set, so the value reaches no reader it had not reached already, and what
+  follows it is the stamp.
+
+  A declared entry can still reach a computed document, from a
+  schema-carrying write to it, and the skip is unconditional over that route
+  as it is over the meta seam's document-root route. Honoring it would make a
+  derivation admit its own inputs' taint or refuse it according to whether
+  the schema behind it happens to carry an `ifc`, while the atoms arriving in
+  the join come from what the transaction read rather than from anything that
+  schema describes. The residual is that a declaration which did reach such a
+  document stops being a write ceiling; it stays a read floor, and the
+  persisted stamp is unaffected.
+
+  What the skip does NOT do is release the value. A derivation's result
+  leaves the fabric only through a sink, and a sink measures the join it is
+  handed. Where the host is the one releasing — the `run_pattern` tool
+  answering a model with what a piece computed — there is no request to
+  record and no commit to gate, so that tool measures the release itself,
+  against a public ceiling, through `describeSinkReleaseRefusal`
+  ([run-pattern.ts](../../packages/cf-harness/src/tools/run-pattern.ts)).
+  The two routes fit their joins with one membership predicate, so a clause
+  outside a ceiling on one is outside it on the other. They differ in what
+  reaches the join: the host route measures what releasing the answer
+  resolved, and applies no exchange-rule rewriting to it, so a clause a
+  policy evaluation would have discharged is refused there. The ladder
+  governs it like any other gate — at `disabled` and `observe` it records
+  nothing that rejects.
+
   The exemption is not a hole. A path counts as meta only while no payload
   write landed on it too, so a transaction writing both leaves the path
   measured. The collapse of a deeper path against a covering ancestor runs

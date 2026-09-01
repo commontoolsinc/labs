@@ -61,6 +61,21 @@ const newRuntime = (
     cfcFlowLabels: "persist",
   });
 
+/**
+ * A runtime at the strictness where a writer-fit misfit rejects. The blocks
+ * below pin it rather than inheriting the file's `enforce-explicit` default,
+ * because that is where the exemptions they cover are observable.
+ */
+const strictRuntime = (
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+) =>
+  new Runtime({
+    apiUrl: new URL("https://example.com"),
+    storageManager,
+    cfcEnforcementMode: "enforce-strict",
+    cfcFlowLabels: "persist",
+  });
+
 // The space principal of the space every doc in this file lives in — the
 // clause residency admits (§8.12.4).
 const ownSpacePrincipal = {
@@ -767,6 +782,244 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
     });
   });
 
+  describe("computed-cell exemption", () => {
+    // The measurement quantifies over surfaces a schema could have declared a
+    // policy at, and a computed cell is not one. It is the derived internal
+    // cell the runtime materializes to hold a derivation's result, under its
+    // own URI scheme (`computed:fid1:<hash>`; see `entity-kind.ts` and
+    // `docs/specs/computed-cell-identity.md`). A pattern names the data it
+    // declares policy on, and it does not name the intermediates the reactive
+    // graph materializes for it, so measuring them refuses every derivation
+    // that reads labeled data and writes its result.
+    //
+    // The exemption decides which store a value may land in, not whether it
+    // stays labeled: the join still lands on the computed document as its
+    // `derived` component, which is what the cases below pin alongside it.
+
+    /**
+     * The `computed:` id over the same hash as the `of:` id `cause` mints. The
+     * two name different entities, so a case can write the same join to both
+     * and hold everything but the scheme fixed.
+     */
+    const computedIdFor = (
+      runtime: Runtime,
+      cause: string,
+    ): `${string}:${string}` => {
+      const plain = runtime.getCell(signer.did(), cause)
+        .getAsNormalizedFullLink().id;
+      return `computed:${plain.slice("of:".length)}`;
+    };
+
+    it("admits a tainted write into a computed document", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-computed-source");
+        const computedId = computedIdFor(runtime, "wf-computed-target");
+
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "wf-computed-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        tx.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: computedId,
+          path: ["value", "copied"],
+        }, `${raw.secret}!`);
+        tx.prepareCfc();
+
+        expect((await tx.commit()).error).toBeUndefined();
+
+        // The value landed, and it landed carrying what it derived from.
+        expect(
+          (storedDocument(storageManager, computedId)?.value as {
+            copied?: string;
+          })?.copied,
+        ).toBe("s3cr3t!");
+        expect(
+          replicaEntries(storageManager, computedId)
+            .filter((entry) => entry.origin === "derived")
+            .flatMap((entry) => entry.label.confidentiality ?? []),
+        ).toContain("secret");
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("still rejects the same join written into the state cell beside it", async () => {
+      // The control: the exemption is about the surface, not about this
+      // transaction's join. The source and the target cause are the ones the
+      // case above used, so the target here is the `of:` id over the very
+      // hash that case wrote through `computed:` — a different entity,
+      // differing from it in its URI scheme alone — and the misfit is back.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-computed-source");
+        const plainId = runtime
+          .getCell(signer.did(), "wf-computed-target")
+          .getAsNormalizedFullLink().id;
+
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "wf-computed-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        tx.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: plainId,
+          path: ["value", "copied"],
+        }, `${raw.secret}!`);
+        tx.prepareCfc();
+
+        const result = await tx.commit();
+        expect(result.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(result.error?.message).toContain(`for ${plainId} at /`);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("keeps measuring a computed target whose join came from another space", async () => {
+      // The exemption is scoped to a join this target's own space produced.
+      // A clause that reached the join from a document in another space is
+      // measured wherever it lands, so a derivation cannot carry a foreign
+      // space's labeled value into a local document by materializing it.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      const foreign = (await Identity.fromPassphrase("wf-computed-foreign"))
+        .did();
+      try {
+        const seed = runtime.edit();
+        const foreignCell = runtime.getCell(
+          foreign,
+          "wf-computed-foreign-source",
+          { type: "object", properties: { secret: { type: "string" } } },
+          seed,
+        );
+        const foreignId = foreignCell.getAsNormalizedFullLink().id;
+        writeSeedEnvelopeDoc(seed, foreign);
+        seed.writeOrThrow({
+          space: foreign,
+          scope: "space",
+          id: foreignId,
+          path: [],
+        }, {
+          value: { secret: "s3cr3t" },
+          cfc: {
+            version: 1,
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: ["secret"],
+                label: { confidentiality: ["secret"] },
+              }],
+            },
+          },
+        });
+        expect((await seed.commit()).ok).toBeDefined();
+
+        const computedId = computedIdFor(runtime, "wf-computed-foreign-target");
+        const tx = runtime.edit();
+        const source = runtime.getCellFromLink(
+          { id: foreignId, path: [], space: foreign, scope: "space" },
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        expect(raw.secret).toBe("s3cr3t");
+        tx.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: computedId,
+          path: ["value", "copied"],
+        }, `${raw.secret}!`);
+        tx.prepareCfc();
+
+        const result = await tx.commit();
+        expect(result.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(result.error?.message).toContain(`for ${computedId} at /`);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("carries the admitted taint into a later transaction that reads it back", async () => {
+      // What the exemption rests on: the stamp the admitted write left is a
+      // read floor like any other, so the value cannot be laundered by
+      // routing it through a computed document. A second transaction reads it
+      // back and writes it into an ordinary undeclared store, and that write
+      // misfits on the clause the first transaction's source carried.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-computed-launder-source");
+        const computedId = computedIdFor(runtime, "wf-computed-launder-target");
+
+        const first = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "wf-computed-launder-source",
+          undefined,
+          first,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        first.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: computedId,
+          path: ["value", "copied"],
+        }, `${raw.secret}!`);
+        first.prepareCfc();
+        expect((await first.commit()).error).toBeUndefined();
+
+        const second = runtime.edit();
+        const derived = runtime.getCellFromLink(
+          { id: computedId, path: [], space: signer.did(), scope: "space" },
+          undefined,
+          second,
+        );
+        const carried = (derived.getRaw() as { copied?: string }).copied;
+        expect(carried).toBe("s3cr3t!");
+        const plainId = runtime.getCell(signer.did(), "wf-computed-launder-out")
+          .getAsNormalizedFullLink().id;
+        second.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: plainId,
+          path: ["value", "copied"],
+        }, carried as string);
+        second.prepareCfc();
+
+        const result = await second.commit();
+        expect(result.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(result.error?.message).toContain('"secret"');
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+  });
+
   describe("meta-seam exemption", () => {
     // The measurement quantifies over paths a schema could have declared a
     // policy at, and the raw meta seam is not one: `setMetaRaw` lands on a
@@ -782,18 +1035,6 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
     //
     // The seam is outside the check at every rung, so these cases assert on
     // both the strict reject and the persist-and-flag diagnostic below it.
-
-    // Pinned rather than inherited: this exemption is only observable at the
-    // strictness where the misfit rejects.
-    const strictRuntime = (
-      storageManager: ReturnType<typeof StorageManager.emulate>,
-    ) =>
-      new Runtime({
-        apiUrl: new URL("https://example.com"),
-        storageManager,
-        cfcEnforcementMode: "enforce-strict",
-        cfcFlowLabels: "persist",
-      });
 
     /** Seed `cause` as a plain document declaring no store policy. */
     const seedUndeclaredTarget = async (

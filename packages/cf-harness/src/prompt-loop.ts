@@ -3936,6 +3936,7 @@ export class CfHarnessPromptLoop {
         rawCauseMessage: _rawCauseMessage,
         pieceId: _pieceId,
         resultRefSchema: _resultRefSchema,
+        releaseObservation: _releaseObservation,
         ...publicOutput
       } = output;
       const scrubbed: Record<string, unknown> = { ...publicOutput };

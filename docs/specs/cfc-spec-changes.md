@@ -334,6 +334,43 @@ logical path past what that field declares. That is over-taint, so reads stay
 protected, and giving the envelope seam its own path space is the fix. Shares
 the meta-seam predicate with the schema write-policy requirement (#6077).
 
+A second narrowing follows the same rule over a document rather than a path.
+A computed cell is the derived internal cell the runtime materializes to hold
+a derivation's result, addressed under its own URI scheme
+(`computed:fid1:<hash>`). No author declares a store policy on one — a
+pattern names the data it declares policy on, and does not name the
+intermediates the reactive graph materializes for it — so its ceiling is the
+empty one, and measuring it refuses every derivation that reads labeled data
+and writes its result. That is ordinary reactive computation, so the refusal
+reaches product flows and not only tests. The id class is outside the check
+at every rung, through the same predicate the meta seam uses, and the skip is
+scoped to a join the target's own space produced: the join records the space
+each contributing document lived in, and a computed target whose join drew a
+clause from elsewhere is measured like any other document. The residency half
+of the ceiling therefore still holds for the direction it was written for,
+while a derivation over its own space's data proceeds — within one space the
+source and the computed cell share a replica set.
+
+Nothing is laundered here either. The join still lands on the computed
+document as its `derived` component, so a later read of it is tainted and a
+later write of what it read misfits on the original clause. What the
+exemption gives up is a refusal that was doing an egress gate's work by
+accident: a value derived from labeled data now lands, and whether it may
+LEAVE is the sink's question. Where the host is the one releasing — a tool
+answering a model with what a piece computed — there is no sink request to
+record and no commit to gate, so the release is measured directly: read what
+is about to be released through a transaction, and fit that transaction's
+consumed join to the destination's ceiling, which for a model's context is
+the empty one. `describeSinkReleaseRefusal` (runner `cfc/prepare.ts`) is that
+measurement, and it shares `atomsOutsideCeiling` and the refusal-detail
+construction with the in-commit sink gate, so a clause outside a ceiling on
+one route is outside it on the other. Two differences are worth recording:
+the host route measures what releasing the answer resolved rather than what a
+whole transaction consumed, and it applies no exchange-rule rewriting, so it
+refuses a clause a policy evaluation would have discharged. A residual stands where a declared entry did reach a
+computed document, from a schema-carrying write: it stops being a write
+ceiling there, and stays a read floor.
+
 (d) **[normative] Residency fit — the ceiling a document carries by living
 where it lives.** The fit measurement joins the target's declared policy with
 one RESIDENCY clause, `Space(<the space the document resides in>)`. A flow
