@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { FabricInstance } from "@commonfabric/data-model/fabric-value";
+import { FabricInstance } from "@commonfabric/data-model";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   applyPieceSourceTransition,

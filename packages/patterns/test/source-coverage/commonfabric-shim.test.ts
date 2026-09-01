@@ -36,10 +36,7 @@
 
 // The generated child import map resolves the transitive
 // `data-model`/`content-hash`/`leb128` graph these pull in.
-import {
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import { type FabricValue, valueEqual } from "@commonfabric/data-model";
 export { valueEqual };
 export {
   toCompactDebugString,

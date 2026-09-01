@@ -2,7 +2,7 @@ import {
   type FabricValue,
   isFabricPlainObject,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 
 import type {
   IExtendedStorageTransaction,

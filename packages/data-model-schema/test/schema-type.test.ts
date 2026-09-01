@@ -18,6 +18,7 @@ import {
   isFabricPrimitiveSchemaType,
 } from "@commonfabric/api";
 
+import type { FabricPrimitive } from "@commonfabric/data-model";
 import { BaseFabricPrimitive } from "@commonfabric/data-model/fabric-bases";
 import {
   codecClasses,
@@ -28,7 +29,6 @@ import {
   FabricKeyPair,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
-import type { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 
 import { schemaTypeOfFabricPrimitive } from "@/schemaTypeOfFabricPrimitive.ts";
 

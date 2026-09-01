@@ -1,10 +1,10 @@
-import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   cloneIfNecessary,
   fabricFromNativeValue,
   type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
+import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   toCompactDebugString,
   toStructuredDebugValue,

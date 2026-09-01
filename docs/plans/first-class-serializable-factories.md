@@ -174,8 +174,8 @@ Tests to port or extend:
 - [ ] Export only the minimum protocol surface needed by the runner and codec;
   do not expose `.curry` or state mutation to pattern authors.
 - [ ] Re-export the runner-facing protocol through
-  `packages/data-model/src/fabric-value.ts` without creating a dependency from
-  the data model back into the runner.
+  `packages/data-model/src/index.ts` without creating a dependency from the
+  data model back into the runner.
 
 Expected implementation files:
 

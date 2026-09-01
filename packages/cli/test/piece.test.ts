@@ -1,9 +1,9 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import { FabricSpecialObject } from "@commonfabric/data-model";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
 import { pieceId, SlugResolutionError } from "@commonfabric/piece";
 import {

@@ -4,6 +4,12 @@ import {
   type JSONSchemaObj,
   type SchemaPathSelector,
 } from "@commonfabric/api";
+import {
+  FabricInstance,
+  FabricPrimitive,
+  FabricSpecialObject,
+  type FabricValue,
+} from "@commonfabric/data-model";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
@@ -18,12 +24,6 @@ import {
   schemaTypeOfFabricPrimitive,
   schemaWithProperties,
 } from "@commonfabric/data-model-schema";
-import {
-  FabricInstance,
-  FabricPrimitive,
-  FabricSpecialObject,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";

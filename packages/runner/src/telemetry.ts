@@ -3,7 +3,7 @@
 // contexts to visualize or log events inside the runtime.
 
 import type { CfcRefusalDetail } from "./cfc/refusal-detail.ts";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 
 import { IMemoryChange } from "./storage/interface.ts";
 

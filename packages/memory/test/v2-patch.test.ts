@@ -17,12 +17,12 @@ import {
   assertThrows,
 } from "@std/assert";
 
+import { FabricInstance } from "@commonfabric/data-model";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
-import { FabricInstance } from "@commonfabric/data-model/fabric-value";
 
 import { applyPatch, applyPatchToDocument } from "../v2/patch.ts";
 

@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Database } from "@db/sqlite";
+import type { FabricValue } from "@commonfabric/data-model";
 import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
 import type { LinkWalkBounds } from "@commonfabric/state-inspector";
 

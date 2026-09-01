@@ -1,11 +1,5 @@
 import type { ReadonlyCell } from "@commonfabric/api";
 import {
-  type EntityRef,
-  entityRefFromString,
-  linkRefFrom,
-} from "@commonfabric/data-model/cell-rep";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import {
   assertValidFabricValueLayer,
   cloneIfNecessary,
   type FabricConvertibleValue,
@@ -19,7 +13,13 @@ import {
   shallowCleanPlainObject,
   shallowFabricFromNativeObjectElseUndefined,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
+import {
+  type EntityRef,
+  entityRefFromString,
+  linkRefFrom,
+} from "@commonfabric/data-model/cell-rep";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,

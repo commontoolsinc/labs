@@ -9,13 +9,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import type { FabricInstance } from "@commonfabric/data-model";
 import { UnknownValue } from "@commonfabric/data-model/codec-common";
 import {
   FabricError,
   FabricMap,
 } from "@commonfabric/data-model/fabric-instances";
-
-import type { FabricInstance } from "@commonfabric/data-model/fabric-value";
 
 import { refuseFabricInstance } from "../src/fabric-special-object.ts";
 

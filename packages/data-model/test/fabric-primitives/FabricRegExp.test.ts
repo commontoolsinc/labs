@@ -27,7 +27,7 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import {
   isValidFabricConvertibleValue,
   shallowFabricFromNativeValue,
-} from "@/fabric-value.ts";
+} from "@/index.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 import { isValidFabricNativeObject } from "@/type-check.ts";
 import { tagFromNativeClass, tagFromNativeValue } from "@/native-type-tags.ts";

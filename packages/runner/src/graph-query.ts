@@ -13,7 +13,7 @@
  * the traversal's internals.
  */
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import { internPathSelector } from "@commonfabric/data-model-schema";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { ScopeKey, ScopeKeyIdentity } from "@commonfabric/memory/v2";

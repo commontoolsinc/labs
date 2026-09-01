@@ -1,7 +1,7 @@
 import { createSession, DID, Identity, Session } from "@commonfabric/identity";
 import { CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc";
+import type { FabricPlainObject } from "@commonfabric/data-model";
 import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
-import type { FabricPlainObject } from "@commonfabric/data-model/fabric-value";
 import { navigate } from "@commonfabric/navigation";
 import { slugIdForSpace } from "@commonfabric/runner/slugs";
 import { NameSchema } from "@commonfabric/runner/schemas";

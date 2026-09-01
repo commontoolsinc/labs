@@ -1,15 +1,15 @@
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import {
-  combineSchemaForLink,
-  resolveSchemaRefsCanonical,
-} from "./traverse.ts";
 import {
   fabricFromNativeValue,
   FabricInstance,
   type FabricValue,
   nativeFromFabricValue,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import {
+  combineSchemaForLink,
+  resolveSchemaRefsCanonical,
+} from "./traverse.ts";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { hashOf, hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";

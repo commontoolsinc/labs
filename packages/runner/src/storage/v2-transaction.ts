@@ -1,10 +1,7 @@
 import type { FabricValue } from "@commonfabric/api";
+import { cloneIfNecessary, valueEqual } from "@commonfabric/data-model";
 import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import {
-  cloneIfNecessary,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
 import {
   canResolveScopeKey,
   type CommitPrecondition,

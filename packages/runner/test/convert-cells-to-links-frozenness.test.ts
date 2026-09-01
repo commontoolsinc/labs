@@ -11,9 +11,9 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import type { FabricConvertibleValue } from "@commonfabric/data-model";
 import { isLinkRef, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import type { FabricConvertibleValue } from "@commonfabric/data-model/fabric-value";
 import {
   FabricBytes,
   FabricEpochNsec,

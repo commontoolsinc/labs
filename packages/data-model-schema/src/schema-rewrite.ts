@@ -5,7 +5,7 @@ import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import {
   type FabricValue,
   shallowMutableClone,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import { internSchema, isInternedSchema } from "./schema-intern.ts";
 import { toDeepFrozenSchema } from "./schema-copy.ts";
 

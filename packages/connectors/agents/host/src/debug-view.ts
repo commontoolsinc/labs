@@ -5,10 +5,7 @@ import {
   cellHasOwnerProtection,
   stableCellId,
 } from "@commonfabric/agents-connector/fabric-graph";
-import type {
-  FabricPlainObject,
-  FabricValue,
-} from "@commonfabric/data-model/fabric-value";
+import type { FabricPlainObject, FabricValue } from "@commonfabric/data-model";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { pieceId } from "@commonfabric/piece";
 import type { PiecesController } from "@commonfabric/piece/ops";

@@ -11,15 +11,12 @@
  * what the protocol module is for.
  */
 
+import { type FabricValue, isValidFabricValue } from "@commonfabric/data-model";
 import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import type { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
-import {
-  type FabricValue,
-  isValidFabricValue,
-} from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type { Cell } from "@commonfabric/runner";
 import {

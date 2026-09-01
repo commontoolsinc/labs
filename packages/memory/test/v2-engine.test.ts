@@ -6,12 +6,12 @@ import {
 } from "@std/assert";
 import { toFileUrl } from "@std/path";
 
+import type { FabricValue } from "@commonfabric/data-model";
 import {
   type EntityRef,
   entityRefFromString,
   LINK_V1_TAG,
 } from "@commonfabric/data-model/cell-rep";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Database } from "@db/sqlite";
 
 import {

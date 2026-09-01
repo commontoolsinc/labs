@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 
 import type { JSONSchemaTypes } from "@commonfabric/api";
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {

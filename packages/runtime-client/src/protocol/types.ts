@@ -1,13 +1,13 @@
 import type { MetaField } from "@commonfabric/runner";
 import type {
-  FabricBytes,
-  FabricKeyPair,
-} from "@commonfabric/data-model/fabric-primitives";
-import type {
   FabricArray,
   FabricPlainObject,
   FabricValue,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
+import type {
+  FabricBytes,
+  FabricKeyPair,
+} from "@commonfabric/data-model/fabric-primitives";
 import type { DID } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
 import type {

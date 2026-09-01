@@ -5,11 +5,8 @@
  * for interacting with cells across the worker boundary.
  */
 
+import type { FabricPlainObject, FabricValue } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import type {
-  FabricPlainObject,
-  FabricValue,
-} from "@commonfabric/data-model/fabric-value";
 import type { DID, Identity } from "@commonfabric/identity";
 import { Program } from "@commonfabric/js-compiler/interface";
 import type {

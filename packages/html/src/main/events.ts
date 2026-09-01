@@ -8,7 +8,7 @@
 import {
   type FabricValue,
   isValidFabricValueLayer,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import type { SigilLink } from "@commonfabric/runner/shared";
 import { isCellHandle } from "@commonfabric/runtime-client";
 import {

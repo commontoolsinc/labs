@@ -1,9 +1,12 @@
 /**
- * This module is the canonical public surface for the `FabricValue` types: the
- * type declarations, the `FabricInstance` base class, and the functions that
- * operate on them. Those are spread across several modules, not all of which
- * the package exports on their own, and a caller should not have to know which
- * is which.
+ * This module is the package's main entry point, and the canonical public
+ * surface for the `FabricValue` types: the type declarations, the
+ * `FabricInstance` base class, and the functions that operate on them. Those
+ * are spread across several modules, not all of which the package exports on
+ * their own, and a caller should not have to know which is which. The rest of
+ * the package -- the codec system, the concrete value classes, the hash and
+ * debug utilities -- is reached through the exported subpaths named in
+ * `deno.jsonc`, not through here.
  */
 
 // Re-export everything from `interface.ts`, which declares the types and the

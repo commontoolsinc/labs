@@ -77,15 +77,16 @@ wrapper classes (Section 1.4).
 > **Where a thing is declared is not where it is imported from**, and the
 > modules named here divide on that point. `interface.ts` and
 > `native-conversion.ts` are internal: they are not exported subpaths, and their
-> contents are reached through `@commonfabric/data-model/fabric-value`, which
-> re-exports them. `codec-interface/` is internal in the same way: it is reached
-> through `@commonfabric/data-model/codec-common`, which re-exports it.
-> `codec-common/`, `fabric-bases/` and `fabric-instances/` are exported subpaths
-> in their own right and are imported directly under those names; `fabric-value`
-> does *not* re-export the codec vocabulary, so `LiveEnvironment` and its
-> siblings come from `@commonfabric/data-model/codec-common`. Cite a module to
-> say where something is defined; consult the package's `exports` map to know
-> where to import it from.
+> contents are reached through `@commonfabric/data-model`, the package's main
+> entry point, which re-exports them. `codec-interface/` is internal in the same
+> way: it is reached through `@commonfabric/data-model/codec-common`, which
+> re-exports it. `codec-common/`, `fabric-bases/` and `fabric-instances/` are
+> exported subpaths in their own right and are imported directly under those
+> names; the main entry point does *not* re-export the codec vocabulary, so
+> `LiveEnvironment` and its siblings come from
+> `@commonfabric/data-model/codec-common`. Cite a module to say where something
+> is defined; consult the package's `exports` map to know where to import it
+> from.
 >
 > Type declarations visible to patterns are in
 > `packages/data-model/src/api.ts` (the `interface` + `declare const` pattern),
@@ -96,7 +97,7 @@ wrapper classes (Section 1.4).
 
 ```typescript
 // Shown at module scope.
-// file: packages/data-model/fabric-value.ts
+// file: packages/data-model/index.ts
 
 /**
  * The complete set of values that can flow through the runtime, be stored
@@ -229,7 +230,7 @@ native JS object types that the conversion layer can handle:
 
 ```typescript
 // Shown at module scope.
-// file: packages/data-model/fabric-value.ts
+// file: packages/data-model/index.ts
 
 /**
  * Union of raw native JS object types that the conversion layer can translate
@@ -2199,7 +2200,7 @@ codec system can round-trip it back to a real `Temperature` instance.
 
 import {
   type FabricValue,
-} from '@commonfabric/data-model/fabric-value';
+} from '@commonfabric/data-model';
 import {
   CODEC,
   BaseNonterminalCodec,
@@ -3202,7 +3203,7 @@ the left layer (JS wild west) and the middle layer (`FabricValue`) at the
 The module also provides a shallow conversion function
 (`shallowFabricFromNativeValue()`) and a type-check function
 (`isValidFabricConvertibleValue()`). The public surface is re-exported from
-`fabric-value.ts`, which also defines the comparison function `valueEqual()`.
+`index.ts`, which also defines the comparison function `valueEqual()`.
 
 ```typescript
 // Shown for illustration only.
@@ -3244,7 +3245,7 @@ The implementation is split across several files for separation of concerns:
 
 | File | Purpose |
 |------|---------|
-| `fabric-value.ts` | Public surface: re-exports the conversion functions (from `native-conversion.ts`), the type declarations (from `interface.ts`), and the clone helpers (from `value-clone.ts`); defines `valueEqual()` |
+| `index.ts` | Public surface: re-exports the conversion functions (from `native-conversion.ts`), the type declarations (from `interface.ts`), and the clone helpers (from `value-clone.ts`); defines `valueEqual()` |
 | `native-conversion.ts` | Conversion: `fabricFromNativeValue`, `shallowFabricFromNativeValue`, `nativeFromFabricValue`, `isValidFabricConvertibleValue` |
 | `fabric-bases/` | The abstract bases a concrete `FabricValue` extends, one per branch of the type hierarchy: `BaseFabricInstance.ts`, `BaseFabricPrimitive.ts` (plus an `index.ts` barrel). These are the implementer's half of the hierarchy; `interface.ts` is the client's, and reaching it does not reach these. |
 | `fabric-instances/` | Concrete `FabricInstance` subclasses, each in its own file: `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricLink.ts`, `FabricMap.ts`, `FabricSet.ts` (plus an `index.ts` barrel). `UnknownValue` and `ProblematicValue` are `FabricInstance`s too, but live in `codec-common/`, existing only as products of a decode fault. |

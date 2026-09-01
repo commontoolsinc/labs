@@ -66,6 +66,12 @@ import type {
 import { toSchema } from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
 import type {
+  FabricInstance,
+  FabricPrimitive,
+  FabricSpecialObject,
+  valueEqual,
+} from "@commonfabric/data-model";
+import type {
   FabricError,
   FabricLink,
 } from "@commonfabric/data-model/fabric-instances";
@@ -77,12 +83,6 @@ import type {
   FabricKeyPair,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
-import type {
-  FabricInstance,
-  FabricPrimitive,
-  FabricSpecialObject,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
 import type {
   toCompactDebugString,
   toIndentedDebugString,

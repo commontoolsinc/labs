@@ -19,7 +19,7 @@
 // Pure module: no FFI, no engine imports — safe for client-side import.
 
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
-import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model/fabric-value";
+import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 /** A reference to a declared column, handed to the rule as `f.<col>`. */

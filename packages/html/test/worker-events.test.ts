@@ -3,9 +3,9 @@
  */
 
 import { assertEquals, assertThrows } from "@std/assert";
+import type { FabricValue } from "@commonfabric/data-model";
 import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   $conn,
   CellHandle,

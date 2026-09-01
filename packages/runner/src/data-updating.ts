@@ -5,8 +5,6 @@ import {
   type ScopeKeyIdentity,
 } from "@commonfabric/memory/v2";
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { isFabricDataUri } from "@commonfabric/data-model/data-uri-codec";
 import {
   assertValidFabricValueLayer,
   cloneIfNecessary,
@@ -15,7 +13,9 @@ import {
   FabricSpecialObject,
   type FabricValue,
   shallowFabricFromNativeObjectElseUndefined,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
+import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import { isFabricDataUri } from "@commonfabric/data-model/data-uri-codec";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getLogger } from "@commonfabric/utils/logger";

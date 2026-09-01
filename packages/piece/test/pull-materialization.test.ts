@@ -1,11 +1,11 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import type { FabricValue } from "@commonfabric/data-model";
 import {
   entityRefToString,
   linkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { createSession, Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
