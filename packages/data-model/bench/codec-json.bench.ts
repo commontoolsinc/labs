@@ -33,7 +33,7 @@ import {
   SPARSE,
 } from "./fixtures/codec-fixtures.ts";
 
-/** Encoded forms, for the decode direction. */
+/** Encoded forms of the singles, for the decode direction. */
 const SINGLES_JSON = SINGLES.map(([n, v]) =>
   [n, jsonFromFabricValue(v)] as const
 );

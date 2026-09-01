@@ -44,7 +44,7 @@ import {
   type ScopedEntity,
 } from "./fingerprint.ts";
 
-/** Filenames the layout depends on. */
+/** Manifest filename the layout depends on. */
 const MANIFEST = "clone.json";
 
 /**

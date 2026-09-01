@@ -810,6 +810,7 @@ export class WaveAccumulator
     string,
     "owner" | "creation" | "acl"
   >();
+
   readonly #onForeignWriteRefusal:
     | ((info: { space: MemorySpace; actionId?: string }) => void)
     | undefined;

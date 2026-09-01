@@ -34,6 +34,7 @@ export interface ConsoleFlowCell {
   token?: string;
   ref?: string;
   slug?: string;
+
   /** The step whose result minted it. */
   producedByStep?: number;
 
@@ -74,10 +75,10 @@ export interface ConsoleFlowNode {
   /** What CFC decided about the observation. */
   policyDecision?: string;
 
-  /** Whether that decision refused it. */
+  /** Whether a policy event refused it. */
   policyDenied?: boolean;
 
-  /** What the decision said, where it said more than its verdict. */
+  /** What that refusal said, where it said more than the fact of it. */
   policyDetail?: string;
 
   /** Cells this call read. */

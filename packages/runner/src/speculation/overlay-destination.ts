@@ -310,29 +310,32 @@ export class SpeculationOverlayDestination
    * not enact. */
   readonly #droppedLateEchoTxs = new WeakSet<object>();
 
-  /** DIAGNOSTIC counters (tests). */
+  /** DIAGNOSTIC counter (tests): sweeps the ARRIVAL wake ran. */
   #arrivalSweeps = 0;
 
+  /** DIAGNOSTIC counter (tests): late echoes dropped at seal. */
   #lateEchoDrops = 0;
 
   /** Stage C W2.1: cascade-child echoes retired because an ANCESTOR
    * intent's terminal consequence arrived (`retireIntent` walked the
-   * cascade thread to them), and the subset retired while NO doc they
-   * wrote had yet moved past their read basis in the replica — the
-   * flicker witness (see `retireIntent`). */
+   * cascade thread to them). */
   #cascadeEchoRetirements = 0;
 
+  /** The subset of those retired while NO doc they wrote had yet moved
+   * past their read basis in the replica — the flicker witness; see
+   * `cascadeEchoRetirementUnarrivedCount` for the heuristic it uses. */
   #cascadeEchoRetirementsUnarrived = 0;
 
-  /** F6 telemetry (combined review 2026-08-19): the silent-strand
-   * distinguishers. A `#cascadeParents` eviction at the 4096 bound, or
-   * an ancestry walk stopped at the 64-hop depth cap with chain
-   * remaining, makes a live descendant read as "no ancestor" — the
-   * walk gives up and the entry strands exactly like the pre-W2.1
-   * posture, with nothing else to see. Zero in every expected
-   * workload; nonzero is the signal to look. */
+  /** F6 telemetry (combined review 2026-08-19): one of the two
+   * silent-strand distinguishers, counting `#cascadeParents` evictions
+   * at the 4096 bound. Either distinguisher makes a live descendant read
+   * as "no ancestor" — the walk gives up and the entry strands exactly
+   * like the pre-W2.1 posture, with nothing else to see. Zero in every
+   * expected workload; nonzero is the signal to look. */
   #cascadeThreadEvictions = 0;
 
+  /** The other silent-strand distinguisher: an ancestry walk stopped at
+   * the 64-hop depth cap with chain remaining. */
   #cascadeWalkDepthCaps = 0;
 
   /** space -> last observed watermark (for registration-time sweeps). */
@@ -370,12 +373,21 @@ export class SpeculationOverlayDestination
    * built, shifts the tail down), so a hint is never trusted unread. */
   readonly #intentSidecarStates = new Map<string, { hints: Set<number> }>();
 
-  /** DIAGNOSTIC counters (tests; the `commonfabric.*` surface reads the
-   * logger keys — `speculation-overlay/intent-*`). */
+  /** DIAGNOSTIC counter (tests): intent checks run. The `commonfabric.*`
+   * surface reads none of these counters; it reads the logger keys —
+   * `speculation-overlay/intent-*`. */
   #intentCheckCount = 0;
 
+  /** DIAGNOSTIC counter (tests): sidecar entries visited across all
+   * checks. */
   #intentCheckVisits = 0;
+
+  /** DIAGNOSTIC counter (tests): the largest single check's visit
+   * count. */
   #intentCheckMaxVisits = 0;
+
+  /** DIAGNOSTIC counter (tests): times the intent listener was
+   * installed. */
   #intentListenerInstalls = 0;
 
   /** Subscribers to terminal intent outcomes — the events.md §5 "the
@@ -395,6 +407,7 @@ export class SpeculationOverlayDestination
     string,
     Array<(outcome: IntentConsequence) => void>
   >();
+
   readonly #intentConsequenceMemo = new Map<string, IntentConsequence>();
 
   /** Resolvers parked by `waitForIntentQuiescence`, flushed by the same

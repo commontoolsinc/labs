@@ -191,6 +191,7 @@ export class EventAppendQueue {
     QueuedEventAppend,
     (outcome: EventAppendOutcome) => void
   >();
+
   #clientSeq = 0;
   #draining = false;
   #closed = false;
@@ -201,10 +202,12 @@ export class EventAppendQueue {
    * pending forever, wedging dispose-time sanitizers). */
   #retryRelease: (() => void) | undefined;
 
-  /** OW27 pacing: the per-stream token buckets (keyed by sidecar doc id
-   * — one per stream), or undefined when pacing is disabled. */
+  /** OW27 pacing: the rate and burst the buckets refill on, or undefined
+   * when pacing is disabled. */
   readonly #pacing: EventAppendPacing | undefined;
 
+  /** The per-stream token buckets, keyed by sidecar doc id — one per
+   * stream. */
   readonly #buckets = new Map<string, { tokens: number; refilledAt: number }>();
 
   /** DIAGNOSTIC (tests): sends held by pacing so far. */
