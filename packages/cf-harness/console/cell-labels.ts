@@ -53,6 +53,7 @@ export interface ConsoleCellLabelEntry {
    * for showing, and belongs to whoever shows it.
    */
   path: readonly string[];
+
   confidentiality: readonly string[];
   integrity: readonly string[];
   origin?: string;

@@ -31,9 +31,12 @@ export interface ConsoleGraphNode {
   /** The step this node first appeared at. */
   atStep: number;
 
-  /** For a pattern: how the call turned out, and what CFC said about it. */
+  /** For a pattern: how the call turned out. */
   status?: ConsoleStep["status"];
+
+  /** For a pattern: what CFC said about it. */
   policyDecision?: string;
+
   disclosure?: ConsoleDisclosure;
 
   /** For a pattern run from the index rather than from fresh source. */
