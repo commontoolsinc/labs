@@ -259,10 +259,12 @@ The registry value around the list is written out here rather than reused from
 type, which is where the schema records them, and `AdminRegistryValue<Role>`
 fixes that field as `readonly Role[]`: the element type is yours to choose, and
 the array around it is not, so there is no `Role` that puts a contract on the
-list. A registry also tends to want fields the shared value does not have, such
-as a bootstrap role and an `everyoneIsAdmin` flag that carries a write binding
-of its own. Every pattern that floors a registry declares its own for those two
-reasons.
+list. The other two fields go the same way. `everyoneIsAdmin` is there, as a
+plain `boolean`, which is the one form that cannot name the handler allowed to
+flip it, so a pattern holding that flag to one write binding declares it again.
+A bootstrap role, the first grant made while the roster is still open, has no
+field at all. Every pattern that floors a registry declares its own value for
+those reasons.
 
 ```ts
 // Shown at module scope.
