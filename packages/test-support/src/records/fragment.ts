@@ -12,9 +12,11 @@ import { join } from "@std/path";
 import { serializeRecordLine, type TestRecord } from "./schema.ts";
 import { type Environment, recordsDir } from "./paths.ts";
 
-/** Fragment files are `fragment-<ulid>.ndjson` inside the spool. */
+/** Leading half of a fragment file's name: `fragment-<ulid>.ndjson` inside
+ * the spool. */
 export const FRAGMENT_PREFIX = "fragment-";
 
+/** The extension that completes that name. */
 export const FRAGMENT_SUFFIX = ".ndjson";
 
 const encoder = new TextEncoder();

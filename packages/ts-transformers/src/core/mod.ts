@@ -198,8 +198,8 @@
  *      compiler itself structures NodeLinks: one private per-node struct, narrow
  *      public accessors, the table never handed out.
  */
-export { TransformationContext } from "./context.ts";
 
+export { TransformationContext } from "./context.ts";
 export { CrossStageState } from "./cross-stage-state.ts";
 export type {
   BuilderSourceSiteOptions,

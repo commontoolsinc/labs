@@ -424,17 +424,20 @@ export type QueryGraphReuseContext = {
   managers?: Map<string, EngineObjectManager>;
 };
 
+/** Source of fresh ids for {@link canonicalSelectorId}. */
+let nextCanonicalSelectorId = 0;
+
+/** Ids already issued, keyed by canonical (interned) selector instance. */
+const canonicalSelectorIds = new WeakMap<SchemaPathSelector, number>();
+
 /**
- * Canonical selector identity for evaluation-cache keys. Interning gives
- * structurally equal selectors one canonical instance
+ * Returns the canonical selector identity for evaluation-cache keys.
+ * Interning gives structurally equal selectors one canonical instance
  * (`internPathSelector`), so reference identity is structural equality and
  * the id is exact. Canonical instances are weakly held, so an id can lapse
  * with its selector and a re-interned equal reappears under a fresh id —
  * that costs a cache miss, never a wrong hit.
  */
-let nextCanonicalSelectorId = 0;
-
-const canonicalSelectorIds = new WeakMap<SchemaPathSelector, number>();
 const canonicalSelectorId = (selector: SchemaPathSelector): number => {
   const interned = internPathSelector(selector);
   let id = canonicalSelectorIds.get(interned);
@@ -479,6 +482,7 @@ export type QueryEvaluationCacheDiagnostics = {
 
   misses: number;
   rotations: number;
+
   /** Serves of a scope-pure entry (identical for every identity). */
   hitsPure: number;
 
@@ -581,7 +585,8 @@ export type QueryEvaluationCache = {
   /** Evaluations that found no usable entry. */
   misses: number;
 
-  /** Times the cache was rotated out for a newer engine seq. */
+  /** Times the cache was rotated out — a newer engine seq, or a different
+   * engine object for the same space. */
   rotations: number;
 };
 

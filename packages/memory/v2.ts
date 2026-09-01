@@ -455,6 +455,7 @@ export type DeliveryDeferral = {
   activeFailureStartedAt?: number;
   state: "failed" | "recovering";
   recoveryEpoch?: string;
+
   /** Positive versioned producer evidence that this failure is permanent. */
   permanentEvidence?: true;
 };
@@ -529,10 +530,13 @@ export type StreamEventEntry = {
    * (events.md §5). */
   error?: string;
 
-  /** Processing-side: the dropped-event notice (events.md §5 T7) —
-   * `{ status: "dropped", reason }` on the entry itself. */
+  /** Processing-side: how the entry ended, where it did not simply run.
+   * `"dropped"` is the dropped-event notice (events.md §5 T7);
+   * `"needs-attention"` has its detail in `attention` below. */
   status?: "dropped" | "needs-attention";
 
+  /** The dropped-event notice's reason, the other half of
+   * `{ status: "dropped", reason }` on the entry itself. */
   reason?: string;
 
   /** Processing-side checkpoint. It is not a consequence and advances no
@@ -920,6 +924,7 @@ export type OperationFieldSnapshot = OperationFieldAddress & {
   baselineHash: string;
   materialized: FabricValue;
   operations: IntegratedOperation[];
+
   /** Lowest cursor from which the retained integrated suffix is contiguous. */
   retainedFrom?: OpCursor;
 
@@ -1584,6 +1589,7 @@ export type SqliteNativeRow = Record<string, FabricValue>;
 
 export type SqliteQueryResult = {
   rows: SqliteNativeRow[];
+
   /** Per-result-column origin, present ONLY when the db needs provenance for
    *  CFC labeling — any column declares `ifc` (Phase 2) or any table declares
    *  a per-row label rule (Phase 3); see `dbNeedsColumnProvenance`. An aliased

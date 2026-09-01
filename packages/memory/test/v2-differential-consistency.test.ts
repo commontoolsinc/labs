@@ -121,8 +121,8 @@ interface ScheduleStats {
   pendingReadAccepts: number;
 
   /** Sparsely-mutated pending reads the schedule accepted. Both this and
-   * `sparseRejects` must stay non-zero for the declared-set exclusion to keep
-   * differential coverage (see the vacuity guard). */
+   * `sparseRejects` must stay at five or more for the declared-set exclusion
+   * to keep differential coverage — the floor the vacuity guard enforces. */
   sparseAccepts: number;
 
   /** The same, for the ones it rejected. */
