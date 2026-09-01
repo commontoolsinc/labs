@@ -11,7 +11,27 @@ import { expect } from "@std/expect";
 
 import { IndexTrackingStack } from "../src/index-tracking-stack.ts";
 
-/** Distinct objects, as many as a test asks for. */
+/**
+ * The marks the class arranges itself around, which a test has to straddle.
+ */
+const MARKS = IndexTrackingStack.accessForTestingOnly;
+
+/** How tall a stack has to be for the index to have been built. */
+const TALL = MARKS.ADD_INDEX_AT + 5;
+
+/** The two lookups, and which position of a repeated value each reports. */
+const LOOKUPS = [
+  { name: "indexOf", reports: "lowest" },
+  { name: "lastIndexOf", reports: "highest" },
+] as const;
+
+/**
+ * The two states a lookup can be answered from, as the height a stack is
+ * padded to before a case's own values go onto it.
+ */
+const ARMS = [["scanning", 0], ["indexed", TALL]] as const;
+
+/** Distinct objects, as many as asked for. */
 function objects(count: number): object[] {
   const out: object[] = [];
 
@@ -21,25 +41,17 @@ function objects(count: number): object[] {
 }
 
 /**
- * The marks the class arranges itself around, which a test has to straddle.
+ * A stack padded to `height` with distinct objects and then given `values`.
+ *
+ * The lookup between the two is what makes the indexed arm indexed *before*
+ * the values arrive, so that they go in through the maintenance path rather
+ * than being swept up by a later build. Which of the three sites keys a value
+ * is the thing most easily left untested here.
  */
-const MARKS = IndexTrackingStack.accessForTestingOnly;
-
-/** How tall a stack has to be for the index to have been built. */
-const TALL = MARKS.ADD_INDEX_AT + 5;
-
-/**
- * A stack holding the given objects, padded first to `height` with distinct
- * objects of its own, so that one test body can be run on either side of the
- * threshold.
- */
-function stackOf(height: number, values: readonly object[]) {
-  const stack = new IndexTrackingStack<object>();
+function stackOf(height: number, values: readonly unknown[]) {
+  const stack = new IndexTrackingStack<unknown>();
 
   for (const filler of objects(height)) stack.push(filler);
-
-  // An index is built by a lookup, not by growth, so a padded stack is not an
-  // indexed one until something has asked it a position.
   stack.indexOf({});
 
   for (const value of values) stack.push(value);
@@ -70,14 +82,32 @@ describe("IndexTrackingStack", () => {
 
       expect(stack.depth).toBe(0);
     });
+
+    it("tells an empty stack from one holding an `undefined`", () => {
+      // `popElseUndefined()` cannot, which is what its doc says; this is what
+      // a caller uses instead.
+      const held = new IndexTrackingStack<unknown>();
+      const empty = new IndexTrackingStack<unknown>();
+
+      held.push(undefined);
+
+      expect(held.popElseUndefined()).toBeUndefined();
+      expect(empty.popElseUndefined()).toBeUndefined();
+      expect(held.depth).toBe(0);
+      expect(empty.depth).toBe(0);
+    });
   });
 
   describe("pop()", () => {
-    it("throws for an empty stack", () => {
+    it("throws given an empty stack", () => {
       expect(() => new IndexTrackingStack<object>().pop()).toThrow();
     });
 
-    it("returns the objects it pops, topmost first", () => {
+    it("throws given an empty stack whose domain holds `undefined`", () => {
+      expect(() => new IndexTrackingStack<unknown>().pop()).toThrow();
+    });
+
+    it("returns the values it pops, topmost first", () => {
       const held = objects(3);
       const stack = new IndexTrackingStack<object>();
 
@@ -89,13 +119,22 @@ describe("IndexTrackingStack", () => {
       expect(() => stack.pop()).toThrow();
     });
 
-    it("returns the objects it pops from an indexed stack", () => {
+    it("returns the values it pops from an indexed stack", () => {
       const held = objects(3);
       const stack = stackOf(TALL, held);
 
       expect(stack.pop()).toBe(held[2]);
       expect(stack.pop()).toBe(held[1]);
       expect(stack.pop()).toBe(held[0]);
+    });
+
+    it("pops an `undefined` that is really there", () => {
+      const stack = new IndexTrackingStack<unknown>();
+
+      stack.push(undefined);
+
+      expect(stack.pop()).toBeUndefined();
+      expect(stack.depth).toBe(0);
     });
   });
 
@@ -105,7 +144,7 @@ describe("IndexTrackingStack", () => {
         .toBeUndefined();
     });
 
-    it("returns the objects it pops, topmost first", () => {
+    it("returns the values it pops, topmost first", () => {
       const held = objects(2);
       const stack = new IndexTrackingStack<object>();
 
@@ -128,7 +167,7 @@ describe("IndexTrackingStack", () => {
   });
 
   describe("popExpect()", () => {
-    it("pops the object it was told to expect", () => {
+    it("pops the value it was told to expect", () => {
       const held = objects(2);
       const stack = new IndexTrackingStack<object>();
 
@@ -139,7 +178,7 @@ describe("IndexTrackingStack", () => {
       expect(stack.indexOf(held[1]!)).toBe(-1);
     });
 
-    it("throws for an object that is in the stack but not on top", () => {
+    it("throws given a value that is in the stack but not on top", () => {
       const held = objects(2);
       const stack = new IndexTrackingStack<object>();
 
@@ -148,7 +187,7 @@ describe("IndexTrackingStack", () => {
       expect(() => stack.popExpect(held[0]!)).toThrow();
     });
 
-    it("throws for an object the stack does not hold", () => {
+    it("throws given a value the stack does not hold", () => {
       const stack = new IndexTrackingStack<object>();
 
       stack.push({});
@@ -156,8 +195,15 @@ describe("IndexTrackingStack", () => {
       expect(() => stack.popExpect({})).toThrow();
     });
 
-    it("throws for an empty stack", () => {
+    it("throws given an empty stack", () => {
       expect(() => new IndexTrackingStack<object>().popExpect({})).toThrow();
+    });
+
+    it("throws given an empty stack rather than meeting an `undefined`", () => {
+      // The trap a parametric domain opens: reading past the bottom of an
+      // empty stack yields `undefined`, which would meet the expectation.
+      expect(() => new IndexTrackingStack<unknown>().popExpect(undefined))
+        .toThrow();
     });
 
     it("leaves the stack as it was when it throws", () => {
@@ -173,8 +219,6 @@ describe("IndexTrackingStack", () => {
     });
 
     it("maintains the index, given an indexed stack", () => {
-      // The successful arm has to be a real pop on either side of the
-      // threshold, index maintenance included.
       const twice = {};
       const stack = stackOf(TALL, [twice, {}, twice]);
 
@@ -184,212 +228,11 @@ describe("IndexTrackingStack", () => {
       expect(stack.lastIndexOf(twice)).toBe(TALL);
       expect(stack.indexOf(twice)).toBe(TALL);
     });
-  });
 
-  describe("indexOf() and lastIndexOf()", () => {
-    for (
-      const [where, height] of [["scanning", 0], ["indexed", TALL]] as const
-    ) {
+    for (const [where, height] of ARMS) {
       describe(where, () => {
-        it("reports -1 for an object it does not hold", () => {
-          const stack = stackOf(height, []);
-
-          expect(stack.indexOf({})).toBe(-1);
-          expect(stack.lastIndexOf({})).toBe(-1);
-        });
-
-        it("reports each object's position", () => {
-          const held = objects(4);
-          const stack = stackOf(height, held);
-
-          held.forEach((value, at) => {
-            expect(stack.indexOf(value)).toBe(height + at);
-            expect(stack.lastIndexOf(value)).toBe(height + at);
-          });
-        });
-
-        it("compares by identity rather than by value", () => {
-          const stack = stackOf(height, [{ same: 1 }]);
-
-          expect(stack.indexOf({ same: 1 })).toBe(-1);
-          expect(stack.lastIndexOf({ same: 1 })).toBe(-1);
-        });
-
-        it("reports -1 for an object that has been popped", () => {
-          const [kept, dropped] = objects(2) as [object, object];
-          const stack = stackOf(height, [kept, dropped]);
-
-          stack.pop();
-
-          expect(stack.indexOf(kept)).toBe(height);
-          expect(stack.indexOf(dropped)).toBe(-1);
-          expect(stack.lastIndexOf(dropped)).toBe(-1);
-        });
-
-        it("reports the lowest and the highest position of a repeated object", () => {
-          const twice = {};
-          const stack = stackOf(height, [twice, {}, twice]);
-
-          expect(stack.indexOf(twice)).toBe(height);
-          expect(stack.lastIndexOf(twice)).toBe(height + 2);
-        });
-
-        it("keeps the earlier position of a repeated object when the later one is popped", () => {
-          const twice = {};
-          const stack = stackOf(height, [twice, {}, twice]);
-
-          stack.pop();
-
-          expect(stack.indexOf(twice)).toBe(height);
-          expect(stack.lastIndexOf(twice)).toBe(height);
-        });
-
-        it("walks back through the positions of an object held three times", () => {
-          // Two occurrences would not tell a positions stack from a pair of
-          // numbers; three is where popping through them has to be in order.
-          const thrice = {};
-          const stack = stackOf(height, [thrice, {}, thrice, {}, thrice]);
-
-          expect(stack.indexOf(thrice)).toBe(height);
-          expect(stack.lastIndexOf(thrice)).toBe(height + 4);
-
-          stack.pop();
-          expect(stack.lastIndexOf(thrice)).toBe(height + 2);
-
-          stack.pop();
-          stack.pop();
-          expect(stack.lastIndexOf(thrice)).toBe(height);
-          expect(stack.indexOf(thrice)).toBe(height);
-        });
-
-        it("reports -1 once every position of a repeated object is popped", () => {
-          const twice = {};
-          const stack = stackOf(height, [twice, {}, twice]);
-
-          stack.pop();
-          stack.pop();
-          stack.pop();
-
-          expect(stack.indexOf(twice)).toBe(-1);
-          expect(stack.lastIndexOf(twice)).toBe(-1);
-        });
-      });
-    }
-  });
-
-  describe("a domain holding `undefined` and `NaN`", () => {
-    // What a parametric stack costs: `undefined` stops being a signal, and the
-    // scan and the index stop agreeing on their own. Each case runs on both
-    // sides of the threshold, since only one of the two is at issue in each.
-    for (
-      const [where, height] of [["scanning", 0], ["indexed", TALL]] as const
-    ) {
-      describe(where, () => {
-        /**
-         * A stack of the padded height, then the given values. The lookup
-         * between the two is what makes the indexed arm indexed *before* the
-         * values arrive, so that they go in through the maintenance path
-         * rather than being swept up by a later build.
-         */
-        function stackOfAny(values: readonly unknown[]) {
-          const stack = new IndexTrackingStack<unknown>();
-
-          for (const filler of objects(height)) stack.push(filler);
-          stack.indexOf({});
-
-          for (const value of values) stack.push(value);
-
-          return stack;
-        }
-
-        it("finds `undefined` where it was pushed", () => {
-          const stack = stackOfAny([undefined, {}, undefined]);
-
-          expect(stack.indexOf(undefined)).toBe(height);
-          expect(stack.lastIndexOf(undefined)).toBe(height + 2);
-        });
-
-        it("finds `NaN`, which strict comparison never would", () => {
-          const stack = stackOfAny([NaN, {}, NaN]);
-
-          expect(stack.indexOf(NaN)).toBe(height);
-          expect(stack.lastIndexOf(NaN)).toBe(height + 2);
-        });
-
-        it("finds `0` where `0` was pushed, and not where `-0` was", () => {
-          const stack = stackOfAny([-0, 0]);
-
-          expect(stack.indexOf(0)).toBe(height + 1);
-          expect(stack.lastIndexOf(0)).toBe(height + 1);
-        });
-
-        it("finds `-0` where `-0` was pushed, and not where `0` was", () => {
-          const stack = stackOfAny([0, -0]);
-
-          expect(stack.indexOf(-0)).toBe(height + 1);
-          expect(stack.lastIndexOf(-0)).toBe(height + 1);
-        });
-
-        it("holds `-0` and `0` apart across every position of each", () => {
-          const stack = stackOfAny([-0, 0, -0, 0]);
-
-          expect(stack.indexOf(-0)).toBe(height);
-          expect(stack.lastIndexOf(-0)).toBe(height + 2);
-          expect(stack.indexOf(0)).toBe(height + 1);
-          expect(stack.lastIndexOf(0)).toBe(height + 3);
-        });
-
-        it("does not find a `-0` for a `NaN`, nor either for the other", () => {
-          const stack = stackOfAny([NaN]);
-
-          expect(stack.indexOf(-0)).toBe(-1);
-          expect(stack.indexOf(0)).toBe(-1);
-          expect(stack.lastIndexOf(-0)).toBe(-1);
-        });
-
-        it("finds neither `0` nor `-0` in a stack holding neither", () => {
-          const stack = stackOfAny([1, {}]);
-
-          expect(stack.indexOf(0)).toBe(-1);
-          expect(stack.indexOf(-0)).toBe(-1);
-          expect(stack.lastIndexOf(0)).toBe(-1);
-          expect(stack.lastIndexOf(-0)).toBe(-1);
-        });
-
-        it("pops an expected `-0` and refuses an expected `0` for it", () => {
-          const stack = stackOfAny([-0]);
-
-          expect(() => stack.popExpect(0)).toThrow();
-          expect(stack.depth).toBe(height + 1);
-
-          stack.popExpect(-0);
-
-          expect(stack.depth).toBe(height);
-        });
-
-        it("pops an expected `0` and refuses an expected `-0` for it", () => {
-          const stack = stackOfAny([0]);
-
-          expect(() => stack.popExpect(-0)).toThrow();
-
-          stack.popExpect(0);
-
-          expect(stack.depth).toBe(height);
-        });
-
-        it("stops finding a popped `-0` while keeping a `0` below it", () => {
-          // The stand-in key the index gives `-0` has to come off with it, and
-          // to have been a different entry from the one `0` holds.
-          const stack = stackOfAny([0, -0]);
-
-          stack.pop();
-
-          expect(stack.indexOf(-0)).toBe(-1);
-          expect(stack.indexOf(0)).toBe(height);
-        });
-
         it("pops an expected `undefined` off the top", () => {
-          const stack = stackOfAny([undefined]);
+          const stack = stackOf(height, [undefined]);
 
           stack.popExpect(undefined);
 
@@ -397,49 +240,167 @@ describe("IndexTrackingStack", () => {
         });
 
         it("pops an expected `NaN` off the top", () => {
-          const stack = stackOfAny([NaN]);
+          const stack = stackOf(height, [NaN]);
 
           stack.popExpect(NaN);
 
           expect(stack.depth).toBe(height);
         });
+
+        it("pops an expected `-0` off the top", () => {
+          const stack = stackOf(height, [-0]);
+
+          stack.popExpect(-0);
+
+          expect(stack.depth).toBe(height);
+        });
+
+        it("throws given a `0` expected of a `-0` on top", () => {
+          const stack = stackOf(height, [-0]);
+
+          expect(() => stack.popExpect(0)).toThrow();
+          expect(stack.depth).toBe(height + 1);
+        });
+
+        it("pops an expected `0` off the top", () => {
+          const stack = stackOf(height, [0]);
+
+          stack.popExpect(0);
+
+          expect(stack.depth).toBe(height);
+        });
+
+        it("throws given a `-0` expected of a `0` on top", () => {
+          const stack = stackOf(height, [0]);
+
+          expect(() => stack.popExpect(-0)).toThrow();
+          expect(stack.depth).toBe(height + 1);
+        });
       });
     }
-
-    it("refuses `popExpect(undefined)` on an empty stack", () => {
-      // The trap the type parameter opens: reading past the bottom of an empty
-      // stack yields `undefined`, which would meet the expectation.
-      expect(() => new IndexTrackingStack<unknown>().popExpect(undefined))
-        .toThrow();
-    });
-
-    it("refuses `pop()` on an empty stack whose domain holds `undefined`", () => {
-      expect(() => new IndexTrackingStack<unknown>().pop()).toThrow();
-    });
-
-    it("pops an `undefined` that is really there", () => {
-      const stack = new IndexTrackingStack<unknown>();
-
-      stack.push(undefined);
-
-      expect(stack.pop()).toBeUndefined();
-      expect(stack.depth).toBe(0);
-    });
-
-    it("leaves `depth` to tell an empty stack from a held `undefined`", () => {
-      // `popElseUndefined()` cannot, which is what its doc says; this is what
-      // a caller uses instead.
-      const held = new IndexTrackingStack<unknown>();
-      const empty = new IndexTrackingStack<unknown>();
-
-      held.push(undefined);
-
-      expect(held.popElseUndefined()).toBeUndefined();
-      expect(empty.popElseUndefined()).toBeUndefined();
-      expect(held.depth).toBe(0);
-      expect(empty.depth).toBe(0);
-    });
   });
+
+  for (const lookup of LOOKUPS) {
+    describe(`${lookup.name}()`, () => {
+      /** The position of a repeated value this lookup reports, of two. */
+      const ofTwo = (first: number, last: number) =>
+        (lookup.reports === "lowest") ? first : last;
+
+      for (const [where, height] of ARMS) {
+        describe(where, () => {
+          it("reports -1 for a value it does not hold", () => {
+            const stack = stackOf(height, []);
+
+            expect(stack[lookup.name]({})).toBe(-1);
+          });
+
+          it("reports each value's position", () => {
+            const held = objects(4);
+            const stack = stackOf(height, held);
+
+            held.forEach((value, at) => {
+              expect(stack[lookup.name](value)).toBe(height + at);
+            });
+          });
+
+          it("compares by identity rather than by value", () => {
+            const stack = stackOf(height, [{ same: 1 }]);
+
+            expect(stack[lookup.name]({ same: 1 })).toBe(-1);
+          });
+
+          it("reports -1 for a value that has been popped", () => {
+            const [kept, dropped] = objects(2) as [object, object];
+            const stack = stackOf(height, [kept, dropped]);
+
+            stack.pop();
+
+            expect(stack[lookup.name](kept)).toBe(height);
+            expect(stack[lookup.name](dropped)).toBe(-1);
+          });
+
+          it(`reports the ${lookup.reports} position of a repeated value`, () => {
+            const twice = {};
+            const stack = stackOf(height, [twice, {}, twice]);
+
+            expect(stack[lookup.name](twice)).toBe(ofTwo(height, height + 2));
+          });
+
+          it("keeps the earlier position when the later one is popped", () => {
+            const twice = {};
+            const stack = stackOf(height, [twice, {}, twice]);
+
+            stack.pop();
+
+            expect(stack[lookup.name](twice)).toBe(height);
+          });
+
+          it("walks back through the positions of a value held three times", () => {
+            // Two occurrences would not tell a positions stack from a pair of
+            // numbers; three is where popping through them has to be in order.
+            const thrice = {};
+            const stack = stackOf(height, [thrice, {}, thrice, {}, thrice]);
+
+            expect(stack[lookup.name](thrice))
+              .toBe(ofTwo(height, height + 4));
+
+            stack.pop();
+            expect(stack[lookup.name](thrice))
+              .toBe(ofTwo(height, height + 2));
+
+            stack.pop();
+            stack.pop();
+            expect(stack[lookup.name](thrice)).toBe(height);
+          });
+
+          it("reports -1 once every position of a repeated value is popped", () => {
+            const twice = {};
+            const stack = stackOf(height, [twice, {}, twice]);
+
+            stack.pop();
+            stack.pop();
+            stack.pop();
+
+            expect(stack[lookup.name](twice)).toBe(-1);
+          });
+
+          it("finds `undefined` where it was pushed", () => {
+            const stack = stackOf(height, [undefined, {}, undefined]);
+
+            expect(stack[lookup.name](undefined))
+              .toBe(ofTwo(height, height + 2));
+          });
+
+          it("finds `NaN`, which strict comparison never would", () => {
+            const stack = stackOf(height, [NaN, {}, NaN]);
+
+            expect(stack[lookup.name](NaN)).toBe(ofTwo(height, height + 2));
+          });
+
+          it("holds `-0` and `0` apart across every position of each", () => {
+            const stack = stackOf(height, [-0, 0, -0, 0]);
+
+            expect(stack[lookup.name](-0)).toBe(ofTwo(height, height + 2));
+            expect(stack[lookup.name](0)).toBe(ofTwo(height + 1, height + 3));
+          });
+
+          it("does not find a zero of either sign for a `NaN`", () => {
+            const stack = stackOf(height, [NaN]);
+
+            expect(stack[lookup.name](-0)).toBe(-1);
+            expect(stack[lookup.name](0)).toBe(-1);
+          });
+
+          it("finds neither `0` nor `-0` in a stack holding neither", () => {
+            const stack = stackOf(height, [1, {}]);
+
+            expect(stack[lookup.name](0)).toBe(-1);
+            expect(stack[lookup.name](-0)).toBe(-1);
+          });
+        });
+      }
+    });
+  }
 
   describe("special values through an index that is already live", () => {
     // The build sweeps the whole stack, so a value pushed before it is keyed
@@ -486,6 +447,16 @@ describe("IndexTrackingStack", () => {
       expect(stack.indexOf(-0)).toBe(-1);
     });
 
+    it("pops a `NaN` off an indexed stack and stops finding it", () => {
+      const stack = indexedStack();
+
+      stack.push(NaN);
+      stack.pop();
+
+      expect(stack.indexOf(NaN)).toBe(-1);
+      expect(stack.indexOf(0)).toBe(TALL);
+    });
+
     it("sweeps a `-0` and a `0` into separate entries when the index is built", () => {
       // The other side of the same coin: a value already on the stack when
       // the index is built is keyed by the build loop rather than by `push()`,
@@ -511,16 +482,6 @@ describe("IndexTrackingStack", () => {
 
       expect(stack.indexOf(NaN)).toBe(0);
       expect(stack.indexOf(0)).toBe(1);
-    });
-
-    it("pops a `NaN` off an indexed stack and stops finding it", () => {
-      const stack = indexedStack();
-
-      stack.push(NaN);
-      stack.pop();
-
-      expect(stack.indexOf(NaN)).toBe(-1);
-      expect(stack.indexOf(0)).toBe(TALL);
     });
   });
 
@@ -548,9 +509,9 @@ describe("IndexTrackingStack", () => {
     });
 
     it("answers from the scan again once the index has been dropped", () => {
-      // Coming back down past `DROP_INDEX_BELOW` drops the index, so what
-      // is used afterwards is the scan -- over a stack that a `Map` was
-      // tracking a moment ago, and has to have stopped tracking cleanly.
+      // Coming back down past the low mark drops the index, so what is used
+      // afterwards is the scan -- over a stack that a `Map` was tracking a
+      // moment ago, and has to have stopped tracking cleanly.
       const twice = {};
       const stack = new IndexTrackingStack<object>();
 
@@ -584,8 +545,8 @@ describe("IndexTrackingStack", () => {
       expect(stack.lastIndexOf(twice)).toBe(1);
     });
 
-    it("carries both positions of an object already held twice into the index", () => {
-      // The index is built by grouping the stack as it stands, so an object
+    it("carries both positions of a value already held twice into the index", () => {
+      // The index is built by grouping the stack as it stands, so a value
       // already holding two positions is the case where that grouping has to
       // produce a pair rather than overwrite.
       const twice = {};
@@ -594,22 +555,10 @@ describe("IndexTrackingStack", () => {
       stack.push(twice);
       stack.push(twice);
       for (const filler of objects(TALL)) stack.push(filler);
+      stack.indexOf({});
 
       expect(stack.indexOf(twice)).toBe(0);
       expect(stack.lastIndexOf(twice)).toBe(1);
-    });
-
-    it("carries the objects already held into the index it builds", () => {
-      // The index is built from the stack as it stands, so what was pushed
-      // before the crossing has to arrive in it.
-      const early = {};
-      const stack = new IndexTrackingStack<object>();
-
-      stack.push(early);
-      for (const filler of objects(TALL)) stack.push(filler);
-
-      expect(stack.indexOf(early)).toBe(0);
-      expect(stack.lastIndexOf(early)).toBe(0);
     });
   });
 });
