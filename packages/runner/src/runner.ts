@@ -9707,6 +9707,15 @@ export function applyPieceSourceTransition(
   ) {
     throw new Error(PIECE_SOURCE_MOVED);
   }
+  const history = getPieceSourceRevisions(candidate);
+  if (
+    history.some((revision) => revision.revisionId === transition.revisionId)
+  ) {
+    throw new Error(
+      `piece source revision ID already exists: ` +
+        `\`${transition.revisionId}\``,
+    );
+  }
 
   const verifyRetainedPattern = (
     pattern: { identity: string; symbol: string },
@@ -9747,7 +9756,6 @@ export function applyPieceSourceTransition(
     }, rawMetaWriteAuthorization);
   }
 
-  const history = getPieceSourceRevisions(candidate);
   const recordedCurrent = history.at(-1);
   const currentOrigin = normalizePieceSourceOrigin(
     runtime,

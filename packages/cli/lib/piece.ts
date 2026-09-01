@@ -1520,7 +1520,7 @@ export async function setPiecePattern(
     undefined,
     resolvedConfig.pieceScope,
   );
-  return await piece.setPattern(
+  const receipt = await piece.setPattern(
     await (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
       pieces,
       entry,
@@ -1533,6 +1533,7 @@ export async function setPiecePattern(
     },
   );
   noteWroteTo(config.space);
+  return receipt;
 }
 
 /**

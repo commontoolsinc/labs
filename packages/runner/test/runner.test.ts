@@ -101,14 +101,26 @@ async function compileReceiptPattern(
   }, { space });
 }
 
+/** Returns the receipt fixture's durable or session-side source state. */
+function receiptSourceSnapshot(
+  runtime: Runtime,
+  resultCell: Cell<unknown>,
+) {
+  const snapshot = getPieceSourceSnapshot(
+    resultCell,
+    runtime.runner.sessionPatternPointerFor(resultCell),
+  );
+  if (snapshot === undefined) {
+    throw new Error("the receipt fixture has no source snapshot");
+  }
+  return snapshot;
+}
+
 async function receiptSourceTransition(
   runtime: Runtime,
   resultCell: Cell<unknown>,
 ): Promise<PieceSourceTransition> {
-  const expected = getPieceSourceSnapshot(resultCell);
-  if (expected === undefined) {
-    throw new Error("the receipt fixture has no source snapshot");
-  }
+  const expected = receiptSourceSnapshot(runtime, resultCell);
   return {
     revisionId: crypto.randomUUID(),
     baseline: await preparePieceSourceTransitionBaseline(
@@ -1807,8 +1819,7 @@ describe("setup/start", () => {
       initialPattern,
       {},
     );
-    const previous = getPatternIdentityRef(resultCell);
-    expect(previous).toBeDefined();
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
     const pieceSourceTransition = await receiptSourceTransition(
       runtime,
       resultCell,
@@ -1818,10 +1829,12 @@ describe("setup/start", () => {
       resultCell,
       nextPattern,
       {},
-      { expectedPatternIdentity: previous!, pieceSourceTransition },
+      { expectedPatternIdentity: previous, pieceSourceTransition },
     );
 
-    expect(result.commit.pattern).toEqual(getPatternIdentityRef(resultCell));
+    expect(result.commit.pattern).toEqual(
+      receiptSourceSnapshot(runtime, resultCell).pattern,
+    );
     expect(result.cell.get()).toEqual({ marker: "v2" });
   });
 
@@ -1837,8 +1850,7 @@ describe("setup/start", () => {
       initialPattern,
       {},
     );
-    const previous = getPatternIdentityRef(resultCell);
-    expect(previous).toBeDefined();
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
     const pieceSourceTransition = await receiptSourceTransition(
       runtime,
       resultCell,
@@ -1873,7 +1885,7 @@ describe("setup/start", () => {
           resultCell,
           nextPattern,
           {},
-          { expectedPatternIdentity: previous!, pieceSourceTransition },
+          { expectedPatternIdentity: previous, pieceSourceTransition },
         );
       } catch (error) {
         reported = error;
@@ -1883,7 +1895,7 @@ describe("setup/start", () => {
       const failure = reported as PatternSetupPostCommitError;
       expect(failure.cause).toBe(postCommitFailure);
       expect(failure.commit.pattern).toEqual(
-        getPatternIdentityRef(resultCell),
+        receiptSourceSnapshot(runtime, resultCell).pattern,
       );
     } finally {
       runner.syncCellsForRunningPattern = originalSync;
@@ -1903,8 +1915,7 @@ describe("setup/start", () => {
     );
     const executable = trustExecutable(runtime, pattern);
     await runtime.runSynced(resultCell, executable, {});
-    const previous = getPatternIdentityRef(resultCell);
-    expect(previous).toBeDefined();
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
 
     await expect(runtime.runSyncedWithCommit(
       resultCell,
@@ -1913,8 +1924,43 @@ describe("setup/start", () => {
       // JavaScript callers can bypass the required TypeScript field; the
       // runtime boundary must still refuse rather than minting a receipt for
       // the zero-write setup this exact fixture produces.
-      { expectedPatternIdentity: previous! } as never,
+      { expectedPatternIdentity: previous } as never,
     )).rejects.toThrow("requires a fresh source transition");
+  });
+
+  it("runSyncedWithCommit refuses a source revision ID already in history", async () => {
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit reused source revision",
+    );
+    const initialPattern = await compileReceiptPattern(runtime, "v1");
+    const secondPattern = await compileReceiptPattern(runtime, "v2");
+    const thirdPattern = await compileReceiptPattern(runtime, "v3");
+
+    await runtime.runSynced(resultCell, initialPattern, {});
+    const initial = receiptSourceSnapshot(runtime, resultCell);
+    const firstTransition = await receiptSourceTransition(runtime, resultCell);
+    await runtime.runSyncedWithCommit(resultCell, secondPattern, {}, {
+      expectedPatternIdentity: initial.pattern,
+      pieceSourceTransition: firstTransition,
+    });
+    const current = receiptSourceSnapshot(runtime, resultCell);
+    const reusedTransition = {
+      ...await receiptSourceTransition(runtime, resultCell),
+      revisionId: firstTransition.revisionId,
+    };
+
+    await expect(runtime.runSyncedWithCommit(
+      resultCell,
+      thirdPattern,
+      {},
+      {
+        expectedPatternIdentity: current.pattern,
+        pieceSourceTransition: reusedTransition,
+      },
+    )).rejects.toThrow("source revision ID already exists");
+    expect(receiptSourceSnapshot(runtime, resultCell)).toEqual(current);
+    expect(resultCell.get()).toEqual({ marker: "v2" });
   });
 
   it("runSyncedWithCommit refuses to issue a receipt while sealing into a wave", async () => {
@@ -1996,8 +2042,7 @@ describe("setup/start", () => {
       "runSyncedWithCommit sealing mid-call",
     );
     await serving.runSynced(resultCell, trustExecutable(serving, pattern), {});
-    const previous = getPatternIdentityRef(resultCell);
-    expect(previous).toBeDefined();
+    const previous = receiptSourceSnapshot(serving, resultCell).pattern;
 
     // Installed from the synchronization the call performs before it opens
     // its transaction, which is the window the entry check cannot see.
@@ -2025,7 +2070,7 @@ describe("setup/start", () => {
         trustExecutable(serving, pattern),
         {},
         {
-          expectedPatternIdentity: previous!,
+          expectedPatternIdentity: previous,
           pieceSourceTransition: unreachableReceiptSourceTransition(),
         },
       )).rejects.toThrow(SEALING_RECEIPT_REFUSAL);
@@ -2130,8 +2175,7 @@ describe("setup/start", () => {
       "runSyncedWithCommit without pattern identity",
     );
     await runtime.runSynced(resultCell, trustExecutable(runtime, pattern), {});
-    const previous = getPatternIdentityRef(resultCell);
-    expect(previous).toBeDefined();
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
 
     const runner = runtime.runner as unknown as {
       setupInternal(...args: unknown[]): unknown;
@@ -2145,7 +2189,7 @@ describe("setup/start", () => {
         trustExecutable(runtime, pattern),
         {},
         {
-          expectedPatternIdentity: previous!,
+          expectedPatternIdentity: previous,
           pieceSourceTransition: unreachableReceiptSourceTransition(),
         },
       )).rejects.toThrow("without recording a pattern identity");
@@ -2170,8 +2214,7 @@ describe("setup/start", () => {
       trustExecutable(runtime, pattern("v1")),
       {},
     );
-    const previous = getPatternIdentityRef(resultCell);
-    expect(previous).toBeDefined();
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
 
     const runner = runtime.runner as unknown as {
       syncCellsForRunningPattern(
@@ -2201,7 +2244,7 @@ describe("setup/start", () => {
         resultCell,
         trustExecutable(runtime, pattern("v2")),
         {},
-        { expectedPatternIdentity: previous! },
+        { expectedPatternIdentity: previous },
       )).rejects.toThrow("injected legacy post-commit failure");
     } finally {
       runner.syncCellsForRunningPattern = originalSync;
@@ -2799,8 +2842,7 @@ describe("setup/start", () => {
       "transaction-bound post-setup failure",
     );
     await runtime.runSynced(resultCell, trusted, {});
-    const currentIdentity = getPatternIdentityRef(resultCell);
-    expect(currentIdentity).toBeDefined();
+    const currentIdentity = receiptSourceSnapshot(runtime, resultCell).pattern;
 
     const boundTx = runtime.edit();
     const runner = runtime.runner as unknown as {
@@ -2831,7 +2873,7 @@ describe("setup/start", () => {
         resultCell.withTx(boundTx),
         trusted,
         {},
-        { expectedPatternIdentity: currentIdentity! },
+        { expectedPatternIdentity: currentIdentity },
       )).rejects.toThrow("transaction-bound post-setup failure");
     } finally {
       runner.syncCellsForRunningPattern = originalSync;

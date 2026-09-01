@@ -1445,7 +1445,7 @@ export class PiecesController<T = unknown> {
     commit: PatternSetupCommitReceipt;
   }> {
     const piece = this.runtime.getCellFromEntityId(
-      this.space,
+      this.#space,
       entityIdFrom(pieceId),
     );
     const result = await this.runtime.runSyncedWithCommit(

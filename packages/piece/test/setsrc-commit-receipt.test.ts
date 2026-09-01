@@ -6,7 +6,6 @@ import {
   getPatternIdentityRef,
   getPieceSourceRevisions,
   type Pattern,
-  PatternSetupPostCommitError,
   Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
@@ -134,30 +133,30 @@ describe("setsrc commit receipt", () => {
     const piece = await pieces.create(markedProgram("v1"), { input: {} });
     await runtime.idle();
     const originalSyncPattern = pieces.syncPattern.bind(pieces);
-    const originalRunPatternUpdate = pieces.runPatternUpdate.bind(pieces);
+    const originalRunSyncedWithCommit = runtime.runSyncedWithCommit.bind(
+      runtime,
+    );
     const originalWarn = console.warn;
     const cellPrototype = Object.getPrototypeOf(piece.getCell()) as {
       getMetaRaw: (field: string, options?: unknown) => unknown;
     };
     const originalGetMetaRaw = cellPrototype.getMetaRaw;
-    let postCommitFailureReported = false;
+    let commitReceiptIssued = false;
     let sourceHistoryReadsAfterReceipt = 0;
     console.warn = () => {};
     pieces.syncPattern = () => {
+      if (!commitReceiptIssued) {
+        throw new Error("post-commit refresh started before the receipt");
+      }
       throw new Error("injected post-commit refresh failure");
     };
-    pieces.runPatternUpdate = (async (...args) => {
-      try {
-        return await originalRunPatternUpdate(...args);
-      } catch (error) {
-        if (error instanceof PatternSetupPostCommitError) {
-          postCommitFailureReported = true;
-        }
-        throw error;
-      }
-    }) as typeof pieces.runPatternUpdate;
+    runtime.runSyncedWithCommit = (async (...args) => {
+      const result = await originalRunSyncedWithCommit(...args);
+      commitReceiptIssued = true;
+      return result;
+    }) as typeof runtime.runSyncedWithCommit;
     cellPrototype.getMetaRaw = function (field, options) {
-      if (postCommitFailureReported && field === "pieceSourceHistory") {
+      if (commitReceiptIssued && field === "pieceSourceHistory") {
         sourceHistoryReadsAfterReceipt++;
         throw new Error(
           "the commit receipt must not be verified by rereading source history",
@@ -169,7 +168,7 @@ describe("setsrc commit receipt", () => {
     try {
       const receipt = await piece.setPattern(markedProgram("v2"));
 
-      expect(postCommitFailureReported).toBe(true);
+      expect(commitReceiptIssued).toBe(true);
       expect(sourceHistoryReadsAfterReceipt).toBe(0);
       expect(receipt.status).toBe("committed");
       expect(receipt.refresh).toEqual({
@@ -178,13 +177,13 @@ describe("setsrc commit receipt", () => {
       });
       // The assertions below deliberately inspect history after the guard has
       // proved setPattern itself did not. Restore ordinary reads first.
-      postCommitFailureReported = false;
+      commitReceiptIssued = false;
       expect(getPatternIdentityRef(piece.getCell())).toEqual(receipt.ref);
       expect(getPieceSourceRevisions(piece.getCell()).at(-1)?.revisionId)
         .toBe(receipt.revisionId);
     } finally {
       pieces.syncPattern = originalSyncPattern;
-      pieces.runPatternUpdate = originalRunPatternUpdate;
+      runtime.runSyncedWithCommit = originalRunSyncedWithCommit;
       cellPrototype.getMetaRaw = originalGetMetaRaw;
       console.warn = originalWarn;
     }

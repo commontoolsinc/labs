@@ -41,8 +41,6 @@ import {
   setCellValueFromCommand,
   setPieceSourceFromCommand,
   setsrcSuccessLine,
-  warnDeprecatedPieceSpelling,
-  withDeprecatedSpellingWarning,
 } from "../commands/piece.ts";
 import {
   CellSelectionError,
@@ -2315,7 +2313,7 @@ describe("cli piece parsing", () => {
         apiUrl: API_URL,
         space: SPACE,
         identity: "/tmp/test.key",
-        piece: PIECE,
+        cell: PIECE,
       },
       "/repo/pattern.tsx",
       {
@@ -2366,7 +2364,7 @@ describe("cli piece parsing", () => {
         apiUrl: API_URL,
         space: SPACE,
         identity: "/tmp/test.key",
-        piece: PIECE,
+        cell: PIECE,
       },
       "/repo/pattern.tsx",
       {
@@ -2415,7 +2413,7 @@ describe("cli piece parsing", () => {
           apiUrl: API_URL,
           space: SPACE,
           identity: "/tmp/test.key",
-          piece: PIECE,
+          cell: PIECE,
         },
         "/repo/pattern.tsx",
         {
@@ -2463,7 +2461,7 @@ describe("cli piece parsing", () => {
         apiUrl: API_URL,
         space: SPACE,
         identity: "/tmp/test.key",
-        piece: PIECE,
+        cell: PIECE,
       },
       "/repo/pattern.tsx",
       {
@@ -2486,7 +2484,7 @@ describe("cli piece parsing", () => {
         apiUrl: API_URL,
         space: SPACE,
         identity: "/tmp/test.key",
-        piece: PIECE,
+        cell: PIECE,
       },
       "/repo/pattern.tsx",
       {
