@@ -8,7 +8,8 @@ import {
   type CreateHarnessPromptLoopOptions,
   type RunHarnessTranscriptOptions,
 } from "./prompt-loop.ts";
-import { persistHarnessRunSkillRegistry } from "./skills/run-registry.ts";
+import { establishHarnessSessionContext } from "./session-assembly.ts";
+import type { HarnessInputCellSpec } from "./contracts/input-cells.ts";
 import {
   createHarnessChatErrorResponse,
   createHarnessChatEventEnvelope,
@@ -1448,23 +1449,7 @@ export class HarnessInteractiveChatService {
         !record.transcript.some((message) => message.role === "system")
         ? [{ role: "system", content: this.#systemPrompt }]
         : [];
-    const transcript: HarnessTranscriptMessage[] = [
-      ...seededSystemPrompt,
-      ...record.transcript,
-      {
-        role: "user",
-        content: params.input.text,
-        ...(params.input.imageAttachments !== undefined &&
-            params.input.imageAttachments.length > 0
-          ? { imageAttachments: params.input.imageAttachments }
-          : {}),
-      },
-    ];
-    // Prompt loops replay their initial transcript through onTranscriptEvent.
-    // Those messages are durable history, not activity from this turn: in
-    // particular, a recovered unknown-outcome result must not be re-emitted as
-    // a newly completed tool call.
-    let observedTranscriptLength = transcript.length;
+    let observedTranscriptLength = 0;
     // The `delegate_task` children this turn has announced, keyed by the
     // parent tool call that started each one. Membership is what closes the
     // bracket: a `subagent_completed` is emitted only for a child whose
@@ -1472,14 +1457,39 @@ export class HarnessInteractiveChatService {
     const startedSubagents = new Map<string, HarnessChatSubagentSummary>();
 
     try {
-      const loop = await this.#startPromptLoop(
+      const { loop, contextMessages } = await this.#startPromptLoop(
         this.#buildPromptLoopOptions(
           session,
           turnId,
           policy,
           browserAccess,
+          params.inputCells,
         ),
       );
+      // The context messages announce what this turn's own run holds — its
+      // preloaded skills, its granted references, its input cells — so they
+      // sit immediately before the request they are held for, after the
+      // history the session already had.
+      const transcript: HarnessTranscriptMessage[] = [
+        ...seededSystemPrompt,
+        ...record.transcript,
+        ...contextMessages.map((content) =>
+          ({ role: "user", content }) as const
+        ),
+        {
+          role: "user",
+          content: params.input.text,
+          ...(params.input.imageAttachments !== undefined &&
+              params.input.imageAttachments.length > 0
+            ? { imageAttachments: params.input.imageAttachments }
+            : {}),
+        },
+      ];
+      // Prompt loops replay their initial transcript through
+      // onTranscriptEvent. Those messages are durable history, not activity
+      // from this turn: in particular, a recovered unknown-outcome result must
+      // not be re-emitted as a newly completed tool call.
+      observedTranscriptLength = transcript.length;
       const result = await loop.runTranscript({
         transcript,
         model: session.model,
@@ -1561,32 +1571,54 @@ export class HarnessInteractiveChatService {
   }
 
   /**
-   * Starts a turn's loop on a run that already knows its skills. A turn is its
-   * own run, so the scan happens per turn, against the engine this builds and
-   * hands to the loop: the registry has to be on the run state before the
-   * first model turn for `read_skill_resource` to answer and for a delegated
-   * subagent to inherit its profile's preloaded skills.
+   * Starts a turn's loop on a run that already holds everything it was
+   * configured with, and returns the context messages announcing it.
    *
-   * Tools reach the tree on the host here, so the scan records host paths and
-   * no sandbox mount is involved.
+   * A turn is its own run, so this happens per turn against the engine this
+   * builds and hands to the loop: the skill registry has to be on the run
+   * state before the first model turn for `read_skill_resource` to answer and
+   * for a delegated subagent to inherit its profile's preloaded skills, and
+   * the grants and input cells mint their tokens into that run's own handle
+   * table — the tokens a turn is told about are the ones its own run holds.
+   *
+   * Tools reach the tree on the host here, so the skills scan records host
+   * paths and no sandbox mount is involved.
    */
   async #startPromptLoop(
     options: CreateHarnessPromptLoopOptions,
-  ): Promise<HarnessInteractivePromptLoop> {
+  ): Promise<{
+    loop: HarnessInteractivePromptLoop;
+    contextMessages: readonly string[];
+  }> {
     // The skills root reaches this either way: on the options directly, or on
     // an injected engine's own config (where `options.skillsRoot` is unset).
     // Read both so neither shape is missed.
     const skillsRoot = options.engine?.config.skillsRoot ?? options.skillsRoot;
-    if (skillsRoot === undefined) {
-      return this.#createPromptLoop(options);
+    const fabricSession = options.engine?.config.fabricSession ??
+      options.fabricSession;
+    if (
+      options.engine === undefined && skillsRoot === undefined &&
+      fabricSession === undefined
+    ) {
+      // Nothing configured needs a run to be brought up before its first model
+      // turn, and constructing an engine to discover that would build a
+      // sandbox runtime for a turn that has no use for one.
+      return { loop: this.#createPromptLoop(options), contextMessages: [] };
     }
-    // A turn is its own run, so the scan happens every turn: it records the
-    // registry the skill tools read before the first model call, and a run
-    // that reuses an engine still refreshes it, so a skill added or removed
-    // mid-session is not stale.
     const engine = options.engine ?? new CfHarnessEngine(options);
-    await persistHarnessRunSkillRegistry(engine, { skillsRoot });
-    return this.#createPromptLoop({ ...options, engine });
+    const contextMessages = await establishHarnessSessionContext({
+      engine,
+      config: {
+        ...(skillsRoot !== undefined ? { skillsRoot } : {}),
+        skillNames: [],
+      },
+      onGrantsUnavailable: (error) =>
+        console.error("fabric grants unavailable for this turn:", error),
+    });
+    return {
+      loop: this.#createPromptLoop({ ...options, engine }),
+      contextMessages,
+    };
   }
 
   #buildPromptLoopOptions(
@@ -1594,9 +1626,13 @@ export class HarnessInteractiveChatService {
     turnId: string,
     policy: HarnessChatPolicy,
     browserAccess?: HarnessChatBrowserAccessLease,
+    inputCells?: readonly HarnessInputCellSpec[],
   ): CreateHarnessPromptLoopOptions {
     return {
       ...this.#basePromptLoopOptions,
+      ...(inputCells !== undefined && inputCells.length > 0
+        ? { inputCells }
+        : {}),
       ...(session.workspace?.hostPath !== undefined
         ? { workspaceHostPath: session.workspace.hostPath }
         : {}),

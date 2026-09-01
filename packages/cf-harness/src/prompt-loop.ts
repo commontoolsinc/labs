@@ -88,7 +88,11 @@ import type {
   HarnessToolDescriptor,
   HarnessToolEffectClass,
 } from "./contracts/tool-descriptor.ts";
-import { DEFAULT_PARENT_TOOL_IDS as DEFAULT_PROMPT_LOOP_TOOL_IDS } from "./contracts/tool-descriptor.ts";
+import {
+  type HarnessToolBackingAvailability,
+  parentToolIdsForBacking,
+  withheldToolIds,
+} from "./contracts/tool-descriptor.ts";
 import type { ToolOutputId, ToolResultRef } from "./contracts/tool-result.ts";
 import type {
   HarnessToolCall,
@@ -936,67 +940,6 @@ const subagentProfileConfigForRun = (
     ),
   };
 };
-
-/**
- * The tools that exist only over a fabric session. They join the tool
- * surface exactly when the run can build one; without it each is absent
- * rather than present-but-failing, even when an explicit allowlist names it.
- */
-const FABRIC_SESSION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
-  ["run_pattern", "assign_slug", "acquire_skill"] as const,
-);
-
-/**
- * The tools that exist only over the pattern index, gated on the same terms
- * as the fabric-session ones.
- */
-const PATTERN_INDEX_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
-  ["search_patterns", "record_feedback"] as const,
-);
-
-/** The metadata-only tool gated on configured skills.sh discovery. */
-const SKILLS_SH_SEARCH_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
-  ["search_skills"] as const,
-);
-
-/** The pinned acquisition tool gated separately from discovery. */
-const SKILLS_SH_ACQUISITION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
-  ["acquire_skill"] as const,
-);
-
-/**
- * The tools that exist only over a skill registry, gated on the same terms.
- * A run given no skills root scans no registry, so `read_skill_resource`
- * would answer `skill_registry_missing` on every call and `run_skill_script`
- * has nothing to run — absent rather than present-but-failing, so a model
- * does not spend turns discovering a tool it was never backed to use.
- */
-const SKILL_REGISTRY_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
-  ["read_skill_resource", "run_skill_script"] as const,
-);
-
-/** What a run can back the gated tools with. */
-interface HarnessToolBackingAvailability {
-  fabricSessionAvailable: boolean;
-  patternIndexAvailable: boolean;
-  skillsShSearchAvailable: boolean;
-  skillsShAcquisitionAvailable: boolean;
-  skillRegistryAvailable: boolean;
-}
-
-/** The gated tools this run cannot back, and so does not offer. */
-const withheldToolIds = (
-  availability: HarnessToolBackingAvailability,
-): ReadonlySet<BuiltinToolId> =>
-  new Set([
-    ...(availability.fabricSessionAvailable ? [] : FABRIC_SESSION_TOOL_IDS),
-    ...(availability.patternIndexAvailable ? [] : PATTERN_INDEX_TOOL_IDS),
-    ...(availability.skillsShSearchAvailable ? [] : SKILLS_SH_SEARCH_TOOL_IDS),
-    ...(availability.skillsShAcquisitionAvailable
-      ? []
-      : SKILLS_SH_ACQUISITION_TOOL_IDS),
-    ...(availability.skillRegistryAvailable ? [] : SKILL_REGISTRY_TOOL_IDS),
-  ]);
 
 /**
  * The child's initial handle table for a delegation: an empty table salted
@@ -2587,17 +2530,8 @@ export class CfHarnessPromptLoop {
     // The gated tools join the tool surface exactly when the run can back
     // them; see the backing-specific tool-id sets above.
     const availability = this.#toolBackingAvailability();
-    const requestedToolIds = options.allowedToolIds ?? [
-      ...DEFAULT_PROMPT_LOOP_TOOL_IDS,
-      ...(availability.fabricSessionAvailable ? FABRIC_SESSION_TOOL_IDS : []),
-      ...(availability.patternIndexAvailable ? PATTERN_INDEX_TOOL_IDS : []),
-      ...(availability.skillsShSearchAvailable
-        ? SKILLS_SH_SEARCH_TOOL_IDS
-        : []),
-      ...(availability.skillsShAcquisitionAvailable
-        ? SKILLS_SH_ACQUISITION_TOOL_IDS
-        : []),
-    ];
+    const requestedToolIds = options.allowedToolIds ??
+      parentToolIdsForBacking(availability);
     const withheld = withheldToolIds(availability);
     this.#allowedToolIds = new Set(
       requestedToolIds.filter((toolId) => !withheld.has(toolId)),

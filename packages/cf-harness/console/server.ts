@@ -58,12 +58,9 @@ import type {
   HarnessFabricCfcFlowLabelsMode,
   HarnessFabricSessionConfig,
   HarnessModelProviderId,
-  HarnessPatternIndexConfig,
-  HarnessSkillsShConfig,
 } from "../src/config.ts";
 import type { CfcPosture } from "@commonfabric/runner";
 import {
-  DEFAULT_HARNESS_CHAT_POLICY,
   type HarnessChatError,
   type HarnessChatEventEnvelope,
   type HarnessChatPolicy,
@@ -71,8 +68,18 @@ import {
 } from "../src/contracts/interactive-chat.ts";
 import { HARNESS_CREDENTIAL_OWNER_REF_TYPE } from "../src/contracts/run-manifest.ts";
 import { createCliPromptSlotBinding } from "../src/contracts/prompt-slot.ts";
-import { PATTERN_AUTHOR_SUBAGENT_PROFILE } from "../src/contracts/subagent.ts";
-import type { BuiltinToolId } from "../src/contracts/tool-descriptor.ts";
+import type { HarnessInputCellSpec } from "../src/contracts/input-cells.ts";
+import {
+  DEFAULT_SUBAGENT_PROFILE,
+  PATTERN_AUTHOR_SUBAGENT_PROFILE,
+} from "../src/contracts/subagent.ts";
+import { parseHostMountSpecs } from "../src/host-mounts.ts";
+import { parseInputCellArgument } from "../src/input-cells.ts";
+import {
+  harnessSessionChatPolicy,
+  harnessSessionEngineOptions,
+  type HarnessSessionConfig,
+} from "../src/session-assembly.ts";
 import {
   createHarnessInteractiveChatService,
   type CreateHarnessInteractiveChatServiceOptions,
@@ -230,22 +237,6 @@ const CONSOLE_CREDENTIAL_OWNER = {
 } as const;
 
 /**
- * The tools a console session is allowed, over the default parent surface: the
- * two that need a fabric session, and the two that need an index. Each is
- * withheld again by the prompt loop when its backing is absent, so naming them
- * here asks for them rather than asserting they exist.
- */
-const FABRIC_TOOL_IDS = [
-  "run_pattern",
-  "assign_slug",
-] as const satisfies readonly BuiltinToolId[];
-
-const PATTERN_INDEX_TOOL_IDS = [
-  "search_patterns",
-  "record_feedback",
-] as const satisfies readonly BuiltinToolId[];
-
-/**
  * The index functions the Index view may reach through the proxy. Every one of
  * them reads: this surface inspects what the index holds and never writes to
  * it, so a page that asked for `publishPattern` or `recordEvent` is refused by
@@ -305,18 +296,75 @@ const callPatternIndex = (
   }
 };
 
-/** Everything the server needs before it can serve a single request. */
-interface ConsoleConfig {
+/**
+ * The input cells a `/api/task` body attaches to the turn it starts, each a
+ * `{ name, ref }` pair. The name is what the model is told, the reference is
+ * the cell it stands for, and neither the value nor the address ever reaches
+ * the page — the run mints a token for the reference and the model works
+ * through that.
+ *
+ * The grammar is the flag's, checked by the flag's own parser, so a spelling
+ * the CLI refuses is refused here too. A body that names no cells yields
+ * none, which is the ordinary task.
+ *
+ * @throws Error naming the defect, which the route answers 400 with.
+ */
+const parseTaskInputCells = (
+  value: unknown,
+): readonly HarnessInputCellSpec[] => {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("inputCells must be an array");
+  }
+  const specs: HarnessInputCellSpec[] = [];
+  const names = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) {
+      throw new Error("each input cell must be an object");
+    }
+    const { name, ref } = entry as { name?: unknown; ref?: unknown };
+    if (typeof name !== "string" || typeof ref !== "string") {
+      throw new Error("each input cell needs a string name and ref");
+    }
+    // Checked through the flag's own parser, so the two surfaces cannot come
+    // to accept different references under the same name.
+    const spec = parseInputCellArgument(`${name}=${ref}`);
+    if (names.has(spec.name)) {
+      throw new Error(`inputCells names \`${spec.name}\` twice`);
+    }
+    names.add(spec.name);
+    specs.push(spec);
+  }
+  return specs;
+};
+
+/**
+ * Everything the server needs before it can serve a single request: the
+ * session every task runs under, plus what belongs to this surface alone.
+ *
+ * The session half is {@link HarnessSessionConfig}, the same description the
+ * batch CLI resolves argv into, so a capability configurable there is
+ * configurable here by the same name. This surface adds only what an HTTP
+ * server has and a command does not — a port, a durable session store, a
+ * seeded system prompt, a space database to read labels out of.
+ */
+interface ConsoleConfig extends HarnessSessionConfig {
   port: number;
-  workspacePath: string;
-  artifactRoot: string;
+  harnessHome: string;
+
+  /** A fabric session is required here; see `resolveConsoleConfig`. */
+  fabricSession: HarnessFabricSessionConfig;
+
+  /**
+   * The sandbox's two CFC sidecar transports, always sited: this surface
+   * creates them under its own data directory rather than asking an operator
+   * to name a path before their first run.
+   */
   cfcResultDir: string;
   cfcInvocationContextDir: string;
-  harnessHome: string;
-  model: string;
-  fabricSession: HarnessFabricSessionConfig;
-  patternIndex?: HarnessPatternIndexConfig;
-  skillsSh?: HarnessSkillsShConfig;
+
   sessionDbPath?: string;
 
   /**
@@ -326,9 +374,6 @@ interface ConsoleConfig {
    */
   spaceDbPath?: string;
 
-  maxModelTurns?: number;
-  skillsRoot?: string;
-
   /**
    * System prompt seeded into every console session, read from the file named
    * by `--system-prompt-file`. Absent, a session runs with no system message,
@@ -336,13 +381,6 @@ interface ConsoleConfig {
    * its tool descriptors.
    */
   systemPrompt?: string;
-
-  /**
-   * Whether a `pattern-author` child keeps the guidance telling it to compose
-   * what the index holds rather than rewrite it. True unless
-   * `--no-child-composition-guidance` is passed.
-   */
-  childCompositionGuidance: boolean;
 }
 
 /**
@@ -395,11 +433,11 @@ const positiveInteger = (value: string, flag: string): number => {
  * and never hand back an address for it, which is the one outcome this surface
  * exists to avoid.
  */
-export const resolveConsoleConfig = (
+export const resolveConsoleConfig = async (
   args: readonly string[],
   env: Record<string, string | undefined>,
   cwd: string,
-): ConsoleConfig => {
+): Promise<ConsoleConfig> => {
   const parsed = parseArgs(args, {
     string: [
       "port",
@@ -411,6 +449,8 @@ export const resolveConsoleConfig = (
       "fabric-space",
       "pattern-index-url",
       "skills-registry-url",
+      "skills-root",
+      "host-mount",
       "session-db",
       "space-db",
       "max-model-turns",
@@ -419,7 +459,12 @@ export const resolveConsoleConfig = (
       "fabric-cfc-posture",
       "system-prompt-file",
     ],
-    boolean: ["no-child-composition-guidance"],
+    boolean: [
+      "no-child-composition-guidance",
+      "no-pattern-index-publish",
+      "pattern-index-publish-discoverable",
+    ],
+    collect: ["host-mount"],
   });
   const flag = (name: string): string | undefined =>
     typeof parsed[name] === "string" ? nonEmpty(parsed[name]) : undefined;
@@ -535,6 +580,13 @@ export const resolveConsoleConfig = (
 
   const patternIndexUrl = flag("pattern-index-url") ??
     nonEmpty(env.CF_HARNESS_PATTERN_INDEX_URL);
+  // Publishing posture reads exactly as it does on the CLI: on unless turned
+  // off, and recorded-only unless discoverability is asked for.
+  const patternIndexPublish = parsed["no-pattern-index-publish"] !== true &&
+    nonEmpty(env.CF_HARNESS_PATTERN_INDEX_PUBLISH) !== "0";
+  const patternIndexPublishDiscoverable =
+    parsed["pattern-index-publish-discoverable"] === true ||
+    nonEmpty(env.CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE) === "1";
   const skillsRegistryUrl = flag("skills-registry-url") ??
     nonEmpty(env.CF_HARNESS_SKILLS_REGISTRY_URL);
   const sessionDb = flag("session-db") ??
@@ -550,7 +602,7 @@ export const resolveConsoleConfig = (
 
   return {
     port,
-    workspacePath,
+    workspace: workspacePath,
     artifactRoot,
     cfcResultDir,
     cfcInvocationContextDir,
@@ -565,6 +617,10 @@ export const resolveConsoleConfig = (
       ? {
         patternIndex: {
           baseUrl: requiredUrl(patternIndexUrl, "--pattern-index-url"),
+          ...(patternIndexPublish ? {} : { publish: false }),
+          ...(patternIndexPublishDiscoverable
+            ? { publishDiscoverable: true }
+            : {}),
         },
       }
       : {}),
@@ -582,45 +638,45 @@ export const resolveConsoleConfig = (
     // is what a throwaway run wants and what a machine without the SQLite
     // native library can still do.
     ...(sessionDb === "none" ? {} : { sessionDbPath: resolve(cwd, sessionDb) }),
-    ...(maxModelTurns !== undefined
-      ? {
-        maxModelTurns: positiveInteger(maxModelTurns, "--max-model-turns"),
-      }
-      : {}),
+    maxModelTurns: positiveInteger(maxModelTurns, "--max-model-turns"),
     skillsRoot: skillsRootFlag,
     ...(systemPromptFile !== undefined
       ? { systemPrompt: readSystemPromptFile(systemPromptFile, cwd) }
       : {}),
-    childCompositionGuidance: parsed["no-child-composition-guidance"] !== true,
+    hostMounts: await parseHostMountSpecs(
+      parsed["host-mount"] as string[] | undefined,
+      cwd,
+    ),
+    // The rest of the session description this surface does not vary. Skills
+    // are scanned rather than preloaded by name, scripts are not allowlisted,
+    // handles materialize nowhere, and a task's input cells arrive per task
+    // on `/api/task` rather than at startup.
+    skillNames: [],
+    allowedSkillScripts: [],
+    skillScriptExecutionTarget: "sandbox",
+    handleValueOrigins: [],
+    inputCells: [],
+    // The tool surface is left to the session's own backing rather than
+    // listed here, so a tool the harness gains reaches this surface with it.
+    allowedSubagentProfiles: [
+      DEFAULT_SUBAGENT_PROFILE,
+      PATTERN_AUTHOR_SUBAGENT_PROFILE,
+    ],
+    subagentCompositionGuidance:
+      parsed["no-child-composition-guidance"] !== true,
   };
 };
 
 /**
- * The policy a console session runs under: see `FABRIC_TOOL_IDS`. The prompt
- * slot is bound as a direct command because the page's textarea is the user
- * typing the command themselves — the same standing the batch CLI's prompt
- * argument has, and what authorizes effectful tools under CFC enforce modes.
+ * The prompt slot a console turn is bound under. The page's textarea is the
+ * user typing the command themselves — the same standing the batch CLI's
+ * prompt argument has, and what authorizes effectful tools under CFC enforce
+ * modes.
  */
-export const consoleChatPolicy = (
-  patternIndexConfigured: boolean,
-  skillsShConfigured: boolean,
-): HarnessChatPolicy => ({
-  ...DEFAULT_HARNESS_CHAT_POLICY,
-  allowedToolIds: [
-    ...DEFAULT_HARNESS_CHAT_POLICY.allowedToolIds,
-    ...FABRIC_TOOL_IDS,
-    ...(patternIndexConfigured ? PATTERN_INDEX_TOOL_IDS : []),
-    ...(skillsShConfigured ? ["search_skills" as const] : []),
-  ],
-  allowedSubagentProfiles: [
-    ...DEFAULT_HARNESS_CHAT_POLICY.allowedSubagentProfiles,
-    PATTERN_AUTHOR_SUBAGENT_PROFILE,
-  ],
-  promptSlot: createCliPromptSlotBinding({
-    kernelName: "cf-harness",
-    surface: "console-web",
-    role: "direct-command",
-  }),
+const CONSOLE_PROMPT_SLOT = createCliPromptSlotBinding({
+  kernelName: "cf-harness",
+  surface: "console-web",
+  role: "direct-command",
 });
 
 /**
@@ -1195,10 +1251,7 @@ export class ConsoleServer {
    * next session actually gets.
    */
   #sessionPolicy(): HarnessChatPolicy {
-    return consoleChatPolicy(
-      this.#config.patternIndex !== undefined,
-      this.#config.skillsSh !== undefined,
-    );
+    return harnessSessionChatPolicy(this.#config, CONSOLE_PROMPT_SLOT);
   }
 
   /**
@@ -1237,7 +1290,7 @@ export class ConsoleServer {
         status: 400,
       });
     }
-    const body: { text?: unknown; sessionId?: unknown } =
+    const body: { text?: unknown; sessionId?: unknown; inputCells?: unknown } =
       typeof parsed === "object" && parsed !== null ? parsed : {};
     const text = body.text;
     if (typeof text !== "string" || text.trim() === "") {
@@ -1248,10 +1301,18 @@ export class ConsoleServer {
         status: 400,
       });
     }
+    let inputCells: readonly HarnessInputCellSpec[];
+    try {
+      inputCells = parseTaskInputCells(body.inputCells);
+    } catch (error) {
+      return Response.json({
+        error: error instanceof Error ? error.message : String(error),
+      }, { status: 400 });
+    }
     let sessionId = body.sessionId;
     if (sessionId === undefined) {
       const session = await this.#service.startSession(crypto.randomUUID(), {
-        workspace: { hostPath: this.#config.workspacePath },
+        workspace: { hostPath: this.#config.workspace },
         model: this.#config.model,
         artifactRoot: this.#config.artifactRoot,
         policy: this.#sessionPolicy(),
@@ -1264,6 +1325,7 @@ export class ConsoleServer {
     const turn = await this.#service.startTurn(crypto.randomUUID(), {
       sessionId,
       input: { text },
+      ...(inputCells.length > 0 ? { inputCells } : {}),
     });
     if (!turn.ok) {
       return chatErrorResponse(turn);
@@ -1488,24 +1550,8 @@ export const createConsoleInteractiveServiceOptions = (
   sessionStore?: HarnessChatSessionStore,
 ): CreateHarnessInteractiveChatServiceOptions => ({
   basePromptLoopOptions: {
+    ...harnessSessionEngineOptions(config),
     ...modelOptions,
-    model: config.model,
-    artifactRoot: config.artifactRoot,
-    workspaceHostPath: config.workspacePath,
-    cfcResultDir: config.cfcResultDir,
-    cfcInvocationContextDir: config.cfcInvocationContextDir,
-    fabricSession: config.fabricSession,
-    ...(config.patternIndex !== undefined
-      ? { patternIndex: config.patternIndex }
-      : {}),
-    ...(config.skillsSh !== undefined ? { skillsSh: config.skillsSh } : {}),
-    ...(config.maxModelTurns !== undefined
-      ? { maxModelTurns: config.maxModelTurns }
-      : {}),
-    ...(config.skillsRoot !== undefined
-      ? { skillsRoot: config.skillsRoot }
-      : {}),
-    subagentCompositionGuidance: config.childCompositionGuidance,
   },
   ...(config.systemPrompt !== undefined
     ? { systemPrompt: config.systemPrompt }
@@ -1534,10 +1580,10 @@ export const startConsoleServer = async (
   env: Record<string, string | undefined> = Deno.env.toObject(),
   cwd: string = Deno.cwd(),
 ): Promise<void> => {
-  const config = resolveConsoleConfig(args, env, cwd);
+  const config = await resolveConsoleConfig(args, env, cwd);
   for (
     const directory of [
-      config.workspacePath,
+      config.workspace,
       config.artifactRoot,
       config.cfcResultDir,
       config.cfcInvocationContextDir,
@@ -1596,7 +1642,7 @@ export const startConsoleServer = async (
       // reason the posture is printed rather than left to be inferred.
       console.log(`  results:    ${config.cfcResultDir}`);
       console.log(`  contexts:   ${config.cfcInvocationContextDir}`);
-      console.log(`  workspace:  ${config.workspacePath}`);
+      console.log(`  workspace:  ${config.workspace}`);
       console.log(`  artifacts:  ${config.artifactRoot}\n`);
     },
     onError: (error) => {
