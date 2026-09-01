@@ -1,8 +1,8 @@
 /**
  * A stack of values offering `Array`-style {@link #indexOf} and {@link
- * #lastIndexOf}. A value's index is counted from the bottom, so the first
- * value pushed is at index `0`, and an index does not change while things are
- * pushed above it.
+ * #lastIndexOf}, and {@link #has} for a caller that wants no position. A
+ * value's index is counted from the bottom, so the first value pushed is at
+ * index `0`, and an index does not change while things are pushed above it.
  *
  * Values are compared as `Object.is` compares them: by identity for an object,
  * by value for a primitive, `NaN` matching itself, and `-0` distinct from `0`.
@@ -40,6 +40,11 @@ export class IndexTrackingStack<T = unknown> {
    */
   get depth(): number {
     return this.#stack.length;
+  }
+
+  /** Whether the stack holds the given value. */
+  has(value: T): boolean {
+    return this.indexOf(value) >= 0;
   }
 
   /**
