@@ -1251,8 +1251,14 @@ export default pattern<TopicInput, TopicOutput>(
 
     const editComment = action<EditCommentEvent, EditCommentResult>(
       ({ comment, body: text, agentName }) => {
-        const author = topicAuthorFromAgent(agentName) ??
+        // Checked, not bound: `editComment` requires a signature like every
+        // other mutation here, and then stores nothing from it. `author` and
+        // `sentAt` stay as the comment was written — an edit changes what was
+        // said, not who said it. Fabric still records the principal behind
+        // the write.
+        if (!topicAuthorFromAgent(agentName)) {
           rejectMutation("editComment", "agentName must be non-blank");
+        }
         if (!comment || comment.get() === undefined) {
           rejectMutation("editComment", "comment must be a reference");
         }
@@ -1262,10 +1268,6 @@ export default pattern<TopicInput, TopicOutput>(
         const trimmed = (text ?? "").trim();
         if (!trimmed) rejectMutation("editComment", "body must be non-empty");
         const editedAt = Date.now();
-        // `author` and `sentAt` are left alone: an edit changes what was said,
-        // not who said it. The editor is recorded by Fabric as the principal
-        // behind the write; `agentName` is required here for the same reason
-        // every other mutation requires it, not to overwrite attribution.
         comment.key("body").set(trimmed);
         comment.key("editedAt").set(editedAt);
         return { body: trimmed, editedAt };
