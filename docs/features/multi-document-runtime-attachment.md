@@ -101,7 +101,18 @@ seen on this path is therefore never to be "fixed" by finding a way to pass
 the key: the key was not supposed to be in the frame.
 `packages/runtime-client/src/shared/key-material.ts` holds the invariant and
 the finding; the acting principal is additionally required to be a DID, so a
-signer cannot ride in as the field that names one.
+signer cannot ride in as the field that names one. The refusal sits in
+`RuntimeConnection.attach`, immediately before the frame reaches a transport,
+so a caller holding a connection directly is covered by it too.
+
+**This is a misbuild detector, not an exfiltration filter.** A secret already
+reduced to bytes or text — a PKCS8 blob, a JWK, a seed as a `Uint8Array` — is
+out of scope and would pass unnoticed. Both ends of an attach are a page and a
+worker at one trust level under one origin, so a sender determined to move
+bytes has the whole payload to do it in; what this catches is the accident of
+handing an attach the signer that initialization takes. The classes it
+recognizes are enumerated rather than derived, so a future codec class able to
+hold a key has to be added to the walker.
 
 ## The protocol
 

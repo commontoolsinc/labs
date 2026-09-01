@@ -24,8 +24,26 @@
  * keeps its state in `#` fields, so there is nothing to walk into -- which is
  * also what makes the check exact rather than a guess at what a key looks
  * like.
+ *
+ * **What this is not.** A secret already reduced to bytes or to text -- a
+ * PKCS8 blob, a JWK, a seed as a `Uint8Array`, a private key pasted into a
+ * string -- is out of scope, and nothing here would notice one. That is not a
+ * gap to close: the two ends of an attach are a page and a worker under one
+ * origin at one trust level, and a sender determined to move bytes has the
+ * whole payload to do it in. This detects a MISBUILT frame -- the accident of
+ * handing an attach the signer that initialization takes -- and is worth
+ * exactly that. Reading it as an exfiltration filter would be reading a
+ * type-check as a sandbox.
+ *
+ * **Keeping it true.** The classes below are enumerated, not derived, so a
+ * newly registered codec class that can hold a `CryptoKey` -- or a new
+ * instance shape that carries state past the enumerable-property walk -- has
+ * to be added here, exactly as a new field on `RuntimeSecurityContext` has to
+ * be added to the roster it is compared against. Neither is a check a machine
+ * will notice is missing.
  */
 
+import { BaseFabricInstance } from "@commonfabric/data-model/fabric-bases";
 import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
 
 /**
@@ -78,6 +96,37 @@ function findIn(
       if (found !== undefined) return found;
     }
     return undefined;
+  }
+
+  // A decoded instance keeps its state in `#` fields, so the walk over
+  // enumerable properties below sees an empty object. That is exactly the way
+  // a key pair can arrive unseen: a tag this realm does not know decodes into
+  // an `UnknownValue` carrying whatever rode under it, and one the decoder
+  // refused into a `ProblematicValue` doing the same. Their state is public,
+  // so it is walked like anything else.
+  if (value instanceof BaseFabricInstance && "state" in value) {
+    const found = findIn(
+      (value as { state: unknown }).state,
+      path === "" ? "state" : `${path}.state`,
+      seen,
+    );
+    if (found !== undefined) return found;
+  }
+
+  // A `Map` and a `Set` have no enumerable own properties either. Their
+  // contents are named `{key}` and `{}` so a path says which kind it walked
+  // through.
+  if (value instanceof Map) {
+    for (const [key, entry] of value) {
+      const found = findIn(entry, `${path}{${String(key)}}`, seen);
+      if (found !== undefined) return found;
+    }
+  }
+  if (value instanceof Set) {
+    for (const entry of value) {
+      const found = findIn(entry, `${path}{}`, seen);
+      if (found !== undefined) return found;
+    }
   }
 
   for (const [key, entry] of Object.entries(value)) {
