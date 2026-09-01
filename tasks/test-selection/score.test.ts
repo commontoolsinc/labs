@@ -23,7 +23,12 @@ import {
   trimWindows,
   value,
 } from "./score.ts";
-import { VALUE_FLOOR } from "./policy.ts";
+import {
+  CATCH_BREADTH_WINDOW_DAYS,
+  FLAKE_COMMIT_REACH,
+  SAME_COMMIT_REACH_DAYS,
+  VALUE_FLOOR,
+} from "./policy.ts";
 import { testIdentityKey } from "@commonfabric/test-support/records";
 
 const TEST = { k: "unit", s: "memory", n: "space > writes a fact" };
@@ -70,7 +75,9 @@ describe("score", () => {
       // itself, which suppresses a real catch. A credited entry with no
       // readable day can never be aged out, so it suppresses one forever.
       const back = parseContext({
-        outcomesAtCommit: [["k c1", { day: "2026-08-20", outcomes: ["wat"] }]],
+        outcomesAtCommit: [
+          ["c1", { day: "2026-08-20", identities: [["k", ["wat"]]] }],
+        ],
         mainAtCommit: [["k c1", { day: "nope", outcome: "fail" }]],
         credited: [["k c1 branch", "not a day"]],
         failures: [["k", [{ day: "2026-08-20", source: "branch" }]]],
@@ -141,7 +148,7 @@ describe("score", () => {
 
     it("drops an entry whose held value is not a record", () => {
       const back = parseContext({
-        outcomesAtCommit: [["k a", "yesterday"], ["k b", null]],
+        outcomesAtCommit: [["c1", "yesterday"], ["c2", null]],
         mainAtCommit: [["k a", 7], ["k b", null]],
         credited: [],
         failures: [["k a", "not a list"], ["k b", 7]],
@@ -154,10 +161,14 @@ describe("score", () => {
     it("drops an outcome record with no readable day or outcomes", () => {
       const back = parseContext({
         outcomesAtCommit: [
-          ["k a", { day: 7, outcomes: ["pass"] }],
-          ["k b", { day: "2026-08-20", outcomes: "pass" }],
-          ["k c", { day: "2026-08-20", outcomes: ["wat"] }],
-          ["k d", { day: "2026-08-20", outcomes: ["pass", "fail"] }],
+          ["ca", { day: 7, identities: [["k", ["pass"]]] }],
+          ["cb", { day: "2026-08-20", identities: "not a list" }],
+          ["cc", { day: "2026-08-20", identities: [["k", ["wat"]]] }],
+          ["cd", { day: "2026-08-20", identities: [["k", "pass"]] }],
+          ["ce", {
+            day: "2026-08-20",
+            identities: [["k", ["pass", "fail"]]],
+          }],
         ],
         mainAtCommit: [
           ["k a", { day: "2026-08-20", outcome: "skip" }],
@@ -166,7 +177,7 @@ describe("score", () => {
         credited: [],
         failures: [],
       });
-      expect([...back.outcomesAtCommit.keys()]).toEqual(["k d"]);
+      expect([...back.outcomesAtCommit.keys()]).toEqual(["ce"]);
       // A skip is not an outcome the cross-run rules act on, so a stored
       // one is not a main verdict to be resumed from.
       expect([...back.mainAtCommit.keys()]).toEqual(["k b"]);
@@ -214,9 +225,9 @@ describe("score", () => {
         { day: "2020-01-01", source: "a" },
         { day: "2026-08-20", source: "b" },
       ]);
-      context.outcomesAtCommit.set("k old", {
+      context.outcomesAtCommit.set("old", {
         day: "2020-01-01",
-        outcomes: new Set(["fail"]),
+        identities: new Map([["k", new Set(["fail"])]]),
       });
       trimContext(context, "2026-08-20");
       expect([...context.failures.keys()]).toEqual(["k here"]);
@@ -717,5 +728,99 @@ describe("a skipped run", () => {
       saw("skip", { commit: "c2" }),
     ]);
     expect(folded.mainRed.has(KEY)).toBe(true);
+  });
+});
+
+describe("how far back the fold remembers where a test passed", () => {
+  /** A pass at each of `count` commits, one after another. */
+  function passesAt(count: number): Observation[] {
+    return Array.from({ length: count }, (_, i) =>
+      saw("pass", {
+        commit: `c${i}`,
+        startedAt: `2026-08-20T${String(i).padStart(2, "0")}:00:00.000Z`,
+      }));
+  }
+
+  it("reads a failure at a remembered commit as disagreement", () => {
+    const context = emptyContext();
+    foldObservations([saw("pass", { commit: "c0" })], { context });
+    const second = foldObservations([
+      saw("pass", { commit: "c1", startedAt: "2026-08-20T01:00:00.000Z" }),
+      saw("fail", { commit: "c0", startedAt: "2026-08-20T02:00:00.000Z" }),
+    ], { context });
+    const state = second.states.get(KEY)!;
+    expect(state.flakesByDay["2026-08-20"]).toBe(1);
+    expect(state.mainCatches).toBe(0);
+  });
+
+  it("keeps at most the reach, so the corpus times commits cannot grow", () => {
+    // Every identity runs at nearly every commit, so an unbounded map is
+    // the whole corpus multiplied by every commit it ever saw.
+    const context = emptyContext();
+    foldObservations(passesAt(FLAKE_COMMIT_REACH + 6), { context });
+    expect(context.recentCommits.length).toBe(FLAKE_COMMIT_REACH);
+    expect(context.outcomesAtCommit.size).toBe(FLAKE_COMMIT_REACH);
+  });
+
+  it("forgets a clean test's pass once the commit falls out of reach", () => {
+    const context = emptyContext();
+    foldObservations(passesAt(FLAKE_COMMIT_REACH + 2), { context });
+    // c0 is past the reach and the test has never failed, so nothing is
+    // held against it and the late failure reads as a first failure.
+    const late = foldObservations([
+      saw("fail", { commit: "c0", startedAt: "2026-08-21T00:00:00.000Z" }),
+    ], { context, prior: new Map() });
+    expect(late.states.get(KEY)!.flakesByDay["2026-08-20"]).toBeUndefined();
+  });
+
+  it("keeps a failed test's passes past the reach", () => {
+    // Once a test has failed it is a flake candidate, and its passes are
+    // what a later disagreement is judged against, so they survive the
+    // window that a clean test's do not.
+    const context = emptyContext();
+    foldObservations([
+      saw("fail", { commit: "c0" }),
+      saw("pass", { commit: "c0", startedAt: "2026-08-20T00:30:00.000Z" }),
+    ], { context });
+    foldObservations(
+      passesAt(FLAKE_COMMIT_REACH + 6).slice(1),
+      { context },
+    );
+    const held = context.outcomesAtCommit.get("c0");
+    expect(held).toBeDefined();
+    expect([...held!.identities.get(KEY)!].sort()).toEqual(["fail", "pass"]);
+  });
+
+  it("drops the window along with the days it aged out", () => {
+    const context = emptyContext();
+    foldObservations(passesAt(3), { context });
+    expect(context.recentCommits.length).toBe(3);
+    trimContext(context, "2027-01-01");
+    expect(context.outcomesAtCommit.size).toBe(0);
+    expect(context.recentCommits).toEqual([]);
+  });
+});
+
+describe("the two windows the context ages on", () => {
+  it("keeps a failure the breadth rule can still reach", () => {
+    // Breadth asks whether many branches saw one test fail around the
+    // same time, and same-commit disagreement asks whether a rerun could
+    // still arrive. One is weeks, the other hours, so a context aged on
+    // a single span must be aged on the longer one and pay for it.
+    const context = emptyContext();
+    context.failures.set("k", [{ day: "2026-08-20", source: "a" }]);
+    context.outcomesAtCommit.set("c1", {
+      day: "2026-08-20",
+      identities: new Map([["k", new Set(["pass"])]]),
+    });
+    const past = new Date(
+      Date.parse("2026-08-20T00:00:00Z") +
+        (SAME_COMMIT_REACH_DAYS + 1) * 86_400_000,
+    ).toISOString().slice(0, 10);
+    trimContext(context, past);
+    expect(context.outcomesAtCommit.size).toBe(0);
+    expect(context.failures.size).toBe(
+      CATCH_BREADTH_WINDOW_DAYS > SAME_COMMIT_REACH_DAYS ? 1 : 0,
+    );
   });
 });

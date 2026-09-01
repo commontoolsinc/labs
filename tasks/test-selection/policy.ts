@@ -138,6 +138,43 @@ export const COVERAGE_TREND_WEEKS = 3;
 /** Days within which failures across branches read as the environment. */
 export const CATCH_BREADTH_WINDOW_DAYS = 2;
 
+/**
+ * Days the fold remembers what an identity did at a commit, which is how
+ * a rerun that disagrees with the run it repeats is read as the test
+ * disagreeing with itself rather than as a catch.
+ *
+ * Its own dial rather than the breadth window's, because the two ask
+ * different questions over different spans. Breadth asks whether many
+ * branches saw one test fail around the same time, which is a question
+ * about weeks. This asks whether a rerun of one commit could still
+ * arrive, which is a question about hours: a commit is superseded long
+ * before a day is out, and nothing reruns a three-week-old one.
+ *
+ * It is also the expensive one. Every identity runs at nearly every
+ * commit, so what is remembered is the corpus times the commits: over 21
+ * days of the store that is 63.8 million pairs, past what a `Map` can
+ * hold at all. Keeping only the identities the failure witness names
+ * brings 21 days to 4.2 million, and two days to 40 thousand.
+ */
+export const SAME_COMMIT_REACH_DAYS = 2;
+
+/**
+ * How many of the most recently observed commits the fold remembers
+ * outcomes at, so that a failure arriving in a later batch than the pass
+ * it disagrees with is still read as the test disagreeing with itself.
+ *
+ * Every identity runs at nearly every commit, so this multiplies by the
+ * whole corpus: one measured day of the store holds 2.6 million
+ * identity-and-commit pairs, of which 23 carry a failure and 13 carry
+ * both a pass and a failure. Remembering all of them costs 442MB for one
+ * day, which is more than a string can hold. What slides out of the
+ * window keeps the identities the failure witness still names, so a test
+ * that has already failed stays exact until the commit itself ages out
+ * at `SAME_COMMIT_REACH_DAYS` — which is the shorter of the two spans
+ * whenever the breadth window is the longer one.
+ */
+export const FLAKE_COMMIT_REACH = 8;
+
 /** Days before the coverage attribution map is rebuilt. */
 export const ATTRIBUTION_MAP_DAYS = 7;
 
@@ -559,6 +596,26 @@ export const DIALS: readonly Dial[] = [
     why:
       "Up when a broken runner's failures are being counted as catches; down " +
       "when genuine breadth is being written off as environmental.",
+  },
+  {
+    name: "SAME_COMMIT_REACH_DAYS",
+    value: SAME_COMMIT_REACH_DAYS,
+    unit: "days",
+    setBy: "chosen",
+    why: "Up when reruns are landing far enough behind the run they repeat " +
+      "that their disagreement is being counted as a catch; down when the " +
+      "fold's memory is the thing that will not fit. It costs the number " +
+      "of identities that have failed times the number of commits, so it " +
+      "is the dial to check first when a run runs out of memory.",
+  },
+  {
+    name: "FLAKE_COMMIT_REACH",
+    value: FLAKE_COMMIT_REACH,
+    unit: "commits",
+    setBy: "chosen",
+    why: "Up when reruns of a commit arrive far enough behind the run they " +
+      "repeat that their disagreement is being counted as a catch; down " +
+      "when the fold's memory is the thing that will not fit.",
   },
   {
     name: "ATTRIBUTION_MAP_DAYS",
