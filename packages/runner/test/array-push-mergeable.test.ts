@@ -2564,6 +2564,62 @@ describe("mergeable op guards and single-session branches", () => {
     );
   });
 
+  it("a whole-document transaction emits a set and drops the push's intent", async () => {
+    // `markWholeDocumentWrites` replaces every op with a whole-document set —
+    // the client speculation overlay's seal, whose entries layer their ops over
+    // a confirmed value that moves under them. The append is not sent, so its
+    // intent must not survive to narrow the array read out of the commit's
+    // reads: that read is a real dependency of the value the set carries, and
+    // for a speculative seal it is what the entry's retirement floor is built
+    // from.
+    const tx0 = rt.edit();
+    rt.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["a", "b"]);
+    await tx0.commit({ resolveAt: "verdict" });
+    await rt.storageManager.synced();
+
+    const tx = rt.edit();
+    const cell = rt.getCell<string[]>(space, CAUSE, stringListSchema, tx);
+    cell.push("c");
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])].length)
+      .toBe(1);
+
+    tx.tx.markWholeDocumentWrites!();
+    const native = getDirectTransactionNativeCommit(tx, space);
+    expect(native?.operations.map((op) => op.op)).toEqual(["set"]);
+    expect(
+      (native?.operations[0] as { value?: { value?: string[] } }).value?.value,
+    ).toEqual(["a", "b", "c"]);
+    // The array read the append would have narrowed away is in the sealed
+    // commit's reads, which is the claim the abandonment is FOR — the
+    // intent count alone cannot show it, and the whole-document write is
+    // the value the run computed from that read. Asserted before the
+    // intent count so a regression names the consequence, not the
+    // mechanism.
+    const replica = rt.storageManager.open(space).replica;
+    const sealed = replica.sealNative!(
+      native!,
+      tx.tx,
+      new Promise(() => {}),
+      { speculative: true },
+    );
+    const readIds = [
+      ...sealed.commit.reads.confirmed,
+      ...sealed.commit.reads.pending,
+    ].map((read) => read.id);
+    expect(readIds).toContain(cell.getAsNormalizedFullLink().id);
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])]).toEqual(
+      [],
+    );
+
+    // Poisoned as well as deleted: a later push on the same transaction
+    // records nothing, so the intent cannot come back after the commit
+    // was built without it.
+    cell.push("d");
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])]).toEqual(
+      [],
+    );
+  });
+
   it("nested tail ops abandon only the contained one", async () => {
     // Two tail ops where one op's payload contains the other's target: exactly
     // one intent — the CONTAINED one — is abandoned, and the containing op

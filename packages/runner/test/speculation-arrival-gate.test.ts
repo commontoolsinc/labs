@@ -458,6 +458,10 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       const tx = {
         tx: {
           sourceAction: writer,
+          // These doubles hand-build the ops they seal, so the mark has
+          // nothing to shape; it is present because the seal refuses a
+          // transaction that cannot take it.
+          markWholeDocumentWrites: () => {},
           sealInto: (collector: {
             sealSpaceCommit: (
               space: MemorySpace,
@@ -699,6 +703,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     const tx = {
       tx: {
         sourceAction: { name: "writer" },
+        markWholeDocumentWrites: () => {},
         sealInto: (collector: {
           sealSpaceCommit: (
             space: MemorySpace,
@@ -811,6 +816,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       const tx = {
         tx: {
           sourceAction: { name: "handler" },
+          markWholeDocumentWrites: () => {},
           sealInto: (collector: {
             sealSpaceCommit: (
               space: MemorySpace,
@@ -997,6 +1003,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       const tx = {
         tx: {
           sourceAction: { name: "witness-writer" },
+          markWholeDocumentWrites: () => {},
           sealInto: (collector: {
             sealSpaceCommit: (
               space: MemorySpace,
@@ -1385,6 +1392,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       const tx = {
         tx: {
           sourceAction: { name: "pivot" },
+          markWholeDocumentWrites: () => {},
           sealInto: (collector: {
             sealSpaceCommit: (
               space: MemorySpace,

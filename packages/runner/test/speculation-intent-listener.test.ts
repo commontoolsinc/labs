@@ -770,6 +770,10 @@ const cascadeDestination = () => {
     const tx = {
       tx: {
         sourceAction: { name: "handler" },
+        // These doubles hand-build the ops they seal, so the mark has nothing
+        // to shape; it is present because the seal refuses a transaction that
+        // cannot take it.
+        markWholeDocumentWrites: () => {},
         sealInto: async (collector: {
           sealSpaceCommit: (
             space: MemorySpace,

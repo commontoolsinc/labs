@@ -246,11 +246,11 @@ describe("topic-board-pivot-contract", () => {
    * back the rows so the caller can pin the exact set.
    *
    * Waits on content rather than on a count, because `referencedBy` is served
-   * from the board-wide pivot rather than written here: a count that settles
-   * one row away from the expected number — which server execution has been
-   * seen to do — makes a count-wait wait for a number that is never coming,
-   * while a content-wait still resolves the moment the edge lands and the
-   * assertion after it still catches the extra row. */
+   * from the board-wide pivot rather than written here: a count-wait cannot
+   * tell a number that has not arrived from one that never will, and
+   * `waitForCellValue` has no deadline, so a pivot serving the wrong number
+   * hangs it. A content-wait resolves the moment the edge lands, and the
+   * assertion after it still catches an extra row. */
   const awaitInbound = async (
     t: PieceController,
     ...titles: string[]
@@ -288,11 +288,10 @@ describe("topic-board-pivot-contract", () => {
     ),
     fn: async () => {
       // Waits on the three topics this suite filed, which `addTopic` produces
-      // directly, rather than on the pivot's row count — the pivot is
-      // board-wide and has been seen to settle a row away from the topic
-      // count under server execution, which a count-wait would never recover
-      // from. The table is then asserted rather than awaited, so an extra
-      // row still fails.
+      // directly, rather than on the pivot's row count: the pivot is
+      // board-wide, and a count-wait on it would hang rather than fail if it
+      // ever served a different number. The table is then asserted rather
+      // than awaited, so an extra row still fails.
       const topics = (await board.result.getCell()).key("topics");
       await waitForCellValue<unknown[]>(
         cc.runtime,

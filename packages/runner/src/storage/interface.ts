@@ -1150,8 +1150,10 @@ export interface IStorageTransaction {
    * Make this transaction's writes AUTHORITATIVE: every value write is
    * recorded and committed even when it equals the currently-visible
    * state, instead of being elided as a no-op (deletes of absent slots
-   * stay no-ops — there is nothing to assert). One-way; there is no
-   * un-mark.
+   * stay no-ops — there is nothing to assert). Implies
+   * {@link markWholeDocumentWrites}, so the writes also commit as
+   * whole-document set/delete and the mergeable intents they recorded are
+   * abandoned. One-way; there is no un-mark.
    *
    * Exists for effect-COMPLETION writebacks under the serving posture
    * (server-execution v2 stage G, serving-loop.md §4): the ordinary
@@ -1174,6 +1176,30 @@ export interface IStorageTransaction {
    * (`normalizeAndDiff`), whose equal-leaf elision sits ABOVE the
    * transaction layer and must yield for the same reason. */
   isAuthoritativeWrites?(): boolean;
+
+  /**
+   * Emit this transaction's document writes as WHOLE-DOCUMENT set/delete
+   * operations rather than as patches or mergeable collection ops, while
+   * leaving the no-op elision alone. Recorded mergeable intents are
+   * abandoned with the ops they would have produced, so the reads
+   * incidental to those ops stay in the commit's read set — the
+   * whole-document write is the value the run computed from what it read.
+   * One-way; there is no un-mark. {@link markAuthoritativeWrites} implies
+   * this and additionally disables the elision.
+   *
+   * Exists for the client speculation overlay (server-execution v2 Phase 2,
+   * speculation.md §1): an overlay entry's operations are layered above the
+   * confirmed value and materialized over it on every read. A patch is
+   * relative to the layer beneath it, and that layer moves — the space's
+   * serving runtime commits the authoritative derivation for the same
+   * document, and it arrives before the entry's watermark coverage retires
+   * the entry. A positional array splice re-applied over an array that
+   * already carries what it inserts duplicates that element; one that
+   * removed elements drops one, and a mergeable append double-applies. A
+   * whole-document set says what the run computed, so the entry renders
+   * that value over whatever lies beneath it.
+   */
+  markWholeDocumentWrites?(): void;
 
   /**
    * Record one mergeable-write delta against the document at `address` (see
