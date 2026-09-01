@@ -778,9 +778,10 @@ export function exitWithDataError(
 /**
  * Turn a failed `cf call` into its stderr report, or re-throw.
  *
- * A named function rather than an inline `.catch` in the command action: the
- * action body only ever runs under Cliffy, so anything written there is
- * unreachable from a unit test. The `deps` seam is `exitWithDataError`'s,
+ * A named function rather than an inline `.catch` in the command action:
+ * which of the two it does is decided by the error alone, so a test states
+ * the error and reads the answer instead of provoking one out of a payload
+ * a resolved callable rejects. The `deps` seam is `exitWithDataError`'s,
  * threaded so a test can observe the report without a real process exit.
  *
  * `observer` is the call's phase observer: this exit bypasses the action's
@@ -813,9 +814,11 @@ export function reportVerbInputErrorOrRethrow(
  * the retry key, before exiting 1. A wait-bound expiry additionally writes
  * the Invocation JSON with that phase as its `status` to stdout — the same
  * machine surface as a settled call, so a script parses one shape either
- * way. A named export rather than catch-block prose because the action body
- * only runs under Cliffy and is unreachable from a unit test; the seams let
- * a test observe the exact exit contract, and the action's catch calls THIS
+ * way. A named export rather than catch-block prose because the error and
+ * the phase together pick which of those reports comes out, and both are
+ * parameters a test names — a wait-bound expiry at a chosen phase is
+ * otherwise a call held open until its bound passes. The seams let a test
+ * observe the exact exit contract, and the action's catch calls THIS
  * function, so what the tests observe is what a user gets.
  */
 export function exitPieceCallFailure(
@@ -3007,8 +3010,11 @@ export interface PieceCellCommandDependencies {
  * decides which the positionals name), and either spelling may end in
  * `#argument`, which reads the arguments cell the way `--input` does.
  *
- * A named export with seams rather than an inline action body because action
- * bodies never execute under the unit suite (docs/development/COVERAGE.md).
+ * A named export with seams rather than an arrow function at the `.action()`
+ * call: what the intake decided is the thing under test — which spelling
+ * named the target, the path segments it merged, the read options it
+ * settled — and a caller supplying its own `getCellValue` reads all three
+ * off the call it receives, with no runtime, socket, or server behind it.
  */
 export async function getCellValueFromCommand(
   options: PieceGetCLIOptions,

@@ -61,8 +61,11 @@ export interface ExecCommandOptions {
  * the caller has configured, so a token that omitted it would suggest a
  * command that reads a different cell.
  *
- * Extracted from the action body so it is unit-coverable: command action
- * bodies never execute under the unit suite (docs/development/COVERAGE.md).
+ * Standing apart from the action is what lets a test state a result of each
+ * shape and read what came out of the two sinks, rather than mounting a file
+ * and dispatching to it three times. The action body does run under the unit
+ * suite, so what the separation buys is reaching the three outcomes, not
+ * reaching the lines.
  */
 export function renderExecOutcome(
   result: ExecutedMountedCallableFile,
@@ -103,9 +106,10 @@ export function renderExecOutcome(
  * A selection that fails against a RESULT is the other case, and that one does
  * name them.
  *
- * Extracted from the action body for the same reason `renderExecOutcome` is:
- * command action bodies never execute under the unit suite
- * (docs/development/COVERAGE.md).
+ * A named export with a `deps` seam rather than a `try` inside the action:
+ * the exit ends the process, so a malformed selection reached through argv
+ * is read off a stubbed `Deno.exit`, while a direct call reads the report
+ * off the seam the exit contract is written against.
  */
 export async function parseExecSelection(
   options: ExecCommandOptions,
@@ -137,9 +141,11 @@ export async function parseExecSelection(
  * a caller decide rather than guess. The session completing the pair is
  * already on stderr, announced at dispatch.
  *
- * A named export rather than catch-block prose because the action body only
- * runs under Cliffy and is unreachable from a unit test; the seams let a test
- * observe the exact exit contract, and the action's catch calls THIS function.
+ * A named export rather than catch-block prose because the phase is what
+ * chooses between those two reports, and as a parameter a test names it —
+ * reaching the second one through the action would take a mounted callable
+ * that fails after it has dispatched. The seams let a test observe the exact
+ * exit contract, and the action's catch calls THIS function.
  */
 export function exitExecFailure(
   error: unknown,
