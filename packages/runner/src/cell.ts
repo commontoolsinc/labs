@@ -4,6 +4,7 @@ import {
   entityRefFromString,
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   assertValidFabricValueLayer,
   cloneIfNecessary,
@@ -4122,8 +4123,8 @@ type CellLinkOptions = {
 };
 
 /**
- * Helper for `convertCellsToLinks()`, which returns the link that reaches a
- * cell, carrying the cell's CFC label view onto it when asked.
+ * Helper for `convertCellsToLinks()`, which returns the frozen link that
+ * reaches a cell, carrying the cell's CFC label view onto it when asked.
  */
 function linkToCell(cell: Cell<any>, options: CellLinkOptions): SigilLink {
   const link = cell.getAsLink(options);
@@ -4135,12 +4136,12 @@ function linkToCell(cell: Cell<any>, options: CellLinkOptions): SigilLink {
     }
   }
 
-  return link;
+  return deepFreeze(link);
 }
 
 /**
  * Converts cells and objects that can be turned to cells to links. What comes
- * back is a `FabricValue` with a link wherever a cell sat.
+ * back is a deeply frozen `FabricValue` with a link wherever a cell sat.
  *
  * @param value - The value to convert.
  * @returns The converted value.
@@ -4171,6 +4172,9 @@ export function convertCellsToLinks(
  * cut is correct because an entry sits in `ancestors` only while the walk is
  * inside it, which is exactly while the stack still holds its own path as a
  * prefix.
+ *
+ * Each container is frozen as the walk returns it, and each link as it is
+ * minted, which is what makes the whole answer deeply frozen.
  */
 function convertOneToLinks(
   value: CellLinkInput,
@@ -4182,7 +4186,7 @@ function convertOneToLinks(
     const depth = ancestors.get(value);
 
     if (depth !== undefined) {
-      return linkRefFrom({ path: stack.slice(0, depth) });
+      return deepFreeze(linkRefFrom({ path: stack.slice(0, depth) }));
     }
   }
 
@@ -4277,7 +4281,7 @@ function convertOneToLinks(
       // where filling `new Array(n)` by index returns a holey one, which
       // costs its consumers -- about a fifth of what structured-cloning the
       // result takes, paid on every crossing to the client.
-      return container.map((element: unknown, index: number) => {
+      return Object.freeze(container.map((element: unknown, index: number) => {
         stack.push(String(index));
 
         const converted = convertOneToLinks(
@@ -4290,7 +4294,7 @@ function convertOneToLinks(
         stack.pop();
 
         return converted;
-      });
+      }));
     }
 
     // Built through `fromEntries()` rather than by assigning member by member.
@@ -4298,7 +4302,7 @@ function convertOneToLinks(
     // filled by assignment costs about half again as much to structured-clone
     // as the same object built from entries, and every consumer of a converted
     // value pays that, the crossing to the client included.
-    return Object.fromEntries(
+    return Object.freeze(Object.fromEntries(
       Object.entries(container).map(([key, member]) => {
         stack.push(key);
 
@@ -4313,7 +4317,7 @@ function convertOneToLinks(
 
         return [key, converted];
       }),
-    );
+    ));
   } finally {
     ancestors.delete(original);
   }
