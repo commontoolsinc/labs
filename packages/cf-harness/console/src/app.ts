@@ -92,6 +92,7 @@ export class ConsoleApp extends LitElement {
   declare turnId: string | undefined;
   declare runs: readonly ConsoleRunSummary[];
   declare openRunId: string | undefined;
+
   /** The open run's conversation map, which the third column draws. */
   declare flow: ConsoleFlow | undefined;
 
@@ -110,6 +111,7 @@ export class ConsoleApp extends LitElement {
 
   declare state: string;
   declare running: boolean;
+
   /** The last thing the live stream reported, shown while a turn runs. */
   declare activity: string | undefined;
 
@@ -120,6 +122,7 @@ export class ConsoleApp extends LitElement {
   #lastSequence = 0;
 
   #stream: EventSource | undefined;
+
   /** Run ids known before the running turn started, so its own is spottable. */
   #runIdsBeforeTurn = new Set<string>();
 

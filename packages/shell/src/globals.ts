@@ -6,6 +6,7 @@ declare global {
   var commonfabric: {
     rt?: RuntimeClient;
     detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
+
     /** Changes memory-message compression for live and later connections. */
     setMemoryMessageCompression?: (enabled: boolean) => Promise<void>;
 

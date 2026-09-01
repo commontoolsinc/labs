@@ -475,6 +475,7 @@ export type ServingLoopStats = {
     needsAttentionSealFailures: number;
     deliveryCheckpointWriteFailures: number;
     explicitRetries: number;
+
     /** Terminal drop/error notices SEALED onto a durable entry
      * (events.md §5: the notice IS the consequence and the frontier
      * advances past it). DROPS ONLY — a handler that THREW seals an

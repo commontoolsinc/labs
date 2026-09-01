@@ -174,6 +174,7 @@ function portReader(port: MessagePort) {
   port.start();
   return {
     received,
+
     /** Settles on the next message to arrive. Called before what prompts it. */
     next: () => new Promise<void>((resolve) => (arrived = resolve)),
   };

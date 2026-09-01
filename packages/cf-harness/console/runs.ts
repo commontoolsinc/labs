@@ -30,10 +30,12 @@ export interface ConsoleRunSummary {
   endedAt?: string;
   terminalReason?: string;
   model?: string;
+
   /** The last thing a person said in this run, which is what it was asked. */
   title?: string;
 
   toolCallCount: number;
+
   /** The run that delegated this one, for a `delegate_task` child. */
   parentRunId?: string;
 
@@ -58,6 +60,7 @@ export interface ConsoleRunSummary {
  */
 export interface ConsolePatternAttempt {
   toolCallId: string;
+
   /** Present when the call submitted source; absent when it named an index pattern. */
   source?: string;
 
@@ -68,6 +71,7 @@ export interface ConsolePatternAttempt {
   inputNames: readonly string[];
 
   status: string;
+
   /** The compiler's diagnostic, for a call the compiler refused. */
   message?: string;
 
@@ -78,11 +82,13 @@ export interface ConsolePatternAttempt {
 /** One `search_patterns` call and the patterns it matched. */
 export interface ConsolePatternSearch {
   toolCallId: string;
+
   /** What was searched for: the call's free text, its tags, or both. */
   query?: string;
 
   hits: readonly {
     patternId?: string;
+
     /** The hit's own description, which is all the index titles it by. */
     description?: string;
 
@@ -95,6 +101,7 @@ export interface ConsolePatternSearch {
 export interface ConsolePatternFeedback {
   toolCallId: string;
   patternId?: string;
+
   /** The verdict the call cast: `up` or `down`. */
   verdict?: string;
 

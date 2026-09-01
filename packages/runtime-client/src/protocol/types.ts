@@ -965,6 +965,7 @@ export type CellGetRequest = BaseRequest & {
 /** The {@link RequestType.CellPull} request. */
 export type CellPullRequest = BaseRequest & {
   type: RequestType.CellPull;
+
   /**
    * The cell whose producers to demand before reading its current value.
    */

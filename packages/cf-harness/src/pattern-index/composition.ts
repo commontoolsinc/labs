@@ -235,6 +235,7 @@ export const materializeComposedPatterns = async (
       patternIndexErrorDetail(error),
     );
   }
+
   /** Ids made durable by this call, dependencies first. */
   const materialized: string[] = [];
 

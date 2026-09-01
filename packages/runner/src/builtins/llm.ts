@@ -469,16 +469,6 @@ async function executeWithToolsLoop(params: {
 }
 
 /**
- * Announce the builtin's result cell again, in a transaction of its own.
- *
- * The announcement rides the same transaction as the request it belongs to, so
- * a refused request takes the announcement with it and the pattern is left
- * pointing at nothing — including at the error the refusal is about to record.
- * Writing it again puts the result cell back where a reader looks for it. The
- * value is the one the refused transaction carried, so on the runs that kept
- * their announcement this writes what is already there.
- */
-/**
  * Common error handler for LLM requests.
  * Resets state and allows retry on next invocation.
  */
@@ -501,7 +491,9 @@ async function handleLLMError<T, P>(
    * results); inert everywhere else. */
   effectKey?: string,
   /** Announces the builtin's result cell, for the caller whose announcement
-   * rode a transaction that was abandoned. It runs whether or not a newer
+   * rode a transaction that was abandoned: a refused request takes the
+   * announcement with it and leaves the pattern pointing at nothing, including
+   * at the error the refusal is about to record. It runs whether or not a newer
    * request has taken over, because the announcement says where the answer
    * appears and is the same either way, and the run that took over will not
    * make it again. */

@@ -488,6 +488,7 @@ export interface WaveCommitRejection {
   message: string;
   conflictedDocs?: readonly string[];
   failedPreconditions?: readonly number[];
+
   /** Operation index for a deterministic RowLabelCommitError. */
   failedOperation?: number;
 }

@@ -33,10 +33,12 @@ import type { PiecesController } from "./pieces-controller.ts";
 /** One revision a piece could be returned to, and whether it could be. */
 export interface RestorableRevision {
   revisionId: string;
+
   /** When the piece accepted this source state, as an epoch millisecond. */
   timestamp: number;
 
   patternIdentity: string;
+
   /** The export the revision runs — the executable pointer's other half. */
   symbol: string;
 
@@ -200,6 +202,7 @@ export async function readRestorableSource(
 export interface RestoreTarget {
   patternIdentity: string;
   symbol: string;
+
   /**
    * The revision itself, when the caller recorded one. Absent, the
    * reference selects it — the case a rollback row carries for a piece

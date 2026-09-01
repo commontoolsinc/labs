@@ -1038,6 +1038,7 @@ export class PatternManager {
       await getCompileCacheRuntimeVersion(),
       { patternCoverage: this.runtime.patternCoverage !== undefined },
     );
+
     /** One origin's verified closure read, complete or classified.
      * Verification recomputes module identities with the default ("")
      * runtimeFingerprint — the same default every compile path in the

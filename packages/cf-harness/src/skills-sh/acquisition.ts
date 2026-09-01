@@ -23,6 +23,7 @@ const GITHUB_API_BASE_URL = "https://api.github.com";
 const GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com";
 const FULL_GIT_COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const MAX_TREE_PATH_CHARS = 4_096;
+
 /** Maximum exact byte length admitted for an instructions-only SKILL.md. */
 export const SKILLS_SH_MAX_SKILL_BYTES = 256 * 1_024;
 

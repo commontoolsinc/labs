@@ -414,6 +414,7 @@ export function resolveLink(
   options: {
     preserveOverwrite?: boolean;
     onScopeBlocked?: () => void;
+
     /**
      * Mark the transaction cfc-relevant for every crossed link whose
      * stored schema carries `ifc` (the crossing seam,
@@ -453,6 +454,7 @@ export function resolveLinkTracingDereferences(
   options: {
     preserveOverwrite?: boolean;
     onScopeBlocked?: () => void;
+
     /**
      * Mark the transaction cfc-relevant for every crossed link whose
      * stored schema carries `ifc` (the crossing seam,

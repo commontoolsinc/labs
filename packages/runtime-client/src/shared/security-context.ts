@@ -67,11 +67,6 @@ const SECURITY_CONTEXT_FIELDS: Record<
 };
 
 /**
- * The security context a runtime stood up from this data runs under. The
- * acting principal arrives as a key pair and is recorded here as the DID it
- * derives to, which is what an attach states and all an attach may state.
- */
-/**
  * The fields on which `asserted` and `running` disagree, in a fixed order, or
  * an empty list where they agree throughout.
  *

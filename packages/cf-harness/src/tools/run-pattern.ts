@@ -1223,6 +1223,7 @@ export const runPatternTool: HarnessToolDefinition<
     // the created piece carries a pointer another runtime can load. A session
     // built without an instantiation recorder asks nothing.
     const instantiationStart = session.instantiations?.sequence() ?? 0;
+
     /**
      * Reports this invocation's outcome to the index, when the pattern came
      * from there. A cancelled run reports nothing: it neither succeeded nor
@@ -1476,6 +1477,7 @@ export const runPatternTool: HarnessToolDefinition<
     if (valueError === undefined) {
       recordOutcome("run_succeeded");
     }
+
     /**
      * The render gate: what the pattern's own `$UI` does before the pattern
      * is contributed to the index.

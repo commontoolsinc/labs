@@ -164,7 +164,6 @@ export function parseIdentityArgument(text: string): TestIdentity | undefined {
   return test;
 }
 
-/** What `explain` says about one identity, as lines. */
 /** What the packing decided about one identity. */
 export interface PlanVerdict {
   selected: boolean;
@@ -184,6 +183,7 @@ export interface PlanVerdict {
   loneSeconds?: number;
 }
 
+/** What `explain` says about one identity, as lines. */
 export function explainLines(
   manifest: Manifest,
   test: TestIdentity,

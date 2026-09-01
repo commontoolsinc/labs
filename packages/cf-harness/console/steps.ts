@@ -52,10 +52,12 @@ export interface ConsoleHandleUse {
  */
 export interface ConsoleHandle {
   token: string;
+
   /** The address the handle stands for, when the run's table still holds it. */
   ref?: string;
 
   addressKey?: string;
+
   /** The step whose text first carried this token. */
   introducedAtStep: number;
 

@@ -682,6 +682,7 @@ type RuntimeOperationSession = {
   cellKey: string;
   target: RuntimeOperationTarget;
   subscriptions: Set<string>;
+
   /**
    * The client that opened this session. A session id is a UUID its client
    * minted, which keeps two clients from colliding but does not stop one

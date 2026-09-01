@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env --allow-sys --allow-ffi
+
 /**
  * Fails when a command the CLI accepts is described in no live document.
  *

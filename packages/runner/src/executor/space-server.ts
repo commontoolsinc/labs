@@ -793,6 +793,7 @@ export class SpaceServer implements TransactionSealDestination {
   readonly #deliveryRecoveryAttempts = new Set<string>();
   readonly #deliveryCheckpointWriteBlocked = new Set<string>();
   readonly #attentionSealWriteBlocked = new Set<string>();
+
   /** Input frontier at which a processing-state write failed. Only a newer
    * admitted input may serve as the generic storage/input wake. */
   readonly #deliveryWriteBlockedAt = new Map<string, number>();

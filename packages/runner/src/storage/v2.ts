@@ -199,6 +199,7 @@ const pendingPatchLogger = getLogger("storage.v2.pending-patch", {
   level: "warn",
   logCountEvery: 0,
 });
+
 /** Its OWN logger, deliberately, because the module logger above sits at
  *  `level: "error"` and would swallow a warn. A session remount is the visible
  *  end of a starvation that was previously indistinguishable from a doc simply

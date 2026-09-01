@@ -26,6 +26,7 @@ export interface ConsoleSessionSummary {
   turnCount: number;
   createdAt: string;
   updatedAt: string;
+
   /** The first user input of the session, elided past the preview limit. */
   firstTaskText?: string;
 }
