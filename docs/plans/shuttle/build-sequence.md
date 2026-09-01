@@ -90,8 +90,9 @@ recorded limit; the PR is whichever the review rules.
 
 ## Stage B — the shuttle package
 
-**B0 — scaffold** (after A1). Done. `packages/shuttle` is a workspace
-member: its path sits in the root `deno.jsonc` workspace array, and its
+**B0 — scaffold** (after A1). Done (#6741). `packages/shuttle` is a
+workspace member: its path sits in the root `deno.jsonc` workspace array,
+and its
 own `deno.jsonc` carries the `tasks.test` entry — without which a
 `deno task test` run there resolves the root workspace task instead and
 re-runs the whole suite inside itself. The scaffold is configuration
