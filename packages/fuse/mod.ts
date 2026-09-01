@@ -1864,7 +1864,7 @@ export async function main(argv: string[] = Deno.args) {
           // degraded mode when its projection refresh discovers an outage.
           if (isConnectionWriteFailure(error)) noteWriteFailure(error);
           console.error(`[source] ${finalized.warning}`);
-          bridge.writeSourceErrorLog(writeTarget.target, finalized.warning);
+          bridge.writeSourceErrorLog(writeTarget.target, finalized.logWarning);
         }
         reconcileCfcWritebacks("source flush post-finalize");
         markExistingFinalized();
