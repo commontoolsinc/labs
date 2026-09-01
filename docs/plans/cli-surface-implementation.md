@@ -157,7 +157,11 @@ offline but for `inspect pull`, which fetches from a remote.
 the question — if they are not, the fix is naming rather than merging.
 
 **M2. Two `view`s, and a `render`.** `cf view`, `cf piece view`, and
-`cf piece render`. Three commands that turn a piece into something displayable.
+`cf piece render`. `piece view` and `piece render` display a live piece, as a
+terminal tree and as HTML. `cf view` shares the word and little else: it takes
+a file or stdin, declares no target options at all, and so can name neither a
+piece nor a space. The decision is whether one word should cover both a running
+piece and a source file.
 
 **M3. `piece map` against `inspect graph`.** Both draw the connections between
 pieces. `inspect graph` already produces DOT output and takes a space; `piece
