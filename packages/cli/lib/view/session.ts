@@ -4607,7 +4607,10 @@ export class Session {
         this.#jumpSel = clamp(this.#jumpSel - 1, 0, last);
         return this.#scrollJumpToSelection(this.#jumpSel);
       case "pagedown":
+        this.#jumpSel = clamp(this.#jumpSel + 10, 0, last);
+        return this.#scrollJumpToSelection(this.#jumpSel);
       case "space":
+        if (this.#jumpSearching) break;
         this.#jumpSel = clamp(this.#jumpSel + 10, 0, last);
         return this.#scrollJumpToSelection(this.#jumpSel);
       case "pageup":

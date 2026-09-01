@@ -258,6 +258,16 @@ Deno.test("jumplist: a filter matching the commit subject keeps the commit", () 
   assertEquals(entryText(s), ["● commit 012345678  Fix the widget alignment"]);
 });
 
+Deno.test("jumplist: spaces are entered in a filter", () => {
+  const s = diffSession(SHOW);
+  press(s, "i", "/");
+  type(s, "widget");
+  s.handleKey({ name: "space", char: " " });
+  type(s, "alignment");
+  assertEquals(entryText(s), ["● commit 012345678  Fix the widget alignment"]);
+  assertEquals(s.view().inputLine, "jump to: widget alignment");
+});
+
 Deno.test("jumplist: enter with no match leaves the list open", () => {
   const s = diffSession(SHOW);
   press(s, "down", "down"); // scroll off the top so "unmoved" is meaningful
