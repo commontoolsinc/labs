@@ -60,9 +60,6 @@ const POOL = 128;
 /** How far above `ADD_INDEX_AT` the indexed state sits. */
 const ABOVE = 8;
 
-/** How far below `DROP_INDEX_BELOW` the crossed state comes back down to. */
-const BELOW = 8;
-
 /** Distinct objects, as many as asked for. */
 function objects(count: number): object[] {
   const out: object[] = [];
@@ -89,24 +86,13 @@ function batchOf(repeated: boolean): object[] {
   return out;
 }
 
-/**
- * The states, as the height a stack reaches and where it settles. `between` is
- * the one the lookup groups exist for: tall enough to have built an index and
- * not short enough to have dropped it, at a height a scan would still be
- * cheap at.
- */
+/** The three states, as the height a stack reaches and where it settles. */
 const STATES = [
   { name: "scanning", climb: 0, settle: 0 },
   {
     name: "crossed",
     climb: IndexTrackingStack.ADD_INDEX_AT + ABOVE,
-    settle: IndexTrackingStack.DROP_INDEX_BELOW - BELOW,
-  },
-  {
-    name: "between",
-    climb: IndexTrackingStack.ADD_INDEX_AT + ABOVE,
-    settle: (IndexTrackingStack.ADD_INDEX_AT +
-      IndexTrackingStack.DROP_INDEX_BELOW) / 2,
+    settle: 0,
   },
   {
     name: "indexed",
@@ -157,8 +143,12 @@ const BANDS = [
   },
 ] as const;
 
-/** How many operations one oscillating iteration performs. */
-const SWING_OPS = 10240;
+/**
+ * How many operations one oscillating iteration performs. Divisible by twice
+ * every band's swing, so each band runs the count exactly rather than
+ * overshooting it by a different remainder.
+ */
+const SWING_OPS = 11088;
 
 for (const band of BANDS) {
   const swing = band.ceiling - band.floor;
