@@ -47,6 +47,9 @@
 
 import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 
+/** The marks this class arranges itself around, which the cases are set by. */
+const MARKS = IndexTrackingStack.accessForTestingOnly;
+
 /** How many operations one timed batch performs, against one stack. */
 const BATCH = 32;
 
@@ -91,13 +94,13 @@ const STATES = [
   { name: "scanning", climb: 0, settle: 0 },
   {
     name: "crossed",
-    climb: IndexTrackingStack.ADD_INDEX_AT + ABOVE,
+    climb: MARKS.ADD_INDEX_AT + ABOVE,
     settle: 0,
   },
   {
     name: "indexed",
-    climb: IndexTrackingStack.ADD_INDEX_AT + ABOVE,
-    settle: IndexTrackingStack.ADD_INDEX_AT + ABOVE,
+    climb: MARKS.ADD_INDEX_AT + ABOVE,
+    settle: MARKS.ADD_INDEX_AT + ABOVE,
   },
 ] as const;
 
@@ -129,17 +132,17 @@ const BANDS = [
   {
     name: "below the threshold",
     floor: 0,
-    ceiling: IndexTrackingStack.ADD_INDEX_AT - 8,
+    ceiling: MARKS.ADD_INDEX_AT - 8,
   },
   {
     name: "above the low mark",
-    floor: IndexTrackingStack.ADD_INDEX_AT - 8,
-    ceiling: IndexTrackingStack.ADD_INDEX_AT + 48,
+    floor: MARKS.ADD_INDEX_AT - 8,
+    ceiling: MARKS.ADD_INDEX_AT + 48,
   },
   {
     name: "across both marks",
-    floor: IndexTrackingStack.DROP_INDEX_BELOW - 8,
-    ceiling: IndexTrackingStack.ADD_INDEX_AT + 48,
+    floor: MARKS.DROP_INDEX_BELOW - 8,
+    ceiling: MARKS.ADD_INDEX_AT + 48,
   },
 ] as const;
 
@@ -180,8 +183,7 @@ const LOOKUPS = 64;
  * stack can sit here either with an index or without one, which is what makes
  * the comparison a comparison.
  */
-const LOOKUP_HEIGHT =
-  (IndexTrackingStack.ADD_INDEX_AT + IndexTrackingStack.DROP_INDEX_BELOW) / 2;
+const LOOKUP_HEIGHT = (MARKS.ADD_INDEX_AT + MARKS.DROP_INDEX_BELOW) / 2;
 
 /**
  * The lookup subjects, as how a stack of `LOOKUP_HEIGHT` got there. The first
@@ -193,13 +195,13 @@ const LOOKUP_SUBJECTS = [
   { name: "no index", climb: LOOKUP_HEIGHT, settle: LOOKUP_HEIGHT },
   {
     name: "index, between the marks",
-    climb: IndexTrackingStack.ADD_INDEX_AT + ABOVE,
+    climb: MARKS.ADD_INDEX_AT + ABOVE,
     settle: LOOKUP_HEIGHT,
   },
   {
     name: "index, above the high mark",
-    climb: IndexTrackingStack.ADD_INDEX_AT + ABOVE,
-    settle: IndexTrackingStack.ADD_INDEX_AT + ABOVE,
+    climb: MARKS.ADD_INDEX_AT + ABOVE,
+    settle: MARKS.ADD_INDEX_AT + ABOVE,
   },
 ] as const;
 

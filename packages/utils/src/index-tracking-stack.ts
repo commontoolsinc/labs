@@ -11,10 +11,9 @@
  * it was pushed at. {@link #indexOf} names the lowest of them and {@link
  * #lastIndexOf} the highest, and a pop takes the highest away.
  *
- * A lookup does not get slower as the stack grows: past {@link #ADD_INDEX_AT}
- * values it keeps an index, and drops it again below
- * {@link #DROP_INDEX_BELOW}. Where an answer came from is not observable
- * beyond what it cost.
+ * A lookup does not get slower as the stack grows. How that is arranged, and
+ * the heights it is arranged around, are this class's own business and not
+ * something to write code against.
  */
 export class IndexTrackingStack<T> {
   /** The values, in order, so a value's position is its index. */
@@ -25,8 +24,8 @@ export class IndexTrackingStack<T> {
    * enough to want them, and `undefined` otherwise. Keyed by {@link #keyFor},
    * not by the value itself.
    *
-   * Kept once built until the stack falls below {@link #DROP_INDEX_BELOW}, and
-   * used at every height while it exists: what a short stack is spared is
+   * Kept once built until the stack falls below {@link #DROP_INDEX_BELOW},
+   * and used at every height while it exists: what a short stack is spared is
    * maintaining this, and that is already spent by the time a lookup asks.
    * The two marks are far enough apart that ordinary movement does not build
    * and drop repeatedly -- a stack has to swing across the whole gap.
@@ -140,7 +139,7 @@ export class IndexTrackingStack<T> {
       } else {
         found.push(at);
       }
-    } else if (this.#stack.length >= IndexTrackingStack.ADD_INDEX_AT) {
+    } else if (this.#stack.length >= IndexTrackingStack.#ADD_INDEX_AT) {
       const positions = new Map<unknown, number[]>();
 
       for (let index = 0; index < this.#stack.length; index++) {
@@ -181,7 +180,7 @@ export class IndexTrackingStack<T> {
         }
       }
 
-      if (this.#stack.length < IndexTrackingStack.DROP_INDEX_BELOW) {
+      if (this.#stack.length < IndexTrackingStack.#DROP_INDEX_BELOW) {
         this.#positions = undefined;
       }
     }
@@ -210,14 +209,33 @@ export class IndexTrackingStack<T> {
    * a scan and a keyed lookup cost the same, so that reaching it never costs
    * more than not having reached it.
    */
-  static readonly ADD_INDEX_AT = 64;
+  static readonly #ADD_INDEX_AT = 64;
 
   /**
    * The height below which the index is dropped. The gap between this and
    * {@link #ADD_INDEX_AT} is what keeps a stack from building and dropping
    * over and over: a stack has to swing across the whole of it to rebuild.
    */
-  static readonly DROP_INDEX_BELOW = 32;
+  static readonly #DROP_INDEX_BELOW = 32;
+
+  /**
+   * The heights this class arranges itself around, for a test or a benchmark
+   * to bound its cases with.
+   *
+   * The name is the documentation. These are a tuning decision, not part of
+   * what this class promises, and code that reads them is written against a
+   * number that is free to move. A test that has to straddle a threshold has
+   * no other way to find it, which is the whole of why this exists.
+   */
+  static get accessForTestingOnly(): {
+    ADD_INDEX_AT: number;
+    DROP_INDEX_BELOW: number;
+  } {
+    return {
+      ADD_INDEX_AT: IndexTrackingStack.#ADD_INDEX_AT,
+      DROP_INDEX_BELOW: IndexTrackingStack.#DROP_INDEX_BELOW,
+    };
+  }
 
   /**
    * The index key for the given value: the value itself, except for the two a

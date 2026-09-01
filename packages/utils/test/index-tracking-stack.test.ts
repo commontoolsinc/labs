@@ -2,7 +2,7 @@
  * `IndexTrackingStack` answers its two lookups two ways -- by scanning, and
  * from the index it builds once it is tall enough -- so every question worth
  * asking gets asked on both sides of
- * {@link IndexTrackingStack.ADD_INDEX_AT}. The two must agree, and a stack
+ * `ADD_INDEX_AT`. The two must agree, and a stack
  * that crosses the threshold and comes back down must answer as one that never
  * crossed it.
  */
@@ -22,7 +22,12 @@ function objects(count: number): object[] {
 }
 
 /** How tall a stack has to be for the index to have been built. */
-const TALL = IndexTrackingStack.ADD_INDEX_AT + 5;
+/**
+ * The marks the class arranges itself around, which a test has to straddle.
+ */
+const MARKS = IndexTrackingStack.accessForTestingOnly;
+
+const TALL = MARKS.ADD_INDEX_AT + 5;
 
 /**
  * A stack holding the given objects, padded first to `height` with distinct
