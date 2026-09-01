@@ -604,6 +604,7 @@ export type PostCommitSideEffect = {
   nonce?: string;
 
   flush(tx: unknown): void | Promise<void>;
+
   /**
    * Called instead of {@link flush} when the work this effect stands for will
    * not happen: the transaction carrying it was rejected and whoever owns its

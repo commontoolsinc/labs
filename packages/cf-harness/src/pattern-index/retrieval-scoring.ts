@@ -36,6 +36,7 @@ export const REPORTED_RANK_CUTOFF = 10;
 export interface LabelledCapability {
   id: string;
   need: string;
+
   /** Entries a session could use for `need` without rewriting behaviour. */
   answers: readonly string[];
 
@@ -85,6 +86,7 @@ export interface QueryScore {
   queryId: string;
   capability: string;
   register: string;
+
   /** 1-based rank of the first answering entry, or `undefined` for none. */
   firstAnswerRank?: number;
 
@@ -106,6 +108,7 @@ export interface NegativeScore {
 
 export interface Aggregate {
   queries: number;
+
   /** Queries whose first answering entry reached rank 5 or better. */
   hitAt5: number;
 
@@ -129,6 +132,7 @@ export interface RetrievalReport {
   queryScores: readonly QueryScore[];
   negativeScores: readonly NegativeScore[];
   failures: readonly QueryFailure[];
+
   /** Negative queries that correctly returned nothing. */
   negativesClean: number;
 }

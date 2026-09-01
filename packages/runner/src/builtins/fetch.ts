@@ -319,6 +319,7 @@ function fetchBuiltin(kind: FetchKind) {
     let internal: Cell<Schema<typeof internalSchema>>;
     let cellScope: CellScope | undefined;
     let myRequestId: string | undefined = undefined;
+
     /**
      * The request this node staged on its most recent run, if that run staged
      * one. A token rather than the request's hash: two stagings of the same

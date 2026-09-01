@@ -758,6 +758,7 @@ export async function repairPieces(
     };
   };
   const rows: RepairRow[] = [];
+
   /**
    * Every row this run settles, to the report and to a watching caller.
    *

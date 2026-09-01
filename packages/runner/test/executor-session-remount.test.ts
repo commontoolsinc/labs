@@ -91,6 +91,7 @@ describe("the session remount (profile-starvation fifth face)", () => {
   let server: MemoryV2Server.Server;
   let cleanups: Array<() => Promise<void>>;
   let storeSeq = 0;
+
   /** `session.open` attempts by the SERVING identity — the observable for
    * "did this remount actually mint a new session?". Scoped to the service
    * principal because the ACL-setting client runtimes open sessions of

@@ -234,6 +234,7 @@ export type SlowQuery = {
   space: string;
   roots?: number;
   watches?: number;
+
   /** transact only: milliseconds the commit waited for the space
    * publication lock before evaluation began. Flush passes hold the same
    * lock, so a large value is head-of-line blocking behind fan-out rather
@@ -1429,6 +1430,7 @@ export class Server {
       store?: URL;
 
       operationCodecs?: OperationCodecRegistry;
+
       /** Engine-owned interval for operation checkpoints and bounded retention. */
       operationCheckpointInterval?: number;
 

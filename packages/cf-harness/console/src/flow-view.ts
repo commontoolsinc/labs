@@ -51,6 +51,7 @@ export class ConsoleFlowView extends LitElement {
   };
 
   declare flow: ConsoleFlow | undefined;
+
   /** The step the timeline is on, marked here so the two stay in step. */
   declare focusStep: number | undefined;
 

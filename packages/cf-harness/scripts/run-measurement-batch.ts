@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-net --allow-read --allow-write --allow-env
+
 /**
  * Run a list of console tasks unattended and write the measurement report.
  *
@@ -558,6 +559,7 @@ export type ImportedPatternOrigin =
   | { kind: "seeded-superseded" }
   | {
     kind: "seeded-via-alias";
+
     /** Seeded patterns this one depends on. */
     through: readonly string[];
 

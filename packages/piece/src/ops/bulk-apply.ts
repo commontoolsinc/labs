@@ -76,10 +76,12 @@ export type ApplyVerdict =
 /** One piece's row in an apply report. */
 export interface ApplyRow {
   piece: string;
+
   /** The plan row's phase label, carried as the plan stamped it. */
   phase?: string;
 
   verdict: ApplyVerdict;
+
   /**
    * What a moved, refused, or failed row broke; absent otherwise. A row
    * names its own piece's trouble alone — the run's own, a session that
@@ -145,6 +147,7 @@ export interface ApplyRow {
 /** What one apply run found, and — under `apply` — did. */
 export interface ApplyReport {
   rows: readonly ApplyRow[];
+
   /** Operations applied. Zero on a dry run and on a fully landed re-run. */
   applied: number;
 
@@ -184,6 +187,7 @@ export type ReferenceOp = Extract<PieceOp, { patternIdentity: string }>;
 export interface WorkRow<Op extends ReferenceOp> {
   piece: string;
   phase?: string;
+
   /**
    * The origin the plan recorded for this piece; see {@link ApplyRow.origin}.
    * Beside `expect` rather than inside it: `expect` is the precondition a
@@ -258,6 +262,7 @@ export interface PlanOperation<Op extends ReferenceOp> {
 export interface ApplyOptions<Op extends ReferenceOp> {
   plan: PiecePlan;
   operation: PlanOperation<Op>;
+
   /**
    * Perform each row's operation. Absent, the run is the preflight
    * classification alone — where every piece stands, and no write at all.
@@ -460,6 +465,7 @@ export async function applyPlan<Op extends ReferenceOp>(
     "landed" | "outstanding" | { blocked: ApplyRow }
   >();
   let startBlocked = false;
+
   /** The run's own trouble, as opposed to any piece's: see `stopReason`. */
   let sessionProblem: string | undefined;
 

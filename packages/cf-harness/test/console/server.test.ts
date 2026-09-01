@@ -182,6 +182,7 @@ const writeTurnTranscript = async (
 
 describe("console/server", () => {
   let server: ConsoleServer;
+
   /** The `Cookie` header the page carries, as loading the page hands it out. */
   let cookie: string;
 

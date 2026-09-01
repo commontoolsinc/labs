@@ -2970,6 +2970,7 @@ export class Scheduler {
     reason: string,
     options: {
       quiet?: boolean;
+
       /** Defaults to the terminal `dropped` arm. `deferred` leaves the
        * durable entry UNCONSEQUENCED for a later drain (events.md §5);
        * only meaningful for a served event. */

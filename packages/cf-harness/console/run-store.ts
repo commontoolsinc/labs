@@ -87,6 +87,7 @@ export interface ConsoleRunDetail {
   runState: HarnessRunState;
   transcript: readonly HarnessTranscriptMessage[];
   lens: ConsoleRunLens;
+
   /** The run as a timeline, which is what the step scrubber reads. */
   steps: readonly ConsoleStep[];
 

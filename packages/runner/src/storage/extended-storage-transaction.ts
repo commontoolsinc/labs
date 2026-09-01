@@ -163,6 +163,7 @@ type CfcInstrumentationHooks = {
   onFlowLabelProbe?(outcome: "computed" | "memo"): void;
 
   onPreparedTx?(): void;
+
   /**
    * CFC prepare refused this transaction. `reasons` are the PLAIN reason
    * texts (the verdict tag is a classification channel and never leaves the

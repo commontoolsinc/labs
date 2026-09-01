@@ -196,6 +196,7 @@ export interface SandboxRuntimeDescription {
 
 export interface SandboxRuntime {
   describe(): SandboxRuntimeDescription;
+
   /**
    * Read whether the host runtime has a valid absolute directory registered
    * for each CFC sidecar flag, so that `describe()` reports a reading rather

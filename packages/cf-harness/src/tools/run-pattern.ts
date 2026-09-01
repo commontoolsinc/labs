@@ -1476,6 +1476,7 @@ export const runPatternTool: HarnessToolDefinition<
     if (valueError === undefined) {
       recordOutcome("run_succeeded");
     }
+
     /**
      * The render gate: what the pattern's own `$UI` does before the pattern
      * is contributed to the index.

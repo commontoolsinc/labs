@@ -384,6 +384,7 @@ export class RuntimeInternals extends EventTarget {
   #disposed = false;
   #favorites: FavoritesManager;
   #callbacks: RuntimeInternalsCallbacks;
+
   /** Cached space roots, with whether the cached one was STARTED: a
    * started root also answers a caller that only reads its exports, while
    * one resolved without starting does not answer a caller that needs it

@@ -477,6 +477,7 @@ export type QueryEvaluationCacheDiagnostics = {
   seq: number;
   entries: number;
   weight: number;
+
   /** Total serves: the sum of the three per-class hit counters. */
   hits: number;
 
@@ -563,6 +564,7 @@ export type QueryEvaluationCache = {
     string,
     { state: TrackedGraphState; share: StateScopeClass; weight: number }
   >;
+
   /** Sum of entry weights (retained entity count — the proxy for the
    * parsed documents an entry keeps alive). The server enforces its
    * cross-space budget against this. */

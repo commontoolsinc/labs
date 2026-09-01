@@ -54,6 +54,7 @@ export type Transport = {
   close(): Promise<void>;
   setReceiver(receiver: (payload: string) => void): void;
   setCloseReceiver?(receiver: (error?: Error) => void): void;
+
   /** Enables compression after a successful capability handshake. */
   setMessageCompressionEnabled?(enabled: boolean): void;
 };
