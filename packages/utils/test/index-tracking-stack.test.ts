@@ -291,7 +291,7 @@ describe("IndexTrackingStack", () => {
 
     it("answers from the scan again once the index has been dropped", () => {
       // Coming back down past `DROP_INDEX_BELOW` drops the index, so what
-      // answers afterwards is the scan -- over a stack that a `Map` was
+      // is used afterwards is the scan -- over a stack that a `Map` was
       // tracking a moment ago, and has to have stopped tracking cleanly.
       const twice = {};
       const stack = new IndexTrackingStack();

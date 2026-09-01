@@ -5,13 +5,13 @@
  * change while things are pushed above it.
  *
  * Both lookups are answered by scanning while the stack is short, and by an
- * index once it has reached {@link #ADD_INDEX_AT} objects. Which one answers
+ * index once it has reached {@link #ADD_INDEX_AT} objects. Which one is used
  * is not observable beyond the cost: a scan is linear in the stack's height
  * where a keyed lookup is not, and the two are within reach of each other only
  * over a range that a short stack sits well below.
  *
  * What the marks weigh is the whole of a stack's use, maintenance included,
- * rather than a lookup on its own. Where an index exists it answers, at any
+ * rather than a lookup on its own. Where an index exists it is used, at any
  * height: maintaining it is what a short stack is being spared, and that is
  * already spent by the time a lookup asks.
  *
