@@ -1,0 +1,490 @@
+/**
+ * Computes alternative added and removed line counts for unified diffs. The
+ * normal mode reports the diff as written. The other modes remove changes
+ * that leave source text unchanged after comments and whitespace are removed.
+ */
+
+import { type DiffFile, type DiffLine, parseDiff } from "./diff.ts";
+import { languageForFile } from "./languages/language.ts";
+import type { Line, TokenClass } from "./model.ts";
+
+/** The line-count policies available in the diff jump list. */
+export type DiffCountMode = "normal" | "whitespace" | "comments";
+
+/** Count policies in the order the jump-list key cycles through them. */
+export const DIFF_COUNT_MODES: readonly DiffCountMode[] = [
+  "normal",
+  "whitespace",
+  "comments",
+];
+
+/** Added and removed line counts. */
+export interface DiffLineCounts {
+  /** Added lines which remain under the selected policy. */
+  readonly adds: number;
+
+  /** Removed lines which remain under the selected policy. */
+  readonly dels: number;
+}
+
+/** Counts for the whole diff and for each file in document order. */
+export interface DiffCounts {
+  /** Counts summed across every file. */
+  readonly totals: DiffLineCounts;
+
+  /** Counts by diff-file index. */
+  readonly files: readonly DiffLineCounts[];
+}
+
+interface ChangedLine {
+  /** Diff-file index containing the line. */
+  readonly file: number;
+
+  /** Side of the diff containing the line. */
+  readonly kind: "add" | "del";
+
+  /** Source text after the diff marker. */
+  readonly text: string;
+
+  /** Text with fallback-language comments removed, when fallback scanning ran. */
+  readonly fallbackText?: string;
+
+  /** Highlighted diff line, used to identify comment spans. */
+  readonly line: Line;
+}
+
+interface MutableCounts {
+  /** Added lines which have not been discounted. */
+  adds: number;
+
+  /** Removed lines which have not been discounted. */
+  dels: number;
+}
+
+/** Computes added and removed counts under `mode`. */
+export function diffCounts(
+  text: string,
+  lines: readonly Line[],
+  mode: DiffCountMode,
+): DiffCounts {
+  const model = parseDiff(text);
+  if (!model) return { totals: { adds: 0, dels: 0 }, files: [] };
+
+  const raw = text.split("\n");
+  const counts: MutableCounts[] = model.files.map(() => ({ adds: 0, dels: 0 }));
+  const byFile: ChangedLine[][] = model.files.map(() => []);
+  const changed: ChangedLine[] = [];
+  for (const [fileIndex, file] of model.files.entries()) {
+    const fallback = fallbackCommentLines(raw, model.lines, lines, file);
+    for (let i = file.headerLine; i <= file.endLine; i++) {
+      const kind = model.lines[i]?.kind;
+      if (kind !== "add" && kind !== "del") continue;
+      if (kind === "add") counts[fileIndex].adds++;
+      else counts[fileIndex].dels++;
+      const line = {
+        file: fileIndex,
+        kind,
+        text: (raw[i] ?? "").slice(1),
+        fallbackText: fallback.get(i),
+        line: lines[i] ?? { text: raw[i] ?? "", spans: [] },
+      };
+      changed.push(line);
+      byFile[fileIndex].push(line);
+    }
+  }
+
+  if (mode === "whitespace") {
+    for (let file = 0; file < model.files.length; file++) {
+      discountPairs(
+        byFile[file],
+        counts,
+        (line) => withoutWhitespace(line.text),
+      );
+    }
+  } else if (mode === "comments") {
+    const remaining: ChangedLine[] = [];
+    for (const line of changed) {
+      const normalized = withoutWhitespace(withoutComments(line));
+      if (normalized.length === 0) decrement(counts[line.file], line.kind);
+      else remaining.push(line);
+    }
+    discountPairs(
+      remaining,
+      counts,
+      (line) => withoutWhitespace(withoutComments(line)),
+    );
+  }
+
+  return {
+    totals: sumDiffLineCounts(counts),
+    files: counts,
+  };
+}
+
+/** Short label for a count policy in the jump-list summary. */
+export function diffCountModeLabel(mode: DiffCountMode): string {
+  switch (mode) {
+    case "normal":
+      return "normal";
+    case "whitespace":
+      return "ignore whitespace-only changes";
+    case "comments":
+      return "ignore comments and whitespace";
+  }
+}
+
+/** Discounts matching additions and removals according to `keyOf`. */
+function discountPairs(
+  lines: readonly ChangedLine[],
+  counts: MutableCounts[],
+  keyOf: (line: ChangedLine) => string,
+): void {
+  const deletions = new Map<
+    string,
+    { readonly lines: ChangedLine[]; next: number }
+  >();
+  for (const line of lines) {
+    if (line.kind !== "del") continue;
+    const key = keyOf(line);
+    const bucket = deletions.get(key) ?? { lines: [], next: 0 };
+    bucket.lines.push(line);
+    deletions.set(key, bucket);
+  }
+  for (const addition of lines) {
+    if (addition.kind !== "add") continue;
+    const bucket = deletions.get(keyOf(addition));
+    const deletion = bucket?.lines[bucket.next];
+    if (!bucket || !deletion) continue;
+    bucket.next++;
+    decrement(counts[deletion.file], "del");
+    decrement(counts[addition.file], "add");
+  }
+}
+
+function decrement(counts: MutableCounts, kind: "add" | "del"): void {
+  if (kind === "add") counts.adds--;
+  else counts.dels--;
+}
+
+/** Sums any set of per-file counts. */
+export function sumDiffLineCounts(
+  counts: readonly DiffLineCounts[],
+): DiffLineCounts {
+  let adds = 0;
+  let dels = 0;
+  for (const file of counts) {
+    adds += file.adds;
+    dels += file.dels;
+  }
+  return { adds, dels };
+}
+
+function withoutWhitespace(text: string): string {
+  return text.replace(/\s/gu, "");
+}
+
+/** Returns one changed line with comment-classified spans removed. */
+function withoutComments(line: ChangedLine): string {
+  if (line.fallbackText !== undefined) return line.fallbackText;
+  let text = line.text;
+  if (
+    line.line.spans.length > 0 &&
+    line.line.spans.map((span) => span.text).join("") === line.line.text
+  ) {
+    let first = true;
+    text = "";
+    for (const span of line.line.spans) {
+      let part = span.text;
+      if (first) {
+        part = [...part].slice(1).join("");
+        first = false;
+      }
+      if (!isCommentSpan(span.cls, part)) text += part;
+    }
+  }
+  return text;
+}
+
+function isCommentSpan(cls: TokenClass, text: string): boolean {
+  return cls === "comment" || cls === "docComment" ||
+    (cls === "sectionHeader" && /^\s*\/\/\s*transformed:/.test(text));
+}
+
+interface CommentSyntax {
+  readonly lines: readonly string[];
+  readonly blocks: readonly (readonly [string, string])[];
+  readonly nestedBlocks: boolean;
+  readonly skipHighlightedCode: boolean;
+  readonly heredocs: boolean;
+}
+
+interface CommentState {
+  block?: {
+    readonly open: string;
+    readonly close: string;
+    depth: number;
+    readonly nested: boolean;
+  };
+  literalClose?: string;
+  heredoc?: { readonly end: string; readonly stripTabs: boolean };
+}
+
+/** Scans each hunk side so block comments carry across changed lines. */
+function fallbackCommentLines(
+  raw: readonly string[],
+  diffLines: readonly DiffLine[],
+  renderedLines: readonly Line[],
+  file: DiffFile,
+): ReadonlyMap<number, string> {
+  const oldSyntax = fallbackSyntaxFor(file.oldPath);
+  const newSyntax = fallbackSyntaxFor(file.newPath);
+  if (!oldSyntax && !newSyntax) return new Map();
+
+  const result = new Map<number, string>();
+  for (const hunk of file.hunks) {
+    const oldState: CommentState = {};
+    const newState: CommentState = {};
+    for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
+      const kind = diffLines[i]?.kind;
+      const text = (raw[i] ?? "").slice(1);
+      if (kind === "ctx") {
+        if (
+          oldSyntax && shouldScanFallback(oldSyntax, renderedLines[i], oldState)
+        ) {
+          stripCommonComments(text, oldSyntax, oldState);
+        }
+        if (
+          newSyntax && shouldScanFallback(newSyntax, renderedLines[i], newState)
+        ) {
+          stripCommonComments(text, newSyntax, newState);
+        }
+      } else if (kind === "del" && oldSyntax) {
+        if (shouldScanFallback(oldSyntax, renderedLines[i], oldState)) {
+          result.set(i, stripCommonComments(text, oldSyntax, oldState));
+        }
+      } else if (kind === "add" && newSyntax) {
+        if (shouldScanFallback(newSyntax, renderedLines[i], newState)) {
+          result.set(i, stripCommonComments(text, newSyntax, newState));
+        }
+      }
+    }
+  }
+  return result;
+}
+
+function shouldScanFallback(
+  syntax: CommentSyntax,
+  line: Line | undefined,
+  state: CommentState,
+): boolean {
+  if (!syntax.skipHighlightedCode || state.block !== undefined || !line) {
+    return true;
+  }
+  const source = [...line.text].slice(1).join("");
+  if (/^(?: {4}|\t)/u.test(source)) return false;
+
+  let first = true;
+  let foundCode = false;
+  for (const span of line.spans) {
+    let text = span.text;
+    if (first) {
+      text = [...text].slice(1).join("");
+      first = false;
+    }
+    if (withoutWhitespace(text).length === 0) continue;
+    if (span.cls !== "string" && span.cls !== "template") return true;
+    foundCode = true;
+  }
+  return !foundCode;
+}
+
+function fallbackSyntaxFor(
+  path: string | undefined,
+): CommentSyntax | undefined {
+  const language = languageForFile(path).id;
+  if (language !== "plain-text" && language !== "markdown") return undefined;
+  const syntax = commentSyntaxFor(path ?? "");
+  return syntax.lines.length > 0 || syntax.blocks.length > 0
+    ? syntax
+    : undefined;
+}
+
+/** Removes common comment forms while updating multiline scanning state. */
+function stripCommonComments(
+  text: string,
+  syntax: CommentSyntax,
+  state: CommentState,
+): string {
+  if (state.heredoc) {
+    const candidate = state.heredoc.stripTabs
+      ? text.replace(/^\t+/u, "")
+      : text;
+    if (candidate === state.heredoc.end) state.heredoc = undefined;
+    return text;
+  }
+
+  let start = 0;
+  let result = "";
+  if (state.literalClose) {
+    const end = text.indexOf(state.literalClose);
+    if (end < 0) return text;
+    result = text.slice(0, end + state.literalClose.length);
+    start = result.length;
+    state.literalClose = undefined;
+  }
+
+  let quote = "";
+  for (let i = start; i < text.length;) {
+    if (state.block) {
+      if (state.block.nested && text.startsWith(state.block.open, i)) {
+        state.block.depth++;
+        i += state.block.open.length;
+      } else if (text.startsWith(state.block.close, i)) {
+        state.block.depth--;
+        i += state.block.close.length;
+        if (state.block.depth === 0) state.block = undefined;
+      } else {
+        i++;
+      }
+      continue;
+    }
+    const ch = text[i];
+    if (quote) {
+      result += ch;
+      if (ch === "\\" && i + 1 < text.length) {
+        result += text[++i];
+      } else if (ch === quote) {
+        quote = "";
+      }
+      i++;
+      continue;
+    }
+    if (
+      (ch === '"' || ch === "'" || ch === "`") &&
+      closingQuote(text, i, ch) >= 0
+    ) {
+      quote = ch;
+      result += ch;
+      i++;
+      continue;
+    }
+    const rawString = rustRawStringAt(text, i);
+    if (rawString) {
+      const end = text.indexOf(rawString.close, i + rawString.open.length);
+      if (end < 0) {
+        result += text.slice(i);
+        state.literalClose = rawString.close;
+        break;
+      }
+      const after = end + rawString.close.length;
+      result += text.slice(i, after);
+      i = after;
+      continue;
+    }
+    const block = syntax.blocks.find(([open]) => text.startsWith(open, i));
+    if (block) {
+      state.block = {
+        open: block[0],
+        close: block[1],
+        depth: 1,
+        nested: syntax.nestedBlocks,
+      };
+      i += block[0].length;
+      continue;
+    }
+    if (syntax.lines.some((marker) => startsLineComment(text, i, marker))) {
+      break;
+    }
+    result += ch;
+    i++;
+  }
+  if (syntax.heredocs && !state.heredoc) {
+    const heredoc = /<<(-)?\s*(['"]?)([A-Za-z_]\w*)\2/.exec(result);
+    if (heredoc) {
+      state.heredoc = { end: heredoc[3], stripTabs: heredoc[1] === "-" };
+    }
+  }
+  return result;
+}
+
+function rustRawStringAt(
+  text: string,
+  index: number,
+): { readonly open: string; readonly close: string } | undefined {
+  const match = /^(?:br|r)(#*)"/.exec(text.slice(index));
+  if (!match) return undefined;
+  return { open: match[0], close: `"${match[1]}` };
+}
+
+function startsLineComment(
+  text: string,
+  index: number,
+  marker: string,
+): boolean {
+  if (!text.startsWith(marker, index)) return false;
+  if (marker === "//" && text[index - 1] === ":") return false;
+  if (marker === "#" && index > 0 && !/\s/u.test(text[index - 1])) return false;
+  return true;
+}
+
+function closingQuote(text: string, start: number, quote: string): number {
+  for (let i = start + 1; i < text.length; i++) {
+    if (text[i] === "\\") i++;
+    else if (text[i] === quote) return i;
+  }
+  return -1;
+}
+
+function commentSyntaxFor(path: string): CommentSyntax {
+  const lower = path.toLowerCase();
+  const lines: string[] = [];
+  const blocks: [string, string][] = [];
+  let nestedBlocks = false;
+  let skipHighlightedCode = false;
+  let heredocs = false;
+  const addLine = (marker: string) => {
+    if (!lines.includes(marker)) lines.push(marker);
+  };
+  const addBlock = (open: string, close: string) => {
+    blocks.push([open, close]);
+  };
+
+  if (
+    /\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|m|mm|java|go|rs|swift|kt|kts|scala|groovy|cs|fs|fsx|dart|php|scss|sass|less|proto|sol|zig|vue|svelte)$/
+      .test(
+        lower,
+      )
+  ) {
+    addLine("//");
+    addBlock("/*", "*/");
+  }
+  if (/\.css$/.test(lower)) addBlock("/*", "*/");
+  if (/\.(?:html?|xml|svg|md|markdown|mdown|mkd|mdx|vue|svelte)$/.test(lower)) {
+    addBlock("<!--", "-->");
+  }
+  if (/\.(?:md|markdown|mdown|mkd|mdx)$/.test(lower)) {
+    skipHighlightedCode = true;
+  }
+  if (
+    /\.(?:py|pyi|pyw|ya?ml|sh|bash|zsh|fish|rb|pl|pm|r|ex|exs|php|tf|hcl|toml|ini|cfg|conf|properties)$/
+      .test(
+        lower,
+      ) || /(?:^|\/)(?:dockerfile|makefile|gnumakefile)(?:\..*)?$/.test(lower)
+  ) {
+    addLine("#");
+  }
+  if (/\.(?:sh|bash|zsh)$/.test(lower)) heredocs = true;
+  if (/\.sql$/.test(lower)) {
+    addLine("--");
+    addBlock("/*", "*/");
+  }
+  if (/\.lua$/.test(lower)) addLine("--");
+  if (/\.(?:hs|lhs)$/.test(lower)) {
+    addLine("--");
+    addBlock("{-", "-}");
+    nestedBlocks = true;
+  }
+  if (/\.rs$/.test(lower)) nestedBlocks = true;
+  if (/\.(?:lisp|cl|clj|cljs|edn|scm|rkt|el)$/.test(lower)) addLine(";");
+  return { lines, blocks, nestedBlocks, skipHighlightedCode, heredocs };
+}

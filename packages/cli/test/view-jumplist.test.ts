@@ -6,11 +6,12 @@
  */
 
 import { assert, assertEquals } from "@std/assert";
-import { Session } from "../lib/view/session.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { diffSource } from "../lib/view/diffedit.ts";
 import { parseDocument } from "../lib/view/languages/typescript/parse.ts";
+import type { Line } from "../lib/view/model.ts";
+import { Session } from "../lib/view/session.ts";
 
 function press(s: Session, ...names: string[]): void {
   for (const name of names) {
@@ -39,8 +40,23 @@ function diffSession(diffText: string, height = 20): Session {
   );
 }
 
+/** Selectable rows before the jump list's summary. */
+function entryLines(s: Session): readonly Line[] {
+  const lines = s.view().overlay?.lines ?? [];
+  const summary = lines.findIndex((line) => line.text === "");
+  return summary < 0 ? lines : lines.slice(0, summary);
+}
+
+/** Plain text of the selectable jump-list rows. */
 function entryText(s: Session): string[] {
-  return s.view().overlay?.lines.map((l) => l.text) ?? [];
+  return entryLines(s).map((line) => line.text);
+}
+
+/** Plain text of the count-policy and count-total rows. */
+function summaryText(s: Session): string[] {
+  const lines = s.view().overlay?.lines.map((l) => l.text) ?? [];
+  const summary = lines.indexOf("");
+  return summary < 0 ? [] : lines.slice(summary + 1);
 }
 
 const TWO_FILES = [
@@ -96,7 +112,7 @@ Deno.test("jumplist: i lists the diff's files, dirs summarized", () => {
     "   ▸ src/app.ts  +1 −1",
     " T ▸ src/app.test.ts  +1 −0",
   ]);
-  assertEquals(s.view().inputLine, "jump to: ");
+  assertEquals(s.view().inputLine, null);
   assertEquals(s.view().overlay?.title, "Jump to file or commit");
   assertEquals(s.view().overlay?.selectedLine, 0);
 });
@@ -123,7 +139,7 @@ Deno.test("jumplist: new and deleted files color their applicable counts", () =>
   );
   press(s, "i");
 
-  const lines = s.view().overlay!.lines;
+  const lines = s.view().overlay!.lines.slice(0, 2);
   assertEquals(lines.map((line) => line.text), [
     "   ▸ new.ts  +2 (new)",
     "   ▸ gone.ts  −2 (deleted)",
@@ -184,6 +200,38 @@ Deno.test("jumplist: pagedown and pageup jump the selection to the ends", () => 
   assertEquals(s.view().overlay?.selectedLine, 0, "clamped to the first entry");
 });
 
+Deno.test("jumplist: space pages the selection down", () => {
+  const s = diffSession(LOG);
+  press(s, "i");
+  assertEquals(s.view().overlay?.selectedLine, 0);
+  press(s, "space");
+  assertEquals(s.view().overlay?.selectedLine, 3, "clamped to the last entry");
+});
+
+Deno.test("jumplist: selecting the last entry reveals the summary", () => {
+  const s = diffSession(CATEGORY_FILES, 12);
+  press(s, "i", "pagedown");
+  const overlay = s.view().overlay!;
+  assertEquals(overlay.selectedLine, 3);
+  assertEquals(overlay.scroll, 1);
+  assertEquals(overlay.lines.slice(-2).map((line) => line.text), [
+    "Counts: normal",
+    "All files +4 −4 · Shown files +4 −4",
+  ]);
+});
+
+Deno.test("jumplist: a one-row overlay can reveal the summary total", () => {
+  const s = diffSession(TWO_FILES, 7);
+  press(s, "i", "pagedown");
+  const overlay = s.view().overlay!;
+  assertEquals(overlay.selectedLine, 1);
+  assertEquals(overlay.scroll, 4);
+  assertEquals(
+    overlay.lines[overlay.scroll].text,
+    "All files +2 −1 · Shown files +2 −1",
+  );
+});
+
 Deno.test("jumplist: tab jumps the same as enter", () => {
   const s = diffSession(SHOW, 6);
   press(s, "i", "down"); // preselected commit -> src/app.ts
@@ -194,7 +242,7 @@ Deno.test("jumplist: tab jumps the same as enter", () => {
 
 Deno.test("jumplist: typing filters the list", () => {
   const s = diffSession(SHOW);
-  press(s, "i");
+  press(s, "i", "/");
   type(s, "test");
   assertEquals(entryText(s), [" T ▸ src/app.test.ts  +1 −0"]);
   assertEquals(s.view().inputLine, "jump to: test");
@@ -205,7 +253,7 @@ Deno.test("jumplist: typing filters the list", () => {
 
 Deno.test("jumplist: a filter matching the commit subject keeps the commit", () => {
   const s = diffSession(SHOW);
-  press(s, "i");
+  press(s, "i", "/");
   type(s, "widget");
   assertEquals(entryText(s), ["● commit 012345678  Fix the widget alignment"]);
 });
@@ -215,12 +263,91 @@ Deno.test("jumplist: enter with no match leaves the list open", () => {
   press(s, "down", "down"); // scroll off the top so "unmoved" is meaningful
   const top = s.view().top;
   assert(top > 0);
-  press(s, "i");
+  press(s, "i", "/");
   type(s, "zzz");
   assertEquals(entryText(s), ["(no matches)"]);
   press(s, "enter");
   assert(s.view().overlay !== null, "still open");
   assertEquals(s.view().top, top, "viewport unmoved");
+});
+
+Deno.test("jumplist: escape leaves filtering before it closes the list", () => {
+  const s = diffSession(SHOW);
+  press(s, "i", "/");
+  type(s, "test");
+  press(s, "escape");
+  assertEquals(s.view().inputLine, null);
+  assertEquals(entryText(s).length, 3);
+  assert(s.view().overlay !== null, "list remains open");
+  press(s, "escape");
+  assertEquals(s.view().overlay, null);
+});
+
+Deno.test("jumplist: file visibility keys remain active while browsing", () => {
+  const s = diffSession(TWO_FILES);
+  press(s, "i", "T");
+  assert(entryText(s)[1].startsWith(" T ▸ src/app.test.ts"));
+  assert(
+    s.view().overlay!.lines[1].spans.every((span) => span.cls === "comment"),
+  );
+
+  press(s, "down", "f");
+  assert(
+    s.view().overlay!.lines[1].spans.some((span) => span.cls !== "comment"),
+  );
+  press(s, "F");
+  assert(
+    s.view().overlay!.lines.slice(0, 2).every((line) =>
+      line.spans.every((span) => span.cls === "comment")
+    ),
+  );
+  press(s, "E");
+  assert(
+    s.view().overlay!.lines.slice(0, 2).every((line) =>
+      line.spans.some((span) => span.cls !== "comment")
+    ),
+  );
+});
+
+Deno.test("jumplist: the summary reports all and shown file counts", () => {
+  const s = diffSession(TWO_FILES);
+  press(s, "i");
+  assertEquals(summaryText(s), [
+    "Counts: normal",
+    "All files +2 −1 · Shown files +2 −1",
+  ]);
+  press(s, "T");
+  assertEquals(summaryText(s), [
+    "Counts: normal",
+    "All files +2 −1 · Shown files +1 −1",
+  ]);
+});
+
+Deno.test("jumplist: D cycles the diff-count policy", () => {
+  const s = diffSession(
+    [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1 +1 @@",
+      "-run(); // before",
+      "+ run ( ) ; // after",
+      "",
+    ].join("\n"),
+  );
+  press(s, "i");
+  assert(entryText(s)[0].endsWith("+1 −1"));
+  press(s, "D");
+  assertEquals(summaryText(s)[0], "Counts: ignore whitespace-only changes");
+  assert(entryText(s)[0].endsWith("+1 −1"));
+  press(s, "D");
+  assertEquals(summaryText(s), [
+    "Counts: ignore comments and whitespace",
+    "All files +0 −0 · Shown files +0 −0",
+  ]);
+  assert(entryText(s)[0].endsWith("+0 −0"));
+  press(s, "D");
+  assertEquals(summaryText(s)[0], "Counts: normal");
 });
 
 Deno.test("jumplist: escape cancels and leaves the viewport put", () => {
@@ -294,7 +421,7 @@ Deno.test("jumplist: files stay listed and jumpable while collapsed", () => {
   press(s, "F"); // collapse every file to a summary line
   press(s, "i");
   assertEquals(entryText(s).length, 3, "commit and both files still listed");
-  const fileLines = s.view().overlay!.lines.slice(1);
+  const fileLines = entryLines(s).slice(1);
   assert(
     fileLines.every((line) =>
       line.spans.every((span) => span.cls === "comment")
@@ -340,8 +467,8 @@ Deno.test("jumplist: file rows use an aligned category-toggle column", () => {
 
 Deno.test("jumplist: only currently collapsed file rows are muted", () => {
   const s = diffSession(CATEGORY_FILES);
-  press(s, "M", "i");
-  const lines = s.view().overlay!.lines;
+  press(s, "i", "M");
+  const lines = entryLines(s);
   for (const line of lines) {
     const markdown = line.text.startsWith("M");
     assertEquals(
@@ -391,6 +518,7 @@ Deno.test("jumplist: an email patch shows and filters by its Subject", () => {
     "   ▸ src/app.ts  +1 −1",
   ]);
   // The subject (with its [PATCH] prefix stripped) is filterable.
+  press(s, "/");
   type(s, "widget");
   assertEquals(entryText(s), ["● commit 012345678  Fix the widget alignment"]);
 });
