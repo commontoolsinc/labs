@@ -7,6 +7,7 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import {
+  type PatternUpdateReceipt,
   type PieceController,
   type PiecePatternRef,
   PiecesController,
@@ -47,6 +48,7 @@ import {
   encodeFuseComponent,
   encodeFusePathSegments,
 } from "./path-codec.ts";
+import { committedSourceWarning } from "./source-write-finalize.ts";
 import {
   buildFsProjection,
   buildJsonTree,
@@ -356,6 +358,28 @@ interface PropRebuildJob {
   propName: "input" | "result";
   resolveLink: ResolveLink;
   spaceName: string;
+}
+
+/**
+ * What `error.log` says after a source write whose transaction committed and
+ * whose refresh of the running piece then failed, and `undefined` when the
+ * refresh completed or the write made no source update.
+ *
+ * A write in that state saved the source and left the piece not running it,
+ * which the file has to keep saying: `error.log` is cleared on a clean write,
+ * so silence there is the mount reporting an unqualified success. Held apart
+ * from the reporting so the text a reader finds in the file is assertable on
+ * its own.
+ */
+export function sourceRefreshWarning(
+  receipt: PatternUpdateReceipt | undefined,
+): string | undefined {
+  return receipt?.refresh.status === "failed"
+    ? committedSourceWarning(
+      receipt,
+      `refreshing the running piece failed: ${receipt.refresh.warning}`,
+    )
+    : undefined;
 }
 
 export class CellBridge {
@@ -2284,21 +2308,104 @@ export class CellBridge {
     });
   }
 
-  async finalizeSourceWritePath(writePath: SourceWritePath): Promise<void> {
+  /**
+   * Rebuild a piece's source tree and pattern metadata after a write.
+   *
+   * `receipt` is the source update the write committed, when it made one. Its
+   * refresh outcome is reported here rather than by the caller because the
+   * rebuild below replaces `.src` and the synthetic `error.log` inside it:
+   * a report written before this call is discarded along with the inode it
+   * went to, so the only place a report survives is after the rebuild, which
+   * is inside this method.
+   */
+  async finalizeSourceWritePath(
+    writePath: SourceWritePath,
+    receipt?: PatternUpdateReceipt,
+  ): Promise<void> {
+    try {
+      const state = this.spaces.get(writePath.spaceName);
+      const pieceIno = state?.pieceInos.get(writePath.pieceName);
+      if (state && pieceIno !== undefined) {
+        await this.buildSourceTree(
+          pieceIno,
+          writePath.piece,
+          state,
+          writePath.pieceName,
+        );
+        await this.refreshPiecePatternMetadata(
+          state,
+          writePath.piece,
+          pieceIno,
+        );
+      }
+    } finally {
+      // Reported whether or not the rebuild survived: "the source saved and
+      // the piece is not running it" is exactly the message a projection
+      // failure must not eat, and it is the receipt's, not the rebuild's.
+      // On a failed rebuild the console line still fires and the file half
+      // lands wherever a synthetic log is standing; the rebuild's own failure
+      // propagates to the caller and is reported as its own warning there.
+      this.reportSourceRefreshWarning(
+        writePath,
+        sourceRefreshWarning(receipt),
+      );
+    }
+  }
+
+  /**
+   * Report that a source write committed and then failed to refresh the
+   * running piece, into `.src/error.log` as that directory stands now.
+   * `undefined` is the refresh having succeeded, and reports nothing.
+   *
+   * The directory a caller was handed is not the one to write into after a
+   * finalize: `buildSourceTree` replaces `.src` wholesale and mints a fresh
+   * empty `error.log` inside it, so both the text written before that and the
+   * inode it was written to are gone. Resolving the directory here, from the
+   * state the rebuild updated, is what lets a report outlive the rebuild that
+   * a successful write performs.
+   *
+   * A piece with no synthetic `error.log` has nowhere to keep the report: a
+   * system piece or one the rebuild skipped has no source tree at all, and a
+   * piece whose own source contains a file called `error.log` keeps that file
+   * instead — the synthetic one is only minted when the name is free. The
+   * console line stands in for the file in both cases, which is why the
+   * inode is read from `srcErrorLogInos` rather than looked up by name:
+   * resolving by name would find the authored file and overwrite committed
+   * source with this report.
+   */
+  reportSourceRefreshWarning(
+    writePath: SourceWritePath,
+    warning: string | undefined,
+  ): void {
+    if (warning === undefined) return;
+    console.error(`[source] ${warning}`);
+    this.writeSourceErrorLog(writePath, warning);
+  }
+
+  /**
+   * Write the synthetic `.src/error.log`, and only ever that file.
+   *
+   * Every mutation of the log goes through here — the clear a clean write
+   * performs, the diagnostic a failed one leaves, and the refresh warning
+   * above — because the file is identified by the inode `buildSourceTree`
+   * recorded when it minted it, never by name. A pattern is free to author a
+   * source file called `error.log`, and resolving by name would find that
+   * file and overwrite the mounted copy of committed source with a
+   * diagnostic, which the mount would then be able to save back.
+   *
+   * A piece with no synthetic log gets no file write and no error: the
+   * console lines its callers already emit are the report such a piece gets.
+   */
+  writeSourceErrorLog(writePath: SourceWritePath, text: string): void {
     const state = this.spaces.get(writePath.spaceName);
-    const pieceIno = state?.pieceInos.get(writePath.pieceName);
-    if (!state || pieceIno === undefined) return;
-    await this.buildSourceTree(
-      pieceIno,
-      writePath.piece,
-      state,
-      writePath.pieceName,
-    );
-    await this.refreshPiecePatternMetadata(
-      state,
-      writePath.piece,
-      pieceIno,
-    );
+    const errorLogIno = state?.srcErrorLogInos.get(writePath.pieceName);
+    if (errorLogIno === undefined) return;
+    // The map is dropped whenever `.src` is rebuilt, so a tracked inode names
+    // a live file. Checked anyway: a write through a stale one throws, which
+    // would turn a committed source update into a failed one at the mount.
+    const node = this.tree.getNode(errorLogIno);
+    if (node?.kind !== "file") return;
+    this.tree.updateFile(errorLogIno, text);
   }
 
   invalidateHandlerTarget(target: HandlerTarget): void {
@@ -4360,7 +4467,12 @@ export class CellBridge {
       value: { files },
     });
 
-    // Create or reuse .src/ dir
+    // Create or reuse .src/ dir. The synthetic error.log is minted below only
+    // when no authored file claims that name, so the tracked inode is dropped
+    // here rather than overwritten: a rebuild whose new source DOES claim the
+    // name would otherwise leave the deleted synthetic inode in the map, and
+    // a later write through it fails on an inode that is no longer a file.
+    state.srcErrorLogInos.delete(pieceName);
     let srcIno = this.tree.lookup(pieceIno, ".src");
     if (srcIno !== undefined) {
       this.tree.clear(srcIno);

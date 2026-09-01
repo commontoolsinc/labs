@@ -24,6 +24,7 @@ import {
 } from "@commonfabric/piece";
 import {
   type PatternCompatibilityReport,
+  type PatternUpdateReceipt,
   type PiecePatternRef,
   PiecesController,
 } from "@commonfabric/piece/ops";
@@ -1497,12 +1498,13 @@ export async function setPieceSlug(
   noteWroteTo(config.space);
 }
 
+/** Replaces the piece's source and returns its setup transaction receipt. */
 export async function setPiecePattern(
   config: PieceConfig,
   entry: EntryConfig,
   options: SetPiecePatternOptions = {},
   deps: PieceOperationDependencies = {},
-): Promise<void> {
+): Promise<PatternUpdateReceipt> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const resolvedConfig = await resolvePieceConfigWithPieces(
     config,
@@ -1515,7 +1517,7 @@ export async function setPiecePattern(
     undefined,
     resolvedConfig.pieceScope,
   );
-  await piece.setPattern(
+  const receipt = await piece.setPattern(
     await (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
       pieces,
       entry,
@@ -1528,6 +1530,7 @@ export async function setPiecePattern(
     },
   );
   noteWroteTo(config.space);
+  return receipt;
 }
 
 /**

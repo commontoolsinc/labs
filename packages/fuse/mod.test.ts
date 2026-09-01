@@ -16,6 +16,7 @@ import {
   sourceRelPathToTreeSegments,
   writeUnavailableErrno,
 } from "./mod.ts";
+import { finalizeCommittedSourceWrite } from "./source-write-finalize.ts";
 import { HandleMap } from "./handles.ts";
 import {
   closeKernelFileHandle,
@@ -183,6 +184,55 @@ Deno.test("source writeback retains attached data files", async () => {
   assert(
     sourceWriteback.includes("dataFiles: program.dataFiles"),
     "source writeback must pass the recovered data files to setPattern",
+  );
+});
+
+Deno.test("source writeback hands its receipt to the finalize that rebuilds .src", async () => {
+  // Where the report is composed and written is CellBridge's business, and
+  // deliberately so: finalizing rebuilds `.src` and mints a fresh empty
+  // `error.log`, so a report written out here would be discarded along with
+  // the inode it went to. What the flush path owes is the receipt, handed to
+  // the call that performs that rebuild. Read from the source because driving
+  // the flush needs a mounted filesystem, in the same way as the two cases
+  // above.
+  const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
+  const sourceWriteback = source.slice(
+    source.indexOf('if (writeTarget?.kind === "source")'),
+  );
+
+  assert(
+    sourceWriteback.includes(
+      "bridge.finalizeSourceWritePath(writeTarget.target, receipt)",
+    ),
+    "source writeback must hand the update receipt to the finalize",
+  );
+});
+
+Deno.test("source projection failures after commit become warnings, not rejected writes", async () => {
+  const receipt = {
+    status: "committed" as const,
+    ref: { identity: "A".repeat(43), symbol: "default" },
+    revisionId: "revision-committed-before-finalize",
+    detachedOrigin: null,
+    refresh: { status: "completed" as const },
+  };
+  const failure = new Error("projection rebuild failed");
+
+  const failed = await finalizeCommittedSourceWrite(receipt, () => {
+    throw failure;
+  });
+  assertEquals(failed, {
+    status: "failed",
+    warning:
+      `Source revision revision-committed-before-finalize committed as ` +
+      `cf:module/${"A".repeat(43)}#default, but refreshing the FUSE ` +
+      `projection failed: projection rebuild failed`,
+    error: failure,
+  });
+
+  assertEquals(
+    await finalizeCommittedSourceWrite(receipt, () => Promise.resolve()),
+    { status: "completed" },
   );
 });
 
