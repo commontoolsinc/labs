@@ -1251,16 +1251,22 @@ export type Reactive<T> = T;
 //
 
 /**
- * CellLike is a cell (AnyCell) whose nested values are valid factory inputs.
- * The top level must be AnyCell, but nested values can be plain or wrapped.
- *
- * Note: This is primarily used for type constraints that require a cell.
+ * The cell half of {@link CellLike}: the top level must be a branded cell, and
+ * its nested values can be plain or wrapped. Used for type constraints that
+ * require a cell.
  */
 type CellWrappedValue<T> = AnyBrandedCell<CellWrappedData<T>> & {
   [CELL_LIKE]?: unknown;
 };
 
+/**
+ * A `T`, either plain or wrapped in a cell whose nested values are valid
+ * factory inputs ({@link CellWrappedValue}). The accepting type for a position
+ * — a JSX prop, for instance — that takes a live cell in place of the plain
+ * value.
+ */
 export type CellLike<T> = CellWrappedValue<T> | T;
+
 type CellWrappedData<T> =
   | T
   | AnyBrandedCell<T>
