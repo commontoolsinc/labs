@@ -1276,18 +1276,23 @@ export type TraversalContext = {
   includeMeta: boolean;
 
   /**
-   * Whether a document the traversal loads mid-walk chases its metadata
-   * family (`loadMetaLinkedDocs`). On by default: a runtime traversal that
-   * loads a document generally intends to interpret it. The memory server's
-   * graph-query walk turns this off and chases only the documents a query
-   * NAMES as roots — a crossing-reached document is delivered under the
-   * selector that reached it, without its family, because chasing at every
-   * load multiplies a wide walk by each visited piece's whole doc set.
-   * Consulted only where `includeMeta` already gates the chase; it does not
-   * affect `traverseCells`, which `includeMeta` also carries.
+   * The metadata rails a document the traversal loads mid-walk chases
+   * (`loadMetaLinkedDocs`). Every rail by default: a runtime traversal
+   * that loads a document generally intends to interpret it. The memory
+   * server's graph-query walk narrows this to the rails a reader needs of
+   * a document it reached but did not name — `result` and `internal`, the
+   * rails computed values arrive through — and reserves the full family
+   * for the documents a query NAMES as roots, because chasing every rail
+   * at every load multiplies a wide walk by each visited piece's whole
+   * doc set. Consulted only where `includeMeta` already gates the chase;
+   * it does not affect `traverseCells`, which `includeMeta` also carries.
    */
-  chaseLoadedMeta: boolean;
-  metaDocsVisited: Set<string>;
+  loadedMetaRails: readonly MetaRail[];
+
+  /** Tracker key → the rails already chased for that document within this
+   * traversal, so a later chase under a wider rail set still walks the
+   * rails an earlier, narrower one did not. */
+  metaDocsVisited: Map<string, Set<MetaRail>>;
 
   /**
    * Reports a followed link whose target document is absent from the local
@@ -1334,7 +1339,10 @@ export function createTraversalContext(
   schemaTracker: MapSet<string, SchemaPathSelector>,
   scopeKeyIdentity: ScopeKeyIdentity,
   includeMeta: boolean = false,
-  metaDocsVisited: Set<string> = new Set<string>(),
+  metaDocsVisited: Map<string, Set<MetaRail>> = new Map<
+    string,
+    Set<MetaRail>
+  >(),
   onMissingLinkTarget?: (
     link: NormalizedFullLink,
     sourceSpace: MemorySpace,
@@ -1342,14 +1350,14 @@ export function createTraversalContext(
   ) => void,
   schemaDocsLoaded: Set<string> = new Set<string>(),
   schemaDocsAvailable: Set<string> = new Set<string>(),
-  chaseLoadedMeta: boolean = true,
+  loadedMetaRails: readonly MetaRail[] = ALL_META_RAILS,
 ): TraversalContext {
   return {
     tracker,
     schemaTracker,
     scopeKeyIdentity,
     includeMeta,
-    chaseLoadedMeta,
+    loadedMetaRails,
     metaDocsVisited,
     onMissingLinkTarget,
     schemaDocsLoaded,
@@ -1362,7 +1370,10 @@ export function createDefaultTraversalContext(
   includeMeta: boolean = true,
   schemaTracker: MapSet<string, SchemaPathSelector> =
     new MapSetStringToPathSelectors(true),
-  metaDocsVisited: Set<string> = new Set<string>(),
+  metaDocsVisited: Map<string, Set<MetaRail>> = new Map<
+    string,
+    Set<MetaRail>
+  >(),
   onMissingLinkTarget?: (
     link: NormalizedFullLink,
     sourceSpace: MemorySpace,
@@ -2590,9 +2601,9 @@ function trackVisitedDoc(
     );
   }
   // Load the metadata-linked docs recursively unless the address holds no
-  // value, or the context reserves the chase for the documents a caller
-  // names (`chaseLoadedMeta`).
-  if (context.includeMeta && context.chaseLoadedMeta) {
+  // value, over the rails the context grants a mid-walk load
+  // (`loadedMetaRails`).
+  if (context.includeMeta && context.loadedMetaRails.length > 0) {
     // Loading metadata requires the full doc. Ignore this read for scheduling.
     const { ok: fullDoc } = tx.read(
       { ...target, path: [] },
@@ -2606,6 +2617,7 @@ function trackVisitedDoc(
           value: fullDoc.value,
         },
         context,
+        context.loadedMetaRails,
       );
     }
   }
@@ -2615,7 +2627,7 @@ function trackVisitedDoc(
 function loadMetaLinkedDoc(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
-  meta: "cfc" | "result" | "pattern" | "argument" | "internal",
+  meta: MetaRail,
   schemaTracker: MapSet<string, SchemaPathSelector>,
   identity: ScopeKeyIdentity,
 ): IMemorySpaceAttestation[] {
@@ -2840,36 +2852,65 @@ function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
   return undefined;
 }
 
-// Recursively load the meta linked docs from the doc. Every loaded doc is
+/** The rails a document's metadata family hangs off. */
+export type MetaRail = "cfc" | "result" | "pattern" | "argument" | "internal";
+
+export const ALL_META_RAILS: readonly MetaRail[] = [
+  "cfc",
+  "result",
+  "pattern",
+  "argument",
+  "internal",
+];
+
+// Recursively load the meta linked docs from the doc, over the given rails
+// (every rail unless the caller narrows them). Every loaded doc is
 // delivered whole — tracked under the rejecting selector — and never
 // schema-traversed; narrowing a meta document by schema is not a policy
 // this traversal has.
+//
+// The visited record is per RAIL, not per document: one traversal can chase
+// a document under the crossing subset first and under every rail later —
+// a walk crosses into a piece before a root names it — and the later call
+// must still chase the rails the earlier one did not.
 export function loadMetaLinkedDocs(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
   context: TraversalContext,
+  rails: readonly MetaRail[] = ALL_META_RAILS,
 ) {
+  const missingRailsOf = (key: string): MetaRail[] => {
+    const seen = context.metaDocsVisited.get(key);
+    return seen === undefined
+      ? [...rails]
+      : rails.filter((rail) => !seen.has(rail));
+  };
+  const recordRails = (key: string, chased: readonly MetaRail[]): void => {
+    let seen = context.metaDocsVisited.get(key);
+    if (seen === undefined) {
+      seen = new Set<MetaRail>();
+      context.metaDocsVisited.set(key, seen);
+    }
+    for (const rail of chased) seen.add(rail);
+  };
+
   const valueEntryKey = getTrackerKey(
     valueEntry.address,
     context.scopeKeyIdentity,
   );
-  if (context.metaDocsVisited.has(valueEntryKey)) {
+  const entryRails = missingRailsOf(valueEntryKey);
+  if (entryRails.length === 0) {
     return;
   }
-  context.metaDocsVisited.add(valueEntryKey);
+  recordRails(valueEntryKey, entryRails);
 
-  const pendingDocs = [valueEntry];
+  const pendingDocs: [IMemorySpaceAttestation, readonly MetaRail[]][] = [[
+    valueEntry,
+    entryRails,
+  ]];
   while (pendingDocs.length > 0) {
-    const currentDoc = pendingDocs.shift()!;
-    for (
-      const meta of [
-        "cfc",
-        "result",
-        "pattern",
-        "argument",
-        "internal",
-      ] as const
-    ) {
+    const [currentDoc, currentRails] = pendingDocs.shift()!;
+    for (const meta of currentRails) {
       const linkedDocs = loadMetaLinkedDoc(
         tx,
         currentDoc,
@@ -2886,9 +2927,10 @@ export function loadMetaLinkedDocs(
           linkedDoc.address,
           context.scopeKeyIdentity,
         );
-        if (context.metaDocsVisited.has(linkedDocKey)) continue;
-        context.metaDocsVisited.add(linkedDocKey);
-        pendingDocs.push(linkedDoc);
+        const linkedRails = missingRailsOf(linkedDocKey);
+        if (linkedRails.length === 0) continue;
+        recordRails(linkedDocKey, linkedRails);
+        pendingDocs.push([linkedDoc, linkedRails]);
       }
     }
   }
