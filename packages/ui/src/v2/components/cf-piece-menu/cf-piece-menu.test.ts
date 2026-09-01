@@ -357,6 +357,106 @@ function openMenu(cell: CellHandle = pieceCell()): CFPieceMenu {
   return menu;
 }
 
+/** The runtime a fake piece is reached through, on its own. */
+function spaceRuntime(
+  options: Parameters<typeof pieceCell>[1] = {},
+): RuntimeClient {
+  return (pieceCell(undefined, options) as unknown as {
+    runtime(): RuntimeClient;
+  }).runtime();
+}
+
+/** A menu opened over a space with no piece, as a failed load leaves one. */
+function openSpaceMenu(
+  options: Parameters<typeof pieceCell>[1] = {},
+): CFPieceMenu {
+  const menu = newMenu();
+  menu.open({ space: SPACE, runtime: spaceRuntime(options), x: 40, y: 60 });
+  return menu;
+}
+
+/**
+ * The rendered entry carrying `testId`, as the template that holds it. Both
+ * the id and the disabled state are interpolated values rather than literal
+ * markup, so a caller reads them out of the template rather than out of text.
+ */
+function entryTemplate(
+  menu: CFPieceMenu,
+  testId: string,
+): { strings: readonly string[]; values: unknown[]; at: number } {
+  let found:
+    | { strings: readonly string[]; values: unknown[]; at: number }
+    | undefined;
+  const visit = (node: unknown): void => {
+    if (found) return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (node === null || typeof node !== "object") return;
+    const template = node as {
+      strings?: readonly string[];
+      values?: unknown[];
+    };
+    if (!template.strings || !template.values) return;
+    const at = template.strings.findIndex((part, index) =>
+      part.endsWith('test-id="') && template.values![index] === testId
+    );
+    if (at >= 0) {
+      found = { strings: template.strings, values: template.values, at };
+      return;
+    }
+    for (const child of template.values) visit(child);
+  };
+  visit((menu as unknown as { render(): unknown }).render());
+  if (!found) throw new Error(`no rendered entry carries test-id ${testId}`);
+  return found;
+}
+
+/** Whether the entry carrying `testId` renders as disabled. */
+function isDisabled(menu: CFPieceMenu, testId: string): boolean {
+  const { strings, values, at } = entryTemplate(menu, testId);
+  for (let index = at + 1; index < values.length; index++) {
+    if (strings[index].includes('?disabled="')) return Boolean(values[index]);
+    if (strings[index].includes('@click="')) break;
+  }
+  return false;
+}
+
+/**
+ * The subject line of the open panel, which names what the panel is about. It
+ * is an interpolated value, so a caller reads it out of the template.
+ */
+function subjectOf(menu: CFPieceMenu): unknown {
+  const visit = (node: unknown): unknown => {
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        const found = visit(child);
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    }
+    if (node === null || typeof node !== "object") return undefined;
+    const template = node as {
+      strings?: readonly string[];
+      values?: unknown[];
+    };
+    if (!template.strings || !template.values) return undefined;
+    const at = template.strings.findIndex((part) =>
+      part.endsWith('<span class="subject">')
+    );
+    if (at >= 0) return template.values[at];
+    for (const child of template.values) {
+      const found = visit(child);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  };
+  const found = visit((menu as unknown as { render(): unknown }).render());
+  if (found === undefined) throw new Error("no panel renders a subject line");
+  return found;
+}
+
 /** An element stub that records the attributes the menu changes. */
 function highlightProbe(): {
   element: Element;
@@ -451,15 +551,6 @@ describe("the menu a right-click opens", () => {
     expect(shows(menu)).toContain("View source");
     menu.close();
     expect(shows(menu)).toBe("");
-  });
-
-  it("keeps itself inside the viewport", () => {
-    const menu = newMenu();
-    menu.open({ cell: pieceCell(), x: 1_000_000, y: 1_000_000 });
-    const placement = shows(menu);
-    // Clamped rather than drawn off-screen, wherever the click landed.
-    expect(placement).toContain("left: ");
-    expect(placement).not.toContain("left: 1000000px");
   });
 
   it("moves the highlight to the addressed piece and removes it on close", () => {
@@ -953,6 +1044,192 @@ describe("the menu a right-click opens", () => {
     expect(shows(menu)).toContain(
       "The clone was canceled because the runtime stopped.",
     );
+  });
+});
+
+describe("the menu over a space with no piece", () => {
+  it("names the space and says the piece is unavailable", () => {
+    const rendered = shows(openSpaceMenu());
+    expect(rendered).toContain("Piece unavailable");
+    expect(rendered).toContain(`Space ${SPACE}`);
+  });
+
+  it("disables every entry that needs a piece", () => {
+    const menu = openSpaceMenu();
+    for (const entry of pieceMenuEntries()) {
+      expect(isDisabled(menu, entry.testId)).toBe(true);
+    }
+  });
+
+  it("leaves the space entry available", () => {
+    expect(isDisabled(openSpaceMenu(), "piece-menu-space-access")).toBe(false);
+  });
+
+  it("reads the space ACL with no piece to read it through", async () => {
+    const menu = openSpaceMenu();
+    await menu.showPanel("access");
+    const rendered = shows(menu);
+    expect(rendered).toContain("Space access rights");
+    expect(rendered).toContain(OWNER);
+  });
+
+  it("names the space in the access panel's subject line", async () => {
+    const menu = openSpaceMenu();
+    await menu.showPanel("access");
+    expect(subjectOf(menu)).toBe(SPACE);
+  });
+
+  it("disables the space entry when no runtime came with the space", () => {
+    const menu = newMenu();
+    menu.open({ space: SPACE, x: 40, y: 60 });
+    expect(isDisabled(menu, "piece-menu-space-access")).toBe(true);
+  });
+
+  it("reads no access rights it has no runtime to read them through", async () => {
+    // The entry that opens this panel is disabled without a runtime, so a
+    // caller reaching the panel anyway finds it still waiting rather than
+    // reporting a failure it never attempted.
+    const menu = newMenu();
+    menu.open({ space: SPACE, x: 40, y: 60 });
+
+    await menu.showPanel("access");
+
+    expect(shows(menu)).toContain("Reading access rights…");
+  });
+
+  it("stays down when it is opened over neither a piece nor a space", () => {
+    const menu = newMenu();
+    menu.open({ x: 40, y: 60 });
+    expect(shows(menu)).toBe("");
+    // The host covers the viewport, so a menu showing nothing has to be
+    // hidden rather than left over the page catching its clicks.
+    expect(menu.hidden).toBe(true);
+  });
+
+  it("takes the highlight off the piece a previous opening marked", () => {
+    const menu = newMenu();
+    const piece = highlightProbe();
+
+    menu.open({
+      cell: pieceCell(),
+      x: 0,
+      y: 0,
+      highlightedPiece: piece.element,
+    });
+    expect(piece.has("data-cf-piece-menu-open")).toBe(true);
+
+    menu.open({ space: SPACE, runtime: spaceRuntime(), x: 40, y: 60 });
+    expect(piece.has("data-cf-piece-menu-open")).toBe(false);
+  });
+});
+
+describe("placing the menu", () => {
+  /**
+   * Where `#placeMenu` puts a menu whose box is `width` by `height`, opened at
+   * (`x`, `y`) in a viewport of `viewport`. The element standing in for the
+   * rendered menu reports that box however it is positioned, which is what the
+   * corner measurement buys: the size does not change under the clamp.
+   */
+  function placement(
+    { x, y, width, height, viewport }: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      viewport: { width: number; height: number };
+    },
+  ): { left: string; top: string } {
+    const style = { left: "", top: "" };
+    const element = {
+      style,
+      getBoundingClientRect: () => ({ width, height }),
+    };
+    const menu = newMenu();
+    menu.open({ space: SPACE, runtime: spaceRuntime(), x, y });
+    Object.defineProperty(menu, "shadowRoot", {
+      configurable: true,
+      value: {
+        querySelector: (selector: string) =>
+          selector === ".menu" ? element : null,
+      },
+    });
+    const globals = globalThis as unknown as Record<string, unknown>;
+    const priorWidth = globals.innerWidth;
+    const priorHeight = globals.innerHeight;
+    globals.innerWidth = viewport.width;
+    globals.innerHeight = viewport.height;
+    try {
+      (menu as unknown as { updated(changed: Map<string, unknown>): void })
+        .updated(new Map());
+    } finally {
+      globals.innerWidth = priorWidth;
+      globals.innerHeight = priorHeight;
+    }
+    return style;
+  }
+
+  const VIEWPORT = { width: 1000, height: 800 };
+
+  it("leaves the menu at the click when it fits there", () => {
+    expect(
+      placement({ x: 40, y: 60, width: 240, height: 300, viewport: VIEWPORT }),
+    ).toEqual({ left: "40px", top: "60px" });
+  });
+
+  it("pulls a menu clicked near the far corner back inside the viewport", () => {
+    expect(
+      placement({
+        x: 990,
+        y: 790,
+        width: 240,
+        height: 300,
+        viewport: VIEWPORT,
+      }),
+    ).toEqual({ left: "756px", top: "496px" });
+  });
+
+  it("holds a menu too big for the viewport against the near edges", () => {
+    expect(
+      placement({
+        x: 500,
+        y: 500,
+        width: 1200,
+        height: 900,
+        viewport: VIEWPORT,
+      }),
+    ).toEqual({ left: "4px", top: "4px" });
+  });
+
+  it("places nothing while a panel is open in the menu's place", () => {
+    const menu = newMenu();
+    menu.open({ space: SPACE, runtime: spaceRuntime(), x: 40, y: 60 });
+    Object.defineProperty(menu, "shadowRoot", {
+      configurable: true,
+      value: { querySelector: () => null },
+    });
+    expect(() =>
+      (menu as unknown as { updated(changed: Map<string, unknown>): void })
+        .updated(new Map())
+    ).not.toThrow();
+  });
+});
+
+describe("the menu over a piece", () => {
+  it("names the space the piece belongs to", () => {
+    expect(shows(openMenu())).toContain(`Space ${SPACE}`);
+  });
+
+  it("names the space in the access panel's subject line", async () => {
+    const menu = openMenu();
+    await menu.showPanel("access");
+    expect(subjectOf(menu)).toBe(SPACE);
+  });
+
+  it("keeps every piece entry live", () => {
+    const menu = openMenu();
+    for (const entry of pieceMenuEntries()) {
+      expect(isDisabled(menu, entry.testId)).toBe(false);
+    }
   });
 });
 

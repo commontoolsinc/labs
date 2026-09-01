@@ -20,7 +20,7 @@ The shell supports these browser URL forms:
 
 Embed mode is intended for rendering the shell inside another web view, such as
 an iframe. It removes shell-owned chrome around the pattern, including the
-header, debugger, quick jump, outer content padding, sidebar, and fab surfaces.
+header, debugger, outer content padding, sidebar, and fab surfaces.
 
 Shell navigation preserves embed mode. For example, a pattern calling
 `navigateTo(...)` from a `/.embed/...` URL navigates to another `/.embed/...`

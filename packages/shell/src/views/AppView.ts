@@ -571,6 +571,7 @@ export class XAppView extends BaseView {
     const authenticated = html`
       <x-body-view
         .rt="${this.rt}"
+        .space="${this.space}"
         .activePattern="${activePattern}"
         .loadError="${loadError}"
         .runtimeError="${runtimeLoadError}"

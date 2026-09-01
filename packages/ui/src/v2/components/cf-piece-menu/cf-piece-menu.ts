@@ -25,10 +25,17 @@ import type {
   PieceSourceRevisionSourceView,
   PieceSourceRevisionView,
   PieceSourceView,
+  RuntimeClient,
   SpaceAclCapability,
   SpaceAclView,
 } from "@commonfabric/runtime-client";
-import { css, html, nothing, type TemplateResult } from "lit";
+import {
+  css,
+  html,
+  nothing,
+  type PropertyValues,
+  type TemplateResult,
+} from "lit";
 import { state } from "lit/decorators.js";
 import { live } from "lit/directives/live.js";
 
@@ -238,11 +245,16 @@ export function payloadHint(action: PieceAction): string | undefined {
 }
 
 /**
- * CFPieceMenu — the menu a right-click on a piece opens, with the panels for
- * what it can show and do about that piece: its authored source, the origin
- * and history it records, its live argument and result data, and the handler
- * streams an event can be dispatched to. It also shows the containing space's
- * access rights and lets space owners change them.
+ * CFPieceMenu — the menu a right-click opens on a space, and usually on a
+ * piece in it. Its piece entries hold the panels for what it can show and do
+ * about that piece: the authored source, the origin and history it records,
+ * the live argument and result data, and the handler streams an event can be
+ * dispatched to. Below a divider it names the space and shows its access
+ * rights, which space owners can change.
+ *
+ * Opened on a space alone — over a surface no piece loaded into — the first
+ * heading reads "Piece unavailable", every entry needing a piece is disabled,
+ * and the space entries stay live.
  *
  * @element cf-piece-menu
  *
@@ -317,7 +329,12 @@ export class CFPieceMenu extends BaseElement {
       white-space: nowrap;
     }
 
-    .menu-item:hover,
+    .menu-item:disabled {
+      cursor: default;
+      opacity: 0.55;
+    }
+
+    .menu-item:enabled:hover,
     .menu-item:focus-visible {
       background: var(--cf-theme-color-surface-hover, rgba(0, 0, 0, 0.06));
     }
@@ -866,7 +883,13 @@ export class CFPieceMenu extends BaseElement {
     }
   `;
 
-  /** The piece the menu addresses. */
+  /** The space the menu addresses. */
+  declare space?: DID;
+
+  /** The runtime the space is read and changed through. */
+  declare runtime?: RuntimeClient;
+
+  /** The piece the menu addresses, when it was opened over one. */
   declare cell?: CellHandle;
 
   /** Client X coordinate of where the click landed. */
@@ -876,6 +899,8 @@ export class CFPieceMenu extends BaseElement {
   declare y: number;
 
   static override properties = {
+    space: { attribute: false },
+    runtime: { attribute: false },
     cell: { attribute: false },
     x: { attribute: false },
     y: { attribute: false },
@@ -1058,10 +1083,17 @@ export class CFPieceMenu extends BaseElement {
     super.disconnectedCallback();
   }
 
-  /** Show the menu for `cell` at a click position. */
+  /**
+   * Show the menu at a click position, over `cell` when the click landed on a
+   * piece. A caller with no piece to name — a surface one failed to load into
+   * — passes the space and the runtime instead, and the menu offers what it
+   * can reach without a piece.
+   */
   open(
-    { cell, x, y, highlightedPiece, highlightTarget }: {
-      cell: CellHandle;
+    { cell, space, runtime, x, y, highlightedPiece, highlightTarget }: {
+      cell?: CellHandle;
+      space?: DID;
+      runtime?: RuntimeClient;
       x: number;
       y: number;
       highlightedPiece?: Element;
@@ -1069,15 +1101,23 @@ export class CFPieceMenu extends BaseElement {
     },
   ): void {
     if (this.clonePending) return;
+    // The host covers the viewport while the menu is up, so a menu that would
+    // show nothing has to stay down rather than sit over the page unseen.
+    if (!cell && !space) {
+      this.close();
+      return;
+    }
     const target = highlightTarget ?? highlightedPiece;
     if (
-      highlightedPiece && target && target !== highlightedPiece &&
+      cell && highlightedPiece && target && target !== highlightedPiece &&
       !this.#elementRepresentsPiece(target, cell)
     ) {
       this.close();
       return;
     }
     this.cell = cell;
+    this.space = cell ? cell.space() : space;
+    this.runtime = cell ? cell.runtime() : runtime;
     this.#setHighlightedPiece(highlightedPiece, target);
     this.x = x;
     this.y = y;
@@ -1102,12 +1142,13 @@ export class CFPieceMenu extends BaseElement {
     this.sourceActionToken++;
     this.readToken++;
     this.hidden = false;
-    void this.#readSource(cell);
+    if (cell) void this.#readSource(cell);
   }
 
   /**
-   * Hides the menu and forgets its piece. A clone progress dialog remains
-   * mounted until the request settles so it can report failure or navigate.
+   * Hides the menu and forgets what it addressed. A clone progress dialog
+   * remains mounted until the request settles so it can report failure or
+   * navigate.
    */
   close(): void {
     if (this.clonePending) return;
@@ -1115,6 +1156,8 @@ export class CFPieceMenu extends BaseElement {
     this.hidden = true;
     this.panel = undefined;
     this.cell = undefined;
+    this.space = undefined;
+    this.runtime = undefined;
     this.source = undefined;
     this.#resetRevisionSource();
     this.#resetPieceState();
@@ -1441,6 +1484,11 @@ export class CFPieceMenu extends BaseElement {
     this.panel = panel;
     this.selectedFile = 0;
     this.#resetRevisionSource();
+    // The access panel is addressed by space; every other panel by piece.
+    if (panel === "access") {
+      await this.#readSpaceAccess();
+      return;
+    }
     const cell = this.cell;
     if (!cell) return;
     if (panel === "data" || panel === "actions") {
@@ -1449,27 +1497,25 @@ export class CFPieceMenu extends BaseElement {
       await this.#readPieceState(cell);
       return;
     }
-    if (panel === "access") {
-      await this.#readSpaceAccess(cell);
-      return;
-    }
     if (this.source !== undefined) return;
     await this.#readSource(cell);
   }
 
-  #readSpaceAccess(cell: CellHandle): Promise<void> {
-    this.accessRead ??= this.#performSpaceAccessRead(cell);
+  #readSpaceAccess(): Promise<void> {
+    this.accessRead ??= this.#performSpaceAccessRead();
     return this.accessRead;
   }
 
-  async #performSpaceAccessRead(cell: CellHandle): Promise<void> {
+  async #performSpaceAccessRead(): Promise<void> {
+    const { runtime, space } = this;
+    if (!runtime || !space) return;
     const token = this.readToken;
     try {
-      const access = await cell.runtime().getSpaceAcl(cell.space());
+      const access = await runtime.getSpaceAcl(space);
       if (token !== this.readToken) return;
       this.spaceAccess = access;
     } catch (error) {
-      if (token !== this.readToken || cell.runtime().signal.aborted) return;
+      if (token !== this.readToken || runtime.signal.aborted) return;
       this.accessError = error instanceof Error ? error.message : String(error);
     }
   }
@@ -1479,17 +1525,20 @@ export class CFPieceMenu extends BaseElement {
     user: string,
     capability: SpaceAclCapability,
   ): Promise<void> {
-    const cell = this.cell;
+    const { runtime, space } = this;
     const normalizedUser = user.trim();
-    if (!cell || this.accessActionPending || normalizedUser.length === 0) {
+    if (
+      !runtime || !space || this.accessActionPending ||
+      normalizedUser.length === 0
+    ) {
       return;
     }
     const token = this.readToken;
     this.accessActionPending = true;
     this.accessError = undefined;
     try {
-      const access = await cell.runtime().setSpaceAclEntry(
-        cell.space(),
+      const access = await runtime.setSpaceAclEntry(
+        space,
         normalizedUser,
         capability,
       );
@@ -1499,7 +1548,7 @@ export class CFPieceMenu extends BaseElement {
         this.newAccessUser = "";
       }
     } catch (error) {
-      if (token !== this.readToken || cell.runtime().signal.aborted) return;
+      if (token !== this.readToken || runtime.signal.aborted) return;
       this.accessError = error instanceof Error ? error.message : String(error);
     } finally {
       if (token === this.readToken) this.accessActionPending = false;
@@ -1508,20 +1557,17 @@ export class CFPieceMenu extends BaseElement {
 
   /** Remove one explicit entry from the current space's ACL. */
   async removeSpaceAccessEntry(user: string): Promise<void> {
-    const cell = this.cell;
-    if (!cell || this.accessActionPending) return;
+    const { runtime, space } = this;
+    if (!runtime || !space || this.accessActionPending) return;
     const token = this.readToken;
     this.accessActionPending = true;
     this.accessError = undefined;
     try {
-      const access = await cell.runtime().removeSpaceAclEntry(
-        cell.space(),
-        user,
-      );
+      const access = await runtime.removeSpaceAclEntry(space, user);
       if (token !== this.readToken) return;
       this.spaceAccess = access;
     } catch (error) {
-      if (token !== this.readToken || cell.runtime().signal.aborted) return;
+      if (token !== this.readToken || runtime.signal.aborted) return;
       this.accessError = error instanceof Error ? error.message : String(error);
     } finally {
       if (token === this.readToken) this.accessActionPending = false;
@@ -2024,8 +2070,38 @@ export class CFPieceMenu extends BaseElement {
     }
   }
 
+  protected override updated(changed: PropertyValues): void {
+    super.updated(changed);
+    this.#placeMenu();
+  }
+
+  /**
+   * Put the open menu at the click, pulled back inside the viewport by as much
+   * as it hangs over an edge. The menu is measured at the top left corner,
+   * where the whole viewport is available to it, so the box it reports is the
+   * one it occupies wherever it lands: the clamp never puts it anywhere with
+   * less room than it was measured in.
+   */
+  #placeMenu(): void {
+    const menu = this.shadowRoot?.querySelector<HTMLElement>(".menu");
+    if (!menu) return;
+    menu.style.left = "4px";
+    menu.style.top = "4px";
+    const { width, height } = menu.getBoundingClientRect();
+    const left = Math.max(
+      4,
+      Math.min(this.x, globalThis.innerWidth - width - 4),
+    );
+    const top = Math.max(
+      4,
+      Math.min(this.y, globalThis.innerHeight - height - 4),
+    );
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+
   protected override render() {
-    if (this.hidden || !this.cell) return nothing;
+    if (this.hidden || (!this.cell && !this.space)) return nothing;
     return html`
       ${this.#renderNestedHighlight()} ${this.cloneMode !== undefined
         ? this.#renderCloneDialog()
@@ -2055,39 +2131,33 @@ export class CFPieceMenu extends BaseElement {
   }
 
   #renderMenu(): TemplateResult {
-    // Keep the menu inside the viewport: a click near the right or bottom edge
-    // clamps it back into view.
     // A piece carrying an origin nothing can follow gets the detach entry too:
     // detaching is what repairs it.
     const entries = pieceMenuEntries(
       this.source?.origin !== undefined ||
         this.source?.unusableOrigin !== undefined,
     );
-    const width = 240;
-    const height = 49 + (entries.length + 1) * 34;
-    const left = Math.max(
-      4,
-      Math.min(this.x, globalThis.innerWidth - width - 4),
-    );
-    const top = Math.max(
-      4,
-      Math.min(this.y, globalThis.innerHeight - height - 4),
-    );
+    // The menu renders in the corner, which is where `#placeMenu` measures it.
+    // That measurement and the move to the click both happen within the
+    // update, so the corner is never painted.
     return html`
       <div
         class="backdrop"
         @click="${() => this.close()}"
         @contextmenu="${this._onBackdropContextMenu}"
       ></div>
-      <div class="menu" role="menu" style="left: ${left}px; top: ${top}px">
-        <div class="menu-title">Piece ${this.cell!.id()}</div>
+      <div class="menu" role="menu" style="left: 4px; top: 4px">
+        <div class="menu-title">
+          ${this.cell ? `Piece ${this.cell.id()}` : "Piece unavailable"}
+        </div>
         ${entries.map((entry) =>
           html`
             <button
               class="menu-item"
               role="menuitem"
               test-id="${entry.testId}"
-              ?disabled="${this.sourceActionPending || this.clonePending}"
+              ?disabled="${!this.cell || this.sourceActionPending ||
+                this.clonePending}"
               @click="${() =>
                 "panel" in entry
                   ? this.showPanel(entry.panel)
@@ -2102,10 +2172,14 @@ export class CFPieceMenu extends BaseElement {
           `
         )}
         <div class="menu-divider" role="separator"></div>
+        <div class="menu-title">
+          ${this.space ? `Space ${this.space}` : "Space unavailable"}
+        </div>
         <button
           class="menu-item"
           role="menuitem"
           test-id="${SPACE_ACCESS_ENTRY.testId}"
+          ?disabled="${!this.runtime || !this.space}"
           @click="${() => this.showPanel(SPACE_ACCESS_ENTRY.panel)}"
         >
           ${SPACE_ACCESS_ENTRY.label}
@@ -2174,7 +2248,7 @@ export class CFPieceMenu extends BaseElement {
   #renderPanel(panel: Panel): TemplateResult {
     const title = PANEL_TITLES[panel];
     const subject = panel === "access"
-      ? this.cell?.space() ?? ""
+      ? this.space ?? ""
       : panel !== "source" || this.sourceRevision === undefined
       ? this.source?.name ?? this.cell?.id() ?? ""
       : `Pattern ${this.sourceRevision.pattern.identity} · ${this.sourceRevision.pattern.symbol}`;
@@ -3152,29 +3226,50 @@ function copyThemeVariables(from: Element, to: HTMLElement): void {
  */
 let shared: CFPieceMenu | undefined;
 
-/** Show the piece menu for `cell` at a click position. */
+/**
+ * Show the menu at a click position, mounting it on `document.body` the first
+ * time. It addresses either a piece — `cell`, which the space and runtime are
+ * read from — or a space with no piece, named by `space` and reached through
+ * `runtime`. A call carrying neither leaves the menu closed.
+ */
 export function openPieceMenu(
-  { cell, x, y, themeFrom, highlightedPiece, highlightTarget }: {
-    cell: CellHandle;
-    x: number;
-    y: number;
+  { cell, space, runtime, x, y, themeFrom, highlightedPiece, highlightTarget }:
+    {
+      cell?: CellHandle;
 
-    /** The element the click came from, whose theme the menu adopts. */
-    themeFrom?: Element;
+      /** The space to address when the click landed on no piece. */
+      space?: DID;
 
-    /** The rendered piece to highlight while the menu remains open. */
-    highlightedPiece?: Element;
+      /** The runtime that space is reached through, alongside `space`. */
+      runtime?: RuntimeClient;
 
-    /** A nested pattern root to highlight within the rendered piece. */
-    highlightTarget?: Element;
-  },
+      x: number;
+      y: number;
+
+      /** The element the click came from, whose theme the menu adopts. */
+      themeFrom?: Element;
+
+      /** The rendered piece to highlight while the menu remains open. */
+      highlightedPiece?: Element;
+
+      /** A nested pattern root to highlight within the rendered piece. */
+      highlightTarget?: Element;
+    },
 ): CFPieceMenu {
   if (!shared || !shared.isConnected) {
     shared = globalThis.document.createElement("cf-piece-menu") as CFPieceMenu;
     globalThis.document.body.appendChild(shared);
   }
   if (themeFrom) copyThemeVariables(themeFrom, shared);
-  shared.open({ cell, x, y, highlightedPiece, highlightTarget });
+  shared.open({
+    cell,
+    space,
+    runtime,
+    x,
+    y,
+    highlightedPiece,
+    highlightTarget,
+  });
   return shared;
 }
 

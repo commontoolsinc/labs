@@ -65,6 +65,11 @@ runtime and gives a user a way to move around their spaces. Entry point is
 - Views use `@lit/task` for asynchronous work, and cleanup belongs in the
   component lifecycle. A task that outlives its component keeps writing into a
   disconnected tree.
+- `BodyView` opens the piece menu over the surface a piece failed to load into.
+  Everywhere else a right-click reaches `cf-render`, and there is no `cf-render`
+  on that surface, so the view stands in for it and hands the menu the space
+  with no piece. That is why it takes a `space` property it otherwise would not
+  need.
 
 ## Where answers live
 
