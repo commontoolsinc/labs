@@ -385,10 +385,12 @@ describe("main command", () => {
           // disagreeing with the CLI.
           //
           // A bare noun is claimable only when the noun itself declares
-          // CF_SPACE or all of its subcommands do. `space` fails that on both
-          // counts — `clone`, `verify`, `reset` and `fingerprint` take a
-          // rehearsal clone's directory — which is why the line names its two
-          // server-touching subcommands instead of the noun.
+          // CF_SPACE or all of its subcommands do. `space` fails on both
+          // counts: it declares no CF_SPACE of its own, and four of its six
+          // name their target themselves — two as a positional space, two as
+          // a clone directory — so an ambient default reaches none of those
+          // four. Failing both counts is what makes the noun unclaimable,
+          // and why the line names the two subcommands that do read it.
           const spaceLine = description.split("\n").find((text: string) =>
             text.includes("CF_SPACE    = ambient")
           );
