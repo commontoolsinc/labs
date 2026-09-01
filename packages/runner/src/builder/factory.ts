@@ -2,6 +2,12 @@
  * Factory function to create builder functions with runtime dependency injection
  */
 
+import {
+  FabricInstance,
+  FabricPrimitive,
+  FabricSpecialObject,
+  valueEqual,
+} from "@commonfabric/data-model";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import {
   FabricError,
@@ -15,12 +21,6 @@ import {
   FabricKeyPair,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
-import {
-  FabricInstance,
-  FabricPrimitive,
-  FabricSpecialObject,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
 import {
   toCompactDebugString,
   toIndentedDebugString,

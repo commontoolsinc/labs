@@ -11,15 +11,12 @@
  * is removed outright.
  */
 
+import { FabricInstance, FabricPrimitive } from "@commonfabric/data-model";
 import {
   isLinkRef,
   linkRefFrom,
   linkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
-import {
-  FabricInstance,
-  FabricPrimitive,
-} from "@commonfabric/data-model/fabric-value";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { refuseFabricInstance } from "../fabric-special-object.ts";
 import type { CellLinkRefPayload, SigilLink } from "../sigil-types.ts";

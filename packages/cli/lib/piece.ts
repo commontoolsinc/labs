@@ -2,14 +2,11 @@ import { ensureDir } from "@std/fs";
 import { dirname, join } from "@std/path";
 
 import type { CellScope, JSONSchema } from "@commonfabric/api";
+import { FabricPrimitive, FabricSpecialObject } from "@commonfabric/data-model";
 import {
   codecOf,
   NULL_LIVE_ENVIRONMENT,
 } from "@commonfabric/data-model/codec-common";
-import {
-  FabricPrimitive,
-  FabricSpecialObject,
-} from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { createSession, isDID, Session } from "@commonfabric/identity";
 import { collectDataFileNames } from "@commonfabric/js-compiler";

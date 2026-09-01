@@ -1,16 +1,16 @@
 import type { JSONSchema as SchemaDocJSONSchema } from "@commonfabric/api";
+import {
+  type FabricPlainObject,
+  type FabricValue,
+  type MutableFabricPlainObjectLayer,
+  shallowMutableClone,
+} from "@commonfabric/data-model";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import { lookupSchemaDocument } from "../schema-registry.ts";
 import type { URI } from "../sigil-types.ts";
-import {
-  type FabricPlainObject,
-  type FabricValue,
-  type MutableFabricPlainObjectLayer,
-  shallowMutableClone,
-} from "@commonfabric/data-model/fabric-value";
 import { aclDocId } from "@commonfabric/memory/acl";
 import {
   type CommitError,

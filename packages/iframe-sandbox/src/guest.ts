@@ -4,14 +4,14 @@
  */
 
 import {
-  fabricFromRealmValue,
-  realmFromFabricValue,
-} from "@commonfabric/data-model/codecs";
-import {
   cloneIfNecessary,
   type FabricValue,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 
 import {
   BRIDGE_PROTOCOL,

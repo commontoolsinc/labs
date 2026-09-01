@@ -25,8 +25,8 @@ import {
   cloneIfNecessary,
   type CloneOptions,
   isValidFabricValue,
-} from "@/fabric-value.ts";
-import type { FabricValue } from "@/fabric-value.ts";
+} from "@/index.ts";
+import type { FabricValue } from "@/index.ts";
 import { isDeepFrozen, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";

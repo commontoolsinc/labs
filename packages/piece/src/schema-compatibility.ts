@@ -15,10 +15,7 @@ import {
 } from "@commonfabric/runner/cfc";
 import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model-schema";
-import {
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import { type FabricValue, valueEqual } from "@commonfabric/data-model";
 
 type SchemaObject = Exclude<JSONSchema, boolean>;
 type SchemaRole = "argument" | "result";

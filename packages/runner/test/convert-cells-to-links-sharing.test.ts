@@ -8,8 +8,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { type FabricConvertibleValue } from "@commonfabric/data-model";
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
-import { type FabricConvertibleValue } from "@commonfabric/data-model/fabric-value";
 
 import { convertCellsToLinks } from "../src/cell.ts";
 

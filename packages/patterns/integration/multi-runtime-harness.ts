@@ -36,11 +36,11 @@
  * to before: flag unset or false keeps the in-process standalone server.
  */
 
+import type { FabricValue } from "@commonfabric/data-model";
 import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { env } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";

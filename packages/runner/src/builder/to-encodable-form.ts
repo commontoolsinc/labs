@@ -7,7 +7,7 @@ import {
   FabricInstance,
   FabricPrimitive,
   shallowFabricFromNativeObjectElseUndefined,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import { refuseFabricInstance } from "../fabric-special-object.ts";
 import { type AliasBinding } from "../sigil-types.ts";
 import {

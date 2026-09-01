@@ -1,9 +1,9 @@
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
+import { cloneIfNecessary } from "@commonfabric/data-model";
 import {
   hasDataUriScheme,
   valueFromDataUri,
 } from "@commonfabric/data-model/data-uri-codec";
-import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { aclDocId } from "@commonfabric/memory/acl";
 import type { Entity } from "@commonfabric/memory/interface";

@@ -19,7 +19,7 @@ import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
-import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
+import { shallowFabricFromNativeValue } from "@/index.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 
 describe("FabricEpochNsec", () => {

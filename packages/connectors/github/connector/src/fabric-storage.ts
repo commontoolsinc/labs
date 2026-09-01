@@ -1,7 +1,7 @@
 import {
   fabricFromNativeValue,
   type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import type { Cell, MemorySpace, Runtime } from "@commonfabric/runner";
 
 export interface GithubFabricConnection {

@@ -21,13 +21,13 @@
 
 import { type JSONSchema, type Pattern } from "@commonfabric/runner";
 import { validateSchemaDefinition } from "@commonfabric/runner/cfc";
+import type { FabricValue } from "@commonfabric/data-model";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import {
   fabricFromJsonValue,
   jsonFromFabricValue,
 } from "@commonfabric/data-model/codecs";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { assertPatternSchemasBackwardCompatible } from "../packages/piece/src/schema-compatibility.ts";
 
 /**

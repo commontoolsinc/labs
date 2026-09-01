@@ -17,7 +17,7 @@ import {
   type FabricValue,
   isFabricPlainObject,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   isObjectNotArray,

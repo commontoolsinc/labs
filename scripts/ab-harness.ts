@@ -66,7 +66,7 @@ const ju: any = await (async () => {
 })();
 const md: any = await import(`${R}/builder/pattern-metadata.ts`);
 const { fabricFromNativeValue } = await import(
-  "@commonfabric/data-model/fabric-value"
+  "@commonfabric/data-model"
 );
 const { dataUriFromValue } = await import(
   "@commonfabric/data-model/data-uri-codec"

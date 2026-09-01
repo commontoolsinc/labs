@@ -26,7 +26,7 @@ import {
   CloneForMutationError,
   cloneWithoutValueAtPath,
   cloneWithValueAtPath,
-} from "@/fabric-value.ts";
+} from "@/index.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";

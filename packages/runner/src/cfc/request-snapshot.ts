@@ -1,4 +1,4 @@
-import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
+import { cloneIfNecessary } from "@commonfabric/data-model";
 import type { FabricValue } from "@commonfabric/api";
 
 /**

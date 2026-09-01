@@ -34,8 +34,8 @@
 
 import { BenchWorker } from "@commonfabric/test-support/bench-worker";
 
+import type { FabricValue } from "@commonfabric/data-model";
 import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
 import { serializeEvent } from "../src/main/events.ts";
 import type { EventRequest } from "./fixtures/dom-event-far-side.ts";

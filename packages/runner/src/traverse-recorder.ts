@@ -1,6 +1,6 @@
 import type { SchemaPathSelector } from "@commonfabric/api";
+import type { FabricValue } from "@commonfabric/data-model";
 import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 

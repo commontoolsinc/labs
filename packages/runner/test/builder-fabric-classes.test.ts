@@ -20,7 +20,7 @@ import {
   FabricInstance,
   FabricPrimitive,
   FabricSpecialObject,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import {
   FabricError,
   FabricLink,

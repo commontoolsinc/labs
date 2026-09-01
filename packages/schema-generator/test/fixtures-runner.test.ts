@@ -8,16 +8,16 @@ import {
   createUnifiedDiff,
   defineFixtureSuite,
 } from "@commonfabric/test-support/fixture-runner";
+import {
+  FabricPrimitive,
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model";
 import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import {
   fabricFromJsonValue,
   jsonFromFabricValue,
 } from "@commonfabric/data-model/codecs";
-import {
-  FabricPrimitive,
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { SchemaGenerator } from "../src/schema-generator.ts";
 import {

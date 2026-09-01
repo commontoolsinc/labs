@@ -1,10 +1,7 @@
 import { encodeHex } from "@std/encoding/hex";
 
 import { sha256 } from "@commonfabric/content-hash";
-import {
-  cloneIfNecessary,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
+import { cloneIfNecessary, type FabricValue } from "@commonfabric/data-model";
 import {
   type CfcEnforcementMode as RunnerCfcEnforcementMode,
   DEFAULT_CFC_ENFORCEMENT_MODE,

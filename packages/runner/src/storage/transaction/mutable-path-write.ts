@@ -10,14 +10,14 @@
  */
 
 import {
-  cloneForMutation,
-  CloneForMutationError,
-} from "@commonfabric/data-model/value-clone";
-import {
   type FabricValue,
   isFabricPlainContainer,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
+import {
+  cloneForMutation,
+  CloneForMutationError,
+} from "@commonfabric/data-model/value-clone";
 import { toDebugKindString } from "@commonfabric/data-model/value-debug";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import type {

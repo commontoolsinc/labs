@@ -3,7 +3,7 @@ import {
   FabricPrimitive,
   type FabricValue,
   isValidFabricValue,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
   Cell,

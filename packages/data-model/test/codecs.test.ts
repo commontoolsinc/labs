@@ -24,10 +24,10 @@ import {
   realmFromFabricValue,
 } from "@/codecs.ts";
 import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
-import { isValidFabricValue } from "@/fabric-value.ts";
+import { isValidFabricValue } from "@/index.ts";
 import { JsonCodecEngine } from "@/codec-json/JsonCodecEngine.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
-import type { FabricValue } from "@/fabric-value.ts";
+import type { FabricValue } from "@/index.ts";
 import { BaseLiveEnvironment } from "@/codec-interface/BaseLiveEnvironment.ts";
 
 /** Mock runtime for decode calls. */
