@@ -54,19 +54,39 @@ elsewhere — it opens inside the chained `piece` command expression, around
 its first inline action, and `buildCallCommand` is a standalone function
 well before it.
 
-**A4 — exit and output seams audit.** Every seam shuttle calls must accept
-an exit override (`exitWithDataError` / `exitPieceCallFailure` call
-`Deno.exit(1)` by default — a data error must not kill the shell) and
-route output through the `render`/`hint` deps rather than stray
-`console.error`. One audit PR that threads what is missing, with the test
-that proves a data error surfaces as a value.
+**A4 — exit and output seams audit.** Done (#6704). `exitWithDataError` and
+`exitPieceCallFailure` default to `Deno.exit(1)` and take a `deps`
+override in its place, each with an `exit` typed `never` beside the sinks
+its own report needs — `printError` and `printHint` for the data error,
+`printError` and `render` for the call failure, whose expiry writes
+Invocation JSON to the machine surface. Every seam a v1 verb reaches
+forwards the caller's own:
+`getCellValueFromCommand`, and `callFromCommand` at each of its three
+exits, the payload rejection reported from inside the dispatch's promise
+chain included. An `exit` typed `never` throws rather than returning, so
+that rejection's throw lands in the action's own catch;
+`callFromCommand` records that an exit ran and rethrows, rather than
+describing the shell's exit as a second failure of the call.
+`describePieceFromCommand` takes `render`/`hint` beside them, so its page
+and next steps land where the caller puts them, and the confirmation
+`cf call` puts on stderr for a JSON payload — so that stdout stays the
+machine surface — rides the caller's `printError` rather than the
+process's. `announce` beside those carries what a call publishes in
+flight — the invocation pair, and the spans under `--verbose` — which
+raw stderr serves for a one-shot command and corrupts for a caller
+drawing its own screen. The bulk seams — survey, repair, retarget,
+`setsrc --check` — are on no v1 verb's path and keep the exits they have.
+Each threaded seam carries the test the override makes possible: an
+injected exit that throws, and the report read back as a value.
 
 **A5 — module-global state.** `quietMode` is a file-level `let`;
 `setLLMUrl` is written by both `loadPieces` and
-`PiecesController.initialize`. Either scope them per connection, or land a
-recorded limit: one connection per process for shuttle v1, revisited when
-multiple places arrive. The cheap honest move is the recorded limit; the
-PR is whichever the review rules.
+`PiecesController.initialize`; `receipted` (`lib/write-receipt.ts`)
+memoizes the write receipt per process, so a shell names a space once and
+says nothing for the writes after. Either scope them per connection, or
+land a recorded limit: one connection per process for shuttle v1,
+revisited when multiple places arrive. The cheap honest move is the
+recorded limit; the PR is whichever the review rules.
 
 ## Stage B — the shuttle package
 

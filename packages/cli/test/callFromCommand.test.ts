@@ -8,10 +8,11 @@
  * phases it announced, and the outcome it rendered. No runtime, no socket, and
  * no server stands behind any of it.
  *
- * The bound on that: the two failure exits end the process, so the cases here
- * are the ones that return or that raise a `ValidationError`, which
- * `exitPieceCallFailure` rethrows for Cliffy's usage rendering rather than
- * exiting on.
+ * A case reaching a failure exit supplies an `exit` of its own — one that
+ * throws, which is the only shape an `exit` typed `never` leaves open — and
+ * reads the report off its own sinks rather than losing the runner to
+ * `Deno.exit`. `exitPieceCallFailure` rethrows a `ValidationError` instead of
+ * exiting, so Cliffy still renders the usage screen for one.
  */
 
 import { expect } from "@std/expect";
@@ -23,7 +24,9 @@ import {
   callFromCommand,
   type PieceCallCLIOptions,
   type PieceCallCommandDependencies,
+  WaitBoundExpired,
 } from "../commands/piece.ts";
+import { VerbInputValidationError } from "../lib/callable.ts";
 import type {
   ExecutedPieceCallable,
   executePieceCallable,
@@ -93,9 +96,19 @@ function stubExecutor(
   };
 }
 
-/** A dispatcher that fails with `error` rather than recording anything. */
-function failingExecutor(error: unknown): typeof executePieceCallable {
-  return () => Promise.reject(error);
+/**
+ * A dispatcher that fails with `error` rather than recording anything,
+ * announcing `phases` through the observer the action supplied first, so a
+ * case can choose the furthest phase the failure report names.
+ */
+function failingExecutor(
+  error: unknown,
+  phases: readonly ("dispatched" | "committed")[] = [],
+): typeof executePieceCallable {
+  return (_config, _callableName, _rawArgs, deps = {}) => {
+    for (const phase of phases) deps.onPhase?.(phase);
+    return Promise.reject(error);
+  };
 }
 
 /**
@@ -126,6 +139,52 @@ function sinks(): {
     },
     rendered,
     hinted,
+  };
+}
+
+/**
+ * Sinks standing in for the process's, as a caller holding a connection
+ * supplies them. `exit` throws rather than ending anything, which is what an
+ * `exit` typed `never` has to do, so a case reads the failure report back as
+ * a value instead of losing the runner to it.
+ */
+function exitSinks(): {
+  deps: PieceCallCommandDependencies;
+  printed: string[];
+  hinted: string[];
+  rendered: string[];
+  announced: string[];
+  exited: number[];
+} {
+  const printed: string[] = [];
+  const hinted: string[] = [];
+  const rendered: string[] = [];
+  const announced: string[] = [];
+  const exited: number[] = [];
+  return {
+    deps: {
+      render: (value: unknown) => {
+        rendered.push(String(value));
+      },
+      hint: (message: string) => {
+        hinted.push(message);
+      },
+      printError: (message: string) => {
+        printed.push(message);
+      },
+      announce: (message: string) => {
+        announced.push(message);
+      },
+      exit: (code: number): never => {
+        exited.push(code);
+        throw new Error("exit-sentinel");
+      },
+    },
+    printed,
+    hinted,
+    rendered,
+    announced,
+    exited,
   };
 }
 
@@ -482,6 +541,37 @@ describe("callFromCommand()", () => {
       expect(rendered).toEqual(['{"found":1}']);
     });
 
+    it("hands a JSON-input handler's confirmation to the caller's error sink", async () => {
+      // A payload given as JSON puts the confirmation on stderr, so that
+      // stdout stays the machine surface — and stderr, for a caller holding
+      // one, is its own `printError` rather than this process's. The
+      // captured lines are what says the confirmation went to the sink
+      // instead of past it.
+
+      const dispatches: Dispatch[] = [];
+      const { deps, printed, hinted, rendered } = exitSinks();
+      const escaped = await captureStderr(() =>
+        callFromCommand(
+          options,
+          "call",
+          "addItem",
+          ['{"title":"Milk"}'],
+          ["--cell", PIECE, "addItem", '{"title":"Milk"}'],
+          [],
+          {
+            ...deps,
+            executePieceCallable: stubExecutor(dispatches, {
+              parsed: { usedJsonInput: true },
+            } as Partial<ExecutedPieceCallable>),
+          },
+        )
+      );
+      expect(printed).toEqual([`Called handler "addItem" on piece ${PIECE}`]);
+      expect(escaped).toEqual([]);
+      expect(rendered).toEqual([]);
+      expect(hinted[0]).toContain(`cf get --cell ${PIECE}`);
+    });
+
     it("throws a dispatch's usage failure out to Cliffy rather than exiting", async () => {
       await expect(
         callFromCommand(
@@ -573,6 +663,191 @@ describe("callFromCommand()", () => {
         )
       );
       expect(lines.filter((line) => line.startsWith("timing: "))).toEqual([]);
+    });
+
+    it("hands the invocation pair to the caller's `announce`, and writes none of it to the process", async () => {
+      // Raw stderr is fine for a command that owns the terminal, and wrong
+      // for a caller drawing its own screen: a line written behind the frame
+      // corrupts it. The captured stderr is what says the announcement went
+      // to the sink rather than past it.
+
+      const dispatches: Dispatch[] = [];
+      const announced: string[] = [];
+      const escaped = await captureStderr(() =>
+        callFromCommand(
+          options,
+          "call",
+          "addItem",
+          [],
+          ["--cell", PIECE, "addItem"],
+          [],
+          {
+            ...discard,
+            announce: (message: string) => {
+              announced.push(message);
+            },
+            executePieceCallable: stubExecutor(dispatches, {}, ["dispatched"]),
+          },
+        )
+      );
+      expect(announced).toEqual([
+        `invocation: ${INVOCATION}`,
+        `session: ${SESSION}`,
+      ]);
+      expect(escaped).toEqual([]);
+    });
+
+    it("hands the `--verbose` spans to the caller's `announce`, and writes none of them to the process", async () => {
+      const dispatches: Dispatch[] = [];
+      const announced: string[] = [];
+      const escaped = await captureStderr(() =>
+        callFromCommand(
+          { ...options, verbose: true },
+          "call",
+          "addItem",
+          [],
+          ["--cell", PIECE, "--verbose", "addItem"],
+          [],
+          {
+            ...discard,
+            announce: (message: string) => {
+              announced.push(message);
+            },
+            executePieceCallable: stubExecutor(dispatches, {}, [
+              "dispatched",
+              "committed",
+            ]),
+          },
+        )
+      );
+      const spans = announced.filter((line) => line.startsWith("timing: "))
+        .map((line) => line.replace(/ [\d.]+ms$/, ""));
+      expect(spans).toEqual([
+        "timing: initial_sync → dispatched",
+        "timing: dispatched → committed",
+        "timing: committed → settled",
+      ]);
+      expect(escaped).toEqual([]);
+    });
+  });
+
+  describe("the failure exits", () => {
+    // Each case supplies an `exit` of its own, so what would end a process
+    // ends the call instead and the report is left on the caller's sinks —
+    // the message it prints, the remedy it hints, and the retry key beside
+    // it are all values a caller still holds after the failure.
+
+    it("reports a malformed read selection to the caller, and dispatches nothing", async () => {
+      const dispatches: Dispatch[] = [];
+      const { deps, printed, exited } = exitSinks();
+      await expect(
+        callFromCommand(
+          options,
+          "call",
+          "addItem",
+          [],
+          ["--cell", PIECE, "addItem", "--", "--filter", "title ="],
+          ["--filter", "title ="],
+          { ...deps, executePieceCallable: stubExecutor(dispatches) },
+        ),
+      ).rejects.toThrow("exit-sentinel");
+      expect(printed).toHaveLength(1);
+      expect(printed[0]).toMatch(/^Invalid --filter predicate at column 7/);
+      expect(exited).toEqual([1]);
+      expect(dispatches).toEqual([]);
+    });
+
+    it("reports a rejected payload with the verb listing to point at", async () => {
+      const { deps, printed, hinted, exited } = exitSinks();
+      await expect(
+        callFromCommand(
+          options,
+          "call",
+          "addItem",
+          [],
+          ["--cell", PIECE, "addItem"],
+          [],
+          {
+            ...deps,
+            executePieceCallable: failingExecutor(
+              new VerbInputValidationError(
+                "addItem",
+                "missing required property title",
+              ),
+            ),
+          },
+        ),
+      ).rejects.toThrow("exit-sentinel");
+      expect(printed).toEqual([
+        'Invalid input for "addItem": missing required property title',
+      ]);
+      expect(hinted[0]).toContain(`cf piece verbs --cell ${PIECE}`);
+      expect(exited).toEqual([1]);
+    });
+
+    it("names the phase a failed dispatch reached beside its invocation id", async () => {
+      const { deps, printed, announced, exited } = exitSinks();
+      const escaped = await captureStderr(async () => {
+        await expect(
+          callFromCommand(
+            options,
+            "call",
+            "addItem",
+            [],
+            ["--cell", PIECE, "addItem"],
+            [],
+            {
+              ...deps,
+              executePieceCallable: failingExecutor(new Error("send blew up"), [
+                "dispatched",
+              ]),
+            },
+          ),
+        ).rejects.toThrow("exit-sentinel");
+      });
+      expect(printed).toEqual([
+        "send blew up",
+        `invocation: ${INVOCATION} phase: dispatched`,
+      ]);
+      expect(announced).toEqual([
+        `invocation: ${INVOCATION}`,
+        `session: ${SESSION}`,
+      ]);
+      expect(escaped).toEqual([]);
+      expect(exited).toEqual([1]);
+    });
+
+    it("writes an expired call's Invocation JSON to the caller's own stdout", async () => {
+      const { deps, printed, rendered, announced, exited } = exitSinks();
+      const escaped = await captureStderr(async () => {
+        await expect(
+          callFromCommand(
+            options,
+            "call",
+            "addItem",
+            [],
+            ["--cell", PIECE, "addItem"],
+            [],
+            {
+              ...deps,
+              executePieceCallable: failingExecutor(new WaitBoundExpired(5), [
+                "dispatched",
+              ]),
+            },
+          ),
+        ).rejects.toThrow("exit-sentinel");
+      });
+      expect(JSON.parse(rendered[0])).toEqual({
+        invocation: INVOCATION,
+        status: "dispatched",
+      });
+      expect(printed[1]).toBe(`invocation: ${INVOCATION} phase: dispatched`);
+      expect(announced).toEqual([
+        `invocation: ${INVOCATION}`,
+        `session: ${SESSION}`,
+      ]);
+      expect(escaped).toEqual([]);
+      expect(exited).toEqual([1]);
     });
   });
 });

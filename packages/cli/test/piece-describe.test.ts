@@ -516,6 +516,28 @@ describe("piece-describe", () => {
       expect(out).toContain("  addItem");
     });
 
+    it("writes the page and its next steps to the sinks the caller supplies", async () => {
+      // Without the sinks the page reaches stdout and the tip reaches
+      // stderr, which is right for a one-shot verb and wrong for a caller
+      // that has somewhere else to put them. A supplied sink is handed the
+      // message whatever `--quiet` says, suppressing it being the caller's
+      // decision from there on rather than this command's.
+
+      const rendered: unknown[] = [];
+      const hinted: string[] = [];
+      await describePieceFromCommand(OPTIONS, {
+        describePiece: () => Promise.resolve(DESCRIPTION),
+        render: (value) => {
+          rendered.push(value);
+        },
+        hint: (message) => {
+          hinted.push(message);
+        },
+      });
+      expect(rendered).toContain("NAME    Work tracker");
+      expect(hinted[0]).toContain("cf piece verbs --cell board");
+    });
+
     it("is the action the piece command registers for describe", () => {
       const registered = piece.getCommand("describe") as unknown as {
         actionHandler: unknown;

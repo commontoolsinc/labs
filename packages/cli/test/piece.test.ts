@@ -689,6 +689,40 @@ describe("cli piece parsing", () => {
     expect(rendered).toEqual([{ ok: true }, { ok: true }]);
   });
 
+  it("getCellValueFromCommand() leaves an unresolved path on the caller's sinks rather than exiting", async () => {
+    // The exit the injected one stands in for is `Deno.exit(1)`, which no
+    // long-lived caller survives. An `exit` typed `never` throws instead, so
+    // the report the read failed with — its message, the remedy, and the
+    // code — is left as values the caller still holds.
+
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
+    const printed: string[] = [];
+    const hinted: string[] = [];
+    const exited: number[] = [];
+    await expect(
+      getCellValueFromCommand(base, `/${LLM_HANDLE}/items/0`, "title", {
+        getCellValue: (() =>
+          Promise.reject(
+            new Error('Cannot access path "items/0/title"'),
+          )) as never,
+        render: () => {},
+        printError: (message) => {
+          printed.push(message);
+        },
+        hint: (message) => {
+          hinted.push(message);
+        },
+        exit: (code): never => {
+          exited.push(code);
+          throw new Error("exit-sentinel");
+        },
+      }),
+    ).rejects.toThrow("exit-sentinel");
+    expect(printed).toEqual(['Cannot access path "items/0/title"']);
+    expect(hinted[0]).toContain("retry with --input");
+    expect(exited).toEqual([1]);
+  });
+
   it("setCellValueFromCommand() writes through a positional address and requires a path", async () => {
     const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
     const writes: unknown[][] = [];

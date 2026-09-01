@@ -756,8 +756,11 @@ export function verbInputErrorReport(
 /**
  * Print a data-error report — message plus optional hint — to stderr and exit
  * 1. The single exit path for the `cf get` / `piece link` data errors
- * above. The `deps` seam lets unit tests observe the wiring without a real
- * process exit; runtime callers use the defaults.
+ * above. The `deps` seam puts both sinks and the exit itself in the caller's
+ * hands: a one-shot verb takes the defaults and ends the process, while a
+ * caller that has to survive the report supplies an `exit` that throws and
+ * reads what its own sinks were handed. `exit` is typed `never`, so throwing
+ * is the only way such a caller can write one.
  */
 export function exitWithDataError(
   report: { message: string; hint?: string },
@@ -783,12 +786,12 @@ export function exitWithDataError(
  * unreachable from a unit test. The `deps` seam is `exitWithDataError`'s,
  * threaded so a test can observe the report without a real process exit.
  *
- * `observer` is the call's phase observer: this exit bypasses the action's
- * catch (it terminates the process from inside the promise chain), so the
- * verbose in-flight span must be closed HERE — otherwise a pre-dispatch
- * payload rejection under --verbose would leave the initial_sync span
- * dangling with no failure timing. A rethrown error is closed by the
- * action's own failure exit instead.
+ * `observer` is the call's phase observer, and its verbose in-flight span is
+ * closed HERE. The exit leaves from inside the dispatch's promise chain,
+ * ending the process by default and throwing where a caller supplied its
+ * own, so a pre-dispatch payload rejection under --verbose would otherwise
+ * leave the initial_sync span dangling with no failure timing. A rethrown
+ * error is closed by the action's own failure exit instead.
  */
 export function reportVerbInputErrorOrRethrow(
   error: unknown,
@@ -2992,13 +2995,37 @@ export interface PieceGetCLIOptions extends PieceLabelCLIOptions {
   schema?: string;
 }
 
+/**
+ * The collaborators {@link getCellValueFromCommand} and
+ * {@link setCellValueFromCommand} read, write, and report through.
+ */
 export interface PieceCellCommandDependencies {
+  /** The read, which a caller holding its own connection supplies. */
   getCellValue?: typeof getCellValue;
+
+  /** The write, which a caller holding its own connection supplies. */
   setCellValue?: typeof setCellValue;
+
+  /** Where the written value comes from, standard input by default. */
   drainStdin?: typeof drainStdin;
+
+  /** Where the value goes, stdout unless the caller says otherwise. */
   render?: typeof render;
+
+  /** Where the next steps go, stderr unless the caller says otherwise. */
   hint?: typeof hint;
+
+  /** The data-error report itself, for a caller replacing the whole exit. */
   exitWithDataError?: typeof exitWithDataError;
+
+  /** Where a data error's message goes, stderr unless the caller says so. */
+  printError?: (message: string) => void;
+
+  /**
+   * How a data error ends the caller. `Deno.exit` by default, which a shell
+   * replaces with a shim that throws, so the error arrives as a value.
+   */
+  exit?: (code: number) => never;
 }
 
 /**
@@ -3048,7 +3075,13 @@ export async function getCellValueFromCommand(
       input,
       piece: pieceConfig.piece,
     });
-    if (report) (deps.exitWithDataError ?? exitWithDataError)(report);
+    if (report) {
+      (deps.exitWithDataError ?? exitWithDataError)(report, {
+        printError: deps.printError,
+        printHint: deps.hint,
+        exit: deps.exit,
+      });
+    }
     throw error;
   }
 }
@@ -3140,6 +3173,28 @@ export interface PieceCallCommandDependencies {
 
   /** Where the next steps go, stderr unless the caller says otherwise. */
   hint?: typeof hint;
+
+  /** Where a failure's report goes, stderr unless the caller says so. */
+  printError?: (message: string) => void;
+
+  /**
+   * Where the call's in-flight lines go, stderr unless the caller says
+   * otherwise: the invocation pair as the dispatch happens, the spans under
+   * `--verbose`, and the per-phase lines `CF_TEST_ANNOUNCE_INVOCATION_PHASES`
+   * adds. One sink rather than several because the three interleave in one
+   * temporal stream, and splitting them would leave a caller rendering them
+   * as ordered events to reassemble an order it was handed already sorted.
+   *
+   * Distinct from `printError` because these are published while the call
+   * is in flight and whether or not it goes on to fail.
+   */
+  announce?: (message: string) => void;
+
+  /**
+   * How a failed call ends the caller. `Deno.exit` by default, which a shell
+   * replaces with a shim that throws, so the failure arrives as a value.
+   */
+  exit?: (code: number) => never;
 }
 
 /**
@@ -3200,11 +3255,39 @@ export async function callFromCommand(
   const invocationId = identity.id;
   const waitControl = resolveWaitControl({ ...options, ...readback });
   let phase: InvocationPhase = "initial_sync";
+  // The in-flight lines — the invocation pair as the dispatch happens, and
+  // the spans under --verbose — go where `announce` puts them. Raw stderr
+  // suits a command that owns the terminal for the length of one
+  // invocation; a caller drawing its own screen is corrupted by a line
+  // written behind the frame, and it needs these as events it can place.
+  //
+  // They stay apart from `printError` for all that: both are published
+  // while the call is in flight and whether or not it goes on to fail, so a
+  // failure sink would be naming a failure that has not happened.
   const observer = pieceCallPhaseObserver(
     !!options.verbose,
     (next) => phase = next,
+    deps.announce,
   );
   setQuietMode(!!options.quiet);
+  // Both data-error reports below end the caller, so each goes to the
+  // caller's own sinks rather than to the process's: a shell supplies an
+  // `exit` that throws, and reads the report as the value it acts on.
+  //
+  // A supplied `exit` throws, where `Deno.exit` does not come back at all,
+  // and that difference is what `exitTaken` is for: the payload rejection is
+  // reported from inside the dispatch's promise chain, so its throw lands in
+  // the catch at the bottom of this function, which would otherwise describe
+  // the caller's own exit as a second, invented failure of the call.
+  let exitTaken = false;
+  const dataErrorSinks = {
+    printError: deps.printError,
+    printHint: deps.hint,
+    exit: (code: number): never => {
+      exitTaken = true;
+      return (deps.exit ?? Deno.exit)(code);
+    },
+  };
   // Read outside the invocation's failure wrapper below. Nothing is
   // dispatched here — no callable resolved, no id spent — so a malformed
   // selection is a data error about the flags, the same one `cf get` reports.
@@ -3219,7 +3302,7 @@ export async function callFromCommand(
     // the verbose in-flight span is closed here.
     observer.finish("failed");
     if (error instanceof CellSelectionError) {
-      exitWithDataError({ message: error.message });
+      exitWithDataError({ message: error.message }, dataErrorSinks);
     }
     throw error;
   }
@@ -3250,7 +3333,7 @@ export async function callFromCommand(
           onPhase: invocationPhaseReporter(
             identity,
             observer.onPhase,
-            undefined,
+            deps.announce,
             Boolean(Deno.env.get("CF_TEST_ANNOUNCE_INVOCATION_PHASES")),
           ),
         },
@@ -3258,22 +3341,27 @@ export async function callFromCommand(
         reportVerbInputErrorOrRethrow(
           error,
           pieceConfig.piece,
-          undefined,
+          dataErrorSinks,
           observer,
         )
       ),
       waitControl.boundSeconds,
     );
+    // The bag goes whole, here and at the failure exit below. Re-listing the
+    // fields a callee accepts is a claim about that callee's type which
+    // nothing rechecks when it grows a sink, and a dropped one is invisible:
+    // the default writes to the process and the caller sees no gap.
     renderPieceCallOutcome(
       observer,
       result,
       callableName,
       pieceConfig.piece,
-      { render: deps.render, hint: deps.hint },
+      deps,
       { detached: waitControl.mode === "commit", invocation: identity },
     );
   } catch (error) {
-    exitPieceCallFailure(observer, error, invocationId, phase);
+    if (exitTaken) throw error;
+    exitPieceCallFailure(observer, error, invocationId, phase, deps);
   }
 }
 
@@ -4430,6 +4518,12 @@ export async function listSlugsFromCommand(
 
 export interface PieceDescribeCommandDependencies {
   describePiece?: typeof describePiece;
+
+  /** Where the page goes, stdout unless the caller says otherwise. */
+  render?: typeof render;
+
+  /** Where the next steps go, stderr unless the caller says otherwise. */
+  hint?: typeof hint;
 }
 
 /** `cf piece describe`'s action, held apart from the cliffy chain the way
@@ -4444,15 +4538,16 @@ export async function describePieceFromCommand(
 ): Promise<void> {
   setQuietMode(!!options.quiet);
   const pieceConfig = parsePieceOptions(options);
+  const print = deps.render ?? render;
   const description = await (deps.describePiece ?? describePiece)(pieceConfig);
   if (options.json) {
-    render(pieceDescribeJson(description, !!options.all), { json: true });
+    print(pieceDescribeJson(description, !!options.all), { json: true });
     return;
   }
   for (const line of pieceDescribeLines(description, !!options.all)) {
-    render(line);
+    print(line);
   }
-  hint(
+  (deps.hint ?? hint)(
     cliText(
       `TIP: 'cf piece verbs --cell ${pieceConfig.piece} --json' has each verb's schemas; 'cf call --cell ${pieceConfig.piece} <verb> --help' documents one verb.`,
     ),

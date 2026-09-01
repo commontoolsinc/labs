@@ -189,6 +189,21 @@ collaborators only — the `render`/`hint` sinks and the dispatch itself —
 so a caller holding a connection passes an `executePieceCallable` bound to
 it rather than opening one per call.
 
+Not every v1 verb lands on a `*FromCommand` action, and which ones do not
+is what decides whether a bare `Deno.exit` in some Cliffy action is
+shuttle's problem. `get`, `set`, `call` and `describe` go through the
+named exports (`getCellValueFromCommand`, `setCellValueFromCommand`,
+`callFromCommand`, `describePieceFromCommand`); `ls` goes through
+`listPiecesFromCommand` and `listSlugsFromCommand`; `wish` through
+`readWish`. The two that do not are composed from the library instead:
+**`link` calls `linkPieces` (`lib/piece.ts`) directly**, which is the seam
+A2 gave it and which raises `LinkValidationError` as a value, so the
+inline action behind `cf piece link` — exit and all — is not on shuttle's
+path; and **`verbs` composes `listPieceCallables` (`lib/piece.ts`) with
+the exported `verbListingLines` / `verbListingJson` / `verbListingNotes`
+and `partitionVerbListing`**, rendering the rows itself rather than
+running that command's inline action.
+
 ## Prerequisite work in `packages/cli`
 
 Each of these is small and lands on its own; together they are what decision
@@ -204,20 +219,77 @@ Each of these is small and lands on its own; together they are what decision
 3. **`callFromCommand`.** Done. `buildCallCommand`'s action reads the two
    argv arrays off the command bound to it and hands them on; everything
    below that line is the named export, which needs no binding.
-4. **Exit discipline.** `exitWithDataError` and `exitPieceCallFailure` call
-   `Deno.exit(1)` (typed `never`); `getCellValueFromCommand` reaches the
-   former on a data error, which would kill the shell. Both take a `deps`
-   override — shuttle threads an exit shim through every seam it calls, and
-   catches the `ValidationError` that `exitPieceCallFailure` rethrows for
-   Cliffy's usage rendering.
-5. **Output capture.** The `FromCommand` seams accept `render`/`hint` deps;
-   stray `console.error` calls in `lib/piece.ts` do not. Sweep as views
-   need them captured.
+4. **Exit discipline.** Done. `exitWithDataError` and `exitPieceCallFailure`
+   default to `Deno.exit(1)` (typed `never`) and take a `deps` override in
+   its place, which the seams a v1 verb reaches forward:
+   `getCellValueFromCommand` on a data error, and `callFromCommand` at each
+   of its three exits. Shuttle's shim therefore throws rather than returns —
+   what an `exit` typed `never` requires — and shuttle catches it beside the
+   `ValidationError` that `exitPieceCallFailure` rethrows for Cliffy's usage
+   rendering. `callFromCommand` reports its payload rejection from inside
+   the dispatch's promise chain, so it records that an exit ran and rethrows
+   rather than describing the shim's own throw as a second failure.
+5. **Output capture.** What a caller captures is the seam's own output:
+   for every seam a v1 verb reaches, the value or page goes to `render`,
+   the next steps to `hint`, a failure's report to `printError`, and the
+   lines a call publishes while it is in flight — the invocation pair as
+   the dispatch happens, and the spans under `--verbose` — to `announce`.
+   What the seam prints, the caller decides where.
+
+   `announce` is one sink rather than several because its three streams —
+   the pair, the spans, and the per-phase lines
+   `CF_TEST_ANNOUNCE_INVOCATION_PHASES` adds — interleave in one temporal
+   stream, and splitting them would leave a caller rendering them as
+   ordered events reassembling an order it was handed already sorted. It
+   is separate from `printError` because all three are published whether
+   or not the call goes on to fail. Raw stderr, which a caller supplying
+   nothing still gets, suits a command that owns the terminal for one
+   invocation; a caller drawing its own screen is corrupted by a line
+   written behind the frame, so the views the pager substrate carries
+   need these as events they can place.
+
+   Two kinds of writing still reach the process, and they are different
+   problems. The first is a **designed output with no sink**: the write
+   receipt, `noteWroteTo` (`lib/write-receipt.ts`), which `set`, `link`
+   and `call` all reach. It wants a sink of its own rather than the hint
+   stream, because `--quiet` deliberately does not silence it, and a memo
+   per connection rather than per process — its `receipted` set, which
+   item 6 names beside the other two globals.
+
+   The second is **lib-internal warnings no seam reaches**, all in
+   `lib/piece.ts`, and the sweep is of every `console.*` there rather
+   than the error ones alone:
+
+   - `loadPieceForCallables` warns on `console.warn` when it cannot
+     ensure the default pattern. `call` reaches it through
+     `resolvePieceCallable`, `verbs` through `listPieceCallables`, and
+     `describe` through `describePiece` — three v1 verbs, and the last of
+     them a seam that takes `render`/`hint` and cannot route this.
+   - `withRuntimeCleanupOnFailure` warns twice on `console.warn` when
+     disposal itself fails after a failed connect, and `loadPieces` wraps
+     its whole body in it, so any v1 verb can reach both.
+   - The navigate callback inside `loadPieces` writes three lines, and
+     one of them goes to **`console.log` — raw stdout** — whenever
+     `jsonOutput` is false, which is every `cf call` without `--json`.
+     Behind a full-screen frame that corrupts the drawing, and it lands
+     in the machine surface besides. It is the one on this list to fix
+     first.
+
+   The rest of that file is off a v1 verb's path: the pin-rewrite report
+   belongs to `piece new` and to `setsrc` either side of `--check`, the
+   `savePiecePattern` warning to `setsrc`, the `searchPieces` warning to
+   a `search` verb v1 defers, and the inspect warning to `piece map`. The
+   phase trace wraps operations throughout the module, `linkPieces` among
+   them, but writes nothing unless `CF_CLI_TRACE_TIMINGS=1` asks it to.
+
+   Sweep each as views need it captured.
 6. **Module-global state.** `quietMode` is a file-level `let` set on every
    `FromCommand` entry; `setLLMUrl` is a global written by both `loadPieces`
    and `PiecesController.initialize`, so two connections on different API
-   URLs would fight. Scope them, or accept one-connection-per-process for
-   v1 and record the limit.
+   URLs would fight; and `receipted` (`lib/write-receipt.ts`) memoizes the
+   write receipt per process, so a long-lived shell names a space once and
+   stays silent for every write after. Scope them, or accept
+   one-connection-per-process for v1 and record the limit.
 7. **Disposal.** `withRuntimeCleanupOnFailure` disposes only on throw; the
    success path relies on process exit. In a long-lived shell every
    un-injected call leaks a runtime, a storage manager, and a WebSocket —
