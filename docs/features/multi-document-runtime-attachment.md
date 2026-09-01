@@ -74,6 +74,27 @@ The assertion is a check against misconfiguration, not the authorization. The
 port **is** the capability: a document can only attach because the page that
 owns the worker handed it a duplex.
 
+### No key material crosses an attach port
+
+The initializing client supplies the signer, once. An attaching client
+supplies none: it names the acting principal as a DID, and the runtime refuses
+it when that is not the principal it acts as. So no step of an attach needs a
+key to cross, and a frame carrying one is refused by name — on the sending
+side before it reaches a port, and again on the receiving side — with the path
+the key sits at.
+
+That refusal is loud rather than left to the platform, because the platform's
+answer varies and one of its answers is worse than a refusal. Measured on the
+SP5 spike: a non-extractable `CryptoKey` posted over a `MessagePort` between
+two WKWebViews throws `DataCloneError`, which is an embedding defect — browsers
+carry it — but means a frame with a key in it would fail there as a transport
+error, in a shell, at run time, saying nothing about why. A `DataCloneError`
+seen on this path is therefore never to be "fixed" by finding a way to pass
+the key: the key was not supposed to be in the frame.
+`packages/runtime-client/src/shared/key-material.ts` holds the invariant and
+the finding; the acting principal is additionally required to be a DID, so a
+signer cannot ride in as the field that names one.
+
 ## The protocol
 
 `Attach` is its own request rather than a second `Initialize`. A worker that

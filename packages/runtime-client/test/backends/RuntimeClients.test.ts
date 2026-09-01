@@ -4,6 +4,7 @@ import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
+import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
 import type { DID } from "@commonfabric/identity";
 
 import {
@@ -19,6 +20,12 @@ import { RuntimeClients } from "@/backends/client-registry.ts";
 import type { WorkerClient } from "@/backends/worker-client.ts";
 
 type Posted = Record<string, unknown>;
+
+const keyPair = new FabricKeyPair(
+  "Ed25519",
+  new Uint8Array(32),
+  new Uint8Array(32),
+);
 
 const spaceDid = "did:key:z6Mk-runtime-clients-space" as DID;
 const identityDid = "did:key:z6Mk-runtime-clients-identity" as DID;
@@ -305,6 +312,38 @@ describe("RuntimeClients", () => {
         expect(h.owner.posted[0].error).toContain(
           "initializes its runtime rather than attaching",
         );
+      });
+
+      it("refuses an attach carrying key material, naming where it sits", async () => {
+        // The invariant `findKeyMaterial` states: an attaching client supplies
+        // no signer, so a key in the frame is a frame built wrong. Refused
+        // here rather than left to the platform, whose answer in a WKWebView
+        // is a bare `DataCloneError`.
+        const h = harness();
+        await h.initialize(1);
+        const { received, channel } = await attachedClient(h, {
+          ...runningContext,
+          trustSnapshot: {
+            id: "principal",
+            signer: keyPair,
+          } as unknown as RuntimeSecurityContext["trustSnapshot"],
+        });
+        channel.port1.close();
+        expect(received).toHaveLength(1);
+        expect(received[0].error).toContain("no key material");
+        expect(received[0].error).toContain("`trustSnapshot.signer`");
+      });
+
+      it("refuses an attach whose acting principal is not a DID", async () => {
+        const h = harness();
+        await h.initialize(1);
+        const { received, channel } = await attachedClient(h, {
+          ...runningContext,
+          identity: { publicKey: "raw" } as unknown as DID,
+        });
+        channel.port1.close();
+        expect(received).toHaveLength(1);
+        expect(received[0].error).toContain("acting principal");
       });
 
       it("refuses a request from a client that has not attached", async () => {

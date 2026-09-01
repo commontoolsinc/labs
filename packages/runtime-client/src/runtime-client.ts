@@ -66,11 +66,13 @@ import {
   type PieceSourceView,
   type PieceUpdateSourceResponse,
   RequestType,
+  type RuntimeSecurityContext,
   type SpaceAclCapability,
   type SpaceAclView,
   TelemetryNotification,
   type UploadBlobResponse,
 } from "./protocol/mod.ts";
+import { assertNoKeyMaterial } from "./shared/key-material.ts";
 import { cellRefToInstanceId } from "./shared/utils.ts";
 
 export interface RuntimeClientOptions
@@ -307,7 +309,9 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     options: RuntimeClientOptions,
   ): Promise<RuntimeClient> {
     assertRenderDeclassificationPolicy(options.renderDeclassificationPolicy);
-    const attached = await (new RuntimeConnection(transport)).attach({
+    const context: RuntimeSecurityContext = {
+      // The acting principal as a DID: an attach states which principal the
+      // runtime acts as and supplies no signer of its own.
       identity: options.identity.did(),
       spaceDid: options.spaceDid,
       experimental: options.experimental,
@@ -316,7 +320,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       renderDeclassificationPolicy: options.renderDeclassificationPolicy,
       renderConfidentialityCeiling: options.renderConfidentialityCeiling,
       trustSnapshot: options.trustSnapshot,
-    });
+    };
+    // The far side refuses this too, and refusing before the send is what
+    // matters for a shell: `key-material.ts` records why, and the short of it
+    // is that a `MessagePort` between two WKWebViews throws `DataCloneError`
+    // on a key rather than carrying it. A frame refused here never reaches a
+    // port, so that failure has nothing to happen to.
+    assertNoKeyMaterial(context);
+    const attached = await (new RuntimeConnection(transport)).attach(context);
     return new RuntimeClient(attached, options);
   }
 

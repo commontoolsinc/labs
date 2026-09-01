@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
+import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 
 import {
@@ -13,6 +14,7 @@ import type { RuntimeProcessor } from "@/backends/mod.ts";
 import { RuntimeClients } from "@/backends/client-registry.ts";
 import type { WorkerClient } from "@/backends/worker-client.ts";
 import { MessagePortRuntimeTransport } from "@/client/transports/message-port/transport-message-port.ts";
+import type { MessagePortLike } from "@/shared/message-port-like.ts";
 import { RuntimeClient, type RuntimeClientOptions } from "@/runtime-client.ts";
 
 // The two halves of an attachment, joined over a real channel: a worker's
@@ -30,6 +32,12 @@ const otherIdentity = await Identity.fromPassphrase("someone-else", {
 });
 
 const spaceDid = identity.did();
+
+const keyPair = new FabricKeyPair(
+  "Ed25519",
+  new Uint8Array(32),
+  new Uint8Array(32),
+);
 
 function clientOptions(as: Identity): RuntimeClientOptions {
   return {
@@ -136,6 +144,46 @@ describe("attach-round-trip", () => {
       ),
     ).rejects.toThrow("Attach refused");
     expect(worker.requests).toEqual([]);
+  });
+
+  it("refuses to send an attach holding key material, before it reaches a port", async () => {
+    // The far side refuses one too, and this is the one that matters for a
+    // shell: a `MessagePort` between two WKWebViews throws `DataCloneError`
+    // on a non-extractable `CryptoKey`, so a frame carrying one would fail as
+    // a transport error saying nothing about why. Refused here by name, and
+    // never posted.
+    const worker = await runningWorker();
+    const channel = new MessageChannel();
+    worker.clients.attach(channel.port2);
+    const posted: unknown[] = [];
+    const watchedPort: MessagePortLike = {
+      postMessage: (message) => {
+        posted.push(message);
+        channel.port1.postMessage(message);
+      },
+      addEventListener: (type, listener) =>
+        channel.port1.addEventListener(type, listener),
+      start: () => channel.port1.start(),
+      close: () => channel.port1.close(),
+    };
+    try {
+      await expect(
+        RuntimeClient.attach(
+          new MessagePortRuntimeTransport({ port: watchedPort }),
+          {
+            ...clientOptions(identity),
+            trustSnapshot: {
+              id: "principal",
+              signer: keyPair,
+            } as unknown as RuntimeClientOptions["trustSnapshot"],
+          },
+        ),
+      ).rejects.toThrow("no key material");
+      expect(posted).toEqual([]);
+      expect(worker.requests).toEqual([]);
+    } finally {
+      channel.port1.close();
+    }
   });
 
   it("delivers a notification addressed to one client to that client alone", async () => {

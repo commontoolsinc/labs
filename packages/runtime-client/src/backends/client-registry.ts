@@ -20,6 +20,7 @@ import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
+import { isDID } from "@commonfabric/identity";
 import { CompilerStackLoadError } from "@commonfabric/runner";
 import {
   type InitializationData,
@@ -34,6 +35,7 @@ import {
   RuntimeErrorCode,
 } from "@/protocol/mod.ts";
 import { RuntimeProcessor } from "@/backends/mod.ts";
+import { assertNoKeyMaterial } from "@/shared/key-material.ts";
 import type { MessagePortLike } from "@/shared/message-port-like.ts";
 import { describeFailure } from "@/shared/utils.ts";
 import { postThrough } from "./post-to-client.ts";
@@ -269,6 +271,18 @@ export class RuntimeClients {
         // because it is the same fact about the worker.
         if (!this.#runtime) {
           throw new Error("WorkerRuntime not initialized.");
+        }
+        assertNoKeyMaterial(request.data);
+        // The acting principal is stated, never supplied. A frame naming it
+        // as anything but a DID is either carrying a signer past the check
+        // above or is not the frame it claims to be; both are refused here
+        // rather than reaching a comparison that would simply find them
+        // unequal and say something less useful.
+        if (!isDID(request.data.identity)) {
+          throw new Error(
+            "Attach refused: the acting principal must be a DID, which is " +
+              "stated rather than supplied.",
+          );
         }
         this.#runtime.assertAttachable(request.data);
         const registered = this.#attachedClients.get(client.id);
