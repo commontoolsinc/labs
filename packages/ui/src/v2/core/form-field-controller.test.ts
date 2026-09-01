@@ -48,7 +48,7 @@ class MockHost {
 // Mock CellController that tracks calls
 class MockCellController<T> implements CellControllerLike<T> {
   private _value: T;
-  private _cell: { set: (value: T) => Promise<void> } | null = null;
+  private _cell: { setStrict: (value: T) => Promise<void> } | null = null;
   setCallCount = 0;
   lastSetValue: T | undefined;
 
@@ -56,7 +56,7 @@ class MockCellController<T> implements CellControllerLike<T> {
     this._value = initialValue;
     if (hasCell) {
       this._cell = {
-        set: (value: T): Promise<void> => {
+        setStrict: (value: T): Promise<void> => {
           this._value = value;
           return Promise.resolve();
         },
@@ -305,7 +305,7 @@ describe("FormFieldController registration behavior", () => {
       flush: async () => {
         const cell = cellController.getCell();
         if (cell) {
-          await cell.set(cellController.getValue());
+          await cell.setStrict(cellController.getValue());
         }
       },
       reset: () => {
@@ -423,6 +423,45 @@ describe("FormFieldController registration behavior", () => {
 
     await expect(registration.flush()).rejects.toThrow("Network error");
   });
+
+  it("returns only after a registered field write is confirmed", async () => {
+    const value = "Launch checklist";
+    let serverDraftBody: string | undefined;
+    let confirmWrite: (() => void) | undefined;
+    const host = new MockHost() as unknown as MockHost & HTMLElement;
+    const cellController: CellControllerLike<string> = {
+      getValue: () => value,
+      setValue: () => {},
+      getCell: () => ({
+        setStrict: (next: string) =>
+          new Promise((resolve) => {
+            confirmWrite = () => {
+              serverDraftBody = next;
+              resolve();
+            };
+          }),
+      }),
+    };
+    const formContext = new MockFormContext();
+    const formField = new FormFieldController(host, { cellController });
+    const internals = formField as unknown as {
+      _formContextConsumer: { value: FormContext };
+    };
+    internals._formContextConsumer = { value: formContext };
+    formField.register("draftBody");
+
+    let returned = false;
+    const flushing = formContext.getLastRegistration()!.flush().then(() => {
+      returned = true;
+    });
+    await Promise.resolve();
+
+    expect(returned).toBe(false);
+    expect(confirmWrite).toBeDefined();
+    confirmWrite!();
+    await flushing;
+    expect(serverDraftBody!.trim()).toBe(value);
+  });
 });
 
 describe("captureOriginalValue", () => {
@@ -443,6 +482,77 @@ describe("captureOriginalValue", () => {
 });
 
 describe("FormFieldController commit", () => {
+  it("reads the confirmed cell value after returning", async () => {
+    const value = "Launch checklist";
+    let localDraftBody: string | undefined;
+    let serverDraftBody: string | undefined;
+    const cell = {
+      set: (next: string) => {
+        localDraftBody = next;
+        return Promise.resolve();
+      },
+      setStrict: (next: string) => {
+        localDraftBody = next;
+        serverDraftBody = next;
+        return Promise.resolve();
+      },
+    };
+    const host = new MockHost() as unknown as MockHost & HTMLElement;
+    const cellController: CellControllerLike<string> = {
+      getValue: () => value,
+      setValue: () => {},
+      getCell: () => cell,
+    };
+    const formField = new FormFieldController(host, { cellController });
+
+    await formField.commit();
+
+    expect(localDraftBody).toBe(value);
+    expect(serverDraftBody!.trim()).toBe(value);
+  });
+
+  it("returns only after the cell write is confirmed", async () => {
+    let confirmWrite: (() => void) | undefined;
+    const host = new MockHost() as unknown as MockHost & HTMLElement;
+    const cellController: CellControllerLike<string> = {
+      getValue: () => "Launch checklist",
+      setValue: () => {},
+      getCell: () => ({
+        setStrict: () =>
+          new Promise((resolve) => {
+            confirmWrite = resolve;
+          }),
+      }),
+    };
+    const formField = new FormFieldController(host, { cellController });
+
+    let returned = false;
+    const committing = formField.commit().then(() => {
+      returned = true;
+    });
+    await Promise.resolve();
+
+    expect(returned).toBe(false);
+    expect(confirmWrite).toBeDefined();
+    confirmWrite!();
+    await committing;
+    expect(returned).toBe(true);
+  });
+
+  it("returns confirmed cell write failures to the caller", async () => {
+    const host = new MockHost() as unknown as MockHost & HTMLElement;
+    const cellController: CellControllerLike<string> = {
+      getValue: () => "Launch checklist",
+      setValue: () => {},
+      getCell: () => ({
+        setStrict: () => Promise.reject(new Error("commit refused")),
+      }),
+    };
+    const formField = new FormFieldController(host, { cellController });
+
+    await expect(formField.commit()).rejects.toThrow("commit refused");
+  });
+
   it("flushes the cell controller and writes through the cell", async () => {
     const host = new MockHost() as unknown as MockHost & HTMLElement;
     let flushed = false;
@@ -454,7 +564,7 @@ describe("FormFieldController commit", () => {
         flushed = true;
       },
       getCell: () => ({
-        set: (v: string) => {
+        setStrict: (v: string) => {
           cellSet = v;
           return Promise.resolve();
         },
@@ -492,7 +602,7 @@ describe("FormFieldController commit", () => {
       getValue: () => "cell-value",
       setValue: () => {},
       getCell: () => ({
-        set: (v: string) => {
+        setStrict: (v: string) => {
           cellSet = v;
           return Promise.resolve();
         },
@@ -527,7 +637,7 @@ describe("FormFieldController commit", () => {
         flushed = true;
       },
       getCell: () => ({
-        set: (v: string) => {
+        setStrict: (v: string) => {
           cellSet = v;
           return Promise.resolve();
         },
