@@ -20,15 +20,22 @@ export class IndexTrackingStack {
 
   /**
    * The positions each object occupies, ascending, once the stack has been
-   * tall enough to want them, and `undefined` until then. Kept for the rest of
-   * the stack's life once built: a stack that reached the height once is apt
-   * to reach it again, and rebuilding at each crossing would cost more than
-   * maintaining it.
+   * tall enough to want them, and `undefined` until then.
+   *
+   * Kept for the rest of the stack's life once built, so a stack that has been
+   * past {@link #INDEX_AT} and come back down goes on answering from the index
+   * at a height where a stack that never went up would still be scanning --
+   * and goes on paying for it, at about what it pays above the threshold. A
+   * caller that pushes deep once and then stays shallow for a long time is the
+   * shape that costs.
    */
   #positions: Map<object, number[]> | undefined;
 
-  /** How many objects the stack holds. */
-  get length(): number {
+  /**
+   * How deep the stack is: how many objects it holds, which is also the index
+   * the next object pushed will take.
+   */
+  get depth(): number {
     return this.#stack.length;
   }
 
@@ -63,10 +70,25 @@ export class IndexTrackingStack {
   }
 
   /**
+   * Pops the topmost object off the stack and returns it.
+   *
+   * @throws If the stack is empty.
+   */
+  pop(): object {
+    const value = this.popElseUndefined();
+
+    if (value === undefined) {
+      throw new Error("Cannot pop an empty stack.");
+    }
+
+    return value;
+  }
+
+  /**
    * Pops the topmost object off the stack and returns it, or returns
    * `undefined` if the stack is empty.
    */
-  pop(): object | undefined {
+  popElseUndefined(): object | undefined {
     const value = this.#stack.pop();
 
     if (value === undefined) {
@@ -86,6 +108,21 @@ export class IndexTrackingStack {
     }
 
     return value;
+  }
+
+  /**
+   * Pops the topmost object off the stack, which has to be the given one.
+   * The stack is left as it was if it is not: what a caller has to sort out
+   * is one unbalanced push and pop, not that plus a pop it did not intend.
+   *
+   * @throws If the stack is empty, or its topmost object is not `expected`.
+   */
+  popExpect(expected: object): void {
+    if (this.#stack[this.#stack.length - 1] !== expected) {
+      throw new Error("Popped an object other than the expected one.");
+    }
+
+    this.pop();
   }
 
   /** Pushes an object onto the stack, at the current top. */

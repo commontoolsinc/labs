@@ -38,33 +38,33 @@ function stackOf(height: number, values: readonly object[]) {
 }
 
 describe("IndexTrackingStack", () => {
-  describe("length", () => {
+  describe("depth", () => {
     it("is zero for a fresh stack", () => {
-      expect(new IndexTrackingStack().length).toBe(0);
+      expect(new IndexTrackingStack().depth).toBe(0);
     });
 
     it("counts what has been pushed and not popped", () => {
       const stack = new IndexTrackingStack();
 
       for (const value of objects(TALL)) stack.push(value);
-      expect(stack.length).toBe(TALL);
+      expect(stack.depth).toBe(TALL);
 
       for (let at = 0; at < 10; at++) stack.pop();
-      expect(stack.length).toBe(TALL - 10);
+      expect(stack.depth).toBe(TALL - 10);
     });
 
     it("stays at zero when an empty stack is popped", () => {
       const stack = new IndexTrackingStack();
 
-      stack.pop();
+      stack.popElseUndefined();
 
-      expect(stack.length).toBe(0);
+      expect(stack.depth).toBe(0);
     });
   });
 
   describe("pop()", () => {
-    it("returns `undefined` for an empty stack", () => {
-      expect(new IndexTrackingStack().pop()).toBeUndefined();
+    it("throws for an empty stack", () => {
+      expect(() => new IndexTrackingStack().pop()).toThrow();
     });
 
     it("returns the objects it pops, topmost first", () => {
@@ -76,7 +76,7 @@ describe("IndexTrackingStack", () => {
       expect(stack.pop()).toBe(held[2]);
       expect(stack.pop()).toBe(held[1]);
       expect(stack.pop()).toBe(held[0]);
-      expect(stack.pop()).toBeUndefined();
+      expect(() => stack.pop()).toThrow();
     });
 
     it("returns the objects it pops from an indexed stack", () => {
@@ -86,6 +86,92 @@ describe("IndexTrackingStack", () => {
       expect(stack.pop()).toBe(held[2]);
       expect(stack.pop()).toBe(held[1]);
       expect(stack.pop()).toBe(held[0]);
+    });
+  });
+
+  describe("popElseUndefined()", () => {
+    it("returns `undefined` for an empty stack", () => {
+      expect(new IndexTrackingStack().popElseUndefined()).toBeUndefined();
+    });
+
+    it("returns the objects it pops, topmost first", () => {
+      const held = objects(2);
+      const stack = new IndexTrackingStack();
+
+      for (const value of held) stack.push(value);
+
+      expect(stack.popElseUndefined()).toBe(held[1]);
+      expect(stack.popElseUndefined()).toBe(held[0]);
+      expect(stack.popElseUndefined()).toBeUndefined();
+    });
+
+    it("maintains the index, given an indexed stack", () => {
+      const twice = {};
+      const stack = stackOf(TALL, [twice, {}, twice]);
+
+      expect(stack.popElseUndefined()).toBe(twice);
+
+      expect(stack.lastIndexOf(twice)).toBe(TALL);
+      expect(stack.depth).toBe(TALL + 2);
+    });
+  });
+
+  describe("popExpect()", () => {
+    it("pops the object it was told to expect", () => {
+      const held = objects(2);
+      const stack = new IndexTrackingStack();
+
+      for (const value of held) stack.push(value);
+      stack.popExpect(held[1]!);
+
+      expect(stack.depth).toBe(1);
+      expect(stack.indexOf(held[1]!)).toBe(-1);
+    });
+
+    it("throws for an object that is in the stack but not on top", () => {
+      const held = objects(2);
+      const stack = new IndexTrackingStack();
+
+      for (const value of held) stack.push(value);
+
+      expect(() => stack.popExpect(held[0]!)).toThrow();
+    });
+
+    it("throws for an object the stack does not hold", () => {
+      const stack = new IndexTrackingStack();
+
+      stack.push({});
+
+      expect(() => stack.popExpect({})).toThrow();
+    });
+
+    it("throws for an empty stack", () => {
+      expect(() => new IndexTrackingStack().popExpect({})).toThrow();
+    });
+
+    it("leaves the stack as it was when it throws", () => {
+      const held = objects(2);
+      const stack = new IndexTrackingStack();
+
+      for (const value of held) stack.push(value);
+      expect(() => stack.popExpect(held[0]!)).toThrow();
+
+      expect(stack.depth).toBe(2);
+      expect(stack.indexOf(held[0]!)).toBe(0);
+      expect(stack.lastIndexOf(held[1]!)).toBe(1);
+    });
+
+    it("maintains the index, given an indexed stack", () => {
+      // The successful arm has to be a real pop on either side of the
+      // threshold, index maintenance included.
+      const twice = {};
+      const stack = stackOf(TALL, [twice, {}, twice]);
+
+      stack.popExpect(twice);
+
+      expect(stack.depth).toBe(TALL + 2);
+      expect(stack.lastIndexOf(twice)).toBe(TALL);
+      expect(stack.indexOf(twice)).toBe(TALL);
     });
   });
 
@@ -193,7 +279,7 @@ describe("IndexTrackingStack", () => {
       for (const value of held) climbed.push(value);
       for (const value of held) flat.push(value);
 
-      expect(climbed.length).toBe(flat.length);
+      expect(climbed.depth).toBe(flat.depth);
       held.forEach((value, at) => {
         expect(climbed.indexOf(value)).toBe(flat.indexOf(value));
         expect(climbed.indexOf(value)).toBe(at);
