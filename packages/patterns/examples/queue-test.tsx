@@ -27,33 +27,17 @@ export default pattern<QueueTestInput>(({ title }) => {
     "What is 5+5? Reply in one word.",
   ];
 
-  const responses = [
+  // A reactive receiver, so the collection lowers to `mapWithPattern` and
+  // each prompt owns a persistent `generateText` node. A plain-array map here
+  // would collect the reactive results into a native array instead.
+  const queuedPrompts = computed(() => prompts);
+  const responses = queuedPrompts.map((prompt) =>
     generateText({
-      prompt: prompts[0],
+      prompt,
       model: "anthropic:claude-haiku-4-5",
       queue: "test-queue",
-    }),
-    generateText({
-      prompt: prompts[1],
-      model: "anthropic:claude-haiku-4-5",
-      queue: "test-queue",
-    }),
-    generateText({
-      prompt: prompts[2],
-      model: "anthropic:claude-haiku-4-5",
-      queue: "test-queue",
-    }),
-    generateText({
-      prompt: prompts[3],
-      model: "anthropic:claude-haiku-4-5",
-      queue: "test-queue",
-    }),
-    generateText({
-      prompt: prompts[4],
-      model: "anthropic:claude-haiku-4-5",
-      queue: "test-queue",
-    }),
-  ];
+    })
+  );
 
   const completedCount = computed(() =>
     responses.filter((r) => !r.pending && r.result).length
