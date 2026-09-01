@@ -39,14 +39,20 @@ to add the file to. `packages/dashboard` spreads the pair across a runner script
 and the task that runner calls, which changes where they are written and not
 what they match.
 
-Two things break it. A browser-only test under any other name lands in the
-plain Deno pass, where it fails on the first browser global it touches. Use the
-name whenever the test needs a browser, whatever its subject:
-`packages/ui/src/v2/components/cf-svg/sanitize-svg.browser.test.ts` needs one
-for `DOMParser` alone. And a `typeof document === "undefined"` guard around the
-body makes that failure silent instead, because the file then reports "ok"
-having asserted nothing. A file the glob routes always has a document, so write
-no guard.
+Two things break it, and the second is what makes the first hard to notice.
+
+A browser-only test under any other name lands in the plain Deno pass, where it
+fails on the first browser global it touches. So use the name whenever the test
+needs a browser, whatever its subject.
+`packages/ui/src/v2/components/cf-svg/sanitize-svg.browser.test.ts` is the case
+to keep in mind: it is not a component test at all, and needs a browser for
+`DOMParser` alone.
+
+A `typeof document === "undefined"` guard around the body turns that loud
+failure into a silent one. The file runs in Deno, returns before its first
+assertion, and reports "ok" having checked nothing. A file the glob routes
+always has a document, so the guard can only ever hide a mis-wiring. Write no
+guard.
 
 `docs/development/TESTING.md#focused-browser-regressions` states the rest,
 including when to use this route rather than the browser integration lane.
