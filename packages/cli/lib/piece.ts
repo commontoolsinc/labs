@@ -4029,7 +4029,7 @@ async function inspectSlugTargetCell(
  */
 export async function getPieceView(
   config: PieceConfig,
-  deps: PieceOperationDependencies = {},
+  deps: PieceResolutionDeps = {},
 ): Promise<unknown> {
   const data = (await inspectPiece(config, deps)) as any;
   return data.result?.[UI] as VNode;
@@ -4469,13 +4469,29 @@ export async function setCellValue(
 }
 
 /**
+ * What a {@link callPieceHandler} call supplies: the connection its
+ * resolution runs over, and the execution deps its dispatch reads.
+ *
+ * Narrower than {@link PieceCallableDependencies} by the fields that have no
+ * bearing here — the stdin readers, because the payload arrives decoded as an
+ * argument, and the help prefix, because nothing on this path renders a page.
+ */
+export type PieceHandlerCallDeps =
+  & CallableExecutionDeps
+  & Pick<PieceCallableDependencies, "loadPieces" | "loadPiece">;
+
+/**
  * Calls a named handler within a piece with a decoded JSON payload.
+ *
+ * A `deps.invocation` names the id and session the handling files its receipt
+ * under; without one the dispatch takes a runtime-minted event id, and there
+ * is no receipt to come back for.
  */
 export async function callPieceHandler<T = any>(
   config: PieceConfig,
   handlerName: string,
   args: T,
-  deps: PieceCallableDependencies = {},
+  deps: PieceHandlerCallDeps = {},
 ): Promise<void> {
   const resolved = await timeCliPhase(
     "callPieceHandler.resolve",
@@ -4486,7 +4502,7 @@ export async function callPieceHandler<T = any>(
   }
   await timeCliPhase(
     "callPieceHandler.execute",
-    () => executeResolvedCallable(resolved, args),
+    () => executeResolvedCallable(resolved, args, deps),
   );
 }
 

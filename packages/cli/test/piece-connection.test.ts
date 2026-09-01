@@ -293,17 +293,32 @@ describe("piece-connection", () => {
   });
 
   describe("callPieceHandler()", () => {
+    /** One dispatch onto the handler cell. */
+    interface Dispatch {
+      input: unknown;
+
+      /**
+       * What the send was told to file the handling under, where the call
+       * named an invocation, and `undefined` where it named none.
+       */
+      options?: { eventId: string; session: string };
+    }
+
     /**
      * The stream marker on the raw cell value is what classifies a name as a
      * handler, so `addItem` resolves and every other name reaches the end of
      * the resolution walk with nothing.
      */
-    function stubController(sent: unknown[]): PiecesController {
+    function stubController(sent: Dispatch[]): PiecesController {
       const handlerCell = {
         getRaw: () => ({ $stream: true }),
         get: () => ({ $stream: true }),
-        send: (input: unknown, resolve: (tx: unknown) => void) => {
-          sent.push(input);
+        send: (
+          input: unknown,
+          resolve: (tx: unknown) => void,
+          options?: { eventId: string; session: string },
+        ) => {
+          sent.push({ input, ...(options !== undefined ? { options } : {}) });
           resolve({ status: () => ({ status: "done" }) });
         },
       };
@@ -326,7 +341,7 @@ describe("piece-connection", () => {
 
     it("dispatches the payload to the named handler", async () => {
       resetWriteReceipts();
-      const sent: unknown[] = [];
+      const sent: Dispatch[] = [];
       const lines = await captureStderr(() =>
         callPieceHandler(
           config,
@@ -338,12 +353,51 @@ describe("piece-connection", () => {
           },
         )
       );
-      expect(sent).toEqual([{ title: "Milk" }]);
+      expect(sent).toEqual([{ input: { title: "Milk" } }]);
       expect(lines).toContain(`wrote to space ${SPACE}`);
     });
 
+    it("files the handling under the invocation the caller named", async () => {
+      // The id and the session decide which receipt this handling files
+      // under, so a call that names one and dispatches without it has spent
+      // an invocation nobody can collect.
+
+      resetWriteReceipts();
+      const sent: Dispatch[] = [];
+      await captureStderr(() =>
+        callPieceHandler(config, "addItem", { title: "Milk" }, {
+          loadPieces: () => Promise.resolve(stubController(sent)),
+          loadPiece: (pieces) => pieces.get(),
+          invocation: { id: "inv-7", session: "sess-3" },
+        })
+      );
+      expect(sent).toEqual([{
+        input: { title: "Milk" },
+        options: { eventId: "inv-7", session: "sess-3" },
+      }]);
+    });
+
+    it("reports each dispatch phase to the observer it was given", async () => {
+      resetWriteReceipts();
+      const sent: Dispatch[] = [];
+      const phases: string[] = [];
+      await captureStderr(() =>
+        callPieceHandler(config, "addItem", { title: "Milk" }, {
+          loadPieces: () => Promise.resolve(stubController(sent)),
+          loadPiece: (pieces) => pieces.get(),
+          invocation: { id: "inv-7", session: "sess-3" },
+          // The readback reads an outcome back off the receipt, which this
+          // stub does not mint; skipping it ends the call at the commit, and
+          // is itself a dep that has to arrive to be honored.
+          skipReadback: true,
+          onPhase: (phase) => phases.push(phase),
+        })
+      );
+      expect(phases).toEqual(["dispatched", "committed"]);
+    });
+
     it("throws naming a verb the piece does not expose", async () => {
-      const sent: unknown[] = [];
+      const sent: Dispatch[] = [];
       await expect(
         callPieceHandler(config, "title", {}, {
           loadPieces: () => Promise.resolve(stubController(sent)),

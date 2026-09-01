@@ -170,8 +170,8 @@ injection point that lets a lib function reuse a held controller:
 - **Hardcode `loadPieces`:** `setPieceSlug`, `savePiecePattern`,
   `applyPieceInput`, `linkSqliteDiskSource`, `resetHomePattern`, and
   `commands/deps.ts`. Each opens a fresh runtime and WebSocket per call. No
-  v1 verb reaches one, so each is a conversion for the milestone that first
-  calls it.
+  shuttle-v1 verb reaches one, so each is a conversion for the milestone
+  that first calls it.
 
 `call` is the one verb with no seam at all: `buildCallCommand`'s action is
 inline and bound to Cliffy's `this` (`getLiteralArgs`). Its constituents are
