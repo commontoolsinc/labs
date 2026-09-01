@@ -1,6 +1,7 @@
 import type { JSONSchema } from "@commonfabric/api";
 import {
   type Cell,
+  cellWithScopedLinkRequiredsRelaxed,
   compileAndSavePattern,
   getPatternIdentityRef,
   PatternManager,
@@ -8,9 +9,11 @@ import {
 } from "@commonfabric/runner";
 import {
   type CfcAddress,
+  type CfcConfClause,
   type CfcRefusalAttribution,
   type CfcRefusalDetail,
   type CfcRefusalGate,
+  describeSinkReleaseRefusal,
   selectReferencedCfcSchemaDefs,
   validateAgainstSchema,
 } from "@commonfabric/runner/cfc";
@@ -97,6 +100,15 @@ export interface RunPatternToolSuccessOutput {
 
   /** Canonical LLM-friendly link to the piece's result cell. */
   resultRef: string;
+
+  /**
+   * What the release measurement refused, on a run the enforcement ladder did
+   * not reject it on. Artifact-only, like the other fields the prompt loop
+   * strips: the answer went out, so the model has nothing to act on, while an
+   * operator staging the ladder has the population that raising it would
+   * start refusing.
+   */
+  releaseObservation?: RunPatternPolicyRefusal;
 
   /**
    * The compiled pattern's result schema — the shape of whatever
@@ -186,8 +198,8 @@ export interface RunPatternPublicationReport {
 }
 
 /**
- * What the commit boundary refused, in terms the caller can act on: the
- * boundary that refused, the label atoms outside it, and the keys of this
+ * What a boundary refused, in terms the caller can act on: the boundary that
+ * refused, the label atoms outside it, and the keys of this
  * call's own `inputs` that carried those atoms in. When `attribution` is
  * `complete`, a run without those keys meets the boundary.
  *
@@ -266,8 +278,10 @@ export interface RunPatternToolErrorOutput {
   rawCauseMessage?: string;
 
   /**
-   * What the commit boundary refused and which of this call's own inputs
-   * carried it, when a policy refusal is what stopped the run.
+   * What a boundary refused and which of this call's own inputs carried it,
+   * when a policy refusal is what stopped the run. A refused commit landed no
+   * result; a refused release landed one, which stays in the space under its
+   * own labels while the answer is withheld.
    */
   policyRefusal?: RunPatternPolicyRefusal;
 }
@@ -510,6 +524,21 @@ const RUN_PATTERN_REFUSAL_ARTIFACT_NOTE =
   "The refusal reason is retained in the run artifact and withheld here, " +
   "since it names the labels and documents involved";
 
+/** The sink this tool's own answer is, as a refusal names it. */
+const RUN_PATTERN_ANSWER_SINK = "run_pattern";
+
+/**
+ * What that sink admits: nothing. A model's context is outside every space,
+ * so no confidentiality clause names an audience it belongs to, and an empty
+ * ceiling — "public only", per `sink-inventory.ts` — is the one that says so.
+ *
+ * Empty rather than absent, and the difference is the point. A sink absent
+ * from the inventory goes ungated because a deployment has not decided about
+ * it; this sink is not one a deployment declares, since the audience on the
+ * far side of it is fixed by what the tool does rather than by where it runs.
+ */
+const RUN_PATTERN_ANSWER_CEILING: readonly CfcConfClause[] = [];
+
 /** What a refusal the commit boundary described only in prose is told. */
 const RUN_PATTERN_OPAQUE_REFUSAL_MESSAGE =
   "the pattern ran but the space's policy refused to commit its result: " +
@@ -542,37 +571,47 @@ const pathStartsWith = (
   prefix.every((segment, index) => segment === path[index]);
 
 /**
- * The key of `inputs` a refused read belongs to, or `undefined` when none
- * does.
+ * The keys of `inputs` a refused read belongs to, empty when none does.
  *
  * A read reaches an input two ways. It reads the document the caller's link
  * addressed, which the retained addresses match. Or it reads the piece's
  * argument document, where every input — link or plain JSON — sits under its
  * own key, so the first path segment is the key. Both are matched, because
  * one refusal commonly reports the same input through both.
+ *
+ * Every match is returned. One document handed in under two keys is reached
+ * by dropping either alias alone, and a remedy naming one of them would
+ * leave the other carrying the label.
  */
-const refusalReadInputKey = (
+const refusalReadInputKeys = (
   read: CfcAddress,
   addresses: readonly RunPatternInputAddress[],
   argumentHash: string | undefined,
   suppliedKeys: readonly string[],
-): string | undefined => {
+): readonly string[] => {
   const readHash = comparableEntityHash(read.id);
   if (readHash === undefined) {
-    return undefined;
+    return [];
   }
+  const keys: string[] = [];
   for (const address of addresses) {
-    if (address.hash === readHash && pathStartsWith(read.path, address.path)) {
-      return address.key;
+    if (
+      address.hash === readHash && pathStartsWith(read.path, address.path) &&
+      !keys.includes(address.key)
+    ) {
+      keys.push(address.key);
     }
   }
   if (argumentHash !== undefined && readHash === argumentHash) {
     const first = read.path[0];
-    if (first !== undefined && suppliedKeys.includes(first)) {
-      return first;
+    if (
+      first !== undefined && suppliedKeys.includes(first) &&
+      !keys.includes(first)
+    ) {
+      keys.push(first);
     }
   }
-  return undefined;
+  return keys;
 };
 
 /**
@@ -607,7 +646,7 @@ const namableRefusalAtom = (rendered: string): boolean => {
  */
 export const runPatternPolicyRefusal = (
   refusals: readonly CfcRefusalDetail[],
-  inputKeyFor: (read: CfcAddress) => string | undefined,
+  inputKeysFor: (read: CfcAddress) => readonly string[],
 ): RunPatternPolicyRefusal | undefined => {
   if (refusals.length === 0) {
     return undefined;
@@ -633,13 +672,15 @@ export const runPatternPolicyRefusal = (
       else withheldAtomCount += 1;
     }
     for (const input of detail.inputs) {
-      const key = inputKeyFor(input.read);
-      if (key === undefined) {
+      const keys = inputKeysFor(input.read);
+      if (keys.length === 0) {
         // Counted by document, so one document read at three paths is one
         // input the caller cannot name rather than three.
         unattributed.add(comparableEntityHash(input.read.id) ?? "");
-      } else if (!inputKeys.includes(key)) {
-        inputKeys.push(key);
+        continue;
+      }
+      for (const key of keys) {
+        if (!inputKeys.includes(key)) inputKeys.push(key);
       }
     }
   }
@@ -665,12 +706,20 @@ const quoteAll = (values: readonly string[]): string =>
   values.map((value) => `"${value}"`).join(", ");
 
 /**
+ * Which boundary a refusal came from, which decides what the caller is told
+ * became of the result: a refused commit landed no result, while a refused
+ * release has one, in the space under its own labels.
+ */
+export type RunPatternRefusalBoundary = "commit" | "release";
+
+/**
  * The refusal stated as an instruction: what refused, which of the caller's
  * inputs carried what it refused, and whether dropping those inputs is the
  * whole remedy or only narrows the flow.
  */
 export const policyRefusalMessage = (
   refusal: RunPatternPolicyRefusal,
+  boundaryRefused: RunPatternRefusalBoundary,
 ): string => {
   const boundary = refusal.sinks.length > 0
     ? `the sink${refusal.sinks.length > 1 ? "s" : ""} ${
@@ -680,10 +729,16 @@ export const policyRefusalMessage = (
   const atoms = refusal.offendingAtoms.length > 0
     ? ` (${refusal.offendingAtoms.join(", ")})`
     : "";
+  const refused = boundaryRefused === "commit"
+    ? "commit its result"
+    : "release its result";
+  const became = boundaryRefused === "commit"
+    ? "the result never landed"
+    : "the result stays in the space and is withheld here";
   const opening =
-    "the pattern ran but the space's policy refused to commit its result: " +
+    `the pattern ran but the space's policy refused to ${refused}: ` +
     `${boundary} does not admit the confidentiality${atoms} this run ` +
-    "carries, so the result never landed";
+    `carries, so ${became}`;
   const plural = refusal.inputKeys.length > 1;
   const keys = `input${plural ? "s" : ""} ${quoteAll(refusal.inputKeys)}`;
   const remedy = refusal.attribution === "complete"
@@ -1314,7 +1369,132 @@ export const runPatternTool: HarnessToolDefinition<
       resultCell.getAsNormalizedFullLink(),
       space,
     );
-    const rawValue = asSerializableValue(await piece.result.get());
+    /**
+     * The report a policy refusal produces, whichever boundary stated it.
+     *
+     * The refusal reason stays out of the model-facing message the same way
+     * thrown text does: it names the documents and label atoms involved —
+     * fabric identifiers and policy detail the model does not read — so the
+     * artifact keeps it and the model gets the fact of the refusal.
+     */
+    const policyRefusalOutput = async (
+      details: readonly CfcRefusalDetail[],
+      boundaryRefused: RunPatternRefusalBoundary,
+      rawCauseMessage: string,
+    ) => {
+      recordOutcome("run_failed");
+      // The piece's argument document is where every input reaches the
+      // pattern under its own key, so a refused read of it names an input
+      // by its first path segment. Its address is resolved here rather than
+      // kept from creation because only a refusal asks for it.
+      let argumentHash: string | undefined;
+      try {
+        argumentHash = comparableEntityHash(
+          (await piece.input.getCell()).getAsNormalizedFullLink().id,
+        );
+      } catch {
+        argumentHash = undefined;
+      }
+      const policyRefusal = runPatternPolicyRefusal(
+        details,
+        (read) =>
+          refusalReadInputKeys(
+            read,
+            inputAddresses,
+            argumentHash,
+            suppliedInputKeys,
+          ),
+      );
+      return {
+        ...errorOutput(
+          "error",
+          policyRefusal === undefined
+            ? RUN_PATTERN_OPAQUE_REFUSAL_MESSAGE
+            : policyRefusalMessage(policyRefusal, boundaryRefused),
+        ),
+        pieceId: piece.id,
+        rawCauseMessage,
+        ...(policyRefusal !== undefined ? { policyRefusal } : {}),
+      };
+    };
+
+    // The answer is an egress: what this tool returns is read by a model,
+    // outside every space the fabric labels. A pattern's own egresses are
+    // sink requests the commit boundary gates, and this one records none, so
+    // it is measured here. The measurement is a transaction that reads what
+    // the answer stands for, and its consumed join is what the answer
+    // carries — the result document, and every computed cell the result links
+    // to. Nothing is committed.
+    //
+    // A second transaction reads the piece's argument document, and only that
+    // transaction does. Every input reaches the pattern through that document
+    // under its own key, so a clause it carries names an input the caller can
+    // drop; a clause reaching the answer by another route is reported as
+    // unattributed.
+    //
+    // The ladder decides whether a recorded reason REJECTS, not whether it is
+    // taken: the measurement runs at every rung, so an observe-stage rollout
+    // can size what turning the rung up would refuse, which is what the sink
+    // gate beside it does with the same reason.
+    const releaseGateRejects =
+      pieces.runtime.cfcEnforcementMode !== "disabled" &&
+      pieces.runtime.cfcEnforcementMode !== "observe";
+    let releaseRefusal: CfcRefusalDetail | undefined;
+    let rawValue: unknown;
+    const measureRelease = async () => {
+      const releaseTx = pieces.runtime.edit();
+      const inputsTx = pieces.runtime.edit();
+      try {
+        // The answer the tool returns is read HERE, through the transaction
+        // that measures it, and the value below is that read rather than a
+        // second one. A result the reactive graph advances between two reads
+        // would otherwise let a later clean state answer for an earlier
+        // labeled one. The `required` relaxation is the piece controller's,
+        // so a scoped link the session cannot materialize degrades its member
+        // rather than voiding the whole read.
+        const measuredResult = cellWithScopedLinkRequiredsRelaxed(
+          resultCell.withTx(releaseTx),
+        );
+        await measuredResult.pull();
+        rawValue = asSerializableValue(measuredResult.get());
+        try {
+          const measuredArgument = (await piece.input.getCell())
+            .withTx(inputsTx);
+          await measuredArgument.pull();
+          asSerializableValue(measuredArgument.get());
+        } catch {
+          // An argument cell that will not resolve leaves the caller's own
+          // addresses as the route from a clause back to an input key.
+        }
+        for (const { cell } of liveCellInputs) {
+          const measuredInput = cell.withTx(inputsTx);
+          await measuredInput.pull();
+          asSerializableValue(measuredInput.get());
+        }
+        return describeSinkReleaseRefusal(
+          releaseTx,
+          inputsTx,
+          RUN_PATTERN_ANSWER_SINK,
+          RUN_PATTERN_ANSWER_CEILING,
+        );
+      } finally {
+        releaseTx.abort("run_pattern release measurement");
+        inputsTx.abort("run_pattern release attribution");
+      }
+    };
+    // Raced with the signal like every other wait this tool performs: the
+    // reads resolve a graph, and a caller that gave up while they were in
+    // flight is told it was cancelled rather than handed an answer it stopped
+    // waiting for. The measurement abandons its own transactions whichever
+    // way the race goes.
+    const measuring = (async () => {
+      releaseRefusal = await measureRelease();
+    })();
+    if (await raceWithAbort(measuring, signal) === "aborted") {
+      stopPiece(piece.getCell());
+      return cancelledOutput();
+    }
+
     let value: unknown;
     let linkedStringCount: number | undefined;
     let valueError: string | undefined;
@@ -1367,51 +1547,16 @@ export const runPatternTool: HarnessToolDefinition<
       (inertResultKeys !== undefined && inertResultKeys.length === 0);
     if (valueError !== undefined || resultAbsent) {
       const pieceErrors = observations.errorsSince(observationStart, piece.id);
-      // A policy refusal is named as what it is. The refusal reason stays
-      // out of the model-facing message the same way thrown text does: it
-      // names the documents and label atoms involved — fabric identifiers
-      // and policy detail the model does not read — so the artifact keeps it
-      // and the model gets the fact of the refusal.
+      // A policy refusal is named as what it is.
       const refusal = pieceErrors.find((record) =>
         record.name === "CfcCommitRefusalError"
       );
       if (refusal !== undefined) {
-        recordOutcome("run_failed");
-        // The piece's argument document is where every input reaches the
-        // pattern under its own key, so a refused read of it names an input
-        // by its first path segment. Its address is resolved here rather
-        // than kept from creation because only a refusal asks for it, and an
-        // argument cell that will not resolve costs that second route to a
-        // key while the caller's own resolved addresses still answer.
-        let argumentHash: string | undefined;
-        try {
-          argumentHash = comparableEntityHash(
-            (await piece.input.getCell()).getAsNormalizedFullLink().id,
-          );
-        } catch {
-          argumentHash = undefined;
-        }
-        const policyRefusal = runPatternPolicyRefusal(
+        return await policyRefusalOutput(
           refusal.refusals ?? [],
-          (read) =>
-            refusalReadInputKey(
-              read,
-              inputAddresses,
-              argumentHash,
-              suppliedInputKeys,
-            ),
+          "commit",
+          refusal.message,
         );
-        return {
-          ...errorOutput(
-            "error",
-            policyRefusal === undefined
-              ? RUN_PATTERN_OPAQUE_REFUSAL_MESSAGE
-              : policyRefusalMessage(policyRefusal),
-          ),
-          pieceId: piece.id,
-          rawCauseMessage: refusal.message,
-          ...(policyRefusal !== undefined ? { policyRefusal } : {}),
-        };
       }
       if (pieceErrors.length > 0) {
         // The thrown text stays out of the model-facing message: a
@@ -1468,6 +1613,28 @@ export const runPatternTool: HarnessToolDefinition<
           pieceId: piece.id,
         };
       }
+    }
+    // A measurement the ladder does not reject on is still an answer about
+    // this run, and the only place it can be read from is the artifact.
+    const releaseObservation =
+      releaseRefusal === undefined || releaseGateRejects
+        ? undefined
+        : runPatternPolicyRefusal(
+          [releaseRefusal],
+          (read) =>
+            refusalReadInputKeys(
+              read,
+              inputAddresses,
+              undefined,
+              suppliedInputKeys,
+            ),
+        );
+    if (releaseRefusal !== undefined && releaseGateRejects) {
+      return await policyRefusalOutput(
+        [releaseRefusal],
+        "release",
+        releaseRefusal.reason,
+      );
     }
     // A result the caller's own `resultSchema` refused is reported as neither
     // outcome: the pattern ran and landed a result, and the schema it did not
@@ -1724,6 +1891,7 @@ export const runPatternTool: HarnessToolDefinition<
       ...(linkedStringCount !== undefined ? { linkedStringCount } : {}),
       ...(valueError !== undefined ? { valueError } : {}),
       ...(rawValue !== undefined ? { rawValue } : {}),
+      ...(releaseObservation !== undefined ? { releaseObservation } : {}),
       ...(publication !== undefined ? { patternPublication: publication } : {}),
       ...(probeThrown !== undefined ? { rawCauseMessage: probeThrown } : {}),
     };

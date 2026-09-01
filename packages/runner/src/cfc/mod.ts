@@ -222,6 +222,7 @@ export {
 } from "./space-membership.ts";
 export {
   CFC_PREFIX_PROVENANCE_MAX_WRITES,
+  describeSinkReleaseRefusal,
   flowLabelWorkExists,
   flowReadExcluded,
   gatedSinkRequestExists,

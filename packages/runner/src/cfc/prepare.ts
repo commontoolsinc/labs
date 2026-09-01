@@ -28,6 +28,7 @@ import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { entityKindOfIdString } from "../entity-kind.ts";
 import { refuseFabricInstance } from "../fabric-special-object.ts";
 import {
   containsExternalSchemaRef,
@@ -101,6 +102,7 @@ import {
 } from "./migration-reason.ts";
 import { verdictReason } from "./verdict-reason.ts";
 import {
+  type CfcRefusalDetail,
   type ConsumedAtomSource,
   describeRefusalInputs,
   renderCfcAtom,
@@ -1580,6 +1582,35 @@ const isMetaSeamPath = (
   path: readonly string[],
 ): boolean => metaOnlyByPath?.get(pathKey(path)) === true;
 
+/**
+ * Whether a schema could have declared a store policy for a write at `path`
+ * on `id` — the surfaces the §8.12.4 writer-fit measurement quantifies over.
+ *
+ * Two are outside it. The raw meta seam is one, per {@link isMetaSeamPath}:
+ * no value schema describes the document-root siblings of `value`. A computed
+ * cell is the other: the derived internal cell the runtime materializes to
+ * hold a derivation's result, addressed under its own URI scheme
+ * (`computed:fid1:<hash>`; see `entity-kind.ts` and
+ * `docs/specs/computed-cell-identity.md`). A pattern declares policy on the
+ * data it names, and it names neither.
+ *
+ * Both stay flow stamp targets: the join lands on them as the `derived`
+ * component, so a later read of one is tainted and a later egress of one is
+ * gated on that label. The residency clause is part of the ceiling this
+ * skips, so a derivation's result may land in a space whose name none of the
+ * label's clauses carry.
+ *
+ * `docs/specs/cfc-enforcement-matrix.md` §4 carries the reasoning.
+ */
+const isDeclarablePolicyPath = (
+  id: string,
+  joinIsLocal: boolean,
+  metaOnlyByPath: ReadonlyMap<string, boolean> | undefined,
+  path: readonly string[],
+): boolean =>
+  (entityKindOfIdString(id) !== "computed" || !joinIsLocal) &&
+  !isMetaSeamPath(metaOnlyByPath, path);
+
 // S16 flow labels (default transition): one conservative confidentiality join
 // per transaction — everything the transaction observed taints everything it
 // wrote (§8.9.2/§8.9.3 collapsed to tx granularity). Reads of runtime-internal
@@ -1931,11 +1962,9 @@ export const deriveFlowJoin = (
   options?: {
     /**
      * Collect the spaces of observations that contributed label content to
-     * the join (inv-12 Stage 1): the per-target cross-space predicate in
-     * `prepareBoundaryCommit` tests whether any labeled contribution
-     * originated outside the destination space. Opt-in so the default path
-     * — every prepare with `cfcLabelMetadataProtection: "off"` — allocates
-     * nothing for it.
+     * the join (inv-12 Stage 1). The per-target predicates in
+     * `prepareBoundaryCommit` test whether any labeled contribution
+     * originated outside the destination space.
      */
     collectLabeledSpaces?: boolean;
   },
@@ -5020,6 +5049,78 @@ const collectConsumedLabel = (
 };
 
 /**
+ * The refusal a sink's ceiling states about `offending`, with the reads that
+ * carried each clause.
+ *
+ * The reason text is the pairing key between a recorded detail and the reason
+ * that refused, so the two are built together rather than assembled twice.
+ */
+const sinkCeilingRefusal = (
+  sink: string,
+  offending: readonly unknown[],
+  sources: readonly ConsumedAtomSource[],
+): CfcRefusalDetail => {
+  // Name the offending atom(s) so an observe-mode diagnostic identifies the
+  // exact (sink, atom) pair that needs a ceiling entry (review on #3993).
+  const offendingAtoms = offending.map(renderCfcAtom);
+  return {
+    gate: "sink-ceiling",
+    sink,
+    offendingAtoms,
+    ...describeRefusalInputs(offending, sources),
+    reason: `sink-request confidentiality exceeds ceiling for ${sink}: ` +
+      offendingAtoms.join(", "),
+  };
+};
+
+/**
+ * What `ceiling` refuses about everything `released` has read, as the §8.12.4
+ * sink gate would state it, or `undefined` when it refuses nothing.
+ *
+ * The commit boundary answers this question for the sink requests a
+ * transaction records, which covers an egress a pattern performs. An egress
+ * the HOST performs — a tool answering a model with what a piece computed —
+ * has no request to record and no commit to gate, so it asks here instead:
+ * read what it is about to release through a transaction, and measure that
+ * transaction's consumed join against the ceiling the destination carries.
+ * Both routes measure the same join against the same membership predicate,
+ * so a host gate cannot admit a flow the boundary refuses.
+ *
+ * `attributedTo` is the read set the refusal is EXPLAINED in terms of, which
+ * a host narrows to the reads its caller can act on. A clause carried by no
+ * read of `attributedTo` is reported as unattributed. Passing one transaction
+ * for both asks the boundary's own question.
+ *
+ * The join is what `released` has read, and a label on a field is consumed
+ * where that field is read: a read that resolves a document root and stops
+ * there counts entries at or above it only. A caller measuring a release
+ * therefore walks the value it is about to hand over.
+ *
+ * The membership predicate is the one `verifySinkRequestCeilings` fits with,
+ * so a clause outside a ceiling here is outside it there. The join is what
+ * `released` read, with no exchange-rule rewriting applied to it, so a clause
+ * a policy evaluation would have discharged is refused here.
+ *
+ * Neither transaction is committed, written, or recorded against.
+ */
+export const describeSinkReleaseRefusal = (
+  released: IExtendedStorageTransaction,
+  attributedTo: IExtendedStorageTransaction,
+  sink: string,
+  ceiling: readonly CfcConfClause[],
+): CfcRefusalDetail | undefined => {
+  const offending = atomsOutsideCeiling(
+    collectConsumedLabel(released).confidentiality,
+    ceiling,
+  );
+  return offending.length === 0 ? undefined : sinkCeilingRefusal(
+    sink,
+    offending,
+    collectConsumedLabel(attributedTo).sources,
+  );
+};
+
+/**
  * Runs the exchange-rule evaluator over one gated confidentiality set under
  * the transaction's policy snapshot + trust config (Epic B5). Pure wiring:
  * the snapshot/trust/acting-principal come from tx CFC state; `boundary` is
@@ -5254,24 +5355,13 @@ const verifySinkRequestCeilings = (
     // so the egress gate and the observation fits-test cannot drift.
     const offending = atomsOutsideCeiling(effective, ceiling);
     if (offending.length > 0) {
-      // Name the offending atom(s) so an observe-mode diagnostic identifies the
-      // exact (sink, atom) pair that needs a ceiling entry (review on #3993).
-      const offendingAtoms = offending.map(renderCfcAtom);
-      const reason = `sink-request confidentiality exceeds ceiling for ` +
-        `${sink}: ` +
-        offendingAtoms.join(", ");
-      reasons.push(verdict ? verdictReason(reason) : reason);
+      const detail = sinkCeilingRefusal(sink, offending, consumed.sources);
+      reasons.push(verdict ? verdictReason(detail.reason) : detail.reason);
       // The remedy channel (cfc/refusal-detail.ts): which reads carried the
       // clauses this ceiling refused. Recorded for every mode — an observe-mode
       // rollout wants the same answer a refusal does, and the commit boundary
       // keeps only the details whose reason actually refused.
-      tx.recordCfcRefusalDetail?.({
-        gate: "sink-ceiling",
-        sink,
-        offendingAtoms,
-        ...describeRefusalInputs(offending, consumed.sources),
-        reason,
-      });
+      tx.recordCfcRefusalDetail?.(detail);
     }
   }
   return reasons;
@@ -5582,20 +5672,16 @@ export const prepareBoundaryCommit = (
   const flowMode = state.flowLabelsMode;
   const flowPersist = flowMode === "persist";
   // Inv-12 Stage 1 (SC-25): the cross-space label-metadata representation
-  // dial. When active (observe/enforce), the flow join additionally collects
-  // which spaces contributed label content, so the per-target predicate
-  // below can tell a same-space join from one that consumed foreign labels.
-  // `off` pays nothing — no space collection, no eligibility tracking.
+  // dial. The flow join collects which spaces contributed label content, so
+  // the per-target predicates below can tell a same-space join from one that
+  // consumed foreign labels: the label-metadata protection dial reads it for
+  // its cross-space eligibility, and the writer-fit measurement reads it to
+  // decide whether a computed target's exemption applies.
   const labelProtectionMode = state.labelMetadataProtectionMode;
   const flowTargets = flowMode === "off" ? undefined : valueWriteTargets(tx);
   const flowJoin = flowMode === "off"
     ? { confidentiality: [], integrity: [] }
-    : deriveFlowJoin(
-      tx,
-      labelProtectionMode !== "off"
-        ? { collectLabeledSpaces: true }
-        : undefined,
-    );
+    : deriveFlowJoin(tx, { collectLabeledSpaces: true });
   const flowConfidentiality = flowJoin.confidentiality;
   // Read provenance for a refusal's remedy channel, computed only if a gate
   // below actually refuses. `collectConsumedLabel` walks every read against
@@ -5790,6 +5876,12 @@ export const prepareBoundaryCommit = (
       : undefined;
     const flowJoinIsCrossSpace = flowLabeledSpaces !== undefined &&
       [...flowLabeledSpaces].some((labeled) => labeled !== space);
+    // Every document that contributed a clause to the join belongs to this
+    // target's own space. An unknown provenance is not local: the spaces are
+    // collected on every prepare that derives a join, so their absence means
+    // there was no join to collect them from.
+    const flowJoinIsLocal = flowLabeledSpaces !== undefined &&
+      !flowJoinIsCrossSpace;
     const markFlowStampEntry = (entry: LabelMapEntry): LabelMapEntry => {
       if (flowJoinIsCrossSpace) crossSpaceEligible?.add(entry);
       return entry;
@@ -6663,10 +6755,10 @@ export const prepareBoundaryCommit = (
           structureStampPaths.push(structureContainerPath);
         }
       }
-      // Writer-fit measures the paths a schema could have declared a policy
-      // at, and the raw meta seam is not one: no value schema describes the
-      // document-root siblings of `value`. The measurement is skipped there
-      // at every rung, so a meta path raises neither a strict reject nor a
+      // Writer-fit measures the surfaces a schema could have declared a
+      // policy at, which leaves out the raw meta seam and computed cells
+      // alike (`isDeclarablePolicyPath`). The measurement is skipped on both
+      // at every rung, so neither raises a strict reject nor a
       // persist-and-flag diagnostic.
       //
       // A ceiling can still resolve at a meta path, from a document-root
@@ -6674,7 +6766,7 @@ export const prepareBoundaryCommit = (
       // that entry sits at logical `[]`, the PAYLOAD root, and reaches the
       // seam only because canonicalization strips a leading `"value"`.
       //
-      // Meta paths stay flow stamp targets in the loop below, so the join
+      // Exempt paths stay flow stamp targets in the loop below, so the join
       // still lands on them as the `derived` component. Where a payload
       // field carries a `MetaField` name the two share one logical path, so
       // an exempt meta write can raise the stored derived label there past
@@ -6682,7 +6774,12 @@ export const prepareBoundaryCommit = (
       // entry untouched and reads protected.
       if (flowConfidentiality.length > 0) {
         const measuredPaths = derivedStampPaths.filter((path) =>
-          !isMetaSeamPath(flowTarget?.metaOnlyByPath, path)
+          isDeclarablePolicyPath(
+            id,
+            flowJoinIsLocal,
+            flowTarget?.metaOnlyByPath,
+            path,
+          )
         );
         for (const path of measuredPaths) {
           // Deeper paths are covered by the write at a measured ancestor;

@@ -8,10 +8,23 @@
  * property is the same everywhere: the result cells the pattern reads are
  * announced and say the request will not be answered, rather than staying as
  * they were with nothing coming.
+ *
+ * The last block is the control the rest of the file rests on: the same
+ * builtins over an input the result store admits, where the staging
+ * transaction commits and the request is sent. Without it the cases above
+ * would hold of a builtin that never sends anything at all.
  */
 
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import {
+  addMockObjectResponse,
+  addMockResponse,
+  clearMockResponses,
+  enableMockMode,
+  resetMockMode,
+} from "@commonfabric/llm/client";
 
 import type { BuiltInLLMMessage, JSONSchema } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
@@ -136,6 +149,59 @@ describe("a builtin whose staged request is abandoned", () => {
     const resultCell = runtime.getCell(
       space,
       "generateObject-direct-abandoned",
+      testPattern.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+
+    const settled = await waitForError(result);
+    await runtime.settled();
+
+    expect(settled.error).toContain("was refused before it started");
+    expect(settled.error).not.toContain(PROMPT_INFLUENCE.source);
+    expect(result.withTx().key("pending").get()).toBe(false);
+  });
+
+  it("reports the refusal on generateObject's error cell with tools", async () => {
+    // The tools path stages its own request, separately from the direct one
+    // the case above reaches, and settles through its own ending.
+    const { pattern, generateObject, Cell: BuilderCell } = commonfabric;
+    const dummyPattern = pattern<Record<string, never>, { ok: boolean }>(
+      () => ({
+        ok: true,
+      }),
+    );
+    const testPattern = pattern<Record<string, never>>(() => {
+      const messages = BuilderCell.of([{
+        role: "user",
+        content: "a briefing the result store does not declare",
+      }], {
+        type: "array",
+        items: { type: "object", additionalProperties: true },
+        ifc: { confidentiality: [PROMPT_INFLUENCE] },
+      });
+      return generateObject({
+        messages,
+        schema: {
+          type: "object",
+          properties: { ok: { type: "boolean" } },
+          required: ["ok"],
+          additionalProperties: false,
+        },
+        tools: {
+          dummy: {
+            description: "a tool, so the request takes the tool-calling path",
+            pattern: dummyPattern,
+          },
+        },
+        // deno-lint-ignore no-explicit-any
+      } as any);
+    });
+    const resultCell = runtime.getCell(
+      space,
+      "generateObject-tools-abandoned",
       testPattern.resultSchema,
       tx,
     );
@@ -385,5 +451,136 @@ describe("a builtin whose staged request is abandoned", () => {
     // rode the abandoned transaction, so the ending has no turn to answer and
     // writes no assistant message.
     expect(result.withTx().key("messages").get()).toEqual([]);
+  });
+  describe("and the same builtins when the transaction commits", () => {
+    // An unlabelled input leaves the result store's ceiling nothing to
+    // refuse, so the staging transaction commits and the work starts. The
+    // mock client answers in place of a model.
+
+    beforeEach(() => {
+      enableMockMode();
+      clearMockResponses();
+    });
+
+    afterEach(() => {
+      resetMockMode();
+    });
+
+    it("sends llm's request and lands its result", async () => {
+      const { pattern, llm, Cell: BuilderCell } = commonfabric;
+      addMockResponse(() => true, {
+        role: "assistant",
+        content: "an answer",
+        id: "abandoned-control-llm",
+      });
+      const testPattern = pattern<Record<string, never>>(() => {
+        const messages = BuilderCell.of([{
+          role: "user",
+          content: "a briefing nothing labels",
+        }], {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        });
+        // deno-lint-ignore no-explicit-any
+        return llm({ messages } as any);
+      });
+      const resultCell = runtime.getCell(
+        space,
+        "llm-sent",
+        testPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+
+      const settled = await waitForCellValue<{ pending?: boolean }>(
+        runtime,
+        result,
+        (value) => value?.pending === false,
+      );
+      await runtime.settled();
+
+      expect(settled.pending).toBe(false);
+      expect(result.withTx().key("error").get()).toBeUndefined();
+    });
+
+    it("sends generateObject's request and lands its result", async () => {
+      const { pattern, generateObject, Cell: BuilderCell } = commonfabric;
+      addMockObjectResponse(() => true, {
+        object: { ok: true },
+        id: "abandoned-control-generate-object",
+      });
+      const testPattern = pattern<Record<string, never>>(() => {
+        const messages = BuilderCell.of([{
+          role: "user",
+          content: "a briefing nothing labels",
+        }], {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        });
+        return generateObject({
+          messages,
+          schema: {
+            type: "object",
+            properties: { ok: { type: "boolean" } },
+            required: ["ok"],
+            additionalProperties: false,
+          },
+          // deno-lint-ignore no-explicit-any
+        } as any);
+      });
+      const resultCell = runtime.getCell(
+        space,
+        "generateObject-sent",
+        testPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+
+      const settled = await waitForCellValue<{ pending?: boolean }>(
+        runtime,
+        result,
+        (value) => value?.pending === false,
+      );
+      await runtime.settled();
+
+      expect(settled.pending).toBe(false);
+      expect(result.withTx().key("error").get()).toBeUndefined();
+    });
+
+    it("sends generateText's request and lands its result", async () => {
+      const { pattern, generateText } = commonfabric;
+      addMockResponse(() => true, {
+        role: "assistant",
+        content: "an answer",
+        id: "abandoned-control-generate-text",
+      });
+      const testPattern = pattern<Record<string, never>>(() =>
+        // deno-lint-ignore no-explicit-any
+        generateText({ prompt: "a briefing nothing labels" } as any)
+      );
+      const resultCell = runtime.getCell(
+        space,
+        "generateText-sent",
+        testPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+
+      const settled = await waitForCellValue<{ pending?: boolean }>(
+        runtime,
+        result,
+        (value) => value?.pending === false,
+      );
+      await runtime.settled();
+
+      expect(settled.pending).toBe(false);
+      expect(result.withTx().key("error").get()).toBeUndefined();
+    });
   });
 });
