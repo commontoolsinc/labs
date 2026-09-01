@@ -122,6 +122,7 @@ column refers to the per-process cookie obtained by loading `/`.
 | `POST` | `/api/cancel`                | Yes   | Cancels the active turn                                                                 |
 | `GET`  | `/api/sessions`              | Yes   | Durable session summaries                                                               |
 | `GET`  | `/api/status`                | Yes   | Session status and artifact roots                                                       |
+| `GET`  | `/api/policy`                | Yes   | What a new session here would run under                                                 |
 | `GET`  | `/api/turns/<turnId>/result` | Yes   | Durable structured result for a completed turn                                          |
 | `GET`  | `/api/events`                | Yes   | Live and replayed chat events over SSE                                                  |
 | `GET`  | `/api/runs`                  | Yes   | Run summaries                                                                           |
@@ -217,6 +218,39 @@ Status requires the per-process token cookie obtained by loading the console
 page. The top-level fields are present even before the console has any sessions,
 so an unattended client can check the route contract before starting a model
 turn.
+
+### Policy route
+
+`GET /api/policy` returns what a session started here **would** run under, which
+is the same question the status route answers only for sessions that already
+exist:
+
+| field                     | value                                                                 |
+| ------------------------- | --------------------------------------------------------------------- |
+| `systemPromptSha256`      | SHA-256 of the seeded system prompt, or `null` when none is seeded    |
+| `allowedToolIds`          | the tools a new session's policy asks for                             |
+| `allowedSubagentProfiles` | the subagent profiles it authorizes                                   |
+| `artifactRoot`            | where runs are filed                                                  |
+| `fabricSpace`             | the space name runs build in                                          |
+| `sessionDbPath`           | the durable session store, or `null` when sessions are held in memory |
+
+The prompt crosses as a digest and never as text, so a client can check that
+this console holds the prompt it was told to run without the prompt leaving the
+process. `allowedToolIds` is what the policy asks for; the prompt loop withholds
+a tool again when its backing is absent, so this says a session may reach a tool
+rather than that a turn will hold it.
+
+The route carries the token, as the status route carrying the same policy on a
+live session does — and the space name and the two host paths, which nothing
+outside this server's own page has business reading. The health route's
+exemption is for a client that has no token yet and wants liveness; a client
+acting on this answer has loaded the page and holds one.
+
+An unattended client is the caller this route is for: the measurement batch
+runner refuses a whole batch when the console it found is not the cell its
+`--cell-spec` names, before the first task spends anything. That file's shape is
+in
+[the measurement protocol](../docs/pattern-index-measurement.md#the-cell-spec).
 
 ## CFC
 

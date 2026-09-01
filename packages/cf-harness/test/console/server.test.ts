@@ -689,6 +689,31 @@ describe("console/server", () => {
     });
   });
 
+  describe("GET /api/policy", () => {
+    it("returns what a session started here would run under, before any session exists", async () => {
+      const response = await server.handle(
+        getRequest("/api/policy", { cookie }),
+      );
+
+      expect(response.status).toBe(200);
+      const policy = consoleChatPolicy(false, false);
+      expect(await response.json()).toEqual({
+        systemPromptSha256: null,
+        allowedToolIds: [...policy.allowedToolIds],
+        allowedSubagentProfiles: [...policy.allowedSubagentProfiles],
+        fabricSpace: config().fabricSession.space,
+        artifactRoot: config().artifactRoot,
+        sessionDbPath: null,
+      });
+    });
+
+    it("answers 403 without the token, as the route carrying the same policy on a session does", async () => {
+      const response = await server.handle(getRequest("/api/policy"));
+
+      expect(response.status).toBe(403);
+    });
+  });
+
   describe("GET /api/health", () => {
     it("reports the configured Fabric API and unverified session liveness without a token", async () => {
       const response = await server.handle(getRequest("/api/health"));

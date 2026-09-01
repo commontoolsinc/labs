@@ -95,6 +95,7 @@ import type { CreateHarnessPromptLoopOptions } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
 import { FileSystemHarnessArtifactStore } from "../src/artifacts.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
+import { type ConsolePolicyReport, consolePolicyReport } from "./policy.ts";
 import {
   listConsoleRuns,
   readConsoleRun,
@@ -994,6 +995,9 @@ export class ConsoleServer {
         ...this.#service.status(url.searchParams.get("sessionId") ?? undefined),
       });
     }
+    if (request.method === "GET" && url.pathname === "/api/policy") {
+      return Response.json(this.#policy());
+    }
     if (
       request.method === "GET" && url.pathname.startsWith("/api/turns/")
     ) {
@@ -1185,6 +1189,38 @@ export class ConsoleServer {
   }
 
   /**
+   * The policy every new session here is started with. One expression rather
+   * than two because `/api/policy` answers for the sessions `/api/task`
+   * creates, and a client that acts on the answer is owed the same object the
+   * next session actually gets.
+   */
+  #sessionPolicy(): HarnessChatPolicy {
+    return consoleChatPolicy(
+      this.#config.patternIndex !== undefined,
+      this.#config.skillsSh !== undefined,
+    );
+  }
+
+  /**
+   * What a new session would run under. The seeded system prompt crosses as a
+   * digest, so a client can check that this console holds the prompt it was
+   * told to measure without the prompt's text leaving the process.
+   */
+  #policy(): ConsolePolicyReport {
+    return consolePolicyReport({
+      policy: this.#sessionPolicy(),
+      fabricSpace: this.#config.fabricSession.space,
+      artifactRoot: this.#config.artifactRoot,
+      ...(this.#config.systemPrompt !== undefined
+        ? { systemPrompt: this.#config.systemPrompt }
+        : {}),
+      ...(this.#config.sessionDbPath !== undefined
+        ? { sessionDbPath: this.#config.sessionDbPath }
+        : {}),
+    });
+  }
+
+  /**
    * Starts a turn, in the session the request names or in a new one. One
    * request rather than two because a session with no turn is not a thing
    * anyone asked for, and the page needs both identifiers before it can
@@ -1218,10 +1254,7 @@ export class ConsoleServer {
         workspace: { hostPath: this.#config.workspacePath },
         model: this.#config.model,
         artifactRoot: this.#config.artifactRoot,
-        policy: consoleChatPolicy(
-          this.#config.patternIndex !== undefined,
-          this.#config.skillsSh !== undefined,
-        ),
+        policy: this.#sessionPolicy(),
       });
       if (!session.ok) {
         return chatErrorResponse(session);
