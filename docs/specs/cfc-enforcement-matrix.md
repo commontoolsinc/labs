@@ -325,30 +325,31 @@ The strict-only delta is:
   permanent change to a store's policy leaves a trace even at the rung that
   admits it.
 
-  Five conditions bound it:
+  What bounds the route, and what it declares once inside:
 
-  - **The marker, and who recorded it.** Only a document the runner named
-    through its piece-substrate write-policy input is reached, and only
-    where the runtime itself recorded that input and its address names the
-    whole document rather than a path inside one. The recording method is
-    on the public transaction interface, and pattern-authored code reaches
-    the transaction its cells are bound to, so an input's own fields say
-    only what its recorder wrote; the runtime passes an authorization
-    alongside, the way `setMetaRaw` marks a meta write, and an unmarked
-    marker naming the same document counts for nothing. That is the
-    difference between a gate that ACTS on an input and one that measures
-    it: the two sibling markers in the same file corroborate against
-    transaction state, which suits a claim about a write that has already
-    happened, while this one is a claim about whose write it is. Every other document keeps the ceiling it resolves to, and a
-    misfit there is refused as before, with the §8.12.5 remedy in the
-    reason. The runner records only addresses it MINTS from the piece's
-    result cell: the argument address it would derive, and each derived
-    internal cell's. It reads the argument address back out of the result
-    cell's stored meta on every setup after the first, and where that
-    stored link names some other document — a nested piece's argument lives
-    in its HOST's document — no marker is recorded, so that document keeps
-    its own ceiling. Within a marked document the route reaches every path
-    that transaction writes, not only the paths setup wrote.
+  - **Who recorded the marker.** The recording method is on the public
+    transaction interface, and pattern-authored code reaches the
+    transaction its cells are bound to, so an input's own fields say only
+    what its recorder wrote. The runtime passes an authorization alongside,
+    the way `setMetaRaw` marks a meta write, and a marker without it counts
+    for nothing however it is addressed. This is the difference between a
+    gate that ACTS on an input and one that measures it: the two sibling
+    markers in the same file corroborate against transaction state, which
+    suits a claim about a write that has already happened, while this one
+    is a claim about whose write it is, and a forger supplies the write.
+  - **Which document it names.** The runner records only addresses it
+    MINTS from the piece's result cell — the argument address it would
+    derive, and each derived internal cell's — and only where the address
+    names a whole document rather than a path inside one. It reads the
+    argument address back out of the result cell's stored meta on every
+    setup after the first, and where that stored link names some other
+    document (a nested piece's argument lives in its HOST's) no marker is
+    recorded, so that document keeps its own ceiling. Every document the
+    route does not reach keeps the ceiling it resolves to, and a misfit
+    there is refused as before, with the §8.12.5 remedy in the reason.
+  - **How far it reaches inside that document.** Every path the
+    transaction writes there, not only the paths setup wrote: the marker
+    names the store, and the declaration is a statement about the store.
   - **No schema declaration at that path.** A schema that declares at the
     written path owns the store's policy there. Widening it from the join
     would make the walk's own re-mint non-monotone on the next write, and
