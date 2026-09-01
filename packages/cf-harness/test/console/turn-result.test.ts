@@ -183,4 +183,71 @@ describe("console/turn-result", () => {
       await Deno.remove(artifactRoot, { recursive: true });
     }
   });
+
+  it("rejects unsafe run identifiers and malformed transcripts", async () => {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-console-result-",
+    });
+    try {
+      await expect(readConsoleTurnResult({
+        artifactRoot,
+        turnId: "../another-run",
+        spaceName: "console-test",
+      })).resolves.toBeUndefined();
+
+      const turnId = "turn-with-malformed-transcript";
+      await writeTranscript(artifactRoot, turnId, [
+        { role: "user", content: "build a reading list" },
+      ]);
+      await Deno.writeTextFile(
+        join(artifactRoot, turnId, "transcript.json"),
+        JSON.stringify([null]),
+      );
+
+      await expect(readConsoleTurnResult({
+        artifactRoot,
+        turnId,
+        spaceName: "console-test",
+      })).resolves.toBeUndefined();
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  });
+
+  it("ignores malformed and unsuccessful `assign_slug` outputs", async () => {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-console-result-",
+    });
+    try {
+      const turnId = "turn-with-invalid-piece-outputs";
+      await writeTranscript(artifactRoot, turnId, [
+        { role: "user", content: "build a reading list" },
+        {
+          role: "tool",
+          toolCallId: "call-1",
+          toolName: "assign_slug",
+          content: "not JSON",
+        },
+        {
+          role: "tool",
+          toolCallId: "call-2",
+          toolName: "assign_slug",
+          content: JSON.stringify({ status: "error" }),
+        },
+        { role: "assistant", content: "I could not name it." },
+      ]);
+
+      await expect(readConsoleTurnResult({
+        artifactRoot,
+        turnId,
+        spaceName: "console-test",
+      })).resolves.toEqual({
+        pieces: [],
+        spaceName: "console-test",
+        finalText: "I could not name it.",
+      });
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  });
 });

@@ -711,6 +711,45 @@ describe("console/server", () => {
   });
 
   describe("GET /api/turns/<turnId>/result", () => {
+    it("returns named errors for malformed and unknown turn paths", async () => {
+      const malformedRoute = await server.handle(getRequest(
+        "/api/turns/not-a-result",
+        { cookie },
+      ));
+      expect(malformedRoute.status).toBe(404);
+
+      const malformedEncoding = await server.handle(getRequest(
+        "/api/turns/%/result",
+        { cookie },
+      ));
+      expect(malformedEncoding.status).toBe(404);
+
+      const unknownTurn = await server.handle(getRequest(
+        "/api/turns/turn-nobody-started/result",
+        { cookie },
+      ));
+      expect(unknownTurn.status).toBe(404);
+      expect(await unknownTurn.json()).toEqual({
+        code: "turn_not_found",
+        error: "turn turn-nobody-started was not found",
+      });
+    });
+
+    it("returns a named error when completed-turn artifacts are unavailable", async () => {
+      const started = await startTask({ text: "track my books" });
+
+      const response = await server.handle(getRequest(
+        `/api/turns/${started.turnId}/result`,
+        { cookie },
+      ));
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({
+        code: "turn_result_unavailable",
+        error: `result for turn ${started.turnId} is unavailable`,
+      });
+    });
+
     it("returns the durable result of a completed turn", async () => {
       const artifactRoot = await Deno.makeTempDir({
         prefix: "cf-harness-console-result-route-",
