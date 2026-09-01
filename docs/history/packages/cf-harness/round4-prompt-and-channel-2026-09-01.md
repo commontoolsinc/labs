@@ -97,14 +97,22 @@ shape it was guessing. Every one occurred in a child that had not been given
 the shapes. Children that received them made none, across 45 composing
 attempts in two cells.
 
-The channel is lossless where it is used. Across the two cells that used it,
-every attached entry delivered its exact description, import hint, argument
-shape and result shape into the child's received text. Against the
-2026-08-31 census of the same boundary — 24 delegations, 22 naming a prior hit
-in prose, one carrying an exact argument shape, **none** carrying a result
-shape — the flip is complete: the shape that never once crossed in prose now
-crosses on every entry, and no delegation in any Round-4 cell named a prior
-hit in prose at all.
+The channel is lossless for an entry rehydrated from a shape-bearing search
+record, and that qualifier is load-bearing. Across the two composition cells
+whose crossing was counted entry by entry, all 17 attached entries delivered
+their exact description, import hint, argument shape and result shape into the
+child's received text. But whether a record bears shapes at all depends on the
+rank at which the parent last saw that entry, and one observed entry elsewhere
+in the round reached its child with both shapes reading `Not available.` — see
+the rank-dependence note under the priority-fix evidence below (CT-2159). So
+the channel loses nothing it is given; what it is given is not always
+complete.
+
+Against the 2026-08-31 census of the same boundary — 24 delegations, 22 naming
+a prior hit in prose, one carrying an exact argument shape, **none** carrying
+a result shape — the flip still holds: the shape that never once crossed in
+prose now crosses wherever the record carried it, and no delegation in any
+Round-4 cell named a prior hit in prose at all.
 
 ### The channel is discovered without being taught
 

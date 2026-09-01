@@ -31,9 +31,9 @@ Prompt files as handed over, by SHA-256:
   `a2dd4986575b751280ca8f773bcc3d06ae14941f8dec7a0d43010af30103c44c`
 
 Both agree with the prefixes named in the analysis brief. `parent-historic.txt`
-is byte-identical to `2026-08-31-terra-vs-sol-2x2/parent-composition-prompt.txt`,
-and the candidate file matches the text blockquoted in `predictions.md` word
-for word.
+is byte-identical to
+`2026-08-31-terra-vs-sol-2x2/parent-composition-prompt.txt`, and the candidate
+file matches the text blockquoted in `predictions.md` word for word.
 
 The child-guidance marker is the composition bullet
 `A search hit is a component to wire, not a specification to rebuild.`
@@ -329,8 +329,9 @@ The concurrent-console defect is filed as CT-2156.
 
 ### Cell 2 — P-none, reuse suite (the clean re-run)
 
-Report: `p-none-reuse/report.json`, artifact root `.cf-harness-console-pnone/runs`.
-Ran 03:01:21Z to 03:36:34Z. Six tasks, six `turn_completed`.
+Report: `p-none-reuse/report.json`, artifact root
+`.cf-harness-console-pnone/runs`. Ran 03:01:21Z to 03:36:34Z. Six tasks, six
+`turn_completed`.
 
 #### Flag check — PASSES
 
@@ -648,9 +649,9 @@ which is what the interim burn read shows.
 
 ### Cell 4 — P-cand, reuse suite
 
-Report: `p-cand-reuse/report.json`, artifact root `.cf-harness-console-pcand/runs`.
-Ran 03:37:07Z to 03:39:36Z — **149 seconds for six tasks.** Six
-`turn_completed`.
+Report: `p-cand-reuse/report.json`, artifact root
+`.cf-harness-console-pcand/runs`. Ran 03:37:07Z to 03:39:36Z — **149 seconds for
+six tasks.** Six `turn_completed`.
 
 #### Flag check — PASSES, both directions
 
@@ -934,8 +935,9 @@ this round hit that case, but nothing prevents it.
 
 ### Cell 6 — P-hist, reuse suite
 
-Report: `p-hist-reuse/report.json`, artifact root `.cf-harness-console-phist/runs`.
-Ran 03:54:11Z to 04:08:51Z, 880 seconds. Six tasks, six `turn_completed`.
+Report: `p-hist-reuse/report.json`, artifact root
+`.cf-harness-console-phist/runs`. Ran 03:54:11Z to 04:08:51Z, 880 seconds. Six
+tasks, six `turn_completed`.
 
 #### Flag check — PASSES, both directions
 
@@ -1247,10 +1249,11 @@ each half:
 
 ### Cell 8 — innocuous skill task, n=1
 
-Report: `skill-swot/report.json`, artifact root `.cf-harness-console-skill/runs`,
-console `:8128`, space `round4-skill`, P-cand parent prompt with child bullets
-present, `CF_HARNESS_SKILLS_REGISTRY_URL=https://skills.sh` (banner-verified by
-the operator). Ran 05:05:26Z to 05:16:15Z. One task, `turn_completed`, piece
+Report: `skill-swot/report.json`, artifact root
+`.cf-harness-console-skill/runs`, console `:8128`, space `round4-skill`, P-cand
+parent prompt with child bullets present,
+`CF_HARNESS_SKILLS_REGISTRY_URL=https://skills.sh` (banner-verified by the
+operator). Ran 05:05:26Z to 05:16:15Z. One task, `turn_completed`, piece
 `small-bakery-swot-worksheet`.
 
 **This is n=1, smoke-plus-provenance as pre-registered. No rate is stated and
@@ -1468,7 +1471,8 @@ CLI's message is the one that says what to fix.
 
 ```
 --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile
-                              (repeatable: default | browser | web_fetch | web_search)
+                              (repeatable: default | browser | web_fetch |
+                              web_search)
 ```
 
 `pattern-author` is absent from that enumeration and is nonetheless accepted.
@@ -1485,12 +1489,10 @@ export. It reached a working piece in 21 model turns and about 12 minutes.
 Not a comparable measurement, but a data point that the pattern-author profile
 is a cost lever rather than a precondition.
 
-#### Cell 8c — CLI attempt 3, pending
-
-Running with `--allow-subagent-profile default --allow-subagent-profile
-pattern-author`, fresh space `round4-skill-cli2`, artifacts under
-`.cf-harness-skill-cli2`. **This is the cell that stands for Block 3 if it
-completes cleanly.** Read below.
+A placeholder stood here while attempt 3 was still running, recording only
+that the cell had been announced and not yet read. It is collapsed to this
+line: it carried no reading, so keeping it as a second section titled
+"Cell 8c" would leave two sections with one title and no second cell.
 
 #### Cell 8c — CLI attempt 3, full authority. The Block-3 cell.
 
@@ -1635,10 +1637,11 @@ Block 3 is complete.
 
 ### Cell 9 — the five demo phrases
 
-Report: `demo-dryrun/report.json`, artifact root `.cf-harness-console-demo/runs`.
-Ran 05:17:05Z to 06:06:09Z. Five phrases, five `turn_completed`, five pieces.
-Candidate marker present in all five parents, historic absent, child bullets
-present in all five children. Corpus 29/123 → 29/131, discoverable held at 29.
+Report: `demo-dryrun/report.json`, artifact root
+`.cf-harness-console-demo/runs`. Ran 05:17:05Z to 06:06:09Z. Five phrases, five
+`turn_completed`, five pieces. Candidate marker present in all five parents,
+historic absent, child bullets present in all five children. Corpus 29/123 →
+29/131, discoverable held at 29.
 
 Cell aggregate: **28 `run_pattern`, 0 by id, 0 composing, 23 compile-error,
 5 ok.** Five from-scratch builds.
