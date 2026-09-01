@@ -1004,3 +1004,80 @@ describe("writing the lane's records into its spool", () => {
     }
   });
 });
+
+describe("what a lane does with the batches it was given", () => {
+  /** A topology of one suite running the command a case names. */
+  function topology(command: readonly string[]) {
+    return () =>
+      Promise.resolve([
+        suite({
+          id: "workspace-unit",
+          units: ["packages/bakery/test/glaze.test.ts"],
+          command: (_units, context) =>
+            Promise.resolve([{ command: [...command], cwd: context.root }]),
+        }),
+      ]);
+  }
+
+  /** A manifest selecting that suite's one unit. */
+  function selecting() {
+    return () =>
+      Promise.resolve({
+        manifest: manifestOf([{}]),
+        objectName: "manifest-fixture.json.gz",
+      });
+  }
+
+  async function run(command: readonly string[]): Promise<boolean> {
+    const log = console.log;
+    console.log = () => {};
+    try {
+      return await runLane(
+        {
+          lane: 1,
+          of: 1,
+          full: false,
+          dryRun: false,
+          root: REPOSITORY,
+          at: "2026-09-01T00:00:00Z",
+        },
+        { manifest: selecting(), topology: topology(command) },
+      );
+    } finally {
+      console.log = log;
+    }
+  }
+
+  it("passes when every batch passed", async () => {
+    expect(await run([Deno.execPath(), "eval", "0"])).toBe(true);
+  });
+
+  it("fails when a batch failed, having run it", async () => {
+    // A lane reports what it measured: the batch ran and went red, so
+    // the lane is red, and nothing about that is a crash or a timeout.
+    expect(await run([Deno.execPath(), "eval", "Deno.exit(1)"])).toBe(false);
+  });
+
+  it("says it could not date the tree it is testing", async () => {
+    // Outside a repository there is no commit to resolve the manifest
+    // at, so the lane takes the newest manifest there is and prints
+    // that it did rather than appearing to have chosen one.
+    const outside = await Deno.makeTempDir({ prefix: "lane-nogit-" });
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      await runLane(
+        { lane: 1, of: 1, full: false, dryRun: true, root: outside },
+        {
+          manifest: () => Promise.resolve({ absent: "nothing published" }),
+          topology: () => Promise.resolve([]),
+        },
+      );
+    } finally {
+      console.log = log;
+      await Deno.remove(outside, { recursive: true });
+    }
+    expect(lines.join("\n")).toContain("cannot read the commit's date");
+  });
+});

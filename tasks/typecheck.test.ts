@@ -276,3 +276,38 @@ describe("main()", () => {
     }
   });
 });
+
+describe("collectPathsByScope()", () => {
+  it("raises when the tree holds none of the paths it walks", async () => {
+    // A group that silently collected nothing would report a clean
+    // check over files it never looked at.
+    const root = await Deno.makeTempDir({ prefix: "typecheck-bare-" });
+    try {
+      await expect(collectPathsByScope(root)).rejects.toThrow(
+        "cannot enumerate",
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+});
+
+describe("runTypecheck() with a reload", () => {
+  it("says it is reloading before it checks anything", async () => {
+    // The reload is the slow part, and a run that appeared to hang
+    // without saying why is what the line is for.
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      await runTypecheck(new Map([["oven", ["packages/oven/mod.ts"]]]), {
+        reload: true,
+        check: (scope) =>
+          Promise.resolve({ scope, durationMs: 1, success: true, output: "" }),
+      });
+    } finally {
+      console.log = log;
+    }
+    expect(lines.join("\n")).toContain("Reloading");
+  });
+});

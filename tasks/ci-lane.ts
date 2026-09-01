@@ -566,6 +566,15 @@ export interface LaneDeps {
    * the skip lists, the summary — is exercised without one.
    */
   manifest?: (at: string) => Promise<ManifestFetch>;
+
+  /**
+   * Where the suites come from. A caller that supplies them is saying
+   * what the working tree holds, which is the only way what the lane
+   * does with a batch — opening its capabilities, running it, gathering
+   * what it recorded — can be exercised without running the
+   * repository's real suites to find out.
+   */
+  topology?: (root: string) => Promise<Suite[]>;
 }
 
 /** Runs one lane, and says whether everything in it passed. */
@@ -573,7 +582,7 @@ export async function runLane(
   options: LaneOptions,
   deps: LaneDeps = {},
 ): Promise<boolean> {
-  const suites = await loadTopology(options.root);
+  const suites = await (deps.topology ?? loadTopology)(options.root);
   let batches: Batch[];
   let unschedulable: string[] = [];
   let fetched: { objectName?: string; absent?: string } = {};

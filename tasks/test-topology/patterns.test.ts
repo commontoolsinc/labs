@@ -188,3 +188,16 @@ describe("enumerating a tree that cannot be read", () => {
     await Deno.remove(root, { recursive: true });
   });
 });
+
+describe("a tree holding no patterns at all", () => {
+  it("enumerates nothing rather than failing", async () => {
+    const root = await Deno.makeTempDir({ prefix: "no-patterns-" });
+    try {
+      const suites = await loadPatternSuites(root);
+      const unit = suites.find((suite) => suite.id === "pattern-unit")!;
+      expect(unit.units).toEqual([]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+});

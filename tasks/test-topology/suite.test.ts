@@ -206,3 +206,43 @@ describe("grouping a batch across the packages it spans", () => {
       .toEqual(["a.test.ts", "b.test.ts"]);
   });
 });
+
+describe("two parts of one suite under one scope", () => {
+  it("gives a record to the part whose kind it carries", () => {
+    // A package can record under more than one kind — its Deno tests
+    // and its browser tests — and the parts are told apart by kind as
+    // well as by scope, so a record goes to the one that produced it.
+    const suite = fileSuite({
+      id: "workspace-unit",
+      needs: ["deno"],
+      parts: [
+        {
+          packageDir: "packages/oven",
+          flags: [],
+          junit: { kind: "unit", scope: "oven" },
+          files: ["packages/oven/a.test.ts"],
+        },
+        {
+          packageDir: "packages/oven",
+          flags: [],
+          junit: { kind: "browser", scope: "oven" },
+          files: ["packages/oven/b.test.ts"],
+        },
+      ],
+    });
+    expect(
+      suite.locate({
+        test: { k: "browser", s: "oven", n: "heats" },
+        file: "packages/oven/b.test.ts",
+      }),
+    ).toEqual({ level: "unit", unit: "packages/oven/b.test.ts" });
+    // The same file under the other kind belongs to neither: the part
+    // that holds it records under `browser`.
+    expect(
+      suite.locate({
+        test: { k: "unit", s: "oven", n: "heats" },
+        file: "packages/oven/b.test.ts",
+      }),
+    ).toBeUndefined();
+  });
+});
