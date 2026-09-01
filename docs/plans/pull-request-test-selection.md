@@ -1684,10 +1684,13 @@ work, which is what makes the 230 seconds a constraint on the packing
 rather than a figure it aims at. When the cheapest lane is full the item
 goes to the next-cheapest one with room for it, so a suite whose overhead
 one lane has already paid collects that lane's share of the suite and no
-more. Each pass spends a share of the whole run's budget and no lane
-passes its own, so the packing ends with all five lanes close to 230
-seconds, and what the pull request waits on is 230 seconds rather than
-whichever lane the grouping favored.
+more. The value, density and exploration passes each spend a share of the
+whole run's budget, and none of the three puts a lane past its own. The
+corpus holds far more than a run can fit, so between them those passes
+fill every lane, and what the pull request waits on is 230 seconds rather
+than whichever lane the grouping favored. Two things are allowed past a
+lane's budget, and the next two paragraphs are about them: the mandatory
+pass, and an item costing more than a whole lane.
 
 The mandatory pass is the one allowed past a lane's budget. It takes its
 items largest first, so an item filling most of a lane is offered the

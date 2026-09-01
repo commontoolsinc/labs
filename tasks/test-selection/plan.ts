@@ -315,14 +315,15 @@ function place(
  * ordering. Then exploration, so the unselected corpus keeps producing
  * data.
  *
- * What each pass may spend is a share of the whole run's budget rather
- * than of each lane's, so an expensive test can have a lane to itself
- * while the others carry the tail. What keeps any one lane from running
- * long is separate from the shares: a lane takes no work past its own
- * budget, and the lane that carries an identity costing more than a whole
- * lane's budget carries that identity and nothing else. The two together
- * are what make every lane finish near the budget, which is the number
- * the pull request waits on.
+ * What the last three passes may spend is a share of the whole run's
+ * budget rather than of each lane's, so an expensive test can have a lane
+ * to itself while the others carry the tail. What keeps any one lane from
+ * running long is separate from the shares: those three passes put no
+ * work in a lane past that lane's budget, and the lane that carries an
+ * identity costing more than a whole lane's budget carries that identity
+ * and nothing else. Together they make every lane finish near the budget,
+ * which is the number the pull request waits on. The mandatory pass is
+ * bounded by neither, and reports how far past a lane it went.
  */
 export function plan(input: PlanInput): Plan {
   const manifest = input.manifest;
