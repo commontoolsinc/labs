@@ -36,6 +36,12 @@ export interface DiffCounts {
   readonly files: readonly DiffLineCounts[];
 }
 
+/** Complete file text available to resolve syntax across omitted diff lines. */
+export interface DiffCountFileContext {
+  readonly oldLines?: readonly string[];
+  readonly newLines?: readonly string[];
+}
+
 interface ChangedLine {
   /** Diff-file index containing the line. */
   readonly file: number;
@@ -66,6 +72,7 @@ export function diffCounts(
   text: string,
   lines: readonly Line[],
   mode: DiffCountMode,
+  contexts?: readonly DiffCountFileContext[],
 ): DiffCounts {
   const model = parseDiff(text);
   if (!model) return { totals: { adds: 0, dels: 0 }, files: [] };
@@ -75,7 +82,13 @@ export function diffCounts(
   const byFile: ChangedLine[][] = model.files.map(() => []);
   const changed: ChangedLine[] = [];
   for (const [fileIndex, file] of model.files.entries()) {
-    const fallback = fallbackCommentLines(raw, model.lines, lines, file);
+    const fallback = fallbackCommentLines(
+      raw,
+      model.lines,
+      lines,
+      file,
+      contexts?.[fileIndex],
+    );
     for (let i = file.headerLine; i <= file.endLine; i++) {
       const kind = model.lines[i]?.kind;
       if (kind !== "add" && kind !== "del") continue;
@@ -240,6 +253,7 @@ function fallbackCommentLines(
   diffLines: readonly DiffLine[],
   renderedLines: readonly Line[],
   file: DiffFile,
+  context: DiffCountFileContext | undefined,
 ): ReadonlyMap<number, string> {
   const oldSyntax = fallbackSyntaxFor(file.oldPath);
   const newSyntax = fallbackSyntaxFor(file.newPath);
@@ -248,8 +262,20 @@ function fallbackCommentLines(
   const result = new Map<number, string>();
   const oldState: CommentState = {};
   const newState: CommentState = {};
+  let oldNextLine = 0;
+  let newNextLine = 0;
   for (const [hunkIndex, hunk] of file.hunks.entries()) {
-    if (hunkIndex > 0) {
+    const oldStart = sideStart(hunk.oldStart, hunk.oldCount);
+    const newStart = sideStart(hunk.newStart, hunk.newCount);
+    if (context?.oldLines && oldSyntax) {
+      scanCompleteLines(
+        context.oldLines,
+        oldNextLine,
+        oldStart,
+        oldSyntax,
+        oldState,
+      );
+    } else if (hunkIndex > 0) {
       const previous = file.hunks[hunkIndex - 1];
       const remaining = file.hunks.slice(hunkIndex);
       reconcileStateAfterGap(
@@ -261,6 +287,18 @@ function fallbackCommentLines(
         oldSyntax,
         "old",
       );
+    }
+    if (context?.newLines && newSyntax) {
+      scanCompleteLines(
+        context.newLines,
+        newNextLine,
+        newStart,
+        newSyntax,
+        newState,
+      );
+    } else if (hunkIndex > 0) {
+      const previous = file.hunks[hunkIndex - 1];
+      const remaining = file.hunks.slice(hunkIndex);
       reconcileStateAfterGap(
         raw,
         diffLines,
@@ -295,8 +333,26 @@ function fallbackCommentLines(
         }
       }
     }
+    oldNextLine = oldStart + hunk.oldCount;
+    newNextLine = newStart + hunk.newCount;
   }
   return result;
+}
+
+function sideStart(start: number, count: number): number {
+  return count === 0 ? start : Math.max(0, start - 1);
+}
+
+function scanCompleteLines(
+  lines: readonly string[],
+  start: number,
+  end: number,
+  syntax: CommentSyntax,
+  state: CommentState,
+): void {
+  for (let i = start; i < end && i < lines.length; i++) {
+    stripCommonComments(lines[i], syntax, state);
+  }
 }
 
 /** Keeps multiline state only when this hunk proves the construct stayed open. */

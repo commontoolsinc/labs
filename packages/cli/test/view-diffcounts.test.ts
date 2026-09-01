@@ -3,21 +3,27 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { diffCounts } from "../lib/view/diffcounts.ts";
+import {
+  type DiffCountFileContext,
+  diffCounts,
+} from "../lib/view/diffcounts.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument } from "../lib/view/diffdoc.ts";
 
 /** Computes every count policy over one highlighted diff. */
-function countsFor(text: string) {
+function countsFor(
+  text: string,
+  contexts?: readonly DiffCountFileContext[],
+) {
   const model = parseDiff(text)!;
   const { doc } = buildDiffDocument(text, model, {
     resolve: () => null,
     read: () => null,
   });
   return {
-    normal: diffCounts(text, doc.lines, "normal"),
-    whitespace: diffCounts(text, doc.lines, "whitespace"),
-    comments: diffCounts(text, doc.lines, "comments"),
+    normal: diffCounts(text, doc.lines, "normal", contexts),
+    whitespace: diffCounts(text, doc.lines, "whitespace", contexts),
+    comments: diffCounts(text, doc.lines, "comments", contexts),
   };
 }
 
@@ -170,6 +176,81 @@ describe("diffcounts", () => {
     const counts = countsFor(diff);
 
     expect(counts.comments.totals).toEqual({ adds: 0, dels: 0 });
+  });
+
+  it("uses complete files when a comment opener precedes the first hunk", () => {
+    const diff = [
+      "diff --git a/main.rs b/main.rs",
+      "--- a/main.rs",
+      "+++ b/main.rs",
+      "@@ -3 +3 @@",
+      "- * old note",
+      "+ * new note",
+      "",
+    ].join("\n");
+    const counts = countsFor(diff, [{
+      oldLines: ["/*", " * hidden note", " * old note", " */"],
+      newLines: ["/*", " * hidden note", " * new note", " */"],
+    }]);
+
+    expect(counts.comments.totals).toEqual({ adds: 0, dels: 0 });
+  });
+
+  it("uses omitted file lines to resolve a multiline close", () => {
+    const diff = [
+      "diff --git a/main.rs b/main.rs",
+      "--- a/main.rs",
+      "+++ b/main.rs",
+      "@@ -1,2 +1,2 @@",
+      " /*",
+      "- * old note",
+      "+ * new note",
+      "@@ -4 +4 @@",
+      "-run_old();",
+      "+run_new();",
+      "",
+    ].join("\n");
+    const counts = countsFor(diff, [{
+      oldLines: ["/*", " * old note", " */", "run_old();"],
+      newLines: ["/*", " * new note", " */", "run_new();"],
+    }]);
+
+    expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });
+  });
+
+  it("uses omitted lines before interpreting later comment syntax", () => {
+    const diff = [
+      "diff --git a/main.rs b/main.rs",
+      "--- a/main.rs",
+      "+++ b/main.rs",
+      "@@ -1,2 +1,2 @@",
+      " /*",
+      "- * old note",
+      "+ * new note",
+      "@@ -4,2 +4,2 @@",
+      "-run_old();",
+      "+run_new();",
+      ' // say "hello */',
+      "",
+    ].join("\n");
+    const counts = countsFor(diff, [{
+      oldLines: [
+        "/*",
+        " * old note",
+        " */",
+        "run_old();",
+        '// say "hello */',
+      ],
+      newLines: [
+        "/*",
+        " * new note",
+        " */",
+        "run_new();",
+        '// say "hello */',
+      ],
+    }]);
+
+    expect(counts.comments.totals).toEqual({ adds: 1, dels: 1 });
   });
 
   it("tracks multiline fallback comments across diff hunks", () => {

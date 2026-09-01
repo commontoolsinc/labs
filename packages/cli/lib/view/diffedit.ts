@@ -20,6 +20,7 @@ import {
   type WorkspaceCache,
 } from "./diffdoc.ts";
 import { type DiffHunk, type DiffModel, parseDiff } from "./diff.ts";
+import type { DiffCountFileContext } from "./diffcounts.ts";
 import {
   type CommitHeader,
   type CommitMessage,
@@ -106,6 +107,11 @@ export function diffSource(
     fileText: expectedFiles,
     hunks: saveHunks,
   };
+  const diffCountContexts = buildDiffCountContexts(
+    edit,
+    saveHunks,
+    expectedFiles,
+  );
 
   // No file on disk backs this diff (nothing resolved or verified): read-only.
   // A deletion of an entire file has no new-side lines, but its empty workspace
@@ -117,6 +123,7 @@ export function diffSource(
     return {
       label: null,
       isDiff: true,
+      diffCountContexts,
       editable: false,
       reason:
         "This diff doesn't match any file on disk, so there is nothing to edit.",
@@ -233,6 +240,7 @@ export function diffSource(
       ? shortName(files[0])
       : `${files.length} files`,
     isDiff: true,
+    diffCountContexts,
     editable: true,
     policy,
     logicalEnd: (lines, row) =>
@@ -470,6 +478,29 @@ export function diffSource(
         ? baselineWithCurrentHunks(baseline, current)
         : current,
   };
+}
+
+function buildDiffCountContexts(
+  edit: DiffEdit,
+  hunks: readonly MutableHunk[],
+  fileText: ReadonlyMap<string, string>,
+): readonly DiffCountFileContext[] {
+  const model = parseDiff(edit.sourceText ?? "");
+  if (!model) return [];
+  let hunkIndex = 0;
+  return model.files.map((file, fileIndex) => {
+    let absPath: string | null = null;
+    for (const _hunk of file.hunks) {
+      const hunk = hunks[hunkIndex++];
+      absPath ??= hunk?.absPath ?? null;
+    }
+    const oldLines = edit.oldFileLines[fileIndex]?.map((line) => line.text);
+    const newText = absPath ? fileText.get(absPath) : undefined;
+    return {
+      oldLines: oldLines ?? undefined,
+      newLines: newText?.split("\n"),
+    };
+  });
 }
 
 /** The commit a save would amend when changed text represents HEAD. */

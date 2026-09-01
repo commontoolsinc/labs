@@ -40,6 +40,26 @@ function diffSession(diffText: string, height = 20): Session {
   );
 }
 
+function diffSessionWithFile(
+  diffText: string,
+  path: string,
+  fileText: string,
+): Session {
+  const ws: DiffWorkspace = {
+    resolve: (candidate) => candidate === path ? path : null,
+    read: (candidate) => candidate === path ? fileText : null,
+  };
+  const model = parseDiff(diffText)!;
+  const { doc, edit } = buildDiffDocument(diffText, model, ws);
+  return new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 80, height: 20 },
+    undefined,
+    diffSource(ws, edit),
+  );
+}
+
 /** Selectable rows before the jump list's summary. */
 function entryLines(s: Session): readonly Line[] {
   const lines = s.view().overlay?.lines ?? [];
@@ -358,6 +378,29 @@ Deno.test("jumplist: D cycles the diff-count policy", () => {
   assert(entryText(s)[0].endsWith("+0 −0"));
   press(s, "D");
   assertEquals(summaryText(s)[0], "Counts: normal");
+});
+
+Deno.test("jumplist: counts use syntax before the first hunk", () => {
+  const diff = [
+    "diff --git a/main.rs b/main.rs",
+    "--- a/main.rs",
+    "+++ b/main.rs",
+    "@@ -3 +3 @@",
+    "- * old note",
+    "+ * new note",
+    "",
+  ].join("\n");
+  const s = diffSessionWithFile(
+    diff,
+    "main.rs",
+    ["/*", " * hidden note", " * new note", " */", ""].join("\n"),
+  );
+  press(s, "i", "D", "D");
+
+  assertEquals(summaryText(s), [
+    "Counts: ignore comments and whitespace",
+    "All files +0 −0 · Shown files +0 −0",
+  ]);
 });
 
 Deno.test("jumplist: escape cancels and leaves the viewport put", () => {

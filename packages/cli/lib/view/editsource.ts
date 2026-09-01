@@ -12,6 +12,7 @@
 
 import type { Document, Line, ViewMode } from "./model.ts";
 import type { DiffHunk, DiffModel } from "./diff.ts";
+import type { DiffCountFileContext } from "./diffcounts.ts";
 import type { LineEndingProvenance } from "./editbuffer.ts";
 import type {
   Highlighter,
@@ -88,6 +89,9 @@ export interface EditableSource {
   /** True for a diff view, whether or not it is editable. Absent or false for a
    * plain file or a non-diff pipe. */
   readonly isDiff?: boolean;
+
+  /** Complete diff sides used to scan syntax hidden between visible hunks. */
+  readonly diffCountContexts?: readonly DiffCountFileContext[];
 
   /** False when there is no underlying file to edit or the selected language
    * is read-only. `reason` is shown when a cursor move is attempted on a
