@@ -26,12 +26,19 @@ export const NAME_MAP_SUFFIX = ".json";
 export const SKIP_LIST_VARIABLE = "CF_TEST_SKIP_LIST";
 
 /**
- * The tail of this module's own path. Deno names a JUnit case's class
- * after the module that registered the test, so while the wrapper is
- * installed every case names this module; ingestion rejects a classname
- * ending here rather than reading it as a test file.
+ * The tails of the test machinery's own paths. Deno names a JUnit case's
+ * class after the module that registered the test, so a case registered
+ * through one of these names that module rather than the test file:
+ * `registration.ts` while the `Deno.test` wrapper is installed, and
+ * `bdd.ts` for anything registered through the `describe` and `it` this
+ * repository's import map resolves to. Ingestion rejects a classname
+ * ending in either rather than reading it as a test file, and the
+ * preload's name map is what supplies the file instead.
  */
-export const REGISTRATION_MODULE_SUFFIX = "src/records/registration.ts";
+export const MACHINERY_MODULE_SUFFIXES: readonly string[] = [
+  "src/records/registration.ts",
+  "src/records/bdd.ts",
+];
 
 /**
  * The separator a bdd runner joins a describe chain with, and so the
@@ -130,6 +137,29 @@ export function repositoryRootOf(path: string): string | undefined {
       dir = parent;
     }
   }
+}
+
+/** The repository root of this process's tree, resolved once. */
+let treeRoot: string | undefined;
+let treeRootResolved = false;
+
+/**
+ * The repository-relative file a registration came from, given the stack
+ * captured at the registration. The root is resolved once and kept:
+ * every registration in one process comes from one tree.
+ */
+export function registeringFile(stack: string): string | undefined {
+  const url = registeringModule(stack);
+  if (url === undefined) return undefined;
+  if (!treeRootResolved) {
+    treeRootResolved = true;
+    try {
+      treeRoot = repositoryRootOf(decodeURIComponent(new URL(url).pathname));
+    } catch {
+      treeRoot = undefined;
+    }
+  }
+  return treeRoot === undefined ? undefined : relativeToRoot(url, treeRoot);
 }
 
 /**
@@ -332,21 +362,6 @@ export function buildCapture(
 ): { capture: RegistrationCapture; registrar: (...args: unknown[]) => void } {
   const { skips, spool } = options;
   const names = new Map<string, string>();
-  let root: string | undefined;
-  let rootResolved = false;
-
-  const fileOf = (url: string | undefined): string | undefined => {
-    if (url === undefined) return undefined;
-    if (!rootResolved) {
-      rootResolved = true;
-      try {
-        root = repositoryRootOf(decodeURIComponent(new URL(url).pathname));
-      } catch {
-        root = undefined;
-      }
-    }
-    return root === undefined ? undefined : relativeToRoot(url, root);
-  };
 
   const capture: RegistrationCapture = {
     names,
@@ -392,7 +407,7 @@ export function buildCapture(
       (through as any)(...args);
       return;
     }
-    const file = fileOf(registeringModule(new Error().stack ?? ""));
+    const file = registeringFile(new Error().stack ?? "");
     if (file !== undefined) names.set(definition.name, file);
     if (capture.skipped(file, definition.name)) {
       through({ ...definition, ...extra, ignore: true });

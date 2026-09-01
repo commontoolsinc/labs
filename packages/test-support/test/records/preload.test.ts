@@ -19,11 +19,19 @@ import {
   type SkipList,
 } from "../../src/records/mod.ts";
 
-/** The imports a fixture tree needs to resolve the preload's own modules. */
+/**
+ * The imports a fixture tree needs to resolve the preload's own modules.
+ * `@std/testing/bdd` points at this repository's re-export exactly as the
+ * root import map does, so a fixture exercises the wrapper a real test
+ * file goes through rather than the module underneath it.
+ */
 const FIXTURE_CONFIG = {
   imports: {
     "@std/path": "jsr:@std/path@^1.1.6",
     "@std/testing": "jsr:@std/testing@^1.0.19",
+    "@std/testing/bdd": new URL("../../src/records/bdd.ts", import.meta.url)
+      .href,
+    "@std/testing/bdd/real": "jsr:@std/testing@^1.0.19/bdd",
     "@std/ulid": "jsr:@std/ulid@^1.0.0",
   },
 };
@@ -96,6 +104,29 @@ async function outcomes(
 const BDD_FILE = `import { describe, it } from "@std/testing/bdd";
 describe("outer", () => {
   it("kept", () => {});
+  it("dropped", () => {});
+});
+`;
+
+const NESTED_BDD_FILE = `import { describe, it } from "@std/testing/bdd";
+describe("outer", () => {
+  describe("inner", () => {
+    it("kept", () => {});
+    it("dropped", () => {});
+  });
+});
+`;
+
+const ADDED_LEAF_FILE = `import { describe, it } from "@std/testing/bdd";
+describe("outer", () => {
+  it("kept", () => {});
+  it("dropped", () => {});
+  it("added later", () => {});
+});
+`;
+
+const OTHER_BDD_FILE = `import { describe, it } from "@std/testing/bdd";
+describe("elsewhere", () => {
   it("dropped", () => {});
 });
 `;
@@ -221,6 +252,71 @@ describe("preload", () => {
     }
   });
 
+  it("skips one leaf of a file by its whole describe chain", async () => {
+    const fixture = await makeFixture({ "bdd.test.ts": BDD_FILE });
+    try {
+      const run = await runFixture(fixture, ["bdd.test.ts"], {
+        "bdd.test.ts": ["outer > dropped"],
+      });
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const reported = await outcomes(fixture);
+      expect(reported.get("outer > kept")).toEqual("pass");
+      expect(reported.get("outer > dropped")).toEqual("skip");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("names a nested leaf by the whole chain that encloses it", async () => {
+    const fixture = await makeFixture({ "nested.test.ts": NESTED_BDD_FILE });
+    try {
+      const run = await runFixture(fixture, ["nested.test.ts"], {
+        "nested.test.ts": ["outer > inner > dropped"],
+      });
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const reported = await outcomes(fixture);
+      expect(reported.get("outer > inner > kept")).toEqual("pass");
+      expect(reported.get("outer > inner > dropped")).toEqual("skip");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("skips independently in two files holding the same leaf name", async () => {
+    const fixture = await makeFixture({
+      "bdd.test.ts": BDD_FILE,
+      "other.test.ts": OTHER_BDD_FILE,
+    });
+    try {
+      const run = await runFixture(fixture, ["bdd.test.ts", "other.test.ts"], {
+        "bdd.test.ts": ["outer > dropped"],
+      });
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const reported = await outcomes(fixture);
+      expect(reported.get("outer > dropped")).toEqual("skip");
+      expect(reported.get("elsewhere > dropped")).toEqual("pass");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("runs an unlisted leaf a pull request just added", async () => {
+    const fixture = await makeFixture({
+      "bdd.test.ts": ADDED_LEAF_FILE,
+    });
+    try {
+      const run = await runFixture(fixture, ["bdd.test.ts"], {
+        "bdd.test.ts": ["outer > kept", "outer > dropped"],
+      });
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const reported = await outcomes(fixture);
+      expect(reported.get("outer > added later")).toEqual("pass");
+      expect(reported.get("outer > kept")).toEqual("skip");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
   it("runs a renamed test, since the new name is not the old", async () => {
     const fixture = await makeFixture({
       "bare.test.ts": `Deno.test("the new name", () => {});\n`,
@@ -266,9 +362,12 @@ describe("preload", () => {
       "bare.test.ts": BARE_FILE,
     });
     try {
-      // No write permission and no skip list: wrapping `Deno.test` would
-      // cost the report its own file attribution and buy nothing, so the
-      // classnames stay on the test files.
+      // No write permission and no skip list, so `Deno.test` is left
+      // alone and a bare test keeps its own class name. A bdd file's
+      // class name is the module its `describe` came from, which is the
+      // repository's own re-export, so ingestion declines it and the
+      // leaf has no file: the preload's name map is what supplies one,
+      // and this run wrote none.
       const run = await new Deno.Command(Deno.execPath(), {
         args: [
           "test",
@@ -293,7 +392,7 @@ describe("preload", () => {
         filePrefix: "",
       });
       const byName = new Map(records.map((r) => [r.test.n, r.file]));
-      expect(byName.get("outer > kept")).toEqual("bdd.test.ts");
+      expect(byName.get("outer > kept")).toBeUndefined();
       expect(byName.get("bare kept")).toEqual("bare.test.ts");
     } finally {
       await Deno.remove(fixture.dir, { recursive: true });

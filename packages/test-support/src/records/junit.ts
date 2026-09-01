@@ -14,8 +14,8 @@
 import { type TestIdentity, type TestRecord } from "./schema.ts";
 import {
   fileForName,
+  MACHINERY_MODULE_SUFFIXES,
   NAME_SEPARATOR,
-  REGISTRATION_MODULE_SUFFIX,
 } from "./registration.ts";
 
 /** One parsed `<testcase>`. */
@@ -292,7 +292,9 @@ function classnameFile(
   }
   if (!isRelativeSourcePath(testcase.classname)) return undefined;
   const cleaned = testcase.classname.replace(/^\.\//, "");
-  if (cleaned.endsWith(REGISTRATION_MODULE_SUFFIX)) return undefined;
+  if (MACHINERY_MODULE_SUFFIXES.some((tail) => cleaned.endsWith(tail))) {
+    return undefined;
+  }
   return filePrefix.length > 0
     ? `${filePrefix.replace(/\/$/, "")}/${cleaned}`
     : cleaned;

@@ -493,6 +493,30 @@ chosen port offset. Calling that `toolshed` would be wrong, and a lane
 that opened a Toolshed server for it would have paid for the wrong thing
 and still failed.
 
+### What a workspace member's own task decides
+
+A member's test task cannot be handed a subset of its own files: almost
+every one of them lists its own paths, so appending more would add to
+what runs rather than restrict it. What the task does carry is everything
+else a run needs — the permissions, `--no-check`, a fake-clock preload,
+an `ENV` assignment in front — so the topology reads the task for those
+and replaces its paths with the chosen ones.
+
+Thirty-two of the forty-seven members are readable that way, which makes
+1,342 test files individually selectable. The rest are one unit each and
+run whole, which is what every member does today. A member whose task is
+written as a dependency list resolves through it to the `deno test`
+underneath, and the one command substitution the workspace writes —
+naming the running Deno in an `--allow-run` list — is resolved rather
+than treated as a shell metacharacter, so neither shape costs a member
+its granularity.
+
+Two things a member's own `deno test` would apply are applied during
+enumeration instead: the task's `--ignore` globs and the member's
+`exclude` list. Deno filters discovered modules through both and an
+explicit path through neither, so a file arriving as a positional
+argument would otherwise run in spite of being excluded.
+
 ### Sharding stops being written down
 
 Four packages are hand-sharded today, and one is lifted out of the
@@ -853,18 +877,25 @@ being imposed.
 - [x] The preload reads a skip list keyed by registering file and name,
       and registers a listed bare `Deno.test` as ignored rather than
       dropping it.
-- [ ] `@commonfabric/test-support` gains a `describe` and `it` that
+- [x] `@commonfabric/test-support` gains a `describe` and `it` that
       re-export the real ones, track the enclosing describe chain, and
       route a listed `it` through `it.ignore`. The root import map points
       `@std/testing/bdd` at it and the real module at a second specifier.
-      No test file's own import changes.
-- [ ] Every `deno test` suite in the topology passes the preload, appended
+      No test file's own import changes. A frame between the test file
+      and `describe` moves the JUnit class name onto the re-export, the
+      same consequence wrapping `Deno.test` already has, so ingestion
+      declines a class name ending in either module and takes the file
+      from the preload's name map.
+- [x] Every `deno test` suite in the topology passes the preload, appended
       the way `--junit-path` already is.
 - [ ] `cost` and the packing passes key on identities, with
       `fileOverhead(file)` fitted from the lane runner's records and the
       density pass sorting by marginal cost.
-- [ ] `command()` returns one invocation per file with its skip list, and
-      omits a file whose every identity is skipped.
+- [x] `command()` returns one invocation per file with its skip list, and
+      omits a file whose every identity is skipped. A suite's runner takes
+      several files at once, so the skip list is per file and the
+      invocation is per package; module load is charged per file either
+      way, which is what `unitOverhead` measures.
 - [ ] The independence flag: a `main`-side check that runs an identity as
       the only test in its file, a rotating slice per run plus every
       identity whose file changed, the flag carried in the manifest, and
@@ -1783,36 +1814,32 @@ draw's seed comes from the manifest. `plan()` lives in
 lane runner, and is straightforwardly testable offline against a recorded
 manifest.
 
-One small job does sit before the pull-request lanes: `select-manifest`.
-It selects an input rather than computing a plan. The job calls a reusable
-workflow by its default-branch ref. That workflow checks out no repository
-code and obtains a Workload Identity credential whose `objectCreator`
-access is restricted to `labs/test-selection/v1/pins/`.
+Re-running a single failed lane later must not shuffle the work. The lane
+resolves the manifest as *the newest one generated at or before the
+commit under test was made*, reading the committer date out of the
+checkout.
 
-The selector first reads the public create-only pin at
-`pins/<workflow-run-id>.json.gz`. If it exists, the job validates and reuses
-it. On the first attempt only, an absent pin makes the job list the public
-manifest objects once and choose the object with the newest server-assigned
-`timeCreated`. It writes one compressed envelope containing the exact
-source object name and generation and the complete validated manifest. No
-objects or a failed listing produces an envelope with an explicit
-unselected result. On a later attempt, an absent pin also produces
-unselected; it never causes a fresh manifest selection.
+What the moment has to be is stable rather than exact: every lane of a
+run has to agree, and every later attempt has to agree with the first.
+Nothing about the run satisfies that. GitHub reports `run_started_at`
+per attempt rather than per run — measured across four re-run builds,
+every one reported a later start for its second attempt, one of them
+nearly six hours later — so an attempt resolving at its own start would
+pick up whatever manifest is newest by then. Its five lanes would agree
+with one another and disagree with the attempt before them, which is
+worse than either: a test the first attempt placed in the lane that
+failed can move to a lane the re-run does not run, leaving `Status` green
+over a set no attempt ran whole.
 
-The pin object is retained beyond the full period in which GitHub permits
-a workflow rerun. Embedding the manifest means the source manifest may
-expire without changing a rerun. The selector succeeds only after it can
-read an existing valid pin or atomically create a new one. A read or create
-failure stops dependent lanes. Pull-request jobs hold no credential that
-can write the pin prefix, so they cannot replace its contents. The short
-selector job adds startup latency, but the durable pin makes the selected
-input stable without assuming that GitHub's clock and Cloud Storage's clock
-are ordered.
-
-The measured manifest compresses to 1.05 megabytes, so this stores one
-additional copy per pull-request workflow run until its rerun period ends.
-That bounded storage is the cost of keeping both the selection and its
-bytes stable after the source manifest's ordinary 30-day retention ends.
+The commit is stable by construction, and it needs nothing from the
+service that scheduled the run — no credential, no request, and no
+failure path where the request is refused. It is also the same value on a
+workstation as in a job, so `plan --dry-run` answers the question a lane
+would answer instead of resolving against the clock. And it is the better
+anchor on its own terms: the manifest worth reading is the one that was
+current when the tree under test came into being. The committer date
+rather than the author's, because a rebased or cherry-picked commit keeps
+the date it was first written.
 
 ## What the census can project
 
@@ -2134,7 +2161,6 @@ pr-tests:
         deno run -A tasks/ci-lane.ts
         --lane ${{ matrix.lane }} --of 5
         --base origin/${{ github.base_ref }}
-        --manifest-pin-run "$GITHUB_RUN_ID"
     - name: 📤 Ship test records
       if: always()
       uses: ./.github/actions/test-records-ship
@@ -2785,9 +2811,9 @@ a way forward.** The job summary names every item the lane ran and why it
 was chosen — the catches behind its score, the change that made it
 mandatory, or the exploration draw — which makes "this is not mine" a fast
 conclusion rather than a guess. `--explain` answers the same question for
-any identity. Re-running the lane runs the same set, because the exact
-manifest object is pinned to the workflow run. And if none of that settles
-it, `ci: full` runs everything.
+any identity. Re-running the lane runs the same set, because the manifest
+is pinned to the commit's date. And if none of that settles it,
+`ci: full` runs everything.
 
 ## Failure modes
 
@@ -2812,7 +2838,7 @@ it, `ci: full` runs everything.
 | A lane dies without uploading its coverage | `Status` is already failing for the dead lane. It says the coverage total is incomplete rather than gating on a partial one. |
 | A lane exceeds five minutes repeatedly | The correction factors rise on the next publisher run and less is packed. If it persists, the publisher's summary shows the miss and somebody looks. |
 | A fork pull request | Works unchanged. The manifest is world-readable, and the existing member gate decides whether the fork's records ship. |
-| A re-run of one failed lane with its pin available | Runs the same set from the manifest embedded in the workflow run's storage pin. A deleted pin on a later attempt creates and uses an explicit unselected pin instead of selecting newer data. |
+| A re-run of one failed lane | Runs the same set, because the manifest is resolved by the commit's date, which no attempt changes. |
 | Both `pr-tests` and `full-tests` skip | `Status` fails. Its second clause requires one of them to have succeeded, so a pull request that ran no tests can never report green. |
 | An `always` item is red on `main` | Every pull request fails on it, deliberately, and the job summary says it was already red and links the `main` run. See [Two rules that keep a test out](#two-rules-that-keep-a-test-out). |
 | `main` is broken and stays broken | Every test failing in the latest `main` run leaves the selectable set, so pull requests are unaffected while it is fixed. They come back on their own. |
@@ -3231,13 +3257,18 @@ The topology goes in, and both `main` and the `ci: full` label start using
 it. Nothing here depends on selection, so this part can be finished and
 exercised on the branch on its own.
 
-- [ ] `tasks/test-topology.ts` and one module per suite, including each
+- [x] `tasks/test-topology.ts` and one module per suite, including each
       suite's declared record surfaces and optional variant, and typed
       record-surface descriptors for every JUnit output. `locate()`
       distinguishes item identities from overlapping suite-level
       measurements, and returns at most one item for an identity that
       several arms or entry points can run. Add `tasks/ci-capabilities.ts`.
-- [ ] The server-execution variant suites consume
+      Eighteen suites hold 2,338 units. The repository gates are two
+      suites rather than one, because `mandatory` belongs to a suite and
+      the `always` set has to stay tiny: `repo-gates` holds formatting,
+      linting and the drift guard, and `repo-checks` holds the rest of
+      what the `Check` job runs, selected on value like anything else.
+- [x] The server-execution variant suites consume
       `tasks/server-execution-on-skips.ts`: whole-file entries are declared
       unavailable and omitted from enumeration, while step entries exclude
       only the named leaf identity from unknown and coverage rules.
@@ -3265,10 +3296,15 @@ exercised on the branch on its own.
       part. `packages/cli/test/integration-sections.test.ts` holds the
       dispatch table to that property, and to every step being scheduled
       by some group rather than only by name.
-- [ ] `tasks/check-test-topology.ts`, both halves, wired into
+- [x] `tasks/check-test-topology.ts`, both halves, wired into
       `repo-gates`, with exact variant matching and one source-item claim
-      allowed per variant.
-- [ ] Extract the part of `tasks/test-records-gather.ts` that reads records,
+      allowed per variant. Its first run found ten test files that
+      nothing in this repository executes; they are recorded with the
+      reason each runs nowhere and reported rather than failed on, so a
+      new unclaimed surface still fails. The five projects under
+      `packages/deno-web-test/test/` that the harness drives are declared
+      as the fixtures they are.
+- [x] Extract the part of `tasks/test-records-gather.ts` that reads records,
       ingests JUnit, and applies a declared variant as the shared gather
       function. Its command-line entry point and `tasks/ci-lane.ts` both
       use it. The lane runner gives every batch execution fresh spool and

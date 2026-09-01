@@ -332,12 +332,40 @@ export async function runTypecheck(
   return true;
 }
 
+/**
+ * The scopes named on the command line, or every scope when none are.
+ * A continuous-integration lane is given part of the repository to check
+ * and names the groups it was given; a person running the task names
+ * none and checks the whole tree.
+ */
+export function selectScopes(
+  byScope: ReadonlyMap<string, string[]>,
+  args: readonly string[],
+): Map<string, string[]> {
+  const named = args
+    .filter((arg) => arg.startsWith("--scope="))
+    .map((arg) => arg.slice("--scope=".length));
+  if (named.length === 0) return new Map(byScope);
+  const selected = new Map<string, string[]>();
+  for (const scope of named) {
+    const paths = byScope.get(scope);
+    if (paths === undefined) {
+      throw new Error(`no such type-check scope: ${scope}`);
+    }
+    selected.set(scope, paths);
+  }
+  return selected;
+}
+
 export async function main(): Promise<void> {
-  const passed = await runTypecheck(await collectPathsByScope(), {
-    list: Deno.args.includes("--list"),
-    reload: (Deno.env.get("DENO_CHECK_RELOAD") ?? "") !== "",
-    recordResults: true,
-  });
+  const passed = await runTypecheck(
+    selectScopes(await collectPathsByScope(), Deno.args),
+    {
+      list: Deno.args.includes("--list"),
+      reload: (Deno.env.get("DENO_CHECK_RELOAD") ?? "") !== "",
+      recordResults: true,
+    },
+  );
   if (!passed) Deno.exit(1);
 }
 
