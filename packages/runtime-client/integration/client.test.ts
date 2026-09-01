@@ -25,6 +25,7 @@ import {
 } from "@commonfabric/runtime-client";
 import { experimentalOptionsFromEnv } from "@commonfabric/runner";
 import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
+import { MessagePortRuntimeTransport } from "@commonfabric/runtime-client/transports/message-port";
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
 import { defer } from "@commonfabric/utils/defer";
 
@@ -1757,6 +1758,186 @@ export default pattern<Record<string, never>>(() => {
       );
     });
   });
+
+  describe("multi-document attachment", () => {
+    // Two documents over one worker's runtime, joined the way a family root's
+    // page joins them: the page that spawned the worker hands a port across,
+    // and the document at the far end attaches to the runtime already running.
+    // Everything under here is real -- a real worker, a real backend, real
+    // ports -- because what these pin is exactly what a stand-in on either
+    // side of the IPC cannot show.
+
+    /**
+     * The owner's client and its transport, which is what a port is handed
+     * over through. `createRuntimeClient` drops the transport it connects, and
+     * these tests need to keep it.
+     */
+    async function owningClient(session: Session) {
+      const transport = await WebWorkerRuntimeTransport.connect();
+      const options = await clientOptionsFor(session);
+      const client = await RuntimeClient.initialize(transport, options);
+      await client.synced(session.space);
+      return { client, transport, options };
+    }
+
+    /** A second document, attached over a port the owner hands the worker. */
+    async function attachingClient(
+      owner: { transport: WebWorkerRuntimeTransport },
+      options: RuntimeClientOptions,
+    ) {
+      const channel = new MessageChannel();
+      owner.transport.attachClientPort(channel.port2);
+      return await RuntimeClient.attach(
+        new MessagePortRuntimeTransport({ port: channel.port1 }),
+        options,
+      );
+    }
+
+    const counterSchema = {
+      type: "object",
+      properties: { counter: { type: "number" } },
+    } as const satisfies JSONSchema;
+
+    it("feeds both documents from one runtime, and one unsubscribe stops one feed", async () => {
+      const session = await createTestSession();
+      const owner = await owningClient(session);
+      const second = await attachingClient(owner, owner.options);
+      try {
+        const cause = "multi-document-attachment-" + crypto.randomUUID();
+        const first = await owner.client.getCell<{ counter: number }>(
+          session.space,
+          cause,
+          counterSchema,
+        );
+        const mirror = await second.getCell<{ counter: number }>(
+          session.space,
+          cause,
+          counterSchema,
+        );
+        await first.set({ counter: 0 });
+        await owner.client.idle();
+        await mirror.sync();
+
+        // Both documents watch the same cell. Before this change the second
+        // subscribe was a no-op on the first's, so the second document heard
+        // nothing and the first's unsubscribe silenced both.
+        const firstSeen: number[] = [];
+        const secondSeen: number[] = [];
+        const sawOne = defer<void>();
+        const cancelFirst = first.subscribe((value) => {
+          if (value) firstSeen.push(value.counter);
+        });
+        const cancelSecond = mirror.subscribe((value) => {
+          if (!value) return;
+          secondSeen.push(value.counter);
+          if (value.counter === 1) sawOne.resolve();
+        });
+
+        await first.set({ counter: 1 });
+        await sawOne.promise;
+        assertEquals(secondSeen.includes(1), true);
+        assertEquals(firstSeen.includes(1), true);
+
+        // The first document leaves the cell. The second's feed is its own.
+        cancelFirst();
+        await owner.client.idle();
+
+        const sawTwo = defer<void>();
+        const secondSeenBefore = secondSeen.length;
+        const firstSeenBefore = firstSeen.length;
+        const watchTwo = mirror.subscribe((value) => {
+          if (value?.counter === 2) sawTwo.resolve();
+        });
+        await first.set({ counter: 2 });
+        await sawTwo.promise;
+
+        // The second document heard the write; the first, having left the
+        // cell, heard nothing further. A write's echo can arrive behind the
+        // local delivery it confirms, so this asks what reached each feed
+        // rather than in which order.
+        assert(secondSeen.length > secondSeenBefore);
+        assertEquals(secondSeen.includes(2), true);
+        assertEquals(firstSeen.includes(2), false);
+        assertEquals(firstSeen.length, firstSeenBefore);
+
+        watchTwo();
+        cancelSecond();
+      } finally {
+        await second.dispose();
+        await owner.client.dispose();
+      }
+    });
+
+    it("keeps the runtime and the first document running when the second leaves", async () => {
+      const session = await createTestSession();
+      const owner = await owningClient(session);
+      const second = await attachingClient(owner, owner.options);
+      const cause = "multi-document-departure-" + crypto.randomUUID();
+      try {
+        const cell = await owner.client.getCell<{ counter: number }>(
+          session.space,
+          cause,
+          counterSchema,
+        );
+        await cell.set({ counter: 0 });
+        await owner.client.idle();
+
+        const mirror = await second.getCell<{ counter: number }>(
+          session.space,
+          cause,
+          counterSchema,
+        );
+        const cancelMirror = mirror.subscribe(() => {});
+        await second.idle();
+
+        // The second document's departure is its own: its subscription stops,
+        // and the runtime it was borrowing keeps serving the first.
+        cancelMirror();
+        await second.dispose();
+
+        const seen: number[] = [];
+        const sawThree = defer<void>();
+        const cancel = cell.subscribe((value) => {
+          if (!value) return;
+          seen.push(value.counter);
+          if (value.counter === 3) sawThree.resolve();
+        });
+        await cell.set({ counter: 3 });
+        await sawThree.promise;
+        // Membership rather than the last value: a write's echo can arrive
+        // behind the local delivery it confirms, so the tail of this list is
+        // delivery order and not what the test is about.
+        assertEquals(seen.includes(3), true);
+        cancel();
+      } finally {
+        await owner.client.dispose();
+      }
+    });
+
+    it("refuses a second document asserting a different acting principal", async () => {
+      const session = await createTestSession();
+      const owner = await owningClient(session);
+      try {
+        const stranger = await Identity.fromPassphrase(
+          "a different operator",
+          keyConfig,
+        );
+        const channel = new MessageChannel();
+        owner.transport.attachClientPort(channel.port2);
+        await assertRejects(
+          () =>
+            RuntimeClient.attach(
+              new MessagePortRuntimeTransport({ port: channel.port1 }),
+              { ...owner.options, identity: stranger },
+            ),
+          Error,
+          "Attach refused",
+        );
+      } finally {
+        await owner.client.dispose();
+      }
+    });
+  });
 });
 
 async function createTestSession(): Promise<Session> {
@@ -1766,10 +1947,15 @@ async function createTestSession(): Promise<Session> {
   });
 }
 
-async function createRuntimeClient(
+/**
+ * What this process's clients are configured with. A second document attaches
+ * by asserting the security half of these, so the two callers build them from
+ * one place rather than each stating a posture of its own.
+ */
+async function clientOptionsFor(
   session: Session,
   extraOptions: Partial<RuntimeClientOptions> = {},
-): Promise<RuntimeClient> {
+): Promise<RuntimeClientOptions> {
   // If a space identity was created, replace it with a transferrable
   // key in Deno using the same derivation as Session
   if (session.spaceIdentity && session.spaceName) {
@@ -1778,8 +1964,7 @@ async function createRuntimeClient(
     ).derive(session.spaceName, keyConfig);
   }
 
-  const transport = await WebWorkerRuntimeTransport.connect();
-  const worker = await RuntimeClient.initialize(transport, {
+  return {
     apiUrl: new URL(API_URL),
     identity: session.as,
     spaceIdentity: session.spaceIdentity,
@@ -1793,7 +1978,18 @@ async function createRuntimeClient(
       ? {}
       : { serverExecution: SERVER_EXECUTION_FROM_ENV },
     ...extraOptions,
-  });
+  };
+}
+
+async function createRuntimeClient(
+  session: Session,
+  extraOptions: Partial<RuntimeClientOptions> = {},
+): Promise<RuntimeClient> {
+  const transport = await WebWorkerRuntimeTransport.connect();
+  const worker = await RuntimeClient.initialize(
+    transport,
+    await clientOptionsFor(session, extraOptions),
+  );
 
   await worker.synced(session.space);
   return worker;
