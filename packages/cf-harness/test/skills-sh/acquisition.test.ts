@@ -10,7 +10,10 @@ import { describe, it } from "@std/testing/bdd";
 import type { HarnessFetch } from "../../src/contracts/http-fetch.ts";
 import {
   acquireSkillsShPinnedSkill,
+  cacheHarnessSkillsShAcquisitionClientFactory,
+  createHarnessSkillsShAcquisitionClientFactory,
   SKILLS_SH_MAX_SKILL_BYTES,
+  SkillsShAcquisitionClient,
   SkillsShAcquisitionError,
 } from "../../src/skills-sh/acquisition.ts";
 import type { SkillsShPinnedAddress } from "../../src/skills-sh/pin.ts";
@@ -51,13 +54,15 @@ const fixtureFetch = (options: {
   tree?: unknown;
   treeUrl?: string;
   skillUrl?: string;
-  skillBody?: BodyInit;
+  skillBody?: BodyInit | null;
   skillStatus?: number;
 } = {}): { fetch: HarnessFetch; urls: string[] } => {
   const tree = options.tree ?? membraneTree;
   const treeUrl = options.treeUrl ?? MEMBRANE_TREE_URL;
   const skillUrl = options.skillUrl ?? MEMBRANE_SKILL_URL;
-  const skillBody = options.skillBody ?? "# Plaid\n";
+  const skillBody = options.skillBody === undefined
+    ? "# Plaid\n"
+    : options.skillBody;
   const urls: string[] = [];
   const fetch: HarnessFetch = (input) => {
     const url = String(input);
@@ -303,6 +308,23 @@ describe("skills.sh pinned acquisition", () => {
     expect(refusal.message).toContain("malformed tree entry");
   });
 
+  it("refuses unusable tree paths instead of treating them as absent", async () => {
+    const { fetch } = fixtureFetch({
+      tree: {
+        sha: MEMBRANE_SHA,
+        truncated: false,
+        tree: [{ path: "", mode: "100644", type: "blob" }],
+      },
+    });
+
+    const refusal = await refusalOf(
+      acquireSkillsShPinnedSkill(MEMBRANE_PIN, { fetch }),
+    );
+
+    expect(refusal.code).toBe("unparseable_response");
+    expect(refusal.message).toContain("malformed tree entry");
+  });
+
   it("refuses a candidate whose root SKILL.md is not a regular file", async () => {
     const { fetch } = fixtureFetch({
       tree: {
@@ -370,6 +392,32 @@ describe("skills.sh pinned acquisition", () => {
     expect(refusal.message).toContain("empty");
   });
 
+  it("refuses a response with no SKILL.md body as empty", async () => {
+    const { fetch } = fixtureFetch({ skillBody: null });
+
+    const refusal = await refusalOf(
+      acquireSkillsShPinnedSkill(MEMBRANE_PIN, { fetch }),
+    );
+
+    expect(refusal.code).toBe("invalid_skill_text");
+    expect(refusal.message).toContain("empty");
+  });
+
+  it("ignores empty stream chunks without changing the fetched bytes", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array());
+        controller.enqueue(new TextEncoder().encode("# Plaid\n"));
+        controller.close();
+      },
+    });
+    const { fetch } = fixtureFetch({ skillBody: body });
+
+    const acquired = await acquireSkillsShPinnedSkill(MEMBRANE_PIN, { fetch });
+
+    expect(acquired.text).toBe("# Plaid\n");
+  });
+
   it("refuses a SKILL.md that exceeds the byte cap while streaming", async () => {
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -386,6 +434,25 @@ describe("skills.sh pinned acquisition", () => {
 
     expect(refusal.code).toBe("skill_too_large");
     expect(refusal.message).toContain(String(SKILLS_SH_MAX_SKILL_BYTES));
+  });
+
+  it("keeps the size refusal when stream cancellation itself fails", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(SKILLS_SH_MAX_SKILL_BYTES + 1));
+      },
+      cancel() {
+        throw new Error("cleanup failed");
+      },
+    });
+    const { fetch } = fixtureFetch({ skillBody: body });
+
+    const refusal = await refusalOf(
+      acquireSkillsShPinnedSkill(MEMBRANE_PIN, { fetch }),
+    );
+
+    expect(refusal.code).toBe("skill_too_large");
+    expect(refusal.message).not.toContain("cleanup failed");
   });
 
   it("refuses a raw-content HTTP error", async () => {
@@ -439,6 +506,19 @@ describe("skills.sh pinned acquisition", () => {
     expect(urls).toEqual([]);
   });
 
+  it("refuses a pin whose discovery id cannot be parsed before fetching", async () => {
+    const { fetch, urls } = fixtureFetch();
+
+    const refusal = await refusalOf(
+      acquireSkillsShPinnedSkill({ ...MEMBRANE_PIN, id: "not-an-id" }, {
+        fetch,
+      }),
+    );
+
+    expect(refusal.code).toBe("invalid_pin");
+    expect(urls).toEqual([]);
+  });
+
   it("refuses pin fields that disagree with the validated discovery id", async () => {
     const { fetch, urls } = fixtureFetch();
 
@@ -450,5 +530,33 @@ describe("skills.sh pinned acquisition", () => {
 
     expect(refusal.code).toBe("invalid_pin");
     expect(urls).toEqual([]);
+  });
+
+  it("builds acquisition clients with either injected or default fetch", async () => {
+    const injectedFactory = createHarnessSkillsShAcquisitionClientFactory(
+      fixtureFetch().fetch,
+    );
+    const defaultFactory = createHarnessSkillsShAcquisitionClientFactory();
+
+    expect(await injectedFactory()).toBeInstanceOf(SkillsShAcquisitionClient);
+    expect(await defaultFactory()).toBeInstanceOf(SkillsShAcquisitionClient);
+  });
+
+  it("forgets a rejected client construction so a later call can recover", async () => {
+    const client = new SkillsShAcquisitionClient({
+      fetch: fixtureFetch().fetch,
+    });
+    let attempts = 0;
+    const factory = cacheHarnessSkillsShAcquisitionClientFactory(() => {
+      attempts += 1;
+      return attempts === 1
+        ? Promise.reject(new Error("first construction failed"))
+        : Promise.resolve(client);
+    });
+
+    await expect(factory()).rejects.toThrow("first construction failed");
+    expect(await factory()).toBe(client);
+    expect(await factory()).toBe(client);
+    expect(attempts).toBe(2);
   });
 });

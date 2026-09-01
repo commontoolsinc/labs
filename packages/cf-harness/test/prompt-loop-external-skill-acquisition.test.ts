@@ -253,11 +253,33 @@ describe("prompt-loop external skill acquisition", () => {
           expect(toolMessage?.content).toContain(
             "skill-context handles can be consumed only by delegate_task skillHandle",
           );
+          turn = toolCallTurn("call-array-misuse", "run_pattern", {
+            patternId: "unused",
+            hashtags: [handleToken],
+          });
+        } else if (index === 5) {
+          const toolMessage = view.messages.findLast((message) =>
+            message.role === "tool"
+          );
+          expect(toolMessage?.content).toContain(
+            "skill-context handles can be consumed only by delegate_task skillHandle",
+          );
+          turn = toolCallTurn("call-key-misuse", "run_pattern", {
+            patternId: "unused",
+            inputs: { [handleToken]: "ordinary value" },
+          });
+        } else if (index === 6) {
+          const toolMessage = view.messages.findLast((message) =>
+            message.role === "tool"
+          );
+          expect(toolMessage?.content).toContain(
+            "skill-context handles can be consumed only by delegate_task skillHandle",
+          );
           turn = toolCallTurn("call-delegate", "delegate_task", {
             goal: "Use the acquired instructions.",
             skillHandle: handleToken,
           });
-        } else if (index === 5) {
+        } else if (index === 7) {
           const childText = view.messages.map((message) => message.content)
             .join(
               "\n",
@@ -267,7 +289,7 @@ describe("prompt-loop external skill acquisition", () => {
             `<skill_context source="handle:${handleToken}">`,
           );
           turn = assistantTurn(`Attempted echo:\n${SKILL_TEXT}`);
-        } else if (index === 6) {
+        } else if (index === 8) {
           const parentText = view.messages.map((message) => message.content)
             .join(
               "\n",
@@ -292,6 +314,7 @@ describe("prompt-loop external skill acquisition", () => {
           "read_file",
           "describe_handle",
           "delegate_task",
+          "run_pattern",
         ],
       });
 
@@ -303,8 +326,8 @@ describe("prompt-loop external skill acquisition", () => {
         "Parent completed without seeing skill text.",
       );
       expect(result.finalAssistantText).not.toContain(CANARY);
-      expect(requestBodies).toHaveLength(7);
-      for (const index of [0, 1, 2, 3, 4, 6]) {
+      expect(requestBodies).toHaveLength(9);
+      for (const index of [0, 1, 2, 3, 4, 5, 6, 8]) {
         const parentText = chatViewOfRequest(requestBodies[index]).messages
           .map((message) => message.content).join("\n");
         expect(parentText).not.toContain(CANARY);

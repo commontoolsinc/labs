@@ -4089,6 +4089,39 @@ Deno.test("formatCfHarnessTranscriptEvent formats assistant tool calls and tool 
         role: "assistant",
         content: "",
         toolCalls: [{
+          id: "call-acquire-1",
+          type: "function",
+          function: {
+            name: "acquire_skill",
+            arguments: '{"id":"membranedev/application-skills/plaid"}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: acquire_skill(id="membranedev/application-skills/plaid")\n',
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-acquire-2",
+          type: "function",
+          function: { name: "acquire_skill", arguments: '{"id":42}' },
+        }],
+      },
+      transcript: [],
+    }),
+    "assistant -> tools: acquire_skill\n",
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
           id: "call-skills-1",
           type: "function",
           function: {

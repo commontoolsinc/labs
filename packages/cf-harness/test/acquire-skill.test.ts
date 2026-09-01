@@ -15,8 +15,13 @@ import { normalize } from "@std/path/posix";
 import { describe, it } from "@std/testing/bdd";
 
 import { CfHarnessEngine } from "../src/engine.ts";
+import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { resolveHandleToken } from "../src/handle-table.ts";
-import { SkillsShAcquisitionClient } from "../src/skills-sh/acquisition.ts";
+import {
+  SkillsShAcquisitionClient,
+  SkillsShAcquisitionError,
+} from "../src/skills-sh/acquisition.ts";
+import { SkillsShPinResolutionError } from "../src/skills-sh/pin.ts";
 import { SkillsShSearchClient } from "../src/skills-sh/search-client.ts";
 import type {
   SandboxCommandRequest,
@@ -30,6 +35,7 @@ import {
   type AcquireSkillToolLoadedOutput,
   type AcquireSkillToolRefusedOutput,
 } from "../src/tools/acquire-skill.ts";
+import type { HarnessToolContext } from "../src/tools/types.ts";
 import buildgreatTree from "./skills-sh/fixtures/buildgreatproducts-plaid-002ea.tree.json" with {
   type: "json",
 };
@@ -195,10 +201,40 @@ const createEngine = (
       Promise.resolve(new SkillsShAcquisitionClient({ fetch })),
   });
 
+const invokeWith = (
+  overrides: Partial<HarnessToolContext>,
+): ReturnType<typeof acquireSkillTool.invoke> =>
+  acquireSkillTool.invoke({
+    runId: "acquire-skill-unit",
+    now: () => RECEIVED_AT,
+    nextOutputId: (toolId: string) =>
+      createToolOutputId("acquire-skill-unit", toolId, 1),
+    ...overrides,
+  } as unknown as HarnessToolContext, { id: MEMBRANE_ID });
+
+const unitPin = {
+  id: MEMBRANE_ID,
+  owner: "membranedev",
+  repo: "application-skills",
+  slug: "plaid",
+  commitSha: MEMBRANE_SHA,
+  resolvedAt: RECEIVED_AT,
+};
+
+const unitAcquired = {
+  pin: unitPin,
+  skillRoot: "skills/plaid",
+  sourceUrl: MEMBRANE_SKILL_URL,
+  text: MEMBRANE_SKILL_TEXT,
+  valueDigest: MEMBRANE_DIGEST,
+  loadedPaths: ["SKILL.md"] as const,
+};
+
 describe("acquire-skill", () => {
   it("writes exact fetched text behind a handle with fetch provenance", async () => {
     await withFabric(async ({ pieces }) => {
       const engine = createEngine(pieces);
+      expect(engine.skillsShAcquisitionClientFactory).toBeDefined();
 
       const searched = await engine.invokeBuiltinTool("search_skills", {
         query: "plaid",
@@ -322,6 +358,123 @@ describe("acquire-skill", () => {
       });
       expect(result.output).toMatchObject({ status: "error", message });
     }
+  });
+
+  it("requires the capability-typed handle mint at the write boundary", async () => {
+    const output = await invokeWith({
+      getSkillsShAcquisitionClient: () =>
+        Promise.resolve({} as SkillsShAcquisitionClient),
+      getFabricSession: () => Promise.reject(new Error("unused")),
+    });
+
+    expect(output).toMatchObject({
+      status: "error",
+      message: "acquire_skill requires the host skill-context handle mint",
+    });
+  });
+
+  it("returns a named error when the durable write fails", async () => {
+    const cell = {
+      getAsNormalizedFullLink: () => ({
+        id: "of:unit-cell",
+        space: "did:key:unit",
+        scope: "space",
+        path: [],
+      }),
+      withTx: () => ({ set: () => undefined }),
+    };
+    const runtime = {
+      getCell: () => cell,
+      editWithRetry: (write: (tx: object) => void) => {
+        write({ markCfcRelevant: () => undefined });
+        return Promise.resolve({ error: new Error("write failed") });
+      },
+    };
+    const output = await invokeWith({
+      getSkillsShAcquisitionClient: () =>
+        Promise.resolve({
+          resolvePin: () => Promise.resolve(unitPin),
+          acquirePin: () => Promise.resolve(unitAcquired),
+        } as unknown as SkillsShAcquisitionClient),
+      getFabricSession: () =>
+        Promise.resolve({
+          pieces: {
+            runtime,
+            getSpace: () => "did:key:unit",
+          },
+        } as never),
+      mintSkillContextHandle: () => Promise.resolve("cfh:a:unit1"),
+    });
+
+    expect(output).toMatchObject({
+      status: "error",
+      message: "acquire_skill could not write the skill handle: write failed",
+    });
+  });
+
+  it("classifies acquisition transport failures as operational errors", async () => {
+    const output = await invokeWith({
+      getSkillsShAcquisitionClient: () =>
+        Promise.resolve({
+          resolvePin: () => Promise.resolve(unitPin),
+          acquirePin: () =>
+            Promise.reject(
+              new SkillsShAcquisitionError("http_error", "GitHub answered 503"),
+            ),
+        } as unknown as SkillsShAcquisitionClient),
+      getFabricSession: () => Promise.reject(new Error("unused")),
+      mintSkillContextHandle: () => Promise.resolve("cfh:a:unit1"),
+    });
+
+    expect(output).toMatchObject({
+      status: "error",
+      message: "GitHub answered 503",
+    });
+  });
+
+  it("classifies pin failures without retrying around their reason", async () => {
+    const cases = [
+      {
+        error: new SkillsShPinResolutionError(
+          "request_failed",
+          "GitHub could not be reached",
+        ),
+        expected: { status: "error", message: "GitHub could not be reached" },
+      },
+      {
+        error: new SkillsShPinResolutionError("invalid_hit", "invalid id"),
+        expected: {
+          status: "refused",
+          reason: { code: "invalid_hit", message: "invalid id" },
+        },
+      },
+    ] as const;
+
+    for (const { error, expected } of cases) {
+      const output = await invokeWith({
+        getSkillsShAcquisitionClient: () =>
+          Promise.resolve({
+            resolvePin: () => Promise.reject(error),
+          } as unknown as SkillsShAcquisitionClient),
+        getFabricSession: () => Promise.reject(new Error("unused")),
+        mintSkillContextHandle: () => Promise.resolve("cfh:a:unit1"),
+      });
+      expect(output).toMatchObject(expected);
+    }
+  });
+
+  it("sanitizes an unexpected acquisition failure", async () => {
+    const output = await invokeWith({
+      getSkillsShAcquisitionClient: () =>
+        Promise.reject(new Error("unexpected\u001b]8;;bad\u0007failure")),
+      getFabricSession: () => Promise.reject(new Error("unused")),
+      mintSkillContextHandle: () => Promise.resolve("cfh:a:unit1"),
+    });
+
+    expect(output).toMatchObject({
+      status: "error",
+      message: "acquire_skill failed: unexpectedfailure",
+    });
   });
 
   it("states the handle, refusal, and no-grant boundaries in its prompt", () => {

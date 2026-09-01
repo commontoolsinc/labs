@@ -118,6 +118,7 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
         const cell = runtime.getCell(space, "ingest-a", undefined, tx);
         const id = cell.getAsNormalizedFullLink().id;
         stampExternalIngest(tx, meta(id, "sha256:payload-1"));
+        stampExternalIngest(tx, meta(id, "sha256:ignored-second-stamp"));
         tx.writeOrThrow({ space, scope: "space", id, path: ["value"] }, {
           hello: "world",
         });
@@ -148,6 +149,10 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
         stampExternalFetchIngest(
           tx,
           fetchMeta(id, "sha256:fetched-payload"),
+        );
+        stampExternalFetchIngest(
+          tx,
+          fetchMeta(id, "sha256:ignored-second-stamp"),
         );
         tx.writeOrThrow(
           { space, scope: "space", id, path: ["value"] },
