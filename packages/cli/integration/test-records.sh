@@ -105,28 +105,6 @@ cf_test_step_close() {
   CF_TEST_STEP_START_MS=""
 }
 
-# Records the phase that just finished as its own step, and starts the
-# next. This is the marker for a script whose phase markers trail their
-# work rather than leading it, where `cf_test_step_begin`'s lead it. What
-# that costs is failure attribution: a phase that fails never reaches its
-# marker, so the failure is carried by the script's own record rather than
-# by a step. Moving a script's markers ahead of their phases is what buys
-# that back, and is a change to the script rather than to this file.
-cf_test_step_done() {
-  if [ -z "${CF_TEST_RECORDS_DIR:-}" ]; then
-    return 0
-  fi
-  local end_ms
-  end_ms=$(cf_test_now_ms || echo 0)
-  local since="${CF_TEST_STEP_START_MS:-}"
-  if [ -z "$since" ]; then
-    since="$CF_TEST_RECORD_START_MS"
-  fi
-  cf_test_record_line "$CF_TEST_RECORD_NAME $1" "pass" $((end_ms - since))
-  CF_TEST_STEP_START_MS="$end_ms"
-  CF_TEST_STEP_NAME=""
-}
-
 # Records the whole script (or its dispatched section) as one test, from
 # start to exit.
 cf_test_record_script() {
