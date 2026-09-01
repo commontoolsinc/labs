@@ -167,7 +167,9 @@ What works today:
   snapshots, and tool outputs, plus explicit skill registry and activation
   artifacts
 - provider-neutral run-report model-attempt diagnostics, one record per attempt,
-  naming the provider and the API operation that served it
+  naming the provider and the API operation that served it, and timing it twice
+  — `durationMs` to the response headers, `responseCompleteDurationMs` to the
+  end of the body or stream, which is the model's own working time
 - provider-reported per-turn token usage in run reports, with aggregate input,
   cached-input, cache-write, output, reasoning, and total tokens surfaced in
   operator and batch results
