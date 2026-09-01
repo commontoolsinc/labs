@@ -3,7 +3,7 @@
  * The adapter takes hooks structurally, so React stays a guest dependency.
  */
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 import {

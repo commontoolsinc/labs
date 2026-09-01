@@ -32,10 +32,7 @@
  */
 
 import type { FabricValue } from "@commonfabric/api";
-import {
-  isValidFabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import { isValidFabricValue, valueEqual } from "@commonfabric/data-model";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isLink } from "@commonfabric/runner";

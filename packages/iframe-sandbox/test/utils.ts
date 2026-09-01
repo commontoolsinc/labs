@@ -1,4 +1,4 @@
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import { defer } from "@commonfabric/utils/defer";
 
 import type {

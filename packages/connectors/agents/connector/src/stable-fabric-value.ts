@@ -1,4 +1,10 @@
 import {
+  fabricFromNativeValue,
+  FabricInstance,
+  type FabricPlainObject,
+  type FabricValue,
+} from "@commonfabric/data-model";
+import {
   ProblematicValue,
   UnknownValue,
 } from "@commonfabric/data-model/codec-common";
@@ -7,12 +13,6 @@ import {
   FabricError,
   FabricLink,
 } from "@commonfabric/data-model/fabric-instances";
-import {
-  fabricFromNativeValue,
-  FabricInstance,
-  type FabricPlainObject,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
 import { VALUE_TAGS } from "@commonfabric/data-model/VALUE_TAGS";
 import { tagFromNativeValue } from "@commonfabric/data-model/native-type-tags";
 import {

@@ -2,15 +2,15 @@ import type { CfcAtom } from "@commonfabric/api/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
 import type { Schema } from "@commonfabric/api/schema";
 import {
+  FabricInstance,
+  FabricPrimitive,
+  type FabricValue,
+} from "@commonfabric/data-model";
+import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
 import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
-import {
-  FabricInstance,
-  FabricPrimitive,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
 import {
   internSchema,
   isNontrivialSchema,

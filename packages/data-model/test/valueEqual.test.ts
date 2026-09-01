@@ -21,7 +21,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { type FabricValue, valueEqual } from "@/fabric-value.ts";
+import { type FabricValue, valueEqual } from "@/index.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";

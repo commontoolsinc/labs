@@ -12,6 +12,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { internSchema } from "@commonfabric/data-model-schema";
+import type { FabricValue } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   FabricError,
@@ -21,7 +22,6 @@ import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   Entity,
   Revision,

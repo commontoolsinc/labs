@@ -14,9 +14,9 @@
  */
 
 import type { SchemaPathSelector } from "@commonfabric/api";
+import type { FabricValue } from "@commonfabric/data-model";
 import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 import { ExtendedStorageTransaction } from "../../src/storage/extended-storage-transaction.ts";

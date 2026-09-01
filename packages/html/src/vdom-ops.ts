@@ -5,7 +5,7 @@
  * on the main thread. They are batched and sent as a single message.
  */
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import type { CellRef } from "@commonfabric/runtime-client";
 
 /**

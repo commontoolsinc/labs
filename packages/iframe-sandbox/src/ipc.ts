@@ -1,6 +1,6 @@
 // Types used by the `common-iframe-sandbox` IPC.
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 
 // Diagram of the messages between the Host environment, the intermediary outer
 // frame, and the guest in the inner frame.

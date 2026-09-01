@@ -4,7 +4,7 @@ import {
   FabricInstance,
   FabricPrimitive,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model-schema";
 import {
   type FabricExecValue,

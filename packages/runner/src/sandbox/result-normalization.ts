@@ -1,13 +1,13 @@
+import {
+  fabricFromNativeValue,
+  type FabricValue,
+} from "@commonfabric/data-model";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
   FabricEpochNsec,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
-import {
-  fabricFromNativeValue,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
 
 import { isReactive } from "../builder/types.ts";
 import { hasEncodableForm } from "../encodable-form.ts";

@@ -3,12 +3,9 @@ import type {
   JSONSchema,
   JSONSchemaObj,
 } from "@commonfabric/api";
+import { type FabricValue, valueEqual } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { internSchema } from "@commonfabric/data-model-schema";
-import {
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { getPatternEnvironment } from "../builder/env.ts";

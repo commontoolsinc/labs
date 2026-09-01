@@ -1,4 +1,4 @@
-import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
+import { FabricPrimitive } from "@commonfabric/data-model";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isStreamValue } from "./builder/types.ts";

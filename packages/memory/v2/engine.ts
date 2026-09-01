@@ -1,6 +1,6 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
-import { valueEqual } from "@commonfabric/data-model/fabric-value";
+import { valueEqual } from "@commonfabric/data-model";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";

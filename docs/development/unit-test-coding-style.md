@@ -364,7 +364,7 @@ assert on _that_ result:
 
 ```ts
 import { expect } from "@std/expect";
-import { valueEqual } from "@commonfabric/data-model/fabric-value";
+import { valueEqual } from "@commonfabric/data-model";
 
 // Vacuous: asserts `Object.is(NaN, NaN)`, which holds regardless of
 // what `valueEqual()` does.

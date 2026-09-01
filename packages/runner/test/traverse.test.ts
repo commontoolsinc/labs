@@ -3,9 +3,9 @@ import { type CellScope, resolveScopeKey } from "@commonfabric/memory/v2";
 import { describe, it } from "@std/testing/bdd";
 
 import type { SchemaPathSelector } from "@commonfabric/api";
+import type { FabricValue } from "@commonfabric/data-model";
 import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   internPathSelector,
   isInternedSchema,

@@ -1,8 +1,8 @@
+import type { FabricValue } from "@commonfabric/data-model";
 import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 

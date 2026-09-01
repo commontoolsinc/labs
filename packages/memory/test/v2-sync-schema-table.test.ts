@@ -5,6 +5,10 @@ import {
   assertStrictEquals,
   assertThrows,
 } from "@std/assert";
+import type {
+  FabricValue,
+  MutableFabricPlainObjectLayer,
+} from "@commonfabric/data-model";
 import {
   isLinkRef,
   LINK_V1_TAG,
@@ -13,10 +17,6 @@ import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import type {
-  FabricValue,
-  MutableFabricPlainObjectLayer,
-} from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model-schema";
 import type { JSONSchema } from "@commonfabric/api";
 import {

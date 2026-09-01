@@ -42,12 +42,12 @@ import {
 import { waveRunContextOf, waveSettlementOf } from "../executor/wave.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
-import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
 import {
   fabricFromNativeValue,
   type FabricValue,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
+import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
 import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import {
   columnDeclaresIfc,

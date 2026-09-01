@@ -40,9 +40,9 @@
 
 import { BenchWorker } from "@commonfabric/test-support/bench-worker";
 
+import type { FabricValue } from "@commonfabric/data-model";
 import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { convertCellsToLinks, KeepAsCell } from "@commonfabric/runner";
 import { redactSigilCfcLabelViewsForDisplay } from "@commonfabric/runner/cfc";
 

@@ -1,8 +1,8 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import type { FabricValue } from "@commonfabric/data-model";
 import { FabricMap } from "@commonfabric/data-model/fabric-instances";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 
 import {

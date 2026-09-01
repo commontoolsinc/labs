@@ -3,14 +3,14 @@ import {
   type JSONSchemaObj,
   type JSONValue,
 } from "@commonfabric/api";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   cloneIfNecessary,
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
   shallowMutableClone,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   internSchema,
   isNontrivialSchema,

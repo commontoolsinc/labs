@@ -1,10 +1,10 @@
+import { fabricFromNativeValue } from "@commonfabric/data-model";
 import {
   getModernCellRepConfig,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
-import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
 import {

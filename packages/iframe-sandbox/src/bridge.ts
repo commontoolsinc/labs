@@ -3,7 +3,7 @@
  * Only resources named by the embedding host are reachable through the port.
  */
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import {
   fabricFromRealmValue,
   realmFromFabricValue,

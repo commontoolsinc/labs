@@ -1,6 +1,6 @@
 // Inline scheduler idempotency check tests.
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 
 import {
   captureTransactionWrites,

@@ -8,7 +8,7 @@ import type {
   State,
   URI,
 } from "@commonfabric/memory/interface";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import {
   createDefaultTraversalContext,
   ManagedStorageTransaction,
