@@ -824,3 +824,55 @@ describe("the two windows the context ages on", () => {
     );
   });
 });
+
+describe("a commit the window has already let go of", () => {
+  const OTHER = { k: "unit", s: "memory", n: "another test" };
+  const OTHER_KEY = testIdentityKey(OTHER);
+
+  /** Passes at `count` commits after `c0`, one after another. */
+  function moveOn(count: number): Observation[] {
+    return Array.from({ length: count }, (_, i) =>
+      saw("pass", {
+        commit: `c${i + 1}`,
+        startedAt: `2026-08-20T${String(i + 1).padStart(2, "0")}:00:00.000Z`,
+      }));
+  }
+
+  it("remembers nothing new there about a test that has not failed", () => {
+    // The commit is held only for the test that failed at it. Another
+    // test arriving there later is not what it is being held for, and
+    // remembering it would put the whole corpus back at that commit.
+    const context = emptyContext();
+    foldObservations([saw("fail", { commit: "c0" })], { context });
+    foldObservations(moveOn(FLAKE_COMMIT_REACH + 1), { context });
+
+    const held = context.outcomesAtCommit.get("c0")!;
+    expect([...held.identities.keys()]).toEqual([KEY]);
+    foldObservations([
+      saw("pass", {
+        test: OTHER,
+        commit: "c0",
+        startedAt: "2026-08-20T20:00:00.000Z",
+      }),
+    ], { context });
+    expect([...held.identities.keys()]).toEqual([KEY]);
+    expect(held.identities.has(OTHER_KEY)).toBe(false);
+  });
+
+  it("lets go of a commit the window names but no longer holds", () => {
+    // A stored window can name a commit whose outcomes did not survive
+    // being read, so the walk that evicts has to tolerate one that is
+    // already gone rather than assume the two agree.
+    const context = parseContext({
+      outcomesAtCommit: [],
+      recentCommits: ["gone"],
+      mainAtCommit: [],
+      credited: [],
+      failures: [],
+    });
+    expect(context.recentCommits).toEqual(["gone"]);
+    foldObservations(moveOn(FLAKE_COMMIT_REACH), { context });
+    expect(context.recentCommits).not.toContain("gone");
+    expect(context.outcomesAtCommit.has("gone")).toBe(false);
+  });
+});
