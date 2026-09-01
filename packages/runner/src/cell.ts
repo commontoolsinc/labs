@@ -4326,7 +4326,11 @@ function convertOneToLinks(
       }),
     ));
   } finally {
-    ancestors.pop();
+    // Named rather than a bare pop: this walk is the only thing pushing onto
+    // `ancestors`, so what comes off has to be what this frame put on, and a
+    // stack answers by position -- one unbalanced pair and every depth after
+    // it is wrong by one, silently.
+    ancestors.popExpect(original);
   }
 }
 
