@@ -30,7 +30,7 @@ const TALL = IndexTrackingStack.ADD_INDEX_AT + 5;
  * threshold.
  */
 function stackOf(height: number, values: readonly object[]) {
-  const stack = new IndexTrackingStack();
+  const stack = new IndexTrackingStack<object>();
 
   for (const filler of objects(height)) stack.push(filler);
   for (const value of values) stack.push(value);
@@ -41,11 +41,11 @@ function stackOf(height: number, values: readonly object[]) {
 describe("IndexTrackingStack", () => {
   describe("depth", () => {
     it("is zero for a fresh stack", () => {
-      expect(new IndexTrackingStack().depth).toBe(0);
+      expect(new IndexTrackingStack<object>().depth).toBe(0);
     });
 
     it("counts what has been pushed and not popped", () => {
-      const stack = new IndexTrackingStack();
+      const stack = new IndexTrackingStack<object>();
 
       for (const value of objects(TALL)) stack.push(value);
       expect(stack.depth).toBe(TALL);
@@ -55,7 +55,7 @@ describe("IndexTrackingStack", () => {
     });
 
     it("stays at zero when an empty stack is popped", () => {
-      const stack = new IndexTrackingStack();
+      const stack = new IndexTrackingStack<object>();
 
       stack.popElseUndefined();
 
@@ -65,12 +65,12 @@ describe("IndexTrackingStack", () => {
 
   describe("pop()", () => {
     it("throws for an empty stack", () => {
-      expect(() => new IndexTrackingStack().pop()).toThrow();
+      expect(() => new IndexTrackingStack<object>().pop()).toThrow();
     });
 
     it("returns the objects it pops, topmost first", () => {
       const held = objects(3);
-      const stack = new IndexTrackingStack();
+      const stack = new IndexTrackingStack<object>();
 
       for (const value of held) stack.push(value);
 
@@ -92,12 +92,13 @@ describe("IndexTrackingStack", () => {
 
   describe("popElseUndefined()", () => {
     it("returns `undefined` for an empty stack", () => {
-      expect(new IndexTrackingStack().popElseUndefined()).toBeUndefined();
+      expect(new IndexTrackingStack<object>().popElseUndefined())
+        .toBeUndefined();
     });
 
     it("returns the objects it pops, topmost first", () => {
       const held = objects(2);
-      const stack = new IndexTrackingStack();
+      const stack = new IndexTrackingStack<object>();
 
       for (const value of held) stack.push(value);
 
@@ -120,7 +121,7 @@ describe("IndexTrackingStack", () => {
   describe("popExpect()", () => {
     it("pops the object it was told to expect", () => {
       const held = objects(2);
-      const stack = new IndexTrackingStack();
+      const stack = new IndexTrackingStack<object>();
 
       for (const value of held) stack.push(value);
       stack.popExpect(held[1]!);
@@ -131,7 +132,7 @@ describe("IndexTrackingStack", () => {
 
     it("throws for an object that is in the stack but not on top", () => {
       const held = objects(2);
-      const stack = new IndexTrackingStack();
+      const stack = new IndexTrackingStack<object>();
 
       for (const value of held) stack.push(value);
 
@@ -139,7 +140,7 @@ describe("IndexTrackingStack", () => {
     });
 
     it("throws for an object the stack does not hold", () => {
-      const stack = new IndexTrackingStack();
+      const stack = new IndexTrackingStack<object>();
 
       stack.push({});
 
@@ -147,12 +148,12 @@ describe("IndexTrackingStack", () => {
     });
 
     it("throws for an empty stack", () => {
-      expect(() => new IndexTrackingStack().popExpect({})).toThrow();
+      expect(() => new IndexTrackingStack<object>().popExpect({})).toThrow();
     });
 
     it("leaves the stack as it was when it throws", () => {
       const held = objects(2);
-      const stack = new IndexTrackingStack();
+      const stack = new IndexTrackingStack<object>();
 
       for (const value of held) stack.push(value);
       expect(() => stack.popExpect(held[0]!)).toThrow();
@@ -267,13 +268,105 @@ describe("IndexTrackingStack", () => {
     }
   });
 
+  describe("a domain holding `undefined` and `NaN`", () => {
+    // What a parametric stack costs: `undefined` stops being a signal, and the
+    // scan and the index stop agreeing on their own. Each case runs on both
+    // sides of the threshold, since only one of the two is at issue in each.
+    for (
+      const [where, height] of [["scanning", 0], ["indexed", TALL]] as const
+    ) {
+      describe(where, () => {
+        /** A stack of the padded height, then the given values. */
+        function stackOfAny(values: readonly unknown[]) {
+          const stack = new IndexTrackingStack<unknown>();
+
+          for (const filler of objects(height)) stack.push(filler);
+          for (const value of values) stack.push(value);
+
+          return stack;
+        }
+
+        it("finds `undefined` where it was pushed", () => {
+          const stack = stackOfAny([undefined, {}, undefined]);
+
+          expect(stack.indexOf(undefined)).toBe(height);
+          expect(stack.lastIndexOf(undefined)).toBe(height + 2);
+        });
+
+        it("finds `NaN`, which strict comparison never would", () => {
+          const stack = stackOfAny([NaN, {}, NaN]);
+
+          expect(stack.indexOf(NaN)).toBe(height);
+          expect(stack.lastIndexOf(NaN)).toBe(height + 2);
+        });
+
+        it("treats `-0` and `0` as one value, as a `Map` key would", () => {
+          const stack = stackOfAny([-0]);
+
+          expect(stack.indexOf(0)).toBe(height);
+          expect(stack.lastIndexOf(-0)).toBe(height);
+        });
+
+        it("pops an expected `undefined` off the top", () => {
+          const stack = stackOfAny([undefined]);
+
+          stack.popExpect(undefined);
+
+          expect(stack.depth).toBe(height);
+        });
+
+        it("pops an expected `NaN` off the top", () => {
+          const stack = stackOfAny([NaN]);
+
+          stack.popExpect(NaN);
+
+          expect(stack.depth).toBe(height);
+        });
+      });
+    }
+
+    it("refuses `popExpect(undefined)` on an empty stack", () => {
+      // The trap the type parameter opens: reading past the bottom of an empty
+      // stack yields `undefined`, which would meet the expectation.
+      expect(() => new IndexTrackingStack<unknown>().popExpect(undefined))
+        .toThrow();
+    });
+
+    it("refuses `pop()` on an empty stack whose domain holds `undefined`", () => {
+      expect(() => new IndexTrackingStack<unknown>().pop()).toThrow();
+    });
+
+    it("pops an `undefined` that is really there", () => {
+      const stack = new IndexTrackingStack<unknown>();
+
+      stack.push(undefined);
+
+      expect(stack.pop()).toBeUndefined();
+      expect(stack.depth).toBe(0);
+    });
+
+    it("leaves `depth` to tell an empty stack from a held `undefined`", () => {
+      // `popElseUndefined()` cannot, which is what its doc says; this is what
+      // a caller uses instead.
+      const held = new IndexTrackingStack<unknown>();
+      const empty = new IndexTrackingStack<unknown>();
+
+      held.push(undefined);
+
+      expect(held.popElseUndefined()).toBeUndefined();
+      expect(empty.popElseUndefined()).toBeUndefined();
+      expect(held.depth).toBe(0);
+      expect(empty.depth).toBe(0);
+    });
+  });
+
   describe("crossing the threshold", () => {
     it("answers the same after coming back down as a stack that never went up", () => {
       // The index outlives the height that built it, so from here on the two
       // implementations are being compared directly on the same question.
       const held = objects(4);
-      const climbed = new IndexTrackingStack();
-      const flat = new IndexTrackingStack();
+      const climbed = new IndexTrackingStack<object>();
+      const flat = new IndexTrackingStack<object>();
 
       for (const filler of objects(TALL)) climbed.push(filler);
       for (let at = 0; at < TALL; at++) climbed.pop();
@@ -294,7 +387,7 @@ describe("IndexTrackingStack", () => {
       // is used afterwards is the scan -- over a stack that a `Map` was
       // tracking a moment ago, and has to have stopped tracking cleanly.
       const twice = {};
-      const stack = new IndexTrackingStack();
+      const stack = new IndexTrackingStack<object>();
 
       stack.push(twice);
       stack.push(twice);
@@ -311,7 +404,7 @@ describe("IndexTrackingStack", () => {
       // A rebuild from a stack that has held an index before is a different
       // path from the first build, and it has to arrive at the same answers.
       const twice = {};
-      const stack = new IndexTrackingStack();
+      const stack = new IndexTrackingStack<object>();
 
       for (const filler of objects(TALL)) stack.push(filler);
       while (stack.depth > 0) stack.pop();
@@ -329,7 +422,7 @@ describe("IndexTrackingStack", () => {
       // already holding two positions is the case where that grouping has to
       // produce a pair rather than overwrite.
       const twice = {};
-      const stack = new IndexTrackingStack();
+      const stack = new IndexTrackingStack<object>();
 
       stack.push(twice);
       stack.push(twice);
@@ -343,7 +436,7 @@ describe("IndexTrackingStack", () => {
       // The index is built from the stack as it stands, so what was pushed
       // before the crossing has to arrive in it.
       const early = {};
-      const stack = new IndexTrackingStack();
+      const stack = new IndexTrackingStack<object>();
 
       stack.push(early);
       for (const filler of objects(TALL)) stack.push(filler);

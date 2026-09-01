@@ -102,8 +102,8 @@ const STATES = [
 ] as const;
 
 /** A stack in the given state, ready for a batch to be timed against it. */
-function stackIn(state: typeof STATES[number]): IndexTrackingStack {
-  const stack = new IndexTrackingStack();
+function stackIn(state: typeof STATES[number]): IndexTrackingStack<object> {
+  const stack = new IndexTrackingStack<object>();
 
   for (const value of objects(state.climb)) stack.push(value);
   while (stack.depth > state.settle) stack.pop();
@@ -112,8 +112,8 @@ function stackIn(state: typeof STATES[number]): IndexTrackingStack {
 }
 
 /** A pool of stacks, each brought to the given state. */
-function poolIn(state: typeof STATES[number]): IndexTrackingStack[] {
-  const out: IndexTrackingStack[] = [];
+function poolIn(state: typeof STATES[number]): IndexTrackingStack<object>[] {
+  const out: IndexTrackingStack<object>[] = [];
 
   for (let at = 0; at < POOL; at++) out.push(stackIn(state));
 
@@ -158,7 +158,7 @@ for (const band of BANDS) {
     group: "oscillating",
     baseline: band.name === "below the threshold",
   }, (b) => {
-    const stack = new IndexTrackingStack();
+    const stack = new IndexTrackingStack<object>();
     const batch = objects(band.ceiling);
 
     for (const value of batch.slice(0, band.floor)) stack.push(value);
@@ -209,11 +209,11 @@ const LOOKUP_SUBJECTS = [
  */
 function lookupPool(
   subject: typeof LOOKUP_SUBJECTS[number],
-): { stack: IndexTrackingStack; bottom: object }[] {
-  const out: { stack: IndexTrackingStack; bottom: object }[] = [];
+): { stack: IndexTrackingStack<object>; bottom: object }[] {
+  const out: { stack: IndexTrackingStack<object>; bottom: object }[] = [];
 
   for (let at = 0; at < POOL; at++) {
-    const stack = new IndexTrackingStack();
+    const stack = new IndexTrackingStack<object>();
     const held = objects(subject.climb);
 
     for (const value of held) stack.push(value);
