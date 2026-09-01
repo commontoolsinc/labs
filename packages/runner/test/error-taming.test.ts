@@ -16,7 +16,7 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { tagFromNativeValue } from "@commonfabric/data-model/native-type-tags";
+import { tagFromNativeValue } from "@commonfabric/data-model";
 import { restoreErrorIsError } from "../src/sandbox/error-taming.ts";
 import {
   ensureSESLockdown,

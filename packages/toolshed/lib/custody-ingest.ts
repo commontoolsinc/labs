@@ -2,7 +2,7 @@ import type { Cell, IExtendedStorageTransaction } from "@commonfabric/runner";
 import { stampExternalIngest } from "@commonfabric/runner/cfc";
 import { sha256 } from "@commonfabric/content-hash";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
-import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
+import { cloneIfNecessary } from "@commonfabric/data-model";
 import type { FabricValue } from "@commonfabric/api";
 
 /**

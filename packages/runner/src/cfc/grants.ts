@@ -1,4 +1,4 @@
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import type { URI } from "@commonfabric/memory/interface";

@@ -2,7 +2,7 @@ import type {
   MutableJSONSchema,
   MutableJSONSchemaObj,
 } from "@commonfabric/api";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import ts from "typescript";
 

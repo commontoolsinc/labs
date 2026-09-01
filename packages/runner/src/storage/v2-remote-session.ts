@@ -1,4 +1,4 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { type MemorySpace, type Signer } from "@commonfabric/memory/interface";
 import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";

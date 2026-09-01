@@ -1,4 +1,4 @@
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { deepFreeze } from "@commonfabric/data-model";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CellScope } from "../builder/types.ts";

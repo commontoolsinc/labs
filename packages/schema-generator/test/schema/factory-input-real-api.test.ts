@@ -15,13 +15,15 @@ const DATA_MODEL_API = join(REPO_ROOT, "packages/data-model/src/api.ts");
 
 /**
  * The workspace specifiers `packages/api/index.ts` names, resolved by hand
- * because this program compiles without an import map. `deep-freeze` is a
- * value module no part of the surface under test reaches, so a stub
- * declaration stands in for it; the fabric value declarations are part of that
- * surface, so they resolve to the real module.
+ * because this program compiles without an import map. The
+ * `@commonfabric/data-model` barrel is reached for one value, `deepFreeze()`
+ * in `packages/api/cfc.ts`, which no part of the surface under test calls, so
+ * a stub declaring just that function stands in for the whole module; the
+ * fabric value declarations are part of that surface, so they resolve to the
+ * real module.
  */
 const WORKSPACE_MODULES: ReadonlyMap<string, ts.ResolvedModuleFull> = new Map([
-  ["@commonfabric/data-model/deep-freeze", {
+  ["@commonfabric/data-model", {
     resolvedFileName: DEEP_FREEZE_STUB,
     extension: ts.Extension.Dts,
     isExternalLibraryImport: false,

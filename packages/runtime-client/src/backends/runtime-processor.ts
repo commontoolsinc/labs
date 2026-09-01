@@ -2,13 +2,11 @@ import {
   cloneIfNecessary,
   fabricFromNativeValue,
   type FabricValue,
+  toCompactDebugString,
+  toStructuredDebugValue,
 } from "@commonfabric/data-model";
 import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import {
-  toCompactDebugString,
-  toStructuredDebugValue,
-} from "@commonfabric/data-model/value-debug";
 import {
   type SiteTable,
   siteTableCause,

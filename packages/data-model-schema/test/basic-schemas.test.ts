@@ -3,9 +3,8 @@ import { expect } from "@std/expect";
 
 import type { JSONSchemaTypes } from "@commonfabric/api";
 
-import type { FabricValue } from "@commonfabric/data-model";
+import { type FabricValue, isDeepFrozen } from "@commonfabric/data-model";
 
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   FabricBytes,
   FabricEpochDay,

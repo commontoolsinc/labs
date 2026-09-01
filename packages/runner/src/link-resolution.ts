@@ -5,7 +5,7 @@ import {
 } from "./schema-ifc.ts";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { isObjectOrArray } from "@commonfabric/utils/types";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { toCompactDebugString } from "@commonfabric/data-model";
 import {
   linkPayloadAtProbe,
   linkProbeSubPath,

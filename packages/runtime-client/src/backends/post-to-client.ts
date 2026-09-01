@@ -1,5 +1,5 @@
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 import { type IPCRemotePost, NotificationType } from "@/protocol/mod.ts";
 import { describeFailure } from "@/shared/utils.ts";

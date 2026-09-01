@@ -1,6 +1,6 @@
 import { walk } from "@std/fs";
 import { fromFileUrl, join, relative } from "@std/path";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import { SOURCE_COMPILE_CACHE_RUNTIME_VERSION } from "./compile-cache-version.ts";
 

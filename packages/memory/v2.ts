@@ -1,4 +1,5 @@
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
+import { hashStringOf } from "@commonfabric/data-model";
 import {
   type EntityRef,
   getModernCellRepConfig,
@@ -9,7 +10,6 @@ import {
   jsonFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import { internPathSelector } from "@commonfabric/data-model-schema";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isObjectNotArray, unsafeObjectKeyIn } from "@commonfabric/utils/types";
 
 export const MEMORY_PROTOCOL = "memory" as const;

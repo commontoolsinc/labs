@@ -12,8 +12,8 @@
 
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { hashOf } from "@commonfabric/data-model";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   entityRefFrom,
   resetModernCellRepConfig,

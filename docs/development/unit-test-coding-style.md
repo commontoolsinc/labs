@@ -386,7 +386,7 @@ compare unequal. Compare through an accessor instead:
 
 ```ts
 import { expect } from "@std/expect";
-import { hashOf, hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashOf, hashStringOf } from "@commonfabric/data-model";
 
 const a = { donut: "cruller" };
 const b = { donut: "cruller" };

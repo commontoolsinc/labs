@@ -1,4 +1,4 @@
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import type { Program } from "@commonfabric/js-compiler";
 import { resolveImportSpecifier } from "@commonfabric/js-compiler/specifier";
 

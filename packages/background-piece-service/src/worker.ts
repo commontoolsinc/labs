@@ -363,7 +363,7 @@ export async function runPiece(data: RunData): Promise<void> {
 // arguments, which arrive live and in-process (the runtime's console capture
 // dispatches them without serialization): a logged `FabricSpecialObject`
 // renders as `{}`, silently. Wants a `FabricSpecialObject` test rendering
-// via `toCompactDebugString()` from `@commonfabric/data-model/value-debug`.
+// via `toCompactDebugString()` from `@commonfabric/data-model`.
 export function safeFormat(value: unknown): unknown {
   if (value && typeof value === "object") {
     try {
