@@ -85,14 +85,18 @@ describe("reading the shape of a bdd call", () => {
 });
 
 describe("what the wrappers do once a capture is installed", () => {
-  /** A capture that skips whatever a case names. */
+  /** A capture that skips what a case names, and says what it was asked. */
   function capturing(skips: readonly string[] = []) {
-    return () => ({
+    const asked: string[] = [];
+    const capture = () => ({
       names: new Map<string, string>(),
-      skipped: (_file: string | undefined, name: string) =>
-        skips.includes(name),
+      skipped: (_file: string | undefined, name: string) => {
+        asked.push(name);
+        return skips.includes(name);
+      },
       flush: () => {},
     });
+    return Object.assign(capture, { asked });
   }
 
   it("passes a call it cannot read straight through", () => {
@@ -106,28 +110,28 @@ describe("what the wrappers do once a capture is installed", () => {
     expect(seen).toEqual([["a name with no body"], [{ no: "name" }]]);
   });
 
-  it("replaces the body of a suite declared as one definition", () => {
+  it("encloses a leaf in the chain of a suite declared as one definition", () => {
     // The chain has to be pushed around the body wherever the body
     // sits, so a definition carrying its own `fn` has that field
-    // replaced rather than an argument.
-    let inner: string | undefined;
+    // replaced rather than an argument. What proves it is the name the
+    // capture is asked about: the leaf's own name means the body ran
+    // outside the chain, and the joined name means it ran inside.
+    const inner = capturing();
     const through = (definition: { name: string; fn: () => void }) => {
       definition.fn();
     };
-    const it_ = wrapIt(
-      (name: string) => {
-        inner = name;
-      },
-      () => {},
-      capturing(),
-    );
+    const it_ = wrapIt(() => {}, () => {}, inner);
     wrapDescribe(through, capturing())({
       name: "outer",
-      fn: () => it_("leaf"),
+      fn: () => it_("leaf", () => {}),
     });
-    // The leaf is named by the chain that encloses it, which is what
-    // the store speaks in.
-    expect(inner).toBe("leaf");
+    expect(inner.asked).toEqual(["outer > leaf"]);
+  });
+
+  it("names a leaf by itself where no suite encloses it", () => {
+    const alone = capturing();
+    wrapIt(() => {}, () => {}, alone)("bare leaf", () => {});
+    expect(alone.asked).toEqual(["bare leaf"]);
   });
 
   it("registers a listed leaf as ignored rather than running it", () => {
