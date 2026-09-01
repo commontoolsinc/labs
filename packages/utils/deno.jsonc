@@ -14,7 +14,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./ancestor-stack": "./src/ancestor-stack.ts",
+    "./index-tracking-stack": "./src/index-tracking-stack.ts",
     "./arrays": "./src/arrays.ts",
     "./async-local-store": "./src/async-local-store.ts",
     "./base64url": "./src/base64url.ts",

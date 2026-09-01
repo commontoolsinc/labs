@@ -1,4 +1,4 @@
-import { AncestorStack } from "@commonfabric/utils/ancestor-stack";
+import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 
 import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import type { CodecEngineConfig } from "./CodecEngineConfig.ts";
@@ -32,7 +32,7 @@ export abstract class BaseCodecAct<Encoded> {
    * The values whose walk is in progress, or `undefined` before the first one
    * is entered.
    */
-  #inProgress: AncestorStack | undefined;
+  #inProgress: IndexTrackingStack | undefined;
 
   /** Constructs an instance. */
   constructor(config: CodecEngineConfig<Encoded>, env: LiveEnvironment) {
@@ -50,12 +50,25 @@ export abstract class BaseCodecAct<Encoded> {
   }
 
   /**
-   * Leaves the value most recently entered, its walk being finished. Which
-   * value that is takes no saying: entering and leaving nest strictly, which
-   * is what the subclass contract asks for, so it is the deepest one.
+   * Leaves the given value, its walk being finished. It has to be the value
+   * most recently entered, entering and leaving nesting strictly, which is
+   * what the subclass contract asks of an implementation.
+   *
+   * @throws If the value is not the one most recently entered.
    */
-  leave(): void {
-    this.#inProgress?.pop();
+  leave(value: object): void {
+    const left = this.#inProgress?.pop();
+
+    // Shouldn't happen; a subclass that keeps the contract cannot get here. It
+    // is checked because the stack beneath answers by position: a walk that
+    // left a value it had not entered would go on answering, with every
+    // position after it wrong by one.
+    //
+    // One line, and ignored as one: the condition runs on every call, but a
+    // guard whose branch is never taken is reported as an uncovered line
+    // whole, so a block form would leave its closing brace uncovered too.
+    // deno-coverage-ignore
+    if (left !== value) throw new Error("Shouldn't happen: mismatched leave.");
   }
 
   /** The configuration of the engine that minted this act. */
@@ -85,9 +98,9 @@ export abstract class BaseCodecAct<Encoded> {
    *   progress.
    */
   protected tryEnter(value: object): boolean {
-    const inProgress = this.#inProgress ??= new AncestorStack();
+    const inProgress = this.#inProgress ??= new IndexTrackingStack();
 
-    if (inProgress.depthOf(value) >= 0) {
+    if (inProgress.indexOf(value) >= 0) {
       return false;
     }
 

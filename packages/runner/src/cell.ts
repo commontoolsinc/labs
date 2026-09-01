@@ -35,7 +35,7 @@ import {
   type StreamLinkRef,
 } from "@commonfabric/memory/v2";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
-import { AncestorStack } from "@commonfabric/utils/ancestor-stack";
+import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -4151,7 +4151,7 @@ export function convertCellsToLinks(
   value: CellLinkInput,
   options: CellLinkOptions = {},
 ): FabricValue {
-  return convertOneToLinks(value, options, [], new AncestorStack());
+  return convertOneToLinks(value, options, [], new IndexTrackingStack());
 }
 
 /**
@@ -4182,10 +4182,10 @@ function convertOneToLinks(
   value: CellLinkInput,
   options: CellLinkOptions,
   stack: string[],
-  ancestors: AncestorStack,
+  ancestors: IndexTrackingStack,
 ): FabricValue {
   if (isObjectOrArray(value)) {
-    const depth = ancestors.depthOf(value);
+    const depth = ancestors.indexOf(value);
 
     if (depth >= 0) {
       return deepFreeze(linkRefFrom({ path: stack.slice(0, depth) }));

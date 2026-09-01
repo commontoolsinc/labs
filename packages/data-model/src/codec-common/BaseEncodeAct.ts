@@ -177,7 +177,7 @@ export abstract class BaseEncodeAct<Encoded, SerializedForm = Encoded>
       // not to this node -- so an entry left behind would make a later visit
       // to the same value report a cycle that is not there.
       if (isObject) {
-        this.leave();
+        this.leave(value as object);
       }
     }
 
