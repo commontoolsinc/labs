@@ -3970,10 +3970,12 @@ function maybeConvertArrayPathToDataURILink(
 function containsCycle(value: unknown): boolean {
   // The containers the walk is inside, which is what a cycle leads back to.
   const ancestors = new IndexTrackingStack<object>();
+
   // Nodes already walked to completion without finding a cycle. Without this
   // memo the walk is exponential on shared acyclic references (a diamond per
   // level doubles the work), and candidate values are user-controlled.
   const completed = new Set<object>();
+
   const walk = (node: unknown): boolean => {
     if (
       node === null || typeof node !== "object" || isCell(node) ||
@@ -3981,22 +3983,29 @@ function containsCycle(value: unknown): boolean {
     ) {
       return false;
     }
+
     if (completed.has(node)) return false;
     if (ancestors.has(node)) return true;
+
     ancestors.push(node);
+
     // Every way out of the descent, the early return on a cycle included,
     // takes the node back off the stack.
     try {
       const values = Array.isArray(node) ? node : Object.values(node);
+
       for (const child of values) {
         if (walk(child)) return true;
       }
     } finally {
       ancestors.popExpect(node);
     }
+
     completed.add(node);
+
     return false;
   };
+
   return walk(value);
 }
 
