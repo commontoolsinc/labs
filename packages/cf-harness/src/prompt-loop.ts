@@ -125,6 +125,7 @@ import type {
 } from "./model/client.ts";
 import { OpenAICompatibleGatewayModelClient } from "./model/openai-compatible-gateway.ts";
 import { sumHarnessModelUsage } from "./model/usage.ts";
+import { collapseSupersededRunPatternDiagnostics } from "./run-pattern-diagnostic-collapse.ts";
 import {
   loadHarnessSkillContext,
   loadHarnessSkillContextFromText,
@@ -2953,6 +2954,9 @@ export class CfHarnessPromptLoop {
           );
           const toolMessage = invokedToolCall.toolMessage;
           transcript.push(toolMessage);
+          if (toolMessage.toolName === "run_pattern") {
+            collapseSupersededRunPatternDiagnostics(transcript);
+          }
           await this.engine.persistTranscript(transcript);
           reportTimeline.push(transcriptTimelineEntry(
             toolMessage,
