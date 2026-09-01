@@ -9,7 +9,7 @@ import { expect } from "@std/expect";
 
 import { type CellLinkInput, convertCellsToLinks } from "../src/cell.ts";
 
-describe("convertCellsToLinks() with a leaf value", () => {
+describe("convert-cells-to-links-leaves", () => {
   it("returns `null` for `null`", () => {
     expect(convertCellsToLinks(null)).toBe(null);
   });

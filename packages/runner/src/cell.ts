@@ -4213,16 +4213,19 @@ function convertOneToLinks(
     }
     case "function": {
       // No function has a fabric form, and none is a cell or a cell result
-      // either, so it is refused before the tests below. The refusal is the
-      // vetting's, so that it reads the same as everywhere else a value is
-      // vetted; the `throw` after it is for the type system, which cannot
-      // see that the assertion admits no function.
+      // either, so it is refused before the tests below. The type admits no
+      // function here either; this arm is for one that got past it. The
+      // refusal is the vetting's, so that it reads the same as everywhere
+      // else a value is vetted, and the assertion refuses every function, so
+      // the `throw` after it is unreachable: it is here so that the arm ends
+      // where it reads as ending, rather than as a `break` into the walk.
       assertValidFabricValueLayer(value);
       throw new Error("Unreachable: a function never passes vetting.");
     }
     default: {
-      // A primitive, which is a `FabricValue` as it stands.
-      return value as FabricValue;
+      // A primitive, which is a `FabricValue` by type. No primitive is vetted
+      // here, so a symbol the vetting would refuse is returned as given.
+      return value;
     }
   }
 
