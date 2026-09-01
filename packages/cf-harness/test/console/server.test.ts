@@ -4,11 +4,11 @@ import { join, resolve, toFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import {
-  consoleChatPolicy,
   ConsoleServer,
   createConsoleInteractiveServiceOptions,
   resolveConsoleConfig,
 } from "../../console/server.ts";
+import { harnessSessionChatPolicy } from "../../src/session-assembly.ts";
 import type { ConsoleSessionListing } from "../../console/sessions.ts";
 import {
   createHarnessChatEventEnvelope,
@@ -188,7 +188,7 @@ describe("console/server", () => {
 
   beforeEach(async () => {
     server = new ConsoleServer(
-      config(),
+      await config(),
       (onEvent) =>
         new HarnessInteractiveChatService({
           createPromptLoop: answeringLoop,
@@ -251,7 +251,7 @@ describe("console/server", () => {
       return Promise.resolve(response);
     };
     const indexed = new ConsoleServer(
-      configWithIndex(),
+      await configWithIndex(),
       (onEvent) =>
         new HarnessInteractiveChatService({
           createPromptLoop: answeringLoop,
@@ -286,7 +286,7 @@ describe("console/server", () => {
     recordCellLabels: (sessionId: string) => Promise<void>,
   ): Promise<{ server: ConsoleServer; stream: Response }> => {
     const held = new ConsoleServer(
-      config(),
+      await config(),
       (onEvent) =>
         new HarnessInteractiveChatService({
           createPromptLoop: answeringLoop,
@@ -315,7 +315,7 @@ describe("console/server", () => {
       prefix: "cf-harness-console-result-event-",
     });
     try {
-      const resultConfig = resolveConsoleConfig(
+      const resultConfig = await resolveConsoleConfig(
         [
           "--fabric-identity",
           "key.pkcs8",
@@ -373,8 +373,8 @@ describe("console/server", () => {
     });
 
   describe("console prompt configuration", () => {
-    it("threads configured skills.sh discovery into the run and policy", () => {
-      const resolved = resolveConsoleConfig(
+    it("threads configured skills.sh discovery into the run and policy", async () => {
+      const resolved = await resolveConsoleConfig(
         [
           "--fabric-identity",
           "key.pkcs8",
@@ -407,16 +407,21 @@ describe("console/server", () => {
       expect(serviceOptions.runIdForTurn?.("session-1", "turn-1")).toBe(
         "turn-1",
       );
-      expect(consoleChatPolicy(false, true).allowedToolIds).toContain(
-        "search_skills",
-      );
-      expect(consoleChatPolicy(false, false).allowedToolIds).not.toContain(
-        "search_skills",
-      );
+      // A registry and a fabric session back both skill tools, so a session
+      // configured for one offers acquisition as well as discovery.
+      const policy = harnessSessionChatPolicy(resolved);
+      expect(policy.allowedToolIds).toContain("search_skills");
+      expect(policy.allowedToolIds).toContain("acquire_skill");
     });
 
-    it("reads the skills.sh discovery registry from the environment", () => {
-      const resolved = resolveConsoleConfig(
+    it("withholds the skill tools from a session with no registry", async () => {
+      const policy = harnessSessionChatPolicy(await config());
+      expect(policy.allowedToolIds).not.toContain("search_skills");
+      expect(policy.allowedToolIds).not.toContain("acquire_skill");
+    });
+
+    it("reads the skills.sh discovery registry from the environment", async () => {
+      const resolved = await resolveConsoleConfig(
         [
           "--fabric-identity",
           "key.pkcs8",
@@ -434,8 +439,8 @@ describe("console/server", () => {
       });
     });
 
-    it("rejects a skills.sh discovery registry that is not a URL", () => {
-      expect(() =>
+    it("rejects a skills.sh discovery registry that is not a URL", async () => {
+      await expect(
         resolveConsoleConfig(
           [
             "--fabric-identity",
@@ -449,8 +454,8 @@ describe("console/server", () => {
           ],
           {},
           "/console",
-        )
-      ).toThrow("--skills-registry-url must be a valid URL");
+        ),
+      ).rejects.toThrow("--skills-registry-url must be a valid URL");
     });
 
     it("reads the named prompt and disables child composition guidance", async () => {
@@ -462,7 +467,7 @@ describe("console/server", () => {
           join(directory, "system.txt"),
           "COMPOSE FIRST\n",
         );
-        const resolved = resolveConsoleConfig(
+        const resolved = await resolveConsoleConfig(
           [
             "--fabric-identity",
             "key.pkcs8",
@@ -479,7 +484,7 @@ describe("console/server", () => {
         );
 
         expect(resolved.systemPrompt).toBe("COMPOSE FIRST\n");
-        expect(resolved.childCompositionGuidance).toBe(false);
+        expect(resolved.subagentCompositionGuidance).toBe(false);
         const serviceOptions = createConsoleInteractiveServiceOptions(
           resolved,
           {
@@ -498,8 +503,8 @@ describe("console/server", () => {
       }
     });
 
-    it("rejects a prompt file that cannot be read", () => {
-      expect(() =>
+    it("rejects a prompt file that cannot be read", async () => {
+      await expect(
         resolveConsoleConfig(
           [
             "--fabric-identity",
@@ -513,8 +518,8 @@ describe("console/server", () => {
           ],
           {},
           "/console-prompt-test",
-        )
-      ).toThrow(
+        ),
+      ).rejects.toThrow(
         "--system-prompt-file could not be read: /console-prompt-test/missing.txt",
       );
     });
@@ -527,7 +532,7 @@ describe("console/server", () => {
         const promptPath = join(directory, "empty.txt");
         await Deno.writeTextFile(promptPath, " \n\t");
 
-        expect(() =>
+        await expect(
           resolveConsoleConfig(
             [
               "--fabric-identity",
@@ -541,8 +546,8 @@ describe("console/server", () => {
             ],
             {},
             directory,
-          )
-        ).toThrow(`--system-prompt-file is empty: ${promptPath}`);
+          ),
+        ).rejects.toThrow(`--system-prompt-file is empty: ${promptPath}`);
       } finally {
         await Deno.remove(directory, { recursive: true });
       }
@@ -684,7 +689,7 @@ describe("console/server", () => {
 
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({
-        artifactRoot: config().artifactRoot,
+        artifactRoot: (await config()).artifactRoot,
         sessions: [],
       });
     });
@@ -697,13 +702,14 @@ describe("console/server", () => {
       );
 
       expect(response.status).toBe(200);
-      const policy = consoleChatPolicy(false, false);
+      const resolved = await config();
+      const policy = harnessSessionChatPolicy(resolved);
       expect(await response.json()).toEqual({
         systemPromptSha256: null,
         allowedToolIds: [...policy.allowedToolIds],
         allowedSubagentProfiles: [...policy.allowedSubagentProfiles],
-        fabricSpace: config().fabricSession.space,
-        artifactRoot: config().artifactRoot,
+        fabricSpace: resolved.fabricSession.space,
+        artifactRoot: resolved.artifactRoot,
         sessionDbPath: null,
       });
     });
@@ -722,7 +728,7 @@ describe("console/server", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({
         ok: true,
-        fabricApiUrl: config().fabricSession.apiUrl,
+        fabricApiUrl: (await config()).fabricSession.apiUrl,
         fabricSession: "unverified",
       });
     });
@@ -781,7 +787,7 @@ describe("console/server", () => {
         prefix: "cf-harness-console-result-route-",
       });
       try {
-        const resultConfig = resolveConsoleConfig(
+        const resultConfig = await resolveConsoleConfig(
           [
             "--fabric-identity",
             "key.pkcs8",
@@ -861,7 +867,7 @@ describe("console/server", () => {
         url: toFileUrl(join(artifactRoot, "sessions.sqlite")),
       });
       try {
-        const resultConfig = resolveConsoleConfig(
+        const resultConfig = await resolveConsoleConfig(
           [
             "--fabric-identity",
             "key.pkcs8",
@@ -941,7 +947,7 @@ describe("console/server", () => {
         finish = resolve;
       });
       const waitingServer = new ConsoleServer(
-        config(),
+        await config(),
         (onEvent) =>
           new HarnessInteractiveChatService({
             createPromptLoop: () => ({
@@ -1133,7 +1139,7 @@ describe("console/server", () => {
       // unreadable keyfile names the path the operator configured, which the
       // page must not read.
       const server = new ConsoleServer(
-        config(),
+        await config(),
         (onEvent) =>
           new HarnessInteractiveChatService({
             createPromptLoop: answeringLoop,
