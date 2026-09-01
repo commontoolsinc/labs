@@ -84,6 +84,14 @@ export interface Capability {
  */
 export const BINARY_CACHE_DIR = ".ci-cache/binaries";
 
+/**
+ * Where the pattern compile byte cache is kept between runs, relative to
+ * the repository root, for the same reason the binaries are: a directory
+ * the lane made for itself would be empty every run, so every pattern
+ * would be compiled again from nothing.
+ */
+export const COMPILE_CACHE_FILE = ".ci-cache/compile/lane.json";
+
 /** Nothing to undo. */
 const NOTHING = () => Promise.resolve();
 
@@ -436,7 +444,7 @@ const compileCache: Capability = {
   id: "compile-cache",
   description: "the pattern compile byte cache",
   async open(context) {
-    const file = path.join(context.workDir, "compile-cache", "lane.json");
+    const file = path.join(context.root, COMPILE_CACHE_FILE);
     if (!context.dryRun) {
       await Deno.mkdir(path.dirname(file), { recursive: true });
     }

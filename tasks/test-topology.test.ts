@@ -35,7 +35,13 @@ describe("the test topology", () => {
   it("lets a default suite and a variant suite hold one source file", () => {
     const on = suites.find((suite) => suite.id === "package-integration-on")!;
     const off = suites.find((suite) => suite.id === "package-integration")!;
-    const shared = on.units.filter((unit) => off.units.includes(unit));
+    // Pinned to a runner-scope file rather than whichever unit sorts
+    // first: a record's scope has to match the part that holds the file,
+    // and taking the first shared unit would make this fail for the
+    // wrong reason the day a whole-file skip changes the order.
+    const shared = on.units.filter((unit) =>
+      off.units.includes(unit) && unit.startsWith("packages/runner/")
+    );
     expect(shared.length > 0).toBe(true);
     // They are distinct execution surfaces, so the same file being a unit
     // of both is right; what must not happen is one identity reaching

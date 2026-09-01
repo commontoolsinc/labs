@@ -39,11 +39,16 @@ import {
 } from "@commonfabric/test-support/records";
 import { isLaneMeasurement } from "./ci-lane.ts";
 import { dayOf } from "./test-selection/build.ts";
+import { DENO_TEST_FILE } from "./test-topology/deno-task.ts";
 import { claimsFor, loadTopology } from "./test-topology.ts";
-import type { Suite } from "./test-topology/suite.ts";
+import { type Suite, unavailableUnits } from "./test-topology/suite.ts";
 
-/** What the tree half looks at. */
-const TEST_FILE = /\.test\.tsx?$|_test\.tsx?$/;
+/**
+ * What the tree half looks at. The same rule the topology enumerates a
+ * member's tests by, so a file one of them treats as a test cannot be a
+ * file the other passes over.
+ */
+const TEST_FILE = DENO_TEST_FILE;
 
 /** Directories that hold no test surface of their own. */
 const SKIPPED = new Set([
@@ -65,8 +70,11 @@ export async function candidateSurfaces(root: string): Promise<string[]> {
     let entries: AsyncIterable<Deno.DirEntry>;
     try {
       entries = Deno.readDir(path.join(root, relative));
-    } catch {
-      return;
+    } catch (error) {
+      // A directory outside this checkout contributes nothing; anything
+      // else would shorten the list the guard checks against.
+      if (error instanceof Deno.errors.NotFound) return;
+      throw error;
     }
     for await (const entry of entries) {
       const at = `${relative}/${entry.name}`;
@@ -268,6 +276,10 @@ export function checkTree(
     const containing = claims.filter((claim) =>
       claim.containers.some((unit) => candidate.startsWith(`${unit}/`))
     );
+    // Containment is coarse and legitimately overlapping: a workspace
+    // member that runs whole contains a directory another suite owns,
+    // and a type-check group's unit is a scope name that reads as a
+    // directory prefix. Only an exact claim is exclusive.
     if (containing.length > 0) continue;
     findings.push({
       fails: true,
@@ -333,7 +345,9 @@ export function checkStore(
     }
   }
   for (const suite of suites) {
-    const unavailable = new Set(suite.unavailable.map((entry) => entry.unit));
+    // A leaf declared unavailable leaves its unit expected to record,
+    // because every other identity in that unit still runs.
+    const unavailable = unavailableUnits(suite);
     for (const unit of suite.units) {
       if (unavailable.has(unit)) continue;
       if (recorded.has(`${suite.id}\t${unit}`)) continue;

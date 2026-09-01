@@ -77,20 +77,25 @@ async function cliCoreSuite(root: string): Promise<Suite> {
   const script = await Deno.readTextFile(
     path.join(root, CLI_DIR, "integration.sh"),
   );
-  // Every shell script in the directory except the FUSE one, which is its
-  // own suite. The dispatch script calls the rest from inside its steps,
-  // so they are surfaces this suite accounts for rather than surfaces
-  // nobody registered.
-  const sources: string[] = [];
-  for await (const entry of Deno.readDir(path.join(root, CLI_DIR))) {
-    if (
-      entry.isFile && entry.name.endsWith(".sh") &&
-      entry.name !== "fuse-exec.sh"
-    ) {
-      sources.push(`${CLI_DIR}/${entry.name}`);
+  // The scripts this suite runs: the dispatch script, the standalone
+  // scripts beside it, and whichever scripts its steps call. Read from
+  // the script rather than listed, so a step that starts calling another
+  // one accounts for it without anybody remembering to say so. A script
+  // nothing calls is left unclaimed on purpose — that is a test surface
+  // running nowhere, and the drift guard exists to say so.
+  const sources = new Set<string>([`${CLI_DIR}/integration.sh`]);
+  for (const name of STANDALONE_SCRIPTS) sources.add(`${CLI_DIR}/${name}`);
+  for (const [called] of script.matchAll(/(?:^|[\s"'/])([\w.-]+\.sh)\b/g)) {
+    const name = called.replace(/^[\s"'/]/, "");
+    if (name === "fuse-exec.sh") continue;
+    try {
+      await Deno.stat(path.join(root, CLI_DIR, name));
+      sources.add(`${CLI_DIR}/${name}`);
+    } catch {
+      // A name that is not a script beside this one, such as a path the
+      // script builds for something it writes.
     }
   }
-  sources.sort();
   const arms = stepArms(script);
   // A unit is named for the record its step writes, which is what the
   // store speaks in; the arm that runs it is what the command reaches
@@ -114,7 +119,7 @@ async function cliCoreSuite(root: string): Promise<Suite> {
     needs: ["deno", "toolshed", "cf", "jq"],
     units,
     unavailable: [],
-    sources,
+    sources: [...sources].sort(),
     locate(record): Location | undefined {
       if (!claimsIdentity({ recordSurfaces: SURFACE }, record.test)) {
         return undefined;

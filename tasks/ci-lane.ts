@@ -27,7 +27,12 @@ import {
 } from "@commonfabric/test-support/records";
 import { type CapabilityId, openCapabilities } from "./ci-capabilities.ts";
 import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
-import type { Invocation, Suite, UnitRequest } from "./test-topology/suite.ts";
+import {
+  type Invocation,
+  type Suite,
+  unavailableUnits,
+  type UnitRequest,
+} from "./test-topology/suite.ts";
 import { collectRecords } from "./test-records-gather.ts";
 import { fetchManifest } from "./test-selection/store.ts";
 import {
@@ -218,7 +223,7 @@ export function mandatoryFor(
     ]);
   }
   for (const suite of suites) {
-    const unavailable = new Set(suite.unavailable.map((entry) => entry.unit));
+    const unavailable = unavailableUnits(suite);
     // A unit that is a path is made mandatory by the diff naming it. A
     // unit that is not — a type-check group, a binary — is one the suite
     // has to map the diff onto itself, because only it knows what its
@@ -264,10 +269,13 @@ export async function changedFiles(
     stderr: "piped",
   }).output();
   if (!result.success) {
-    console.warn(
-      `ci-lane: cannot diff against ${base}; nothing is mandatory by change`,
+    // Treating this as a change-free pull request would drop every unit
+    // the change touched out of the mandatory set without saying so, and
+    // the lane would pass having run none of them.
+    throw new Error(
+      `cannot diff against ${base}: ` +
+        new TextDecoder().decode(result.stderr).trim(),
     );
-    return new Set();
   }
   return new Set(
     new TextDecoder().decode(result.stdout).split("\n")
@@ -351,7 +359,7 @@ export function everyBatch(
   const batches: Batch[] = [];
   let index = 0;
   for (const suite of suites) {
-    const unavailable = new Set(suite.unavailable.map((entry) => entry.unit));
+    const unavailable = unavailableUnits(suite);
     const units: UnitRequest[] = [];
     for (const unit of suite.units) {
       if (unavailable.has(unit)) continue;
@@ -465,6 +473,7 @@ async function runBatch(
     const invocations = await batch.suite.command(batch.units, {
       root: options.root,
       outputDir,
+      ...(options.base === undefined ? {} : { baseRef: options.base }),
     });
     for (const invocation of invocations) {
       const outcome = await runInvocation(invocation, {
@@ -512,6 +521,7 @@ function describePlan(
   batches: readonly Batch[],
   capabilities: readonly CapabilityId[],
   manifest: { objectName?: string; absent?: string },
+  unschedulable: readonly string[] = [],
 ): void {
   const lines: string[] = [];
   lines.push(`## Lane ${options.lane} of ${options.of}`);
@@ -531,6 +541,12 @@ function describePlan(
       `| ${batch.suite.id} | ${batch.units.length} | ${batch.repeats} |`,
     );
   }
+  if (unschedulable.length > 0) {
+    lines.push("");
+    lines.push("Nothing can run these, so nothing did:");
+    lines.push("");
+    for (const entry of unschedulable) lines.push(`- ${entry}`);
+  }
   const text = `${lines.join("\n")}\n`;
   console.log(text);
   const summary = Deno.env.get("GITHUB_STEP_SUMMARY");
@@ -543,6 +559,7 @@ function describePlan(
 export async function runLane(options: LaneOptions): Promise<boolean> {
   const suites = await loadTopology(options.root);
   let batches: Batch[];
+  let unschedulable: string[] = [];
   let fetched: { objectName?: string; absent?: string } = {};
   if (options.full) {
     batches = everyBatch(suites, options.lane, options.of);
@@ -579,6 +596,15 @@ export async function runLane(options: LaneOptions): Promise<boolean> {
       });
       const mine = laid.lanes.find((lane) => lane.lane === options.lane);
       batches = batchesOf(suites, manifest.manifest, mine?.selections ?? []);
+      // An identity costing more than a lane's hard bound runs nowhere,
+      // and a mandatory one that cannot run is a hole in what the pull
+      // request was told it tested. Naming it is what turns that into
+      // something somebody can act on; the sixty-second rule is where
+      // such a test gets split.
+      unschedulable = laid.unschedulable.map((entry) =>
+        `${entry.suite}: ${testIdentityKey(entry.test)} costs ` +
+        `${entry.cost.toFixed(0)}s, more than a lane can hold`
+      );
       if (laid.overBudgetSeconds > 0) {
         console.log(
           `ci-lane: the mandatory set puts a lane ` +
@@ -593,7 +619,7 @@ export async function runLane(options: LaneOptions): Promise<boolean> {
   for (const batch of batches) {
     for (const capability of batch.suite.needs) needs.add(capability);
   }
-  describePlan(options, batches, [...needs].sort(), fetched);
+  describePlan(options, batches, [...needs].sort(), fetched, unschedulable);
   if (options.dryRun) return true;
 
   const workDir = await Deno.makeTempDir({ prefix: "ci-lane-" });
@@ -622,6 +648,9 @@ export async function runLane(options: LaneOptions): Promise<boolean> {
     }
   } finally {
     await opened.close();
+    // The lane owns this directory and nothing outside the lane reads
+    // it, so it goes whether the batches passed, failed, or never ran.
+    await Deno.remove(workDir, { recursive: true }).catch(() => {});
   }
   return ok;
 }

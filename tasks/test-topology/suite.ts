@@ -189,6 +189,36 @@ export function claimsIdentity(
   );
 }
 
+/**
+ * The units a configuration does not run at all. An entry naming a leaf
+ * leaves its unit available, because every other identity in that unit
+ * still runs; only an entry naming no leaf takes the unit out.
+ */
+export function unavailableUnits(
+  suite: Pick<Suite, "unavailable">,
+): Set<Unit> {
+  return new Set(
+    suite.unavailable
+      .filter((entry) => entry.leafName === undefined)
+      .map((entry) => entry.unit),
+  );
+}
+
+/** The leaves a configuration does not run, by the unit holding them. */
+export function unavailableLeaves(
+  suite: Pick<Suite, "unavailable">,
+): Map<Unit, string[]> {
+  const leaves = new Map<Unit, string[]>();
+  for (const entry of suite.unavailable) {
+    if (entry.leafName === undefined) continue;
+    leaves.set(entry.unit, [
+      ...leaves.get(entry.unit) ?? [],
+      entry.leafName,
+    ]);
+  }
+  return leaves;
+}
+
 /** Writes a batch's skip list where its invocations will read it. */
 export async function writeSkipList(
   skipListPath: string,
@@ -312,6 +342,15 @@ export function fileSuite(options: FileSuiteOptions): Suite {
         const slug = `${options.id}-${part.junit.scope.replaceAll("/", "__")}`;
         const junitPath = path.join(context.outputDir, `${slug}.xml`);
         const skips = skipListOf(group);
+        // A leaf this configuration declares unavailable does not run,
+        // whether or not the packer chose the rest of its unit. Saying so
+        // in the skip list is what makes the declaration the thing that
+        // stops it, rather than the test file remembering to guard
+        // itself.
+        for (const [unit, leaves] of unavailableLeaves({ unavailable })) {
+          if (!group.some((request) => request.unit === unit)) continue;
+          skips[unit] = [...new Set([...skips[unit] ?? [], ...leaves])];
+        }
         const env: Record<string, string> = { ...part.env };
         if (Object.keys(skips).length > 0) {
           const skipListPath = path.join(

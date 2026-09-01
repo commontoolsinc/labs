@@ -12,7 +12,12 @@
  */
 
 import { collectPathsByScope, scopeOfPath } from "../typecheck.ts";
-import { collectAllPatternFiles, patternKey } from "../pattern-files.ts";
+import * as path from "@std/path";
+import {
+  collectPatternFiles,
+  PATTERN_TREES,
+  patternKey,
+} from "../pattern-files.ts";
 import {
   claimsIdentity,
   type Invocation,
@@ -290,8 +295,15 @@ function cfcheckSuite(): Suite {
  * retired pattern still has a baseline, whether an accepted break has
  * gone orphaned — are only asked of an unfiltered run.
  */
-async function patternCompatSuite(): Promise<Suite> {
-  const files = await collectAllPatternFiles();
+async function patternCompatSuite(root: string): Promise<Suite> {
+  // Collected against the root the topology was given rather than the
+  // process's own directory: a lane runs from the repository root, and a
+  // test of the topology runs from wherever its package does.
+  const files = (await Promise.all(
+    PATTERN_TREES.map((tree) =>
+      collectPatternFiles(path.join(root, tree.directory))
+    ),
+  )).flat().sort().map((file) => path.relative(root, file));
   const byKey = new Map(files.map((file) => [patternKey(file), file]));
   const units = [...byKey.keys()].sort();
   const recordSurfaces = [{ kind: "gate", scope: "repo" }];
@@ -383,7 +395,7 @@ export async function loadGateSuites(root: string): Promise<Suite[]> {
     gateSuite("repo-checks", CHECK_GATES, ["deno", "git-history"]),
     await typecheckSuite(root),
     cfcheckSuite(),
-    await patternCompatSuite(),
+    await patternCompatSuite(root),
     patternVintageSuite(),
   ];
 }

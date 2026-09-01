@@ -40,9 +40,11 @@ async function filesIn(
         found.push(`${directory}/${entry.name}`);
       }
     }
-  } catch {
+  } catch (error) {
     // A directory the tree does not hold contributes nothing, which is
-    // what a package without integration tests looks like.
+    // what a package without integration tests looks like. Anything else
+    // would silently take tests out of the topology, so it is raised.
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
   }
   return found.sort();
 }
@@ -54,8 +56,9 @@ async function patternTestFiles(root: string): Promise<string[]> {
     let entries: AsyncIterable<Deno.DirEntry>;
     try {
       entries = Deno.readDir(path.join(root, directory));
-    } catch {
-      return;
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) return;
+      throw error;
     }
     for await (const entry of entries) {
       if (entry.isDirectory) await walk(`${directory}/${entry.name}`);

@@ -39,8 +39,11 @@ async function integrationFiles(
         found.push(`${packageDir}/integration/${entry.name}`);
       }
     }
-  } catch {
-    // A package with no integration directory contributes nothing.
+  } catch (error) {
+    // A directory the tree does not hold contributes nothing, which is
+    // what a package without integration tests looks like. Anything else
+    // would silently take tests out of the topology, so it is raised.
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
   }
   return found.sort();
 }

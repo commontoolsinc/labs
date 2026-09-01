@@ -50,16 +50,31 @@ const EXEC_PATH_SUBSTITUTION =
 /** `NAME=value` in front of the command. */
 const ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/;
 
-/** Strips one layer of shell quoting from a task's argument. */
-function unquote(word: string): string {
-  const first = word[0];
-  if (
-    (first === "'" || first === '"') && word.length > 1 &&
-    word.endsWith(first)
-  ) {
-    return word.slice(1, -1);
+/**
+ * Strips shell quoting from a task's argument.
+ *
+ * A quote may wrap the whole word or sit inside it: several members
+ * write `--allow-env=API_URL,"TSC_*",NODE_ENV`, where the quotes are the
+ * shell's and the permission the flag names is `TSC_*` without them.
+ * Passing the word through as written would give `deno test` a
+ * permission with literal quote characters in it, which matches no
+ * variable at all.
+ */
+export function unquote(word: string): string {
+  let out = "";
+  let quote: string | undefined;
+  for (const character of word) {
+    if (quote === undefined && (character === "'" || character === '"')) {
+      quote = character;
+      continue;
+    }
+    if (character === quote) {
+      quote = undefined;
+      continue;
+    }
+    out += character;
   }
-  return word;
+  return out;
 }
 
 /**
@@ -99,7 +114,7 @@ export function parseTestTask(
       continue;
     }
     if (word.startsWith("-")) {
-      flags.push(word);
+      flags.push(unquote(word));
       continue;
     }
     paths.push(unquote(word));
@@ -108,7 +123,7 @@ export function parseTestTask(
 }
 
 /** What Deno takes for a test file when it walks a directory. */
-const TEST_FILE =
+export const DENO_TEST_FILE =
   /(^|[/\\])(test\.(ts|tsx|mts|js|mjs|jsx)|.*[._]test\.(ts|tsx|mts|js|mjs|jsx))$/;
 
 /** Directories no walk descends into. */
@@ -127,8 +142,12 @@ async function walkTestFiles(
   let entries: AsyncIterable<Deno.DirEntry>;
   try {
     entries = Deno.readDir(directory);
-  } catch {
-    return;
+  } catch (error) {
+    // A directory the tree does not hold contributes nothing. Anything
+    // else — a permission the walk does not have, a filesystem error —
+    // would silently shorten the list of tests, so it is raised.
+    if (error instanceof Deno.errors.NotFound) return;
+    throw error;
   }
   for await (const entry of entries) {
     if (entry.isDirectory) {
@@ -136,7 +155,7 @@ async function walkTestFiles(
       await walkTestFiles(path.join(directory, entry.name), found);
       continue;
     }
-    if (entry.isFile && TEST_FILE.test(entry.name)) {
+    if (entry.isFile && DENO_TEST_FILE.test(entry.name)) {
       found.push(path.join(directory, entry.name));
     }
   }
@@ -190,8 +209,11 @@ export async function memberTestFiles(
   for (const target of targets) {
     const absolute = path.resolve(memberDir, target);
     let directory = false;
+    let named = false;
     try {
-      directory = (await Deno.stat(absolute)).isDirectory;
+      const stat = await Deno.stat(absolute);
+      directory = stat.isDirectory;
+      named = stat.isFile;
     } catch {
       // Not a path in the tree, so it is a glob to expand.
     }
@@ -199,10 +221,18 @@ export async function memberTestFiles(
       await walkTestFiles(absolute, found);
       continue;
     }
+    // A path the task names outright is a file the task runs, whatever
+    // it is called. The naming rule is how Deno decides what to run when
+    // it discovers files for itself, so it belongs to the walk above and
+    // to a glob's matches, not to a file somebody wrote down.
+    if (named) {
+      found.push(absolute);
+      continue;
+    }
     for await (
       const entry of expandGlob(target, { root: memberDir, includeDirs: false })
     ) {
-      if (TEST_FILE.test(path.basename(entry.path))) found.push(entry.path);
+      found.push(entry.path);
     }
   }
   const excludes = [...parsed.ignores, ...await memberExcludes(memberDir)];
@@ -280,9 +310,12 @@ export async function memberTasks(
     const task = tasks[name];
     return typeof task === "string" ? [] : task?.dependencies ?? [];
   };
+  const browserTest = tasks["browser-test"] !== undefined;
   const half = tasks["deno-test"] !== undefined ? "deno-test" : "test";
   if (tasks[half] === undefined) {
-    return { browserTest: false, present: false };
+    // A member with only a browser half is still a test surface: it runs
+    // whole, as one unit, and its records come from the browser harness.
+    return { browserTest, present: browserTest };
   }
   const candidates = [half, ...dependenciesOf(half)];
   for (const name of candidates) {
@@ -293,13 +326,13 @@ export async function memberTasks(
       return {
         denoTest: parsed,
         denoTestTask: name,
-        browserTest: tasks["browser-test"] !== undefined,
+        browserTest,
         present: true,
       };
     }
   }
   return {
-    browserTest: tasks["browser-test"] !== undefined,
+    browserTest,
     present: true,
     // A member whose only test task echoes that it has none is not a
     // test surface, and saying so here keeps it out of the enumeration.

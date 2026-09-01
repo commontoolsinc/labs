@@ -271,6 +271,22 @@ describe("what a lane must run whatever the score says", () => {
     });
     expect(mandatoryFor([on], undefined, new Set()).mandatory.size).toBe(0);
   });
+
+  it("keeps a unit whose unavailability names only one leaf", () => {
+    // Every other identity in the file still runs, so taking the file
+    // out would stop far more than the configuration asked to stop.
+    const on = suite({
+      id: "package-integration-on",
+      variant: "server-execution",
+      units: ["packages/oven/a.test.ts"],
+      unavailable: [{
+        unit: "packages/oven/a.test.ts",
+        leafName: "bakes > slowly",
+        reason: "the surface that step exercises has not landed",
+      }],
+    });
+    expect(mandatoryFor([on], undefined, new Set()).mandatory.size).toBe(1);
+  });
 });
 
 describe("turning a lane's selections into batches", () => {
@@ -347,5 +363,21 @@ describe("running everything", () => {
     ];
     expect(everyBatch(suites, 1, 1)[0]!.units.map((unit) => unit.unit))
       .toEqual(["b.test.ts"]);
+  });
+
+  it("keeps a unit whose unavailability names only one leaf", () => {
+    const suites = [
+      suite({
+        id: "package-integration-on",
+        units: ["a.test.ts", "b.test.ts"],
+        unavailable: [{
+          unit: "a.test.ts",
+          leafName: "bakes > slowly",
+          reason: "that step's surface has not landed",
+        }],
+      }),
+    ];
+    expect(everyBatch(suites, 1, 1)[0]!.units.map((unit) => unit.unit))
+      .toEqual(["a.test.ts", "b.test.ts"]);
   });
 });
