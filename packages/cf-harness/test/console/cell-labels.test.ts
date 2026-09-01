@@ -451,7 +451,7 @@ describe("console/cell-labels", () => {
   });
 
   describe("foldCellLabels()", () => {
-    /** Three readings of one cell, no two of them stating the same thing. */
+    /** A reading that saw the whole cell, and found a label on it. */
     const whole: ConsoleCellLabels = {
       confidentiality: ["Secret"],
       integrity: [],
@@ -459,6 +459,8 @@ describe("console/cell-labels", () => {
       transformedBy: [],
       entries: [{ path: [], confidentiality: ["Secret"], integrity: [] }],
     };
+
+    /** A reading that ran out of node budget before it finished. */
     const truncated: ConsoleCellLabels = {
       confidentiality: [],
       integrity: [],
@@ -467,6 +469,8 @@ describe("console/cell-labels", () => {
       entries: [],
       truncationReason: "node-budget-exhausted",
     };
+
+    /** A reading that declined a path, so left part of the cell unread. */
     const unread: ConsoleCellLabels = {
       confidentiality: [],
       integrity: [],

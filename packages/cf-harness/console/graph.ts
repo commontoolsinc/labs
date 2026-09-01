@@ -39,8 +39,10 @@ export interface ConsoleGraphNode {
   /** For a pattern run from the index rather than from fresh source. */
   patternId?: string;
 
-  /** For a cell: the handle that named it, and the address it stands for. */
+  /** For a cell: the handle that named it. */
   token?: string;
+
+  /** For a cell: the address that handle stands for. */
   address?: string;
 
   /** For a cell: the slug `assign_slug` gave it, once it has one. */

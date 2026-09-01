@@ -135,8 +135,10 @@ export interface ConsoleCellLabelsSummary {
   detail?: string;
   space?: { configured: string; did?: string; dbPath?: string };
 
-  /** How many cells the snapshot read, and how many of them carry a label. */
+  /** How many cells the snapshot read. */
   cellsRead: number;
+
+  /** How many of those cells carry a label. */
   cellsLabelled: number;
 
   /**
