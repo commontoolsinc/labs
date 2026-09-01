@@ -45,7 +45,7 @@ const signer = await Identity.fromPassphrase("cf-harness describe-handle");
 const HASH_A = "A".repeat(43);
 const REF_A = `/of:fid1:${HASH_A}/summary`;
 
-/** The raw hash the two hostile property names below are built from. */
+/** The raw hash the hostile tagged property name below is built from. */
 const SCRUB_HASH = "C".repeat(43);
 
 /**

@@ -57,7 +57,7 @@ const NEVER_WRITTEN = entity("neverWritten");
  */
 const OWN_DID = "did:key:z6MkfrQ3tCDZgvJcLwPTvxNsFR8RgTsHTa5JzmnW9pQrUvNq";
 
-/** A space this host never opened, for the same reason. */
+/** A space this host never opened, for the cross-space cases below. */
 const FOREIGN_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 
 /**
@@ -247,8 +247,8 @@ const SHALLOW: LinkWalkBounds = {
 };
 
 /**
- * The other such bound: {@link SPENT} has two values to spend, so it runs out
- * with the rest of the document unenumerated.
+ * The other such bound: two values to spend, so it runs out with the rest of
+ * the document unenumerated.
  */
 const SPENT: LinkWalkBounds = { maxDepth: 64, maxNodes: 2 };
 
