@@ -89,7 +89,7 @@ export abstract class BaseCodecAct<Encoded> {
   protected tryEnter(value: object): boolean {
     const inProgress = this.#inProgress ??= new IndexTrackingStack<object>();
 
-    if (inProgress.indexOf(value) >= 0) {
+    if (inProgress.has(value)) {
       return false;
     }
 
