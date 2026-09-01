@@ -959,11 +959,23 @@ describe("writing the lane's records into its spool", () => {
   it("says nothing where the spool cannot be written", async () => {
     // Recording is telemetry: a spool this process cannot write costs
     // the run its records and must not cost it the run.
-    spoolRecords("/nonexistent/spool", [{
-      line: "record",
-      test: { k: "gate", s: "ci", n: "ci-lane setup deno" },
-      outcome: "pass",
-      durationMs: 1,
-    }]);
+    //
+    // The spool is a path underneath a file, which no user can make a
+    // directory of, so the case occurs whoever the suite runs as. A
+    // path that merely does not exist would not do: the superuser
+    // creates it and the case never happens.
+    const file = await Deno.makeTempFile({ prefix: "lane-not-a-dir-" });
+    try {
+      expect(() =>
+        spoolRecords(`${file}/spool`, [{
+          line: "record",
+          test: { k: "gate", s: "ci", n: "ci-lane setup deno" },
+          outcome: "pass",
+          durationMs: 1,
+        }])
+      ).not.toThrow();
+    } finally {
+      await Deno.remove(file);
+    }
   });
 });

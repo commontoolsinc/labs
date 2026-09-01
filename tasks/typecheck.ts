@@ -207,14 +207,19 @@ export async function checkGroup(
   paths: string[],
   reload: boolean,
   execPath: string = Deno.execPath(),
+  cwd: string = Deno.cwd(),
 ): Promise<GroupResult> {
   const startedAt = performance.now();
   const args = ["check", ...(reload ? ["--reload"] : []), ...paths];
   let success = false;
   let output = "";
   try {
+    // The paths are collected relative to the tree they were found in,
+    // so the check runs there. Without this a caller pointing at another
+    // tree would collect that tree's paths and check this one's.
     const result = await new Deno.Command(execPath, {
       args,
+      cwd,
       env: { DENO_V8_FLAGS: "--max-old-space-size=8192" },
       stdout: "piped",
       stderr: "piped",
@@ -237,6 +242,9 @@ export interface TypecheckOptions {
   list?: boolean;
   reload?: boolean;
   check?: typeof checkGroup;
+
+  /** The tree the paths were collected from, and so the tree to check. */
+  root?: string;
 
   /**
    * Spool one typecheck record per scope.
@@ -300,7 +308,13 @@ export async function runTypecheck(
   const workers = Array.from({ length: workerCount }, async () => {
     while (next < scopes.length) {
       const scope = scopes[next++]!;
-      const result = await check(scope, byScope.get(scope)!, reload);
+      const result = await check(
+        scope,
+        byScope.get(scope)!,
+        reload,
+        Deno.execPath(),
+        options.root ?? Deno.cwd(),
+      );
       results.push(result);
       recordsFragment?.append({
         line: "record",
@@ -372,6 +386,7 @@ export async function main(
       list: args.includes("--list"),
       reload: (Deno.env.get("DENO_CHECK_RELOAD") ?? "") !== "",
       recordResults: true,
+      root,
       ...options,
     },
   );

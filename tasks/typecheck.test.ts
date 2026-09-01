@@ -240,7 +240,11 @@ describe("main()", () => {
     // asserted.
     const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
     const log = console.log;
+    const err = console.error;
     console.log = () => {};
+    // The failing run reports its errors through `console.error`, and a
+    // test that lets those through reads as a suite going wrong.
+    console.error = () => {};
     try {
       expect(
         await main(["--scope=leb128"], root, {
@@ -268,6 +272,7 @@ describe("main()", () => {
       ).toBe(1);
     } finally {
       console.log = log;
+      console.error = err;
     }
   });
 });
