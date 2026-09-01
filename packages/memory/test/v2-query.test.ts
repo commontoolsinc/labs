@@ -2425,6 +2425,44 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
     // load rides the naming, not the reachability.
     assert(targetIds.has("of:crossing-target"));
     assert(targetIds.has("of:target-family"));
+
+    const bothRooted = queryGraph(
+      space,
+      engine,
+      {
+        roots: [{
+          id: "of:meta-root",
+          selector: {
+            path: [],
+            schema: {
+              type: "object",
+              properties: {
+                child: {
+                  type: "object",
+                  properties: { name: { type: "string" } },
+                },
+              },
+            },
+          },
+        }, {
+          id: "of:crossing-target",
+          selector: {
+            path: [],
+            schema: {
+              type: "object",
+              properties: { name: { type: "string" } },
+            },
+          },
+        }],
+      },
+      undefined,
+      identity,
+    );
+    const bothIds = new Set(bothRooted.entities.map((entity) => entity.id));
+    // Naming beats ordering: the first root's crossing may cover the second
+    // root's document before it is visited, and coverage skips the second
+    // root's traversal — but a named root's family arrives regardless.
+    assert(bothIds.has("of:target-family"));
   } finally {
     close(engine);
     await Deno.remove(path);
