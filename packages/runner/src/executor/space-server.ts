@@ -441,6 +441,7 @@ export class SpaceServer implements TransactionSealDestination {
    * the LT1 in-process cascade copy (no streamEntry) is a different
    * producer and is deliberately NOT tracked here. */
   readonly #drainInFlight = new Map<string, "queued" | "marked">();
+
   #currentWave: WaveAccumulator | undefined;
   #sealChain: Promise<unknown> = Promise.resolve();
   #feed: AdmittedCommitNotice[] = [];
@@ -595,6 +596,7 @@ export class SpaceServer implements TransactionSealDestination {
     string,
     { id: string; scopeKey: string }
   >();
+
   // (d′) — server-settle instrumentation (design §6 W4's
   // metric; §2.8 (c)). Per authored input: admission (the feed notice's
   // arrival, `enqueueCommit`) → COVERAGE (the wave commit whose

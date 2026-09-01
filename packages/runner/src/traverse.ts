@@ -377,28 +377,9 @@ function narrowAndCombineSelectorForLink(
   return interned;
 }
 
-/**
- * Memoized, canonicalizing wrapper around `ContextualFlowControl.schemaAtPath()` for the hot
- * traversal seams (object properties, array items). The core method now
- * symbolically memoizes its common boolean-default derivations; this seam also
- * covers the marker-object variant used below, which is intentionally outside
- * that cache. It returns one interned (canonical, deep-frozen) result per
- * (schema identity, path, marker variant), so downstream identity-keyed hash
- * caches (most notably the `traverseWithSchema` memo) hit.
- *
- * Only memoizes when `schema` is a memoizable input (interned or deep-frozen
- * — see `isMemoizableSchemaInput()`), so the identity key cannot go stale.
- * (`schemaAtPath()` is deterministic — `ContextualFlowControl` carries no
- * instance state — so a module-level cache across cfc instances is sound.)
- * Mutable input falls back to the exact un-memoized computation.
- *
- * `markers` selects the `$comment` marker pair `#traverseObjectWithSchema`
- * uses to detect properties it should not descend into.
- */
 const EMPTY_PROPERTIES_MARKER: JSONSchema = Object.freeze(
   { $comment: "emptyProperties" },
 );
-
 const MISSING_PROPERTY_MARKER: JSONSchema = Object.freeze(
   { $comment: "missingProperty" },
 );
@@ -413,6 +394,25 @@ onSchemaRegistryClear(() => {
   _schemaAtPathCache = new WeakMap();
 });
 
+/**
+ * Memoized, canonicalizing wrapper around
+ * `ContextualFlowControl.schemaAtPath()` for the hot traversal seams (object
+ * properties, array items). The core method now symbolically memoizes its
+ * common boolean-default derivations; this seam also covers the marker-object
+ * variant used below, which is intentionally outside that cache. It returns one
+ * interned (canonical, deep-frozen) result per (schema identity, path, marker
+ * variant), so downstream identity-keyed hash caches (most notably the
+ * `traverseWithSchema` memo) hit.
+ *
+ * Only memoizes when `schema` is a memoizable input (interned or deep-frozen
+ * — see `isMemoizableSchemaInput()`), so the identity key cannot go stale.
+ * (`schemaAtPath()` is deterministic — `ContextualFlowControl` carries no
+ * instance state — so a module-level cache across cfc instances is sound.)
+ * Mutable input falls back to the exact un-memoized computation.
+ *
+ * `markers` selects the `$comment` marker pair `#traverseObjectWithSchema`
+ * uses to detect properties it should not descend into.
+ */
 function schemaAtPathCanonical(
   schema: JSONSchema,
   path: readonly string[],

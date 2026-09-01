@@ -29,7 +29,8 @@ const schemaToSah = new WeakMap<JSONSchemaObj, SchemaAndHash>();
  * object schema's lookup by hash takes both halves: deref the `WeakRef` from
  * here, then read the `SchemaAndHash` out of `schemaToSah`. A `SchemaAndHash`
  * is thereby reachable only while its own schema object is alive. A primitive
- * hash is answered from `primInterns` and reaches neither half.
+ * hash takes neither step — it is read straight out of this map, and the
+ * primitive stored here routes to `primInterns`.
  */
 const hashToRef = new Map<
   string,

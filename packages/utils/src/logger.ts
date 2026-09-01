@@ -585,15 +585,6 @@ function getEnvMeasuresEnabled(): boolean {
 }
 
 /**
- * The cap named by `CF_TIMING_MEASURES_CAP`, when it names a positive integer.
- *
- * Separate from the on/off variable because a run that hits the cap stops
- * emitting partway through, which leaves an early-run prefix rather than a
- * sample — and a reader who does not know that will attribute a whole run from
- * its setup. Raising it has to be reachable from wherever emission is.
- */
-
-/**
  * What `CF_TIMING_MEASURES_CAP` means, separated from reading it.
  *
  * Separate because the decision is the part with a rule in it — anything that
@@ -610,6 +601,14 @@ export function parseTimingMeasureCap(
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+/**
+ * The cap named by `CF_TIMING_MEASURES_CAP`, when it names a positive integer.
+ *
+ * Separate from the on/off variable because a run that hits the cap stops
+ * emitting partway through, which leaves an early-run prefix rather than a
+ * sample — and a reader who does not know that will attribute a whole run from
+ * its setup. Raising it has to be reachable from wherever emission is.
+ */
 function getEnvMeasureCap(): number | undefined {
   if (isDeno()) {
     try {
@@ -1637,7 +1636,8 @@ export function resetAllCountBaselines(): void {
 
 /**
  * Resets the timing baseline for every registered logger, so that each
- * logger's `getTimingDeltas()` reports relative to its current timings.
+ * logger's `getTimeStats()` reports its `*SinceBaseline` figures relative to
+ * its current timings.
  */
 export function resetAllTimingBaselines(): void {
   const global = globalThis as unknown as {

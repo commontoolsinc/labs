@@ -4671,12 +4671,12 @@ const coalesceLabelEntries = (
  * unconditional. A spelling that refuses decomposition simply fails the
  * check and the caller falls through as before.
  */
-// Exported for unit testing of the fallback arms; the persist loop's merge
-// is the one production caller.
 export const decomposeToSameRoot = (
   left: JSONSchema,
   right: JSONSchema,
 ): boolean => {
+  // Exported for unit testing of the fallback arms; the persist loop's merge
+  // is the one production caller.
   if (!isObjectNotArray(left) || !isObjectNotArray(right)) return false;
   try {
     return decomposeSchema(left, { resolveDocument: lookupSchemaDocument })
