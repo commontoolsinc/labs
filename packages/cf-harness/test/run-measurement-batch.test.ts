@@ -11,6 +11,7 @@ import {
   type IndexPreflight,
   type IndexSnapshot,
   parseMeasurementSuite,
+  preflightCellSpec,
   preflightPosture,
   readAncestry,
   readServerMeta,
@@ -41,9 +42,13 @@ const CONSOLE_PREFLIGHT = {
 };
 
 const renderBatchReport = (
-  batch: Omit<BatchResult, "consolePreflight">,
+  batch: Omit<BatchResult, "consolePreflight" | "cellSpec">,
 ): string =>
-  renderBatchReportImpl({ ...batch, consolePreflight: CONSOLE_PREFLIGHT });
+  renderBatchReportImpl({
+    ...batch,
+    consolePreflight: CONSOLE_PREFLIGHT,
+    cellSpec: { kind: "unasked" },
+  });
 
 const TOKEN = "cf_harness_console_token=fixture-token";
 
@@ -130,6 +135,12 @@ interface FakeConsoleOptions {
 
   /** What `/api/meta` answers, standing in for the fabric server. */
   meta?: unknown;
+
+  /**
+   * What `/api/policy` answers, or `null` for a console that does not serve
+   * the route at all.
+   */
+  policy?: unknown;
 
   /** What `getPattern` reports each pattern depends on. */
   dependencies?: Readonly<Record<string, readonly string[]>>;
@@ -231,6 +242,11 @@ const startFakeConsole = (options: FakeConsoleOptions): FakeConsole => {
         }],
       });
     }
+    if (url.pathname === "/api/policy") {
+      return options.policy === null
+        ? new Response("not found", { status: 404 })
+        : Response.json(options.policy ?? POLICY);
+    }
     if (url.pathname === "/api/index/call") {
       if (options.indexFault) {
         return new Response(
@@ -298,6 +314,17 @@ const patternOf = (
   score,
   events: { published: 1 },
 });
+
+/** What the stand-in console says a session started there would run under. */
+const POLICY = {
+  systemPromptSha256:
+    "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  allowedToolIds: ["shell", "run_pattern", "search_patterns"],
+  allowedSubagentProfiles: ["default", "pattern-author"],
+  fabricSpace: "measurement",
+  artifactRoot: "/console/runs",
+  sessionDbPath: "/console/sessions.sqlite",
+};
 
 const META = {
   gitSha: "7baa03f462e5a1e4b5e477bd2162c880c5e5bc4a",
@@ -1364,6 +1391,89 @@ describe("run-measurement-batch", () => {
     });
   });
 
+  describe("preflightCellSpec()", () => {
+    const withClient = async (
+      options: FakeConsoleOptions,
+      body: (client: ConsoleClient) => Promise<void>,
+    ): Promise<void> => {
+      const console_ = startFakeConsole(options);
+      try {
+        await body(await ConsoleClient.open(console_.url));
+      } finally {
+        await console_.close();
+      }
+    };
+
+    it("returns `unasked` for a batch that named no spec", async () => {
+      await withClient({ streams: [] }, async (client) => {
+        expect(await preflightCellSpec(client, undefined)).toEqual({
+          kind: "unasked",
+        });
+      });
+    });
+
+    it("returns a match for a spec every field of which the console satisfies", async () => {
+      await withClient({ streams: [] }, async (client) => {
+        const spec = {
+          requiredToolIds: ["run_pattern", "search_patterns"],
+          requiredSubagentProfiles: ["pattern-author"],
+          fabricSpace: "measurement",
+        };
+        const preflight = await preflightCellSpec(client, spec);
+        expect(preflight.kind).toBe("matched");
+      });
+    });
+
+    it("returns a refusal naming each mismatched field with expected against actual", async () => {
+      await withClient({ streams: [] }, async (client) => {
+        const preflight = await preflightCellSpec(client, {
+          fabricSpace: "other-space",
+          requiredToolIds: ["record_feedback"],
+          forbiddenToolIds: ["shell"],
+        });
+        expect(preflight.kind).toBe("refused");
+        const mismatches = preflight.kind === "refused"
+          ? preflight.mismatches ?? []
+          : [];
+        expect(mismatches.map((mismatch) => mismatch.field)).toEqual([
+          "fabricSpace",
+          "allowedToolIds (must include)",
+          "allowedToolIds (must exclude)",
+        ]);
+        expect(preflight.kind === "refused" ? preflight.reason : "").toContain(
+          "expected other-space; this console reports measurement",
+        );
+      });
+    });
+
+    it("returns a refusal for a console that does not serve the policy route", async () => {
+      await withClient({ streams: [], policy: null }, async (client) => {
+        const preflight = await preflightCellSpec(client, {
+          fabricSpace: "measurement",
+        });
+        expect(preflight.kind).toBe("refused");
+        expect(preflight.kind === "refused" ? preflight.reason : "").toContain(
+          "/api/policy could not be read",
+        );
+      });
+    });
+
+    it("returns a refusal for a policy answer carrying no tool list", async () => {
+      await withClient({
+        streams: [],
+        policy: { fabricSpace: "measurement", artifactRoot: "/console/runs" },
+      }, async (client) => {
+        const preflight = await preflightCellSpec(client, {
+          fabricSpace: "measurement",
+        });
+        expect(preflight.kind).toBe("refused");
+        expect(preflight.kind === "refused" ? preflight.reason : "").toContain(
+          "missing the allowedToolIds array",
+        );
+      });
+    });
+  });
+
   describe("preflightIndex()", () => {
     it("returns the result and candidate counts for an index that answered", async () => {
       const console_ = startFakeConsole({ streams: [completedStream()] });
@@ -2058,6 +2168,107 @@ describe("run-measurement-batch", () => {
       } finally {
         // the directory is removed by this block's afterEach
       }
+    });
+
+    /** Writes a cell spec beside the suite and points the command at it. */
+    const cellSpecArgs = async (
+      dir: string,
+      spec: unknown,
+    ): Promise<readonly string[]> => {
+      const path = `${dir}/cell.json`;
+      await Deno.writeTextFile(path, JSON.stringify(spec));
+      return [`--cell-spec=${path}`];
+    };
+
+    it("returns 6, starts no task, and names each mismatch when the console is not the cell", async () => {
+      const specDir = await Deno.makeTempDir();
+      temporaryDirectories.push(specDir);
+      const args = await cellSpecArgs(specDir, {
+        label: "phase 3",
+        fabricSpace: "somewhere-else",
+        forbiddenSubagentProfiles: ["pattern-author"],
+      });
+      const { code, dir, logs } = await runMain(
+        { streams: [completedStream()] },
+        ONE_TASK,
+        args,
+      );
+      expect(code).toBe(6);
+      const report = await Deno.readTextFile(`${dir}/out/report.md`);
+      expect(report).toContain(
+        "**The console was not the cell this batch was told to measure, so no task ran.**",
+      );
+      expect(report).toContain(
+        "`fabricSpace`: expected somewhere-else, and this console reports measurement",
+      );
+      expect(report).toContain(
+        "`allowedSubagentProfiles (must exclude)`: expected none of pattern-author",
+      );
+      expect(report).toContain(
+        "the cell spec pre-flight refused first, so the index was not asked",
+      );
+      expect(
+        logs.some((line) =>
+          line.includes("the console is not the cell this batch names")
+        ),
+      ).toBe(true);
+      const json = JSON.parse(
+        await Deno.readTextFile(`${dir}/out/report.json`),
+      );
+      expect(json.results).toHaveLength(0);
+    });
+
+    it("returns 0 and records which fields were checked when the console satisfies the spec", async () => {
+      const specDir = await Deno.makeTempDir();
+      temporaryDirectories.push(specDir);
+      const args = await cellSpecArgs(specDir, {
+        label: "phase 3",
+        fabricSpace: "measurement",
+        requiredToolIds: ["run_pattern", "search_patterns"],
+        requiredSubagentProfiles: ["pattern-author"],
+        systemPromptSha256: POLICY.systemPromptSha256,
+        sessionDbPath: POLICY.sessionDbPath,
+      });
+      const { code, dir } = await runMain(
+        {
+          streams: [completedStream()],
+          runId: "fixture-run",
+          artifactRoot: FIXTURE_ROOT,
+        },
+        ONE_TASK,
+        args,
+      );
+      expect(code).toBe(0);
+      const report = await Deno.readTextFile(`${dir}/out/report.md`);
+      expect(report).toContain("Checked against the cell spec `phase 3`");
+      expect(report).toContain("fabricSpace");
+      expect(report).toContain("Fields the spec does not name are unchecked.");
+    });
+
+    it("returns 6 when a spec was named and the console will not disclose its policy", async () => {
+      const specDir = await Deno.makeTempDir();
+      temporaryDirectories.push(specDir);
+      const args = await cellSpecArgs(specDir, { fabricSpace: "measurement" });
+      const { code, dir } = await runMain(
+        {
+          streams: [completedStream()],
+          policy: null,
+        },
+        ONE_TASK,
+        args,
+      );
+      expect(code).toBe(6);
+      const report = await Deno.readTextFile(`${dir}/out/report.md`);
+      expect(report).toContain("would not say what a session here runs under");
+    });
+
+    it("throws for a spec that asserts nothing, before any socket is opened", async () => {
+      const specDir = await Deno.makeTempDir();
+      temporaryDirectories.push(specDir);
+      const args = await cellSpecArgs(specDir, { label: "asserts nothing" });
+      await expect(
+        runMain({ streams: [completedStream()] }, ONE_TASK, args),
+      ).rejects.toThrow("a cell spec asserts nothing");
     });
 
     it("returns 4 and does not ask the index when the server is not the expected commit", async () => {

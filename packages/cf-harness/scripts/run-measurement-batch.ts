@@ -28,17 +28,31 @@
  *   deno task measure-batch suite.json --out=./measurements/tonight
  *   deno task measure-batch suite.json --fabric-api-url=http://localhost:8040
  *   deno task measure-batch suite.json --expect-git-sha=<sha>
+ *   deno task measure-batch suite.json --cell-spec=./cell.json
  *   deno task measure-batch suite.json --allow-diverged
+ *
+ * `--cell-spec` is what refuses a misconfigured console before the first task
+ * spends anything: the file states the tools, subagent profiles, system
+ * prompt, space and stores this experiment requires, and the batch checks them
+ * against what the console says a session here would run under.
  */
 
 import { parseArgs } from "@std/cli/parse-args";
 import { ensureDir } from "@std/fs";
 import { isAbsolute, join } from "@std/path";
 
+import type { ConsolePolicyReport } from "../console/policy.ts";
 import type {
   HarnessChatEventEnvelope,
   HarnessChatSessionStatus,
 } from "../src/contracts/interactive-chat.ts";
+import {
+  type CellSpec,
+  type CellSpecPreflight,
+  checkCellSpec,
+  describeCellSpecMismatches,
+  parseCellSpec,
+} from "./cell-spec.ts";
 import {
   foldTotals,
   measureRunFamily,
@@ -847,6 +861,51 @@ export class ConsoleClient {
     return { kind: "ready", artifactRoot };
   }
 
+  /**
+   * What a new session here would run under, or why nobody can say.
+   *
+   * `/api/status` carries a session's policy and can only describe sessions
+   * that exist, so it cannot answer this before the first task — which is the
+   * only place the answer is worth anything.
+   */
+  async policy(): Promise<ConsolePolicyReport | { error: string }> {
+    let answer: unknown;
+    try {
+      answer = await this.#json("/api/policy");
+    } catch (error) {
+      return {
+        error: `/api/policy could not be read: ${describeError(error)}`,
+      };
+    }
+    if (typeof answer !== "object" || answer === null) {
+      return { error: "/api/policy did not return a JSON object" };
+    }
+    const report = answer as Record<string, unknown>;
+    for (const field of ["allowedToolIds", "allowedSubagentProfiles"]) {
+      if (!Array.isArray(report[field])) {
+        return { error: `/api/policy is missing the ${field} array` };
+      }
+    }
+    for (const field of ["fabricSpace", "artifactRoot"]) {
+      if (typeof report[field] !== "string") {
+        return { error: `/api/policy is missing the ${field} field` };
+      }
+    }
+    return {
+      systemPromptSha256: typeof report.systemPromptSha256 === "string"
+        ? report.systemPromptSha256
+        : null,
+      allowedToolIds: report.allowedToolIds as readonly string[],
+      allowedSubagentProfiles: report
+        .allowedSubagentProfiles as readonly string[],
+      fabricSpace: report.fabricSpace as string,
+      artifactRoot: report.artifactRoot as string,
+      sessionDbPath: typeof report.sessionDbPath === "string"
+        ? report.sessionDbPath
+        : null,
+    };
+  }
+
   /** What the index holds, read through the console's own signed proxy. */
   async indexSnapshot(): Promise<IndexSnapshot> {
     try {
@@ -1132,6 +1191,7 @@ export interface BatchResult {
   startedAt: string;
   endedAt: string;
   consolePreflight: ConsolePreflight;
+  cellSpec: CellSpecPreflight;
   preflight: IndexPreflight;
   posture: PosturePreflight;
 
@@ -1308,6 +1368,36 @@ export const resolveImportedPatternOrigins = async (
     );
   }
   return origins;
+};
+
+/**
+ * Whether the console is the cell the batch was told to measure.
+ *
+ * A console that will not say what it runs under refuses the batch as surely
+ * as one that says the wrong thing: a spec was named, and nothing here can
+ * report it as satisfied.
+ */
+export const preflightCellSpec = async (
+  client: ConsoleClient,
+  spec: CellSpec | undefined,
+): Promise<CellSpecPreflight> => {
+  if (spec === undefined) return { kind: "unasked" };
+  const policy = await client.policy();
+  if ("error" in policy) {
+    return {
+      kind: "refused",
+      reason:
+        `this batch was given a cell spec, and the console would not say what a session here runs under: ${policy.error}`,
+      spec,
+    };
+  }
+  const mismatches = checkCellSpec(spec, policy);
+  return mismatches.length === 0 ? { kind: "matched", spec, policy } : {
+    kind: "refused",
+    reason: describeCellSpecMismatches(mismatches),
+    spec,
+    mismatches,
+  };
 };
 
 /** Whether each named pattern was findable, asked of the index by name. */
@@ -1694,6 +1784,45 @@ const renderConsolePreflight = (preflight: ConsolePreflight): string =>
     : `**The console status contract was refused, so no task ran.** ${preflight.reason}\n`;
 
 /**
+ * Whether the console satisfied the cell spec, before the first task.
+ *
+ * A batch that named no spec says so rather than leaving the section out: an
+ * experiment whose policy structurally could not offer the tool it exists to
+ * test reads, in every other part of this report, exactly like one whose model
+ * chose not to use it.
+ */
+const renderCellSpec = (preflight: CellSpecPreflight): string => {
+  if (preflight.kind === "unasked") {
+    return "This batch named no cell spec, so nothing here says the console " +
+      "offered the tools, subagent profiles, system prompt, space, or stores " +
+      "this experiment depends on. What the sessions ran under is recorded " +
+      "below; it is not checked against anything.\n";
+  }
+  if (preflight.kind === "matched") {
+    const asserted = Object.keys(preflight.spec).filter((field) =>
+      field !== "label"
+    ).sort();
+    return `Checked against the cell spec${
+      preflight.spec.label === undefined ? "" : ` \`${preflight.spec.label}\``
+    } before the first task, and every field it names held: ${
+      asserted.join(", ")
+    }. Fields the spec does not name are unchecked.\n`;
+  }
+  const lines = [
+    `**The console was not the cell this batch was told to measure, so no task ran.** ${preflight.reason}`,
+  ];
+  if (preflight.mismatches !== undefined) {
+    lines.push(
+      "",
+      ...preflight.mismatches.map((mismatch) =>
+        `- \`${mismatch.field}\`: expected ${mismatch.expected}, and this console reports ${mismatch.actual}`
+      ),
+    );
+  }
+  return `${lines.join("\n")}\n`;
+};
+
+/**
  * Which task imported which published pattern.
  *
  * The count alone cannot tell one claim from another: composing a pattern an
@@ -1822,6 +1951,9 @@ export const renderBatchReport = (batch: BatchResult): string => {
     "## Did the console expose the measurement contract",
     "",
     renderConsolePreflight(batch.consolePreflight),
+    "## Was this the cell the batch was told to measure",
+    "",
+    renderCellSpec(batch.cellSpec),
     "## What the fabric server reported it was running",
     "",
     renderPosture(batch.posture),
@@ -1910,7 +2042,14 @@ export const main = async (
   postureReader: typeof preflightPosture = preflightPosture,
 ): Promise<number> => {
   const flags = parseArgs([...args], {
-    string: ["console", "out", "fabric-api-url", "base", "expect-git-sha"],
+    string: [
+      "console",
+      "out",
+      "fabric-api-url",
+      "base",
+      "expect-git-sha",
+      "cell-spec",
+    ],
     boolean: ["allow-diverged"],
     default: {
       console: DEFAULT_CONSOLE_URL,
@@ -1922,19 +2061,41 @@ export const main = async (
   const suitePath = flags._.map(String)[0];
   if (suitePath === undefined) {
     log(
-      "usage: measure-batch <suite.json> [--console=URL] [--out=DIR] [--allow-diverged]",
+      "usage: measure-batch <suite.json> [--console=URL] [--out=DIR] [--cell-spec=FILE] [--allow-diverged]",
     );
     return 2;
   }
   const suite = parseMeasurementSuite(
     JSON.parse(await Deno.readTextFile(suitePath)),
   );
+  // Both files are read and validated before a socket is opened, so a
+  // malformed spec costs nothing and a console that is not running is the only
+  // thing a reachability failure can mean.
+  const spec = flags["cell-spec"] === undefined
+    ? undefined
+    : parseCellSpec(JSON.parse(await Deno.readTextFile(flags["cell-spec"])));
   const client = await ConsoleClient.open(flags.console);
   const startedAt = new Date().toISOString();
   const consolePreflight = await client.preflightStatus();
   if (consolePreflight.kind === "refused") {
     log(
       `the console status contract was refused, so no task ran: ${consolePreflight.reason}`,
+    );
+  }
+  // Asked of the console before anything else it knows, because a cell whose
+  // policy cannot offer the tool an experiment exists to test spends every
+  // task producing evidence about a different experiment.
+  const cellSpec = consolePreflight.kind === "refused"
+    ? {
+      kind: "refused" as const,
+      reason:
+        "the console status pre-flight refused first, so the cell spec was not checked",
+      ...(spec !== undefined ? { spec } : {}),
+    }
+    : await preflightCellSpec(client, spec);
+  if (cellSpec.kind === "refused" && consolePreflight.kind !== "refused") {
+    log(
+      `the console is not the cell this batch names, so no task ran: ${cellSpec.reason}`,
     );
   }
   // The server's CFC block is recorded rather than differenced against the
@@ -1968,6 +2129,12 @@ export const main = async (
       reason:
         "the console status pre-flight refused first, so the index was not asked",
     }
+    : cellSpec.kind === "refused"
+    ? {
+      kind: "refused" as const,
+      reason:
+        "the cell spec pre-flight refused first, so the index was not asked",
+    }
     : posture.kind === "refused"
     ? {
       kind: "refused" as const,
@@ -1988,8 +2155,9 @@ export const main = async (
     )
     : await readSupersededVisibility(client, suite.supersededPatternIds ?? []);
   const results: TaskResult[] = [];
-  if (consolePreflight.kind === "refused") {
-    // The named refusal was logged when the status was read.
+  if (consolePreflight.kind === "refused" || cellSpec.kind === "refused") {
+    // Both refusals were logged where they were read, and each names what it
+    // found rather than the index question it stopped short of.
   } else if (preflight.kind === "refused") {
     log(`the index did not answer, so no task ran: ${preflight.reason}`);
   } else {
@@ -2032,6 +2200,7 @@ export const main = async (
     startedAt,
     endedAt: new Date().toISOString(),
     consolePreflight,
+    cellSpec,
     preflight,
     posture,
     importedPatternOrigins,
@@ -2060,6 +2229,7 @@ export const main = async (
   // and did not all complete: the first is a machine to fix before trying
   // again, the second is a result to read.
   if (consolePreflight.kind === "refused") return 5;
+  if (cellSpec.kind === "refused") return 6;
   if (posture.kind === "refused") return 4;
   if (preflight.kind === "refused") return 3;
   return results.every((result) => result.outcome.kind === "turn_completed")
