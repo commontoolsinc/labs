@@ -141,19 +141,32 @@ async function burst(round: number): Promise<void> {
   await harness.settle();
 }
 
-/** Optimistic writes rolled back across every session so far. */
+/**
+ * Rejected commits and rolled-back optimistic writes across every session so
+ * far, and whether the counters they come from were there to read.
+ *
+ * A missing counter reads as zero, which is the same number a clean run
+ * reports, so the two are distinguished here rather than left to look alike:
+ * the accounting is the half of this benchmark a timing cannot show, and an
+ * accounting that cannot fail is not one worth printing. `storage.v2` counts
+ * these even when the logger is silent, so a session that reports no such
+ * logger at all has stopped answering rather than stopped conflicting.
+ */
 async function reverts(sessions: readonly MultiRuntimeSession[]) {
   const each = await Promise.all(sessions.map(async (session) => {
     const counts = await session.loggerCounts();
+    const storage = counts["storage.v2"];
     return {
-      conflicts: counts["storage.v2"]?.["commit-conflict"]?.total ?? 0,
-      reverts: counts["storage.v2"]?.["commit-revert"]?.total ?? 0,
+      conflicts: storage?.["commit-conflict"]?.total ?? 0,
+      reverts: storage?.["commit-revert"]?.total ?? 0,
+      counted: storage !== undefined,
     };
   }));
   return each.reduce((total, one) => ({
     conflicts: total.conflicts + one.conflicts,
     reverts: total.reverts + one.reverts,
-  }), { conflicts: 0, reverts: 0 });
+    counting: total.counting + (one.counted ? 1 : 0),
+  }), { conflicts: 0, reverts: 0, counting: 0 });
 }
 
 // Warm-up: every session materializes the vote list and its own keyed vote
@@ -171,7 +184,8 @@ console.error(
   `[lunch-poll vote burst] ${voters.length} voters x ${options.length} ` +
     `options = ${votes} votes per burst; one burst cost ` +
     `${after.conflicts - before.conflicts} rejected commit(s) and ` +
-    `${after.reverts - before.reverts} rolled-back write(s)`,
+    `${after.reverts - before.reverts} rolled-back write(s), counted over ` +
+    `${after.counting}/${voters.length} sessions`,
 );
 
 // `Deno.bench` has no hook for "the file's benchmarks are done", so the ten
