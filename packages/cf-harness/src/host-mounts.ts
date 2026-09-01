@@ -166,7 +166,12 @@ export const parseHostMountSpecs = async (
  * Loom-local host — so neither can advertise a flag it then drops. The first
  * version of this change wired only the Loom host, and the standalone
  * entrypoint accepted `--host-mount`, printed it in its usage text, and ignored
- * it: the same "second entrypoint, no provisioning" defect one layer in.
+ * it: the same "second entrypoint, no provisioning" defect one layer in. The
+ * sandbox Docker runtime pin was a third instance of that class —
+ * `CF_HARNESS_SANDBOX_DOCKER_RUNTIME` reached the batch CLI only, so on a host
+ * whose gVisor runtime is unusable an interactive session had no way to select
+ * a working one and every sandboxed tool call died — and so it is resolved
+ * here too.
  */
 export const resolveInteractiveProvisioning = async (
   parsed: {
@@ -174,17 +179,23 @@ export const resolveInteractiveProvisioning = async (
     maxModelTurns?: number;
   },
   cwd: string,
+  env: Readonly<Record<string, string | undefined>> = Deno.env.toObject(),
 ): Promise<{
   additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
   maxModelTurns?: number;
+  sandboxDockerRuntime?: string;
 }> => {
   const mounts = hostMountsToAdditionalMounts(
     await parseHostMountSpecs(parsed.hostMountSpecs, cwd),
   );
+  const sandboxDockerRuntime = env.CF_HARNESS_SANDBOX_DOCKER_RUNTIME?.trim();
   return {
     ...(mounts.length > 0 ? { additionalMounts: mounts } : {}),
     ...(parsed.maxModelTurns !== undefined
       ? { maxModelTurns: parsed.maxModelTurns }
+      : {}),
+    ...(sandboxDockerRuntime !== undefined && sandboxDockerRuntime !== ""
+      ? { sandboxDockerRuntime }
       : {}),
   };
 };
