@@ -437,6 +437,13 @@ export const getDocumentCachesDiagnostics = ():
 export type EvaluationCachesDiagnostics = {
   budget: number;
   weight: number;
+
+  /** Spaces whose cache OBJECT was dropped — by the space bound or the
+   * empty-cache sweep — taking the space's counters with it. Per-space
+   * records live as long as their object: while this count holds still
+   * between two captures, every record present in both is continuous. */
+  spacesDropped: number;
+
   spaces: Record<string, QueryEvaluationCacheDiagnostics>;
 };
 
@@ -1407,6 +1414,14 @@ export class Server {
    * most QUERY_EVALUATION_CACHE_MAX_SPACES spaces in LRU order. */
   #queryEvaluationCaches = new Map<string, QueryEvaluationCache>();
 
+  /** Cache objects dropped so far (see EvaluationCachesDiagnostics). */
+  #evaluationCacheSpacesDropped = 0;
+
+  /** This server's health-route provider, kept so close() can withdraw
+   * exactly it and never a successor's. */
+  #evaluationCachesDiagnosticsProvider = () =>
+    this.evaluationCachesDiagnostics();
+
   #engines = new Map<string, Promise<Engine.Engine>>();
   // The resolved-engine index for the SYNC cross-engine lease lookup
   // (server-execution v2 Phase 5; see openEngine / #liveCoHostedLeaseSpaceFor).
@@ -1626,8 +1641,8 @@ export class Server {
     documentCachesDiagnosticsProviders.push(
       this.#documentCachesDiagnosticsProvider,
     );
-    evaluationCachesDiagnosticsProvider = () =>
-      this.evaluationCachesDiagnostics();
+    evaluationCachesDiagnosticsProvider =
+      this.#evaluationCachesDiagnosticsProvider;
   }
 
   /** This server's health-route providers, kept so close() can withdraw
@@ -2151,6 +2166,16 @@ export class Server {
       documentCachesDiagnosticsProviders,
       this.#documentCachesDiagnosticsProvider,
     );
+    // Withdraw the health-route provider if it is still this server's, so
+    // a closed server is neither reported nor kept alive by the route.
+    // Synchronous, ahead of the first await: an un-awaited close still
+    // withdraws it at once.
+    if (
+      evaluationCachesDiagnosticsProvider ===
+        this.#evaluationCachesDiagnosticsProvider
+    ) {
+      evaluationCachesDiagnosticsProvider = undefined;
+    }
     this.#cancelScheduledRefresh();
     await this.#refreshing;
     await this.#drainSpacePublicationLocks();
@@ -4686,6 +4711,7 @@ export class Server {
       const oldest = this.#queryEvaluationCaches.keys().next().value;
       if (oldest !== undefined) {
         this.#queryEvaluationCaches.delete(oldest);
+        this.#evaluationCacheSpacesDropped++;
       }
     }
     return cache;
@@ -4706,11 +4732,14 @@ export class Server {
     // Entry-less leftovers (drained by an earlier pass, or rotation-
     // cleared and idle since) drop before eviction: an empty cache holds
     // no weight, only a stale LRU slot. The rebuild preserves order.
+    const before = this.#queryEvaluationCaches.size;
     this.#queryEvaluationCaches = new Map(
       [...this.#queryEvaluationCaches].filter(
         ([, cache]) => cache.entries.size > 0,
       ),
     );
+    this.#evaluationCacheSpacesDropped += before -
+      this.#queryEvaluationCaches.size;
     // Least-recently-evaluated spaces first (map insertion order IS the
     // LRU order), oldest entry first within each. A space drained by THIS
     // pass keeps its cache — its counters and LRU position belong to a
@@ -4745,7 +4774,7 @@ export class Server {
    * per-space form: nothing is created or recency-bumped. A space lists
    * for as long as its cache object lives (its counters outlive rotation,
    * which clears entries only), and disappears once the space bound or a
-   * budget pass drops the cache itself. */
+   * budget pass drops the cache itself — `spacesDropped` counts those. */
   evaluationCachesDiagnostics(): EvaluationCachesDiagnostics {
     const spaces: Record<string, QueryEvaluationCacheDiagnostics> = {};
     let weight = 0;
@@ -4757,6 +4786,7 @@ export class Server {
       budget: this.options.queryEvaluationCacheBudget ??
         QUERY_EVALUATION_CACHE_BUDGET,
       weight,
+      spacesDropped: this.#evaluationCacheSpacesDropped,
       spaces,
     };
   }

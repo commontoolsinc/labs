@@ -580,6 +580,16 @@ export type QueryEvaluationCacheDiagnostics = {
  * watch corpus between two commits (a reconnect stampede after a process
  * death is this, at its worst).
  *
+ * Fresh evaluations alone consult it: a session's first watch group per
+ * branch, a whole-set establishment (session resume), and `graph.query`.
+ * A later `watch.add` in the same session EXTENDS that session's tracked
+ * graph (`extendTrackedGraph`), and an extension's walk depends on what the
+ * session already covers, so it is neither served nor recorded. A page
+ * load that grows its watch set batch by batch therefore records one
+ * entry — its first batch — and re-walks the rest on every load; what the
+ * cache covers is many sessions establishing one corpus, not one session's
+ * incremental establishment.
+ *
  * Scope purity decides who may share an entry. An evaluation whose whole
  * reach — tracked, missed, and loaded — resolved under the `space` scope is
  * identical for every identity and is shared across them; one that touched

@@ -944,6 +944,31 @@ describe("v2 query evaluation cache", () => {
       expect(server.evaluationCacheDiagnostics(spaces[1]).weight).toBe(2);
       expect(server.evaluationCacheDiagnostics(spaces[1]).budgetEvictions)
         .toBe(0);
+      // The drained space kept its (empty) cache and its record.
+      expect(server.evaluationCachesDiagnostics().spacesDropped).toBe(0);
+      expect(spaces[0] in server.evaluationCachesDiagnostics().spaces).toBe(
+        true,
+      );
+
+      // A third space over budget: this pass sweeps the empty leftover —
+      // dropping the first space's record, counted — before evicting.
+      const third = "did:key:z6Mk-eval-budget-3";
+      const messages: ServerMessage[] = [];
+      const connection = server.connect((message) => messages.push(message));
+      connections.push(connection);
+      const sessionId = await openSession(connection, messages, third, "b3");
+      await seedDocs(server, messages, third, sessionId, [
+        "of:doc:1",
+        "of:doc:2",
+      ]);
+      await watchAdd(connection, messages, third, sessionId, "b3", [
+        { id: "of:doc:1" },
+        { id: "of:doc:2" },
+      ]);
+      const report = server.evaluationCachesDiagnostics();
+      expect(report.spacesDropped).toBe(1);
+      expect(spaces[0] in report.spaces).toBe(false);
+      expect(report.weight).toBe(2);
     } finally {
       for (const connection of connections) {
         connection.close();
@@ -1159,8 +1184,13 @@ describe("v2 query evaluation cache", () => {
         );
       }
       // Nine spaces evaluated against a bound of eight: the first has been
-      // evicted (a peek reads empty), the rest retain their entries.
+      // evicted (a peek reads empty), the rest retain their entries — and
+      // the drop is counted, since it took the space's record with it.
       expect(server.evaluationCacheDiagnostics(spaces[0]).entries).toBe(0);
+      expect(server.evaluationCachesDiagnostics().spacesDropped).toBe(1);
+      expect(spaces[0] in server.evaluationCachesDiagnostics().spaces).toBe(
+        false,
+      );
       expect(server.evaluationCacheDiagnostics(spaces[1]).entries).toBe(1);
       expect(server.evaluationCacheDiagnostics(spaces[8]).entries).toBe(1);
 
@@ -1285,6 +1315,7 @@ describe("v2 query evaluation cache", () => {
       expect(report).toEqual(server.evaluationCachesDiagnostics());
       expect(report?.budget).toBe(64);
       expect(report?.weight).toBe(2);
+      expect(report?.spacesDropped).toBe(0);
       expect(Object.keys(report!.spaces).toSorted()).toEqual(spaces);
       for (const space of spaces) {
         expect(report!.spaces[space]).toEqual(
@@ -1298,5 +1329,17 @@ describe("v2 query evaluation cache", () => {
         connection.close();
       }
     }
+  });
+  it("withdraws its health provider on close, never a successor's", async () => {
+    const first = createServer("memory://eval-cache-provider-first", 7);
+    const second = createServer("memory://eval-cache-provider-second", 9);
+    // Last registration wins: the second server is the one reported.
+    expect(getEvaluationCachesDiagnostics()?.budget).toBe(9);
+    // Closing an earlier server leaves the live one's provider in place.
+    await first.close();
+    expect(getEvaluationCachesDiagnostics()?.budget).toBe(9);
+    // Closing the registered one withdraws it: nothing stale is reported.
+    await second.close();
+    expect(getEvaluationCachesDiagnostics()).toBeUndefined();
   });
 });

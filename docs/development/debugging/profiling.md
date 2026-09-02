@@ -381,15 +381,22 @@ process:
   `hitsAbsentResidue`, `hitsIdentity`), `misses`, `residueRefusals`,
   `rotations` (a commit or engine change cleared it), `capEvictions` (a new
   shape displaced the oldest at the entry cap) and `budgetEvictions` (the
-  weight budget removed it). Read it as a difference across one repeated
-  load at a constant `seq`. Hits rising on the repeat means watch
-  establishment is being served. Misses rising together with
-  `entriesTainted` means the entries are keyed to the (principal, session)
-  that recorded them — a page load is a new session, so a reload never
-  matches. A `rotations` step between the captures means a commit landed and
-  the comparison is void. An eviction counter rising means the load's
-  distinct shapes outnumber the cap or outweigh the budget, and which counter
-  moved says which.
+  weight budget removed it). Know what the cache covers before reading it:
+  fresh evaluations only — a session's first watch group per branch, a
+  whole-set establishment on resume, and `graph.query`. A later `watch.add`
+  in the same session extends that session's graph and never touches the
+  cache, so a page load that grows its watch set batch by batch records one
+  entry and re-walks the rest; `rootsVisited == watches` on those batches is
+  the design, not a miss. Read the counters as a difference across one
+  repeated establishment at a constant `seq`. Hits rising on the repeat
+  means it is being served. Misses rising together with `entriesTainted`
+  means the entries are keyed to the (principal, session) that recorded
+  them, which a new session never matches. A `rotations` step between the
+  captures means a commit landed and the comparison is void. An eviction
+  counter rising says which bound moved. Per-space records live as long as
+  the space's cache object: the space bound keeps the eight most recently
+  evaluated, and a budget pass sweeps empty leftovers, so compare two
+  captures only while `spacesDropped` holds still between them.
 - `servingLoop` — the serving loop's counters
   ([`serving-loop.md` §7](../../specs/server-side-execution/serving-loop.md)),
   present only when this process serves. `settle.series` is a ready-made
