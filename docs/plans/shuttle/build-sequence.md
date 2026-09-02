@@ -15,7 +15,9 @@ prerequisites land.
 **A1 — export entries.** Done (#6626). Importing `@commonfabric/cli`'s `.`
 entry runs CLI startup, so the package carries workspace-internal entries
 for the modules a sibling calls: `./lib/piece`, `./commands/piece`,
-`./lib/wish`, `./lib/piece-render`. The completion listing is not a plain
+`./lib/wish`, `./lib/piece-render`, and `./lib/llm-friendly-ref`, which a
+place reads every reference operand through. The completion listing is not a
+plain
 entry: it is `listCellKeys` in `packages/cli/lib/cell-listing.ts`,
 exported as `./lib/cell-listing` behind a `PieceResolutionDeps` seam with
 `keysOf` beside it. The providers are designed to fail silently and
@@ -116,32 +118,91 @@ leaves `coverage-debt: packages/shuttle`, a metric group the gate
 derives from the path with no allowlist, at zero, so B1 lands its code
 and the tests covering it together.
 
-**B1 — walking skeleton** (after A1; A2 for nothing yet). The place value
-and its owner module — the whole pair, position *and* scope, because scope
-is half of what a place is (decision 20): `cd @user` and `cd @space` move
-it, the prompt renders it, and `pwd` prints both halves. The prompt, a
-readline loop, and `cd` / `ls` / `pwd` / `get` over one held
-`PiecesController`, with `cd -` for the previous place and `#name` wish
-targets navigable within the connected space (`cd #favorites`, and the
-`wish` verb, over the `./lib/wish` export entry A1 adds; a home-anchored
-target from elsewhere is refused with the reason — decision 5). Slug and
-name resolution rides the machinery `--piece` already uses
-(`resolveStoredPieceAddress`, `listSpaceSlugs`), so no CLI-surface arc
-step gates B1. `where` lands here as the printing
-surface for the ambient record; later milestones add their dimensions to it
-as they add the dimensions themselves. Facets `slugs/` and `pieces/` only.
+**B1 — walking skeleton** (after A1; A2 for nothing yet). Landing in
+slices, and open until the last of them lands. Each slice moves what it
+built into the first list.
 
-Liveness, in two halves. The held controller is memoized cf-harness-style,
-which covers the construction that never succeeds — the case that cache
-actually addresses. Recovery of an *established* connection needs nothing
-from shuttle: the memory client reconnects and re-arms its watches by
-itself ([`runtime-integration.md`](runtime-integration.md)), so B1 proves
-that rather than rebuilding it — a test that drops the transport under a
-standing watch and shows the subscription still delivering afterwards. What
-B1 does build is the observation seam, reporting live, reconnecting, and
-permanently failed, because no such surface exists today and both the
-prompt and the view markers consume it. No retry loop in shuttle on either
-half.
+Landed:
+
+- **B1a — the place value and its owner module**
+  (`packages/shuttle/src/place.ts`). The whole pair, position *and* scope,
+  because scope is half of what a place is (decision 20): `cd` over relative
+  segments, `..`, `-`, `/`, a scope-only `@scope`, and rooted and complete
+  references; the `slugs/` and `pieces/` facets a space root reserves, and
+  nothing else there; the rendering `pwd` prints of both halves, the position
+  line carrying the scope so that it denotes one cell wherever it is read; and
+  the refusals — a reference carrying `#argument`, a `#` buried in a bare
+  piece id, a part no rendering would name back, and a move into a space other
+  than the connected one, which is the gate a home-anchored entry point meets
+  once resolution hands it a space. Two operands come back for the connection
+  rather than moving: a `#name` wish target, which B1b resolves, and a
+  reference naming its space by name, which is a two-step protocol — the
+  caller resolves the name and hands the move back with the space it resolved
+  to, and the place is landed or refused there.
+
+Still to come:
+
+- **The prompt, a readline loop, and the verbs** (B1b for the verbs and
+  the connection, B1c for the prompt) — `cd` / `ls` / `pwd` / `get` over
+  one held `PiecesController`, with `#name` wish targets
+  navigable within the connected space (`cd #favorites`, and the `wish`
+  verb, over the `./lib/wish` export entry A1 adds; a home-anchored target
+  from elsewhere is refused with the reason — decision 5).
+- **Slug and name resolution** (B1b), riding the machinery `--cell` already
+  uses
+  (`resolveStoredPieceAddress`, `listSpaceSlugs`), so no CLI-surface arc
+  step gates B1.
+- **The vocabulary a relative segment speaks.** The walk and a reference
+  read a segment by different rules — the reserved readings
+  [`grammar.md`](grammar.md) states, against a reference's own unescaping
+  and fragment rule — so some keys are spelled through one and not the
+  other, and a segment lifted out of a rendering is an operand in its own
+  right rather than the key it was printed from. Which keys those are, and
+  what each lifted segment does instead of naming its key, is pinned case
+  by case in `packages/shuttle/test/place.test.ts`, each case under a
+  mutation, so the record moves when the behavior does and not otherwise.
+  `ls` settles it, in B1b: how such a key prints and how it is typed back
+  want deciding together.
+
+  Whether a piece is held to the slug and handle vocabularies is the same
+  question, and its answer is a rule rather than a count: a piece is held
+  where it passes through the canonical parse, and nowhere else. A reference
+  is held that way, and a settled move inherits it, the arm being minted
+  from a parsed reference; every other way in admits a piece the fabric
+  would not name, an arm a caller assembles rather than receives included.
+  What is settled is narrower, and in two parts. A path segment that is
+  empty, ends in whitespace, or holds a line break is refused at every door,
+  because a rendering of it would name a different cell. A piece is held to
+  more than that: one holding a line break is refused for the same reason,
+  and one that is empty, ends in whitespace, or holds an `@` is refused
+  because no slug or handle carries such a name.
+  [`grammar.md`](grammar.md) carries why that reason holds, and which of
+  those the canonical parse would take anyway.
+- **`where`** (B1c), the printing surface for the ambient record; later
+  milestones add their dimensions to it as they add the dimensions themselves.
+  It prints the record `pwd` prints, so it chooses the format for both — a
+  test helper reads that format back by slicing a label width, which is what a
+  change to it has to move with. `pwd` is complete and has no short form, the
+  prompt being the short surface, so a format that shortens has to stay
+  pasteable — and decision 13's shortened-id fallback is a prefix spelled
+  exactly like a whole handle, which is the part that does not. The format's
+  own hazards belong with it: a newline in a part is refused before it reaches
+  a place, because it would leave a shorter reference naming another cell,
+  while a carriage return, a vertical tab, a form feed, a no-break space and
+  the Unicode line and paragraph separators all read back whole and reach only
+  a terminal.
+- **Liveness, in two halves.** The held controller is memoized
+  cf-harness-style, which covers the construction that never succeeds —
+  the case that cache actually addresses. Recovery of an *established*
+  connection needs nothing from shuttle: the memory client reconnects and
+  re-arms its watches by itself
+  ([`runtime-integration.md`](runtime-integration.md)), so B1 proves that
+  rather than rebuilding it — a test that drops the transport under a
+  standing watch and shows the subscription still delivering afterwards.
+  What B1 does build is the observation seam, reporting live,
+  reconnecting, and permanently failed, because no such surface exists
+  today and both the prompt and the view markers consume it. No retry loop
+  in shuttle on either half.
 
 **B2 — writes, calls, handles** (after A2, A3, and A4 — a failed call or
 write must surface as a value, never reach `Deno.exit`). `set` with

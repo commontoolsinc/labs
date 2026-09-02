@@ -89,6 +89,13 @@ decisions point here where they defer.
   its v1 member, and `set x - < https://…` joins when a use rules it in.
 - **`search`.** A `search <query>` verb at any place, over what stands
   below it. Pipes over `ls` cover the interim.
+- **Which space a piece is in.** Naming the space that holds an arbitrary
+  piece, rather than the one the place stands in. It is a query over the
+  fabric and not a dimension of the ambient record, so it arrives with
+  multi-space sessions (candidate 3) and takes its answer from them. v1
+  refuses to follow a reference into another space — denoting is not
+  reaching ([`grammar.md`](grammar.md)) — so the only space v1 could ever
+  name is the connected one, which `where` already prints.
 
 ## Candidates, ranked
 

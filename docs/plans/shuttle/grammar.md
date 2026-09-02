@@ -28,22 +28,35 @@ as the canonical grammar's context rule already works:
 
 - `/of:…` — a **rooted** reference: it names the piece and path from the
   root, so no part of the position is read from the place — but it omits
-  the space, which the place still supplies. Rooted is not
+  the space and the scope, and the place supplies both. Rooted is not
   place-independent.
-- `/@did:key:…/of:…` — a **complete** reference: it carries its own space,
-  so it denotes the same cell read from anywhere. Only this form is
-  place-independent, and it is what a printed address or a shared link
-  should be. Denoting is not reaching, though: a connection serves one
-  space, so a complete reference naming a different space than the place's
-  is refused rather than followed — `validateEmbeddedSpaces`
-  (`packages/cli/lib/llm-friendly-ref.ts`) already holds `cf` to that, and
-  shuttle v1 holds one connection.
+- `/@did:key:…/of:…` — a **complete** reference: piece, path and space are
+  its own, and the scope is still the place's. It is place-independent in
+  one dimension and not in the other, so the same string read at `@user`
+  and at `@session` names two different cells. Denoting is not reaching,
+  either: a connection serves one space, so a reference naming a different
+  space than the place's is refused rather than followed —
+  `validateEmbeddedSpaces` (`packages/cli/lib/llm-friendly-ref.ts`) already
+  holds `cf` to that, and shuttle v1 holds one connection.
+- `/@did:key:…/of:…@scope` — a **fully qualified** reference: every level
+  is its own and nothing is read from the place, so it denotes the same
+  cell read from anywhere. This is the form a printed address or a shared
+  link should be, and it is what `pwd` prints, for that reason.
+
+  The scope a complete reference omits is not a hole in it. Canonically an
+  absent suffix *means* the base, which is why the serializer writes none
+  for a base-scoped link. The two layers read the same absence differently
+  — canonical says base, shuttle fills it from the place, the way a shell
+  reads a relative path — and that difference is why `pwd` writes the
+  suffix rather than trusting it to be inferred.
 - `#…` — a wish target (entry point), resolvable from anywhere within
   the connected space. A target anchored elsewhere — profile and
   favorites resolve against the reading identity's home space regardless
   of the connected space (`packages/cli/lib/wish.ts`) — is refused with
   the reason in v1, which holds one connection to one space.
-- `..` — up one level; `cd -` — the previous place.
+- `/` — the space's own root, the leading `/` of a rooted reference
+  with nothing following it; `..` — up one level; `cd -` — the
+  previous place.
 - Anything else — relative: resolved as a child of the current position
   (a facet at a space root, a key or index inside a piece, a slug inside
   `slugs/`).
@@ -55,21 +68,89 @@ prefix, overriding it with the embedded space when one is present. A
 rooted reference is therefore exactly as space-dependent as a relative
 one; it is the piece and path it fixes, not the space.
 
-Two spellings share the `#` character and nothing else. A lone `#name`
-token is a wish target, as above. `#argument` is a suffix on a reference
-and only that — it selects the piece's arguments cell, the same selection
-`--input` spells as a flag (`normalizeLLMFriendlyRef` in
-`packages/cli/lib/llm-friendly-ref.ts`, which strips it before the runner
-grammar sees the string, and refuses every other fragment).
+How a reading is matched says where it holds.
+`-` and a lone `/` are matched against the whole operand exactly, so
+neither governs a segment: a key named `-` is reachable relatively
+wherever it is not the whole operand. `@scope` and a lone leading `#` are
+matched against the operand's head, and each takes the whole operand with
+it: `cd @user/board` refuses rather than moving the scope and descending,
+and `cd #favorites/topics` hands on the whole string as one target. So
+each is an ordinary data character in every later segment that is data —
+inside a piece. A later segment naming a piece is read by the canonical
+grammar instead, so a scope suffix there moves the scope. A fragment there
+is refused too, but by shuttle rather than by that grammar, which carries
+the `#argument` suffix on a piece designation and would take one. `..` is
+matched segment by segment as the walk splits them, so it is reserved in
+all of them and a key named `..` has no relative spelling — it reaches a
+place through a reference, the door that reads no `..` at all. `/` is the
+separator besides, so no segment of an operand holds one, and a key that
+does is spelled `~1`, which a reference unescapes and a walk does not.
+
+The property every door is held to is that a rendering may be refused but
+may never name a cell other than the one it was printed for. Characters go
+missing between a place and the rendering that names it. Reading a
+rendering back is a parse of a reference, which trims the string and drops a
+trailing empty segment. Writing one separates its lines with a newline. Both
+reach a path segment, so an empty segment, one ending in whitespace, and one
+holding a line break are refused, while one that merely starts with
+whitespace survives and is not. The first two are refused wherever they sit
+and not only last, because `..` makes any segment the last one.
+
+Only the newline reaches a piece that has one. The scope suffix the
+rendering always writes sits between the piece and the end of the string,
+so the trim takes the suffix rather than the piece, and the parse's split
+at the last `@` takes the suffix's own. An empty piece is the exception,
+and one fact generates it: its rendered id segment is the suffix and
+nothing else, so the split finds no id in front of it and the parse refuses
+the whole reference rather than handing anything back.
+
+The piece is nonetheless held to more, for a different reason: one that is
+empty, ends in whitespace, or holds an `@` is refused because no slug or
+handle carries such a name. The reason covers all three. The mechanism
+behind it covers two: for a piece shaped like a handle — a colon, and
+twenty characters — the parse takes it, its handle test being a length rule
+rather than an alphabet one, and hands back verbatim a name the `fid1`
+encoding could not have produced, a rendering that round-trips exactly and
+denotes nothing. That is neither a wrong address nor a dead one, which is
+why the reason cannot be either. For an empty piece, and for anything
+shaped like a slug, the parse refuses it already; refusing at the door
+moves the refusal earlier and names the vocabulary where the parse names
+only the failure.
+
+One rule rather than three is a choice about wording, not about safety: the
+redundant cases cost nothing, and the rule buys no guarantee that every
+rendering is followable — a piece like `Not_A_Slug!!` passes it and the
+parse refuses that afterwards. Which pieces are held to the vocabulary at
+all is B1b's question, recorded with the other validation work in
+[`build-sequence.md`](build-sequence.md).
+
+A segment lifted out of a rendering is an operand in its own right, so
+these readings decide it rather than the key it was printed from.
+
+The `#` character has three readings, and they share nothing but the
+character. A lone `#name` token is a wish target, as above. `#argument` is
+a suffix on a target, whichever way that target is written — a reference, a
+bare id, a slug — and it selects the piece's arguments cell, the same
+selection `--input` spells as a flag. `splitArgumentSuffix`
+(`packages/cli/lib/llm-friendly-ref.ts`) is that one reading: it takes the
+suffix off before anything parses what it followed, and refuses every other
+fragment. And inside a piece `#` is an ordinary character of a data key,
+under the rule above: the wish reading is decided on the whole operand, so
+it governs the head and nothing else.
+
+A container renders without the leading `/` that marks a reference, so a
+space root and a facet cannot be read back as a piece whose slug happens to
+match their name; `cd` refuses such a rendering rather than following it.
 
 A place is **result-rooted**, and holds exactly space, piece, path, and
-scope. `cd` refuses a reference carrying `#argument` rather than dropping
-the suffix silently: a place that could root at the arguments cell would
-leave every later relative read ambiguous about which side of the piece it
-addressed, and the prompt would have to carry the distinction for as long
-as you stood there. Arguments are reached per operand instead —
-`get topics/3#argument`, and `--input` on the `cf` verbs that take it — so
-the choice is one visible token at each use.
+scope. `cd` refuses a target carrying `#argument`, in every spelling that
+takes one, rather than dropping the suffix silently: a place that could
+root at the arguments cell would leave every later relative read ambiguous
+about which side of the piece it addressed, and the prompt would have to
+carry the distinction for as long as you stood there. Arguments are
+reached per operand instead — `get topics/3#argument`, and `--input` on
+the `cf` verbs that take it — so the choice is one visible token at each
+use.
 
 ## The space root and facets
 
@@ -83,11 +164,13 @@ A `fuse/` facet mirroring the FUSE layout is designed and deferred past v1
 ([`futures.md`](futures.md)); shuttle leverages `packages/fuse`'s naming
 and hydration work regardless of when that facet lands.
 
-Facet names are reserved segments at the space root only; inside a piece,
-every segment is data — always. A piece's callables need no reserved name:
-they surface inline in listings, annotated as callable, exactly as the
-FUSE layout marks a handler an executable file inside the piece's tree
-(and the `verbs` verb lists them on demand).
+Facet names are reserved segments at the space root only; inside a piece
+no name is reserved at all, and a facet name is an ordinary data key
+there. The readings above are spellings rather than names, and are what
+they are wherever a piece's path admits them. A piece's callables need
+no reserved name: they surface inline in listings, annotated as
+callable, exactly as the FUSE layout marks a handler an executable file
+inside the piece's tree (and the `verbs` verb lists them on demand).
 
 The facet set stays deliberately small; growing it is a design decision,
 not a convenience.
@@ -154,13 +237,16 @@ position levels, and an explicit suffix on an operand overrides it for
 that operand alone.
 
 A scope-only `@scope` is shuttle **navigation syntax**, not a reference. It
-sits with `..` and `-`: spellings that `cd` and `where` accept to move the
-cwd, and that the canonical grammar does not parse. `parseScopedIdSegment`
+sits with `/`, `..` and `-`: spellings that `cd` accepts to move the cwd,
+and that the canonical grammar does not parse. `parseScopedIdSegment`
 (`packages/runner/src/link-types.ts`) requires an id in front of the
-suffix and throws without one, so `@session` alone addresses nothing. The
-no-growth rule holds because the spelling never leaves those two verbs: an
-operand and a full reference always carry an id, no link endpoint can hold
-a scope-only suffix, and nothing serializes one. Setting the ambient scope
+suffix and throws without one, so `@session` alone addresses nothing, and
+`parseReferenceParts` in the same module throws on a lone `/`, which names
+no piece handle, so the space root has no canonical spelling either. The
+no-growth rule holds because the scope spelling never leaves the verbs that
+move and print the cwd — `cd`, `where`, and `pwd`: an operand and a full
+reference always carry an id, no link endpoint can hold a scope-only
+suffix, and nothing serializes one. Setting the ambient scope
 is all `cd @session` does, and ordinary references pick it up from there.
 
 The canonical grammar bounds what a suffix on a reference can say
@@ -207,6 +293,21 @@ fabric knows it by, a piece by its slug when the slug index confirms it, a
 shortened unique id otherwise, then the path. Shuttle uses the naming
 mechanisms the fabric supports and introduces none of its own; user-managed
 legible space names arrive when the fabric grows them.
+
+A shortened id is a prefix rather than an address, and it is spelled the
+way a whole handle is, so nothing in it says which it is. A prompt meant to
+be pasteable has to make that fallback visibly distinct, or leave it out.
+
+`pwd` is the complete address and has no short form. It writes the scope
+even when it is the base, so what it prints denotes one cell wherever it is
+read, where an omitted suffix would denote whatever the reader's own scope
+selects — shuttle writes absolutely and reads ambiently, the asymmetry a
+shell has between `pwd` and a relative path. Emitting the suffix only for a
+non-base scope would leave the common case contextual, since a suffix-less
+address read in a `@session` shuttle lands at session. The prompt is the
+short surface and is on screen continuously; what `pwd` is for is the thing
+you copy, so a form that cannot be pasted is the one output it should not
+produce.
 
 ## Writes
 
@@ -302,6 +403,34 @@ the set would have to unteach.
 
 ## Open questions
 
-None here — the base-overlay spelling is settled above. The remaining
-open item for shuttle overall (shallow-sink expressibility) lives in
+**Appending to a collection.** Shuttle's write vocabulary is whole-value:
+`set` writes a value, `edit` writes back the one it opened, and `link`
+writes a reference. The fabric below has more than that — operation-based
+append, add-unique, increment and remove-by-value, covered in
+[`mergeable-collection-writes`](../../features/mergeable-collection-writes.md)
+and registered by
+[`patch-operations.md`](../../features/patch-operations.md) — and no shuttle
+spelling reaches any of them. Adding one item to a collection is therefore
+`get`, edit, `set`: the read-modify-write those operations were made
+first-class to avoid.
+
+**The `@` sigil carries two meanings.** It is the space slot of a reference
+and the scope suffix on a piece: `@user` alone is the scope word,
+`/@user/<handle>` is a space *named* user, and `/@user/<handle>@session` is
+both at once — and space names are unvalidated, so the collision is live
+rather than hypothetical. Shuttle cannot resolve it: decision 13 forbids
+inventing a spelling, and a second scope spelling would be worse than the
+ambiguity. Issue
+[#6775](https://github.com/commontoolsinc/labs/issues/6775) carries it. In
+v1 a space named by name is refused unless it resolves to the connected
+space, which is what keeps it dormant; multi-space sessions are where it
+wakes.
+
+**A shortened id is not an address.** The prompt falls back to one where no
+slug is confirmed, and it is spelled exactly as a whole handle is, so
+nothing in it says which it is. Whether the prompt stays pasteable, and how
+that fallback is marked if it does, is open — see the Prompt section above.
+
+The base-overlay spelling is settled above. One further open item for
+shuttle overall (shallow-sink expressibility) lives in
 [`views.md`](views.md).

@@ -73,6 +73,7 @@ const DIRS = [
   "packages/runtime-client",
   "packages/schema-generator/src",
   "packages/shell",
+  "packages/shuttle",
   "packages/spec-model",
   "packages/state-inspector",
   "packages/static/scripts",
