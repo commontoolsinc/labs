@@ -26,7 +26,7 @@
  * "unlabeled" for a fully labeled result.
  */
 
-import { DatabaseSync } from "node:sqlite";
+import { Database } from "@db/sqlite";
 
 import { fabricFromNativeValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
@@ -61,7 +61,7 @@ type QueryState = {
 };
 
 function seedDiskDb(path: string): void {
-  const db = new DatabaseSync(path);
+  const db = new Database(path);
   db.exec("CREATE TABLE records (id INTEGER PRIMARY KEY, body TEXT)");
   db.exec("CREATE TABLE meta (k TEXT)");
   db.exec("INSERT INTO records (body) VALUES ('top secret')");
@@ -76,10 +76,12 @@ function seedDiskDb(path: string): void {
  */
 function settled(query: Cell<QueryState>, superseded?: unknown): Promise<void> {
   return new Promise<void>((resolve) => {
-    let done = false;
-    let cancel: (() => void) | undefined;
+    // The sink can fire DURING `sink()` itself, before it has returned the
+    // canceller, so the callback reaches it through this record rather than
+    // through a binding that is still uninitialized on that first call.
+    const sub: { done: boolean; cancel?: () => void } = { done: false };
     const check = () => {
-      if (done) return;
+      if (sub.done) return;
       if (query.key("pending").getRaw() !== false) return;
       if (
         superseded !== undefined &&
@@ -87,12 +89,12 @@ function settled(query: Cell<QueryState>, superseded?: unknown): Promise<void> {
       ) {
         return;
       }
-      done = true;
+      sub.done = true;
       resolve();
-      cancel?.();
+      sub.cancel?.();
     };
-    cancel = query.sink(check);
-    if (done) cancel();
+    sub.cancel = query.sink(check);
+    if (sub.done) sub.cancel();
   });
 }
 
@@ -209,7 +211,8 @@ async function runTest(base: URL, contractArrivesLate: boolean) {
       await runtime.idle();
       await runtime.storageManager.synced();
 
-      for (const [name, query] of [["direct", direct], ["derived", derived]] as const) {
+      const queries = [["direct", direct], ["derived", derived]] as const;
+      for (const [name, query] of queries) {
         const error = query.key("error").getRaw();
         if (error !== undefined) {
           throw new Error(`${name} query failed: ${JSON.stringify(error)}`);
@@ -227,7 +230,9 @@ async function runTest(base: URL, contractArrivesLate: boolean) {
         | Record<string, unknown>
         | undefined;
       if (!derivedRow || derivedRow.shouted !== "TOP SECRET") {
-        throw new Error(`unexpected derived row: ${JSON.stringify(derivedRow)}`);
+        throw new Error(
+          `unexpected derived row: ${JSON.stringify(derivedRow)}`,
+        );
       }
 
       // (b) The label is STORED on each row's own entity doc — the per-field

@@ -2919,6 +2919,7 @@
       },
       "packages/runner": {
         "dependencies": [
+          "jsr:@db/sqlite@0.13.0",
           "npm:@opentelemetry/api@^1.9.1",
           "npm:ses@^2.2.0",
           "npm:typescript@6.0.3"

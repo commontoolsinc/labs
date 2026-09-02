@@ -17,6 +17,10 @@
   },
   "imports": {
     // Dependency guide: ../../docs/development/DEPENDENCIES.md
+    // Pinned to the exact version packages/memory declares: both open the same
+    // on-disk SQLite files, and the integration test that seeds one for an
+    // injected (03.3) source reads what the server attaches.
+    "@db/sqlite": "jsr:@db/sqlite@0.13.0",
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1",
     "ses": "npm:ses@^2.2.0",
     "typescript": "npm:typescript@6.0.3"
