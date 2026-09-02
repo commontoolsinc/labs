@@ -1,0 +1,5 @@
+new FabricEpochNsec(123456789n)
+
+/EpochNsec(...)
+
+/EpochNsec(...)

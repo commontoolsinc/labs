@@ -1,0 +1,19 @@
+(() => {
+  const a = { x: 1, inner: { y: 2 } };
+  a.self = a;
+  a.inner.root = a;
+  a.inner.self = a.inner;
+  return a;
+})()
+
+{
+  x: 1,
+  inner: {
+    y: 2,
+    root: <circle>,
+    self: <circle>
+  },
+  self: <circle>
+}
+
+{x:1,inner:{y:2,root:<circle>,self:<circle>},self:<circle>}

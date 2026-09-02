@@ -1,0 +1,23 @@
+(() => {
+  class Data {
+    x = 1;
+    y = "two";
+    nested = { z: [3] };
+  }
+  return { data: new Data(), empty: new (class Empty {})() };
+})()
+
+{
+  data: /Data(
+    x: 1,
+    y: "two",
+    nested: {
+      z: [
+        3
+      ]
+    }
+  ),
+  empty: /Empty(...)
+}
+
+{data:/Data(x:1,y:"two",nested:{z:[3]}),empty:/Empty(...)}

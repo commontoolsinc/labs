@@ -1,0 +1,20 @@
+{
+  single: { constructor: 1 },
+  proto: Object.fromEntries([["__proto__", 2]]),
+  several: { constructor: 3, prototype: 4 },
+}
+
+{
+  single: {
+    constructor: 1
+  },
+  proto: {
+    __proto__: 2
+  },
+  several: {
+    constructor: 3,
+    prototype: 4
+  }
+}
+
+{single:{constructor:1},proto:{__proto__:2},several:{constructor:3,prototype:4}}

@@ -1,0 +1,29 @@
+{
+  named: function foo() {},
+  arrow: () => 1,
+  method() {},
+  anonymous: (() => () => 1)(),
+  "empty name": (() => {
+    const f = function () {};
+    Object.defineProperty(f, "name", { value: "" });
+    return f;
+  })(),
+  class: class Foo {},
+  generator: function* gen() {},
+  async: async function af() {},
+  "with properties": Object.assign(function bar() {}, { prop: 1 }),
+}
+
+{
+  named: function foo(...) {...},
+  arrow: function arrow(...) {...},
+  method: function method(...) {...},
+  anonymous: (...) => {...},
+  "empty name": (...) => {...},
+  class: function Foo(...) {...},
+  generator: function gen(...) {...},
+  async: function af(...) {...},
+  "with properties": function bar(...) {...}
+}
+
+{named:function foo(...) {...},arrow:function arrow(...) {...},method:function method(...) {...},...

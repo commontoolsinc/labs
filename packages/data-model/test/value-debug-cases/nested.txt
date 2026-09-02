@@ -1,0 +1,17 @@
+{ a: { b: { c: [1n, { d: undefined }, Symbol.for("s")] } } }
+
+{
+  a: {
+    b: {
+      c: [
+        1n,
+        {
+          d: undefined
+        },
+        @s
+      ]
+    }
+  }
+}
+
+{a:{b:{c:[1n,{d:undefined},@s]}}}

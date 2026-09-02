@@ -1,0 +1,13 @@
+{
+  regexp: /ab+c/gi,
+  error: new Error("boom"),
+  url: new URL("https://example.com/x?y=1"),
+}
+
+{
+  regexp: /RegExp("/ab+c/gi"),
+  error: /Error("Error: boom"),
+  url: /URL("https://example.com/x?y=1")
+}
+
+{regexp:/RegExp("/ab+c/gi"),error:/Error("Error: boom"),url:/URL("https://example.com/x?y=1")}

@@ -1,0 +1,19 @@
+(() => {
+  // A getter is read like any other enumerable property, and what it returns
+  // is what gets rendered.
+  const v = { plain: 1 };
+  Object.defineProperty(v, "computed", {
+    get: () => ({ from: "getter" }),
+    enumerable: true,
+  });
+  return v;
+})()
+
+{
+  plain: 1,
+  computed: {
+    from: "getter"
+  }
+}
+
+{plain:1,computed:{from:"getter"}}

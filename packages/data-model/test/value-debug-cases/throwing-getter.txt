@@ -1,0 +1,16 @@
+(() => {
+  const v = {};
+  Object.defineProperty(v, "x", {
+    get: () => {
+      throw new Error("nope");
+    },
+    enumerable: true,
+  });
+  return v;
+})()
+
+{
+  x: /unconvertible("nope")
+}
+
+{x:/unconvertible("nope")}

@@ -1,0 +1,16 @@
+(() => {
+  // A class instance whose `toJSON()` throws renders as unconvertible, the
+  // class name included in the loss.
+  class Throws {
+    toJSON() {
+      throw new Error("nope");
+    }
+  }
+  return { instance: new Throws() };
+})()
+
+{
+  instance: /unconvertible("nope")
+}
+
+{instance:/unconvertible("nope")}

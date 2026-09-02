@@ -1,0 +1,15 @@
+{
+  instance: new (class {})(),
+  "with props": new (class {
+    x = 1;
+  })(),
+}
+
+{
+  instance: /<anonymous>(...),
+  "with props": /<anonymous>(
+    x: 1
+  )
+}
+
+{instance:/<anonymous>(...),"with props":/<anonymous>(x:1)}
