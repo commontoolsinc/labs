@@ -1,3 +1,4 @@
+// deno-coverage-ignore-file
 // @ts-check
 
 /**
