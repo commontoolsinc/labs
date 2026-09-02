@@ -175,8 +175,9 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
  * What `pwd` prints: both halves of the place, each on its own line.
  *
  * A leading `/` is what makes a string a reference, so it marks the one
- * position that is a cell. A piece therefore renders as a complete reference —
- * the form that denotes the same cell read from anywhere — while a root and a
+ * position that is a cell. A piece therefore renders as a fully qualified
+ * reference — the rung that supplies every level, and so the one that denotes
+ * the same cell read from anywhere — while a root and a
  * facet are containers and render without one, which is what keeps a
  * container's own rendering from resolving as a piece whose slug happens to
  * match. `cd` reads a piece rendering back whole, except where a path segment
@@ -345,7 +346,8 @@ type Step =
  *
  * The operand is read in the order the spellings can be told apart: `-`, a
  * scope-only `@scope`, and `/` are shuttle's own navigation syntax, any other
- * rooted string is a reference for the fabric's grammar to parse, a leading
+ * string starting with `/` is a reference for the fabric's grammar to parse,
+ * whichever rung of it, a leading
  * `#` is a wish target, and anything else is a relative walk from where
  * shuttle stands.
  */
@@ -419,8 +421,9 @@ function refuseUnknownScope(word: string): Step {
 /**
  * Where a parsed reference moves `place` to.
  *
- * A rooted reference fixes the piece and the path and takes its space from the
- * place; only a complete one carries a space of its own. The parse refuses a
+ * A rooted reference fixes the piece and the path and takes both its space
+ * and its scope from the place; a `@did:key:…` prefix supplies the space, and
+ * an `@scope` suffix the scope. The parse refuses a
  * space whose DID differs from the place's, and hands one written as a name
  * back for a session to settle, since deriving a DID from a name needs one.
  */

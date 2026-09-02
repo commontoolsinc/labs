@@ -111,7 +111,7 @@ describe("place", () => {
       );
     });
 
-    it("returns a piece and its path as a complete reference", () => {
+    it("returns a piece and its path as a fully qualified reference", () => {
       const place = atPiece();
       place.cd("topics/3");
       place.cd("@session");

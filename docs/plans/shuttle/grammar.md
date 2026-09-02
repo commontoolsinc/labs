@@ -384,6 +384,17 @@ the set would have to unteach.
 
 ## Open questions
 
-None here — the base-overlay spelling is settled above. The remaining
-open item for shuttle overall (shallow-sink expressibility) lives in
+**Appending to a collection.** Shuttle's write vocabulary is whole-value:
+`set` writes a value, `edit` writes back the one it opened, and `link`
+writes a reference. The fabric below has more than that — operation-based
+append, add-unique, increment and remove-by-value, covered in
+[`mergeable-collection-writes`](../../features/mergeable-collection-writes.md)
+and registered by
+[`patch-operations.md`](../../features/patch-operations.md) — and no shuttle
+spelling reaches any of them. Adding one item to a collection is therefore
+`get`, edit, `set`: the read-modify-write those operations were made
+first-class to avoid.
+
+The base-overlay spelling is settled above. The remaining open item for
+shuttle overall (shallow-sink expressibility) lives in
 [`views.md`](views.md).
