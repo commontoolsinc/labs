@@ -6,8 +6,8 @@ import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import {
   FabricInstance,
+  type FabricPlainObject,
   FabricPrimitive,
-  FabricSpecialObject,
   FabricValue,
 } from "./interface.ts";
 // Imported from its own module rather than the package barrel, deliberately:
@@ -22,187 +22,25 @@ import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 
 /**
- * Sentinel marker used to wrap content that should appear unquoted in the
- * final output. The replacer brackets a bare-token payload (e.g. `42n` or
- * `undefined`) with this marker; a post-processing pass then strips both the
- * markers and the surrounding JSON-string quotes.
+ * Produces the `/unconvertible` result form which stands in for a value whose
+ * conversion threw, carrying the message of the error thrown.
  */
-const UNQUOTE_MARKER = "@@DEBUG_UNQUOTE@@";
-
-/** Regex matching a marked, JSON-quoted payload. Group 1 is the payload. */
-const UNQUOTE_RE = /"@@DEBUG_UNQUOTE@@(.*?)@@DEBUG_UNQUOTE@@"/g;
-
-/** Wraps a payload in the sentinel markers for unquoting. */
-function marked(payload: string): string {
-  return `${UNQUOTE_MARKER}${payload}${UNQUOTE_MARKER}`;
-}
-
-/**
- * Strips sentinel markers (and surrounding JSON quotes) in a stringify output.
- * The captured payload body is decoded back through `JSON.parse` so that any
- * quote / backslash escapes introduced by the outer `JSON.stringify` round-
- * trip are undone (e.g. so that the symbol-form payload `Symbol.for("name")`
- * retains its literal `"`s rather than coming out as `Symbol.for(\"name\")`).
- */
-function unquoteMarked(json: string): string {
-  return json.replace(UNQUOTE_RE, (_match, body) => {
-    return JSON.parse(`"${body}"`);
-  });
-}
-
-/** Helper class for rendering debug-string representations of values. */
-class DebugStringifier {
-  #circles = new Set<object>();
-  #unusedCircles = new Set<object>();
-  #indent: number | undefined;
-  #value: unknown;
-
-  /**
-   * Constructs an instance which renders `value`, using `indent` spaces per
-   * level when given and a single-line rendering when not.
-   */
-  constructor(value: unknown, indent?: number) {
-    this.#value = value;
-    this.#indent = indent;
-  }
-
-  /**
-   * Renders the debug-string form of the configured value, with the configured
-   * indentation if any.
-   */
-  render() {
-    this.#findCircles(this.#value);
-
-    const rawResult = JSON.stringify(
-      this.#value,
-      (_key: string, value: unknown) => this.#replacer(value),
-      this.#indent,
-    );
-
-    return unquoteMarked(rawResult);
-  }
-
-  #findCircles(
-    value: unknown,
-    possibleCircles: Set<object> = new Set<object>(),
-  ) {
-    if (!value || (typeof value !== "object") || this.#circles.has(value)) {
-      return;
-    } else if (possibleCircles.has(value)) {
-      this.#circles.add(value);
-      this.#unusedCircles.add(value);
-      return;
+function makeUnconvertibleResult(error: any): FabricValue {
+  const message = (() => {
+    try {
+      if (error instanceof Error) {
+        const msg = error.message;
+        if (typeof msg === "string") {
+          return msg;
+        }
+      }
+      return String(error);
+    } catch {
+      return "/unconvertibleError";
     }
+  })();
 
-    const valueObj = value as Record<string, unknown>;
-
-    possibleCircles.add(value);
-    for (const key in valueObj) {
-      this.#findCircles(valueObj[key], possibleCircles);
-    }
-    possibleCircles.delete(value);
-  }
-
-  #replacer(value: unknown) {
-    switch (typeof value) {
-      case "bigint": {
-        return marked(`${value}n`);
-      }
-
-      case "function": {
-        return marked(
-          value.name === ""
-            ? "(...) => {...}"
-            : `function ${value.name}(...) {...}`,
-        );
-      }
-
-      case "number": {
-        if (Number.isFinite(value)) {
-          return Object.is(value, -0) ? marked("-0") : value;
-        } else if (Number.isNaN(value)) {
-          return marked("NaN");
-        } else if (value === Infinity) {
-          return marked("Infinity");
-        } else if (value === -Infinity) {
-          return marked("-Infinity");
-        }
-
-        // Shouldn't happen; there aren't any other non-finite possibilites.
-        // deno-coverage-ignore-start
-        return marked(`<non-finite ${value}>`);
-      }
-      // deno-coverage-ignore-stop
-
-      case "object": {
-        if (value === null) {
-          // Let `JSON.stringify()` just render it directly as `"null"`.
-          return null;
-        } else if (this.#circles.has(value)) {
-          if (this.#unusedCircles.has(value)) {
-            this.#unusedCircles.delete(value);
-            return value;
-          }
-          return marked("<circle>");
-        } else if (isPlainObject(value) || Array.isArray(value)) {
-          return value;
-        }
-
-        // Non-plain object.
-
-        const className =
-          (value as { constructor?: { name?: string } }).constructor?.name ??
-            "<anonymous>";
-
-        if (value instanceof FabricSpecialObject) {
-          // The slash here is to suggest that what we're rendering is a known
-          // encodable type, and not just an instance of some random class.
-          // TODO(danfuzz): This should get fancier/smarter, e.g. by rendering
-          // some of the instance's actual state instead of an opaque `(...)`.
-          let fullTag;
-          try {
-            // A `FabricPrimitive` binds no `[CODEC]`, so its JSON codec
-            // supplies the tag here. TODO(danfuzz): Replace `JSON_CODEC` with
-            // `DEBUG_CODEC` once the latter exists.
-            fullTag = codecOf(value, JSON_CODEC).tagForValue(value);
-          } catch {
-            // Never let the debug formatter throw; fall back to the class name.
-            fullTag = className;
-          }
-          const tag = fullTag.replace(/@.*$/, "");
-          return marked(`/${tag}(...)`);
-        } else {
-          // Not a plain object and not a `FabricSpecialObject`. Punt on
-          // attempting to render the innards.
-          return marked(`new ${className}(...)`);
-        }
-      }
-
-      case "symbol": {
-        const key = Symbol.keyFor(value);
-        if (key === undefined) {
-          // Uninterned ("unique") symbol.
-          const description = value.description;
-          return marked(
-            (description === undefined)
-              ? "Symbol()"
-              : `Symbol(${JSON.stringify(description)})`,
-          );
-        } else {
-          // Interned symbol.
-          return marked(`Symbol.for(${JSON.stringify(key)})`);
-        }
-      }
-
-      case "undefined": {
-        return marked("undefined");
-      }
-
-      default: {
-        return value;
-      }
-    }
-  }
+  return { "/unconvertible": message };
 }
 
 /**
@@ -249,7 +87,7 @@ class DebugConverter {
       // close to where they're thrown. This `catch` is a prophylactic "just
       // in case" to help nail down the intention of really really trying not to
       // `throw` out of this method.
-      return DebugConverter.#makeErrorResult(e);
+      return makeUnconvertibleResult(e);
     }
     // deno-coverage-ignore-stop
   }
@@ -274,7 +112,7 @@ class DebugConverter {
       try {
         byName[key] = this.#convertSubvalue(value[key], depth + 1);
       } catch (e) {
-        byName[key] = DebugConverter.#makeErrorResult(e);
+        byName[key] = makeUnconvertibleResult(e);
       }
     }
 
@@ -327,7 +165,7 @@ class DebugConverter {
       try {
         result[resultKey] = this.#convertSubvalue(value[key], depth + 1);
       } catch (e) {
-        result[resultKey] = DebugConverter.#makeErrorResult(e);
+        result[resultKey] = makeUnconvertibleResult(e);
       }
     }
 
@@ -374,7 +212,7 @@ class DebugConverter {
           const content = (name != "") ? `${name}(...)` : "<anonymous>(...)";
           return { "/function": content };
         } catch (e) {
-          return { "/function": DebugConverter.#makeErrorResult(e) };
+          return { "/function": makeUnconvertibleResult(e) };
         }
       }
 
@@ -433,46 +271,190 @@ class DebugConverter {
         this.#nestingStack.delete(value);
       }
     } catch (e) {
-      return DebugConverter.#makeErrorResult(e);
+      return makeUnconvertibleResult(e);
     }
-  }
-
-  //
-  // Static members
-  //
-
-  /**
-   * Produces the appropriate error-bearing result form, for an error thrown
-   * during processing.
-   */
-  static #makeErrorResult(error: any) {
-    const message = (() => {
-      try {
-        if (error instanceof Error) {
-          const msg = error.message;
-          if (typeof msg === "string") {
-            return msg;
-          }
-        }
-        return String(error);
-      } catch {
-        return "/unconvertibleError";
-      }
-    })();
-
-    return { "/unconvertible": message };
   }
 }
 
 /**
- * Renders the debug-string form of the given value with optional indentation.
+ * Helper class for rendering the result of `toStructuredDebugValue()` as a
+ * debug string. The rendering is JSON syntax wherever JSON can express the
+ * value, and a bare token -- `42n`, `undefined`, `NaN`, `-0`, `Infinity`,
+ * `Symbol.for("name")` -- wherever it cannot. A `FabricPrimitive`, which the
+ * conversion passes through as itself, is rendered under its codec tag with
+ * its JSON encoding, in the same shape the conversion gives a
+ * `FabricInstance`.
  */
-function renderDebugString(value: unknown, indent?: number) {
+class DebugStringifier {
+  readonly #indent: string | undefined;
+
+  /**
+   * Constructs an instance which renders using `indent` spaces per nesting
+   * level when given, and on a single line when not.
+   */
+  constructor(indent?: number) {
+    this.#indent = (indent === undefined) ? undefined : " ".repeat(indent);
+  }
+
+  //
+  // Instance members
+  //
+
+  /** Renders the given value. */
+  render(value: FabricValue): string {
+    return this.#renderSubvalue(value, "");
+  }
+
+  /**
+   * Renders an array, whose closing bracket (when the rendering is multi-line)
+   * is indented by `indent`.
+   */
+  #renderArray(value: readonly FabricValue[], indent: string): string {
+    const inner = this.#innerIndent(indent);
+    const parts: string[] = [];
+
+    // Iterated by index rather than by element, so that a hole renders as
+    // `undefined` and takes up its position.
+    for (let i = 0; i < value.length; i++) {
+      parts.push(this.#renderSubvalue(value[i], inner));
+    }
+
+    return this.#renderContainer("[", "]", parts, indent);
+  }
+
+  /**
+   * Renders a container from its already-rendered parts, given the opening and
+   * closing bracket text and the indentation of the closing bracket.
+   */
+  #renderContainer(
+    open: string,
+    close: string,
+    parts: string[],
+    indent: string,
+  ): string {
+    if (parts.length === 0) {
+      return `${open}${close}`;
+    } else if (this.#indent === undefined) {
+      return `${open}${parts.join(",")}${close}`;
+    }
+
+    const inner = this.#innerIndent(indent);
+    return `${open}\n${inner}${parts.join(`,\n${inner}`)}\n${indent}${close}`;
+  }
+
+  /**
+   * Renders a `FabricPrimitive`, under its codec tag with its JSON encoding.
+   * When the codec cannot be found or cannot encode the value, the
+   * `/unconvertible` form is rendered in its place.
+   */
+  #renderFabricPrimitive(value: FabricPrimitive, indent: string): string {
+    let converted: FabricValue;
+
+    try {
+      // A `FabricPrimitive` binds no `[CODEC]`, so its JSON codec supplies the
+      // tag and encoding. TODO(danfuzz): Replace `JSON_CODEC` with
+      // `DEBUG_CODEC` once the latter exists.
+      const codec = codecOf(value, JSON_CODEC);
+      const tag = codec.tagForValue(value);
+      const encoded = codec.encode(value, NULL_LIVE_ENVIRONMENT) as FabricValue;
+      converted = { [`/${tag}`]: encoded };
+    } catch (e) {
+      converted = makeUnconvertibleResult(e);
+    }
+
+    return this.#renderSubvalue(converted, indent);
+  }
+
+  /**
+   * Renders a plain object, whose closing brace (when the rendering is
+   * multi-line) is indented by `indent`.
+   */
+  #renderPlainObject(value: FabricPlainObject, indent: string): string {
+    const inner = this.#innerIndent(indent);
+    const separator = (this.#indent === undefined) ? ":" : ": ";
+    const parts = Object.keys(value).map((key) => {
+      const rendered = this.#renderSubvalue(value[key], inner);
+      return `${JSON.stringify(key)}${separator}${rendered}`;
+    });
+
+    return this.#renderContainer("{", "}", parts, indent);
+  }
+
+  /**
+   * Renders the given value, whose closing bracket (when the value is a
+   * container and the rendering is multi-line) is indented by `indent`.
+   */
+  #renderSubvalue(value: FabricValue, indent: string): string {
+    switch (typeof value) {
+      case "bigint": {
+        return `${value}n`;
+      }
+
+      case "boolean":
+      case "undefined": {
+        return String(value);
+      }
+
+      case "number": {
+        // `String(-0)` is `0`, so negative zero is the one number that needs
+        // special handling.
+        return Object.is(value, -0) ? "-0" : String(value);
+      }
+
+      case "string": {
+        return JSON.stringify(value);
+      }
+
+      case "symbol": {
+        // The conversion represents a unique symbol as a tagged object, so
+        // only an interned symbol arrives here.
+        return `Symbol.for(${JSON.stringify(Symbol.keyFor(value))})`;
+      }
+
+      case "object": {
+        if (value === null) {
+          return "null";
+        } else if (Array.isArray(value)) {
+          return this.#renderArray(value, indent);
+        } else if (value instanceof FabricPrimitive) {
+          return this.#renderFabricPrimitive(value, indent);
+        } else {
+          // The conversion represents every other non-plain object as a plain
+          // one, so what is left is a plain object.
+          return this.#renderPlainObject(value as FabricPlainObject, indent);
+        }
+      }
+
+      // deno-coverage-ignore-start
+      // This will only happen if JS introduces a new type.
+      default: {
+        throw new Error(`Shouldn't happen: unknown type \`${typeof value}\``);
+      }
+        // deno-coverage-ignore-stop
+    }
+  }
+
+  /** Returns the indentation for the contents of a container indented by `indent`. */
+  #innerIndent(indent: string): string {
+    return `${indent}${this.#indent ?? ""}`;
+  }
+}
+
+/**
+ * Renders the debug-string form of the given value with optional indentation,
+ * by converting it with `toStructuredDebugValue()` and rendering the result.
+ */
+function renderDebugString(value: unknown, indent?: number): string {
   try {
-    return new DebugStringifier(value, indent).render();
+    return new DebugStringifier(indent).render(toStructuredDebugValue(value));
+    // deno-coverage-ignore-start
   } catch {
+    // Neither the conversion nor the rendering is meant to throw. This `catch`
+    // is a prophylactic "just in case" to nail down the intention of really
+    // really trying not to `throw` out of this function.
     return "<unrenderable debug string>";
   }
+  // deno-coverage-ignore-stop
 }
 
 /**
@@ -481,22 +463,18 @@ function renderDebugString(value: unknown, indent?: number) {
  * necessary, the returned result will be the indicated length, which includes
  * an "ASCII ellipsis" of `...`.
  *
- * This function handles:
- * * all normal JSON-compatible values.
- * * other JavaScript primitive values:
- *   * bigints.
- *   * symbols, both interned and uninterned.
- *   * non-finite numbers.
- *   * `-0` rendered as such.
- * * functions, rendered in a simplified form and without any additional
- *   properties listed.
- * * objects which define `toJSON()`, calling that method in the usual way.
- * * objects and arrays with circular references, rendering the back-references
- *   as `<circle>`.
+ * The value is first converted with `toStructuredDebugValue()`, and it is that
+ * result which gets rendered. The rendering is JSON syntax wherever JSON can
+ * express the value, and a bare token wherever it cannot:
+ * * `bigint`s, as `42n`.
+ * * `undefined`, as such.
+ * * non-finite numbers and `-0`, as such.
+ * * interned symbols, as `Symbol.for("name")`.
+ * * `FabricPrimitive`s, under their codec tag with their JSON encoding, e.g.
+ *   `{"/Bytes@1":"AQID"}`.
  *
- * If the stringification could not be completed (stack overflow, object
- * `toJSON()` conversion error, etc.), this function returns the literal string
- * `"<unrenderable debug string>"`.
+ * If the rendering could not be completed, this function returns the literal
+ * string `"<unrenderable debug string>"`.
  *
  * **Note:** In _many_ cases, the output of this function is valid JSON text,
  * but not _all_ cases. This function must _not_ be relied on to produce a
@@ -519,28 +497,8 @@ export function toCompactDebugString(
 }
 
 /**
- * Produces an indented string representation of a value.
- *
- * This function handles:
- * * all normal JSON-compatible values.
- * * other JavaScript primitive values:
- *   * bigints.
- *   * symbols, both interned and uninterned.
- *   * non-finite numbers.
- *   * `-0` rendered as such.
- * * functions, rendered in a simplified form and without any additional
- *   properties listed.
- * * objects which define `toJSON()`, calling that method in the usual way.
- * * objects and arrays with circular references, rendering the back-references
- *   as `<circle>`.
- *
- * If the stringification could not be completed (stack overflow, object
- * `toJSON()` conversion error, etc.), this function returns the literal string
- * `"<unrenderable debug string>"`.
- *
- * **Note:** In _many_ cases, the output of this function is valid JSON text,
- * but not _all_ cases. This function must _not_ be relied on to produce a
- * parseable string.
+ * Like `toCompactDebugString()`, except that the result is indented by two
+ * spaces per nesting level, and is never truncated.
  */
 export function toIndentedDebugString(value: unknown): string {
   return renderDebugString(value, 2);

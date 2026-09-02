@@ -26,7 +26,7 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { FabricSpecialObject } from "@/interface.ts";
+import { FabricPrimitive, FabricSpecialObject } from "@/interface.ts";
 
 describe("value-debug", () => {
   describe("toCompactDebugString", () => {
@@ -93,11 +93,7 @@ describe("value-debug", () => {
         .toBe('{"count":100n,"missing":undefined,"items":[1n,2n,undefined]}');
     });
 
-    it("does not unquote ordinary string values that resemble bare tokens", () => {
-      // A user string that just happens to read "undefined" or "42n" should
-      // remain a quoted string in the output -- only sentinel-wrapped payloads
-      // get unquoted.
-
+    it("renders a string that resembles a bare token as a quoted string", () => {
       expect(toCompactDebugString("undefined"))
         .toBe('"undefined"');
       expect(toCompactDebugString("42n")).toBe('"42n"');
@@ -105,48 +101,55 @@ describe("value-debug", () => {
         .toBe('{"a":"undefined"}');
     });
 
-    it("renders a named function as a bare abbreviated form", () => {
+    it("renders a named function under the `/function` tag", () => {
       function foo() {}
-      expect(toCompactDebugString(foo)).toBe("function foo(...) {...}");
+      expect(toCompactDebugString(foo)).toBe('{"/function":"foo(...)"}');
     });
 
     it("renders a named function inside a structure", () => {
       function bar() {}
       expect(toCompactDebugString({ fn: bar }))
-        .toBe('{"fn":function bar(...) {...}}');
+        .toBe('{"fn":{"/function":"bar(...)"}}');
       expect(toCompactDebugString([bar]))
-        .toBe("[function bar(...) {...}]");
+        .toBe('[{"/function":"bar(...)"}]');
     });
 
-    it("renders an anonymous arrow function as a bare abbreviated form", () => {
+    it("renders an anonymous arrow function as `<anonymous>`", () => {
       // An immediately-passed arrow expression has no `name`.
 
       expect(toCompactDebugString((() => 1) as unknown))
-        .toBe("(...) => {...}");
+        .toBe('{"/function":"<anonymous>(...)"}');
     });
 
-    it("renders an anonymous `function` expression as a bare abbreviated form", () => {
+    it("renders an anonymous `function` expression as `<anonymous>`", () => {
       // Force an empty `name` to simulate a true anonymous function expression
       // (`(function(){}).name === ""`).
 
       const anon = function () {};
       Object.defineProperty(anon, "name", { value: "" });
-      expect(toCompactDebugString(anon)).toBe("(...) => {...}");
+      expect(toCompactDebugString(anon)).toBe(
+        '{"/function":"<anonymous>(...)"}',
+      );
     });
 
-    it("renders a `FabricInstance` in `/Name` form", () => {
+    it("renders a `FabricInstance` under its codec tag with its state", () => {
+      // The stack in a `FabricError`'s state names this file and a line in
+      // it, so the assertion stops short of the stack.
+
       const inst = FabricError.fromNativeError(new Error("eek!"));
-      expect(toCompactDebugString(inst)).toBe("/Error(...)");
+      expect(toCompactDebugString(inst)).toMatch(
+        /^\{"\/Error@1":\{"type":"Error","name":null,"message":"eek!","stack":/,
+      );
     });
 
-    it("renders a `FabricPrimitive` in `/Name` form", () => {
+    it("renders a `FabricPrimitive` under its codec tag with its JSON encoding", () => {
       const inst = new FabricEpochNsec(123456789n);
-      expect(toCompactDebugString(inst)).toBe("/EpochNsec(...)");
+      expect(toCompactDebugString(inst)).toBe('{"/EpochNsec@1":"B1vNFQ"}');
     });
 
-    it("renders a non-plain non-`FabricSpecialObject` in `new Name` form", () => {
+    it("renders a non-plain non-`FabricSpecialObject` under its class name", () => {
       const inst = new Set();
-      expect(toCompactDebugString(inst)).toBe("new Set(...)");
+      expect(toCompactDebugString(inst)).toBe('{"/Set":"/..."}');
     });
 
     it('renders an interned symbol as `Symbol.for("name")`', () => {
@@ -160,22 +163,27 @@ describe("value-debug", () => {
       expect(toCompactDebugString([s])).toBe('[Symbol.for("k")]');
     });
 
-    it('renders an uninterned symbol as `Symbol("name")`', () => {
-      expect(toCompactDebugString(Symbol("d"))).toBe('Symbol("d")');
+    it("renders an uninterned symbol under the `/uniqueSymbol` tag", () => {
+      expect(toCompactDebugString(Symbol("d")))
+        .toBe('{"/uniqueSymbol":"d"}');
     });
 
     it("renders an uninterned symbol with no description", () => {
-      expect(toCompactDebugString(Symbol())).toBe("Symbol()");
+      expect(toCompactDebugString(Symbol()))
+        .toBe('{"/uniqueSymbol":undefined}');
     });
 
     it('renders an uninterned symbol with description `""` (empty string)', () => {
-      expect(toCompactDebugString(Symbol(""))).toBe('Symbol("")');
+      expect(toCompactDebugString(Symbol("")))
+        .toBe('{"/uniqueSymbol":""}');
     });
 
     it("renders an uninterned symbol inside a structure", () => {
       const s = Symbol("inner");
-      expect(toCompactDebugString({ s })).toBe('{"s":Symbol("inner")}');
-      expect(toCompactDebugString([s])).toBe('[Symbol("inner")]');
+      expect(toCompactDebugString({ s }))
+        .toBe('{"s":{"/uniqueSymbol":"inner"}}');
+      expect(toCompactDebugString([s]))
+        .toBe('[{"/uniqueSymbol":"inner"}]');
     });
 
     it("renders top-level `NaN` as a bare token", () => {
@@ -219,17 +227,17 @@ describe("value-debug", () => {
         expect(() => toCompactDebugString(a)).not.toThrow();
       });
 
-      it("renders a self-referential object with `<circle>` for the back-ref", () => {
+      it("renders a self-referential object with `/circle` for the back-ref", () => {
         const a: Record<string, unknown> = { x: 1 };
         a.self = a;
         expect(toCompactDebugString(a))
-          .toBe('{"x":1,"self":<circle>}');
+          .toBe('{"x":1,"self":{"/circle":0}}');
       });
 
-      it("renders a self-referential array with `<circle>` for the back-ref", () => {
+      it("renders a self-referential array with `/circle` for the back-ref", () => {
         const arr: unknown[] = [1, 2];
         arr.push(arr);
-        expect(toCompactDebugString(arr)).toBe("[1,2,<circle>]");
+        expect(toCompactDebugString(arr)).toBe('[1,2,{"/circle":0}]');
       });
 
       it("renders a two-object mutual reference cycle", () => {
@@ -237,7 +245,7 @@ describe("value-debug", () => {
         const b: Record<string, unknown> = { a };
         a.b = b;
         expect(toCompactDebugString(a))
-          .toBe('{"b":{"a":<circle>}}');
+          .toBe('{"b":{"a":{"/circle":0}}}');
       });
 
       it("renders a cycle that closes through several intermediate objects", () => {
@@ -245,14 +253,14 @@ describe("value-debug", () => {
         const a: Record<string, unknown> = { b: { c } };
         c.back = a;
         expect(toCompactDebugString(a))
-          .toBe('{"b":{"c":{"back":<circle>}}}');
+          .toBe('{"b":{"c":{"back":{"/circle":0}}}}');
       });
 
-      it("renders a cycle nested under a non-circular root", () => {
+      it("renders a cycle nested under a non-circular root, naming the depth it closes at", () => {
         const cyc: Record<string, unknown> = {};
         cyc.self = cyc;
         expect(toCompactDebugString({ x: 1, y: cyc }))
-          .toBe('{"x":1,"y":{"self":<circle>}}');
+          .toBe('{"x":1,"y":{"self":{"/circle":1}}}');
       });
 
       it("renders multiple independent cycles in the same value", () => {
@@ -262,7 +270,7 @@ describe("value-debug", () => {
         c2.self = c2;
         expect(toCompactDebugString({ a: c1, b: c2 }))
           .toBe(
-            '{"a":{"v":1,"self":<circle>},"b":{"v":2,"self":<circle>}}',
+            '{"a":{"v":1,"self":{"/circle":1}},"b":{"v":2,"self":{"/circle":1}}}',
           );
       });
 
@@ -276,10 +284,8 @@ describe("value-debug", () => {
       });
     });
 
-    describe("with values that prevent rendering", () => {
-      const FALLBACK = "<unrenderable debug string>";
-
-      it("falls back to the class name when codec lookup throws", () => {
+    describe("with values that resist rendering", () => {
+      it("renders a `FabricSpecialObject` with no codec under its class name", () => {
         // A `FabricSpecialObject` with no `[CODEC]` makes `codecOf()` throw.
         // The formatter is most likely to be reached for a value that is
         // already malformed, so it renders what it can rather than adding a
@@ -288,46 +294,36 @@ describe("value-debug", () => {
         class RogueSpecial extends FabricSpecialObject {}
 
         expect(toCompactDebugString(new RogueSpecial())).toBe(
-          "/RogueSpecial(...)",
+          '{"/RogueSpecial":"/..."}',
         );
       });
 
-      it("honors a normal `toJSON()` and renders its return value", () => {
-        // Sanity check that `toJSON()` is consulted in the usual way; this is
-        // the happy-path counterpart to the throw cases below.
+      it("renders the error message in place of a `FabricPrimitive` with no codec", () => {
+        class RoguePrimitive extends FabricPrimitive {}
 
-        const v = { toJSON: () => ({ simplified: 1 }) };
-        expect(toCompactDebugString(v)).toBe('{"simplified":1}');
+        expect(toCompactDebugString(new RoguePrimitive())).toBe(
+          '{"/unconvertible":"Shouldn\'t happen: no `[CODEC]` for `RoguePrimitive`."}',
+        );
       });
 
-      it("returns the fallback string when a top-level `toJSON()` throws", () => {
+      it("renders a plain object's `toJSON` as the function it is, without calling it", () => {
+        // A `toJSON()` that throws is the proof: had it been called, its
+        // error would be what got rendered.
+
         const v = {
           toJSON: () => {
             throw new Error("nope");
           },
         };
-        expect(toCompactDebugString(v)).toBe(FALLBACK);
+        expect(toCompactDebugString(v))
+          .toBe('{"toJSON":{"/function":"toJSON(...)"}}');
+        expect(toCompactDebugString({ a: 1, b: v }))
+          .toBe('{"a":1,"b":{"toJSON":{"/function":"toJSON(...)"}}}');
+        expect(toCompactDebugString([1, v, 3]))
+          .toBe('[1,{"toJSON":{"/function":"toJSON(...)"}},3]');
       });
 
-      it("returns the fallback string when a nested `toJSON()` throws", () => {
-        const inner = {
-          toJSON: () => {
-            throw new Error("nope");
-          },
-        };
-        expect(toCompactDebugString({ a: 1, b: inner })).toBe(FALLBACK);
-      });
-
-      it("returns the fallback string when a `toJSON()` inside an array throws", () => {
-        const inner = {
-          toJSON: () => {
-            throw new Error("nope");
-          },
-        };
-        expect(toCompactDebugString([1, inner, 3])).toBe(FALLBACK);
-      });
-
-      it("returns the fallback string when an enumerable getter throws", () => {
+      it("renders the error message in place of a value whose enumerable getter throws", () => {
         const v = {};
         Object.defineProperty(v, "x", {
           get: () => {
@@ -335,24 +331,30 @@ describe("value-debug", () => {
           },
           enumerable: true,
         });
-        expect(toCompactDebugString(v)).toBe(FALLBACK);
+        expect(toCompactDebugString(v)).toBe('{"x":{"/unconvertible":"nope"}}');
       });
 
-      it("returns the fallback string in the indented form too", () => {
-        const v = {
-          toJSON: () => {
+      it("renders the error message in the indented form too", () => {
+        const v = {};
+        Object.defineProperty(v, "x", {
+          get: () => {
             throw new Error("nope");
           },
-        };
-        expect(toIndentedDebugString(v)).toBe(FALLBACK);
+          enumerable: true,
+        });
+        expect(toIndentedDebugString(v)).toBe(
+          '{\n  "x": {\n    "/unconvertible": "nope"\n  }\n}',
+        );
       });
 
-      it("does not throw to its caller on a throwing `toJSON()`", () => {
-        const v = {
-          toJSON: () => {
+      it("does not throw to its caller on a throwing getter", () => {
+        const v = {};
+        Object.defineProperty(v, "x", {
+          get: () => {
             throw new Error("nope");
           },
-        };
+          enumerable: true,
+        });
         expect(() => toCompactDebugString(v)).not.toThrow();
         expect(() => toIndentedDebugString(v)).not.toThrow();
       });
@@ -406,9 +408,10 @@ describe("value-debug", () => {
         .toBe("[\n  1n,\n  undefined,\n  2n\n]");
     });
 
-    it("renders top-level named function as bare abbreviated form", () => {
+    it("renders a top-level named function under the `/function` tag", () => {
       function baz() {}
-      expect(toIndentedDebugString(baz)).toBe("function baz(...) {...}");
+      expect(toIndentedDebugString(baz))
+        .toBe('{\n  "/function": "baz(...)"\n}');
     });
 
     it('renders top-level interned symbol as `Symbol.for("name")`', () => {
@@ -416,12 +419,13 @@ describe("value-debug", () => {
         .toBe('Symbol.for("ind")');
     });
 
-    it("renders a nested `function` and `symbol` as bare tokens", () => {
+    it("renders a nested `function` and `symbol` as tagged objects", () => {
       function qux() {}
       const v = { fn: qux, sym: Symbol("s") };
       expect(toIndentedDebugString(v))
         .toBe(
-          '{\n  "fn": function qux(...) {...},\n  "sym": Symbol("s")\n}',
+          '{\n  "fn": {\n    "/function": "qux(...)"\n  },\n' +
+            '  "sym": {\n    "/uniqueSymbol": "s"\n  }\n}',
         );
     });
 
@@ -440,11 +444,11 @@ describe("value-debug", () => {
         );
     });
 
-    it("renders a self-referential object with `<circle>` for the back-ref", () => {
+    it("renders a self-referential object with `/circle` for the back-ref", () => {
       const a: Record<string, unknown> = { x: 1 };
       a.self = a;
       expect(toIndentedDebugString(a))
-        .toBe('{\n  "x": 1,\n  "self": <circle>\n}');
+        .toBe('{\n  "x": 1,\n  "self": {\n    "/circle": 0\n  }\n}');
     });
   });
 
@@ -514,23 +518,25 @@ describe("value-debug", () => {
   describe("custom inspector", () => {
     // Without the inspector these all render as `{}`: state lives in private
     // fields, which have no enumerable own properties for an inspector to find.
-    // The elided `(...)` is the debug renderer's own current limitation, marked
-    // by a TODO there; delegating means this surface inherits the fix.
+    // Delegating to the debug renderer is what makes the state visible.
 
     it("renders a FabricPrimitive as its debug string, not `{}`", () => {
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
-      expect(Deno.inspect(bytes)).toBe("/Bytes(...)");
+      expect(Deno.inspect(bytes)).toBe('{"/Bytes@1":"AQID"}');
     });
 
     it("renders a FabricInstance as its debug string, not `{}`", () => {
       const err = FabricError.fromNativeError(new Error("boom"));
-      expect(Deno.inspect(err)).toBe("/Error(...)");
+      expect(Deno.inspect(err)).toMatch(
+        /^\{"\/Error@1":\{"type":"Error","name":null,"message":"boom","stack":/,
+      );
     });
 
     it("renders when nested in containers", () => {
       const bytes = new FabricBytes(new Uint8Array([9]));
-      expect(Deno.inspect({ blob: bytes })).toBe("{ blob: /Bytes(...) }");
-      expect(Deno.inspect([bytes, bytes])).toBe("[ /Bytes(...), /Bytes(...) ]");
+      expect(Deno.inspect({ blob: bytes })).toBe('{ blob: {"/Bytes@1":"CQ"} }');
+      expect(Deno.inspect([bytes, bytes]))
+        .toBe('[ {"/Bytes@1":"CQ"}, {"/Bytes@1":"CQ"} ]');
     });
   });
 });

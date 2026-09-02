@@ -22,7 +22,7 @@ describe("toIndentedDebugString()", () => {
 
   it("indents nested object structure with 2 spaces", () => {
     // Two leading spaces before the first key confirm `indent === 2` reached
-    // `JSON.stringify`. A deeper key carries four spaces.
+    // the renderer. A deeper key carries four spaces.
     const result = toIndentedDebugString({ a: 1, nested: { b: 2 } });
     expect(result).toContain('\n  "a"');
     expect(result).toContain('\n    "b"');
@@ -59,27 +59,30 @@ describe("toIndentedDebugString()", () => {
   it("renders an exotic (non-plain) value without throwing", () => {
     const inst = new FabricEpochNsec(123456789n);
     expect(() => toIndentedDebugString(inst)).not.toThrow();
-    expect(toIndentedDebugString(inst)).toBe("/EpochNsec(...)");
+    expect(toIndentedDebugString(inst))
+      .toBe('{\n  "/EpochNsec@1": "B1vNFQ"\n}');
   });
 
-  it("renders a circular reference as `<circle>` rather than throwing", () => {
+  it("renders a circular reference as `/circle` rather than throwing", () => {
     const a: Record<string, unknown> = { x: 1 };
     a.self = a;
     expect(() => toIndentedDebugString(a)).not.toThrow();
     expect(toIndentedDebugString(a)).toBe(
-      '{\n  "x": 1,\n  "self": <circle>\n}',
+      '{\n  "x": 1,\n  "self": {\n    "/circle": 0\n  }\n}',
     );
   });
 
-  it("falls back to the unrenderable string instead of throwing", () => {
-    // The docstring promises a literal fallback string when stringification
-    // cannot complete (here, a throwing `toJSON()`).
-    const value = {
-      toJSON: () => {
+  it("renders the error message in place of a value that cannot be read", () => {
+    const value = {};
+    Object.defineProperty(value, "x", {
+      get: () => {
         throw new Error("nope");
       },
-    };
+      enumerable: true,
+    });
     expect(() => toIndentedDebugString(value)).not.toThrow();
-    expect(toIndentedDebugString(value)).toBe("<unrenderable debug string>");
+    expect(toIndentedDebugString(value)).toBe(
+      '{\n  "x": {\n    "/unconvertible": "nope"\n  }\n}',
+    );
   });
 });
