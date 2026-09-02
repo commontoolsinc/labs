@@ -720,14 +720,17 @@ interface Fault {
 const NAMES_ANOTHER = "a rendering of the place would name a different cell";
 
 /**
- * The reason a piece the fabric could not have produced is refused.
+ * The reason a piece the fabric could not have produced is refused. It holds
+ * of every rule that uses it; the mechanism behind it turns on the piece's
+ * shape rather than on which rule caught it.
  *
- * `isPieceHandle` is a length rule rather than an alphabet one, so the parse
- * accepts a "handle" the `fid1` encoding cannot make and hands it back
- * verbatim — such a rendering round-trips exactly and denotes nothing. That is
- * neither a wrong address nor a dead one, so the reason it is refused cannot
- * be either; it is that a place should stand only on a name something could
- * have given it.
+ * For a handle-shaped piece — a colon, and twenty characters — `isPieceHandle`
+ * is a length rule rather than an alphabet one, so the parse accepts a
+ * "handle" the `fid1` encoding cannot make and hands it back verbatim: a
+ * rendering that round-trips exactly and denotes nothing, neither a wrong
+ * address nor a dead one, so the reason it is refused cannot be either. An
+ * empty piece and a slug-shaped one the parse refuses on its own account, and
+ * this door reaches them first.
  */
 const NO_SUCH_NAME = "no piece carries that name: a slug is lowercase " +
   "letters, numbers, and single hyphens between words, and a handle is " +
@@ -776,11 +779,16 @@ function unnameableSegment(segment: PathSegment): Fault | undefined {
  * Only the newline costs a piece its name. The scope suffix the rendering
  * always writes sits between the piece and the end of the string, so the trim
  * takes the suffix rather than the piece, and the split at the last `@` takes
- * the suffix's own — a piece comes back whole from both, whatever it holds.
+ * the suffix's own — a piece with something in it comes back whole from both.
+ * An empty one is the exception, and one fact generates it: its rendered id
+ * segment is the suffix and nothing else, so the split finds no id in front of
+ * it and the parse refuses the whole reference.
+ *
  * The other three rules answer to {@link NO_SUCH_NAME} instead, which is a
- * weaker claim than the segment rules make and the honest one: for a
- * slug-shaped piece the canonical parse refuses these anyway, and for a
- * handle-shaped one it does not, which is exactly why this door checks.
+ * weaker claim than the segment rules make and the honest one. This door is
+ * the only check for a handle-shaped piece; for an empty one and for anything
+ * slug-shaped the parse refuses already, so refusing here moves the refusal
+ * earlier and names the vocabulary where the parse names only the failure.
  */
 function unnameablePiece(piece: string): Fault | undefined {
   if (piece.includes("\n")) {
