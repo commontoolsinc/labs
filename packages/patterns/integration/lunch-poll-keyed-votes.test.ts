@@ -23,12 +23,24 @@
  * session's vote by key alone. Under a whole-list write the tally still reads
  * right and that read finds nothing.
  *
- * The second test is the same property in the units a person feels, and it is a
- * bound rather than an equality: a keyed vote still shares its commit with the
- * work the poll's derived views do, and that work reads the whole list. This
- * file's own burst — three voters, four options, three rounds — measured 25
- * rolled-back writes keyed against 63 whole-list (2026-09-01, this harness), so
- * the bound of one per vote sits between them with room either side.
+ * The second test is the same property in the units a person feels: three
+ * voters recast every option at once, three rounds of it, and no write is
+ * rolled back at all. Two things make that an equality rather than a bound.
+ * Each voter's vote for an option is its own document, so a burst of recasts
+ * holds no document two sessions both write. And the color schedule advances
+ * every voter by one color a round, which leaves each option holding one of
+ * every color throughout, so the tallies the poll derives never change and
+ * never contend either. What the count answers is therefore the vote write
+ * alone, which is the question this file asks.
+ *
+ * The schedule is what makes it answer that. Casting the color already held
+ * clears the vote, and clearing one changes the shared list's membership,
+ * which is what the sessions' concurrent commits then get refused over. That
+ * cost is membership churn, and it is the same whether the vote itself is
+ * keyed or not. A burst that repeats a color pays it and measures something
+ * other than what it set out to. This burst costs 0 rolled-back writes with
+ * the keyed write and around 60 with a whole-list write (2026-09-02, this
+ * harness).
  *
  * The poll's identity is a shared `#profile` cell. The wish resolves in this
  * harness, and in a space holding no profile it resolves to the surface that
@@ -60,6 +72,15 @@ const PROGRAM_PATH = join(
 const NAMES = ["Alice", "Bob", "Carol"] as const;
 const TITLES = ["Cheeseboard", "Gregoire", "Saul's", "Fava"] as const;
 const COLORS = ["green", "yellow", "red"] as const;
+
+/**
+ * The color a voter casts for an option in a given round. Consecutive rounds
+ * differ for every voter and option, so no cast ever repeats the color that
+ * vote already holds and no cast is read as clearing it. Every option holds
+ * one of each color in every round, so the poll's tallies never change.
+ */
+const colorFor = (voter: number, option: number, round: number): string =>
+  COLORS[(voter + option + round) % COLORS.length];
 
 /**
  * Optimistic writes these sessions had rolled back — each one applied locally,
@@ -171,10 +192,15 @@ describe("lunch poll: a vote is a keyed, mergeable write", () => {
     // Everyone re-votes every option at once, repeatedly — the shape of a real
     // lunch decision, where a whole-list write makes each vote wait seconds.
     // Warm up first so no session is paying for a document it has never held; a
-    // cold first write conflicts either way and is not what this measures.
-    for (const session of everyone) {
-      for (const option of options) {
-        await session.send("castVote", { optionId: option, voteType: "green" });
+    // cold first write conflicts either way and is not what this measures. The
+    // warm-up is round zero of the same schedule, so the first measured round
+    // changes every color it touches.
+    for (let voter = 0; voter < everyone.length; voter++) {
+      for (let option = 0; option < options.length; option++) {
+        await everyone[voter].send("castVote", {
+          optionId: options[option],
+          voteType: colorFor(voter, option, 0),
+        });
         await harness.settle();
       }
     }
@@ -184,16 +210,13 @@ describe("lunch poll: a vote is a keyed, mergeable write", () => {
     await harness.settle();
     const before = await reverts(everyone);
     const rounds = 3;
-    for (let round = 0; round < rounds; round++) {
+    for (let round = 1; round <= rounds; round++) {
       await Promise.all(
         everyone.flatMap((session, voter) =>
           options.map((option, index) =>
             session.send(
               "castVote",
-              {
-                optionId: option,
-                voteType: COLORS[(voter + index + round) % COLORS.length],
-              },
+              { optionId: option, voteType: colorFor(voter, index, round) },
               undefined,
               { idle: false },
             )
@@ -208,9 +231,11 @@ describe("lunch poll: a vote is a keyed, mergeable write", () => {
     expect(await host.read(["voteCount"])).toBe(cast);
     expect(
       rolledBack,
-      `${rolledBack} rolled-back writes for ${cast * rounds} votes; a vote ` +
-        "should cost well under one rollback, and more than one apiece means " +
+      `${rolledBack} rolled-back writes for ${cast * rounds} concurrent ` +
+        "recasts; a recast writes one voter's own vote document and adds a " +
+        "membership already present, so it shares no document with another " +
+        "voter's recast and costs nothing to roll back. Anything here means " +
         "the vote write is contending on the whole list again",
-    ).toBeLessThan(cast * rounds);
+    ).toBe(0);
   });
 });

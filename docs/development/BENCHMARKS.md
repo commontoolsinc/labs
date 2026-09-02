@@ -345,5 +345,6 @@ Which benchmarks that floor sits under is therefore a question of where
 a question the workflow's list answers.
 
 `packages/patterns/integration/lunch-poll-keyed-votes.test.ts` is the assertion
-half of the same property: it bounds rolled-back writes instead of timing them,
-so a regression that this benchmark shows as trend drift also fails a test.
+half of the same property: it counts rolled-back writes instead of timing them,
+and requires none, so a regression that this benchmark shows as trend drift
+also fails a test.
