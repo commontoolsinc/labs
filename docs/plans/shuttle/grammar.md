@@ -43,12 +43,12 @@ as the canonical grammar's context rule already works:
   cell read from anywhere. This is the form a printed address or a shared
   link should be, and it is what `pwd` prints, for that reason.
 
-The scope a complete reference omits is not a hole in it. Canonically an
-absent suffix *means* the base, which is why the serializer writes none for
-a base-scoped link. The two layers read the same absence differently —
-canonical says base, shuttle fills it from the place, the way a shell reads
-a relative path — and that difference is why `pwd` writes the suffix rather
-than trusting it to be inferred.
+  The scope a complete reference omits is not a hole in it. Canonically an
+  absent suffix *means* the base, which is why the serializer writes none
+  for a base-scoped link. The two layers read the same absence differently
+  — canonical says base, shuttle fills it from the place, the way a shell
+  reads a relative path — and that difference is why `pwd` writes the
+  suffix rather than trusting it to be inferred.
 - `#…` — a wish target (entry point), resolvable from anywhere within
   the connected space. A target anchored elsewhere — profile and
   favorites resolve against the reading identity's home space regardless
@@ -70,21 +70,21 @@ one; it is the piece and path it fixes, not the space.
 
 How a reading is matched says where it holds, and there are three ways.
 `-` and a lone `/` are matched against the whole operand exactly, so
-neither governs a segment: a key named `-` is reachable relatively wherever
-it is not the whole operand. `@scope` and a lone leading `#` are matched
-against the operand's head, and each takes the whole operand with it: `cd
-@user/board` refuses rather than moving the scope and descending, and `cd
-#favorites/topics` hands on the whole string as one target. So each is an
-ordinary data character in every later segment that is data — inside a
-piece. A later segment naming a piece is read by the canonical grammar
-instead, so a scope suffix there moves the scope. A fragment there is
-refused too, but by shuttle rather than by that grammar, which carries the
-`#argument` suffix on a piece designation and would take one. `..` is matched segment by
-segment as the walk splits them, so it is reserved in all of them and a key
-named `..` has no relative spelling — it reaches a place through a
-reference, the door that reads no `..` at all. `/` is the separator
-besides, so no segment of an operand holds one, and a key that does is
-spelled `~1`, which a reference unescapes and a walk does not.
+neither governs a segment: a key named `-` is reachable relatively
+wherever it is not the whole operand. `@scope` and a lone leading `#` are
+matched against the operand's head, and each takes the whole operand with
+it: `cd @user/board` refuses rather than moving the scope and descending,
+and `cd #favorites/topics` hands on the whole string as one target. So
+each is an ordinary data character in every later segment that is data —
+inside a piece. A later segment naming a piece is read by the canonical
+grammar instead, so a scope suffix there moves the scope. A fragment there
+is refused too, but by shuttle rather than by that grammar, which carries
+the `#argument` suffix on a piece designation and would take one. `..` is
+matched segment by segment as the walk splits them, so it is reserved in
+all of them and a key named `..` has no relative spelling — it reaches a
+place through a reference, the door that reads no `..` at all. `/` is the
+separator besides, so no segment of an operand holds one, and a key that
+does is spelled `~1`, which a reference unescapes and a walk does not.
 
 The property every door is held to is that a rendering may be refused but
 may never name a cell other than the one it was printed for. Two steps lose
@@ -415,6 +415,6 @@ slug is confirmed, and it is spelled exactly as a whole handle is, so
 nothing in it says which it is. Whether the prompt stays pasteable, and how
 that fallback is marked if it does, is open — see the Prompt section above.
 
-The base-overlay spelling is settled above. The remaining open item for
+The base-overlay spelling is settled above. One further open item for
 shuttle overall (shallow-sink expressibility) lives in
 [`views.md`](views.md).

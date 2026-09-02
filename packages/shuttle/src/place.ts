@@ -71,12 +71,14 @@ export interface PiecePosition {
   readonly piece: string;
 
   /**
-   * Path inside the piece's result; empty while standing at the piece. Every
-   * segment of it is one a rendering names back, which rules out three: an
-   * empty segment, one ending in whitespace, and one holding a line break.
-   * A path holding any of them renders as a reference to a different cell,
-   * because writing the rendering and reading it back each lose characters
-   * that {@link unnameableSegment} describes.
+   * Path inside the piece's result; empty while standing at the piece.
+   *
+   * Every door into this module refuses a segment a rendering would not name
+   * back — an empty one, one ending in whitespace, one holding a line break —
+   * because writing a rendering and reading it back each lose characters that
+   * {@link unnameableSegment} describes. That is an invariant the doors
+   * establish rather than one this structural type enforces, so a position
+   * reached any other way is outside it.
    */
   readonly path: readonly PathSegment[];
 }
@@ -180,12 +182,14 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
  * the same cell read from anywhere — while a root and a
  * facet are containers and render without one, which is what keeps a
  * container's own rendering from resolving as a piece whose slug happens to
- * match. `cd` reads a piece rendering back whole, except where a path segment
- * holds a `#`, which the reference grammar reserves: `cd` refuses such a
- * rendering rather than reading it as some other cell. A piece or segment
- * holding a newline would split the position line, leaving a shorter
- * reference that names another cell — which is why one is refused before it
- * can reach a place rather than handled here.
+ * match. What holds of a rendering is one property and not a list: `cd` may
+ * refuse it, but it never reads one as some other cell. Several things reach
+ * the first half — a `#` anywhere, which the reference grammar reserves, and
+ * a piece outside the slug and handle vocabularies — and enumerating them
+ * here would be a claim that goes stale as the vocabularies move. A piece or
+ * segment holding a newline would reach the second half, by splitting the
+ * position line into a shorter reference, which is why one is refused before
+ * it can reach a place rather than handled here.
  *
  * The scope is written on the piece even when it is the base, which is what
  * makes "read from anywhere" true rather than nearly so. Scope is part of a
@@ -200,7 +204,7 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
  * wrote — whatever the piece holds, and independently of any rule about
  * what a piece may hold.
  */
-export function renderPlace(place: Place): string {
+function renderPlace(place: Place): string {
   return `position  ${renderPosition(place)}\n` +
     `scope     ${renderScope(place.scope)}`;
 }
@@ -223,11 +227,12 @@ export class CurrentPlace {
    *
    * A space is all a shuttle has when it starts, and taking one rather than a
    * whole {@link Place} is what keeps {@link PiecePosition}'s invariant a
-   * property of the type. Every other door checks what it is handed; a
-   * constructor taking a place would be one that could not, and the invariant
-   * would hold only where somebody remembered it. Restoring a saved place is
-   * a named entry point with checking of its own, for whenever something
-   * needs one.
+   * property of every door rather than of whoever remembered it. It is not a
+   * property of the type: `Place` is a structural interface anyone can write
+   * a literal for. What holds is narrower and is what matters — no door into
+   * this module admits a position the invariant rules out. Restoring a saved
+   * place is a named entry point with checking of its own, for whenever
+   * something needs one.
    */
   constructor(space: MemorySpace) {
     this.#here = { place: placeAtSpaceRoot(space), trail: [] };
@@ -490,9 +495,13 @@ function moveBySegments(from: Standing, operand: string): Step {
 
   let moved = from;
   for (const segment of segments) {
-    const fault = unnameableSegment(segment);
-    if (fault !== undefined) return refuseUnnameable(operand, fault);
-    const step = segment === ".." ? moveUp(moved) : moveDown(moved, segment);
+    // No fault check here: which rule a segment answers to depends on what it
+    // is about to become, and only `moveDown` knows that. A segment naming a
+    // piece is held to the piece rules and told the piece's reason, which is
+    // not the reason a data key gets.
+    const step = segment === ".."
+      ? moveUp(moved)
+      : moveDown(moved, segment, operand);
     if (step.kind !== "moved") return step;
     moved = step.to;
   }
@@ -527,7 +536,7 @@ function enclosing(position: Position): Position {
  * inside a facet, and a data key or index inside a piece. A descent pushes the
  * level it left onto the trail, which is what `..` walks back out.
  */
-function moveDown(from: Standing, segment: string): Step {
+function moveDown(from: Standing, segment: string, operand: string): Step {
   const place = from.place;
   const position = place.position;
   const trail = [...from.trail, position];
@@ -543,8 +552,10 @@ function moveDown(from: Standing, segment: string): Step {
             `facets are \`slugs/\` and \`pieces/\`.`,
         );
     case "facet":
-      return moveIntoPiece(place, position, segment, trail);
-    case "piece":
+      return moveIntoPiece(place, position, segment, trail, operand);
+    case "piece": {
+      const fault = unnameableSegment(segment);
+      if (fault !== undefined) return refuseUnnameable(operand, fault);
       return land({
         ...place,
         position: {
@@ -552,6 +563,7 @@ function moveDown(from: Standing, segment: string): Step {
           path: [...position.path, linkPathSegmentToCellPathSegment(segment)],
         },
       }, trail);
+    }
   }
 }
 
@@ -573,6 +585,7 @@ function moveIntoPiece(
   facet: FacetPosition,
   segment: string,
   trail: Trail,
+  operand: string,
 ): Step {
   const hash = segment.indexOf("#");
   if (hash !== -1) {
@@ -598,7 +611,7 @@ function moveIntoPiece(
     return refuseUnknownScope(segment.slice(segment.lastIndexOf("@") + 1));
   }
   const fault = unnameablePiece(scoped.id);
-  if (fault !== undefined) return refuseUnnameable(segment, fault);
+  if (fault !== undefined) return refuseUnnameable(operand, fault);
   return land({
     position: {
       kind: "piece",
@@ -700,7 +713,10 @@ interface Fault {
   readonly so: string;
 }
 
-/** The reason a part whose rendering would denote some other cell is refused. */
+/**
+ * The reason a part whose rendering would denote some other cell is
+ * refused.
+ */
 const NAMES_ANOTHER = "a rendering of the place would name a different cell";
 
 /**
@@ -714,7 +730,8 @@ const NAMES_ANOTHER = "a rendering of the place would name a different cell";
  * have given it.
  */
 const NO_SUCH_NAME = "no piece carries that name: a slug is lowercase " +
-  "letters, numbers and hyphens, and a handle is `of:fid1:` and base32";
+  "letters, numbers, and single hyphens between words, and a handle is " +
+  "`of:fid1:` and unpadded base64url";
 
 /**
  * Helper for the movers, which names what stops a rendering of a path holding
@@ -728,9 +745,9 @@ const NO_SUCH_NAME = "no piece carries that name: a slug is lowercase " +
  * naming another cell. Both are refused wherever a segment sits and not only
  * last, because `..` makes any segment the last one. Leading whitespace
  * survives both and is admitted: the parse trims the whole string, which no
- * leading character of a segment sits at the end of. What a terminal does with the other control characters is
- * the format's concern rather than this one's, since a reference carrying
- * them reads back whole.
+ * leading character of a segment sits at the end of. What a terminal does with
+ * the other control characters is the format's concern rather than this one's,
+ * since a reference carrying them reads back whole.
  */
 function unnameableSegment(segment: PathSegment): Fault | undefined {
   if (typeof segment !== "number") {

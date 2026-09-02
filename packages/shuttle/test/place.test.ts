@@ -16,14 +16,14 @@
  * A refusal's text is pinned whole, and three of them are somebody else's
  * words. Shuttle consumes the reference grammar rather than forking it, so a
  * rooted operand's diagnostics come from that layer and reach the reader
- * unaltered — the space-mismatch sentence and the unknown-suffix sentence
- * from `normalizeLLMFriendlyRef` and `splitArgumentSuffix`, and the
- * no-piece-handle sentence from `parseReferenceParts`. Each is marked at its case as relayed. When one
- * moves upstream, the fix is to copy the new sentence here, never to match a
- * fragment of it: the whole sentence is what pins that the diagnostic arrives
- * intact, and a substring would let a rewording through that says something
- * else. Other diagnostics from that layer reach a reader without a case
- * here — a bad space segment, a piece segment that is neither slug nor
+ * unaltered — the space-mismatch sentence and the unknown-suffix sentence from
+ * `normalizeLLMFriendlyRef` and `splitArgumentSuffix`, and the no-piece-handle
+ * sentence from `parseReferenceParts`. Each is marked at its case as relayed.
+ * When one moves upstream, the fix is to copy the new sentence here, never to
+ * match a fragment of it: the whole sentence is what pins that the diagnostic
+ * arrives intact, and a substring would let a rewording through that says
+ * something else. Other diagnostics from that layer reach a reader without a
+ * case here — a bad space segment, a piece segment that is neither slug nor
  * handle, a bad scope suffix on a reference — and pinning three of them is
  * enough to hold the relay itself, since all of them travel the same path.
  *
@@ -43,7 +43,6 @@ import {
   FACETS,
   type Move,
   placeAtSpaceRoot,
-  renderPlace,
 } from "../src/place.ts";
 
 const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
@@ -98,15 +97,15 @@ describe("place", () => {
     });
   });
 
-  describe("renderPlace()", () => {
+  describe("render()", () => {
     it("returns a space root with no leading slash, and the scope", () => {
-      expect(renderPlace(placeAtSpaceRoot(SPACE))).toBe(
+      expect(atSpaceRoot().render()).toBe(
         "position  @did:key:z6MkConnectedSpace/\nscope     @space",
       );
     });
 
     it("returns a facet with no leading slash", () => {
-      expect(renderPlace(inSlugs().place)).toBe(
+      expect(inSlugs().render()).toBe(
         "position  @did:key:z6MkConnectedSpace/slugs/\nscope     @space",
       );
     });
@@ -115,7 +114,7 @@ describe("place", () => {
       const place = atPiece();
       place.cd("topics/3");
       place.cd("@session");
-      expect(renderPlace(place.place)).toBe(
+      expect(place.render()).toBe(
         "position  /@did:key:z6MkConnectedSpace/board@session/topics/3\n" +
           "scope     @session",
       );
@@ -574,8 +573,8 @@ describe("place", () => {
               kind: "refused",
               reason: "`board @space` has a piece ending in whitespace, " +
                 "so no piece carries that name: a slug is lowercase " +
-                "letters, numbers and hyphens, and a handle is " +
-                "`of:fid1:` and base32.",
+                "letters, numbers, and single hyphens between words, and a " +
+                "handle is `of:fid1:` and unpadded base64url.",
             });
           });
 
@@ -588,8 +587,8 @@ describe("place", () => {
               kind: "refused",
               reason: "`board@session@session` has a piece holding `@`, " +
                 "so no piece carries that name: a slug is lowercase " +
-                "letters, numbers and hyphens, and a handle is " +
-                "`of:fid1:` and base32.",
+                "letters, numbers, and single hyphens between words, and a " +
+                "handle is `of:fid1:` and unpadded base64url.",
             });
           });
 
@@ -1196,11 +1195,33 @@ describe("place", () => {
             });
           });
 
-          it("refuses an operand with an empty segment", () => {
+          it("gives a piece-name segment the piece's reason, not a segment's", () => {
+            // The same flaw in the same operand shape, one segment along
+            // from `a /b` above, which gets the segment reason. A piece
+            // ending in whitespace does not name another cell — the scope
+            // suffix stands between it and the trim — so it must not be
+            // told that it does.
+
+            expect(inSlugs().cd("board /x")).toEqual({
+              kind: "refused",
+              reason: "`board /x` has a piece ending in whitespace, so no " +
+                "piece carries that name: a slug is lowercase letters, " +
+                "numbers, and single hyphens between words, and a handle " +
+                "is `of:fid1:` and unpadded base64url.",
+            });
+          });
+
+          it("refuses an operand whose empty part would name a piece", () => {
+            // The empty part sits where a piece name goes, so it is held to
+            // the piece rule and told the piece's reason. A segment is
+            // faulted by what it is about to become, not by its position.
+
             expect(atSpaceRoot().cd("slugs//board")).toEqual({
               kind: "refused",
-              reason: "`slugs//board` has an empty segment, " +
-                "so a rendering of the place would name a different cell.",
+              reason: "`slugs//board` has an empty piece, so no piece " +
+                "carries that name: a slug is lowercase letters, numbers, " +
+                "and single hyphens between words, and a handle is " +
+                "`of:fid1:` and unpadded base64url.",
             });
           });
         });
@@ -1380,8 +1401,9 @@ describe("place", () => {
           ).toEqual({
             kind: "refused",
             reason: "`#favorites` resolves to an empty piece, so no piece " +
-              "carries that name: a slug is lowercase letters, numbers and " +
-              "hyphens, and a handle is `of:fid1:` and base32.",
+              "carries that name: a slug is lowercase letters, numbers, and " +
+              "single hyphens between words, and a handle is `of:fid1:` and " +
+              "unpadded base64url.",
           });
         });
 
