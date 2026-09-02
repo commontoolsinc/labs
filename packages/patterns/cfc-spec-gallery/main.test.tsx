@@ -1,5 +1,5 @@
 import { assert, handler, pattern, Stream, TESTS, UI } from "commonfabric";
-import { findNode, propsOf, readValue } from "../test/vnode-helpers.ts";
+import { findNodeById, hasText } from "../test/vnode-helpers.ts";
 import Gallery from "./main.tsx";
 
 const trigger = handler<void, { stream: Stream<void> }>((_, { stream }) => {
@@ -69,10 +69,7 @@ export default pattern(() => {
   // asks for the view, so without this they run only where a browser renders
   // the gallery — which is to say on some CI runs and not others.
   const assert_renders_header = assert(() =>
-    findNode(instance[UI], (node) => {
-      const props = propsOf(node);
-      return props !== undefined && readValue(props["id"]) === "gallery-count";
-    }) !== undefined
+    hasText(findNodeById(instance[UI], "gallery-count"), "16 total examples")
   );
   const assert_forward_prepared = assert(() => instance.completedCount === 0);
   const assert_forward_committed = assert(() =>
