@@ -172,13 +172,13 @@ Deno.test("OpenAICompatibleGatewayClient parses successful chat completion JSON 
   assertEquals(response.choices[0]?.message.content, "ok");
 });
 
-Deno.test("OpenAICompatibleGatewayClient retries chat completion transport failures once by default", async () => {
+Deno.test("OpenAICompatibleGatewayClient retries a chat completion transport failure by default", async () => {
   let calls = 0;
   const attempts: OpenAIChatCompletionAttemptDiagnostic[] = [];
   const client = new OpenAICompatibleGatewayClient({
     baseUrl: "https://llm.stage.commontools.dev/",
     apiKey: "test-key",
-    chatCompletionRetryDelayMs: 0,
+    transportRetryDelayMs: 0,
     fetchFn: () => {
       calls += 1;
       if (calls === 1) {
@@ -225,7 +225,7 @@ Deno.test("OpenAICompatibleGatewayClient does not retry aborted chat completion 
   const client = new OpenAICompatibleGatewayClient({
     baseUrl: "https://llm.stage.commontools.dev/",
     apiKey: "test-key",
-    chatCompletionRetryDelayMs: 0,
+    transportRetryDelayMs: 0,
     fetchFn: (_input, init) => {
       calls += 1;
       assertEquals(init?.signal, controller.signal);
@@ -263,7 +263,7 @@ Deno.test("OpenAICompatibleGatewayClient surfaces exhausted chat completion tran
   const client = new OpenAICompatibleGatewayClient({
     baseUrl: "https://llm.stage.commontools.dev/",
     apiKey: "test-key",
-    chatCompletionRetryDelayMs: 0,
+    transportRetryDelayMs: 0,
     fetchFn: () => {
       calls += 1;
       return Promise.reject(new Error("connection error: timed out"));
@@ -277,9 +277,9 @@ Deno.test("OpenAICompatibleGatewayClient surfaces exhausted chat completion tran
         messages: [],
       }),
     Error,
-    "chat.completions transport request failed after 2 attempts",
+    "chat.completions transport request failed after 4 attempts",
   );
-  assertEquals(calls, 2);
+  assertEquals(calls, 4);
 });
 
 Deno.test("OpenAICompatibleGatewayClient surfaces chat completion errors with response text", async () => {
@@ -324,7 +324,7 @@ Deno.test("OpenAICompatibleGatewayClient surfaces chat completion errors with re
   assertEquals(attempt.operation, "chat.completions");
   assertEquals(attempt.outcome, "http_response");
   assertEquals(attempt.attempt, 1);
-  assertEquals(attempt.maxTransportAttempts, 2);
+  assertEquals(attempt.maxTransportAttempts, 4);
   assertEquals(attempt.request.model, "gpt-5.4");
   assertEquals(attempt.request.messageCount, 1);
   assertEquals(attempt.request.toolCount, 1);

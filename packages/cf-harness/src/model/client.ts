@@ -5,6 +5,8 @@ import type {
   HarnessTranscriptMessage,
 } from "../contracts/transcript.ts";
 import type { HarnessCredentialOwnerRef } from "../contracts/run-manifest.ts";
+import type { HarnessProviderError } from "./provider-error.ts";
+import type { HarnessModelAttemptRetry } from "./transport-retry.ts";
 
 export interface HarnessModelRequestSummary {
   model: string;
@@ -52,6 +54,19 @@ export interface HarnessModelAttemptDiagnostic {
   responseBodyExcerpt?: string;
   responseBodyTruncated?: boolean;
   errorDetail?: string;
+
+  /**
+   * The provider's stated reason for the failure, when the response, stream,
+   * or error body carried one.
+   */
+  providerError?: HarnessProviderError;
+
+  /**
+   * Present when this attempt failed transiently and the client issued
+   * another: what was transient, and the backoff before the next attempt.
+   * Absent on the attempt that ended the exchange, however it ended.
+   */
+  retry?: HarnessModelAttemptRetry;
 }
 
 export interface HarnessModelTurnRequest {

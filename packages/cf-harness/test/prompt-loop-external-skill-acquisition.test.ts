@@ -15,6 +15,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { DEFAULT_SUBAGENT_PROFILE } from "../src/contracts/subagent.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
+import { OpenAICompatibleGatewayClient } from "../src/gateway/openai-client.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import { SkillsShAcquisitionClient } from "../src/skills-sh/acquisition.ts";
 import { SkillsShSearchClient } from "../src/skills-sh/search-client.ts";
@@ -434,10 +435,18 @@ describe("prompt-loop external skill acquisition", () => {
           }),
         );
       };
+      // The scripted fetch answers by request index, so the child's one
+      // provider failure has to end its exchange there rather than be issued
+      // again: a gateway client with no transport retries makes that so.
       const loop = new CfHarnessPromptLoop({
-        apiKey: "test-key",
         engine,
-        fetchFn: modelFetch,
+        gatewayClient: new OpenAICompatibleGatewayClient({
+          baseUrl: engine.config.gatewayBaseUrl,
+          authMode: engine.config.gatewayAuthMode,
+          apiKey: "test-key",
+          transportRetries: 0,
+          fetchFn: modelFetch,
+        }),
         allowedToolIds: ["acquire_skill", "delegate_task"],
         allowedSubagentProfiles: [DEFAULT_SUBAGENT_PROFILE],
       });
