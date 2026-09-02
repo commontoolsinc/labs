@@ -145,16 +145,14 @@ Still to come:
   (`resolveStoredPieceAddress`, `listSpaceSlugs`), so no CLI-surface arc
   step gates B1.
 - **The vocabulary a relative segment speaks.** The two doors read a
-  segment by different rules, so a handful of keys are spelled through one
-  and not the other. Which keys follows from where each reading is decided,
-  the rule [`grammar.md`](grammar.md) states: a relative operand reserves
-  `-`, `@scope`, `/` and a leading `#` at its head alone and `..` in every
-  segment, and takes every other segment literally, where a reference
-  unescapes `~1` and reserves `#` for `#argument` throughout. So a key
-  named `..`, and one holding the separator, are rooted-only, while a key
-  holding `#` is relative-only. What that costs a reader is the segment
-  lifted out of a rendering: `..`, `-`, and an escaped separator each move
-  somewhere else without saying so, where `@` refuses and `#` hands off.
+  segment by different rules — the reserved readings
+  [`grammar.md`](grammar.md) states, against a reference's own unescaping
+  and fragment rule — so some keys are spelled through one door and not the
+  other, and a segment lifted out of a rendering is an operand in its own
+  right rather than the key it was printed from. Which keys those are, and
+  what each lifted segment does instead of naming its key, is pinned case
+  by case in `packages/shuttle/test/place.test.ts`, each case under a
+  mutation, so the record moves when the behavior does and not otherwise.
   `ls` settles it: how such a key prints and how it is typed back want
   deciding together. Segment validation is the same question — a slug's
   vocabulary holds a reference and not a relative segment — and an empty

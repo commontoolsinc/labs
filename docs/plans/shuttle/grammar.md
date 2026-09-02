@@ -57,13 +57,17 @@ prefix, overriding it with the embedded space when one is present. A
 rooted reference is therefore exactly as space-dependent as a relative
 one; it is the piece and path it fixes, not the space.
 
-Where a reading is decided says where it holds. `-`, `@scope`, `/`, and a
-lone leading `#` are read on the whole operand before it is split, so each
+Where a reading is decided says where it holds. `-`, `@scope`, and a lone
+leading `#` are read on the whole operand before it is split, so each
 governs the operand's head and is an ordinary data character in every later
 segment. `..` and an empty segment are read segment by segment, so they are
 reserved wherever they appear — which is why a key named `..` has no
 relative spelling at all, while a key named `-` has one in any position but
-the first.
+the first. `/` is neither: it is the separator, so a lone `/` is an operand
+of its own and no segment holds one.
+
+A segment lifted out of a rendering is an operand in its own right, so
+these readings decide it rather than the key it was printed from.
 
 The `#` character has three readings, and they share nothing but the
 character. A lone `#name` token is a wish target, as above. `#argument` is

@@ -107,9 +107,10 @@ describe("place", () => {
       // reference and `cd` takes it back; a container is not a cell, so its
       // rendering is not a reference and `cd` refuses it rather than
       // resolving it to a piece whose slug happens to match the container's
-      // name. A segment lifted out of a rendering is outside that: the
-      // rendering escapes a `/` in a key and a relative operand reads no
-      // escape, which the walk's own cases pin.
+      // name. A segment lifted out of a rendering is outside that, for two
+      // reasons: it becomes an operand in its own right, so the head
+      // readings decide it, and the rendering escapes a `/` in a key where
+      // a relative operand reads no escape. The walk's own cases pin both.
 
       it("returns a piece rendering `cd` takes back to the same place, pasted whole", () => {
         const place = atPiece();
@@ -512,6 +513,19 @@ describe("place", () => {
             expect(atSpaceRoot().cd("#favorites")).toEqual({
               kind: "wish",
               target: "#favorites",
+            });
+          });
+
+          it("hands back `#argument` too, since the head reading is one rule", () => {
+            // The wish reading is decided on the whole operand, so it does
+            // not ask which word follows the `#`. `#argument` earns the
+            // result-rooted refusal as a *suffix* on a reference; standing
+            // alone it is a target name like any other, and the connection
+            // is what discovers there is none.
+
+            expect(atSpaceRoot().cd("#argument")).toEqual({
+              kind: "wish",
+              target: "#argument",
             });
           });
         });
