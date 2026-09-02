@@ -152,8 +152,9 @@ describe("stage D seal-into-wave", () => {
 
   const stoppedWitnessPiece = async (
     id: string,
-    options: { throwOnInstantiation?: number } = {},
+    options: { throwOnInstantiation?: number; on?: Runtime } = {},
   ) => {
+    const host = options.on ?? runtime;
     let instantiations = 0;
     let lastRunInstantiation = 0;
     const pattern: Pattern = {
@@ -191,17 +192,17 @@ describe("stage D seal-into-wave", () => {
         outputs: {},
       }],
     };
-    const tx = runtime.edit();
-    const cell = runtime.getCell<Record<string, unknown>>(
+    const tx = host.edit();
+    const cell = host.getCell<Record<string, unknown>>(
       space,
       id,
       undefined,
       tx,
     );
-    const running = runtime.runner.run(tx, pattern, {}, cell);
+    const running = host.runner.run(tx, pattern, {}, cell);
     expect((await tx.commit()).error).toBeUndefined();
     await running.pull();
-    runtime.runner.stop(cell);
+    host.runner.stop(cell);
     return {
       cell,
       instantiations: () => instantiations,
@@ -3714,10 +3715,26 @@ describe("stage D seal-into-wave", () => {
     runtime.pieceStartCommitFailureObserver = ({ error }) => {
       failures.push(error);
     };
+    // The refusal names a REAL document, in the shape `toRejectedError`
+    // hands the runner: the engine's message plus the conflict descriptor
+    // parsed out of it. Readiness has two halves — the wire's `readyToRetry`
+    // gate and the named document's pull — and a refusal carrying no
+    // `conflict` silently exercises only the first.
+    const conflicted = witness.cell.getAsNormalizedFullLink().id;
+    const pulled: string[] = [];
+    const provider = runtime.storageManager.open(space);
+    const providerSync = provider.sync.bind(provider);
+    (provider as { sync: typeof provider.sync }).sync = ((
+      ...args: Parameters<typeof provider.sync>
+    ) => {
+      pulled.push(String(args[0]));
+      return providerSync(...args);
+    }) as typeof provider.sync;
     const staleRead = {
       name: "ConflictError" as const,
-      message: "stale confirmed read: of:piece-start at seq 0 " +
+      message: `stale confirmed read: ${conflicted} at seq 0 ` +
         "conflicted with seq 1",
+      conflict: { space, the: "application/json", of: conflicted },
       readyToRetry: () => {
         readinessCalls += 1;
         return Promise.resolve();
@@ -3750,9 +3767,165 @@ describe("stage D seal-into-wave", () => {
 
     expect(pieceInstantiationSeals).toBe(2);
     expect(readinessCalls).toBe(1);
+    expect(
+      pulled,
+      "readiness must also pull the conflicted document, so the retry's " +
+        "write carries its true version instead of re-asserting seq 0",
+    ).toContain(conflicted);
     expect(failures).toContain(staleRead);
     expect(witness.instantiations()).toBe(3);
     expect(witness.lastRunInstantiation()).toBe(3);
+  });
+
+  it("keeps a stale-read instantiation refusal terminal off the flag", async () => {
+    const offManager = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const offRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: offManager,
+      experimental: { serverExecution: false },
+    });
+    try {
+      const witness = await stoppedWitnessPiece(
+        "off-piece-instantiate-stale-read",
+        { on: offRuntime },
+      );
+
+      // The instantiate transaction names ITSELF through `stampServerRun`,
+      // which an OFF runtime still calls even though it records nothing.
+      // That is the handle this test needs: an OFF runtime rejects the seal
+      // destination the flag-ON tests refuse through, and a start mints
+      // several transactions, so refusing merely the first would not say
+      // which one was refused.
+      const instantiateTxs = new WeakSet<object>();
+      const originalStamp = offRuntime.stampServerRun.bind(offRuntime);
+      (offRuntime as { stampServerRun: typeof offRuntime.stampServerRun })
+        .stampServerRun = ((
+          tx: Parameters<typeof offRuntime.stampServerRun>[0],
+          info: Parameters<typeof offRuntime.stampServerRun>[1],
+        ) => {
+          if (info.actionId.startsWith("piece-instantiate/")) {
+            instantiateTxs.add(tx);
+          }
+          return originalStamp(tx, info);
+        }) as typeof offRuntime.stampServerRun;
+
+      const conflicted = witness.cell.getAsNormalizedFullLink().id;
+      const staleRead = {
+        name: "ConflictError" as const,
+        message: `stale confirmed read: ${conflicted} at seq 0 ` +
+          "conflicted with seq 1",
+        conflict: { space, the: "application/json", of: conflicted },
+        readyToRetry: () => Promise.resolve(),
+      };
+      let refusals = 0;
+      const originalEdit = offRuntime.edit.bind(offRuntime);
+      (offRuntime as { edit: typeof offRuntime.edit }).edit = ((
+        ...args: Parameters<typeof offRuntime.edit>
+      ) => {
+        const tx = originalEdit(...args);
+        const commit = tx.commit.bind(tx);
+        (tx as { commit: typeof tx.commit }).commit = (() => {
+          if (!instantiateTxs.has(tx)) return commit();
+          refusals += 1;
+          tx.abort(staleRead.message);
+          return Promise.resolve({ error: staleRead as never });
+        }) as typeof tx.commit;
+        return tx;
+      }) as typeof offRuntime.edit;
+
+      let readinessCalls = 0;
+      const originalReadiness = offRuntime.awaitCommitRetryReadiness.bind(
+        offRuntime,
+      );
+      offRuntime.awaitCommitRetryReadiness = ((
+        ...args: Parameters<typeof offRuntime.awaitCommitRetryReadiness>
+      ) => {
+        readinessCalls += 1;
+        return originalReadiness(...args);
+      }) as typeof offRuntime.awaitCommitRetryReadiness;
+
+      const started = await offRuntime.start(witness.cell);
+      await offRuntime.idle();
+      await offRuntime.runner.idlePieceInstantiationSettlements();
+
+      // The refusal reached the instantiate commit itself, and off the flag
+      // it stays terminal: no catch-up is awaited and no second attempt is
+      // made. The repaired view a retry would read is the serving side's to
+      // supply, and an OFF runtime has none, so the start reports the piece
+      // as not running rather than recovering it. The same refusal under
+      // the flag leaves `start` true and instantiates a third time.
+      expect(refusals).toBe(1);
+      expect(started).toBe(false);
+      expect(readinessCalls).toBe(0);
+      expect(witness.instantiations()).toBe(2);
+    } finally {
+      await offRuntime.dispose();
+      await offManager.close();
+    }
+  });
+
+  it("tears down after a second stale-read refusal instead of spinning", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-stale-read-twice",
+    );
+    let pieceInstantiationSeals = 0;
+    let readinessCalls = 0;
+    const failures: unknown[] = [];
+    runtime.pieceStartCommitFailureObserver = ({ error }) => {
+      failures.push(error);
+    };
+    const conflicted = witness.cell.getAsNormalizedFullLink().id;
+    const staleRead = {
+      name: "ConflictError" as const,
+      message: `stale confirmed read: ${conflicted} at seq 0 ` +
+        "conflicted with seq 1",
+      conflict: { space, the: "application/json", of: conflicted },
+      readyToRetry: () => {
+        readinessCalls += 1;
+        return Promise.resolve();
+      },
+    };
+    runtime.installSealDestination({
+      seal: (tx) => {
+        if (
+          !waveRunContextOf(tx)?.actionId.startsWith("piece-instantiate/")
+        ) {
+          return tx.tx.commit();
+        }
+        pieceInstantiationSeals += 1;
+        if (pieceInstantiationSeals <= 2) {
+          return Promise.resolve({ error: staleRead as never });
+        }
+        return tx.tx.commit();
+      },
+    }, {
+      runStamper: (tx, info) =>
+        stampWaveRunContext(tx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        }),
+    });
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+
+    // Exactly one retry. A basis the serving side does not repair is a
+    // permanent refusal, so the second one retires the registration rather
+    // than spinning on it.
+    expect(pieceInstantiationSeals).toBe(2);
+    expect(readinessCalls).toBe(1);
+    expect(failures).toContain(staleRead);
+    expect(witness.instantiations()).toBe(3);
+
+    // Retired, not wedged: a later owner starts the piece afresh.
+    runtime.clearSealDestination();
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(witness.instantiations()).toBe(4);
   });
 
   it("declines a stale-read refusal the stopped piece no longer owns", async () => {
