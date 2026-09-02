@@ -582,21 +582,22 @@ function renderDebugString(value: unknown, indent?: number): string {
  * an "ASCII ellipsis" of `...`.
  *
  * The value is first converted with `toStructuredDebugValue()`, and it is that
- * result which gets rendered. The rendering is JSON syntax wherever JSON can
- * express the value, except that an object key which is a valid identifier is
- * written bare, and a bare token wherever it cannot:
- * * `bigint`s, as `42n`.
- * * `undefined`, as such.
- * * non-finite numbers and `-0`, as such.
- * * interned symbols, as `@name` when the key is a valid identifier and as
- *   `@"the key"` otherwise.
- * * unique (uninterned) symbols, as `Symbol("name")`.
- * * a reference back to an enclosing object, as `<circle>`.
- * * a hole in an array, as `<hole>`, and a run of them as `<N holes>`.
- * * `FabricInstance`s and `FabricPrimitive`s, in the elided form
- *   `/TypeName(...)`.
- * * other class instances, as `/ClassName(<props>)`, or `/ClassName(...)`
- *   when there are no properties to show.
+ * result which gets rendered. This function handles:
+ * * all normal JSON-compatible values.
+ * * other JavaScript primitive values:
+ *   * bigints.
+ *   * symbols, both interned and uninterned.
+ *   * non-finite numbers.
+ *   * `-0`.
+ * * functions.
+ * * `FabricInstance`s and `FabricPrimitive`s.
+ * * instances of other classes.
+ * * objects and arrays with circular references.
+ * * arrays with holes.
+ *
+ * How any of these renders is _not_ a contract. The rendering is meant for a
+ * human reading a diagnostic, and it changes as that reading is improved;
+ * nothing but a test should depend on its details.
  *
  * If the rendering could not be completed, this function returns the literal
  * string `"<unrenderable debug string>"`.
