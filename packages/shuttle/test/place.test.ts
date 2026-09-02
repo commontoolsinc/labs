@@ -957,7 +957,7 @@ describe("place", () => {
           const place = atSpaceRoot();
           const move = place.cd(`/@estuary/${HANDLE}/title`);
           if (move.kind !== "space-by-name") throw new Error("not handed on");
-          expect(place.settle(move)).toEqual({
+          expect(place.settle(move, SPACE)).toEqual({
             kind: "moved",
             place: move.place,
           });
@@ -967,15 +967,35 @@ describe("place", () => {
           const place = atSpaceRoot();
           const move = place.cd(`/@estuary/${HANDLE}@user`);
           if (move.kind !== "space-by-name") throw new Error("not handed on");
-          place.settle(move);
+          place.settle(move, SPACE);
           expect(place.place.scope).toBe("user");
+        });
+
+        it("refuses a name that resolved to another space", () => {
+          // The arm's place carries the connected space, since that is the
+          // only space a reference without a DID can name. So settling a
+          // name that resolved elsewhere would land on the same piece id in
+          // the wrong space, and say nothing. The space the name resolved
+          // to is the caller's to supply and this module's to check.
+
+          const place = atSpaceRoot();
+          const move = place.cd(`/@estuary/${HANDLE}`);
+          if (move.kind !== "space-by-name") throw new Error("not handed on");
+          expect(place.settle(move, OTHER_SPACE)).toEqual({
+            kind: "refused",
+            reason: "`estuary` resolves to space `did:key:z6MkOtherSpace`, " +
+              "and this shuttle is connected to " +
+              "`did:key:z6MkConnectedSpace`. One connection serves one " +
+              "space.",
+          });
+          expect(place.place).toEqual(placeAtSpaceRoot(SPACE));
         });
 
         it("carries no route, so `..` leaves the piece for the root", () => {
           const place = inSlugs();
           const move = place.cd(`/@estuary/${HANDLE}`);
           if (move.kind !== "space-by-name") throw new Error("not handed on");
-          place.settle(move);
+          place.settle(move, SPACE);
           place.cd("..");
           expect(place.place.position).toEqual({
             kind: "root",

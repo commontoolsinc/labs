@@ -100,11 +100,13 @@ A `fuse/` facet mirroring the FUSE layout is designed and deferred past v1
 ([`futures.md`](futures.md)); shuttle leverages `packages/fuse`'s naming
 and hydration work regardless of when that facet lands.
 
-Facet names are reserved segments at the space root only; inside a piece,
-every segment is data — always. A piece's callables need no reserved name:
-they surface inline in listings, annotated as callable, exactly as the
-FUSE layout marks a handler an executable file inside the piece's tree
-(and the `verbs` verb lists them on demand).
+Facet names are reserved segments at the space root only; inside a piece
+no name is reserved at all, and a facet name is an ordinary data key
+there. The readings above are spellings rather than names, and are what
+they are wherever a piece's path admits them. A piece's callables need
+no reserved name: they surface inline in listings, annotated as
+callable, exactly as the FUSE layout marks a handler an executable file
+inside the piece's tree (and the `verbs` verb lists them on demand).
 
 The facet set stays deliberately small; growing it is a design decision,
 not a convenience.

@@ -103,8 +103,9 @@ export interface Place {
 /**
  * A move that worked out a place but not whether the space its reference named
  * by name is the connected one, which needs a session to derive a DID from a
- * name. Confirming that name — `validateEmbeddedSpaces` does it — and handing
- * this back to {@link CurrentPlace.settle} is what lands it.
+ * name. Resolving that name — `validateEmbeddedSpaces` does it — and handing
+ * this back to {@link CurrentPlace.settle} with the space it resolved to is
+ * what lands it.
  */
 export interface SpaceNamedMove {
   /** Names this arm of {@link Move}. */
@@ -223,12 +224,22 @@ export class CurrentPlace {
   }
 
   /**
-   * Lands a {@link SpaceNamedMove} whose space name the caller has confirmed
-   * names the connected space. The place is adopted as the move worked it out,
-   * scope included, which is what carries an `@scope` suffix through a
-   * reference that also named its space by name.
+   * Lands a {@link SpaceNamedMove}, `confirmed` being the space its name
+   * resolved to. A name that resolved to any space but the connected one is
+   * refused here, so the comparison the reference deferred is made where the
+   * place would be adopted rather than left to the caller. The place is
+   * otherwise adopted as the move worked it out, scope included, which is
+   * what carries an `@scope` suffix through a reference that named its space
+   * by name.
    */
-  settle(move: SpaceNamedMove): Move {
+  settle(move: SpaceNamedMove, confirmed: MemorySpace): Move {
+    const connected = this.#here.place.position.space;
+    if (confirmed !== connected) {
+      return this.#commit(refuseOtherSpace(
+        `\`${move.name}\` resolves to space \`${confirmed}\``,
+        connected,
+      ));
+    }
     return this.#commit(land(move.place, []));
   }
 
@@ -514,10 +525,9 @@ function enterTarget(
   operand: string,
 ): Step {
   if (target.space !== place.position.space) {
-    return refuse(
-      `\`${operand}\` resolves in space \`${target.space}\`, and this ` +
-        `shuttle is connected to \`${place.position.space}\`. One ` +
-        `connection serves one space.`,
+    return refuseOtherSpace(
+      `\`${operand}\` resolves in space \`${target.space}\``,
+      place.position.space,
     );
   }
   if (target.path?.includes("")) {
@@ -551,6 +561,18 @@ function refuseArgumentSuffix(): Step {
       "relative read ambiguous about which side of the piece it " +
       "addressed. Reach arguments per operand instead, as in " +
       "`get topics/3#argument`.",
+  );
+}
+
+/**
+ * Helper for the movers, which refuses something that named a space other
+ * than `connected`. `clause` says what named it and which space it named; the
+ * rest is the same fact whichever route reached it, so it is written once.
+ */
+function refuseOtherSpace(clause: string, connected: MemorySpace): Step {
+  return refuse(
+    `${clause}, and this shuttle is connected to \`${connected}\`. One ` +
+      `connection serves one space.`,
   );
 }
 
