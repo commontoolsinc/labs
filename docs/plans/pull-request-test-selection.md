@@ -3339,7 +3339,7 @@ exercised on the branch on its own.
       distinguishes item identities from overlapping suite-level
       measurements, and returns at most one item for an identity that
       several arms or entry points can run. Add `tasks/ci-capabilities.ts`.
-      Eighteen suites hold 2,338 units. The repository gates are two
+      Twenty suites hold 2,360 units. The repository gates are two
       suites rather than one, because `mandatory` belongs to a suite and
       the `always` set has to stay tiny: `repo-gates` holds formatting,
       linting and the drift guard, and `repo-checks` holds the rest of
