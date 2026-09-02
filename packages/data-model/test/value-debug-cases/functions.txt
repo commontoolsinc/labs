@@ -1,4 +1,14 @@
-{ named: function foo() {}, arrow: () => 1, method() {} }
+{
+  named: function foo() {},
+  arrow: () => 1,
+  method() {},
+  anonymous: (() => () => 1)(),
+  "empty name": (() => {
+    const f = function () {};
+    Object.defineProperty(f, "name", { value: "" });
+    return f;
+  })(),
+}
 
 {
   named: {
@@ -9,7 +19,13 @@
   },
   method: {
     "/function": "method(...)"
+  },
+  anonymous: {
+    "/function": "<anonymous>(...)"
+  },
+  "empty name": {
+    "/function": "<anonymous>(...)"
   }
 }
 
-{named:{"/function":"foo(...)"},arrow:{"/function":"arrow(...)"},method:{"/function":"method(...)"}}
+{named:{"/function":"foo(...)"},arrow:{"/function":"arrow(...)"},method:{"/function":"method(...)...

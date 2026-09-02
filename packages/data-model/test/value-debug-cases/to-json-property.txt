@@ -1,4 +1,8 @@
-{ toJSON: () => ({ simplified: 1 }) }
+{
+  toJSON: () => {
+    throw new Error("nope");
+  },
+}
 
 {
   toJSON: {

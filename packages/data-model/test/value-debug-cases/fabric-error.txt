@@ -1,0 +1,5 @@
+FabricError.fromNativeError(new Error("boom"))
+
+/Error(...)
+
+/Error(...)

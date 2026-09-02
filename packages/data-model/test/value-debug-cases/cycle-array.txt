@@ -1,0 +1,13 @@
+(() => {
+  const a = [1, 2];
+  a.push(a);
+  return a;
+})()
+
+[
+  1,
+  2,
+  <circle>
+]
+
+[1,2,<circle>]

@@ -1,9 +1,0 @@
-{ "/tagged": 1, "//doubled": 2, constructor: 3 }
-
-{
-  "//tagged": 1,
-  "///doubled": 2,
-  "/constructor": 3
-}
-
-{"//tagged":1,"///doubled":2,"/constructor":3}
