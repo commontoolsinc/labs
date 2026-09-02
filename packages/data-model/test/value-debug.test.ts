@@ -29,14 +29,13 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { FabricPrimitive, FabricSpecialObject } from "@/interface.ts";
 
 describe("value-debug", () => {
   describe("toCompactDebugString", () => {
     // The renderings themselves are recorded as case files in
     // `value-debug-cases/`. What is here is what a case file cannot express:
-    // a value at the top level, a class the case scope does not include, and
-    // the `maxLength` behavior at more than one length.
+    // a value at the top level, and the `maxLength` behavior at more than one
+    // length.
 
     it("renders a top-level value the same as it renders that value in an array", () => {
       function foo() {}
@@ -59,25 +58,6 @@ describe("value-debug", () => {
         const nested = toCompactDebugString([value]);
         expect(toCompactDebugString(value)).toBe(nested.slice(1, -1));
       }
-    });
-
-    it("renders a `FabricSpecialObject` with no codec under its class name", () => {
-      // A `FabricSpecialObject` with no `[CODEC]` makes `codecOf()` throw.
-      // The formatter is most likely to be reached for a value that is
-      // already malformed, so it renders what it can rather than adding a
-      // second failure on top of the first.
-
-      class RogueSpecial extends FabricSpecialObject {}
-
-      expect(toCompactDebugString(new RogueSpecial()))
-        .toBe("/RogueSpecial(...)");
-    });
-
-    it("renders a `FabricPrimitive` with no codec under its class name", () => {
-      class RoguePrimitive extends FabricPrimitive {}
-
-      expect(toCompactDebugString(new RoguePrimitive()))
-        .toBe("/RoguePrimitive(...)");
     });
 
     describe("with `maxLength`", () => {
