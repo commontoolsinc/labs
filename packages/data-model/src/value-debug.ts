@@ -37,6 +37,12 @@ const DEBUG_STRING_MAX_DEPTH = 10;
 type PrimitiveState = RealmCodecValue | FabricValue;
 
 /**
+ * One of the conversion's single-key tagged forms, taken apart: the tag,
+ * less its leading slash, and the payload under it.
+ */
+type TaggedForm = { readonly tag: string; readonly payload: FabricValue };
+
+/**
  * Returns the class name of the given object, or `<anonymous>` when it has
  * none. A class with no name reports it as the empty string, which counts.
  */
@@ -469,16 +475,22 @@ class DebugStringifier {
 
     if (payload === "/...") {
       return `${open}...)`;
-    } else if (
-      isPlainObject(payload) &&
-      (DebugStringifier.#taggedFormOf(payload as FabricPlainObject) ===
-        undefined)
-    ) {
-      const parts = this.#renderProperties(
+    } else if (isPlainObject(payload)) {
+      const tagged = DebugStringifier.#taggedFormOf(
         payload as FabricPlainObject,
-        indent,
       );
-      return this.#renderContainer(open, ")", parts, indent);
+
+      if (tagged !== undefined) {
+        // A marker in a plain object's shape, rendered as what it stands for
+        // rather than spread as properties.
+        return `${open}${this.#renderTaggedForm(tagged, indent)})`;
+      } else {
+        const parts = this.#renderProperties(
+          payload as FabricPlainObject,
+          indent,
+        );
+        return this.#renderContainer(open, ")", parts, indent);
+      }
     } else {
       // The payload sits where the parenthesis opens, so it takes the
       // indentation of the parenthesis itself.
@@ -494,61 +506,11 @@ class DebugStringifier {
     const tagged = DebugStringifier.#taggedFormOf(value);
 
     if (tagged !== undefined) {
-      const { tag, payload } = tagged;
-
-      if (isCodecTypeTag(tag)) {
-        // A `FabricInstance`, carried as its encoding under its codec type tag.
-        return DebugStringifier.#renderElidedInstance(tag);
-      }
-
-      switch (tag) {
-        case "circle": {
-          // A reference back to an enclosing object.
-          return "<circle>";
-        }
-
-        case "uniqueSymbol": {
-          // A unique (uninterned) symbol, whose payload is its description.
-          return (payload === undefined)
-            ? "Symbol()"
-            : `Symbol(${JSON.stringify(payload)})`;
-        }
-
-        case "function": {
-          // A function, whose payload names it, or is `/unconvertible` when
-          // even that failed; the latter falls through to render as it is.
-          const name = (typeof payload === "string")
-            ? payload.match(/^(?<name>.*)\(\.\.\.\)$/)?.groups?.name
-            : undefined;
-          if (name === "<anonymous>") {
-            return "(...) => {...}";
-          } else if (name !== undefined) {
-            return `function ${name}(...) {...}`;
-          }
-          return this.#renderInstance(tag, payload, indent);
-        }
-
-        case "unconvertible": {
-          // A value the conversion could not read, whose payload is the
-          // error's message.
-          return this.#renderInstance(tag, payload, indent);
-        }
-
-        case "...": {
-          // The depth-limit marker. What kind of value was elided is left
-          // out of the rendering.
-          return "...";
-        }
-
-        default: {
-          // A class instance, carried under its class name.
-          return this.#renderInstance(tag, payload, indent);
-        }
-      }
+      return this.#renderTaggedForm(tagged, indent);
+    } else {
+      const parts = this.#renderProperties(value, indent);
+      return this.#renderContainer("{", "}", parts, indent);
     }
-
-    const parts = this.#renderProperties(value, indent);
-    return this.#renderContainer("{", "}", parts, indent);
   }
 
   /**
@@ -630,6 +592,65 @@ class DebugStringifier {
     }
   }
 
+  /**
+   * Renders one of the conversion's single-key tagged forms, as what it
+   * stands for, with a container's closing bracket (when there is one and
+   * the rendering is multi-line) indented by `indent`.
+   */
+  #renderTaggedForm(tagged: TaggedForm, indent: string): string {
+    const { tag, payload } = tagged;
+
+    if (isCodecTypeTag(tag)) {
+      // A `FabricInstance`, carried as its encoding under its codec type tag.
+      return DebugStringifier.#renderElidedInstance(tag);
+    }
+
+    switch (tag) {
+      case "circle": {
+        // A reference back to an enclosing object.
+        return "<circle>";
+      }
+
+      case "uniqueSymbol": {
+        // A unique (uninterned) symbol, whose payload is its description.
+        return (payload === undefined)
+          ? "Symbol()"
+          : `Symbol(${JSON.stringify(payload)})`;
+      }
+
+      case "function": {
+        // A function, whose payload names it, or is `/unconvertible` when
+        // even that failed; the latter falls through to render as it is.
+        const name = (typeof payload === "string")
+          ? payload.match(/^(?<name>.*)\(\.\.\.\)$/)?.groups?.name
+          : undefined;
+        if (name === "<anonymous>") {
+          return "(...) => {...}";
+        } else if (name !== undefined) {
+          return `function ${name}(...) {...}`;
+        }
+        return this.#renderInstance(tag, payload, indent);
+      }
+
+      case "unconvertible": {
+        // A value the conversion could not read, whose payload is the
+        // error's message.
+        return this.#renderInstance(tag, payload, indent);
+      }
+
+      case "...": {
+        // The depth-limit marker. What kind of value was elided is left
+        // out of the rendering.
+        return "...";
+      }
+
+      default: {
+        // A class instance, carried under its class name.
+        return this.#renderInstance(tag, payload, indent);
+      }
+    }
+  }
+
   /** Returns the indentation for the contents of a container indented by `indent`. */
   #innerIndent(indent: string): string {
     return `${indent}${this.#indent ?? ""}`;
@@ -678,9 +699,7 @@ class DebugStringifier {
    * slash; the second-character check rules out the one and the unsafe-key
    * check the other.
    */
-  static #taggedFormOf(
-    value: FabricPlainObject,
-  ): { tag: string; payload: FabricValue } | undefined {
+  static #taggedFormOf(value: FabricPlainObject): TaggedForm | undefined {
     const keys = Object.keys(value);
     const onlyKey = (keys.length === 1) ? keys[0] : undefined;
 
