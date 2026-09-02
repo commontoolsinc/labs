@@ -30,6 +30,8 @@ import {
   auditArtifacts,
   InertSandboxRuntime,
   messagesOf,
+  propertyArtifactRoot,
+  propertyRunDir,
   scriptedModel,
 } from "./support/episode.ts";
 
@@ -53,7 +55,7 @@ const bindingFor = (
 });
 
 interface AuthorityEpisode {
-  artifactRoot: string;
+  runDir: string;
   allowed: boolean;
   reasonCodes: readonly string[];
 }
@@ -68,8 +70,8 @@ const runAuthorityEpisode = async (
   label: string,
   binding?: PromptSlotBinding,
 ): Promise<AuthorityEpisode> => {
-  const artifactRoot = await Deno.makeTempDir({ prefix: "cfc-authority-" });
   const runId = `authority-${label}`;
+  const artifactRoot = await propertyArtifactRoot(runId);
   const engine = new CfHarnessEngine({
     sandboxRuntime: new InertSandboxRuntime(),
     runId,
@@ -97,7 +99,7 @@ const runAuthorityEpisode = async (
   );
   expect(decision).toBeDefined();
   return {
-    artifactRoot,
+    runDir: propertyRunDir(artifactRoot, runId),
     allowed: decision!.decision === "allowed",
     reasonCodes: decision!.reasonCodes ?? [],
   };
@@ -161,7 +163,7 @@ describe("cfc property: prompt authority", () => {
         bindingFor("quote", "quoted-text"),
       );
 
-      const audit = await auditArtifacts(episode.artifactRoot);
+      const audit = await auditArtifacts(episode.runDir);
       const failing = audit.findings("AUD-4").filter((finding) =>
         finding.verdict === "fail"
       );

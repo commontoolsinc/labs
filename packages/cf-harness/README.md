@@ -2046,6 +2046,63 @@ they are. [audit/citations.ts](audit/citations.ts) holds that table and
 quote to still be in it, so a specification edit that invalidates a check breaks
 the suite rather than leaving the check quietly wrong.
 
+### The property suite
+
+`test/cfc-properties/` produces the evidence the checks read, in both
+directions, so the audit is exercised rather than merely present. Each property
+runs a scripted adversarial episode against the real engine and prompt loop — no
+live model, no network — writes artifacts into a fresh root, and then runs the
+audit over its own artifacts and asserts the verdict. The checker is the
+assertion library; a property that hand-rolled its own artifact assertions would
+prove that the test can read JSON.
+
+```bash
+cd packages/cf-harness
+deno test -A test/cfc-properties/
+
+# What the nightly does: one root for the whole suite, then the corpus checks
+# over it. AUD-16's refusal count and AUD-18's posture uniformity are questions
+# about a population, which a single run cannot answer.
+CF_HARNESS_PROPERTY_ARTIFACT_ROOT=/tmp/cfc-properties \
+  deno test -A test/cfc-properties/
+deno task cfc-audit /tmp/cfc-properties \
+  --corpus --expect-refusals \
+  --expected-posture audit/profiles/max-enforcement.json --fail-on warn
+```
+
+| Property           | What it establishes                                                                                                                                                                                                                                |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P-deny-egress      | A pattern reading a `Confidential` input has its answer withheld by the answer sink's ceiling, the refusal is recorded as a `policyRefusal` artifact naming `sink-ceiling`, and AUD-16 counts it. No payload reaches any model-visible message     |
+| P-allow            | The same pattern with that one input dropped releases its answer, and the audit fails only the two checks a permitted run is known to fail. The guard against a gate that refuses everything, and against the audit becoming an always-fails alarm |
+| P-influence        | A mediated `bash` call whose `stdout` is observed under a confidentiality label accumulates as influence, and whose `stderr` is denied does not. AUD-8 reaches `pass`, which no run of the historic corpus ever gave it                            |
+| P-prompt-authority | A side effect is allowed under a `direct-command` prompt slot and refused under `context`, under `quote`, and under no binding at all, each with `cfc_enforce_explicit_requires_direct_command`                                                    |
+
+Two properties the brief for this suite named are established elsewhere, and a
+second copy would be a second encoding rather than more coverage:
+
+- **P-refuse-start** — `assertDockerRunscCfcTransportForMode` refuses to start
+  an enforcing run whose CFC transports are unwired, and
+  `test/docker-runsc-sandbox.test.ts` covers both enforcing modes, each
+  transport missing on its own, and both present.
+- **P-dial-order** and **P-posture-parity** — `audit/test/seeded-violations.ts`
+  turns AUD-13 to `fail` and to `warn` on non-conforming matrix points, and
+  `audit/test/deployment.test.ts` covers AUD-18. These are the stronger form for
+  these two: a posture is a declaration, and a live episode can only produce
+  postures the harness is willing to emit, so it cannot reach a non-conforming
+  matrix point at all without the same seeded mutation.
+
+Two checks fail on every fresh run today, and P-allow asserts the exact set so
+that neither can quietly become permanent:
+
+- **AUD-3** — `run_pattern` persists a `run-pattern-source` artifact into
+  `tool-outputs/` that the run report's `toolOutputs` never lists. The historic
+  corpus holds 534 `run_pattern` outputs and no source artifact, so the check
+  passed 234 runs that predate the artifact and fails the first run audited with
+  one.
+- **AUD-9** — an executed side effect wants a CFC invocation context, and
+  `run_pattern` reaches the fabric rather than the sandbox, so none is recorded
+  for it.
+
 ### A consistency check cannot detect a consistent wrong answer
 
 Two encodings of one policy drift, and the repair is to collapse them so that

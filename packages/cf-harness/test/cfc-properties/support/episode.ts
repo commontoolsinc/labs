@@ -12,6 +12,7 @@
  */
 
 import { expect } from "@std/expect";
+import { join } from "@std/path";
 
 import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -335,6 +336,35 @@ export const scriptedModel = (turns: readonly ScriptedTurn[]): typeof fetch => {
     );
   };
 };
+
+/**
+ * Where one property's episode writes its artifacts.
+ *
+ * A temp directory by default, so a local run leaves nothing behind. The
+ * nightly job sets `CF_HARNESS_PROPERTY_ARTIFACT_ROOT` and then audits what
+ * the whole suite wrote, which needs the runs to land somewhere it can name;
+ * each run keeps its own subdirectory there so two properties cannot collide.
+ */
+export const propertyArtifactRoot = async (runId: string): Promise<string> => {
+  const configured = Deno.env.get("CF_HARNESS_PROPERTY_ARTIFACT_ROOT");
+  if (configured === undefined || configured.trim() === "") {
+    return await Deno.makeTempDir({ prefix: `cfc-property-${runId}-` });
+  }
+  await Deno.mkdir(configured, { recursive: true });
+  return configured;
+};
+
+/**
+ * The one run directory an episode wrote, which is what its own assertions
+ * read.
+ *
+ * A property asserts about its own episode, so it audits its run rather than
+ * the root: under the nightly's shared root every property's runs sit side by
+ * side, and auditing the root there would fold the whole suite into each
+ * property's verdict.
+ */
+export const propertyRunDir = (artifactRoot: string, runId: string): string =>
+  join(artifactRoot, runId);
 
 /** What the audit said about one artifact root. */
 export interface AuditOfArtifacts {

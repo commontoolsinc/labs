@@ -1,0 +1,79 @@
+name: CFC Property Suite
+
+# The deterministic CFC property suite, and the audit read over what it just
+# wrote.
+#
+# Nightly rather than per-PR on purpose. The suite stands up real runtimes and
+# real prompt loops, and the point of it is to produce evidence deliberately
+# rather than to gate a diff; the per-PR job already runs the same tests as
+# part of the cf-harness package suite, where they are fast because each one
+# audits only its own run.
+#
+# What this job adds is the second step. The per-PR run audits each property's
+# own artifacts; here the whole suite writes into one root and the corpus
+# checks read that root as a population — AUD-16's refusal count and AUD-18's
+# posture uniformity are corpus questions, and a single run cannot answer
+# either. `--expect-refusals` declares the corpus adversarial, which turns "no
+# release refusal anywhere" from a warning into a failure: a suite that stopped
+# producing its refusal would otherwise go quiet rather than red.
+#
+# The corpus this writes is fresh every night, which is the whole value. The
+# historic session corpus cannot be re-run, so a check can only ever report
+# what those runs happened to record; this one reports what the current code
+# does.
+on:
+  schedule:
+    - cron: "0 5 * * *" # Nightly, 05:00 UTC
+  workflow_dispatch: {} # Allow manual trigger
+
+jobs:
+  cfc-properties:
+    name: "CFC properties and the audit over them"
+    runs-on: ubuntu-latest
+    env:
+      CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      # One root for every property, so the corpus checks have a population.
+      - name: 🧪 Run the CFC property suite
+        working-directory: packages/cf-harness
+        env:
+          CF_HARNESS_PROPERTY_ARTIFACT_ROOT: ${{ runner.temp }}/cfc-properties
+        run: >-
+          deno task run-recorded test cf-harness cfc-properties --
+          deno test -A test/cfc-properties/
+
+      - name: 🔎 Audit the artifacts the suite just wrote
+        working-directory: packages/cf-harness
+        run: |
+          deno task run-recorded gate cf-harness cfc-audit-properties -- \
+            deno task cfc-audit "${{ runner.temp }}/cfc-properties" \
+            --corpus \
+            --expect-refusals \
+            --expected-posture audit/profiles/max-enforcement.json \
+            --fail-on warn
+
+      - name: 📤 Ship test records
+        if: always()
+        uses: ./.github/actions/test-records-ship
+        with:
+          artifact: cfc-properties
+          job: CFC properties and the audit over them
+
+      # Kept whether or not the audit passed: a red run's findings are the
+      # reason to look, so the evidence behind them has to outlive the job.
+      - name: 📤 Upload the audited artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cfc-property-artifacts
+          path: ${{ runner.temp }}/cfc-properties
+          retention-days: 14

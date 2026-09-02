@@ -24,6 +24,8 @@ import {
   directPromptSlotBinding,
   mediatedBashResult,
   messagesOf,
+  propertyArtifactRoot,
+  propertyRunDir,
   scriptedModel,
   ScriptedSandboxRuntime,
 } from "./support/episode.ts";
@@ -31,15 +33,15 @@ import {
 const OBSERVED_STDOUT = "influence-observed-line\n";
 
 interface InfluenceEpisode {
-  artifactRoot: string;
+  runDir: string;
   /** The channels the run accumulated influence for, as `toolCallId:channel`. */
   influencing: readonly string[];
   modelVisibleText: string;
 }
 
 const runInfluenceEpisode = async (): Promise<InfluenceEpisode> => {
-  const artifactRoot = await Deno.makeTempDir({ prefix: "cfc-influence-" });
   const runId = "influence";
+  const artifactRoot = await propertyArtifactRoot(runId);
   const engine = new CfHarnessEngine({
     sandboxRuntime: new ScriptedSandboxRuntime([
       mediatedBashResult(OBSERVED_STDOUT, {
@@ -69,7 +71,7 @@ const runInfluenceEpisode = async (): Promise<InfluenceEpisode> => {
 
   const observations = result.runState.cfcModelContext?.observations ?? [];
   return {
-    artifactRoot,
+    runDir: propertyRunDir(artifactRoot, runId),
     influencing: observations.flatMap((observation) =>
       observation.channels.map((channel) =>
         `${observation.toolCallId}:${channel}`
@@ -95,7 +97,7 @@ describe("cfc property: influence accumulation", () => {
       // entry and found them consistent.
       const episode = await runInfluenceEpisode();
 
-      const audit = await auditArtifacts(episode.artifactRoot);
+      const audit = await auditArtifacts(episode.runDir);
       const aud8 = audit.findings("AUD-8");
       expect(aud8).toHaveLength(1);
       expect(aud8[0].verdict).toBe("pass");
@@ -115,7 +117,7 @@ describe("cfc property: influence accumulation", () => {
     it("leaves AUD-8 with no disagreement to report", async () => {
       const episode = await runInfluenceEpisode();
 
-      const audit = await auditArtifacts(episode.artifactRoot);
+      const audit = await auditArtifacts(episode.runDir);
       const disagreeing = audit.findings("AUD-8").filter((finding) =>
         finding.verdict === "fail"
       );

@@ -32,6 +32,8 @@ import {
   InertSandboxRuntime,
   messagesOf,
   OPTIONAL_SECRET_PATTERN_SOURCE,
+  propertyArtifactRoot,
+  propertyRunDir,
   scriptedModel,
   seedLabeledSecret,
   TOTAL_RESULT_SCHEMA,
@@ -41,7 +43,7 @@ import {
 const SECRET = "s3cr3t";
 
 interface EpisodeOutcome {
-  artifactRoot: string;
+  runDir: string;
   runId: string;
   /** Every model-facing message of the run, joined, for a disclosure check. */
   modelVisibleText: string;
@@ -58,8 +60,8 @@ const runEpisode = async (
   options: { withSource: boolean },
 ): Promise<EpisodeOutcome> => {
   const fabric = await createLabeledFabric("enforce-explicit");
-  const artifactRoot = await Deno.makeTempDir({ prefix: "cfc-property-" });
   const runId = `deny-egress-${options.withSource ? "refused" : "allowed"}`;
+  const artifactRoot = await propertyArtifactRoot(runId);
   try {
     const sourceRef = await seedLabeledSecret(
       fabric.runtime,
@@ -112,7 +114,7 @@ const runEpisode = async (
     );
     expect(toolMessage).toBeDefined();
     return {
-      artifactRoot,
+      runDir: propertyRunDir(artifactRoot, runId),
       runId,
       modelVisibleText: result.transcript.map((message) => message.content)
         .join("\n"),
@@ -137,7 +139,7 @@ describe("cfc property: egress of a labeled flow", () => {
       // The checker is the assertion library. AUD-16 counts the artifact
       // channel, so a refusal the transcript shows but no artifact records
       // fails here.
-      const audit = await auditArtifacts(episode.artifactRoot, {
+      const audit = await auditArtifacts(episode.runDir, {
         expectRefusals: true,
       });
       const aud16 = audit.findings("AUD-16");
@@ -191,7 +193,7 @@ describe("cfc property: egress of a labeled flow", () => {
       // list cannot quietly rot into a permanent excuse.
       const episode = await runEpisode({ withSource: false });
 
-      const audit = await auditArtifacts(episode.artifactRoot);
+      const audit = await auditArtifacts(episode.runDir);
       const failing = audit.results.filter((result) =>
         result.verdict === "fail"
       );
