@@ -288,16 +288,10 @@ class DebugConverter {
 
 /**
  * Helper class for rendering the result of `toStructuredDebugValue()` as a
- * debug string. The rendering is JSON syntax wherever JSON can express the
- * value, except that an object key which is a valid identifier is written
- * bare, and a bare token -- `42n`, `undefined`, `NaN`, `-0`, `Infinity`,
- * `@name`, `Symbol("name")`, `<circle>`, `<hole>` -- wherever it cannot. A
- * `FabricInstance`, which the conversion carries as its encoding under its
- * codec type tag, and a `FabricPrimitive`, which the conversion passes
- * through as itself, are both rendered in the elided form `/TypeName(...)`.
- * Any other class instance, which the conversion carries under its class
- * name, is rendered as `/ClassName(<props>)`, or `/ClassName(...)` when it
- * has none to show.
+ * debug string, for a human to read. The rendering follows JSON syntax where
+ * that suffices and departs from it where it does not; the details are the
+ * renderer's to change, and the case files under `test/value-debug-cases/`
+ * are what records them.
  */
 class DebugStringifier {
   readonly #indent: string | undefined;
