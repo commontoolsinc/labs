@@ -72,13 +72,17 @@ reference, the door that reads no `..` at all. `/` is the separator
 besides, so no segment of an operand holds one, and a key that does is
 spelled `~1`, which a reference unescapes and a walk does not.
 
-However a reading is matched, a segment no rendering would name back is
-refused at every door. Two steps lose characters between a path and the
-rendering that names it: reading a rendering back is a parse of a
-reference, which trims the string and drops a trailing empty segment, and
-writing one separates its lines with a newline. So an empty segment, one
-ending in whitespace, and one holding a line break are refused, while a
-segment that merely starts with whitespace survives both and is not.
+However a reading is matched, a part no rendering would name back is
+refused at every door. Three steps lose characters between a place and the
+rendering that names it. Reading a rendering back is a parse of a
+reference, which trims the string and drops a trailing empty segment.
+Writing one separates its lines with a newline. And the parse splits the
+piece segment at its last `@` and reads what follows as a scope, which
+reaches the piece and nothing else. So an empty part, one ending in
+whitespace, and one holding a line break are refused wherever they appear,
+a piece holding `@` is refused as well, and a part that merely starts with
+whitespace survives all three and is not. No slug or handle carries an `@`,
+so the piece rule costs the fabric no name it can spell.
 
 A segment lifted out of a rendering is an operand in its own right, so
 these readings decide it rather than the key it was printed from.
@@ -92,6 +96,10 @@ strips it before the runner grammar sees the string, and refuses every
 other fragment). And inside a piece it is an ordinary character of a data
 key, under the rule above: the wish reading is decided on the whole
 operand, so it governs the head and nothing else.
+
+A container renders without the leading `/` that marks a reference, so a
+space root and a facet cannot be read back as a piece whose slug happens to
+match their name; `cd` refuses such a rendering rather than following it.
 
 A place is **result-rooted**, and holds exactly space, piece, path, and
 scope. `cd` refuses a reference carrying `#argument` rather than dropping

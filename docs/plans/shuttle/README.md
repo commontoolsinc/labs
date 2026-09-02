@@ -264,8 +264,13 @@ The ambient context is one record:
 - **External working location**, **invocation session**.
 
 `cd` accepts relative path segments, `..`, `-`, `/`, rooted and complete
-canonical references, slugs, wish targets, and scope suffixes (space names
-join when multi-space sessions do). Every
+canonical references, slugs, wish targets, and scope suffixes. A space
+named by name inside a reference is accepted and settled in two steps,
+since deriving a DID from a name needs a session: the move comes back
+carrying the name, and landing it means handing it over again with the
+space that name resolved to, which is refused when that is not the
+connected space. A space name as an operand of its own joins when
+multi-space sessions do. Every
 reference a command takes resolves against the cwd, and how much of the
 cwd it needs varies: a rooted `/of:…` fixes the piece and path but still
 draws its space from the place, so only a complete

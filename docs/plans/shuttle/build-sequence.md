@@ -130,18 +130,25 @@ Landed:
   complete references; the `slugs/` and `pieces/` facets a space root
   reserves, and nothing else there; the rendering `pwd` prints of both
   halves; and the refusals — a reference carrying `#argument`, a `#`
-  buried in a bare piece id, and a move into a space other than the
-  connected one, which is the gate a home-anchored entry point meets once
-  resolution hands it a space.
+  buried in a bare piece id, a part no rendering would name back, and a
+  move into a space other than the connected one, which is the gate a
+  home-anchored entry point meets once resolution hands it a space. Two
+  operands come back for the connection rather than moving: a `#name` wish
+  target, which B1b resolves, and a reference naming its space by name,
+  which is a two-step protocol — the caller resolves the name and hands the
+  move back with the space it resolved to, and the place is landed or
+  refused there.
 
 Still to come:
 
-- **The prompt, a readline loop, and the verbs** — `cd` / `ls` / `pwd` /
-  `get` over one held `PiecesController`, with `#name` wish targets
+- **The prompt, a readline loop, and the verbs** (B1b for the verbs and
+  the connection, B1c for the prompt) — `cd` / `ls` / `pwd` / `get` over
+  one held `PiecesController`, with `#name` wish targets
   navigable within the connected space (`cd #favorites`, and the `wish`
   verb, over the `./lib/wish` export entry A1 adds; a home-anchored target
   from elsewhere is refused with the reason — decision 5).
-- **Slug and name resolution**, riding the machinery `--cell` already uses
+- **Slug and name resolution** (B1b), riding the machinery `--cell` already
+  uses
   (`resolveStoredPieceAddress`, `listSpaceSlugs`), so no CLI-surface arc
   step gates B1.
 - **The vocabulary a relative segment speaks.** The two doors read a
@@ -153,21 +160,24 @@ Still to come:
   what each lifted segment does instead of naming its key, is pinned case
   by case in `packages/shuttle/test/place.test.ts`, each case under a
   mutation, so the record moves when the behavior does and not otherwise.
-  `ls` settles it: how such a key prints and how it is typed back want
-  deciding together. Segment validation is the same question, across three
+  `ls` settles it, in B1b: how such a key prints and how it is typed back
+  want deciding together. Segment validation is the same question, across three
   doors rather than two — a slug's vocabulary holds a reference, and
   neither a relative segment nor a resolved target is held to it. What is
-  settled is narrower: a segment no rendering would name back — empty,
-  ending in whitespace, or holding a line break — is refused at every door,
-  which leaves those keys with no spelling rather than one that prints as a
-  different cell.
-- **`where`**, the printing surface for the ambient record; later
+  settled is narrower: a part no rendering would name back — empty, ending
+  in whitespace, holding a line break, or, for a piece, holding an `@` —
+  is refused at every door, which leaves those names with no spelling
+  rather than one that prints as a different cell.
+- **`where`** (B1c), the printing surface for the ambient record; later
   milestones add their dimensions to it as they add the dimensions
   themselves. It prints the record `pwd` prints, so it chooses the format
   for both — a test helper reads that format back by slicing a label
-  width, which is what a change to it has to move with, and a key holding a
-  newline splits the two lines the format prints while leaving the
-  reference inside them intact.
+  width, which is what a change to it has to move with. The format's own
+  hazards belong with it: a newline in a part is refused before it reaches
+  a place, because it would leave a shorter reference naming another cell,
+  while a carriage return, a vertical tab, a form feed, a no-break space
+  and the Unicode line and paragraph separators all read back whole and
+  reach only a terminal.
 - **Liveness, in two halves.** The held controller is memoized
   cf-harness-style, which covers the construction that never succeeds —
   the case that cache actually addresses. Recovery of an *established*

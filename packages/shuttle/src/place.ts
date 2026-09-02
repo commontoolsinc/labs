@@ -181,9 +181,10 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
  * container's own rendering from resolving as a piece whose slug happens to
  * match. `cd` reads a piece rendering back whole, except where a path segment
  * holds a `#`, which the reference grammar reserves: `cd` refuses such a
- * rendering rather than reading it as some other cell. A segment holding a
- * newline splits the two lines this prints rather than the reference inside
- * them, so what breaks there is the format. The scope renders here
+ * rendering rather than reading it as some other cell. A piece or segment
+ * holding a newline would split the position line, leaving a shorter
+ * reference that names another cell — which is why one is refused before it
+ * can reach a place rather than handled here. The scope renders here
  * rather than through the reference serializer, which emits no suffix for the
  * base scope.
  */
@@ -254,7 +255,8 @@ export class CurrentPlace {
         connected,
       ));
     }
-    const fault = firstUnnameableSegment(move.path);
+    const fault = unnameablePiece(move.piece) ??
+      firstUnnameableSegment(move.path);
     if (fault !== undefined) {
       return this.#commit(refuse(
         `The reference naming space \`${move.name}\` has ${fault}, so a ` +
@@ -375,13 +377,16 @@ function movePlace(
  * trail comes through untouched.
  */
 function moveScope(from: Standing, word: string): Step {
-  if (!CELL_SCOPE_VALUES.has(word)) {
-    return refuse(
-      `\`@${word}\` names no scope. The scopes are \`@space\`, \`@user\`, ` +
-        `and \`@session\`.`,
-    );
-  }
+  if (!CELL_SCOPE_VALUES.has(word)) return refuseUnknownScope(word);
   return land({ ...from.place, scope: word as CellScope }, from.trail);
+}
+
+/** Helper for the movers, which refuses `@word` for naming no scope. */
+function refuseUnknownScope(word: string): Step {
+  return refuse(
+    `\`@${word}\` names no scope. The scopes are \`@space\`, \`@user\`, ` +
+      `and \`@session\`.`,
+  );
 }
 
 /**
@@ -398,9 +403,11 @@ function moveByReference(
   operand: string,
 ): Step {
   if (reference.input === true) return refuseArgumentSuffix();
+  const badPiece = unnameablePiece(reference.pieceId);
+  if (badPiece !== undefined) return refuseUnnameable(operand, badPiece);
   const badSegment = firstUnnameableSegment(reference.path);
   if (badSegment !== undefined) {
-    return refuseUnnameableSegment(operand, badSegment);
+    return refuseUnnameable(operand, badSegment);
   }
   const scope = reference.scope ?? place.scope;
   if (reference.embeddedSpace !== undefined) {
@@ -440,7 +447,7 @@ function moveBySegments(from: Standing, operand: string): Step {
   let moved = from;
   for (const segment of segments) {
     const fault = unnameableSegment(segment);
-    if (fault !== undefined) return refuseUnnameableSegment(operand, fault);
+    if (fault !== undefined) return refuseUnnameable(operand, fault);
     const step = segment === ".." ? moveUp(moved) : moveDown(moved, segment);
     if (step.kind !== "moved") return step;
     moved = step.to;
@@ -541,9 +548,13 @@ function moveIntoPiece(
   let scoped;
   try {
     scoped = parseScopedIdSegment(segment);
-  } catch (error) {
-    return refuse(messageOf(error));
+  } catch {
+    // The one throw left: the suffix names no scope, `@` with no piece in
+    // front of it having been refused above.
+    return refuseUnknownScope(segment.slice(segment.lastIndexOf("@") + 1));
   }
+  const fault = unnameablePiece(scoped.id);
+  if (fault !== undefined) return refuseUnnameable(segment, fault);
   return land({
     position: {
       kind: "piece",
@@ -574,6 +585,13 @@ function enterTarget(
     return refuseOtherSpace(
       `\`${operand}\` resolves in space \`${target.space}\``,
       place.position.space,
+    );
+  }
+  const badPiece = unnameablePiece(target.piece);
+  if (badPiece !== undefined) {
+    return refuse(
+      `\`${operand}\` resolves to ${badPiece}, so a rendering of the place ` +
+        `would name a different cell.`,
     );
   }
   const badSegment = firstUnnameableSegment(target.path ?? []);
@@ -627,29 +645,55 @@ function refuseOtherSpace(clause: string, connected: MemorySpace): Step {
 }
 
 /**
- * Helper for the movers, which names what stops a rendering of a path
- * holding `segment` from naming that path back, and returns nothing when
- * nothing does.
+ * Helper for {@link unnameableSegment} and {@link unnameablePiece}, which
+ * names what the two steps every part of a rendering passes through would
+ * lose from `text`, `noun` naming the part.
  *
- * Two things lose characters between a path and the rendering that names it,
- * and each rules out what it can lose. Reading a rendering back is a parse of
- * a reference, which trims the string it is given and drops a trailing empty
- * segment; a segment ending in whitespace, and an empty one, are what that
- * reaches. Writing the rendering separates its lines with a newline, so a
- * segment holding one splits the position line and leaves a shorter reference
- * that names another cell. A number renders as its digits and survives both.
+ * Reading a rendering back is a parse of a reference, which trims the string
+ * it is given and drops a trailing empty segment; something ending in
+ * whitespace, and something empty, are what that reaches. Writing the
+ * rendering separates its lines with a newline, so one holding a newline
+ * splits the position line and leaves a shorter reference naming another
+ * cell.
  *
  * Leading whitespace survives both and is admitted: the parse trims the whole
- * string, which no leading segment character sits at the end of. What a
+ * string, which no leading character of a part sits at the end of. What a
  * terminal does with the other control characters is the format's concern
  * rather than this one's, since a reference carrying them reads back whole.
  */
-function unnameableSegment(segment: PathSegment): string | undefined {
-  if (typeof segment === "number") return undefined;
-  if (segment === "") return "an empty segment";
-  if (segment !== segment.trimEnd()) return "a segment ending in whitespace";
-  if (segment.includes("\n")) return "a segment holding a line break";
+function unnameableText(text: string, noun: string): string | undefined {
+  if (text === "") return `an empty ${noun}`;
+  if (text !== text.trimEnd()) return `a ${noun} ending in whitespace`;
+  if (text.includes("\n")) return `a ${noun} holding a line break`;
   return undefined;
+}
+
+/**
+ * Helper for the movers, which names what stops a rendering of a path holding
+ * `segment` from naming that path back, and returns nothing when nothing
+ * does. A number renders as its digits and survives every step.
+ */
+function unnameableSegment(segment: PathSegment): string | undefined {
+  return typeof segment === "number"
+    ? undefined
+    : unnameableText(segment, "segment");
+}
+
+/**
+ * Helper for the movers, which names what stops a rendering from naming
+ * `piece` back, and returns nothing when nothing does.
+ *
+ * A third step reads the piece segment and only that one, which is why this
+ * is not {@link unnameableSegment}: `parseScopedIdSegment` splits the piece
+ * at its last `@` and reads what follows as a scope, so a piece holding one
+ * is read back shortened — under a scope it never asked for where the suffix
+ * is a scope word, and as a refusal where it is not. A slug is lowercase
+ * letters, numbers and hyphens and a handle carries none either, so no piece
+ * the fabric can name is lost by refusing the character outright.
+ */
+function unnameablePiece(piece: string): string | undefined {
+  return unnameableText(piece, "piece") ??
+    (piece.includes("@") ? "a piece holding `@`" : undefined);
 }
 
 /** Helper for the movers, which is the first fault in `path`, if it has one. */
@@ -664,10 +708,10 @@ function firstUnnameableSegment(
 }
 
 /**
- * Helper for the movers, which refuses `operand` for a segment no rendering
- * names back, `fault` saying which segment and why.
+ * Helper for the movers, which refuses `operand` for a part no rendering
+ * names back, `fault` saying which part and why.
  */
-function refuseUnnameableSegment(operand: string, fault: string): Step {
+function refuseUnnameable(operand: string, fault: string): Step {
   return refuse(
     `\`${operand}\` has ${fault}, so a rendering of the place would name a ` +
       `different cell.`,
