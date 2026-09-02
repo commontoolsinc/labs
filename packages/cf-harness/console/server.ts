@@ -350,7 +350,7 @@ const parseTaskInputCells = (
  * batch CLI resolves argv into, so a capability configurable there is
  * configurable here by the same name. This surface adds only what an HTTP
  * server has and a command does not — a port, a durable session store, a
- * seeded system prompt, a space database to read labels out of.
+ * seeded system prompt.
  */
 interface ConsoleConfig extends HarnessSessionConfig {
   port: number;
@@ -368,13 +368,6 @@ interface ConsoleConfig extends HarnessSessionConfig {
   cfcInvocationContextDir: string;
 
   sessionDbPath?: string;
-
-  /**
-   * The space database the per-cell label snapshot reads, for a host whose
-   * store is not where the discovery walk looks. Absent, the space the
-   * fabric session names is resolved against the caches on this host.
-   */
-  spaceDbPath?: string;
 
   /**
    * System prompt seeded into every console session, read from the file named

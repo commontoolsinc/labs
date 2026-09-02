@@ -64,6 +64,8 @@ const parityArguments = (
     "/console/.cf-harness-console/cfc/results",
     "--cfc-invocation-context-dir",
     "/console/.cf-harness-console/cfc/invocation-context",
+    "--space-db",
+    "/serving/cache/memory/space.sqlite",
     "--allow-subagent-profile",
     "default",
     "--allow-subagent-profile",
@@ -97,6 +99,8 @@ const parityArguments = (
     `name=reference,source=${hostMountSource},target=/reference`,
     "--session-db",
     "none",
+    "--space-db",
+    "/serving/cache/memory/space.sqlite",
   ],
 });
 
@@ -182,6 +186,27 @@ describe("session-assembly", () => {
         expect(allowedToolIds).toContain("search_patterns");
         expect(allowedToolIds).toContain("search_skills");
         expect(allowedToolIds).toContain("acquire_skill");
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it("read labels from the same space database", async () => {
+      const { workspace, hostMountSource, skillsRoot, cleanup } =
+        await parityDirectories();
+      try {
+        const args = parityArguments(workspace, hostMountSource, skillsRoot);
+        const cli = await cliSession(args.cli);
+        const server = await resolveConsoleConfig(args.console, {}, "/console");
+
+        // Named rather than left to the comparison above: a parity that held
+        // because neither surface carried the path would say nothing.
+        expect(harnessSessionEngineOptions(cli).spaceDbPath).toBe(
+          "/serving/cache/memory/space.sqlite",
+        );
+        expect(harnessSessionEngineOptions(server).spaceDbPath).toBe(
+          "/serving/cache/memory/space.sqlite",
+        );
       } finally {
         await cleanup();
       }
