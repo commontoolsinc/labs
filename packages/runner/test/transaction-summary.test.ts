@@ -421,7 +421,7 @@ describe("transaction-summary", () => {
     assertEquals(summary.writes[0].objectId, "a-very-long-object-i...");
     assertEquals(summary.writes[0].value, `${"x".repeat(100)}...`);
     assertEquals(summary.writes[1].value, "[Array: 3 items]");
-    assertEquals(summary.writes[2].value, '{"nested":{"count":1}}');
+    assertEquals(summary.writes[2].value, '{nested:{count:1}}');
     assertEquals(
       summarizeTransaction(
         createInspectableTransaction([{
