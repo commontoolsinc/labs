@@ -141,6 +141,12 @@ export class HeldConnection implements AsyncDisposable {
    * Closes the connection this instance opened, and refuses to serve one
    * afterwards. Closing again does nothing.
    *
+   * A construction still in flight is awaited and its connection closed, so
+   * that a disposal crossing a connect strands nothing; the ask that started
+   * it still resolves with that connection. `loadPieces` takes no signal to
+   * stop on, so what it opens exists whether or not anyone is still waiting
+   * for it, and closing it is the only thing that can be done about it.
+   *
    * A connection this instance was handed is left open: it is the caller's to
    * close, and closing it would take down a socket still in use. Where no ask
    * opened one there is nothing to close, and a construction that rejected

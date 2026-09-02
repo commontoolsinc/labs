@@ -102,6 +102,18 @@ describe("connection", () => {
           expect(calls).toBe(1);
         });
 
+        it("returns the connection it opened to an ask made after the construction settles", async () => {
+          const controller = stubController();
+          let calls = 0;
+          const connection = new HeldConnection(owning(() => {
+            calls += 1;
+            return Promise.resolve(controller.pieces);
+          }));
+          expect(await connection.pieces()).toBe(controller.pieces);
+          expect(await connection.pieces()).toBe(controller.pieces);
+          expect(calls).toBe(1);
+        });
+
         it("opens with the `SpaceConfig` the record denotes, carrying the record's three dimensions and nothing else", async () => {
           const controller = stubController();
           const configs: SpaceConfig[] = [];
@@ -213,6 +225,18 @@ describe("connection", () => {
           await connection.pieces();
           await connection.dispose();
           await connection.dispose();
+          expect(controller.closed()).toBe(1);
+        });
+
+        it("closes a construction that was still in flight when disposal began", async () => {
+          const controller = stubController();
+          const opening = Promise.withResolvers<PiecesController>();
+          const connection = new HeldConnection(owning(() => opening.promise));
+          const asked = connection.pieces();
+          const disposing = connection.dispose();
+          opening.resolve(controller.pieces);
+          expect(await asked).toBe(controller.pieces);
+          await disposing;
           expect(controller.closed()).toBe(1);
         });
 
