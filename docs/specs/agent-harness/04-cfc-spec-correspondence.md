@@ -53,7 +53,7 @@ was read against.
 | Clause     | CFC section | Relation | Notes                                                                                                                                                                                                                                                                                                                 |
 | ---------- | ----------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `AH-CFC-3` | §18.3.1     | `narrow` | **See "Where the derivation is narrow" below.** §18.3.1 requires a UI mint to replay the render reference and requires a non-UI mint to supply "an equivalent trusted input-capture record such as `UserSurfaceInput`" binding subject, surface, value digest, role, and kernel name. `AH-CFC-3` asks for "value or snapshot digest" and does not require the capture record or the subject. |
-| `AH-CFC-4` | §18.3.1     | `faithful` | §18.3.1: "Application code and model output may request that a value be displayed or submitted, but they cannot assign the load-bearing prompt role themselves", and "a README or webpage containing 'ignore previous instructions' remains `quote` or ordinary labeled content, even if it is imperatively phrased."     |
+| `AH-CFC-4` | §18.3.1     | `faithful` | §18.3.1: "Application code and model output may request that a value be displayed or submitted, but they cannot assign the load-bearing prompt role themselves", and "a README or webpage containing "ignore previous instructions" remains `quote` or ordinary labeled content, even if it is imperatively phrased."     |
 | `AH-CFC-5` | §18.3.1     | `faithful` | §18.3.1's fail-closed list covers a stale target path and a changed source value. `AH-CFC-5` states the same rule for the non-render cases — copying, summarizing, resuming — which §18.3.1 does not enumerate but whose principle it fixes.                                                                             |
 
 ### 3. Observation mediation and model context
@@ -76,8 +76,8 @@ was read against.
 
 | Clause      | CFC section          | Relation   | Notes                                                                                                                                                                                                          |
 | ----------- | -------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AH-CFC-12` | §18.2.4.3, §18.3.3   | `narrow`   | **See "Where the derivation is narrow" below.** §18.2.4.3 asks for a confidentiality ceiling that is "an upper bound on what the callee is allowed to *observe*", with reads above it denied. `AH-CFC-12` asks only that a child receive what is explicitly bound to its profile, which is capability attenuation and not observation attenuation. |
-| `AH-CFC-13` | §18.2.4, §18.2.4.2   | `faithful` | §18.2.4: schema-based `InjectionSafe` sanitization "is a trusted-runtime transition, not a sandbox claim", and the runtime may add it "only after it validates the candidate against that trusted schema". §18.2.4.2's sanitizer sub-agent flow is the same shape from the caller's side. |
+| `AH-CFC-12` | §18.2.4.3, §18.3.3   | `narrow`   | **See "Where the derivation is narrow" below.** §18.2.4.3 asks for a confidentiality ceiling that is "an **upper bound** on what the callee is allowed to *observe*", with reads above it denied. `AH-CFC-12` asks only that a child receive what is explicitly bound to its profile, which is capability attenuation and not observation attenuation. |
+| `AH-CFC-13` | §18.2.4, §18.2.4.2   | `faithful` | §18.2.4: schema-based `InjectionSafe` sanitization "is also a trusted-runtime transition, not a sandbox claim", and the runtime may add it "only after it validates the candidate against that trusted schema". §18.2.4.2's sanitizer sub-agent flow is the same shape from the caller's side. |
 
 ### 6. Enforcement modes
 
@@ -141,7 +141,7 @@ clause.
 §18.2.4.3 is explicit that a delegation's attenuation is about reads: the
 ceiling "is an **upper bound** on what the callee is allowed to *observe* from
 the filesystem, CLI args, inherited opaque handles, and any other labeled
-channels", and "if a read would require observing a value above this ceiling,
+channels", and "If a read would require observing a value above this ceiling,
 the runtime MUST deny the read (fail closed), even if the parent node could
 have observed it." The mechanism it offers is principal attenuation —
 `principal_callee.principals` a subset of `principal_caller.principals` — and

@@ -82,10 +82,12 @@ obligation:
    per-run tokens for positively identified cell addresses, swapped in both
    directions around policy evaluation, seeded into a child table only for the
    handles a delegation names, and inspectable for shape but never for value.
-   §18.2.4.2's opaque handle over _bytes_ is not built — the contract shape
-   exists and nothing stores a payload behind one, so the blocked-value recovery
-   flow through a sanitizer subagent cannot be run. **Partly met**; see
-   deviation 4.
+   §18.2.4.2's opaque handle over _bytes_ is half-built: six sites mint a handle
+   for a blocked observation — a withheld sandbox stream, exit code, error, or
+   output value — and no code anywhere reads a `handleId`. With no resolution
+   step the token identifies a denial rather than conferring a capability, so
+   the blocked-value recovery flow through a sanitizer subagent cannot be run
+   end to end. **Partly met**; see deviation 4.
 8. **How subagent ceilings and observation policies are applied before inherited
    handles are resolved.** A child profile binds tools, host tools, a model
    override, native model tools, skills, allowed scripts, a script target, a

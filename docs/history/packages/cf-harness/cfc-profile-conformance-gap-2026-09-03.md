@@ -7,6 +7,24 @@ reason: "Obligation-by-obligation gap analysis of cf-harness against the CFC spe
 
 # cf-harness against `CfcAgentHarnessProfile`: the gap, obligation by obligation
 
+**The position, stated first. `@commonfabric/cf-harness` does not satisfy
+`CfcAgentHarnessProfile` and does not claim it.** Of §18.3.3's nine
+obligations, three have no implementation behind them (H4 registry snapshots,
+H5 descriptor observation labels, H8 subagent confidentiality ceiling), four are
+partly met (H2, H6, H7, H9), one is satisfied as prose only (H1), and one is
+mechanized (H3). The widest gap is H9: every side-effecting tool except
+`run_pattern` is admitted by a check on a static effect class crossed with a
+run-level direct-command binding, which is a gate on who asked where the clause
+asks for a gate on what is flowing.
+
+**The other two profiles are mostly or entirely not this component's.** Of
+§18.2.7's nineteen obligations, fifteen belong to the `runsc-cfc` runtime, the
+Common Fabric FUSE daemon, and the runner's label store; cf-harness owns four
+and answers them below. All seven of §18.4.4's are the shell renderer's:
+**cf-harness has no user-visible render surface and is not a
+`CfcTrustedRenderProfile` candidate at all**, so its absence from that profile
+is a fact about what the component is rather than a gap in it.
+
 This is the snapshot. It states, for every documentation obligation the CFC
 specification's harness profile imposes, what `@commonfabric/cf-harness`
 actually does, grounded in code read at the pinned commit rather than in what
@@ -80,11 +98,6 @@ answer them:
 Seven obligations in §18.4.4, the trusted-render profile's checklist. All seven
 are the shell renderer's. cf-harness has no user-visible render surface at all,
 so it is not a candidate to claim `CfcTrustedRenderProfile`.
-
-**The bottom line: cf-harness does not today satisfy
-`CfcAgentHarnessProfile`.** Three of the nine harness obligations have no
-implementation behind them, and one of the four partial ones — H9 — is partial
-in the load-bearing direction.
 
 ## §18.3.3 — the harness conformance checklist
 
@@ -195,7 +208,7 @@ Four separate mechanisms, each of which breaks something if removed:
    through `read_skill_resource` cannot carry a `direct-command` role, and
    widening that would be a type change under review rather than a data change.
    This is exactly AH-CFC-4 and §18.3.1's "a README or webpage containing
-   'ignore previous instructions' remains `quote` or ordinary labeled content."
+   "ignore previous instructions" remains `quote` or ordinary labeled content."
 3. **What crosses into the sandbox is influence, not authority.** The harness
    converts its binding into a `PromptSlotInfluence` atom for the invocation
    context (`packages/cf-harness/src/contracts/cfc-invocation-context.ts:194`),
@@ -336,19 +349,55 @@ token names a referent without carrying it, and holding one discloses nothing.
 (`packages/cf-harness/src/tools/run-pattern.ts:570`), and a refusal withholds
 values while returning the reference.
 
-What does not exist is §18.2.4.2's opaque handle over **bytes**: a trusted
-store mapping `opaqueId -> (bytes, label)` for a value that was computed and
-blocked. The shape is declared — `OpaqueHandle` and `ObservationDenied` in
-`packages/cf-harness/src/contracts/observation.ts` carry `handleId`, `scope`,
-`expiresAt`, `passThrough`, and `metadataRef` — and nothing stores a payload
-behind one. `HarnessHandleCapability` is the single-member union
-`"skill-context"` (`packages/cf-harness/src/contracts/handle-table.ts:23`),
-which is the table saying in the type system that it holds addresses.
+What does not exist is §18.2.4.2's opaque handle over **bytes** as a *resolvable
+capability*. The distinction matters, because the mint half is built and the
+resolve half is not, and describing this as "no opaque handles" would be wrong
+in the direction that hides where the work is.
+
+A blocked observation does come back carrying a handle. `createOutputHandle`
+(`packages/cf-harness/src/prompt-loop.ts:1932`) mints one as
+`${resultRef.outputId}:${suffix}` at run scope, and six call sites use it —
+blocked sandbox streams (`:1954`), a withheld exit code (`:2084`, `:2090`),
+and withheld error and output values (`:3917`, `:3949`, `:4063`) — with
+`passThrough` distinguishing an opaque value that could be passed on from one
+that is denied outright. The shape is fully declared in
+`packages/cf-harness/src/contracts/observation.ts`.
+
+**Nothing reads a `handleId`.** A grep across `packages/cf-harness/src` returns
+the six mint sites and the contract that defines the field, and no consumer.
+There is no resolution step, so the token identifies a denial rather than
+conferring a capability: it cannot be handed to a tool or a subagent to recover
+the value, which is the whole of what §18.2.4.2 asks a handle to do
+("`resolved`: a trusted boundary substitutes the payload into a callee input
+and taints the callee `pc` by `payloadLabel`").
+
+`HarnessHandleCapability` is the single-member union `"skill-context"`
+(`packages/cf-harness/src/contracts/handle-table.ts:23`), which is the address
+table saying in the type system that it holds addresses and not payloads.
 
 So the recovery flow §18.2.4.2 describes — supervisor is denied, passes the
 `opaqueId` to a sanitizer sub-agent that may observe it, receives a
-schema-validated result — cannot be run. The harness's response to a blocked
-observation is a denial, not a denial plus a resolvable capability.
+schema-validated result — cannot be run end to end. The harness's response to a
+blocked observation is a denial that names itself, not a denial plus a
+resolvable capability.
+
+**Cheap as a mechanism, not as an obligation.** The trusted-side store this
+needs largely exists: `FileSystemHarnessArtifactStore.persistToolOutput`
+(`packages/cf-harness/src/artifacts.ts:258`) already writes every tool output
+host-side, outside the sandbox, keyed by the same `ToolOutputId` the handle ids
+are derived from — which is §18.2.4.4's "every tool output has an id" already
+in place. Three things are missing, all harness-local: a label stored beside
+the bytes, a resolution step that substitutes a payload into a callee input and
+taints that callee, and a ceiling check at resolution time.
+
+The third couples this obligation to H8. §18.2.4.3 requires that resolving a
+handle into a callee input be rejected when it exceeds the callee's ceiling,
+and cf-harness has no ceiling for that check to consult. **Building H7 alone
+buys the recovery flow without the attenuation** — a supervisor could route a
+blocked value to a sanitizer, and nothing would bound what that sanitizer may
+observe. That is still worth having, and it is why "cheapest" is a claim about
+the mechanism rather than about the obligation: H7's machinery is the smallest
+of the four to build, and H7 is not complete until H8 exists.
 
 **Evidence:** `AUD-5` (handle discipline) covers the address table against
 AH-CFC-18, AH-CFC-19, AH-CFC-12, and AH-CFC-13, and passed on all 180 corpus
@@ -636,9 +685,14 @@ Four obligations, in the order the work should be taken.
 2. **H8 — no subagent confidentiality ceiling.** Capability attenuation is
    built; observation attenuation is not. Closing it needs a representation the
    runner's access check can consume, so it is not harness-local.
-3. **H7 — no payload opaque handle.** The reference half is good. The byte half
-   is declared and unbuilt, so §18.2.4.2's whole recovery flow is unavailable.
-   Self-contained and the cheapest of the four.
+3. **H7 — an opaque handle nothing can resolve.** The reference half is good,
+   and the byte half is half-built: six sites mint a handle for a blocked
+   observation and no code reads a `handleId`, so §18.2.4.2's recovery flow
+   stops at the denial. The smallest mechanism of the four to build, because
+   the host-side store already exists — but not the smallest obligation, since
+   its resolution-time ceiling check needs H8's ceiling to mean anything.
+   Sequence it after H8, or build it before and accept recovery without
+   attenuation knowingly.
 4. **H2 — input-capture records bind neither a subject nor a value digest.**
    Both surfaces mint direct-command authority from a constant. The contract
    already types the missing fields; the work is at the two mint sites.
