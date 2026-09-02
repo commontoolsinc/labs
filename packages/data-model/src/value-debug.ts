@@ -21,12 +21,20 @@ import { codecOf } from "@/codec-common/codecOf.ts";
 import { isCodecTypeTag } from "@/codec-common/isCodecTypeTag.ts";
 import { REALM_CODEC } from "@/codec-interface/interface.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
+import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 
 /**
  * Nesting depth a debug string renders to. TODO(danfuzz): Make this
  * adjustable by the caller, once there is a caller that wants to.
  */
 const DEBUG_STRING_MAX_DEPTH = 10;
+
+/**
+ * What a `FabricPrimitive`'s codec hands back to be rendered: the
+ * realm-crossing encoding of a terminal codec, or the expansion of a
+ * nonterminal one into other `FabricValue`s.
+ */
+type PrimitiveState = RealmCodecValue | FabricValue;
 
 /**
  * Returns the class name of the given object, or `<anonymous>` when it has
@@ -378,7 +386,7 @@ class DebugStringifier {
    */
   #renderFabricPrimitive(value: FabricPrimitive, indent: string): string {
     let tag: string;
-    let state: unknown;
+    let state: PrimitiveState;
 
     try {
       // A `FabricPrimitive` binds no `[CODEC]`, so its realm codec supplies
@@ -386,7 +394,7 @@ class DebugStringifier {
       // richest -- a `bigint` stays a `bigint`, bytes stay bytes -- which is
       // what makes it the one to render. TODO(danfuzz): Replace `REALM_CODEC`
       // with `DEBUG_CODEC` once the latter exists.
-      const codec = codecOf(value, REALM_CODEC);
+      const codec = codecOf<RealmCodecValue>(value, REALM_CODEC);
       tag = codec.tagForValue(value);
       state = codec.encode(value, NULL_LIVE_ENVIRONMENT);
     } catch {
@@ -397,11 +405,12 @@ class DebugStringifier {
 
     // Trim off the encoding version number.
     const open = `/${tag.replace(/@.*$/, "")}(`;
-    const realm = (v: unknown, i: string) => this.#renderRealmState(v, i);
+    const realm = (v: PrimitiveState, i: string) =>
+      this.#renderRealmState(v, i);
 
     if (isPlainObject(state)) {
       const parts = this.#renderProperties(
-        state as Record<string, unknown>,
+        state as { readonly [key: string]: PrimitiveState },
         indent,
         realm,
         false,
@@ -418,8 +427,9 @@ class DebugStringifier {
    * walked as they stand; and anything else takes the ordinary path through
    * the conversion.
    */
-  #renderRealmState(value: unknown, indent: string): string {
-    const realm = (v: unknown, i: string) => this.#renderRealmState(v, i);
+  #renderRealmState(value: PrimitiveState, indent: string): string {
+    const realm = (v: PrimitiveState, i: string) =>
+      this.#renderRealmState(v, i);
 
     if (value instanceof ArrayBuffer) {
       return DebugStringifier.#renderBuffer(value);
@@ -429,18 +439,18 @@ class DebugStringifier {
       return this.#renderContainer("[", "]", parts, indent);
     } else if (isPlainObject(value)) {
       const parts = this.#renderProperties(
-        value as Record<string, unknown>,
+        value as { readonly [key: string]: PrimitiveState },
         indent,
         realm,
         false,
       );
       return this.#renderContainer("{", "}", parts, indent);
+    } else {
+      return this.#renderSubvalue(
+        toStructuredDebugValue(value, DEBUG_STRING_MAX_DEPTH),
+        indent,
+      );
     }
-
-    return this.#renderSubvalue(
-      toStructuredDebugValue(value, DEBUG_STRING_MAX_DEPTH),
-      indent,
-    );
   }
 
   /**
@@ -549,19 +559,19 @@ class DebugStringifier {
    * the conversion prefixes a slash to a key that starts with one and to an
    * unsafe key, and that slash comes back off here.
    */
-  #renderProperties(
-    value: Readonly<Record<string, unknown>>,
+  #renderProperties<T>(
+    value: { readonly [key: string]: T },
     indent: string,
-    render: (value: unknown, indent: string) => string = (v, i) =>
-      this.#renderSubvalue(v as FabricValue, i),
+    render: (value: T, indent: string) => string = (v, i) =>
+      this.#renderSubvalue(v as unknown as FabricValue, i),
     unescape = true,
   ): string[] {
     const inner = this.#innerIndent(indent);
     const separator = (this.#indent === undefined) ? ":" : ": ";
 
-    return Object.keys(value).map((key) => {
+    return Object.entries(value).map(([key, subvalue]) => {
       const original = (unescape && (key[0] === "/")) ? key.slice(1) : key;
-      const rendered = render(value[key], inner);
+      const rendered = render(subvalue, inner);
       return `${DebugStringifier.#renderKey(original)}${separator}${rendered}`;
     });
   }
