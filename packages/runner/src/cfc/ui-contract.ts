@@ -1,7 +1,7 @@
 import {
   isFabricDataUri,
   valueFromDataUri,
-} from "@commonfabric/data-model/data-uri-codec";
+} from "@commonfabric/data-model/codec-data-uri";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { CellScope, FabricValue, JSONSchema } from "../builder/types.ts";

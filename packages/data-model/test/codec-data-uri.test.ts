@@ -32,9 +32,9 @@ import {
   isFabricDataUri,
   valueFromDataUri,
   valueFromDataUriPayloadText,
-} from "@/data-uri-codec.ts";
+} from "@/codec-data-uri.ts";
 
-describe("data-uri-codec", () => {
+describe("codec-data-uri", () => {
   describe("media-type predicates", () => {
     it("returns `true` only for the data-cell media type", () => {
       expect(isDataUriMediaType(DATA_URI_MEDIA_TYPE)).toBe(true);

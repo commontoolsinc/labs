@@ -8,9 +8,9 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/codec-data-uri";
 import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
-import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 
 import type { URI } from "../src/sigil-types.ts";

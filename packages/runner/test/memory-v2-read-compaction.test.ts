@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
+import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";

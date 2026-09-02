@@ -5,7 +5,7 @@ import {
   isDeepFrozen,
   valueEqual,
 } from "@commonfabric/data-model";
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
+import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
 import {
   canResolveScopeKey,
   type CommitPrecondition,

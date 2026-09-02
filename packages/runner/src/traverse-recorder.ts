@@ -4,7 +4,7 @@ import {
   type FabricValue,
   hashStringOf,
 } from "@commonfabric/data-model";
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
+import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
 
 import { getLogger } from "../../utils/src/logger.ts";
 import type { NormalizedFullLink } from "./link-utils.ts";

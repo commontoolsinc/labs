@@ -4,7 +4,7 @@ import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
+import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
 import {

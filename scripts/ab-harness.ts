@@ -69,7 +69,7 @@ const { fabricFromNativeValue } = await import(
   "@commonfabric/data-model"
 );
 const { dataUriFromValue } = await import(
-  "@commonfabric/data-model/data-uri-codec"
+  "@commonfabric/data-model/codec-data-uri"
 );
 
 /** Identity on a tree with no preflight, so the same probe runs on both. */

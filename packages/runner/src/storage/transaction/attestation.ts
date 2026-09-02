@@ -9,7 +9,7 @@ import {
   isDataUriMediaType,
   isFabricDataUri,
   valueFromDataUriPayloadText,
-} from "@commonfabric/data-model/data-uri-codec";
+} from "@commonfabric/data-model/codec-data-uri";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
