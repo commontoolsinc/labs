@@ -280,9 +280,9 @@ class DebugConverter {
  * Helper class for rendering the result of `toStructuredDebugValue()` as a
  * debug string. The rendering is JSON syntax wherever JSON can express the
  * value, and a bare token -- `42n`, `undefined`, `NaN`, `-0`, `Infinity`,
- * `Symbol.for("name")` -- wherever it cannot. A `FabricPrimitive`, which the
- * conversion passes through as itself, is rendered under its codec tag with
- * its JSON encoding, in the same shape the conversion gives a
+ * `Symbol.for("name")`, `<circle>` -- wherever it cannot. A `FabricPrimitive`,
+ * which the conversion passes through as itself, is rendered under its codec
+ * tag with its JSON encoding, in the same shape the conversion gives a
  * `FabricInstance`.
  */
 class DebugStringifier {
@@ -370,9 +370,18 @@ class DebugStringifier {
    * multi-line) is indented by `indent`.
    */
   #renderPlainObject(value: FabricPlainObject, indent: string): string {
+    const keys = Object.keys(value);
+
+    if ((keys.length === 1) && (keys[0] === "/circle")) {
+      // The conversion's marker for a reference back to an enclosing object.
+      // No key of the original value can arrive here in this form, because the
+      // conversion escapes every key with a leading slash.
+      return "<circle>";
+    }
+
     const inner = this.#innerIndent(indent);
     const separator = (this.#indent === undefined) ? ":" : ": ";
-    const parts = Object.keys(value).map((key) => {
+    const parts = keys.map((key) => {
       const rendered = this.#renderSubvalue(value[key], inner);
       return `${JSON.stringify(key)}${separator}${rendered}`;
     });
@@ -470,6 +479,7 @@ function renderDebugString(value: unknown, indent?: number): string {
  * * `undefined`, as such.
  * * non-finite numbers and `-0`, as such.
  * * interned symbols, as `Symbol.for("name")`.
+ * * a reference back to an enclosing object, as `<circle>`.
  * * `FabricPrimitive`s, under their codec tag with their JSON encoding, e.g.
  *   `{"/Bytes@1":"AQID"}`.
  *

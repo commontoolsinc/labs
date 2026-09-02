@@ -63,12 +63,12 @@ describe("toIndentedDebugString()", () => {
       .toBe('{\n  "/EpochNsec@1": "B1vNFQ"\n}');
   });
 
-  it("renders a circular reference as `/circle` rather than throwing", () => {
+  it("renders a circular reference as `<circle>` rather than throwing", () => {
     const a: Record<string, unknown> = { x: 1 };
     a.self = a;
     expect(() => toIndentedDebugString(a)).not.toThrow();
     expect(toIndentedDebugString(a)).toBe(
-      '{\n  "x": 1,\n  "self": {\n    "/circle": 0\n  }\n}',
+      '{\n  "x": 1,\n  "self": <circle>\n}',
     );
   });
 

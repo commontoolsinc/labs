@@ -227,17 +227,17 @@ describe("value-debug", () => {
         expect(() => toCompactDebugString(a)).not.toThrow();
       });
 
-      it("renders a self-referential object with `/circle` for the back-ref", () => {
+      it("renders a self-referential object with `<circle>` for the back-ref", () => {
         const a: Record<string, unknown> = { x: 1 };
         a.self = a;
         expect(toCompactDebugString(a))
-          .toBe('{"x":1,"self":{"/circle":0}}');
+          .toBe('{"x":1,"self":<circle>}');
       });
 
-      it("renders a self-referential array with `/circle` for the back-ref", () => {
+      it("renders a self-referential array with `<circle>` for the back-ref", () => {
         const arr: unknown[] = [1, 2];
         arr.push(arr);
-        expect(toCompactDebugString(arr)).toBe('[1,2,{"/circle":0}]');
+        expect(toCompactDebugString(arr)).toBe("[1,2,<circle>]");
       });
 
       it("renders a two-object mutual reference cycle", () => {
@@ -245,7 +245,7 @@ describe("value-debug", () => {
         const b: Record<string, unknown> = { a };
         a.b = b;
         expect(toCompactDebugString(a))
-          .toBe('{"b":{"a":{"/circle":0}}}');
+          .toBe('{"b":{"a":<circle>}}');
       });
 
       it("renders a cycle that closes through several intermediate objects", () => {
@@ -253,14 +253,14 @@ describe("value-debug", () => {
         const a: Record<string, unknown> = { b: { c } };
         c.back = a;
         expect(toCompactDebugString(a))
-          .toBe('{"b":{"c":{"back":{"/circle":0}}}}');
+          .toBe('{"b":{"c":{"back":<circle>}}}');
       });
 
-      it("renders a cycle nested under a non-circular root, naming the depth it closes at", () => {
+      it("renders a cycle nested under a non-circular root", () => {
         const cyc: Record<string, unknown> = {};
         cyc.self = cyc;
         expect(toCompactDebugString({ x: 1, y: cyc }))
-          .toBe('{"x":1,"y":{"self":{"/circle":1}}}');
+          .toBe('{"x":1,"y":{"self":<circle>}}');
       });
 
       it("renders multiple independent cycles in the same value", () => {
@@ -270,8 +270,13 @@ describe("value-debug", () => {
         c2.self = c2;
         expect(toCompactDebugString({ a: c1, b: c2 }))
           .toBe(
-            '{"a":{"v":1,"self":{"/circle":1}},"b":{"v":2,"self":{"/circle":1}}}',
+            '{"a":{"v":1,"self":<circle>},"b":{"v":2,"self":<circle>}}',
           );
+      });
+
+      it("renders a key of the value that reads `/circle` as itself, escaped", () => {
+        expect(toCompactDebugString({ "/circle": 0 }))
+          .toBe('{"//circle":0}');
       });
 
       it("renders shared non-cyclic refs in full at each occurrence", () => {
@@ -444,11 +449,11 @@ describe("value-debug", () => {
         );
     });
 
-    it("renders a self-referential object with `/circle` for the back-ref", () => {
+    it("renders a self-referential object with `<circle>` for the back-ref", () => {
       const a: Record<string, unknown> = { x: 1 };
       a.self = a;
       expect(toIndentedDebugString(a))
-        .toBe('{\n  "x": 1,\n  "self": {\n    "/circle": 0\n  }\n}');
+        .toBe('{\n  "x": 1,\n  "self": <circle>\n}');
     });
   });
 

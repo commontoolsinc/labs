@@ -10,16 +10,10 @@
   "x": 1,
   "inner": {
     "y": 2,
-    "root": {
-      "/circle": 0
-    },
-    "self": {
-      "/circle": 1
-    }
+    "root": <circle>,
+    "self": <circle>
   },
-  "self": {
-    "/circle": 0
-  }
+  "self": <circle>
 }
 
-{"x":1,"inner":{"y":2,"root":{"/circle":0},"self":{"/circle":1}},"self":{"/circle":0}}
+{"x":1,"inner":{"y":2,"root":<circle>,"self":<circle>},"self":<circle>}
