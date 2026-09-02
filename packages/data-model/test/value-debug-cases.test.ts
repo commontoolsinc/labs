@@ -63,15 +63,26 @@ function evaluateExpression(expression: string): unknown {
   return fn(...values);
 }
 
-/** Splits a case file into its expression and its two recorded renderings. */
+/**
+ * Splits a case file into its expression and its two recorded renderings. A
+ * file with other than three blank-line-separated parts is malformed, except
+ * that a file with nothing but an expression is accepted when the recordings
+ * are about to be rewritten.
+ */
 function parseCaseFile(text: string): {
   expression: string;
   indented: string;
   compact: string;
 } {
-  const [expression = "", indented = "", compact = ""] = text.trimEnd().split(
-    "\n\n",
-  );
+  const parts = text.trimEnd().split("\n\n");
+
+  if (!((parts.length === 3) || (UPDATE_GOLDENS && (parts.length === 1)))) {
+    throw new Error(
+      `Case file has ${parts.length} part(s) rather than three.`,
+    );
+  }
+
+  const [expression = "", indented = "", compact = ""] = parts;
   return { expression, indented, compact };
 }
 

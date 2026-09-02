@@ -1,0 +1,32 @@
+(() => {
+  // A class instance whose properties lie past the depth limit renders with
+  // them elided, the same as any other value there.
+  class Data {
+    x = 1;
+  }
+  let value = new Data();
+  for (let i = 0; i < 8; i++) {
+    value = { d: value };
+  }
+  return value;
+})()
+
+{
+  d: {
+    d: {
+      d: {
+        d: {
+          d: {
+            d: {
+              d: {
+                d: /Data(...)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+{d:{d:{d:{d:{d:{d:{d:{d:/Data(...)}}}}}}}}

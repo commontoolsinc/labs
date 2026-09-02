@@ -192,9 +192,9 @@ differ in what they already know about the value in hand:
   the runtime's own, shared with the builder artifacts the same walk serializes.
 
 `toJSON()` returns the same link under the JSON protocol's name, so a cell reads
-as what it names in any renderer that honors the protocol — `toCompactDebugString()`
-among them. The data model gives that name no standing of its own, and neither
-mechanism above consults it.
+as the link it names, framed by its class name, in any renderer that honors the
+protocol — `toCompactDebugString()` among them. The data model gives that name
+no standing of its own, and neither mechanism above consults it.
 
 `toSigilLinkOrNull()`, `toEncodableForm()` and `toJSON()` return one link under
 three names: the latter two delegate, so they cannot disagree. `getAsLink()` is

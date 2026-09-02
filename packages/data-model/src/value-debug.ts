@@ -39,6 +39,30 @@ function classNameOf(value: object): string {
 }
 
 /**
+ * Returns the tag and payload of the given plain object when it is one of the
+ * conversion's single-key tagged forms, and `undefined` when it is not. No key
+ * of an original value can arrive in such a form, because the conversion
+ * escapes a key with a leading slash and an unsafe key alike, by prefixing a
+ * slash; the second-character check rules out the one and the unsafe-key
+ * check the other.
+ */
+function taggedFormOf(
+  value: FabricPlainObject,
+): { tag: string; payload: FabricValue } | undefined {
+  const keys = Object.keys(value);
+  const onlyKey = (keys.length === 1) ? keys[0] : undefined;
+
+  if (
+    (onlyKey === undefined) || (onlyKey[0] !== "/") || (onlyKey[1] === "/") ||
+    isUnsafeObjectKey(onlyKey.slice(1))
+  ) {
+    return undefined;
+  }
+
+  return { tag: onlyKey.slice(1), payload: value[onlyKey] };
+}
+
+/**
  * Renders a key -- an object property name or a symbol's key -- bare when it
  * is a valid identifier, and as a quoted string otherwise. The identifier
  * check is the ASCII one.
@@ -411,7 +435,10 @@ class DebugStringifier {
 
     if (payload === "/...") {
       return `${open}...)`;
-    } else if (isPlainObject(payload)) {
+    } else if (
+      isPlainObject(payload) &&
+      (taggedFormOf(payload as FabricPlainObject) === undefined)
+    ) {
       const parts = this.#renderProperties(
         payload as FabricPlainObject,
         indent,
@@ -429,20 +456,10 @@ class DebugStringifier {
    * multi-line) is indented by `indent`.
    */
   #renderPlainObject(value: FabricPlainObject, indent: string): string {
-    const keys = Object.keys(value);
-    const onlyKey = (keys.length === 1) ? keys[0] : undefined;
+    const tagged = taggedFormOf(value);
 
-    if (
-      (onlyKey !== undefined) && (onlyKey[0] === "/") && (onlyKey[1] !== "/") &&
-      !isUnsafeObjectKey(onlyKey.slice(1))
-    ) {
-      // The conversion's single-key tagged forms. No key of the original value
-      // can arrive here in one of these forms, because the conversion escapes
-      // a key with a leading slash and an unsafe key alike, by prefixing a
-      // slash; the second-character check rules out the one and the
-      // unsafe-key check the other.
-      const tag = onlyKey.slice(1);
-      const payload = value[onlyKey];
+    if (tagged !== undefined) {
+      const { tag, payload } = tagged;
 
       if (isCodecTypeTag(tag)) {
         // A `FabricInstance`, carried as its encoding under its codec type tag.
@@ -629,6 +646,9 @@ function renderDebugString(value: unknown, indent?: number): string {
  * * objects and arrays with circular references.
  * * arrays with holes.
  *
+ * The rendering stops at a fixed nesting depth, below which a value is
+ * elided.
+ *
  * How any of these renders is _not_ a contract. The rendering is meant for a
  * human reading a diagnostic, and it changes as that reading is improved;
  * nothing but a test should depend on its details.
@@ -658,7 +678,8 @@ export function toCompactDebugString(
 
 /**
  * Like `toCompactDebugString()`, except that the result is indented by two
- * spaces per nesting level, and is never truncated.
+ * spaces per nesting level, and is never truncated for length. The depth
+ * limit applies to both.
  */
 export function toIndentedDebugString(value: unknown): string {
   return renderDebugString(value, 2);
