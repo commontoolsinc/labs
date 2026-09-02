@@ -2,6 +2,7 @@ import { css, html, LitElement, type PropertyValues } from "lit";
 import { property } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
 import { type FabricBridge, FabricBridgeHost } from "./bridge.ts";
+import { GuestSessions } from "./guest-sessions.ts";
 import * as IPC from "./ipc.ts";
 import OuterFrame from "./outer-frame.ts";
 
@@ -52,20 +53,8 @@ export class CommonIframeSandboxElement extends LitElement {
   #src = "";
   #bridge: FabricBridge | undefined;
 
-  /**
-   * The capability sessions on offer to the loaded guest, in offer order. One
-   * is offered per load report, and a load report cannot be matched to a
-   * document -- the inner frame's initial `about:blank` navigation can
-   * complete after a document was asked for, so one asked-for document can
-   * yield two reports. Which offer the guest holds is settled by use: a
-   * session's first request retires every session offered before it.
-   *
-   * Two entries is the most this holds. The guest takes the first port to
-   * reach a document of its that has none, so the session it holds is the
-   * earliest one still here, and everything offered after that one was
-   * refused.
-   */
-  #guestSessions: FabricBridgeHost[] = [];
+  /** The capability sessions on offer to the loaded guest. */
+  #guestSessions = new GuestSessions<FabricBridgeHost>();
 
   /**
    * The frame this element renders, held so the guest can be reached through
@@ -118,10 +107,10 @@ export class CommonIframeSandboxElement extends LitElement {
 
   /**
    * Offers the loaded guest one end of a fresh channel and takes the other.
-   * Each document is its own realm, so each gets a port of its own. A session
-   * already on offer stays as it is: whether this offer reaches a new document
-   * or one already holding a port -- which refuses it -- is settled by which
-   * session the guest's requests arrive on, not here.
+   * Each document is its own realm, so each gets a port of its own. Whether
+   * this offer reaches a new document or one already holding a port -- which
+   * refuses it -- is settled by which session the guest's requests arrive on;
+   * `GuestSessions` holds what that leaves undecided.
    */
   #openGuestPort() {
     // The guest is the inner frame, which is a frame of the outer one. A
@@ -133,56 +122,16 @@ export class CommonIframeSandboxElement extends LitElement {
       return;
     }
 
-    // A guest can renavigate its own frame, and each navigation reports a
-    // load, so what is kept here has to be bounded by something other than
-    // the guest's restraint. Two are kept: the first, which is the one a guest
-    // that has held a port since before any of this took, and the newest,
-    // which is the only other one still reachable. Dropping what was newest
-    // costs a guest that took that offer, has never spoken on it, and is still
-    // there after a further load report -- which is a document driving
-    // navigations while staying silent about the port it holds.
-    for (const superseded of this.#guestSessions.splice(1)) {
-      superseded.disconnect();
-    }
-
     const channel = new MessageChannel();
-    this.#guestSessions.push(
+    this.#guestSessions.offer(
       new FabricBridgeHost(
         this.bridge ?? { resources: {} },
         channel.port1,
-        (session) => this.#retireSessionsBefore(session),
+        (session) => this.#guestSessions.retireBefore(session),
       ),
     );
     guestWindow.postMessage(IPC.GUEST_PORT_ORDERED, "*");
     guestWindow.postMessage(IPC.GUEST_PORT_HANDOFF, "*", [channel.port2]);
-  }
-
-  /**
-   * Retires every session offered before `session`, which has shown the first
-   * request of its port. The guest holds one port, so a request on this
-   * session says every earlier offer went to a document that is gone or was
-   * refused; either way those sessions serve nobody, and closing them is what
-   * cancels a gone document's subscriptions. Later offers are left alone: a
-   * session is never unseated by an earlier one.
-   */
-  #retireSessionsBefore(session: FabricBridgeHost) {
-    const index = this.#guestSessions.indexOf(session);
-    if (index <= 0) return;
-    for (const retired of this.#guestSessions.splice(0, index)) {
-      retired.disconnect();
-    }
-  }
-
-  /**
-   * Closes every session on offer. What the guest sends afterwards reaches
-   * nothing, which is the point: the guest on the other end of a closed port
-   * is one this element is done with.
-   */
-  #closeGuestPort() {
-    for (const session of this.#guestSessions) {
-      session.disconnect();
-    }
-    this.#guestSessions = [];
   }
 
   /** Handles a message from the outer frame. */
@@ -226,7 +175,7 @@ export class CommonIframeSandboxElement extends LitElement {
           // cannot say which session its guest holds, so every session on
           // offer carries the answer; the nonce sees to it that only the
           // guest that posted this marker acts on one.
-          for (const session of this.#guestSessions) {
+          for (const session of this.#guestSessions.offered) {
             session.acknowledgeFlush(raised.nonce);
           }
         } else if (IPC.isGuestAlarm(raised)) {
@@ -278,7 +227,7 @@ export class CommonIframeSandboxElement extends LitElement {
    * holding it has gone.
    */
   #releaseGuest() {
-    this.#closeGuestPort();
+    this.#guestSessions.closeAll();
   }
 
   /**

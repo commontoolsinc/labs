@@ -35,6 +35,29 @@ function handOffPort(): MessagePort {
   return channel.port1;
 }
 
+function event(subscription: string, value?: FabricValue): BridgeHostMessage {
+  return {
+    protocol: BRIDGE_PROTOCOL,
+    version: BRIDGE_VERSION,
+    type: "event",
+    subscription,
+    ...(value !== undefined && { value }),
+  };
+}
+
+// Resolves once the guest has handled everything already sent to it. One port
+// delivers in the order things were posted, so a round trip whose request the
+// guest sends after those messages is only answered once they are handled.
+async function settleAfterEvent(
+  fabric: FabricClient,
+  port: MessagePort,
+): Promise<void> {
+  const fence = fabric.request("pull", { resource: "fence", path: [] });
+  const request = await receive(port);
+  send(port, response(request.id));
+  await fence;
+}
+
 function receive(port: MessagePort): Promise<BridgeRequest> {
   return new Promise((resolve) => {
     port.addEventListener("message", (event) => {
@@ -198,6 +221,56 @@ describe("guest", () => {
         fabric.disconnect();
         await pulling?.catch(() => {});
         Reflect.set(globalThis, "parent", originalParent);
+      }
+    });
+
+    it("keeps the port it has when a second one is offered", async () => {
+      // The host offers a port per load report and cannot tell which document
+      // a report belongs to, so a guest that already has one is offered
+      // another. Keeping the first is what makes the extra offer harmless.
+      const fabric = connectFabric();
+      const held = handOffPort();
+      const replacement = new MessageChannel();
+      const toReplacement: unknown[] = [];
+      replacement.port1.addEventListener(
+        "message",
+        (event) => toReplacement.push((event as MessageEvent).data),
+      );
+      replacement.port1.start();
+      try {
+        globalThis.dispatchEvent(
+          new MessageEvent("message", {
+            data: GUEST_PORT_HANDOFF,
+            ports: [replacement.port2],
+          }),
+        );
+
+        const pulling = fabric.cell<number>("count").pull();
+        const request = await receive(held);
+        expect(request.operation).toBe("pull");
+        send(held, response(request.id, 5));
+        expect(await pulling).toBe(5);
+        expect(toReplacement).toEqual([]);
+      } finally {
+        fabric.disconnect();
+        replacement.port1.close();
+      }
+    });
+
+    it("ignores a message from the host that offers no port", async () => {
+      const fabric = connectFabric();
+      try {
+        globalThis.dispatchEvent(
+          new MessageEvent("message", { data: "something else" }),
+        );
+        const pulling = fabric.cell<number>("count").pull();
+        const host = handOffPort();
+        const request = await receive(host);
+        expect(request.operation).toBe("pull");
+        send(host, response(request.id, 5));
+        expect(await pulling).toBe(5);
+      } finally {
+        fabric.disconnect();
       }
     });
 
@@ -980,6 +1053,130 @@ describe("guest", () => {
         name: "FabricBridgeError",
         code: "disconnected",
       });
+    });
+
+    it("cancels a resource subscription with an `unsink` naming it", async () => {
+      const fabric = connectFabric();
+      try {
+        const host = handOffPort();
+        const seen: unknown[] = [];
+        const delivered = defer();
+        const stop = fabric.sqlite("appDatabase").sink(() => {
+          seen.push(null);
+          delivered.resolve();
+        });
+
+        const sink = await receive(host);
+        expect(sink).toMatchObject({
+          operation: "sink",
+          resource: "appDatabase",
+        });
+        send(host, response(sink.id));
+        send(host, event(sink.subscription as string));
+        await delivered.promise;
+        expect(seen.length).toBe(1);
+
+        // Cancelling names the same subscription, and an event that arrives
+        // afterwards reaches a listener nobody holds.
+        stop();
+        const unsink = await receive(host);
+        expect(unsink).toMatchObject({
+          operation: "unsink",
+          resource: "appDatabase",
+          subscription: sink.subscription,
+        });
+        send(host, event(sink.subscription as string));
+        await settleAfterEvent(fabric, host);
+        expect(seen.length).toBe(1);
+      } finally {
+        fabric.disconnect();
+      }
+    });
+
+    it("reports a sink the host refuses through the error callback", async () => {
+      const fabric = connectFabric();
+      try {
+        const host = handOffPort();
+        const failures: unknown[] = [];
+        const refused = defer();
+        fabric.sinkCell(
+          { resource: "count", path: [] },
+          () => {},
+          (error) => {
+            failures.push(error);
+            refused.resolve();
+          },
+        );
+
+        const sink = await receive(host);
+        send(host, {
+          protocol: BRIDGE_PROTOCOL,
+          version: BRIDGE_VERSION,
+          type: "response",
+          id: sink.id,
+          ok: false,
+          error: { code: "resource-not-found", message: "No such cell." },
+        });
+        await refused.promise;
+        expect(failures).toMatchObject([{ code: "resource-not-found" }]);
+
+        // The subscription is dropped with the failure, so a later event for
+        // it reaches nothing rather than a listener that never became live.
+        send(host, event(sink.subscription as string));
+        await settleAfterEvent(fabric, host);
+        expect(failures.length).toBe(1);
+      } finally {
+        fabric.disconnect();
+      }
+    });
+
+    it("keeps the other sinks when one listener's cleanup throws", async () => {
+      const fabric = connectFabric();
+      try {
+        const host = handOffPort();
+        const cell = fabric.cell<number>("count");
+        const quiet: Array<number | undefined> = [];
+        const updated = defer();
+        cell.sink(() => {
+          return () => {
+            throw new Error("cleanup failed");
+          };
+        });
+        cell.sink((value) => {
+          quiet.push(value);
+          if (value === 3) updated.resolve();
+        });
+
+        const sink = await receive(host);
+        send(host, response(sink.id));
+        send(host, event(sink.subscription as string, 3));
+        await updated.promise;
+
+        expect(quiet).toEqual([undefined, 3]);
+      } finally {
+        fabric.disconnect();
+      }
+    });
+
+    it("ignores a response whose request is not outstanding", async () => {
+      const fabric = connectFabric();
+      try {
+        const host = handOffPort();
+        const cell = fabric.cell<number>("count");
+        const pulling = cell.pull();
+        const request = await receive(host);
+        send(host, response(request.id, 1));
+        expect(await pulling).toBe(1);
+
+        // Answering the same request again reaches no pending caller. The
+        // value staying put is what says the second answer was dropped rather
+        // than applied to something else.
+        send(host, response(request.id, 2));
+        await settleAfterEvent(fabric, host);
+        expect(cell.get()).toBe(1);
+      } finally {
+        fabric.disconnect();
+      }
     });
   });
 
