@@ -154,13 +154,16 @@ Still to come:
   by case in `packages/shuttle/test/place.test.ts`, each case under a
   mutation, so the record moves when the behavior does and not otherwise.
   `ls` settles it: how such a key prints and how it is typed back want
-  deciding together. Segment validation is the same question — a slug's
-  vocabulary holds a reference and not a relative segment — and an empty
-  segment is refused at every door, which leaves the empty key with no
-  spelling rather than one that prints as its parent.
+  deciding together. Segment validation is the same question, across three
+  doors rather than two — a slug's vocabulary holds a reference, and
+  neither a relative segment nor a resolved target is held to it — and an
+  empty segment is refused at every door, which leaves the empty key with
+  no spelling rather than one that prints as its parent.
 - **`where`**, the printing surface for the ambient record; later
   milestones add their dimensions to it as they add the dimensions
-  themselves.
+  themselves. It prints the record `pwd` prints, so it chooses the format
+  for both — a test helper reads that format back by slicing a label
+  width, which is what a change to it has to move with.
 - **Liveness, in two halves.** The held controller is memoized
   cf-harness-style, which covers the construction that never succeeds —
   the case that cache actually addresses. Recovery of an *established*

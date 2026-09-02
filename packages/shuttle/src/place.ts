@@ -101,11 +101,15 @@ export interface Place {
 }
 
 /**
- * A move that worked out a place but not whether the space its reference named
- * by name is the connected one, which needs a session to derive a DID from a
- * name. Resolving that name — `validateEmbeddedSpaces` does it — and handing
- * this back to {@link CurrentPlace.settle} with the space it resolved to is
- * what lands it.
+ * A move whose reference named its space by name rather than by DID, which
+ * needs a session to derive the one from the other. Resolving that name —
+ * `validateEmbeddedSpaces` does it — and handing this back to
+ * {@link CurrentPlace.settle} with the space it resolved to is what lands it.
+ *
+ * It carries what the reference determined and no space, because whether the
+ * name denotes the connected space is the one thing not yet known: an arm
+ * with no space in it has none to be wrong about, and `settle` builds the
+ * place from the space it already holds.
  */
 export interface SpaceNamedMove {
   /** Names this arm of {@link Move}. */
@@ -114,8 +118,14 @@ export interface SpaceNamedMove {
   /** The space name the reference carried. */
   readonly name: string;
 
-  /** Where the reference lands, in the scope the reference asked for. */
-  readonly place: Place;
+  /** The piece as the reference spelled it: a handle or a slug. */
+  readonly piece: string;
+
+  /** Path inside the piece's result; empty for the piece itself. */
+  readonly path: readonly PathSegment[];
+
+  /** The scope the reference asked for, or the place's where it asked none. */
+  readonly scope: CellScope;
 }
 
 /** The arms of a {@link Move} that leave shuttle where it stood. */
@@ -227,10 +237,10 @@ export class CurrentPlace {
    * Lands a {@link SpaceNamedMove}, `confirmed` being the space its name
    * resolved to. A name that resolved to any space but the connected one is
    * refused here, so the comparison the reference deferred is made where the
-   * place would be adopted rather than left to the caller. The place is
-   * otherwise adopted as the move worked it out, scope included, which is
-   * what carries an `@scope` suffix through a reference that named its space
-   * by name.
+   * place would be adopted rather than left to the caller. The place is built
+   * from the connected space and the move's own piece, path and scope, which
+   * is what carries an `@scope` suffix through a reference that named its
+   * space by name.
    */
   settle(move: SpaceNamedMove, confirmed: MemorySpace): Move {
     const connected = this.#here.place.position.space;
@@ -240,7 +250,15 @@ export class CurrentPlace {
         connected,
       ));
     }
-    return this.#commit(land(move.place, []));
+    return this.#commit(land({
+      position: {
+        kind: "piece",
+        space: connected,
+        piece: move.piece,
+        path: move.path,
+      },
+      scope: move.scope,
+    }, []));
   }
 
   /** What `pwd` prints for this place. */
@@ -370,18 +388,25 @@ function moveByReference(
 ): Step {
   if (reference.input === true) return refuseArgumentSuffix();
   if (reference.path.includes("")) return refuseEmptySegment(operand);
-  const moved: Place = {
+  const scope = reference.scope ?? place.scope;
+  if (reference.embeddedSpace !== undefined) {
+    return {
+      kind: "space-by-name",
+      name: reference.embeddedSpace,
+      piece: reference.pieceId,
+      path: reference.path,
+      scope,
+    };
+  }
+  return land({
     position: {
       kind: "piece",
       space: place.position.space,
       piece: reference.pieceId,
       path: reference.path,
     },
-    scope: reference.scope ?? place.scope,
-  };
-  return reference.embeddedSpace === undefined
-    ? land(moved, [])
-    : { kind: "space-by-name", name: reference.embeddedSpace, place: moved };
+    scope,
+  }, []);
 }
 
 /**

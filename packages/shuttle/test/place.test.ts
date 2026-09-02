@@ -454,18 +454,16 @@ describe("place", () => {
           });
 
           it("hands back a reference naming its space by name", () => {
+            // The arm carries no space. Whether the name denotes the
+            // connected one is what is not yet known, so there is nothing
+            // for a space field to hold that would not be a guess.
+
             expect(atSpaceRoot().cd(`/@estuary/${HANDLE}/title`)).toEqual({
               kind: "space-by-name",
               name: "estuary",
-              place: {
-                position: {
-                  kind: "piece",
-                  space: SPACE,
-                  piece: HANDLE,
-                  path: ["title"],
-                },
-                scope: "space",
-              },
+              piece: HANDLE,
+              path: ["title"],
+              scope: "space",
             });
           });
         });
@@ -953,13 +951,21 @@ describe("place", () => {
       });
 
       describe("settle()", () => {
-        it("lands the place the move worked out", () => {
+        it("builds the place from the connected space", () => {
           const place = atSpaceRoot();
           const move = place.cd(`/@estuary/${HANDLE}/title`);
           if (move.kind !== "space-by-name") throw new Error("not handed on");
           expect(place.settle(move, SPACE)).toEqual({
             kind: "moved",
-            place: move.place,
+            place: {
+              position: {
+                kind: "piece",
+                space: SPACE,
+                piece: HANDLE,
+                path: ["title"],
+              },
+              scope: "space",
+            },
           });
         });
 
@@ -972,11 +978,10 @@ describe("place", () => {
         });
 
         it("refuses a name that resolved to another space", () => {
-          // The arm's place carries the connected space, since that is the
-          // only space a reference without a DID can name. So settling a
-          // name that resolved elsewhere would land on the same piece id in
-          // the wrong space, and say nothing. The space the name resolved
-          // to is the caller's to supply and this module's to check.
+          // The place is built from the connected space, so settling a name
+          // that resolved elsewhere would land on the same piece id in the
+          // wrong space and say nothing. The space the name resolved to is
+          // the caller's to supply and this module's to check.
 
           const place = atSpaceRoot();
           const move = place.cd(`/@estuary/${HANDLE}`);
