@@ -116,42 +116,48 @@ leaves `coverage-debt: packages/shuttle`, a metric group the gate
 derives from the path with no allowlist, at zero, so B1 lands its code
 and the tests covering it together.
 
-**B1 — walking skeleton** (after A1; A2 for nothing yet). Open, and landing
-in slices. In, as `packages/shuttle/src/place.ts`: the pair itself, `cd` over
-relative segments, `..`, `-`, `/`, a scope-only `@scope`, and rooted and
-complete references; the `slugs/` and `pieces/` facets a space root reserves;
-what `pwd` prints of both halves; and the refusals — a reference carrying
-`#argument`, a `#` buried in a bare piece id, and a move into a space other
-than the connected one, which is the gate a home-anchored entry point meets
-once resolution hands it a space.
-Still to come: the prompt, the readline loop, the verbs over a held
-controller, wish and slug resolution, `where`, and both halves of liveness.
-The place value and its owner module — the whole pair, position *and*
-scope, because scope is half of what a place is (decision 20):
-`cd @user` and `cd @space` move it, the prompt renders it, and `pwd`
-prints both halves. The prompt, a readline loop, and `cd` / `ls` / `pwd`
-/ `get` over one held `PiecesController`, with `cd -` for the previous
-place and `#name` wish targets navigable within the connected space
-(`cd #favorites`, and the `wish` verb, over the `./lib/wish` export
-entry A1 adds; a home-anchored target from elsewhere is refused with the
-reason — decision 5). Slug and name resolution rides the machinery
-`--piece` already uses (`resolveStoredPieceAddress`, `listSpaceSlugs`),
-so no CLI-surface arc step gates B1. `where` lands here as the printing
-surface for the ambient record; later milestones add their dimensions to
-it as they add the dimensions themselves. Facets `slugs/` and `pieces/`
-only.
+**B1 — walking skeleton** (after A1; A2 for nothing yet). Landing in
+slices, and open until the last of them lands. Each slice moves what it
+built into the first list.
 
-Liveness, in two halves. The held controller is memoized cf-harness-style,
-which covers the construction that never succeeds — the case that cache
-actually addresses. Recovery of an *established* connection needs nothing
-from shuttle: the memory client reconnects and re-arms its watches by
-itself ([`runtime-integration.md`](runtime-integration.md)), so B1 proves
-that rather than rebuilding it — a test that drops the transport under a
-standing watch and shows the subscription still delivering afterwards. What
-B1 does build is the observation seam, reporting live, reconnecting, and
-permanently failed, because no such surface exists today and both the
-prompt and the view markers consume it. No retry loop in shuttle on either
-half.
+Landed:
+
+- **B1a — the place value and its owner module**
+  (`packages/shuttle/src/place.ts`). The whole pair, position *and* scope,
+  because scope is half of what a place is (decision 20): `cd` over
+  relative segments, `..`, `-`, `/`, a scope-only `@scope`, and rooted and
+  complete references; the `slugs/` and `pieces/` facets a space root
+  reserves, and nothing else there; the rendering `pwd` prints of both
+  halves; and the refusals — a reference carrying `#argument`, a `#`
+  buried in a bare piece id, and a move into a space other than the
+  connected one, which is the gate a home-anchored entry point meets once
+  resolution hands it a space.
+
+Still to come:
+
+- **The prompt, a readline loop, and the verbs** — `cd` / `ls` / `pwd` /
+  `get` over one held `PiecesController`, with `#name` wish targets
+  navigable within the connected space (`cd #favorites`, and the `wish`
+  verb, over the `./lib/wish` export entry A1 adds; a home-anchored target
+  from elsewhere is refused with the reason — decision 5).
+- **Slug and name resolution**, riding the machinery `--cell` already uses
+  (`resolveStoredPieceAddress`, `listSpaceSlugs`), so no CLI-surface arc
+  step gates B1.
+- **`where`**, the printing surface for the ambient record; later
+  milestones add their dimensions to it as they add the dimensions
+  themselves.
+- **Liveness, in two halves.** The held controller is memoized
+  cf-harness-style, which covers the construction that never succeeds —
+  the case that cache actually addresses. Recovery of an *established*
+  connection needs nothing from shuttle: the memory client reconnects and
+  re-arms its watches by itself
+  ([`runtime-integration.md`](runtime-integration.md)), so B1 proves that
+  rather than rebuilding it — a test that drops the transport under a
+  standing watch and shows the subscription still delivering afterwards.
+  What B1 does build is the observation seam, reporting live,
+  reconnecting, and permanently failed, because no such surface exists
+  today and both the prompt and the view markers consume it. No retry loop
+  in shuttle on either half.
 
 **B2 — writes, calls, handles** (after A2, A3, and A4 — a failed call or
 write must surface as a value, never reach `Deno.exit`). `set` with
