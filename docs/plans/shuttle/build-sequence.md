@@ -165,10 +165,14 @@ Still to come:
   want deciding together. Segment validation is the same question, across three
   doors rather than two — a slug's vocabulary holds a reference, and
   neither a relative segment nor a resolved target is held to it. What is
-  settled is narrower: a part no rendering would name back — empty, ending
-  in whitespace, holding a line break, or, for a piece, holding an `@` —
-  is refused at every door, which leaves those names with no spelling
-  rather than one that prints as a different cell.
+  settled is narrower, and in two parts. A path segment that is empty, ends
+  in whitespace, or holds a line break is refused at every door, because a
+  rendering of it would name a different cell. A piece is held to more than
+  that: one holding a line break is refused for the same reason, and one
+  that is empty, ends in whitespace, or holds an `@` is refused because no
+  slug or handle carries such a name — the parse would take it, since its
+  handle test is a length rule, and hand back a name nothing could have
+  produced.
 - **`where`** (B1c), the printing surface for the ambient record; later
 milestones add their dimensions to it as they add the dimensions themselves.
 It prints the record `pwd` prints, so it chooses the format for both — a
@@ -182,17 +186,6 @@ a place, because it would leave a shorter reference naming another cell,
 while a carriage return, a vertical tab, a form feed, a no-break space and
 the Unicode line and paragraph separators all read back whole and reach only
 a terminal.
-- **A dormant grammar concern.** `@` carries two meanings in one form: the
-space slot of a reference and the scope suffix on a piece. `@user` alone is
-the scope word, `/@user/<handle>` is a space *named* user, and
-`/@user/<handle>@session` is both at once — and space names are unvalidated,
-so the collision is live rather than hypothetical. Shuttle cannot resolve
-it: decision 13 forbids inventing a spelling, and a second scope spelling
-would be worse than the ambiguity. Issue
-[#6775](https://github.com/commontoolsinc/labs/issues/6775) carries it. In
-v1 a space named by name is refused unless it resolves to the connected
-space, which is what keeps it dormant; multi-space sessions are where it
-wakes.
 - **Liveness, in two halves.** The held controller is memoized
   cf-harness-style, which covers the construction that never succeeds —
   the case that cache actually addresses. Recovery of an *established*

@@ -217,9 +217,20 @@ export class CurrentPlace {
   #here: Standing;
   #previous: Standing | undefined;
 
-  /** Constructs an instance standing at `place`, with no previous place. */
-  constructor(place: Place) {
-    this.#here = { place, trail: [] };
+  /**
+   * Constructs an instance standing at the root of `space`, with no previous
+   * place.
+   *
+   * A space is all a shuttle has when it starts, and taking one rather than a
+   * whole {@link Place} is what keeps {@link PiecePosition}'s invariant a
+   * property of the type. Every other door checks what it is handed; a
+   * constructor taking a place would be one that could not, and the invariant
+   * would hold only where somebody remembered it. Restoring a saved place is
+   * a named entry point with checking of its own, for whenever something
+   * needs one.
+   */
+  constructor(space: MemorySpace) {
+    this.#here = { place: placeAtSpaceRoot(space), trail: [] };
   }
 
   /** Where shuttle stands. */
@@ -271,8 +282,8 @@ export class CurrentPlace {
       firstUnnameableSegment(move.path);
     if (fault !== undefined) {
       return this.#commit(refuse(
-        `The reference naming space \`${move.name}\` has ${fault}, so a ` +
-          `rendering of the place would name a different cell.`,
+        `The reference naming space \`${move.name}\` has ${fault.what}, ` +
+          `so ${fault.so}.`,
       ));
     }
     return this.#commit(land({
@@ -465,10 +476,13 @@ function moveByReference(
  * segment is read against the level the one before it landed on, so `..` and a
  * descent compose in one operand.
  *
- * Segments split on `/` and are taken literally. The reference grammar's `~1`
- * escaping belongs to a reference, which a relative operand is not, so `~1`
- * here is two characters of a key and a key holding the separator has no
- * relative spelling at all.
+ * The operand is trimmed before it is split, so the outer edges of the first
+ * and last segments are lost here where a reference keeps them: `cd " a"`
+ * reaches the key `a`, and a key actually named `" a"` has no relative
+ * spelling, only a rooted one. Between those edges a segment is taken
+ * literally — the reference grammar's `~1` escaping belongs to a reference,
+ * which a relative operand is not, so `~1` here is two characters of a key
+ * and a key holding the separator has no relative spelling at all.
  */
 function moveBySegments(from: Standing, operand: string): Step {
   const segments = operand.split("/");
@@ -620,15 +634,14 @@ function enterTarget(
   const badPiece = unnameablePiece(target.piece);
   if (badPiece !== undefined) {
     return refuse(
-      `\`${operand}\` resolves to ${badPiece}, so a rendering of the place ` +
-        `would name a different cell.`,
+      `\`${operand}\` resolves to ${badPiece.what}, so ${badPiece.so}.`,
     );
   }
   const badSegment = firstUnnameableSegment(target.path ?? []);
   if (badSegment !== undefined) {
     return refuse(
-      `\`${operand}\` resolves to a path with ${badSegment}, so a rendering ` +
-        `of the place would name a different cell.`,
+      `\`${operand}\` resolves to a path with ${badSegment.what}, so ` +
+        `${badSegment.so}.`,
     );
   }
   return land({
@@ -675,69 +688,101 @@ function refuseOtherSpace(clause: string, connected: MemorySpace): Step {
 }
 
 /**
- * Helper for {@link unnameableSegment} and {@link unnameablePiece}, which
- * names what the two steps every part of a rendering passes through would
- * lose from `text`, `noun` naming the part.
- *
- * Reading a rendering back is a parse of a reference, which trims the string
- * it is given and drops a trailing empty segment; something ending in
- * whitespace, and something empty, are what that reaches. Writing the
- * rendering separates its lines with a newline, so one holding a newline
- * splits the position line and leaves a shorter reference naming another
- * cell.
- *
- * Leading whitespace survives both and is admitted: the parse trims the whole
- * string, which no leading character of a part sits at the end of. What a
- * terminal does with the other control characters is the format's concern
- * rather than this one's, since a reference carrying them reads back whole.
+ * What is wrong with one part of a place, and why that is refused. The two
+ * reasons are not interchangeable and a message is built from both, so a part
+ * carries the one that actually applies to it.
  */
-function unnameableText(text: string, noun: string): string | undefined {
-  if (text === "") return `an empty ${noun}`;
-  if (text !== text.trimEnd()) return `a ${noun} ending in whitespace`;
-  if (text.includes("\n")) return `a ${noun} holding a line break`;
-  return undefined;
+interface Fault {
+  /** The part and its flaw, as a noun phrase. */
+  readonly what: string;
+
+  /** Why it is refused, as a clause completing "so". */
+  readonly so: string;
 }
+
+/** The reason a part whose rendering would denote some other cell is refused. */
+const NAMES_ANOTHER = "a rendering of the place would name a different cell";
+
+/**
+ * The reason a piece the fabric could not have produced is refused.
+ *
+ * `isPieceHandle` is a length rule rather than an alphabet one, so the parse
+ * accepts a "handle" the `fid1` encoding cannot make and hands it back
+ * verbatim — such a rendering round-trips exactly and denotes nothing. That is
+ * neither a wrong address nor a dead one, so the reason it is refused cannot
+ * be either; it is that a place should stand only on a name something could
+ * have given it.
+ */
+const NO_SUCH_NAME = "no piece carries that name: a slug is lowercase " +
+  "letters, numbers and hyphens, and a handle is `of:fid1:` and base32";
 
 /**
  * Helper for the movers, which names what stops a rendering of a path holding
  * `segment` from naming that path back, and returns nothing when nothing
- * does. A number renders as its digits and survives every step.
+ * does.
+ *
+ * Two steps lose characters. Reading a rendering back is a parse of a
+ * reference, which trims the string it is given and drops a trailing empty
+ * segment. Writing the rendering separates its lines with a newline, so a
+ * segment holding one splits the position line and leaves a shorter reference
+ * naming another cell. Both are refused wherever a segment sits and not only
+ * last, because `..` makes any segment the last one. Leading whitespace
+ * survives both and is admitted: the parse trims the whole string, which no
+ * leading character of a segment sits at the end of. What a terminal does with the other control characters is
+ * the format's concern rather than this one's, since a reference carrying
+ * them reads back whole.
  */
-function unnameableSegment(segment: PathSegment): string | undefined {
-  if (typeof segment !== "number") return unnameableText(segment, "segment");
+function unnameableSegment(segment: PathSegment): Fault | undefined {
+  if (typeof segment !== "number") {
+    if (segment === "") return { what: "an empty segment", so: NAMES_ANOTHER };
+    if (segment !== segment.trimEnd()) {
+      return { what: "a segment ending in whitespace", so: NAMES_ANOTHER };
+    }
+    if (segment.includes("\n")) {
+      return { what: "a segment holding a line break", so: NAMES_ANOTHER };
+    }
+    return undefined;
+  }
   // A number renders as its digits, and only a canonical array index reads
   // back as the number it was: `1e21`, `-1` and `1.5` all print as something
   // the conversion leaves a string. The canonical rule decides, rather than a
   // second copy of it here.
   return linkPathSegmentToCellPathSegment(String(segment)) === segment
     ? undefined
-    : "a segment that is no canonical index";
+    : { what: "a segment that is no canonical index", so: NAMES_ANOTHER };
 }
 
 /**
- * Helper for the movers, which names what stops a rendering from naming
- * `piece` back, and returns nothing when nothing does.
+ * Helper for the movers, which names what stops a piece from being one a place
+ * may stand on, and returns nothing when nothing does.
  *
- * Only the newline reaches a piece. The scope suffix the rendering always
- * writes sits between the piece and the end of the string, so the trim
- * reaches the suffix rather than the piece, and the split at the last `@`
- * takes the suffix's own `@` rather than any the piece holds — a piece comes
- * back whole from both. What the rules here buy is narrower and still worth
- * having: they hold a place to a name `pwd` can print as a reference somebody
- * can follow. A piece that is empty, ends in whitespace, or holds an `@` is
- * neither slug nor handle, so its rendering parses and is then refused as
- * naming no piece — a dead address rather than a wrong one, and one this
- * module declines to stand at.
+ * Only the newline costs a piece its name. The scope suffix the rendering
+ * always writes sits between the piece and the end of the string, so the trim
+ * takes the suffix rather than the piece, and the split at the last `@` takes
+ * the suffix's own — a piece comes back whole from both, whatever it holds.
+ * The other three rules answer to {@link NO_SUCH_NAME} instead, which is a
+ * weaker claim than the segment rules make and the honest one: for a
+ * slug-shaped piece the canonical parse refuses these anyway, and for a
+ * handle-shaped one it does not, which is exactly why this door checks.
  */
-function unnameablePiece(piece: string): string | undefined {
-  return unnameableText(piece, "piece") ??
-    (piece.includes("@") ? "a piece holding `@`" : undefined);
+function unnameablePiece(piece: string): Fault | undefined {
+  if (piece.includes("\n")) {
+    return { what: "a piece holding a line break", so: NAMES_ANOTHER };
+  }
+  if (piece === "") return { what: "an empty piece", so: NO_SUCH_NAME };
+  if (piece !== piece.trimEnd()) {
+    return { what: "a piece ending in whitespace", so: NO_SUCH_NAME };
+  }
+  if (piece.includes("@")) {
+    return { what: "a piece holding `@`", so: NO_SUCH_NAME };
+  }
+  return undefined;
 }
 
 /** Helper for the movers, which is the first fault in `path`, if it has one. */
 function firstUnnameableSegment(
   path: readonly PathSegment[],
-): string | undefined {
+): Fault | undefined {
   for (const segment of path) {
     const fault = unnameableSegment(segment);
     if (fault !== undefined) return fault;
@@ -749,11 +794,8 @@ function firstUnnameableSegment(
  * Helper for the movers, which refuses `operand` for a part no rendering
  * names back, `fault` saying which part and why.
  */
-function refuseUnnameable(operand: string, fault: string): Step {
-  return refuse(
-    `\`${operand}\` has ${fault}, so a rendering of the place would name a ` +
-      `different cell.`,
-  );
+function refuseUnnameable(operand: string, fault: Fault): Step {
+  return refuse(`\`${operand}\` has ${fault.what}, so ${fault.so}.`);
 }
 
 /** Helper for the movers, which builds a refusal carrying `reason`. */

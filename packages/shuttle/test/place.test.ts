@@ -52,7 +52,7 @@ const HANDLE = "of:fid1:abcdefghijklmnop";
 
 /** Helper for the cases below, which stands an instance at the space root. */
 function atSpaceRoot(): CurrentPlace {
-  return new CurrentPlace(placeAtSpaceRoot(SPACE));
+  return new CurrentPlace(SPACE);
 }
 
 /** Helper for the cases below, which stands an instance inside `slugs/`. */
@@ -300,7 +300,7 @@ describe("place", () => {
           ];
 
           const pieces = candidates(HANDLE.slice(0, 10), HANDLE.slice(10));
-          const segments = candidates("b", "");
+          const segments = candidates("b", "c");
           for (const [index, scope] of scopes.entries()) {
             const reader = scopes[(index + 1) % scopes.length];
 
@@ -390,7 +390,10 @@ describe("place", () => {
 
   describe("CurrentPlace", () => {
     describe("constructor()", () => {
-      it("returns an instance standing at the place it was given", () => {
+      it("returns an instance standing at the root of the space it was given", () => {
+        // The constructor takes a space and not a place, so there is no
+        // door here for a position the other four would refuse.
+
         expect(atSpaceRoot().place).toEqual(placeAtSpaceRoot(SPACE));
       });
 
@@ -570,7 +573,9 @@ describe("place", () => {
             expect(inSlugs().cd("board @space")).toEqual({
               kind: "refused",
               reason: "`board @space` has a piece ending in whitespace, " +
-                "so a rendering of the place would name a different cell.",
+                "so no piece carries that name: a slug is lowercase " +
+                "letters, numbers and hyphens, and a handle is " +
+                "`of:fid1:` and base32.",
             });
           });
 
@@ -581,8 +586,10 @@ describe("place", () => {
 
             expect(inSlugs().cd("board@session@session")).toEqual({
               kind: "refused",
-              reason:
-                "`board@session@session` has a piece holding `@`, so a rendering of the place would name a different cell.",
+              reason: "`board@session@session` has a piece holding `@`, " +
+                "so no piece carries that name: a slug is lowercase " +
+                "letters, numbers and hyphens, and a handle is " +
+                "`of:fid1:` and base32.",
             });
           });
 
@@ -1022,6 +1029,23 @@ describe("place", () => {
             });
           });
 
+          it("trims the outer edges of an operand before splitting it", () => {
+            // A reference keeps what the walk drops here, and the walk is
+            // the only door that drops it — so a key named `" a"` is
+            // reachable by reference and not by walking to it. Landing on
+            // the trimmed key rather than refusing is what makes this
+            // worth pinning: nothing says the edge was lost.
+
+            const place = atReferencedPiece();
+            place.cd(" a ");
+            expect(place.place.position).toEqual({
+              kind: "piece",
+              space: SPACE,
+              piece: HANDLE,
+              path: ["a"],
+            });
+          });
+
           it("reads `~1` in a segment as two characters of a data key", () => {
             // A relative operand is not a reference, so the reference
             // grammar's `~1` escaping does not reach it: `~1` is literal
@@ -1344,6 +1368,20 @@ describe("place", () => {
             kind: "refused",
             reason: "`#favorites` resolves to a path with an empty " +
               "segment, so a rendering of the place would name a different cell.",
+          });
+        });
+
+        it("refuses a target whose piece is empty", () => {
+          expect(
+            atSpaceRoot().enter(
+              { space: SPACE, piece: "", path: [] },
+              "#favorites",
+            ),
+          ).toEqual({
+            kind: "refused",
+            reason: "`#favorites` resolves to an empty piece, so no piece " +
+              "carries that name: a slug is lowercase letters, numbers and " +
+              "hyphens, and a handle is `of:fid1:` and base32.",
           });
         });
 

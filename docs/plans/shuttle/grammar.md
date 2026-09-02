@@ -77,33 +77,36 @@ against the operand's head, and each takes the whole operand with it: `cd
 #favorites/topics` hands on the whole string as one target. So each is an
 ordinary data character in every later segment that is data — inside a
 piece. A later segment naming a piece is read by the canonical grammar
-instead, which carries both readings itself, so a scope suffix there moves
-the scope and a fragment there is refused. `..` is matched segment by
+instead, so a scope suffix there moves the scope. A fragment there is
+refused too, but by shuttle rather than by that grammar, which carries the
+`#argument` suffix on a piece designation and would take one. `..` is matched segment by
 segment as the walk splits them, so it is reserved in all of them and a key
 named `..` has no relative spelling — it reaches a place through a
 reference, the door that reads no `..` at all. `/` is the separator
 besides, so no segment of an operand holds one, and a key that does is
 spelled `~1`, which a reference unescapes and a walk does not.
 
-However a reading is matched, a part no rendering would name back is
-refused at every door. Two steps lose characters between a place and the
-rendering that names it. Reading a rendering back is a parse of a
-reference, which trims the string and drops a trailing empty segment.
-Writing one separates its lines with a newline. Both reach a path segment,
-so an empty segment, one ending in whitespace, and one holding a line break
-are refused, while one that merely starts with whitespace survives and is
-not.
+The property every door is held to is that a rendering may be refused but
+may never name a cell other than the one it was printed for. Two steps lose
+characters between a place and the rendering that names it. Reading a
+rendering back is a parse of a reference, which trims the string and drops a
+trailing empty segment. Writing one separates its lines with a newline. Both
+reach a path segment, so an empty segment, one ending in whitespace, and one
+holding a line break are refused, while one that merely starts with
+whitespace survives and is not. The first two are refused wherever they sit
+and not only last, because `..` makes any segment the last one.
 
 Only the newline reaches a piece. The scope suffix the rendering always
 writes sits between the piece and the end of the string, so the trim takes
 the suffix rather than the piece, and the parse's split at the last `@`
 takes the suffix's own — a piece comes back whole whatever it holds. The
-piece is nonetheless held to more: one that is empty, ends in whitespace,
-or holds an `@` is neither slug nor handle, so its rendering parses and is
-then refused as naming no piece. Refusing those at the door is what keeps
-a place to a name `pwd` can print as a reference somebody can follow, and
-no slug or handle carries an `@`, so it costs the fabric no name it can
-spell.
+piece is nonetheless held to more, for a different reason: one that is
+empty, ends in whitespace, or holds an `@` is refused because no slug or
+handle carries such a name. The parse would take it, its handle test being
+a length rule rather than an alphabet one, and hand back verbatim a name
+the `fid1` encoding could not have produced — a rendering that round-trips
+exactly and denotes nothing. That is neither a wrong address nor a dead
+one, which is why the reason cannot be either.
 
 A segment lifted out of a rendering is an operand in its own right, so
 these readings decide it rather than the key it was printed from.
@@ -394,6 +397,23 @@ and registered by
 spelling reaches any of them. Adding one item to a collection is therefore
 `get`, edit, `set`: the read-modify-write those operations were made
 first-class to avoid.
+
+**The `@` sigil carries two meanings.** It is the space slot of a reference
+and the scope suffix on a piece: `@user` alone is the scope word,
+`/@user/<handle>` is a space *named* user, and `/@user/<handle>@session` is
+both at once — and space names are unvalidated, so the collision is live
+rather than hypothetical. Shuttle cannot resolve it: decision 13 forbids
+inventing a spelling, and a second scope spelling would be worse than the
+ambiguity. Issue
+[#6775](https://github.com/commontoolsinc/labs/issues/6775) carries it. In
+v1 a space named by name is refused unless it resolves to the connected
+space, which is what keeps it dormant; multi-space sessions are where it
+wakes.
+
+**A shortened id is not an address.** The prompt falls back to one where no
+slug is confirmed, and it is spelled exactly as a whole handle is, so
+nothing in it says which it is. Whether the prompt stays pasteable, and how
+that fallback is marked if it does, is open — see the Prompt section above.
 
 The base-overlay spelling is settled above. The remaining open item for
 shuttle overall (shallow-sink expressibility) lives in
