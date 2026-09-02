@@ -1,9 +1,0 @@
-new FabricRegExp(/ab+c/gi)
-
-/RegExp(
-  source: "ab+c",
-  flags: "gi",
-  flavor: "es2025"
-)
-
-/RegExp(source:"ab+c",flags:"gi",flavor:"es2025")
