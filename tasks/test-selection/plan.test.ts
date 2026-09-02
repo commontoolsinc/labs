@@ -494,7 +494,25 @@ describe("plan", () => {
       expect(result.unschedulable[0]!.suite).toBe("pattern-integration");
     });
 
-    it("does not force one in even when the change touches it", () => {
+    it("runs one anyway when the change touches it", () => {
+      // Mandatory says the change is not tested without it. A lane that
+      // runs long reports that it ran long; dropping the test reports a
+      // pass over something that never ran, which is the worse answer.
+      const manifest = sampleManifest({
+        entries: entries(1, () => ({ cost: 400 })),
+      });
+      const key = testIdentityKey(manifest.entries[0]!.test);
+      const mandatory = new Map([[key, "changed" as const]]);
+      const result = run(manifest, { mandatory, boundSeconds: 300 });
+      expect(selected(result).map((s) => testIdentityKey(s.entry.test)))
+        .toEqual([key]);
+      // It is placed, so it is not among the ones nothing can run.
+      expect(result.unschedulable).toEqual([]);
+    });
+
+    it("says how far past its budget forcing one put a lane", () => {
+      // The lane running long is the whole signal that the bound may need
+      // raising, so the figure has to come out even though nothing failed.
       const manifest = sampleManifest({
         entries: entries(1, () => ({ cost: 400 })),
       });
@@ -503,7 +521,7 @@ describe("plan", () => {
         "changed" as const,
       ]]);
       const result = run(manifest, { mandatory, boundSeconds: 300 });
-      expect(selected(result)).toEqual([]);
+      expect(result.overBudgetSeconds).toBeGreaterThan(0);
     });
   });
 

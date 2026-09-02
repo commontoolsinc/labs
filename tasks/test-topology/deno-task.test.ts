@@ -1,0 +1,287 @@
+import { expect } from "@std/expect";
+import { afterEach, describe, it } from "@std/testing/bdd";
+import {
+  memberTasks,
+  memberTestFiles,
+  parseTestTask,
+  unquote,
+} from "./deno-task.ts";
+
+/** Every directory a case made, removed when the case is done. */
+const made: string[] = [];
+
+afterEach(async () => {
+  for (const dir of made.splice(0)) {
+    await Deno.remove(dir, { recursive: true }).catch(() => {});
+  }
+});
+
+/** A member directory holding the manifest and files a case describes. */
+async function member(
+  manifest: Record<string, unknown>,
+  files: readonly string[] = [],
+): Promise<string> {
+  const dir = await Deno.makeTempDir({ prefix: "deno-task-" });
+  made.push(dir);
+  await Deno.writeTextFile(
+    `${dir}/deno.json`,
+    JSON.stringify(manifest, null, 2),
+  );
+  for (const file of files) {
+    const at = `${dir}/${file}`;
+    await Deno.mkdir(at.slice(0, at.lastIndexOf("/")), { recursive: true });
+    await Deno.writeTextFile(at, "");
+  }
+  return dir;
+}
+
+describe("reading a member's test task", () => {
+  it("takes the flags apart from the paths", () => {
+    const parsed = parseTestTask(
+      "ENV=test deno test --no-check --allow-read test/*.test.ts",
+    );
+    expect(parsed?.env).toEqual({ ENV: "test" });
+    expect(parsed?.flags).toEqual(["--no-check", "--allow-read"]);
+    expect(parsed?.paths).toEqual(["test/*.test.ts"]);
+  });
+
+  it("collects every --ignore separately from the flags", () => {
+    const parsed = parseTestTask(
+      "deno test --allow-read --ignore='a.test.ts,b/**' .",
+    );
+    expect(parsed?.ignores).toEqual(["a.test.ts", "b/**"]);
+    expect(parsed?.flags).toEqual(["--allow-read"]);
+  });
+
+  it("resolves the execPath substitution rather than refusing it", () => {
+    const parsed = parseTestTask(
+      'deno test --allow-run=$(deno eval "console.log(Deno.execPath())")',
+      "/usr/bin/deno",
+    );
+    expect(parsed?.flags).toEqual(["--allow-run=/usr/bin/deno"]);
+  });
+
+  it("strips shell quoting from inside a flag's value", () => {
+    // Several members write `--allow-env=API_URL,"TSC_*",NODE_ENV`. The
+    // quotes are the shell's; a flag passed through with them names a
+    // permission with literal quote characters, which matches nothing.
+    const parsed = parseTestTask(
+      'deno test --allow-env=API_URL,"TSC_*",NODE_ENV test/a.test.ts',
+    );
+    expect(parsed?.flags).toEqual(["--allow-env=API_URL,TSC_*,NODE_ENV"]);
+    expect(unquote('a,"b",c')).toBe("a,b,c");
+  });
+
+  it("refuses a task that is two commands", () => {
+    expect(parseTestTask("deno test a.test.ts && deno run b.ts"))
+      .toBeUndefined();
+  });
+
+  it("refuses a task naming its own import map", () => {
+    // That map governs every module of the invocation, the preload
+    // included, so a specifier the preload needs and the map does not
+    // carry would fail the whole run rather than the preload alone.
+    expect(parseTestTask("deno test -A --import-map ./map.json .")).toBe(
+      undefined,
+    );
+  });
+
+  it("refuses a task that is not a deno test at all", () => {
+    expect(parseTestTask("deno run test/runner.ts")).toBeUndefined();
+    expect(parseTestTask("echo 'No tests defined.'")).toBeUndefined();
+  });
+});
+
+describe("listing a member's test files", () => {
+  it("walks a directory the way deno test walks one", async () => {
+    const dir = await member({}, [
+      "test/one.test.ts",
+      "test/nested/two.test.tsx",
+      "test/helper.ts",
+      "src/three_test.ts",
+    ]);
+    const files = await memberTestFiles(dir, parseTestTask("deno test .")!);
+    expect(files).toEqual([
+      "src/three_test.ts",
+      "test/nested/two.test.tsx",
+      "test/one.test.ts",
+    ]);
+  });
+
+  it("applies the task's --ignore, which an explicit path would not", async () => {
+    const dir = await member({}, [
+      "test/one.test.ts",
+      "test/browser/two.browser.test.ts",
+    ]);
+    const files = await memberTestFiles(
+      dir,
+      parseTestTask("deno test --ignore='test/browser' .")!,
+    );
+    expect(files).toEqual(["test/one.test.ts"]);
+  });
+
+  it("applies the member's own exclude", async () => {
+    const dir = await member({ test: { exclude: ["integration"] } }, [
+      "test/one.test.ts",
+      "integration/two.test.ts",
+    ]);
+    const files = await memberTestFiles(dir, parseTestTask("deno test .")!);
+    expect(files).toEqual(["test/one.test.ts"]);
+  });
+
+  it("keeps a file the task names outright, whatever it is called", async () => {
+    // The naming rule is how Deno decides what to run when it discovers
+    // files for itself. A path somebody wrote down is one the task runs.
+    const dir = await member({}, ["test/scenarios.ts", "test/one.test.ts"]);
+    const files = await memberTestFiles(
+      dir,
+      parseTestTask("deno test test/scenarios.ts")!,
+    );
+    expect(files).toEqual(["test/scenarios.ts"]);
+  });
+
+  it("walks a directory that holds no test file and finds none", async () => {
+    // The directory has to exist, or the path never reaches the walk:
+    // an absent one is not a directory, so it falls through to being
+    // expanded as a glob and the case would prove nothing about walking.
+    const dir = await member({}, ["test/helper.ts", "test/data/fixture.json"]);
+    const files = await memberTestFiles(dir, parseTestTask("deno test test")!);
+    expect(files).toEqual([]);
+  });
+
+  it("expands a glob the task names", async () => {
+    const dir = await member({}, [
+      "test/one.test.ts",
+      "test/nested/two.test.ts",
+    ]);
+    const files = await memberTestFiles(
+      dir,
+      parseTestTask("deno test test/*.test.ts")!,
+    );
+    expect(files).toEqual(["test/one.test.ts"]);
+  });
+});
+
+describe("resolving which task a member's tests run through", () => {
+  it("prefers the Deno-only half where a member names one", async () => {
+    const dir = await member({
+      tasks: {
+        test: { dependencies: ["deno-test", "browser-test"] },
+        "deno-test": "deno test --allow-read test/*.test.ts",
+        "browser-test": "deno run -A ../deno-web-test/cli.ts test/*.test.ts",
+      },
+    });
+    const tasks = await memberTasks(dir);
+    expect(tasks.denoTestTask).toBe("deno-test");
+    expect(tasks.browserTest).toBe(true);
+  });
+
+  it("reaches through a task written as a dependency list", async () => {
+    const dir = await member({
+      tasks: {
+        check: "deno check .",
+        "just-test": { command: "deno test --allow-read" },
+        test: { dependencies: ["check", "just-test"] },
+      },
+    });
+    const tasks = await memberTasks(dir);
+    expect(tasks.denoTestTask).toBe("just-test");
+    expect(tasks.denoTest?.flags).toEqual(["--allow-read"]);
+  });
+
+  it("reports a member whose task cannot be handed a subset", async () => {
+    const dir = await member({
+      tasks: { test: "deno run --allow-read test/run-tests.ts" },
+    });
+    const tasks = await memberTasks(dir);
+    expect(tasks.present).toBe(true);
+    expect(tasks.denoTest).toBeUndefined();
+  });
+
+  it("keeps a member whose only tests need a browser", async () => {
+    const dir = await member({
+      tasks: {
+        "browser-test": "deno run -A ../deno-web-test/cli.ts a.test.ts",
+      },
+    });
+    const tasks = await memberTasks(dir);
+    expect(tasks.present).toBe(true);
+    expect(tasks.browserTest).toBe(true);
+  });
+
+  it("reports a member that says it has no tests as no surface", async () => {
+    const dir = await member({ tasks: { test: "echo 'No tests defined.'" } });
+    expect((await memberTasks(dir)).present).toBe(false);
+  });
+});
+
+describe("a member whose manifest says less than usual", () => {
+  it("excludes nothing where the member has no manifest", async () => {
+    const dir = await Deno.makeTempDir({ prefix: "deno-task-" });
+    made.push(dir);
+    await Deno.mkdir(`${dir}/test`, { recursive: true });
+    await Deno.writeTextFile(`${dir}/test/one.test.ts`, "");
+    const files = await memberTestFiles(dir, parseTestTask("deno test .")!);
+    expect(files).toEqual(["test/one.test.ts"]);
+  });
+
+  it("reports no task at all as no test surface", async () => {
+    const dir = await member({});
+    const tasks = await memberTasks(dir);
+    expect(tasks.present).toBe(false);
+    expect(tasks.browserTest).toBe(false);
+  });
+
+  it("never descends into the directories the walk is told to skip", async () => {
+    // These hold test files; what keeps them out is their names. A
+    // dependency's own tests are its own business, and a build output
+    // holds a copy of tests that already ran from their source.
+    const dir = await member({}, [
+      "node_modules/dep/a.test.ts",
+      "dist/b.test.ts",
+      "test/c.test.ts",
+    ]);
+    const files = await memberTestFiles(dir, parseTestTask("deno test .")!);
+    expect(files).toEqual(["test/c.test.ts"]);
+  });
+
+  it("excludes a file by a glob as well as by a directory", async () => {
+    const dir = await member({}, ["test/a.test.ts", "test/b.browser.test.ts"]);
+    const files = await memberTestFiles(
+      dir,
+      parseTestTask("deno test --ignore='**/*.browser.test.ts' .")!,
+    );
+    expect(files).toEqual(["test/a.test.ts"]);
+  });
+});
+
+describe("a member holding a file where a directory would go", () => {
+  it("keeps walking past it, and finds the tests beside it", async () => {
+    // The walk descends into directories and reads files; a file called
+    // `test` is neither a directory to descend into nor a name the test
+    // rule matches, so it is passed over rather than being read as
+    // either.
+    const dir = await Deno.makeTempDir({ prefix: "deno-task-" });
+    made.push(dir);
+    await Deno.writeTextFile(`${dir}/test`, "not a directory");
+    await Deno.mkdir(`${dir}/src`);
+    await Deno.writeTextFile(`${dir}/src/a.test.ts`, "");
+    const files = await memberTestFiles(dir, parseTestTask("deno test .")!);
+    expect(files).toEqual(["src/a.test.ts"]);
+  });
+});
+
+describe("a task naming a dependency that is not there", () => {
+  it("passes over it rather than reading it as a command", async () => {
+    const dir = await member({
+      tasks: {
+        test: { dependencies: ["check", "just-test"] },
+        "just-test": "deno test --allow-read",
+      },
+    });
+    // `check` is named and not defined; what matters is that the
+    // dependency that is defined is still found.
+    const tasks = await memberTasks(dir);
+    expect(tasks.denoTestTask).toBe("just-test");
+  });
+});

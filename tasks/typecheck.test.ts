@@ -7,8 +7,10 @@ import { recordsSpooledBy } from "@commonfabric/test-support/records";
 import {
   checkGroup,
   collectPathsByScope,
+  main,
   runTypecheck,
   scopeOfPath,
+  selectScopes,
 } from "./typecheck.ts";
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
@@ -200,5 +202,112 @@ describe("typecheck", () => {
         true,
       );
     });
+  });
+});
+
+describe("selectScopes()", () => {
+  const byScope = new Map([
+    ["memory", ["packages/memory/mod.ts"]],
+    ["runner", ["packages/runner/mod.ts"]],
+  ]);
+
+  it("returns every scope when the command line names none", () => {
+    // A person running the task checks the whole tree; a lane names the
+    // groups its change touched.
+    expect([...selectScopes(byScope, []).keys()]).toEqual(["memory", "runner"]);
+    expect([...selectScopes(byScope, ["--list"]).keys()].length).toBe(2);
+  });
+
+  it("returns only the scopes the command line names", () => {
+    const selected = selectScopes(byScope, ["--scope=runner"]);
+    expect([...selected.keys()]).toEqual(["runner"]);
+    expect(selected.get("runner")).toEqual(["packages/runner/mod.ts"]);
+  });
+
+  it("refuses a scope that no group covers", () => {
+    // Silently checking nothing would report success over a group the
+    // caller believed it had checked.
+    expect(() => selectScopes(byScope, ["--scope=nowhere"])).toThrow(
+      "no such type-check scope",
+    );
+  });
+});
+
+describe("main()", () => {
+  it("answers with the status the command line would exit with", async () => {
+    // Zero when every group passed and one when any did not, rather
+    // than exiting from inside itself, so what it decides can be
+    // asserted.
+    const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+    const log = console.log;
+    const err = console.error;
+    console.log = () => {};
+    // The failing run reports its errors through `console.error`, and a
+    // test that lets those through reads as a suite going wrong.
+    console.error = () => {};
+    try {
+      expect(
+        await main(["--scope=leb128"], root, {
+          check: (scope) =>
+            Promise.resolve({
+              scope,
+              durationMs: 1,
+              success: true,
+              output: "",
+            }),
+          recordResults: false,
+        }),
+      ).toBe(0);
+      expect(
+        await main(["--scope=leb128"], root, {
+          check: (scope) =>
+            Promise.resolve({
+              scope,
+              durationMs: 1,
+              success: false,
+              output: "a type error",
+            }),
+          recordResults: false,
+        }),
+      ).toBe(1);
+    } finally {
+      console.log = log;
+      console.error = err;
+    }
+  });
+});
+
+describe("collectPathsByScope()", () => {
+  it("raises when the tree holds none of the paths it walks", async () => {
+    // A group that silently collected nothing would report a clean
+    // check over files it never looked at.
+    const root = await Deno.makeTempDir({ prefix: "typecheck-bare-" });
+    try {
+      await expect(collectPathsByScope(root)).rejects.toThrow(
+        "cannot enumerate",
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+});
+
+describe("runTypecheck() with a reload", () => {
+  it("says it is reloading before it checks anything", async () => {
+    // The reload is the slow part, and a run that appeared to hang
+    // without saying why is what the line is for.
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      await runTypecheck(new Map([["oven", ["packages/oven/mod.ts"]]]), {
+        reload: true,
+        check: (scope) =>
+          Promise.resolve({ scope, durationMs: 1, success: true, output: "" }),
+      });
+    } finally {
+      console.log = log;
+    }
+    expect(lines.join("\n")).toContain("Reloading");
   });
 });

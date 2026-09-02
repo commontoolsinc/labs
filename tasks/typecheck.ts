@@ -207,14 +207,19 @@ export async function checkGroup(
   paths: string[],
   reload: boolean,
   execPath: string = Deno.execPath(),
+  cwd: string = Deno.cwd(),
 ): Promise<GroupResult> {
   const startedAt = performance.now();
   const args = ["check", ...(reload ? ["--reload"] : []), ...paths];
   let success = false;
   let output = "";
   try {
+    // The paths are collected relative to the tree they were found in,
+    // so the check runs there. Without this a caller pointing at another
+    // tree would collect that tree's paths and check this one's.
     const result = await new Deno.Command(execPath, {
       args,
+      cwd,
       env: { DENO_V8_FLAGS: "--max-old-space-size=8192" },
       stdout: "piped",
       stderr: "piped",
@@ -237,6 +242,9 @@ export interface TypecheckOptions {
   list?: boolean;
   reload?: boolean;
   check?: typeof checkGroup;
+
+  /** The tree the paths were collected from, and so the tree to check. */
+  root?: string;
 
   /**
    * Spool one typecheck record per scope.
@@ -300,7 +308,13 @@ export async function runTypecheck(
   const workers = Array.from({ length: workerCount }, async () => {
     while (next < scopes.length) {
       const scope = scopes[next++]!;
-      const result = await check(scope, byScope.get(scope)!, reload);
+      const result = await check(
+        scope,
+        byScope.get(scope)!,
+        reload,
+        Deno.execPath(),
+        options.root ?? Deno.cwd(),
+      );
       results.push(result);
       recordsFragment?.append({
         line: "record",
@@ -332,15 +346,54 @@ export async function runTypecheck(
   return true;
 }
 
-export async function main(): Promise<void> {
-  const passed = await runTypecheck(await collectPathsByScope(), {
-    list: Deno.args.includes("--list"),
-    reload: (Deno.env.get("DENO_CHECK_RELOAD") ?? "") !== "",
-    recordResults: true,
-  });
-  if (!passed) Deno.exit(1);
+/**
+ * The scopes named on the command line, or every scope when none are.
+ * A continuous-integration lane is given part of the repository to check
+ * and names the groups it was given; a person running the task names
+ * none and checks the whole tree.
+ */
+export function selectScopes(
+  byScope: ReadonlyMap<string, string[]>,
+  args: readonly string[],
+): Map<string, string[]> {
+  const named = args
+    .filter((arg) => arg.startsWith("--scope="))
+    .map((arg) => arg.slice("--scope=".length));
+  if (named.length === 0) return new Map(byScope);
+  const selected = new Map<string, string[]>();
+  for (const scope of named) {
+    const paths = byScope.get(scope);
+    if (paths === undefined) {
+      throw new Error(`no such type-check scope: ${scope}`);
+    }
+    selected.set(scope, paths);
+  }
+  return selected;
 }
 
-if (import.meta.main) {
-  await main();
+/**
+ * Runs the check the way the command line runs it, and answers with the
+ * status it would exit with rather than exiting from inside itself.
+ */
+export async function main(
+  args: readonly string[] = Deno.args,
+  root: string = Deno.cwd(),
+  options: TypecheckOptions = {},
+): Promise<number> {
+  const passed = await runTypecheck(
+    selectScopes(await collectPathsByScope(root), args),
+    {
+      list: args.includes("--list"),
+      reload: (Deno.env.get("DENO_CHECK_RELOAD") ?? "") !== "",
+      recordResults: true,
+      root,
+      ...options,
+    },
+  );
+  return passed ? 0 : 1;
 }
+
+// `Deno.exitCode` rather than `Deno.exit`, which would end the process
+// before the unload handlers run — and one of those is what writes a
+// test run's name map into its spool.
+if (import.meta.main) Deno.exitCode = await main();

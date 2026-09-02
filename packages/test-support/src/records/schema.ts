@@ -307,6 +307,12 @@ export function localObjectName(context: RunContext): string {
  * and re-running the relay is idempotent: a later attempt's relay
  * re-ships an earlier attempt's artifacts into a collision and ships the
  * re-run jobs' new artifacts as new objects.
+ *
+ * That collision needs both attempts to land in one partition, and the
+ * partition comes from `runStartedAt`, which GitHub reports per attempt.
+ * Two attempts separated by a UTC midnight therefore compute different
+ * partitions, and the earlier attempt's artifacts are stored a second
+ * time under the later day rather than colliding.
  */
 export function ciObjectName(options: {
   runStartedAt: string;

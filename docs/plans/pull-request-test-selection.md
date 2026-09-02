@@ -211,15 +211,11 @@ scores every item-level identity, estimates every item's cost, packs the
 result into five lanes, and writes one manifest object into the store. It
 writes nothing into git.
 
-**The manifest selector** is a trusted reusable workflow referenced from
-the default branch. Before pull-request lanes start, it creates or recovers
-one create-only pin object for the workflow run. The pin embeds the selected
-manifest or records an explicit unselected result.
-
 **The lane runner** is `tasks/ci-lane.ts`. The five pull-request jobs all
-run it, passing their lane number. It fetches the pinned manifest, reads
-the working tree through the topology, adjusts the plan for what this
-particular pull request changed, works out which batches belong to its own
+run it, passing their lane number. It resolves the manifest from the date
+on the commit it has checked out, reads the working tree through the
+topology, adjusts the plan for what this particular pull request changed,
+works out which batches belong to its own
 lane, sets up the capabilities those batches need, runs them, and records
 the results the same way every other job in this repository does.
 
@@ -366,7 +362,15 @@ why that has to be literal. `"changed"` means an item runs when the pull
 request touches a file the item covers; the per-package type check is the
 natural user, because the store already records one `typecheck` identity
 per package group and the mapping from a changed file to a package is
-direct. Absent the field, the suite is selected purely on value.
+direct.
+
+Answering "what does this item cover" belongs to the suite, because a
+unit that is not a path is one only its suite can map a diff onto. A
+suite whose units are files needs to say nothing: the diff naming the
+file is the whole of the question. A suite whose units are type-check
+groups or binaries maps the diff itself, and a suite that maps it wrongly
+runs too much or too little rather than reporting anything, so the answer
+errs toward running. Absent the field, the suite is selected purely on value.
 
 The `always` set is deliberately tiny, and every member of it is a gate
 whose failure means the tree is broken rather than that one test is
@@ -398,6 +402,8 @@ table is the migration's checklist.
 | `pattern-integration-on` | the server-execution ON arm | `server-execution` | `deno`, `toolshed-baked-on`, `browser` |
 | `pattern-reload` | `Pattern Reload Integration Tests` | — | `deno`, `local-dev-servers`, `browser` |
 | `pattern-unit` | `Pattern Unit Tests (1..4)` | — | `deno`, `cf`, `compile-cache` |
+| `binaries` | the compile inside `Build Binary (toolshed)` and the two beside it | — | `deno` |
+| `binaries-on` | the compile inside `Build Binary (toolshed, server-execution ON shell)` | `server-execution` | `deno` |
 
 When server execution becomes the default, the unmarked
 `package-integration` and `pattern-integration` suites change their commands
@@ -430,8 +436,40 @@ adding a new test. The existing rule that the skip registry must be empty
 when server execution becomes the default remains unchanged.
 
 The build jobs (`Build Binary (toolshed)` and the three beside it) do not
-become suites. They are not tests; they are setup, and they become
-capability providers. The deploy and attestation jobs stay exactly as they
+become suites for the reason they exist today. They are not tests; they
+are setup, and as setup they become capability providers.
+
+They do become suites for a different reason. A pull request runs its
+servers and its command line from source and compiles nothing, so a
+compile that breaks would be found on `main`, after the change that broke
+it has merged — where today it is caught before it lands. So `binaries`
+makes each shipped binary a unit whose test is that it still compiles,
+and `binaries-on` does the same for the toolshed under the
+server-execution define, which is the same build in a different
+configuration and therefore a variant of it rather than a second test.
+
+Every one of those builds passes `--no-check`, so this is not a second
+type check: `deno task check` owns that. What a compile catches that
+nothing else does is resolving the whole import graph from an entry
+point, bundling the browser shell, and embedding each `--include`d asset
+from a path that has to still exist.
+
+Nothing forces a build to run. A binary the store has never seen is
+unknown and therefore mandatory, so each is built once; after that it
+sits at the value floor until it catches something. When a compile does
+break, `main` catches it, and a `main` catch is weighted half again for
+being exactly the escape this system exists to stop — one of them lifts a
+build from the floor to several times it, which is enough to be chosen
+against a corpus where almost nothing has ever failed.
+
+The alternative was a map from changed paths to the binaries they can
+break. It is the kind of transcribed table [sharding stops being written
+down](#sharding-stops-being-written-down) exists to delete: a compile
+reaches the whole import graph from an entry point, no short list
+describes that, and the list would go stale the first time an import
+moved. The cost of leaving it out is that the first compile to break
+reaches `main`, which is the trade this design makes everywhere else and
+is what the feedback loop then closes. The deploy and attestation jobs stay exactly as they
 are, since they only ever ran on `main`.
 
 **`cli-fuse` carries the fine granularity the rest of this depends on.**
@@ -492,6 +530,30 @@ need: its job downloads no binary and starts nothing, because
 chosen port offset. Calling that `toolshed` would be wrong, and a lane
 that opened a Toolshed server for it would have paid for the wrong thing
 and still failed.
+
+### What a workspace member's own task decides
+
+A member's test task cannot be handed a subset of its own files: almost
+every one of them lists its own paths, so appending more would add to
+what runs rather than restrict it. What the task does carry is everything
+else a run needs — the permissions, `--no-check`, a fake-clock preload,
+an `ENV` assignment in front — so the topology reads the task for those
+and replaces its paths with the chosen ones.
+
+Thirty-two of the forty-seven members are readable that way, which makes
+1,342 test files individually selectable. The rest are one unit each and
+run whole, which is what every member does today. A member whose task is
+written as a dependency list resolves through it to the `deno test`
+underneath, and the one command substitution the workspace writes —
+naming the running Deno in an `--allow-run` list — is resolved rather
+than treated as a shell metacharacter, so neither shape costs a member
+its granularity.
+
+Two things a member's own `deno test` would apply are applied during
+enumeration instead: the task's `--ignore` globs and the member's
+`exclude` list. Deno filters discovered modules through both and an
+explicit path through neither, so a file arriving as a positional
+argument would otherwise run in spite of being excluded.
 
 ### Sharding stops being written down
 
@@ -853,18 +915,25 @@ being imposed.
 - [x] The preload reads a skip list keyed by registering file and name,
       and registers a listed bare `Deno.test` as ignored rather than
       dropping it.
-- [ ] `@commonfabric/test-support` gains a `describe` and `it` that
+- [x] `@commonfabric/test-support` gains a `describe` and `it` that
       re-export the real ones, track the enclosing describe chain, and
       route a listed `it` through `it.ignore`. The root import map points
       `@std/testing/bdd` at it and the real module at a second specifier.
-      No test file's own import changes.
-- [ ] Every `deno test` suite in the topology passes the preload, appended
+      No test file's own import changes. A frame between the test file
+      and `describe` moves the JUnit class name onto the re-export, the
+      same consequence wrapping `Deno.test` already has, so ingestion
+      declines a class name ending in either module and takes the file
+      from the preload's name map.
+- [x] Every `deno test` suite in the topology passes the preload, appended
       the way `--junit-path` already is.
 - [ ] `cost` and the packing passes key on identities, with
       `fileOverhead(file)` fitted from the lane runner's records and the
       density pass sorting by marginal cost.
-- [ ] `command()` returns one invocation per file with its skip list, and
-      omits a file whose every identity is skipped.
+- [x] `command()` returns one invocation per file with its skip list, and
+      omits a file whose every identity is skipped. A suite's runner takes
+      several files at once, so the skip list is per file and the
+      invocation is per package; module load is charged per file either
+      way, which is what `unitOverhead` measures.
 - [ ] The independence flag: a `main`-side check that runs an identity as
       the only test in its file, a rotating slice per run plus every
       identity whose file changed, the flag carried in the manifest, and
@@ -967,8 +1036,11 @@ compile-time define baked into the browser shell inside the binary, and a
 source run cannot reproduce that. So that capability has a different
 provider: restore the binary from the Actions cache if the key hits, and
 build it in place if it does not. The lane workflow carries one fixed
-`actions/cache` step covering a single directory, keyed on a hash of the
-sources the binaries are built from. That step is in the workflow rather
+`actions/cache` step covering `.ci-cache`, keyed on a hash of the sources
+the binaries are built from. Everything a lane wants to keep between runs
+sits under that one directory — the built binaries, and the pattern
+compile byte cache — because one step covering one directory is what
+keeps the workflow independent of what the lane turns out to need. That step is in the workflow rather
 than in the runner because the cache service is only reachable through the
 action, and it is written once and never touched again.
 
@@ -1071,6 +1143,36 @@ length of about half that, and an object has to fit in a string both to be
 written and to be read. The compactor is implemented and handles days at
 that size; provisioning it is a small infra change and this plan
 recommends doing it, but does not depend on it.
+
+**A re-run's earlier attempts can be stored a second time.** An object's
+day partition comes from the run's start time, and GitHub reports that
+per attempt rather than per run: across four re-run builds in this
+repository every one reported a later start for its second attempt, one
+of them nearly six hours later. Artifacts are scoped to the run rather
+than to the attempt, so a later attempt's relay re-ships the earlier
+attempts' as well as its own. Where two attempts fall either side of a
+UTC midnight their partitions differ, so the re-shipped records are
+written as a second object under the later day rather than colliding with
+the first, and the publisher folds both because it keys on the object
+name. A survey of five days of the store, 68,822 objects, found no run
+identifier written into two partitions, so this has not happened yet.
+
+What it would distort is narrower than it first looks, and the rest of
+this paragraph is inference rather than measurement. Catches are safe by
+construction, because each is attributed to the pair of the commit and
+the source that saw it. Costs are a percentile over many observations and
+would barely move. Duplicating a report doubles its failures and its runs
+together, so a ratio over both is largely unmoved — but the report that
+gets duplicated is the earlier attempt's, which is the one somebody
+re-ran because it failed, so `churn` would carry those failures twice
+against run counts that are only partly duplicated.
+
+Fixing it means settling something this plan should not settle on its
+own. The partition wants to be stable across attempts, while a record's
+context honestly wants the attempt's own start, and one field is doing
+both jobs today. The change reaches `ciObjectName`, the compactor, and
+[the record spec](../specs/test-records.md), so it belongs to the store
+rather than to selection, and it is its own piece of work.
 
 ## Scoring
 
@@ -1783,36 +1885,32 @@ draw's seed comes from the manifest. `plan()` lives in
 lane runner, and is straightforwardly testable offline against a recorded
 manifest.
 
-One small job does sit before the pull-request lanes: `select-manifest`.
-It selects an input rather than computing a plan. The job calls a reusable
-workflow by its default-branch ref. That workflow checks out no repository
-code and obtains a Workload Identity credential whose `objectCreator`
-access is restricted to `labs/test-selection/v1/pins/`.
+Re-running a single failed lane later must not shuffle the work. The lane
+resolves the manifest as *the newest one generated at or before the
+commit under test was made*, reading the committer date out of the
+checkout.
 
-The selector first reads the public create-only pin at
-`pins/<workflow-run-id>.json.gz`. If it exists, the job validates and reuses
-it. On the first attempt only, an absent pin makes the job list the public
-manifest objects once and choose the object with the newest server-assigned
-`timeCreated`. It writes one compressed envelope containing the exact
-source object name and generation and the complete validated manifest. No
-objects or a failed listing produces an envelope with an explicit
-unselected result. On a later attempt, an absent pin also produces
-unselected; it never causes a fresh manifest selection.
+What the moment has to be is stable rather than exact: every lane of a
+run has to agree, and every later attempt has to agree with the first.
+Nothing about the run satisfies that. GitHub reports `run_started_at`
+per attempt rather than per run — measured across four re-run builds,
+every one reported a later start for its second attempt, one of them
+nearly six hours later — so an attempt resolving at its own start would
+pick up whatever manifest is newest by then. Its five lanes would agree
+with one another and disagree with the attempt before them, which is
+worse than either: a test the first attempt placed in the lane that
+failed can move to a lane the re-run does not run, leaving `Status` green
+over a set no attempt ran whole.
 
-The pin object is retained beyond the full period in which GitHub permits
-a workflow rerun. Embedding the manifest means the source manifest may
-expire without changing a rerun. The selector succeeds only after it can
-read an existing valid pin or atomically create a new one. A read or create
-failure stops dependent lanes. Pull-request jobs hold no credential that
-can write the pin prefix, so they cannot replace its contents. The short
-selector job adds startup latency, but the durable pin makes the selected
-input stable without assuming that GitHub's clock and Cloud Storage's clock
-are ordered.
-
-The measured manifest compresses to 1.05 megabytes, so this stores one
-additional copy per pull-request workflow run until its rerun period ends.
-That bounded storage is the cost of keeping both the selection and its
-bytes stable after the source manifest's ordinary 30-day retention ends.
+The commit is stable by construction, and it needs nothing from the
+service that scheduled the run — no credential, no request, and no
+failure path where the request is refused. It is also the same value on a
+workstation as in a job, so `plan --dry-run` answers the question a lane
+would answer instead of resolving against the clock. And it is the better
+anchor on its own terms: the manifest worth reading is the one that was
+current when the tree under test came into being. The committer date
+rather than the author's, because a rebased or cherry-picked commit keeps
+the date it was first written.
 
 ## What the census can project
 
@@ -1886,7 +1984,6 @@ never overwritten — under a new dataset area beside the records:
 ```text
 labs/test-selection/v1/manifest-<ISO 8601 timestamp>-<ULID>.json.gz
 labs/test-selection/v1/state/<yyyy-mm-dd>-<ULID>.json.gz
-labs/test-selection/v1/pins/<workflow-run-id>.json.gz
 ```
 
 Write-once naming is not a stylistic choice: the store's writer
@@ -1894,13 +1991,15 @@ credentials hold `objectCreator` and nothing else, cannot overwrite, and
 that is the property that makes the whole store trustworthy. So there is
 no `current.json`. The leading timestamp keeps object names
 chronologically useful, but it does not decide publication order. When a
-workflow has no manifest pin, its selector lists object metadata once,
-takes the object with the newest server-assigned `timeCreated`, using the
-object name to break a tie, and writes a create-only pin containing that
-object's name, generation, and validated manifest contents. This listing is
-allowed only on attempt one; a later missing pin records unselected. Lanes
-and later attempts fetch the pin rather than resolving "newest" or
-depending on the source manifest's retention.
+lane resolves a manifest, it lists object metadata once and takes the
+newest object generated at or before the commit under test, using the
+object name to break a tie. A manifest published while the run is going
+is generated after that date, so it cannot change the answer, and every
+lane and every later attempt reads the same commit and reaches the same
+object. What the answer does depend on is retention: the manifests a
+commit can resolve have to outlive the window in which that run may be
+re-run, which is a retention setting on the bucket rather than anything
+this reads.
 
 The object carries:
 
@@ -2079,9 +2178,8 @@ The publisher needs a writer credential for its own prefix. That is a new
 service account with `objectCreator` on `labs/test-selection/`, reached
 through a Workload Identity provider pinned to exactly this workflow file
 on `main` — the same pattern, and the same security argument, as the relay
-already uses. The trusted selector workflow also needs create-only access,
-restricted to `labs/test-selection/v1/pins/`. These are infra-repository
-changes under `tofu/test-records`, and they must land and be applied before
+already uses. Nothing else needs a credential: a lane reads the manifest
+it resolves and writes nothing. These are infra-repository changes under `tofu/test-records`, and they must land and be applied before
 these workflows can write. They are the prerequisites [the work](#the-work)
 has that are not ours.
 
@@ -2092,11 +2190,9 @@ direction for a system nothing should gate on.
 
 ## The lane job
 
-The preceding `select-manifest` job checks out no repository code. It
-recovers or creates the public run-scoped manifest pin through the trusted
-reusable workflow. It completes successfully only after that create-only
-object exists and validates. The lane derives its fixed pin path from the
-workflow run id:
+Nothing runs before the lanes. Each one resolves the manifest from the
+commit it has checked out, so five lanes reach the same answer without a
+job to tell them what it is:
 
 ```yaml
 pr-tests:
@@ -2106,7 +2202,6 @@ pr-tests:
     !contains(github.event.pull_request.labels.*.name, 'ci: full')
   runs-on: ubuntu-latest
   timeout-minutes: *lane-job-timeout
-  needs: select-manifest
   env:
     CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
   permissions:
@@ -2127,14 +2222,13 @@ pr-tests:
       uses: ./.github/actions/deno-install
     - name: ♻️ Restore the built-binary cache
       uses: actions/cache@v4
-      with: { path: .ci-cache/binaries, key: ... }
+      with: { path: .ci-cache, key: ... }
     - name: 🧪 Run the lane
       timeout-minutes: *lane-work-timeout
       run: >-
         deno run -A tasks/ci-lane.ts
         --lane ${{ matrix.lane }} --of 5
         --base origin/${{ github.base_ref }}
-        --manifest-pin-run "$GITHUB_RUN_ID"
     - name: 📤 Ship test records
       if: always()
       uses: ./.github/actions/test-records-ship
@@ -2192,9 +2286,9 @@ alternate execution of one test.
 
 What the runner does, in order:
 
-1. Fetch the run-scoped pin and its embedded manifest, then fetch the
-   attribution map that manifest names. An explicit unselected pin or a
-   lane-side fetch failure takes the fallback (see [Failure
+1. Resolve the manifest from the commit's date and fetch it, then fetch
+   the attribution map that manifest names. No manifest at or before that
+   date, or a fetch failure, takes the fallback (see [Failure
    modes](#failure-modes)).
 2. Enumerate every suite against the working tree.
 3. Compute the diff against the merge base, and resolve the changed source
@@ -2785,16 +2879,15 @@ a way forward.** The job summary names every item the lane ran and why it
 was chosen — the catches behind its score, the change that made it
 mandatory, or the exploration draw — which makes "this is not mine" a fast
 conclusion rather than a guess. `--explain` answers the same question for
-any identity. Re-running the lane runs the same set, because the exact
-manifest object is pinned to the workflow run. And if none of that settles
-it, `ci: full` runs everything.
+any identity. Re-running the lane runs the same set, because the manifest
+is pinned to the commit's date. And if none of that settles it,
+`ci: full` runs everything.
 
 ## Failure modes
 
 | What goes wrong | What happens |
 | --- | --- |
 | The store is unreachable from a lane | The lane runs the mandatory set plus a deterministic slice of the corpus sized to its budget, prints that it is running unselected, and passes or fails on that. Pull requests keep flowing. |
-| The selector cannot read or create the run's storage pin | The selector fails and dependent lanes do not start. Pull-request jobs have no credential for the pin prefix. Re-running the selector recovers or creates the pin before lanes start. |
 | The publisher has not run for a day | Lanes use the last manifest. Selection quality decays slowly; nothing fails. |
 | The manifest is malformed or a newer schema | Rejected whole, treated as absent, same path as unreachable. |
 | A selected item no longer exists in the tree | Dropped with a line in the summary. A renamed test is simultaneously an unknown item, so it runs anyway. |
@@ -2802,8 +2895,8 @@ it, `ci: full` runs everything.
 | A record's variant or record surface contradicts its batch | Kept as written and named in the lane summary. The identity then belongs to no suite, so the store half of the drift guard fails on the next `main` run. |
 | A suite gains a new variant with no records | Every available item in that variant is mandatory until a successful full `main` run accounts for every enumerated item under that exact variant, the store drift guard passes, and the next publisher cycle includes the run. Other variants do not stand in for it. |
 | A variant deliberately skips a file or leaf | The topology reads the existing skip registry and the manifest reports the test as unavailable with its phase and reason. It is not unknown or a coverage target. Removing the skip makes it mandatory until `main` records it. |
-| One item is bigger than a lane's planned budget | It gets a lane to itself, up to the hard five-minute bound. Bigger than that and it is listed as unschedulable in the manifest and reported; the 60-second ratchet is the fix. |
-| The mandatory set alone exceeds the budget | The lane runs it anyway and over-runs, up to the five-minute step bound. The summary says by how much. |
+| One item is bigger than a lane's planned budget | It gets a lane to itself, up to the hard five-minute bound. Bigger than that, a mandatory item is still placed and its lane over-runs, while a discretionary one is listed as unschedulable in the manifest and reported; the 60-second ratchet is the fix. |
+| The mandatory set alone exceeds the budget | The lane runs it anyway and over-runs, past the five-minute step bound where the set demands it. The summary says by how much, which is what argues for raising the bound. |
 | A covered package has no baseline, or none from an ancestor of the merge base | The lane reports the comparison and does not fail. The next full `main` run supplies one. |
 | A covered package gains a test needing a browser or a server | It goes in the package's `browser-test` half, which the gate does not measure, so the Deno-only half keeps its gate. A package with no such half yet names one. |
 | A covered package's measured set grows expensive | Reported in the publisher's summary and by `deno task test-selection coverage`. Nothing is excluded automatically; somebody splits the tests or adds a line to the exclusion list. |
@@ -2811,8 +2904,9 @@ it, `ci: full` runs everything.
 | A change touches more than two covered packages | The per-package gate does not run at all, and `Status` says so. The full run on `main` still measures every package, and a rise it finds is reported back to the pull request. |
 | A lane dies without uploading its coverage | `Status` is already failing for the dead lane. It says the coverage total is incomplete rather than gating on a partial one. |
 | A lane exceeds five minutes repeatedly | The correction factors rise on the next publisher run and less is packed. If it persists, the publisher's summary shows the miss and somebody looks. |
+| Two attempts of one run straddle a UTC midnight | The later attempt's relay writes the earlier attempt's records a second time, under the later day, and the publisher folds both. Not observed in the store so far; see [What the store is missing](#what-the-store-is-missing). |
 | A fork pull request | Works unchanged. The manifest is world-readable, and the existing member gate decides whether the fork's records ship. |
-| A re-run of one failed lane with its pin available | Runs the same set from the manifest embedded in the workflow run's storage pin. A deleted pin on a later attempt creates and uses an explicit unselected pin instead of selecting newer data. |
+| A re-run of one failed lane | Runs the same set, because the manifest is resolved by the commit's date, which no attempt changes. |
 | Both `pr-tests` and `full-tests` skip | `Status` fails. Its second clause requires one of them to have succeeded, so a pull request that ran no tests can never report green. |
 | An `always` item is red on `main` | Every pull request fails on it, deliberately, and the job summary says it was already red and links the `main` run. See [Two rules that keep a test out](#two-rules-that-keep-a-test-out). |
 | `main` is broken and stays broken | Every test failing in the latest `main` run leaves the selectable set, so pull requests are unaffected while it is fixed. They come back on their own. |
@@ -2834,16 +2928,6 @@ Write access to the manifest prefix is one service account reachable only
 through a Workload Identity provider pinned to one workflow file on
 `main`, exactly as the relay is. Nothing else in the organization can
 write there, and the account cannot read, list, overwrite, or delete.
-
-The pin prefix has a separate create-only principal restricted to the
-trusted default-branch reusable selector workflow and the Labs repository's
-immutable GitHub `repository_id`. The workflow derives the repository and
-workflow run id from GitHub's trusted context rather than caller inputs.
-Pull-request jobs and callers from another repository cannot obtain that
-credential. The pin reader validates the envelope whole, including the
-workflow run id, selected source name under the trusted manifest prefix,
-source generation as a canonical digits-only decimal string, and embedded
-manifest, before using it.
 
 The lane runner treats the manifest as untrusted input and validates it
 whole. The only field that reaches a shell is a suite identifier, which is
@@ -3076,12 +3160,12 @@ three reasons that look like they force one turn out not to.
 The publisher needs a writer credential: a `test-selection` service
 account with `objectCreator` on the manifest and state prefixes and a
 Workload Identity provider pinned to `.github/workflows/test-selection.yml`
-on `main`. The selector needs a separate principal with `objectCreator`
-restricted to the pin prefix and pinned to its trusted reusable workflow
-and the Labs repository's immutable GitHub `repository_id`. Manifest and
-state objects expire after 30 days. Pin objects have a separate lifecycle
-rule that retains them beyond GitHub's workflow rerun period. The same
-infra change provisions the compactor principal. These are
+on `main`. Manifest and state objects expire after 30 days, and that
+lifecycle rule is what a lane's resolution rests on: a commit resolves the
+newest manifest at or before its own date, so the manifests a run may need
+have to outlive the window in which GitHub still permits that run to be
+re-run. Where the rerun window is the longer of the two, the retention is
+what to raise. The same infra change provisions the compactor principal. These are
 infra-repository changes under `tofu/test-records`, and they must land and
 be applied before anything here can publish. They are predecessors rather
 than a reason to split this work, and they are the only hard ordering
@@ -3161,18 +3245,13 @@ answers somewhere people can see them.
       that artifact's context and object name. A later relay of an earlier
       attempt must collide with its first shipment even when a rerun
       crossed a date boundary.
-- [ ] Add a `select-manifest` job that calls a trusted reusable workflow by
-      its default-branch ref and checks out no pull-request code. Give its
-      Workload Identity principal create-only access restricted to the pin
-      prefix. Recover the public run-id pin or, on attempt one only, list
-      manifests once and create a compressed envelope containing the source
-      name, generation, and complete validated manifest. Create an explicit
-      unselected envelope when listing fails or finds nothing. On a later
-      attempt with no pin, create unselected rather than selecting again.
-- [ ] Retain pin objects beyond GitHub's full workflow rerun period. Fail
-      the selector and do not start lanes when a pin cannot be read or
-      created. Pull-request jobs receive no write credential for the pin
-      prefix and derive the public pin path only from their workflow run id.
+- [ ] Hold manifest retention above the window in which GitHub still
+      permits a run to be re-run. A lane resolves the newest manifest at or
+      before the commit's date, so the answer is the same for every lane
+      and every later attempt as long as the object it names still exists.
+      A manifest that expires between an attempt and its re-run is the one
+      way the two can disagree, and the lifecycle rule is where that is
+      settled rather than in anything a lane reads.
 - [ ] Provision the storage-generated arrival journal. Assign contiguous
       positions and deduplicate object and generation and logical
       submission identity atomically before acknowledging notifications.
@@ -3231,13 +3310,18 @@ The topology goes in, and both `main` and the `ci: full` label start using
 it. Nothing here depends on selection, so this part can be finished and
 exercised on the branch on its own.
 
-- [ ] `tasks/test-topology.ts` and one module per suite, including each
+- [x] `tasks/test-topology.ts` and one module per suite, including each
       suite's declared record surfaces and optional variant, and typed
       record-surface descriptors for every JUnit output. `locate()`
       distinguishes item identities from overlapping suite-level
       measurements, and returns at most one item for an identity that
       several arms or entry points can run. Add `tasks/ci-capabilities.ts`.
-- [ ] The server-execution variant suites consume
+      Twenty suites hold 2,360 units. The repository gates are two
+      suites rather than one, because `mandatory` belongs to a suite and
+      the `always` set has to stay tiny: `repo-gates` holds formatting,
+      linting and the drift guard, and `repo-checks` holds the rest of
+      what the `Check` job runs, selected on value like anything else.
+- [x] The server-execution variant suites consume
       `tasks/server-execution-on-skips.ts`: whole-file entries are declared
       unavailable and omitted from enumeration, while step entries exclude
       only the named leaf identity from unknown and coverage rules.
@@ -3265,10 +3349,21 @@ exercised on the branch on its own.
       part. `packages/cli/test/integration-sections.test.ts` holds the
       dispatch table to that property, and to every step being scheduled
       by some group rather than only by name.
-- [ ] `tasks/check-test-topology.ts`, both halves, wired into
+- [x] `tasks/test-topology/binaries.ts`: each shipped binary is a unit
+      whose test is that it still compiles, and the toolshed under the
+      server-execution define is a variant of that rather than a second
+      test. A pull request runs its servers and its command line from
+      source and compiles nothing, so without these a broken compile
+      would be found only on `main`.
+- [x] `tasks/check-test-topology.ts`, both halves, wired into
       `repo-gates`, with exact variant matching and one source-item claim
-      allowed per variant.
-- [ ] Extract the part of `tasks/test-records-gather.ts` that reads records,
+      allowed per variant. Its first run found ten test files that
+      nothing in this repository executes; they are recorded with the
+      reason each runs nowhere and reported rather than failed on, so a
+      new unclaimed surface still fails. The five projects under
+      `packages/deno-web-test/test/` that the harness drives are declared
+      as the fixtures they are.
+- [x] Extract the part of `tasks/test-records-gather.ts` that reads records,
       ingests JUnit, and applies a declared variant as the shared gather
       function. Its command-line entry point and `tasks/ci-lane.ts` both
       use it. The lane runner gives every batch execution fresh spool and

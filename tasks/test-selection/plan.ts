@@ -83,11 +83,13 @@ export interface Plan {
   overBudgetSeconds: number;
 
   /**
-   * Identities no lane can hold. One costing more than a lane's planned
-   * budget is given a lane to itself and allowed to run up to the hard
-   * bound; one costing more than the hard bound cannot run at all, and
-   * scheduling it would only time the lane out. It is reported instead,
-   * and the sixty-second rule is where such a test gets split.
+   * Discretionary identities no lane can hold. One costing more than a
+   * lane's planned budget is given a lane to itself and allowed to run up
+   * to the hard bound; one costing more than the hard bound would only
+   * time its lane out, so it is reported instead, and the sixty-second
+   * rule is where such a test gets split. A mandatory identity is never
+   * here, however expensive: it is placed, and `overBudgetSeconds` is
+   * what says how far past its budget that put a lane.
    */
   unschedulable: UnschedulableEntry[];
 }
@@ -352,13 +354,16 @@ export function plan(input: PlanInput): Plan {
     byKey.set(testIdentityKey(entry.test), entry);
   }
 
-  // An identity whose own measured time is past the hard bound cannot run
-  // in any lane, so it is reported rather than placed in one that would
-  // then be killed at its bound. Its suite's correction is applied first,
-  // because that is what the time will actually be.
+  // An identity whose own measured time is past the hard bound shares a
+  // lane with nothing, so a discretionary one is reported rather than
+  // placed in a lane that would then be killed at its bound. A mandatory
+  // one is placed anyway: the change is not tested without it, and a lane
+  // running long says so, where dropping it leaves the run reporting a
+  // pass over a test that never ran. Its suite's correction is applied
+  // first, because that is what the time will actually be.
   const unschedulable: UnschedulableEntry[] = [];
-  const beyondBound = new Set<string>();
   for (const entry of manifest.entries) {
+    if (input.mandatory.has(testIdentityKey(entry.test))) continue;
     // What an empty lane would pay for it: its own corrected time plus
     // every overhead and setup that lane would open. Charging only the
     // test's own time would schedule an identity whose suite, unit, and
@@ -368,12 +373,13 @@ export function plan(input: PlanInput): Plan {
     // That whole figure is what is reported, so whoever reads it is told
     // the number the bound was compared against.
     unschedulable.push({ test: entry.test, suite: entry.suite, cost });
-    beyondBound.add(testIdentityKey(entry.test));
   }
 
   // What must not run, unless the change touches what it covers, in which
   // case it is very likely a fix and must be allowed to prove itself.
-  const excluded = new Set<string>(beyondBound);
+  const excluded = new Set<string>(
+    unschedulable.map((entry) => testIdentityKey(entry.test)),
+  );
   for (const held of manifest.withheld) {
     const key = testIdentityKey(held.test);
     if (!input.mandatory.has(key)) excluded.add(key);
@@ -399,10 +405,6 @@ export function plan(input: PlanInput): Plan {
     cost: number;
   }[] = [];
   for (const [key, reason] of input.mandatory) {
-    // Not even a mandatory identity is placed past the hard bound: the
-    // lane would be killed and the run would report a timeout rather than
-    // the test.
-    if (beyondBound.has(key)) continue;
     // An identity the manifest has never heard of is exactly the one that
     // must run: records exist only for tests that ran, and a renamed test
     // is unknown until an alias lands. Dropping it here would break the

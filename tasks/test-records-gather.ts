@@ -82,20 +82,38 @@ export function headCommitOfEvent(payload: unknown): string | undefined {
   return typeof sha === "string" && sha.length > 0 ? sha : undefined;
 }
 
-export interface GatherOptions {
-  out: string;
-  job: string;
-  shard?: string;
-  variant?: string;
-  junit: JUnitSpec[];
+/** What reading one execution's records needs. */
+export interface CollectOptions {
+  /** The spool the producers wrote their fragments into. */
   spoolDir?: string;
-  env?: Environment;
+
+  /** The JUnit reports to ingest, each with the surface it carries. */
+  junit: readonly JUnitSpec[];
+
+  /**
+   * The configuration these records were produced in. Every record takes
+   * this value, replacing whatever a producer supplied, which is what
+   * makes a variant a property of the suite that ran rather than of the
+   * producer that reported.
+   */
+  variant?: string;
 }
 
-/** Gathers the spool and JUnit files into the artifact directory. */
-export async function gather(options: GatherOptions): Promise<void> {
+/**
+ * The records one execution produced: what its producers spooled, and
+ * what its JUnit reports name, with the declared variant applied.
+ *
+ * This is the whole of what the shipping step and the lane runner share.
+ * The shipping step gathers one job's spool at the end; the lane runner
+ * gathers each batch execution as it finishes, before another execution
+ * can reuse a runner-owned path. Neither is a second way of applying a
+ * variant, which is the point of there being one function.
+ */
+export async function collectRecords(
+  options: CollectOptions,
+): Promise<TestRecord[]> {
   if (options.variant !== undefined && options.variant.length === 0) {
-    throw new Error("--variant must not be empty");
+    throw new Error("a declared variant must not be empty");
   }
   const records: TestRecord[] = [];
   // The registration preload leaves a name-to-file map in the spool, and
@@ -145,6 +163,26 @@ export async function gather(options: GatherOptions): Promise<void> {
   if (options.variant !== undefined) {
     for (const record of records) record.test.v = options.variant;
   }
+  return records;
+}
+
+export interface GatherOptions {
+  out: string;
+  job: string;
+  shard?: string;
+  variant?: string;
+  junit: JUnitSpec[];
+  spoolDir?: string;
+  env?: Environment;
+}
+
+/** Gathers the spool and JUnit files into the artifact directory. */
+export async function gather(options: GatherOptions): Promise<void> {
+  const records = await collectRecords({
+    ...(options.spoolDir === undefined ? {} : { spoolDir: options.spoolDir }),
+    junit: options.junit,
+    ...(options.variant === undefined ? {} : { variant: options.variant }),
+  });
 
   const env = options.env ?? Deno.env.get;
   const facts: JobFacts = {
