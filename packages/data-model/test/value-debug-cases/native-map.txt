@@ -1,0 +1,13 @@
+{
+  empty: new Map(),
+  "string keys": new Map([["a", 1], ["b", [2]]]),
+  "object key": new Map([[{ k: 1 }, "v"]]),
+}
+
+{
+  empty: /Map(...),
+  "string keys": /Map(...),
+  "object key": /Map(...)
+}
+
+{empty:/Map(...),"string keys":/Map(...),"object key":/Map(...)}
