@@ -23,6 +23,12 @@ import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 
 /**
+ * Nesting depth a debug string renders to. TODO(danfuzz): Make this
+ * adjustable by the caller, once there is a caller that wants to.
+ */
+const DEBUG_STRING_MAX_DEPTH = 10;
+
+/**
  * Returns the class name of the given object, or `<anonymous>` when it has
  * none. A class with no name reports it as the empty string, which counts.
  */
@@ -584,12 +590,6 @@ class DebugStringifier {
     return `/${tag.replace(/@.*$/, "")}(...)`;
   }
 }
-
-/**
- * Nesting depth a debug string renders to. TODO(danfuzz): Make this
- * adjustable by the caller, once there is a caller that wants to.
- */
-const DEBUG_STRING_MAX_DEPTH = 10;
 
 /**
  * Renders the debug-string form of the given value with optional indentation,
