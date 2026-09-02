@@ -1,4 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
 import { join } from "@std/path";
 import {
   buildFoldPlan,
@@ -710,6 +711,43 @@ Deno.test("fold: a selected node and a search match map onto the summary row", (
     "added",
     "a shown match keeps its source columns",
   );
+});
+
+Deno.test("fold: a collapsed file contributes one searchable match", () => {
+  const diff = [
+    "diff --git a/a.ts b/a.ts",
+    "--- a/a.ts",
+    "+++ b/a.ts",
+    "@@ -1,2 +1,2 @@",
+    "-old needle",
+    "+new needle",
+    " keep needle",
+    "diff --git a/b.ts b/b.ts",
+    "--- a/b.ts",
+    "+++ b/b.ts",
+    "@@ -1 +1,2 @@",
+    " keep",
+    "+needle",
+    "",
+  ].join("\n");
+  const s = foldSession(diff);
+  press(s, "f");
+  press(s, "/");
+  for (const ch of "needle") press(s, ch);
+  press(s, "enter");
+
+  expect(s.view().matches?.length).toBe(2);
+  expect(s.view().currentMatch).toBe(0);
+
+  press(s, "n");
+  const shown = s.view().matches?.[s.view().currentMatch];
+  assert(shown, "the shown file's match is focused");
+  expect(
+    s.displayDoc().lines[shown.line].text.slice(shown.start, shown.end),
+  ).toBe("needle");
+
+  press(s, "N");
+  expect(s.view().currentMatch).toBe(0);
 });
 
 Deno.test("fold: F / E / T / M are refused on a non-diff view", () => {
