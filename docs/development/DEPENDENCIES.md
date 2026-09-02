@@ -438,9 +438,13 @@ run the complete CLI test task:
 
 ### SQLite
 
-Six workspace members pin `@db/sqlite` exactly: `memory`, `toolshed`,
-`state-inspector`, `cf-harness`, `cli`, and `piece`. They must resolve one
-version. The memory package also repeats that version in
+Seven workspace members pin `@db/sqlite` exactly: `memory`, `toolshed`,
+`state-inspector`, `cf-harness`, `cli`, `piece`, and `runner`. They must
+resolve one version. The `runner` pin serves one integration test — the injected on-disk
+source (`docs/specs/sqlite-builtin/03-database-sources.md` §03.3) is only
+exercisable by seeding a real SQLite file, and the test proving `db.query`
+labels such a read belongs with the builtin it covers. No `runner/src` file
+imports it, and the runner's UNIT lane still seeds no files. The memory package also repeats that version in
 `SQLITE3_RELEASE_VERSION` in
 `packages/memory/v2/sqlite/column-origin.ts`.
 
@@ -451,7 +455,7 @@ the column-origin binding derives the same URL from
 both files creates two independent libsqlite3 images, and passing a prepared
 statement between them can crash the process.
 
-To roll SQLite, update all six import maps and
+To roll SQLite, update all seven import maps and
 `SQLITE3_RELEASE_VERSION` in one change, run `deno install`, and verify:
 
 ```bash
