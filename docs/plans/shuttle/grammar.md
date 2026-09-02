@@ -61,7 +61,9 @@ How a reading is matched says where it holds, and there are three ways.
 `-` and a lone `/` are matched against the whole operand exactly, so
 neither governs a segment: a key named `-` is reachable relatively wherever
 it is not the whole operand. `@scope` and a lone leading `#` are matched
-against the operand's head, so each governs a first segment and is an
+against the operand's head, and each takes the whole operand with it: `cd
+@user/board` refuses rather than moving the scope and descending, and `cd
+#favorites/topics` hands on the whole string as one target. So each is an
 ordinary data character in every later segment that is data — inside a
 piece. A later segment naming a piece is read by the canonical grammar
 instead, which carries both readings itself, so a scope suffix there moves
@@ -73,16 +75,24 @@ besides, so no segment of an operand holds one, and a key that does is
 spelled `~1`, which a reference unescapes and a walk does not.
 
 However a reading is matched, a part no rendering would name back is
-refused at every door. Three steps lose characters between a place and the
+refused at every door. Two steps lose characters between a place and the
 rendering that names it. Reading a rendering back is a parse of a
 reference, which trims the string and drops a trailing empty segment.
-Writing one separates its lines with a newline. And the parse splits the
-piece segment at its last `@` and reads what follows as a scope, which
-reaches the piece and nothing else. So an empty part, one ending in
-whitespace, and one holding a line break are refused wherever they appear,
-a piece holding `@` is refused as well, and a part that merely starts with
-whitespace survives all three and is not. No slug or handle carries an `@`,
-so the piece rule costs the fabric no name it can spell.
+Writing one separates its lines with a newline. Both reach a path segment,
+so an empty segment, one ending in whitespace, and one holding a line break
+are refused, while one that merely starts with whitespace survives and is
+not.
+
+Only the newline reaches a piece. The scope suffix the rendering always
+writes sits between the piece and the end of the string, so the trim takes
+the suffix rather than the piece, and the parse's split at the last `@`
+takes the suffix's own — a piece comes back whole whatever it holds. The
+piece is nonetheless held to more: one that is empty, ends in whitespace,
+or holds an `@` is neither slug nor handle, so its rendering parses and is
+then refused as naming no piece. Refusing those at the door is what keeps
+a place to a name `pwd` can print as a reference somebody can follow, and
+no slug or handle carries an `@`, so it costs the fabric no name it can
+spell.
 
 A segment lifted out of a rendering is an operand in its own right, so
 these readings decide it rather than the key it was printed from.
@@ -104,12 +114,13 @@ match their name; `cd` refuses such a rendering rather than following it.
 
 A place is **result-rooted**, and holds exactly space, piece, path, and
 scope. `cd` refuses a target carrying `#argument`, in every spelling that
-takes one, rather than dropping the suffix silently: a place that could root at the arguments cell would
-leave every later relative read ambiguous about which side of the piece it
-addressed, and the prompt would have to carry the distinction for as long
-as you stood there. Arguments are reached per operand instead —
-`get topics/3#argument`, and `--input` on the `cf` verbs that take it — so
-the choice is one visible token at each use.
+takes one, rather than dropping the suffix silently: a place that could
+root at the arguments cell would leave every later relative read ambiguous
+about which side of the piece it addressed, and the prompt would have to
+carry the distinction for as long as you stood there. Arguments are
+reached per operand instead — `get topics/3#argument`, and `--input` on
+the `cf` verbs that take it — so the choice is one visible token at each
+use.
 
 ## The space root and facets
 

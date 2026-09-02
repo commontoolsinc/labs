@@ -17,8 +17,8 @@
  * words. Shuttle consumes the reference grammar rather than forking it, so a
  * rooted operand's diagnostics come from that layer and reach the reader
  * unaltered — the space-mismatch sentence and the unknown-suffix sentence
- * from `normalizeLLMFriendlyRef`, and the no-piece-handle sentence from
- * `parseReferenceParts`. Each is marked at its case as relayed. When one
+ * from `normalizeLLMFriendlyRef` and `splitArgumentSuffix`, and the
+ * no-piece-handle sentence from `parseReferenceParts`. Each is marked at its case as relayed. When one
  * moves upstream, the fix is to copy the new sentence here, never to match a
  * fragment of it: the whole sentence is what pins that the diagnostic arrives
  * intact, and a substring would let a rewording through that says something
@@ -178,9 +178,11 @@ describe("place", () => {
         //
         // Held fixed, and why: the space, which one connection settles and
         // no operand supplies, and the facet, which is one of two literals.
-        // Everything else varies — both parts a position spells, the scope
-        // now that the rendering carries it and the comparison is no longer
-        // vacuous, and all four doors that admit a position.
+        // Everything else varies, and varies crosswise: both parts a
+        // position spells, each driven through each of the four doors, at
+        // each of the three scopes. Reading back stands at a scope of its
+        // own, so the comparison sees whether the rendering carried the
+        // scope or the reader supplied it.
 
         const MARKS = [
           " ",
@@ -205,7 +207,12 @@ describe("place", () => {
          * part whose ordinary spelling is `head` followed by `tail`.
          */
         function candidates(head: string, tail: string): string[] {
-          const values = [""];
+          // The digit spellings sit here rather than among the marks: what
+          // they exercise is the conversion a path segment goes through,
+          // where a canonical index becomes a number and everything else
+          // stays a string, and a door that skips it disagrees with the
+          // three that do not.
+          const values = ["", "3", "0", "01", "1e21", "-1", "1.5"];
           for (const mark of MARKS) {
             values.push(
               mark + head + tail,
@@ -222,13 +229,19 @@ describe("place", () => {
           let refusedPart = 0;
           let refusedRendering = 0;
 
-          /** Helper for this case, which holds the property over `place`. */
-          function check(place: CurrentPlace, move: Move): void {
+          /**
+           * Helper for this case, which holds the property over `place`,
+           * reading its rendering back from `reader` — a scope the place is
+           * not at, so a rendering that omitted the scope would be filled
+           * with the wrong one rather than silently the right one.
+           */
+          function check(place: CurrentPlace, move: Move, reader: CellScope) {
             if (move.kind !== "moved") {
               refusedPart++;
               return;
             }
             const elsewhere = atSpaceRoot();
+            elsewhere.cd(`@${reader}`);
             if (elsewhere.cd(printedPosition(place)).kind !== "moved") {
               refusedRendering++;
               return;
@@ -238,9 +251,59 @@ describe("place", () => {
           }
 
           const scopes: CellScope[] = ["space", "user", "session"];
+
+          // The matrix. A door is driven for every component rather than
+          // for whichever one its loop happened to sit in — that asymmetry
+          // is how `settle` kept an unnormalized path while every other
+          // door normalized, in a block whose comment claimed all four.
+          const doors: {
+            door: string;
+            piece: (at: CurrentPlace, value: string) => Move;
+            segment: (at: CurrentPlace, value: string) => Move;
+          }[] = [
+            {
+              door: "enter",
+              piece: (at, v) =>
+                at.enter({ space: SPACE, piece: v, path: [] }, "#x"),
+              segment: (at, v) =>
+                at.enter({ space: SPACE, piece: HANDLE, path: [v] }, "#x"),
+            },
+            {
+              door: "settle",
+              piece: (at, v) =>
+                at.settle({
+                  kind: "space-by-name",
+                  name: "estuary",
+                  piece: v,
+                  path: [],
+                  scope: at.place.scope,
+                }, SPACE),
+              segment: (at, v) =>
+                at.settle({
+                  kind: "space-by-name",
+                  name: "estuary",
+                  piece: HANDLE,
+                  path: [v],
+                  scope: at.place.scope,
+                }, SPACE),
+            },
+            {
+              door: "walk",
+              piece: (at, v) => (at.cd("slugs"), at.cd(v)),
+              segment: (at, v) => (at.cd(`/${HANDLE}`), at.cd(v)),
+            },
+            {
+              door: "reference",
+              piece: (at, v) => at.cd(`/${v}`),
+              segment: (at, v) => at.cd(`/${HANDLE}/${v}`),
+            },
+          ];
+
           const pieces = candidates(HANDLE.slice(0, 10), HANDLE.slice(10));
           const segments = candidates("b", "");
-          for (const scope of scopes) {
+          for (const [index, scope] of scopes.entries()) {
+            const reader = scopes[(index + 1) % scopes.length];
+
             /** Helper for this case, which stands at `scope` to begin with. */
             const standing = (): CurrentPlace => {
               const place = atSpaceRoot();
@@ -248,46 +311,27 @@ describe("place", () => {
               return place;
             };
 
-            for (const piece of pieces) {
-              for (const path of [[], ["tail"]]) {
-                const entered = standing();
-                check(
-                  entered,
-                  entered.enter({ space: SPACE, piece, path }, "#x"),
-                );
-                const settled = standing();
-                check(
-                  settled,
-                  settled.settle({
-                    kind: "space-by-name",
-                    name: "estuary",
-                    piece,
-                    path,
-                    scope,
-                  }, SPACE),
-                );
+            for (const { piece, segment } of doors) {
+              for (const value of pieces) {
+                const at = standing();
+                check(at, piece(at, value), reader);
               }
-              const walked = standing();
-              walked.cd("slugs");
-              check(walked, walked.cd(piece));
-              const referenced = standing();
-              check(referenced, referenced.cd(`/${piece}`));
+              for (const value of segments) {
+                const at = standing();
+                check(at, segment(at, value), reader);
+              }
             }
-            for (const segment of segments) {
-              for (
-                const path of [[segment], [segment, "tail"], ["head", segment]]
-              ) {
-                const entered = standing();
+            // A segment reached past another one, which is the only shape
+            // the single-segment drives above cannot make.
+            for (const value of segments) {
+              for (const path of [[value, "tail"], ["head", value]]) {
+                const at = standing();
                 check(
-                  entered,
-                  entered.enter({ space: SPACE, piece: HANDLE, path }, "#x"),
+                  at,
+                  at.enter({ space: SPACE, piece: HANDLE, path }, "#x"),
+                  reader,
                 );
               }
-              const walked = standing();
-              walked.cd(`/${HANDLE}`);
-              check(walked, walked.cd(segment));
-              const referenced = standing();
-              check(referenced, referenced.cd(`/${HANDLE}/${segment}`));
             }
           }
 
@@ -296,6 +340,36 @@ describe("place", () => {
           expect(readBack).toBeGreaterThan(0);
           expect(refusedPart).toBeGreaterThan(0);
           expect(refusedRendering).toBeGreaterThan(0);
+        });
+      });
+
+      it("returns a base-scope rendering a reader elsewhere reads as base", () => {
+        // The case the ruling turns on. A rendering that omitted the base
+        // suffix would be filled from wherever it was read, so reading one
+        // from a `@user` shuttle is what tells "the scope was written and
+        // read" apart from "the scope was absent and supplied".
+
+        const place = atPiece();
+        expect(place.place.scope).toBe("space");
+        const elsewhere = atSpaceRoot();
+        elsewhere.cd("@user");
+        elsewhere.cd(printedPosition(place));
+        expect(elsewhere.place).toEqual(place.place);
+      });
+
+      it("returns a container rendering whose refusal names the right fault", () => {
+        // A container's rendering starts with the space's `@`, so pasting
+        // one back reaches the scope reading. The refusal has to be about
+        // what was pasted rather than about a scope word nobody wrote.
+
+        const place = inSlugs();
+        const move = atSpaceRoot().cd(printedPosition(place));
+        expect(move).toEqual({
+          kind: "refused",
+          reason: "`@did:key:z6MkConnectedSpace/slugs/` names no scope: a " +
+            "scope word holds no `/`. What `pwd` prints for a space root " +
+            "or a facet is spelled this way and names no cell — reach one " +
+            "by its facet or its piece.",
         });
       });
 
@@ -858,6 +932,17 @@ describe("place", () => {
             });
           });
 
+          it("gives a bare fragment the wording a reference's gets", () => {
+            // The two are copies: shuttle authors this one so the surfaces
+            // read as one, and the canonical layer authors the other. Only
+            // pinning them equal makes a reword that moves one and not the
+            // other fail here rather than diverge quietly.
+
+            expect(inSlugs().cd("board#result")).toEqual(
+              atSpaceRoot().cd(`/${HANDLE}#result`),
+            );
+          });
+
           it("names the whole fragment, not the part before a second `#`", () => {
             expect(inSlugs().cd("board#argument#x")).toEqual({
               kind: "refused",
@@ -1351,6 +1436,27 @@ describe("place", () => {
               "space.",
           });
           expect(place.place).toEqual(placeAtSpaceRoot(SPACE));
+        });
+
+        it("carries a number a move already converted through unchanged", () => {
+          // A move `cd` minted holds a path the reference grammar already
+          // converted, so the number arm of that conversion is the one such
+          // a move arrives on.
+
+          const place = atSpaceRoot();
+          place.settle({
+            kind: "space-by-name",
+            name: "estuary",
+            piece: HANDLE,
+            path: [3],
+            scope: "space",
+          }, SPACE);
+          expect(place.place.position).toEqual({
+            kind: "piece",
+            space: SPACE,
+            piece: HANDLE,
+            path: [3],
+          });
         });
 
         it("refuses a move whose path holds a number no digits name back", () => {

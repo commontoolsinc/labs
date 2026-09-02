@@ -194,8 +194,10 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
  * asymmetry a shell has between what `pwd` prints and what a relative path
  * means. The reference serializer omits a base scope for the opposite
  * convention, that an omitted suffix means the base, so this writes the
- * suffix itself; a piece holding an `@` is refused, which is what leaves the
- * one this writes unambiguous to the split that reads it back.
+ * suffix itself. The split that reads it back takes the last `@`, and this
+ * writes one after the piece, so the suffix it reads is always the one this
+ * wrote — whatever the piece holds, and independently of any rule about
+ * what a piece may hold.
  */
 export function renderPlace(place: Place): string {
   return `position  ${renderPosition(place)}\n` +
@@ -277,7 +279,16 @@ export class CurrentPlace {
         kind: "piece",
         space: connected,
         piece: move.piece,
-        path: move.path,
+        // Normalized the way every other door normalizes, so that a
+        // position names its cell the same however it was reached, which is
+        // what {@link Position} promises. A move `cd` minted carries a path
+        // the reference grammar already converted; one a caller built does
+        // not, and this is a public door.
+        path: move.path.map((segment) =>
+          typeof segment === "number"
+            ? segment
+            : linkPathSegmentToCellPathSegment(segment)
+        ),
       },
       scope: move.scope,
     }, []));
@@ -386,6 +397,13 @@ function movePlace(
  * trail comes through untouched.
  */
 function moveScope(from: Standing, word: string): Step {
+  if (word.includes("/")) {
+    return refuse(
+      `\`@${word}\` names no scope: a scope word holds no \`/\`. What ` +
+        `\`pwd\` prints for a space root or a facet is spelled this way and ` +
+        `names no cell — reach one by its facet or its piece.`,
+    );
+  }
   if (!CELL_SCOPE_VALUES.has(word)) return refuseUnknownScope(word);
   return land({ ...from.place, scope: word as CellScope }, from.trail);
 }
@@ -697,13 +715,16 @@ function unnameableSegment(segment: PathSegment): string | undefined {
  * Helper for the movers, which names what stops a rendering from naming
  * `piece` back, and returns nothing when nothing does.
  *
- * A third step reads the piece segment and only that one, which is why this
- * is not {@link unnameableSegment}: `parseScopedIdSegment` splits the piece
- * at its last `@` and reads what follows as a scope, so a piece holding one
- * is read back shortened — under a scope it never asked for where the suffix
- * is a scope word, and as a refusal where it is not. A slug is lowercase
- * letters, numbers and hyphens and a handle carries none either, so no piece
- * the fabric can name is lost by refusing the character outright.
+ * Only the newline reaches a piece. The scope suffix the rendering always
+ * writes sits between the piece and the end of the string, so the trim
+ * reaches the suffix rather than the piece, and the split at the last `@`
+ * takes the suffix's own `@` rather than any the piece holds — a piece comes
+ * back whole from both. What the rules here buy is narrower and still worth
+ * having: they hold a place to a name `pwd` can print as a reference somebody
+ * can follow. A piece that is empty, ends in whitespace, or holds an `@` is
+ * neither slug nor handle, so its rendering parses and is then refused as
+ * naming no piece — a dead address rather than a wrong one, and one this
+ * module declines to stand at.
  */
 function unnameablePiece(piece: string): string | undefined {
   return unnameableText(piece, "piece") ??
