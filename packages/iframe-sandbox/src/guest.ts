@@ -24,8 +24,11 @@ import {
   type BridgeOperation,
   type BridgeRequest,
   type BridgeResolvedCell,
+  flushNonce,
   GUEST_PORT_HANDOFF,
+  GUEST_PORT_ORDERED,
   type GuestError,
+  type GuestFlush,
   isBridgeHostMessage,
 } from "./ipc.ts";
 
@@ -485,6 +488,8 @@ type Subscription = {
 /** Guest connection to the resources granted by the embedding host. */
 export class FabricClient {
   #port: MessagePort | undefined;
+  #ordered = false;
+  #awaitingFlushAck: string | undefined;
   #nextRequestId = 0;
   #nextSubscriptionId = 0;
   #pending = new Map<number, PendingRequest>();
@@ -649,21 +654,25 @@ export class FabricClient {
       operation,
       ...fields,
     };
+    // A call queues while there is no port, and while the port waits on the
+    // flush acknowledgement that puts it behind the guest's earlier
+    // parent-chain posts.
+    const queues = !this.#port || this.#awaitingFlushAck !== undefined;
     let encoded: EncodedBridgeRequest;
     try {
       encoded = realmFromFabricValue(request);
-      // `postMessage()` snapshots at send time. Queued calls have no port yet,
-      // so they snapshot the encoded form at invocation time instead of
-      // retaining caller-owned objects by reference until capability handoff.
-      if (!this.#port) encoded = structuredClone(encoded);
+      // `postMessage()` snapshots at send time. A queued call is not sent yet,
+      // so it snapshots the encoded form at invocation time instead of
+      // retaining caller-owned objects by reference until it is.
+      if (queues) encoded = structuredClone(encoded);
     } catch (cause) {
       return Promise.reject(cause);
     }
     const result = Promise.withResolvers<FabricValue | undefined>();
     result.promise.catch(() => {});
     this.#pending.set(id, result);
-    if (this.#port) this.#sendPending(id, encoded);
-    else this.#queued.push({ id, encoded });
+    if (queues) this.#queued.push({ id, encoded });
+    else this.#sendPending(id, encoded);
     return result.promise;
   }
 
@@ -738,6 +747,7 @@ export class FabricClient {
     this.#manifest = undefined;
     this.#cellOperationQueues.clear();
     this.#queued = [];
+    this.#awaitingFlushAck = undefined;
   }
 
   #send(request: BridgeRequest): void {
@@ -758,21 +768,47 @@ export class FabricClient {
   #onHandoff = (event: MessageEvent): void => {
     // The host owns the outer frame and posts directly to this inner guest, so
     // it is two parent hops away. The guest has an opaque origin and cannot
-    // origin-check that post, but it can still refuse a port offered by any
+    // origin-check that post, but it can still refuse a message sent by any
     // other window.
     const expectedHost = globalThis.parent?.parent;
-    if (
-      this.#port || event.data !== GUEST_PORT_HANDOFF || !event.ports[0] ||
-      (expectedHost && event.source !== expectedHost)
-    ) return;
+    if (expectedHost && event.source !== expectedHost) return;
+    if (event.data === GUEST_PORT_ORDERED) {
+      this.#ordered = true;
+      return;
+    }
+    if (this.#port || event.data !== GUEST_PORT_HANDOFF || !event.ports[0]) {
+      return;
+    }
     this.#port = event.ports[0];
     this.#port.onmessage = this.#onPortMessage;
     this.#port.start();
-    for (const request of this.#queued) {
+    const parent: Window | undefined = globalThis.parent;
+    if (this.#ordered && parent) {
+      // The marker rides the parent chain behind everything this guest posted
+      // there before its port, and port traffic holds until the host answers
+      // it -- which the host does only once the relay is handled up to the
+      // marker. That puts every pre-port post ahead of every port request.
+      this.#awaitingFlushAck = flushNonce();
+      parent.postMessage(
+        {
+          type: "flush",
+          nonce: this.#awaitingFlushAck,
+        } satisfies GuestFlush,
+        "*",
+      );
+    } else {
+      this.#flushQueued();
+    }
+  };
+
+  /** Sends every queued request, in the order the calls were made. */
+  #flushQueued(): void {
+    const queued = this.#queued;
+    this.#queued = [];
+    for (const request of queued) {
       this.#sendPending(request.id, request.encoded);
     }
-    this.#queued = [];
-  };
+  }
 
   #onPortMessage = (event: MessageEvent): void => {
     let decoded: FabricValue;
@@ -788,6 +824,18 @@ export class FabricClient {
   #accept(message: BridgeHostMessage): void {
     if (message.type === "event") {
       this.#subscriptions.get(message.subscription)?.update(message.value);
+      return;
+    }
+    if (message.type === "flush") {
+      // Only the acknowledgement echoing this guest's own nonce opens its
+      // port traffic; one answering another document's marker does not.
+      if (
+        this.#awaitingFlushAck !== undefined &&
+        message.nonce === this.#awaitingFlushAck
+      ) {
+        this.#awaitingFlushAck = undefined;
+        this.#flushQueued();
+      }
       return;
     }
     const pending = this.#pending.get(message.id);

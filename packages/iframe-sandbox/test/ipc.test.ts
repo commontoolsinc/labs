@@ -10,6 +10,7 @@ import {
   isBridgeRequest,
   isGuestAlarm,
   isGuestError,
+  isGuestFlush,
   isIPCGuestMessage,
 } from "../src/ipc.ts";
 
@@ -167,6 +168,16 @@ describe("ipc", () => {
         ok: false,
       })).toBe(false);
     });
+
+    it("accepts a flush acknowledgement only with its nonce", () => {
+      expect(isBridgeHostMessage({
+        ...HEADER,
+        type: "flush",
+        nonce: "n1",
+      })).toBe(true);
+      expect(isBridgeHostMessage({ ...HEADER, type: "flush" })).toBe(false);
+      expect(isBridgeHostMessage({ type: "flush", nonce: "n1" })).toBe(false);
+    });
   });
 
   describe("outer-frame messages", () => {
@@ -186,6 +197,13 @@ describe("ipc", () => {
       expect(isGuestError({ ...ERROR, lineno: "1" })).toBe(false);
       expect(isGuestAlarm({ type: "error", data: ERROR })).toBe(true);
       expect(isGuestAlarm({ type: "write", data: ERROR })).toBe(false);
+    });
+
+    it("recognizes only complete flush markers", () => {
+      expect(isGuestFlush({ type: "flush", nonce: "n1" })).toBe(true);
+      expect(isGuestFlush({ type: "flush" })).toBe(false);
+      expect(isGuestFlush({ type: "error", nonce: "n1" })).toBe(false);
+      expect(isGuestFlush("flush")).toBe(false);
     });
   });
 });

@@ -353,6 +353,83 @@ ${GUEST_EPILOG}`;
   }
 });
 
+Deno.test("an alarm raised before a write is dispatched before the write lands", async () => {
+  cleanupFixtures();
+
+  // The alarm route and the port are separate channels. An alarm crosses two
+  // window hops -- guest to outer frame, outer frame to host -- while port
+  // traffic reaches the host directly, and no task ordering holds one channel
+  // behind the other. The guarantee under test is the rendezvous that closes
+  // that race: a guest taking its port posts a flush marker up the parent
+  // chain, behind everything it posted there before, and holds its port
+  // traffic until the host answers -- so by the time any port operation
+  // lands, every earlier parent post has been handled. This test drives the
+  // schedule the rendezvous exists for: every relayed guest message is
+  // withheld, standing for a relay running behind the port, and released in
+  // arrival order once the third arrives. The third is the marker, which is
+  // the last thing the relay carries before port traffic can land.
+  const held: MessageEvent[] = [];
+  let releasing = false;
+  const release = () => {
+    releasing = true;
+    for (const event of held.splice(0)) {
+      globalThis.dispatchEvent(
+        new MessageEvent("message", {
+          data: event.data,
+          source: event.source,
+          origin: event.origin,
+        }),
+      );
+    }
+  };
+  const withhold = (event: MessageEvent) => {
+    if (releasing) return;
+    const data = event.data as { type?: unknown } | null;
+    if (!data || data.type !== "guest-error") return;
+    event.stopImmediatePropagation();
+    held.push(event);
+    if (held.length >= 3) release();
+  };
+  // Registered before the element is, so it hears each message first and can
+  // withhold it from the element.
+  globalThis.addEventListener("message", withhold);
+  try {
+    const context = new ContextShim({}, ["after"]);
+    const errors: string[] = [];
+    const onError = (event: Event) =>
+      errors.push((event as CustomEvent).detail.description);
+    document.addEventListener("common-iframe-error", onError);
+    try {
+      // The same three posts as the test above: a dropped protocol message, an
+      // alarm, a write. Here the write is only allowed to land after the
+      // withheld relay is released, and the alarm must already have been
+      // dispatched when it does.
+      const body = `${GUEST_PROLOG}
+parent.postMessage({ type: "write", data: ["relayed", 1] }, "*");
+parent.postMessage({ type: "error", data: {
+  description: "raised without a port",
+  source: "", lineno: 0, colno: 0, stacktrace: "",
+} }, "*");
+set("after", 1);
+${GUEST_EPILOG}`;
+      const iframe = await render(body, context);
+      await waitForContextValue(
+        context,
+        iframe,
+        "after",
+        (value) => value === 1,
+      );
+      assertEquals(context.get(iframe, "relayed"), undefined);
+      assertDeepEquals(errors, ["raised without a port"]);
+    } finally {
+      document.removeEventListener("common-iframe-error", onError);
+    }
+  } finally {
+    globalThis.removeEventListener("message", withhold);
+    cleanupFixtures();
+  }
+});
+
 Deno.test("a reattached element loads its document into the frame it gets", async () => {
   cleanupFixtures();
   try {
@@ -439,6 +516,60 @@ ${GUEST_EPILOG}`;
       refusal = String(error);
     }
     assert(refusal.includes("Already initialized"));
+  } finally {
+    cleanupFixtures();
+  }
+});
+
+Deno.test("a repeated load report does not unseat the guest holding its port", async () => {
+  cleanupFixtures();
+  try {
+    const context = new ContextShim({ watched: 1 }, ["ready", "echo"]);
+    const body = `${GUEST_PROLOG}
+onUpdate = (key, value) => {
+  if (key === "watched" && value === 2) set("echo", 2);
+};
+sink("watched");
+set("ready", true);
+${GUEST_EPILOG}`;
+    const iframe = await render(body, context);
+    await waitForContextValue(
+      context,
+      iframe,
+      "ready",
+      (value) => value === true,
+    );
+    assertEquals(context.callbacks.length, 1);
+
+    // The outer frame reports a load per completed navigation of its inner
+    // frame, and it cannot tell whose navigation a load event was: the
+    // initial `about:blank` one can complete after a document was asked for,
+    // in which case one asked-for document yields two reports. The element
+    // offers a fresh port on each report, and a session is retired only once
+    // a successor shows activity -- so a guest refusing the extra offer keeps
+    // the session it has, subscriptions included. The repeat is synthesized,
+    // as the real one turns on navigation timing inside the frame.
+    const inner = iframe as unknown as {
+      iframeRef: { value?: HTMLIFrameElement };
+    };
+    globalThis.dispatchEvent(
+      new MessageEvent("message", {
+        data: { type: "load" },
+        source: inner.iframeRef.value!.contentWindow!,
+        origin: "null",
+      }),
+    );
+    assertEquals(context.callbacks.length, 1);
+
+    // The subscription staying registered is half of it; the guest writing
+    // through the port it kept is the other half.
+    context.set(iframe, "watched", 2);
+    await waitForContextValue(
+      context,
+      iframe,
+      "echo",
+      (value) => value === 2,
+    );
   } finally {
     cleanupFixtures();
   }
