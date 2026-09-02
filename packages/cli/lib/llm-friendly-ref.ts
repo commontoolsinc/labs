@@ -13,13 +13,16 @@
  * say what they are, so neither can be mistaken for a name and the wider
  * vocabulary costs the narrower one nothing.
  *
- * At these seams the reference may additionally end in the `#argument`
- * suffix, which selects the piece's arguments cell the way `--input` does.
+ * At these seams a target may additionally end in the `#argument` suffix,
+ * which selects the piece's arguments cell the way `--input` does.
  *
- * The CLI's bare grammar (`pieceId[@scope]`, `pieceId[@scope]/path` at link
- * endpoints, and slugs) is a convenience alias for interactive use. New
- * reference-syntax capabilities land in the canonical form first, and the
- * alias must not grow a capability the canonical form lacks.
+ * The CLI's bare grammar (`pieceId[@scope][#argument]`,
+ * `pieceId[@scope]/path` at link endpoints, and slugs) is a convenience alias
+ * for interactive use. New reference-syntax capabilities land in the
+ * canonical form first, and the alias must not grow a capability the
+ * canonical form lacks. The suffix is one the canonical form has, and a bare
+ * id designates the piece a reference designates, so it means the same on
+ * both.
  */
 
 import { ValidationError } from "@cliffy/command";
@@ -159,6 +162,37 @@ function validatePieceSegment(pieceId: string): void {
 }
 
 /**
+ * Split the trailing `#argument` suffix off a target, and say whether it was
+ * there.
+ *
+ * Both spellings of a target take the suffix, so both reach it here. `#` is
+ * reserved for it: a target carrying any other fragment is refused, which is
+ * why a path key containing `#` needs the positional path spelling rather
+ * than the embedded one.
+ *
+ * The split runs before anything else parses the target. Left on, the suffix
+ * lands inside the piece id, and the refusal that follows names an unknown
+ * piece — a message that says nothing about the `#` that caused it.
+ */
+export function splitArgumentSuffix(
+  target: string,
+): { target: string; input: boolean } {
+  const hash = target.indexOf("#");
+  if (hash === -1) return { target, input: false };
+
+  const suffix = target.slice(hash);
+  if (suffix !== "#argument") {
+    throw new ValidationError(
+      `Unknown suffix "${suffix}". The one supported suffix is ` +
+        `"#argument", which selects the piece's arguments cell the way ` +
+        `"--input" does.`,
+      { exitCode: 1 },
+    );
+  }
+  return { target: target.slice(0, hash), input: true };
+}
+
+/**
  * Normalize a piece reference — `/of:fid1:abc.../path`, or `/tracker/path`,
  * optionally with a `/@space/` prefix or an `@scope` suffix on the piece —
  * into the piece, scope, and path the CLI's own intake uses.
@@ -172,36 +206,20 @@ function validatePieceSegment(pieceId: string): void {
  * through `validateEmbeddedSpaces` once the session has resolved its own.
  *
  * The one addition to the runner's grammar is the trailing `#argument`
- * suffix, which comes back as `input`. `#` is reserved for it: a reference
- * carrying any other fragment is refused, so a path key containing `#` needs
- * the positional path spelling rather than the embedded one.
+ * suffix, read by {@link splitArgumentSuffix} and returned as `input`.
  */
 export function normalizeLLMFriendlyRef(
   ref: string,
   options: { space?: string } = {},
 ): NormalizedLLMFriendlyRef | undefined {
-  let trimmed = ref.trim();
+  const trimmed = ref.trim();
   if (!isReference(trimmed)) return undefined;
 
-  let input = false;
-  const hash = trimmed.indexOf("#");
-  if (hash !== -1) {
-    const suffix = trimmed.slice(hash);
-    if (suffix !== "#argument") {
-      throw new ValidationError(
-        `Unknown reference suffix "${suffix}". The one supported suffix ` +
-          `is "#argument", which selects the piece's arguments cell the ` +
-          `way "--input" does.`,
-        { exitCode: 1 },
-      );
-    }
-    input = true;
-    trimmed = trimmed.slice(0, hash);
-  }
+  const { target, input } = splitArgumentSuffix(trimmed);
 
   let parsed;
   try {
-    parsed = parseReferenceParts(trimmed);
+    parsed = parseReferenceParts(target);
   } catch (error) {
     throw new ValidationError(
       error instanceof Error ? error.message : String(error),

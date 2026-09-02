@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import {
   isReference,
   normalizeLLMFriendlyRef,
+  splitArgumentSuffix,
   validateEmbeddedSpaces,
 } from "../lib/llm-friendly-ref.ts";
 import { createSession, Identity } from "@commonfabric/identity";
@@ -229,12 +230,37 @@ describe("llm-friendly-ref", () => {
 
   it("rejects any fragment other than #argument", () => {
     expect(() => normalizeLLMFriendlyRef(`/${HANDLE}#result`)).toThrow(
-      /Unknown reference suffix "#result"/,
+      /Unknown suffix "#result"/,
     );
     // "#" is reserved for the suffix, so a path key containing it is not an
     // embedded-path spelling.
     expect(() => normalizeLLMFriendlyRef(`/${HANDLE}/we#ird`)).toThrow(
-      /Unknown reference suffix/,
+      /Unknown suffix/,
+    );
+  });
+
+  it("splits the suffix off a bare target the way it does off a reference", () => {
+    // One reading for both spellings: the piece a bare id names is the piece
+    // a reference names, so the selection written after it means the same.
+    expect(splitArgumentSuffix("thermostat#argument")).toEqual({
+      target: "thermostat",
+      input: true,
+    });
+    expect(splitArgumentSuffix(`${HANDLE}@user#argument`)).toEqual({
+      target: `${HANDLE}@user`,
+      input: true,
+    });
+    expect(splitArgumentSuffix("thermostat")).toEqual({
+      target: "thermostat",
+      input: false,
+    });
+    expect(() => splitArgumentSuffix("thermostat#result")).toThrow(
+      /Unknown suffix "#result"/,
+    );
+    // The suffix closes the target, so a scope written behind it is part of
+    // the fragment rather than a scope.
+    expect(() => splitArgumentSuffix("thermostat#argument@user")).toThrow(
+      /Unknown suffix "#argument@user"/,
     );
   });
 });
