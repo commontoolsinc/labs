@@ -1,0 +1,308 @@
+/**
+ * That the absence policy a mode publishes is the absence policy it enacts.
+ *
+ * `cfcAbsenceBehaviorForMode` is the one derivation of what a mode does with
+ * an observation whose trusted mediation metadata is absent. Two readers act
+ * on it: the capability snapshot publishes it, so a reader of a run's
+ * artifacts learns what the run would do, and the model-facing output path
+ * decides whether such an observation reaches the model. This file drives the
+ * second and compares it against the first.
+ *
+ * The comparison is written as a table keyed by the published behavior rather
+ * than by the mode. A test that hard-codes an outcome per mode passes whether
+ * or not the two agree; keying on the descriptor means an edit that changes
+ * one without the other fails here, which is the drift this file exists to
+ * make impossible.
+ */
+
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { normalize } from "@std/path/posix";
+
+import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+
+import {
+  CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+  type PromptSlotBinding,
+} from "../src/contracts/prompt-slot.ts";
+import {
+  CAPABILITY_PROBE_SENTINEL,
+  cfcAbsenceBehaviorForMode,
+  type HarnessCfcAbsenceBehavior,
+} from "../src/diagnostics.ts";
+import { CfHarnessEngine } from "../src/engine.ts";
+import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
+import type {
+  SandboxCommandRequest,
+  SandboxCommandResult,
+  SandboxRuntime,
+  SandboxRuntimeDescription,
+  SandboxShellRequest,
+} from "../src/sandbox/types.ts";
+import { responsesBodyFromChatFixture } from "./support/responses-fixture.ts";
+
+/** The secret the sandbox returns, which a denied observation must not carry. */
+const FILE_CONTENT = "absence-policy-secret";
+
+/**
+ * Authority for the read, so that absence is the only thing under test.
+ *
+ * `enforce-strict` refuses every tool call that carries no direct command
+ * (AH-CFC-9), which would deny the read before the observation path ever ran.
+ * That denial is a different clause answering a different question, and a run
+ * that stops there establishes nothing about what absent mediation metadata
+ * does.
+ */
+const directPromptSlotBinding: PromptSlotBinding = {
+  type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+  source: { type: "test.prompt-slot", subject: "absence-policy" },
+  role: "direct-command",
+  kernelName: "cf-harness",
+  surface: "test",
+  subject: "absence-policy",
+  eventId: "event-absence-policy",
+};
+
+/**
+ * A sandbox that answers the capability probe and then returns plain bytes.
+ *
+ * Plain bytes are the point: nothing here attaches a `CfcSandboxResult`, so
+ * every read through this runtime is an observation whose trusted mediation
+ * metadata is absent.
+ */
+class FakeSandboxRuntime implements SandboxRuntime {
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: this.defaultWorkingDirectory(),
+      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+    };
+  }
+
+  resolvePath(path: string, cwd = this.defaultWorkingDirectory()): string {
+    return normalize(path.startsWith("/") ? path : `${cwd}/${path}`);
+  }
+
+  isPathWithinWorkspace(path: string): boolean {
+    return path === "/workspace" || path.startsWith("/workspace/");
+  }
+
+  isPathWithinAllowedRoots(path: string): boolean {
+    return this.isPathWithinWorkspace(path);
+  }
+
+  defaultWorkingDirectory(): string {
+    return "/workspace";
+  }
+
+  run(_request: SandboxCommandRequest): Promise<SandboxCommandResult> {
+    return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
+  }
+
+  runShell(request: SandboxShellRequest): Promise<SandboxCommandResult> {
+    if (request.command.includes(CAPABILITY_PROBE_SENTINEL)) {
+      return Promise.resolve({
+        stdout: "bash\tpresent\t/bin/bash\tGNU bash, version 5.2.26(1)-release",
+        stderr: "",
+        exitCode: 0,
+      });
+    }
+    return Promise.resolve({
+      stdout: `${FILE_CONTENT}\n`,
+      stderr: "",
+      exitCode: 0,
+    });
+  }
+}
+
+/** A model that reads one file and then stops. */
+const readFileThenStop = (): typeof fetch => {
+  let callCount = 0;
+  return () => {
+    callCount += 1;
+    const payload = callCount === 1
+      ? {
+        choices: [{
+          index: 0,
+          message: {
+            role: "assistant",
+            content: "",
+            tool_calls: [{
+              id: "call-absence-policy",
+              type: "function",
+              function: {
+                name: "read_file",
+                arguments: JSON.stringify({ path: "secret.txt" }),
+              },
+            }],
+          },
+        }],
+      }
+      : {
+        choices: [{
+          index: 0,
+          message: { role: "assistant", content: "Done." },
+        }],
+      };
+    return Promise.resolve(
+      new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+        status: 200,
+      }),
+    );
+  };
+};
+
+/**
+ * What the model-facing path did with the unmediated observation.
+ *
+ * `denied-elsewhere` is the outcome no published behavior claims: a denial
+ * that some other clause raised before the absence policy was consulted. It
+ * exists so that such a run fails this file rather than passing it as though
+ * the absence policy had done the denying.
+ */
+type AbsenceOutcome =
+  | "exposed"
+  | "exposed-with-warning"
+  | "denied"
+  | "denied-elsewhere";
+
+/**
+ * What each published behavior claims the run will do.
+ *
+ * Total over `HarnessCfcAbsenceBehavior`, so a new value in that union stops
+ * compiling here rather than silently going unchecked.
+ */
+const OUTCOME_FOR_BEHAVIOR: Record<
+  HarnessCfcAbsenceBehavior,
+  AbsenceOutcome
+> = {
+  "not-required": "exposed",
+  "permissive-if-absent": "exposed",
+  "observe-only": "exposed-with-warning",
+  "fail-closed-if-absent": "denied",
+};
+
+const MODES: readonly CfcEnforcementMode[] = [
+  "disabled",
+  "observe",
+  "enforce-explicit",
+  "enforce-strict",
+];
+
+interface ObservedAbsence {
+  outcome: AbsenceOutcome;
+  /** Whether the model-facing message carried the sandbox's bytes. */
+  disclosedContent: boolean;
+  /** Set when the observation came back as a typed denial. */
+  denial?: { reason: unknown; handleType: unknown };
+}
+
+const runUnmediatedRead = async (
+  mode: CfcEnforcementMode,
+): Promise<ObservedAbsence> => {
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: `run-absence-${mode}`,
+      model: "gpt-5.4",
+      cfcEnforcementMode: mode,
+    }),
+    fetchFn: readFileThenStop(),
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Read a file.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  const toolMessage = result.transcript.find((message) =>
+    message.role === "tool" && message.toolName === "read_file"
+  );
+  expect(toolMessage).toBeDefined();
+  const content = JSON.parse(toolMessage!.content) as Record<string, unknown>;
+  const disclosedContent = toolMessage!.content.includes(FILE_CONTENT);
+
+  const mediationEvents = result.runState.policyEvents.filter((event) =>
+    (event.detail ?? "").includes(
+      "did not include trusted CFC mediation metadata",
+    )
+  );
+
+  if (content.type === "cf-harness.observation-denied") {
+    // Only a denial the absence policy raised counts as one: the run must
+    // also have recorded absent mediation metadata as the cause.
+    const deniedForAbsence = mediationEvents.some((event) =>
+      event.severity === "denied"
+    );
+    return {
+      outcome: deniedForAbsence ? "denied" : "denied-elsewhere",
+      disclosedContent,
+      denial: {
+        reason: content.reason,
+        handleType: (content.handle as Record<string, unknown> | undefined)
+          ?.type,
+      },
+    };
+  }
+  return {
+    outcome: mediationEvents.some((event) => event.severity === "warning")
+      ? "exposed-with-warning"
+      : "exposed",
+    disclosedContent,
+  };
+};
+
+describe("cfc absence policy", () => {
+  describe("cfcAbsenceBehaviorForMode()", () => {
+    it("answers every enforcement mode", () => {
+      for (const mode of MODES) {
+        expect(OUTCOME_FOR_BEHAVIOR[cfcAbsenceBehaviorForMode(mode)])
+          .toBeDefined();
+      }
+    });
+
+    it("fails closed in both enforcing modes", () => {
+      // AH-CFC-6 admits no weaker answer, and `enforce-explicit` names a rule
+      // about invocation authority rather than about observation mediation.
+      expect(cfcAbsenceBehaviorForMode("enforce-explicit")).toBe(
+        "fail-closed-if-absent",
+      );
+      expect(cfcAbsenceBehaviorForMode("enforce-strict")).toBe(
+        "fail-closed-if-absent",
+      );
+    });
+  });
+
+  describe("an observation whose mediation metadata is absent", () => {
+    for (const mode of MODES) {
+      it(`does in ${mode} what ${mode} publishes it will do`, async () => {
+        const observed = await runUnmediatedRead(mode);
+        const published = cfcAbsenceBehaviorForMode(mode);
+
+        expect(observed.outcome).toBe(OUTCOME_FOR_BEHAVIOR[published]);
+      });
+    }
+
+    it("returns a typed denial carrying an opaque handle in enforcing modes", async () => {
+      // AH-CFC-6: the observation is refused as a named kind of refusal with a
+      // handle standing in for what was withheld, not dropped or emptied.
+      for (const mode of ["enforce-explicit", "enforce-strict"] as const) {
+        const observed = await runUnmediatedRead(mode);
+        expect(observed.denial).toEqual({
+          reason: "not-observable",
+          handleType: "cf-harness.opaque-handle",
+        });
+        expect(observed.disclosedContent).toBe(false);
+      }
+    });
+
+    it("discloses the observation in the modes that publish that it will", async () => {
+      // The other direction, so the suite cannot pass by denying everything.
+      for (const mode of ["disabled", "observe"] as const) {
+        const observed = await runUnmediatedRead(mode);
+        expect(observed.disclosedContent).toBe(true);
+      }
+    });
+  });
+});

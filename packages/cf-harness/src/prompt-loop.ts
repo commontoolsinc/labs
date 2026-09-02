@@ -114,6 +114,7 @@ import type {
 } from "./contracts/transcript.ts";
 import { HarnessControlError } from "./control-errors.ts";
 import {
+  cfcAbsenceBehaviorForMode,
   createHarnessFailureRecord,
   type HarnessFailureRecord,
 } from "./diagnostics.ts";
@@ -1919,6 +1920,31 @@ const deniedObservationPointers = (
       ? []
       : ["/exitCode"]),
   ];
+};
+
+/**
+ * What the model-facing path does with an observation whose trusted mediation
+ * metadata is absent.
+ *
+ * Derived from the published descriptor rather than from the mode, so the
+ * behavior a run takes is the behavior its artifacts say it takes. A mode
+ * reaches this only through `cfcAbsenceBehaviorForMode`, and every value that
+ * function can return is answered here.
+ */
+type ObservationAbsenceDisposition = "expose" | "expose-with-warning" | "deny";
+
+const observationAbsenceDisposition = (
+  mode: CfcEnforcementMode,
+): ObservationAbsenceDisposition => {
+  switch (cfcAbsenceBehaviorForMode(mode)) {
+    case "not-required":
+    case "permissive-if-absent":
+      return "expose";
+    case "observe-only":
+      return "expose-with-warning";
+    case "fail-closed-if-absent":
+      return "deny";
+  }
 };
 
 const toolOutputNeedsSandboxMediation = (
@@ -4088,18 +4114,18 @@ export class CfHarnessPromptLoop {
       };
     }
     if (toolId === "read_file" && isReadFileStatusObservationError(output)) {
-      if (mode === "disabled") {
-        return { output: stripInternalToolFields(output) };
-      }
-      if (mode === "observe") {
-        await writePolicyEvent({
-          severity: "warning",
-          mode,
-          toolId,
-          toolCallId,
-          detail:
-            `${READ_FILE_STATUS_OBSERVATION_DETAIL}; raw error was exposed because CFC is in observe mode`,
-        });
+      const disposition = observationAbsenceDisposition(mode);
+      if (disposition !== "deny") {
+        if (disposition === "expose-with-warning") {
+          await writePolicyEvent({
+            severity: "warning",
+            mode,
+            toolId,
+            toolCallId,
+            detail:
+              `${READ_FILE_STATUS_OBSERVATION_DETAIL}; raw error was exposed because CFC is in observe mode`,
+          });
+        }
         return { output: stripInternalToolFields(output) };
       }
       const denial = makeObservationDenied("not-observable", {
@@ -4127,18 +4153,18 @@ export class CfHarnessPromptLoop {
       };
     }
     if (toolId === "edit_file" && isStructuredFileToolErrorOutput(output)) {
-      if (mode === "disabled") {
-        return { output: stripInternalToolFields(output) };
-      }
-      if (mode === "observe") {
-        await writePolicyEvent({
-          severity: "warning",
-          mode,
-          toolId,
-          toolCallId,
-          detail:
-            `${EDIT_FILE_STATUS_OBSERVATION_DETAIL}; raw error was exposed because CFC is in observe mode`,
-        });
+      const disposition = observationAbsenceDisposition(mode);
+      if (disposition !== "deny") {
+        if (disposition === "expose-with-warning") {
+          await writePolicyEvent({
+            severity: "warning",
+            mode,
+            toolId,
+            toolCallId,
+            detail:
+              `${EDIT_FILE_STATUS_OBSERVATION_DETAIL}; raw error was exposed because CFC is in observe mode`,
+          });
+        }
         return { output: stripInternalToolFields(output) };
       }
       const denial = makeObservationDenied("not-observable", {
@@ -4291,49 +4317,18 @@ export class CfHarnessPromptLoop {
     if (cfcResult === undefined) {
       const detail =
         `${toolId} output did not include trusted CFC mediation metadata`;
-      if (mode === "disabled") {
-        const rendered = toolId === "bash" || toolId === "run_skill_script"
-          ? truncateModelFacingBashOutput(
-            stripInternalToolFields(output),
-            resultRef,
-          )
-          : toolId === "read_file"
-          ? truncateModelFacingReadFileOutput(
-            stripInternalToolFields(output),
-            resultRef,
-          )
-          : stripInternalToolFields(output);
-        return {
-          output: rendered,
-          omissionRules: omissionRules(
-            createHarnessTranscriptOmissionRuleRecord(
-              "model-context-truncation",
-              resultRef,
-              truncationPointers(rendered),
-            ),
-          ),
-        };
-      }
-      if (mode === "observe") {
-        await writePolicyEvent({
-          severity: "warning",
-          mode,
-          toolId,
-          toolCallId,
-          detail:
-            `${detail}; raw output was exposed because CFC is in observe mode`,
-        });
-        const rendered = toolId === "bash" || toolId === "run_skill_script"
-          ? truncateModelFacingBashOutput(
-            stripInternalToolFields(output),
-            resultRef,
-          )
-          : toolId === "read_file"
-          ? truncateModelFacingReadFileOutput(
-            stripInternalToolFields(output),
-            resultRef,
-          )
-          : stripInternalToolFields(output);
+      const disposition = observationAbsenceDisposition(mode);
+      if (disposition !== "deny") {
+        if (disposition === "expose-with-warning") {
+          await writePolicyEvent({
+            severity: "warning",
+            mode,
+            toolId,
+            toolCallId,
+            detail:
+              `${detail}; raw output was exposed because CFC is in observe mode`,
+          });
+        }
         return {
           output: rendered,
           omissionRules: omissionRules(

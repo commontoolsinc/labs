@@ -544,7 +544,7 @@ Deno.test({
       assertEquals(persistedPolicySnapshot.cfc, {
         enforcementMode: "enforce-explicit",
         enforcementModeSource: "default",
-        absenceBehavior: "permissive-if-absent",
+        absenceBehavior: "fail-closed-if-absent",
         substrateStatus: "not-attested",
       });
       assertEquals(persistedPolicySnapshot.runManifest, { present: false });
