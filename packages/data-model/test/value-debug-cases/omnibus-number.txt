@@ -10,6 +10,7 @@
   "min safe integer": Number.MIN_SAFE_INTEGER,
   "max value": Number.MAX_VALUE,
   "min value": Number.MIN_VALUE,
+  epsilon: Number.EPSILON,
   NaN: NaN,
   "positive infinity": Infinity,
   "negative infinity": -Infinity,
@@ -27,6 +28,7 @@
   "min safe integer": -9007199254740991,
   "max value": 1.7976931348623157e+308,
   "min value": 5e-324,
+  epsilon: 2.220446049250313e-16,
   NaN: NaN,
   "positive infinity": Infinity,
   "negative infinity": -Infinity
