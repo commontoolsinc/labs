@@ -152,38 +152,44 @@ describe("value-debug", () => {
       expect(toCompactDebugString(inst)).toBe('{"/Set":"/..."}');
     });
 
-    it('renders an interned symbol as `Symbol.for("name")`', () => {
-      const s = Symbol.for("my-key");
-      expect(toCompactDebugString(s)).toBe('Symbol.for("my-key")');
+    it("renders an interned symbol whose key is an identifier as `@name`", () => {
+      expect(toCompactDebugString(Symbol.for("myKey"))).toBe("@myKey");
+      expect(toCompactDebugString(Symbol.for("_$x9"))).toBe("@_$x9");
+    });
+
+    it('renders an interned symbol whose key is not an identifier as `@"key"`', () => {
+      expect(toCompactDebugString(Symbol.for("my-key"))).toBe('@"my-key"');
+      expect(toCompactDebugString(Symbol.for("9lives"))).toBe('@"9lives"');
+      expect(toCompactDebugString(Symbol.for(""))).toBe('@""');
     });
 
     it("renders an interned symbol inside a structure", () => {
       const s = Symbol.for("k");
-      expect(toCompactDebugString({ s })).toBe('{"s":Symbol.for("k")}');
-      expect(toCompactDebugString([s])).toBe('[Symbol.for("k")]');
+      expect(toCompactDebugString({ s })).toBe('{"s":@k}');
+      expect(toCompactDebugString([s])).toBe("[@k]");
     });
 
-    it("renders an uninterned symbol under the `/uniqueSymbol` tag", () => {
-      expect(toCompactDebugString(Symbol("d")))
-        .toBe('{"/uniqueSymbol":"d"}');
+    it('renders an uninterned symbol as `Symbol("name")`', () => {
+      expect(toCompactDebugString(Symbol("d"))).toBe('Symbol("d")');
     });
 
-    it("renders an uninterned symbol with no description", () => {
-      expect(toCompactDebugString(Symbol()))
-        .toBe('{"/uniqueSymbol":undefined}');
+    it("renders an uninterned symbol with no description as `Symbol()`", () => {
+      expect(toCompactDebugString(Symbol())).toBe("Symbol()");
     });
 
     it('renders an uninterned symbol with description `""` (empty string)', () => {
-      expect(toCompactDebugString(Symbol("")))
-        .toBe('{"/uniqueSymbol":""}');
+      expect(toCompactDebugString(Symbol(""))).toBe('Symbol("")');
     });
 
     it("renders an uninterned symbol inside a structure", () => {
       const s = Symbol("inner");
-      expect(toCompactDebugString({ s }))
-        .toBe('{"s":{"/uniqueSymbol":"inner"}}');
-      expect(toCompactDebugString([s]))
-        .toBe('[{"/uniqueSymbol":"inner"}]');
+      expect(toCompactDebugString({ s })).toBe('{"s":Symbol("inner")}');
+      expect(toCompactDebugString([s])).toBe('[Symbol("inner")]');
+    });
+
+    it("renders a key of the value that reads `/uniqueSymbol` as itself, escaped", () => {
+      expect(toCompactDebugString({ "/uniqueSymbol": "d" }))
+        .toBe('{"//uniqueSymbol":"d"}');
     });
 
     it("renders top-level `NaN` as a bare token", () => {
@@ -419,18 +425,17 @@ describe("value-debug", () => {
         .toBe('{\n  "/function": "baz(...)"\n}');
     });
 
-    it('renders top-level interned symbol as `Symbol.for("name")`', () => {
-      expect(toIndentedDebugString(Symbol.for("ind")))
-        .toBe('Symbol.for("ind")');
+    it("renders top-level interned symbol as `@name`", () => {
+      expect(toIndentedDebugString(Symbol.for("ind"))).toBe("@ind");
     });
 
-    it("renders a nested `function` and `symbol` as tagged objects", () => {
+    it("renders a nested `function` and `symbol`", () => {
       function qux() {}
       const v = { fn: qux, sym: Symbol("s") };
       expect(toIndentedDebugString(v))
         .toBe(
           '{\n  "fn": {\n    "/function": "qux(...)"\n  },\n' +
-            '  "sym": {\n    "/uniqueSymbol": "s"\n  }\n}',
+            '  "sym": Symbol("s")\n}',
         );
     });
 

@@ -280,10 +280,10 @@ class DebugConverter {
  * Helper class for rendering the result of `toStructuredDebugValue()` as a
  * debug string. The rendering is JSON syntax wherever JSON can express the
  * value, and a bare token -- `42n`, `undefined`, `NaN`, `-0`, `Infinity`,
- * `Symbol.for("name")`, `<circle>` -- wherever it cannot. A `FabricPrimitive`,
- * which the conversion passes through as itself, is rendered under its codec
- * tag with its JSON encoding, in the same shape the conversion gives a
- * `FabricInstance`.
+ * `@name`, `Symbol("name")`, `<circle>` -- wherever it cannot. A
+ * `FabricPrimitive`, which the conversion passes through as itself, is
+ * rendered under its codec tag with its JSON encoding, in the same shape the
+ * conversion gives a `FabricInstance`.
  */
 class DebugStringifier {
   readonly #indent: string | undefined;
@@ -372,11 +372,24 @@ class DebugStringifier {
   #renderPlainObject(value: FabricPlainObject, indent: string): string {
     const keys = Object.keys(value);
 
-    if ((keys.length === 1) && (keys[0] === "/circle")) {
-      // The conversion's marker for a reference back to an enclosing object.
-      // No key of the original value can arrive here in this form, because the
-      // conversion escapes every key with a leading slash.
-      return "<circle>";
+    if (keys.length === 1) {
+      // The conversion's single-key marker forms. No key of the original value
+      // can arrive here in one of these forms, because the conversion escapes
+      // every key with a leading slash.
+      switch (keys[0]) {
+        case "/circle": {
+          // A reference back to an enclosing object.
+          return "<circle>";
+        }
+
+        case "/uniqueSymbol": {
+          // A unique (uninterned) symbol, whose payload is its description.
+          const description = value["/uniqueSymbol"];
+          return (description === undefined)
+            ? "Symbol()"
+            : `Symbol(${JSON.stringify(description)})`;
+        }
+      }
     }
 
     const inner = this.#innerIndent(indent);
@@ -416,8 +429,12 @@ class DebugStringifier {
 
       case "symbol": {
         // The conversion represents a unique symbol as a tagged object, so
-        // only an interned symbol arrives here.
-        return `Symbol.for(${JSON.stringify(Symbol.keyFor(value))})`;
+        // only an interned symbol arrives here. Its key is rendered bare when
+        // it is a valid identifier, and quoted otherwise.
+        const key = Symbol.keyFor(value) ?? "";
+        return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)
+          ? `@${key}`
+          : `@${JSON.stringify(key)}`;
       }
 
       case "object": {
@@ -478,7 +495,9 @@ function renderDebugString(value: unknown, indent?: number): string {
  * * `bigint`s, as `42n`.
  * * `undefined`, as such.
  * * non-finite numbers and `-0`, as such.
- * * interned symbols, as `Symbol.for("name")`.
+ * * interned symbols, as `@name` when the key is a valid identifier and as
+ *   `@"the key"` otherwise.
+ * * unique (uninterned) symbols, as `Symbol("name")`.
  * * a reference back to an enclosing object, as `<circle>`.
  * * `FabricPrimitive`s, under their codec tag with their JSON encoding, e.g.
  *   `{"/Bytes@1":"AQID"}`.
