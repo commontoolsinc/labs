@@ -3755,6 +3755,61 @@ describe("stage D seal-into-wave", () => {
     expect(witness.lastRunInstantiation()).toBe(3);
   });
 
+  it("declines a stale-read refusal the stopped piece no longer owns", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-stale-read-stopped",
+    );
+    let pieceInstantiationSeals = 0;
+    let readinessCalls = 0;
+    const refusalRequested = Promise.withResolvers<void>();
+    const heldRefusal = Promise.withResolvers<{ error: unknown }>();
+    const staleRead = {
+      name: "ConflictError" as const,
+      message: "stale confirmed read: of:piece-start at seq 0 " +
+        "conflicted with seq 1",
+      readyToRetry: () => {
+        readinessCalls += 1;
+        return Promise.resolve();
+      },
+    };
+    runtime.installSealDestination({
+      seal: (tx) => {
+        if (
+          !waveRunContextOf(tx)?.actionId.startsWith("piece-instantiate/")
+        ) {
+          return tx.tx.commit();
+        }
+        pieceInstantiationSeals += 1;
+        if (pieceInstantiationSeals === 1) {
+          refusalRequested.resolve();
+          return heldRefusal.promise as never;
+        }
+        return tx.tx.commit();
+      },
+    }, {
+      runStamper: (tx, info) =>
+        stampWaveRunContext(tx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        }),
+    });
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await refusalRequested.promise;
+
+    // The stop lands while the instantiate commit is still in flight, so the
+    // refusal arrives against a registration this attempt no longer owns.
+    // Recovery declines: the stop keeps the key, and no readiness gate is
+    // entered on behalf of retired nodes.
+    runtime.runner.stop(witness.cell);
+    heldRefusal.resolve({ error: staleRead as never });
+    await runtime.runner.idlePieceInstantiationSettlements();
+
+    expect(pieceInstantiationSeals).toBe(1);
+    expect(readinessCalls).toBe(0);
+    expect(witness.instantiations()).toBe(2);
+  });
+
   it("tears down after an immediate non-stale instantiation refusal", async () => {
     const witness = await stoppedWitnessPiece(
       "wave-piece-instantiate-terminal-refusal",
