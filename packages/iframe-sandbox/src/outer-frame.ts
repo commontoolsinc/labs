@@ -31,6 +31,7 @@ iframe {
 <script>
 const HOST_ORIGIN = "${HOST_ORIGIN}";
 const HOST_WINDOW = window.parent;
+
 // The frame holding the guest, once the host has asked for a document. Each
 // document gets a frame of its own; see \`loadDocument()\`.
 let inner = null;
