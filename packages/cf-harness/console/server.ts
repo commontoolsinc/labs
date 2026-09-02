@@ -102,8 +102,6 @@ import {
 } from "../src/sandbox/docker-runsc.ts";
 import type { CreateHarnessPromptLoopOptions } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
-import { FileSystemHarnessArtifactStore } from "../src/artifacts.ts";
-import type { HarnessRunState } from "../src/run-state.ts";
 import { type ConsolePolicyReport, consolePolicyReport } from "./policy.ts";
 import {
   listConsoleRuns,
@@ -789,7 +787,6 @@ export class ConsoleServer {
   readonly #patternIndexClientFactory:
     | HarnessPatternIndexClientFactory
     | undefined;
-  readonly #recordCellLabels: (sessionId: string) => Promise<void>;
 
   /**
    * The tail of the fan-out a terminal event is holding, or `undefined` when
@@ -809,9 +806,7 @@ export class ConsoleServer {
    *
    * The index client is the other way round: it reads the fabric identity from
    * disk to sign with, so it is built lazily, cached once healthy, and handed
-   * in by a test that has no keyfile to read. The cell-label snapshot is
-   * handed in for the same reason — it reads a space database this host may
-   * not hold, and it is what a terminal event waits on.
+   * in by a test that has no keyfile to read.
    */
   constructor(
     config: ConsoleConfig,
@@ -819,11 +814,8 @@ export class ConsoleServer {
       onEvent: HarnessInteractiveChatEventListener,
     ) => HarnessInteractiveChatService,
     patternIndexClientFactory?: HarnessPatternIndexClientFactory,
-    recordCellLabels?: (sessionId: string) => Promise<void>,
   ) {
     this.#config = config;
-    this.#recordCellLabels = recordCellLabels ??
-      ((sessionId) => this.#snapshotCellLabels(sessionId));
     this.#service = createService((envelope) => this.broadcast(envelope));
     const factory = patternIndexClientFactory ??
       (config.patternIndex !== undefined
@@ -845,36 +837,23 @@ export class ConsoleServer {
   /**
    * Writes one envelope to every stream that has not already seen it.
    *
-   * The run's cells are settled once its turn is, so a terminal event is what
-   * the snapshot is taken on — and the page re-reads the run on that same
-   * event, so the event is held until the snapshot has landed. An event that
-   * overtook its own snapshot would hand the page a run whose labels read
-   * `absent`, with no later event to correct it. Nothing of the turn waits
-   * behind the event that closes it, and an envelope broadcast while one is
-   * held queues behind it, so the stream stays in sequence order — which is
-   * the order it delivers in or not at all. A snapshot this server could not
-   * write still lets the event through: the run stands as it is, and the page
-   * is owed the turn either way.
+   * The event that closes a turn carries the turn's result, which is read
+   * from the run's artifacts, so that event is held while the read runs.
+   * Nothing of the turn waits behind the event that closes it, and an
+   * envelope broadcast while one is held queues behind it, so the stream
+   * stays in sequence order — which is the order it delivers in or not at
+   * all.
    */
   broadcast(envelope: HarnessChatEventEnvelope): Promise<void> {
-    const snapshot = TERMINAL_TURN_EVENT_KINDS.has(envelope.event.kind)
-      ? this.#recordCellLabels(envelope.sessionId).catch((error: unknown) => {
-        console.error(
-          `cell label snapshot failed for session ${envelope.sessionId}:`,
-          error,
-        );
-      })
-      : undefined;
-    if (snapshot === undefined && this.#heldFanOut === undefined) {
+    if (
+      !TERMINAL_TURN_EVENT_KINDS.has(envelope.event.kind) &&
+      this.#heldFanOut === undefined
+    ) {
       this.#fanOut(envelope);
       return Promise.resolve();
     }
     const held = (this.#heldFanOut ?? Promise.resolve())
-      .then(() => snapshot)
-      .then(
-        async () => this.#fanOut(await this.#consoleEnvelope(envelope)),
-        async () => this.#fanOut(await this.#consoleEnvelope(envelope)),
-      );
+      .then(async () => this.#fanOut(await this.#consoleEnvelope(envelope)));
     this.#heldFanOut = held;
     void held.finally(() => {
       if (this.#heldFanOut === held) {
@@ -933,64 +912,6 @@ export class ConsoleServer {
         continue;
       }
       this.#write(client, envelope);
-    }
-  }
-
-  /**
-   * Reads the run's space for what it holds about the cells a finished turn
-   * touched, and records it beside the run.
-   *
-   * The run's own artifacts say which cells it made and read; the space says
-   * what each of them is labelled, and nothing else joins the two. A turn is
-   * its own run, so this runs once per turn, over that run and the
-   * `delegate_task` children beneath it — a parent commonly names a cell its
-   * child produced, and a snapshot of the parent alone would leave that cell
-   * unlabelled in the family map.
-   *
-   * The space is read read-only and best-effort: a host holding no copy of it
-   * writes a snapshot that says so, which is a different page from a run whose
-   * cells carry no label.
-   */
-  async #snapshotCellLabels(sessionId: string): Promise<void> {
-    const [session] = this.#service.status(sessionId).sessions;
-    const runId = session?.harnessRunId;
-    if (runId === undefined) {
-      return;
-    }
-    const artifactRoot = session.artifactRoot ?? this.#config.artifactRoot;
-    // The harness ids a child `<parent>.subagent.N`, so the family is a
-    // directory listing rather than a walk of every run's state.
-    const family: string[] = [];
-    for await (const entry of Deno.readDir(artifactRoot)) {
-      if (
-        entry.isDirectory &&
-        (entry.name === runId || entry.name.startsWith(`${runId}.`))
-      ) {
-        family.push(entry.name);
-      }
-    }
-    for (const name of family) {
-      const runState = JSON.parse(
-        await Deno.readTextFile(join(artifactRoot, name, "run-state.json")),
-      ) as HarnessRunState;
-      const refs = (runState.handleTable?.entries ?? []).map((entry) =>
-        entry.ref
-      );
-      if (refs.length === 0) {
-        continue;
-      }
-      // deno-lint-ignore cf-imports/no-inline-module-import -- reading a space database opens SQLite's native library, and a console process whose runs have no cell to snapshot must be able to serve its page without `--allow-ffi`
-      const { readSpaceCellLabels } = await import("../src/space-labels.ts");
-      const labels = await readSpaceCellLabels({
-        space: this.#config.fabricSession.space,
-        ...(this.#config.spaceDbPath !== undefined
-          ? { dbPath: this.#config.spaceDbPath }
-          : {}),
-        refs,
-        generatedAt: new Date().toISOString(),
-      });
-      await new FileSystemHarnessArtifactStore({ artifactRoot, runId: name })
-        .persistCellLabels(labels);
     }
   }
 

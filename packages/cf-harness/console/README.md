@@ -342,15 +342,19 @@ These govern the runtime `run_pattern` deploys patterns into. The harness's own
 `cfcEnforcementMode`, which governs tool policy and the sandbox, is a separate
 dial and reaches every run's `policy-snapshot.json` either way.
 
-A turn ends by reading the space it wrote into for the labels it holds on the
-cells the run touched, and records them as the run's `cell-labels.json`. That is
-what a cell chip draws its `space` row from, and what the head of the map states
-the regime of — a space that could not be read is a run whose cells are
-unasked-about rather than unlabelled. A run and the `delegate_task` children
-beneath it each record their own, and the head states what every cell on the map
-can be taken to mean, so a family whose runs did not all read the space is
-stated as read for none of them: one member's reading cannot speak for another
-member's cells.
+A run ends by reading the space it wrote into for the labels it holds on the
+cells the run touched, and records them as the run's `cell-labels.json` in the
+same write as its outcome, so `run-state.json` carries them too. That is what a
+cell chip draws its `space` row from, and what the head of the map states the
+regime of — a space that could not be read is a run whose cells are
+unasked-about rather than unlabelled, and a snapshot that could not be written
+at all is a failure record on the run, which tells it from a run that held no
+cell to ask about. The turn's run and the `delegate_task` children beneath it
+each record their own as each of them ends, and the head states what every cell
+on the map can be taken to mean, so a family whose runs did not all read the
+space is stated as read for none of them: one member's reading cannot speak for
+another member's cells. `--space-db` reaches the children as it reaches the
+parent.
 
 The read is one hop wide. A pattern's results are their own cells, linked from
 the piece that names them, and the derived label sits on the cell — so the
@@ -391,11 +395,11 @@ Three columns, each scrolling on its own: the runs there are, the run being
 read, and the map of how it went. A turn produces a run, and the run's artifacts
 are the record of it, so the same view serves a run that finished an hour ago
 and one still going. The live event stream drives the status line and the
-re-reads; it is not a second feed. The event that closes a turn is published
-once that turn's labels have been recorded, so the re-read it drives reads the
-snapshot rather than racing it. A run writes its artifacts as it goes, so every
-completed tool call re-reads the list, the open run and its map. The step the
-scrubber sits on survives the re-read.
+re-reads; it is not a second feed. A run records its labels in the write that
+ends it, and the event that closes a turn follows that write, so the re-read the
+event drives reads the snapshot rather than racing it. A run writes its
+artifacts as it goes, so every completed tool call re-reads the list, the open
+run and its map. The step the scrubber sits on survives the re-read.
 
 ### The runs
 
