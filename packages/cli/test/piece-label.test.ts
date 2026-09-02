@@ -858,6 +858,33 @@ describe("cf piece CFC labels", () => {
     expect(stored?.label.confidentiality).toEqual(["finance", "team"]);
   });
 
+  it("set-label REFUSES a class the resolved doc already contradicts", async () => {
+    // The other half of reading the doc the write lands in. Preservation shows
+    // the guard sees the row doc's class; this shows it ACTS on it. Asking for
+    // `shape` where the row doc declares `value` is the conflict the CLI exists
+    // to refuse, and against the unresolved view the guard could not see it —
+    // the write went through and replaced the class instead.
+    const { row, chainDeps } = await buildCrossingChain(
+      "cf-piece-label-refuse",
+    );
+
+    await expect(setCellCfcLabel(
+      pieceConfig,
+      ["q", "result", 0, "shouted"],
+      { confidentiality: ["finance", "team"], observes: "shape" },
+      {},
+      chainDeps as never,
+    )).rejects.toThrow('Cannot set observes to "shape"');
+
+    // Refused means nothing was written.
+    await row.pull();
+    const stored = cfcLabelViewForCell(row)?.entries.find((entry) =>
+      entry.path[0] === "shouted"
+    );
+    expect(stored?.observes).toBe("value");
+    expect(stored?.label.confidentiality).toEqual(["finance"]);
+  });
+
   it("documents JSON input and output on both commands", async () => {
     const getHelp = await cf("cell get-label --help");
     expect(getHelp.code).toBe(0);

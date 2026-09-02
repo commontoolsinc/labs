@@ -186,15 +186,12 @@ const resolvedMetadataForCell = (
   }
   try {
     const tx = cell.runtime.readTx(cell.tx);
-    // `markIfcCrossings` is what a READ entry point passes, and this is one.
-    // On the CLI's path it changes nothing observable: the cell carries no
-    // transaction, so `readTx` mints a throwaway that is never committed and
-    // the marks die with it. It is here for the caller that hands in a cell
-    // with a LIVE transaction, where an ifc-bearing link crossed to reach a
-    // label has to count against that transaction's accounting like any other
-    // crossing. Omitting it would make this the one read path that resolves
-    // links without marking them — wrong in the unsafe direction, and only on
-    // the paths where it matters.
+    // `markIfcCrossings` is what a read entry point passes. On the CLI's path
+    // it changes nothing observable: the cell carries no transaction, so
+    // `readTx` mints a throwaway that is never committed and the marks die
+    // with it. It is here for a caller that hands in a cell with a LIVE
+    // transaction, where an ifc-bearing link crossed to reach a label counts
+    // against that transaction's accounting like any other crossing.
     const resolved = resolveLink(cell.runtime, tx, link, "value", {
       markIfcCrossings: true,
     });
