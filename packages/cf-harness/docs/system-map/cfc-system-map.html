@@ -387,6 +387,12 @@
         stroke-dasharray: 6 5;
         rx: 14;
       }
+      .stamp {
+        font-size: 22px;
+        fill: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        letter-spacing: 0.04em;
+      }
       .group-title {
         font-size: 14px;
         fill: var(--muted);
@@ -658,6 +664,9 @@
     </div>
     <script>
       // ------------------------------------------------------------------ layout data
+      // The state of this repository the map describes. Bump both when the
+      // map is re-verified; the stamp is drawn in the canvas's top-left corner.
+      const SNAPSHOT = { date: "2026-09-02", sha: "80ddb05554" };
       const W = 2760, H = 1840;
       const bands = [
         {
@@ -2603,6 +2612,10 @@
           st.setAttribute("x", b.x + 20 + tt.getBBox().width + 14);
         });
       }
+      const stamp = el("text", { class: "stamp", x: 250, y: 26 }, gBands);
+      stamp.textContent = `snapshot ${SNAPSHOT.date} · labs ${SNAPSHOT.sha}`;
+      document.querySelector("#stage .hud").textContent =
+        `snapshot ${SNAPSHOT.date} · labs ${SNAPSHOT.sha}  —  drag to pan · scroll to zoom · click anything for its story`;
       const pt = el("text", { class: "group-title", x: 60, y: 540 }, gBands);
       pt.textContent = "PRINCIPALS";
       for (const g of groups) {
@@ -3019,7 +3032,7 @@
         }
       }
       function welcome() {
-        return `<span class="kind">Start here</span><h2>How to read this map</h2><p>Four bands, top to bottom: what we never trust, what we mediate, what we must trust, and how we check ourselves. Data flows left to right; a colleague's request enters at the left and a rendered piece comes back to them there. Only the trusted computing base is tinted: it is the thing this map is about.</p><p><b>Diamonds are gates</b>: the only places a value may cross a boundary. Solid green shipped; solid amber partial; hollow red a gap; dashed gray intended.</p><p><b>Red-ringed hexagons are threats</b>, in three kinds. <span style="color:var(--s-partial)">⬢ closed by planned work</span>: a named gap with an owner. <span style="color:var(--s-shipped)">⬢ guarded by CFC</span>: held today. <span style="color:var(--s-intended)">⬢ remains</span>: CFC cannot close it; people and process hold it. Click one to see where it lives and what holds against it.</p><p><b>Dashed light-blue lines are handles</b>: names for data the model routes without ever holding. That line type is the whole idea. Bright white lines are labeled values inside the base; they never leave it except through a gate.</p><h3>Walks</h3><ul><li><b>The circuit</b>: label at the source → store per path → name don't carry → compute at the data → gated release → every sink a gate → prove it → what is still open.</li><li><b>Demo 1</b>: the Weaver pill, as it ran today.</li><li><b>Demo 2</b>: bills from Gmail and Plaid, with the loom-side gaps named.</li><li><b>Demo 3</b>: a hostile skill with nothing to steal.</li><li><b>Where we trust ourselves</b>: the base, ring by ring.</li></ul><p class="hint">Zoom in for edge labels and gate status captions; they hide at overview so the structure reads first.</p><p class="hint">Snapshot as of 2026-09-02, fact-checked against the code, the live docs and the issues. Gate statuses follow the boundary inventory on CT-2175, the deviations list in the harness implementation profile, and what merged after both were written. Loom-side claims are from CT-2189 and not verified against loom's code.</p>`;
+        return `<span class="kind">Start here</span><h2>How to read this map</h2><p>Four bands, top to bottom: what we never trust, what we mediate, what we must trust, and how we check ourselves. Data flows left to right; a colleague's request enters at the left and a rendered piece comes back to them there. Only the trusted computing base is tinted: it is the thing this map is about.</p><p><b>Diamonds are gates</b>: the only places a value may cross a boundary. Solid green shipped; solid amber partial; hollow red a gap; dashed gray intended.</p><p><b>Red-ringed hexagons are threats</b>, in three kinds. <span style="color:var(--s-partial)">⬢ closed by planned work</span>: a named gap with an owner. <span style="color:var(--s-shipped)">⬢ guarded by CFC</span>: held today. <span style="color:var(--s-intended)">⬢ remains</span>: CFC cannot close it; people and process hold it. Click one to see where it lives and what holds against it.</p><p><b>Dashed light-blue lines are handles</b>: names for data the model routes without ever holding. That line type is the whole idea. Bright white lines are labeled values inside the base; they never leave it except through a gate.</p><h3>Walks</h3><ul><li><b>The circuit</b>: label at the source → store per path → name don't carry → compute at the data → gated release → every sink a gate → prove it → what is still open.</li><li><b>Demo 1</b>: the Weaver pill, as it ran today.</li><li><b>Demo 2</b>: bills from Gmail and Plaid, with the loom-side gaps named.</li><li><b>Demo 3</b>: a hostile skill with nothing to steal.</li><li><b>Where we trust ourselves</b>: the base, ring by ring.</li></ul><p class="hint">Zoom in for edge labels and gate status captions; they hide at overview so the structure reads first.</p><p class="hint">Snapshot as of ${SNAPSHOT.date}, at labs commit <code>${SNAPSHOT.sha}</code>, fact-checked against the code, the live docs and the issues. Gate statuses follow the boundary inventory on CT-2175, the deviations list in the harness implementation profile, and what merged after both were written. Loom-side claims are from CT-2189 and not verified against loom's code.</p>`;
       }
       function select(id, zoom) {
         selected = id;

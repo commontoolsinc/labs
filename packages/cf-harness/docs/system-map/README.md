@@ -39,8 +39,9 @@ as you zoom, so the structure reads before the detail.
 
 ## What it claims, and where each claim comes from
 
-The map is a snapshot; its "Snapshot as of" date is in the welcome panel. Every
-sentence on it was checked against three sources, in this order of authority:
+The map is a snapshot: the date and the labs commit it describes are stamped in
+the top-left corner of the canvas and named in the welcome panel. Every sentence
+on it was checked against three sources, in this order of authority:
 
 1. Code: `packages/cf-harness/src` (the tools, the prompt loop, the handle
    table, the sandbox mediation), `packages/cf-harness/console`,
@@ -80,10 +81,11 @@ none of the drawing code needs to change to alter what the map says.
   the caption to show.
 
 When the system changes in a way the map describes, edit the table that holds
-the claim, bump the snapshot date in the welcome text, and re-verify in a
-browser. The two reviews that shaped the current version are the procedure for a
-larger revision, and both are worth running as subagents with the file and the
-sources above in hand:
+the claim, set `SNAPSHOT` (the date and the labs commit the map now describes;
+it is stamped in the canvas's top-left corner and named in the welcome text),
+and re-verify in a browser. The two reviews that shaped the current version are
+the procedure for a larger revision, and both are worth running as subagents
+with the file and the sources above in hand:
 
 - An **accuracy review**: for every gate status, threat class and sentence of
   copy, find the code or document that makes it true today, and report anything
