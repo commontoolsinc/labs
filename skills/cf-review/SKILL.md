@@ -131,6 +131,10 @@ module-graph cleanliness, "make invalid states unrepresentable") is a loud,
 Blocking finding even if the code "works." Fix what the diff touches; propose
 wider sweeps as follow-ups — don't boil the ocean.
 
+For `cf-harness` runtime-semantics changes, include the system map, which reads
+as authoritative but is never a source of truth, in that coherence sweep and
+follow its update procedure in `packages/cf-harness/docs/system-map/README.md`.
+
 `docs/history/` is exempt from the coherence sweep: those are frozen
 point-in-time records and are supposed to describe old behavior. The reverse
 check applies instead — a diff that edits the content of a `docs/history/`

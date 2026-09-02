@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-02", sha: "80ddb05554" };
+    const SNAPSHOT = { date: "2026-09-03", sha: "d005a5c603" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -1061,7 +1061,7 @@
         w: 250,
         h: 100,
         t: "CFC audit checker",
-        s: "9 checks, spec-anchored",
+        s: "AUD-1…9 · 13…19, spec-anchored",
       },
     ];
     const extraLines = {
@@ -1074,7 +1074,7 @@
       spaces: ["links keep labels; copies lose them"],
       sqlite: ["re-derived on every read"],
       connectors: ["sqlite_sources → injected handle cell"],
-      audit: ["verifies; never enforces"],
+      audit: ["posture · sinks · matrix · evidence"],
     };
     const icons = {
       person: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
@@ -1463,8 +1463,8 @@
       },
       g_return: {
         t: "Child return",
-        status: "shipped",
-        short: "validated",
+        status: "partial",
+        short: "CT-2036 number channel",
         boundary: "child → parent",
       },
       g_tool: {
@@ -1640,6 +1640,62 @@
         y: 1122,
         t: "A pattern's llm calls have no ceiling",
       },
+      {
+        id: "t14",
+        n: 14,
+        c: "upcoming",
+        x: 1060,
+        y: 1380,
+        t: "A projected posture is not a runtime attestation",
+      },
+      {
+        id: "t15",
+        n: 15,
+        c: "upcoming",
+        x: 1510,
+        y: 1150,
+        t: "One logical space silently forks across stores",
+      },
+      {
+        id: "t16",
+        n: 16,
+        c: "upcoming",
+        x: 570,
+        y: 675,
+        t: "Consoles interleave one artifact root",
+      },
+      {
+        id: "t17",
+        n: 17,
+        c: "upcoming",
+        x: 630,
+        y: 675,
+        t: "Restored sessions keep stale tool policy",
+      },
+      {
+        id: "t18",
+        n: 18,
+        c: "upcoming",
+        x: 690,
+        y: 675,
+        t: "HTTP health masks a dead fabric session",
+      },
+      {
+        id: "t19",
+        n: 19,
+        c: "upcoming",
+        x: 1400,
+        y: 930,
+        t: "Program text and diagnostics are an unlabeled side channel",
+      },
+      {
+        id: "t20",
+        n: 20,
+        c: "upcoming",
+        x: 750,
+        y: 1640,
+        t: "The retrospective transcript hides omissions",
+      },
     ];
     const threatClass = {
       upcoming: {
@@ -1703,7 +1759,7 @@
         threats: ["t1", "t2"],
         close: [
           "<code>web_fetch</code> applies bounds and redirect checks but stamps no label and no ExternalIngest mark on what it returns.",
-          "Network authority is a curl guard plus a Docker network mode, not an explicit destination profile across sandbox and web tools (harness deviation 3). Per-child <code>--network none</code> is described as cheap plumbing, not done.",
+          "Network authority is a curl guard plus a Docker network mode, not an explicit destination profile across sandbox and web tools (harness deviation 3; CT-2202 item 2). Per-child <code>--network none</code> is described as cheap plumbing, not done.",
         ],
       },
       skillssh: {
@@ -1717,7 +1773,7 @@
           6734,
         ]],
         close: [
-          "The ExternalIngest integrity stamp is written at acquisition but never consulted at a release site.",
+          "The ExternalIngest integrity stamp is written at acquisition but never consulted at a release site (CT-2202 item 3).",
         ],
       },
       thirdparty: {
@@ -1745,6 +1801,7 @@
         band: "agent",
         body:
           `<p>The service the weaver pings. Bad input refs are a 400 before any turn spends. CLI and console assemble the <em>same</em> session from one config, so the class of “console lags the CLI” bugs is gone. The console's fabric session defaults to the <code>max-enforcement</code> posture: policy evaluation on, public-only ceilings on the fetch sinks, enforcement mode pinned at <code>enforce-explicit</code> (not strict, so writer-fit misfits flag rather than reject).</p>`,
+        threats: ["t16", "t17", "t18"],
         links: [["one config for CLI and console", 6743], [
           "turn lifecycle",
           6753,
@@ -1752,6 +1809,11 @@
           "labels land in every run's artifacts in the same write as its outcome",
           6757,
         ]],
+        close: [
+          "A second console can share the same directory, collide on event sequence, and interleave artifact roots (CT-2156).",
+          "A durable session keeps its recorded config-gated tool policy when the host configuration changes (CT-2151).",
+          "Console HTTP health does not attest Docker or fabric-session liveness before provider turns (CT-2150).",
+        ],
       },
       adapters: {
         kind: "Harness adapters",
@@ -1767,6 +1829,7 @@
           `<p>Our proxy in front of the provider. It is ours, so it is trusted for transport and, on OpenAI-compatible traffic, for attribution headers (the Codex transport carries none). It is not a gate: it forwards whatever context the harness built.</p><p>The runner defines an <code>llm</code> sink class with no ceiling, and the harness's own model call is not a runner sink. So there is no label check on this edge; the protection is that labeled values were already withheld upstream and replaced with tokens. That protection does not cover a pattern's own llm calls, which reach the provider from inside the trusted base with no ceiling at all.</p>`,
         close: [
           "Nothing measures the assembled context itself. CT-2175 question 2 asks whether a runner <code>model-context</code> sink class should exist so this becomes a real gate.",
+          "The llm-class sinks release without ceilings until the boundary-scoped admission mechanism exists (CT-2202 item 6).",
         ],
       },
       parent: {
@@ -1786,7 +1849,7 @@
           `<p>The mechanism that lets the agent route data it never sees. A token names a cell address without carrying the value. The model composes work out of tokens: pass one to <code>run_pattern</code>, hand one to a child, name a piece with <code>assign_slug</code>, ask <code>describe_handle</code> what shape it has.</p><p>Ruled today: possession of a handle is not a release. A handle is never withheld; only values are gated.</p>`,
         links: [["a handle is never withheld, values are gated", 6759]],
         close: [
-          "Value handles (as opposed to address handles), lifetimes, release and garbage collection are not yet contracts (deviation 4).",
+          "Value handles (as opposed to address handles), lifetimes, release, garbage collection, and console-restore persistence are not yet contracts (deviation 4; CT-2202 item 8).",
         ],
       },
       child_pa: {
@@ -1794,7 +1857,7 @@
         band: "agent",
         body:
           `<p>Spawned by <code>delegate_task</code> with a fresh context, seeded with exactly the parent tokens its brief names. It writes a pattern, runs it in the trusted fabric session, and returns a handle to the piece. Its return is schema-validated and sanitized: sealed strings become tokens, stray token-shaped text is scrubbed.</p><p>In today's demo run, five of these each called <code>run_pattern</code> over the finance cell, built a real dashboard, and had its values refused twelve times: the first label-driven refusals ever.</p>`,
-        threats: ["t4"],
+        threats: ["t4", "t19"],
       },
       child_browser: {
         kind: "Child harness",
@@ -1820,7 +1883,7 @@
           `<p>Most tool execution runs in Docker under <code>runsc-cfc</code>, the gVisor runtime with CFC taint tracking. Output crosses back to the model through a sidecar that marks each observation <code>observed</code>, <code>opaque</code> or <code>denied</code>; the harness renders that verdict and never overrides it. Network mode defaults to bridge.</p>`,
         threats: ["t5", "t12"],
         close: [
-          "The sandbox's taint (xattr) is a different label store from the runner's. Bridging the two is the retirement condition for the product <code>observe</code> bridges.",
+          "The sandbox's taint (xattr) is a different label store from the runner's. Bridging the two is the retirement condition for the product <code>observe</code> bridges (CT-2202 item 7).",
         ],
       },
       mount: {
@@ -1867,16 +1930,21 @@
         band: "tcb",
         body:
           `<p>Cells stored per space (a DID), with labels stored per path alongside values. Between spaces only a link preserves labels and integrity; copying materialized bytes makes a fresh value with no attestation.</p>`,
-        threats: ["t10"],
+        threats: ["t10", "t15"],
+        close: [
+          "A worktree-local <code>MEMORY_DIR</code> can back the same space DID with a different physical store without warning (CT-2146).",
+        ],
       },
       policy: {
         kind: "TCB · configuration",
         band: "tcb",
         body:
-          `<p>Two things, both operator-owned. The <b>dials</b> are runtime options: the enforcement matrix names five (enforcement mode, flow-label persistence, write floor, trigger-read gating, policy evaluation) and the runtime has nine; the console's <code>max-enforcement</code> bundle sets seven of them, with the enforcement mode pinned at <code>enforce-explicit</code>. The <b>policy snapshot</b> is the digest-bound set of exchange-rule records and grants. Records are <code>ambient</code> (apply to every label) or <code>referenced</code> (fire only where the label names them by hash).</p>`,
+          `<p>Two things, both operator-owned. The <b>dials</b> are runtime options: the enforcement matrix names five (enforcement mode, flow-label persistence, write floor, trigger-read gating, policy evaluation) and the runtime has nine; the console's <code>max-enforcement</code> bundle sets seven of them, with the enforcement mode pinned at <code>enforce-explicit</code>. The <b>policy snapshot</b> is the digest-bound set of exchange-rule records and grants. Records are <code>ambient</code> (apply to every label) or <code>referenced</code> (fire only where the label names them by hash). The harness publishes this posture as <code>projected</code> before the session runtime exists, not as an attestation of a constructed runtime.</p>`,
+        threats: ["t14"],
         close: [
           "There is no door for a policy record to reach a harness runtime: config exposes a posture name only (CT-2175 question 4).",
           "Guard shape for the demo's finance-release record is undecided (question 3).",
+          "Re-stamp the projected posture record from the real runtime once the fabric session exists (CT-2195).",
         ],
       },
       index: {
@@ -1917,13 +1985,14 @@
         band: "evidence",
         body:
           `<p>Every run writes its transcript, run-state, policy snapshot, tool outputs, child references, skill provenance, and, since today, the per-cell labels its space holds for the cells it touched, in the same write as the run's outcome. The one artifact a run does not write from its own knowledge.</p>`,
-        threats: ["t6", "t8", "t12"],
+        threats: ["t6", "t8", "t12", "t20"],
         links: [[
           "cell labels recorded in the write that ends the run",
           6757,
         ]],
         close: [
-          "The twelve refusals are structured in tool outputs but absent from the policy trace; the check that counts them is in open PR #6755.",
+          "Release refusals are structured in tool outputs and AUD-16 counts them there, but they remain absent from <code>policy-trace.json</code> (CT-2200).",
+          "The retrospective transcript does not show what the prompt loop withheld or compressed (CT-2198).",
           "The artifact root is readable from the sandbox (CT-2117).",
         ],
       },
@@ -1931,8 +2000,11 @@
         kind: "Evidence · verifier",
         band: "evidence",
         body:
-          `<p>Runs over any recorded run and grades nine checks (AUD-1 to AUD-9) pass, fail, warn or inconclusive against quoted spec clauses; inconclusive is never pass. First run over the demo: 63 checks over 7 runs, 33 pass, 13 fail (7 real, 6 a checker false positive). The demo acceptance bar is now “the checker passes”. A second batch of checks, including the one that counts release refusals, is in an open PR (#6755).</p><p>It verifies; it never enforces. Missing evidence is a finding, not proof that a gate ran.</p>`,
+          `<p>Runs over any recorded run and grades AUD-1 to AUD-9, AUD-13 to AUD-15a, and deployment checks AUD-16 to AUD-19 as pass, fail, warn or inconclusive against quoted spec clauses; inconclusive is never pass. It reads the shared posture record every surface publishes, checks its total sink registry, and evaluates dial tuples against the enforcement rules in <code>audit/matrix.ts</code>. AUD-16 counts structured <code>policyRefusal</code> records in tool outputs; CT-2200 moves those release decisions into <code>policy-trace.json</code>.</p><p>It verifies; it never enforces. Missing evidence is a finding, not proof that a gate ran.</p>`,
         links: [["spec-anchored CFC checker", 6749], [
+          "shared posture record, total sink registry, matrix-backed audit checks",
+          6755,
+        ], [
           "what the audit found",
           6754,
         ]],
@@ -1955,13 +2027,20 @@
           `<p>Handles cross this boundary correctly: a child's table is seeded with exactly the parent tokens the brief names, and tokens stay identical across the hierarchy. But the brief itself, <code>goal</code> and <code>context</code>, is free text, and a parent can put anything it happens to know in it.</p>`,
         why:
           "The place the handle model is not yet fully realized; named as live work in the harness README.",
-        close: ["Make the brief bound references rather than prose."],
+        close: [
+          "Make the brief bound references rather than prose (CT-2202 item 1).",
+        ],
         threats: ["t4"],
       },
       g_return: {
         body:
           `<p>A child's return is a new observation, not a continuation of the parent's token stream. It is validated against the delegation's return schema, sanitized, sealed strings become parent-resolvable tokens, and any token-shaped text still standing is scrubbed to inert text. Raw child evidence stays in artifacts, off the parent's return channel.</p>`,
         why: "Structure only: no label information crosses with the return.",
+        close: [
+          "CT-2036 tracks the numeric inert-field channel, which can encode a sealed string across this boundary.",
+          "Treat program text and diagnostics as a labeled side channel across delegation (CT-2199).",
+        ],
+        threats: ["t19"],
       },
       g_tool: {
         body:
@@ -1988,7 +2067,7 @@
         why:
           "The exfiltration sink an injected skill aims at. Harness-side it is protected mostly by the agent not holding values, not by a label check on the request.",
         close: [
-          "Represent network authority as an explicit destination profile across sandbox and web tools (deviation 3).",
+          "Represent network authority as an explicit destination profile across sandbox and web tools (deviation 3; CT-2202 item 2).",
           "Label what the web tools bring back, and give the browser's value release a label input.",
         ],
         threats: ["t2", "t1"],
@@ -1999,7 +2078,7 @@
         why:
           "The stamp is written but never read at a release site, so integrity provenance does not yet change any decision.",
         close: [
-          "Read the integrity stamp at the write floor and at egress, so text from outside can never become direct-command authority.",
+          "Read the integrity stamp at the write floor and at egress, so text from outside can never become direct-command authority (CT-2202 item 3).",
         ],
         threats: ["t1"],
       },
@@ -2011,9 +2090,9 @@
         links: [["ceiling gates values, not the handle", 6759]],
         close: [
           "The fit skips the runner's policy evaluation, so no exchange rule can discharge <code>finance</code> here yet. Policy A vs policy B (released under one, refused under the other) is the smallest honest experiment (CT-2175).",
-          "Record the refusal as a policy event so audit can count it (CT-2188 attribution fixed in the same change).",
+          "Record each release refusal in <code>policy-trace.json</code>, then make AUD-16 read that decision channel instead of tool outputs (CT-2200).",
         ],
-        threats: ["t8"],
+        threats: ["t8", "t19"],
       },
       g_write: {
         body:
@@ -2030,7 +2109,7 @@
         why:
           "The person is a sink too. This is the last gate before human eyes, and today it is open.",
         close: [
-          "Turn the ceiling on by default once exchange resolution can discharge what a person is entitled to see.",
+          "Turn the ceiling on by default once exchange resolution can discharge what a person is entitled to see (CT-2202 item 4).",
         ],
       },
       g_conn: {
@@ -2053,7 +2132,9 @@
         body:
           `<p>Operators read artifacts and audit findings. Transcripts, handle maps and policy evidence can reveal sensitive provenance and need protection comparable to the data itself.</p>`,
         why: "The one gate with no code behind it yet.",
-        close: ["Authenticated, scoped, logged access to raw run artifacts."],
+        close: [
+          "Authenticated, scoped, logged access to raw run artifacts (CT-2202 item 5).",
+        ],
         threats: ["t11", "t6"],
       },
     };
@@ -2103,9 +2184,9 @@
       },
       t8: {
         plan:
-          "Record the release refusal as a policy event with a runner-minted refusal detail; merge the audit check that counts policyRefusal on tool outputs (open PR #6755); attribution fixed in #6759.",
+          "CT-2200 records every release refusal in policy-trace.json and makes AUD-16 count that decision channel; AUD-16 counts policyRefusal records in tool outputs today; attribution fixed in #6759.",
         body:
-          `<p>The twelve refusals are structured: each tool output carries a <code>policyRefusal</code> with gates, atoms and the input that carried the label. What cannot show them is the policy <em>decision</em> channel, because the loop records its allow decision before the tool runs; the trace's reason-code union has no label-shaped member, and the merged audit's denial check reads decisions only, so it counts zero. The channel exists, it is structured, and it is empty. A gate we cannot prove fired is, for a colleague, a gate that did not.</p>`,
+          `<p>Release refusals are structured in tool outputs today: each <code>policyRefusal</code> names its gates, sinks, atoms, and the input that carried the label, and AUD-16 counts those records. They are absent from <code>policy-trace.json</code> because the prompt loop records its allow-side tool decision before the release boundary runs. CT-2200 moves every release decision into that trace and makes AUD-16 read the decision channel. A gate whose decision is missing from the trace is invisible to an operator reading policy evidence alone.</p>`,
         where: ["runner", "artifacts", "audit", "g_release"],
       },
       t9: {
@@ -2127,10 +2208,59 @@
       },
       t13: {
         plan:
-          "A ceiling on the runner's llm sink class, so a pattern's model calls fit like its fetch calls do (CT-2091 build list, item 5).",
+          "A ceiling on the runner's llm sink class, so a pattern's model calls fit like its fetch calls do (CT-2202 item 6).",
         body:
           `<p>A model-authored pattern can call <code>llm</code>, <code>generateText</code> or <code>llmDialog</code> over the finance cell. Under <code>max-enforcement</code> those sinks have no ceiling, so labeled values leave for the provider with no gate. The fetch sinks are capped; the llm sinks are not, and a failing-when-fixed test pins the gap. This is a second egress from the trusted base into the provider, beside the model-context edge.</p>`,
         where: ["runner", "gateway", "provider", "g_context"],
+      },
+      t14: {
+        plan:
+          "CT-2195 re-stamps the harness's projected posture from the real Runtime once the Fabric session exists.",
+        body:
+          `<p>The harness records its Fabric-session posture before the lazy Runtime exists. The record says <code>provenance: projected</code>, so it is an honest prediction rather than an attestation, and an injected session factory suppresses it entirely. <b>Open:</b> a run that constructs the session still never replaces that prediction with the resolved Runtime's posture.</p>`,
+        where: ["policy", "console", "artifacts"],
+      },
+      t15: {
+        plan:
+          "CT-2146 adds a store identity or startup contract that prevents an unnoticed worktree-local backend swap.",
+        body:
+          `<p><code>MEMORY_DIR</code> can resolve beneath a toolshed worktree. Two toolsheds can therefore accept the same space name and DID while reading different physical stores, making labels and state appear to vanish without either store losing data.</p>`,
+        where: ["toolshed", "spaces", "artifacts"],
+      },
+      t16: {
+        plan:
+          "CT-2156 makes a second console on the same directory refuse at startup or namespaces concurrent owners.",
+        body:
+          `<p>Two consoles can open the same <code>CF_HARNESS_CONSOLE_DIR</code>. Their durable event sequences collide and their runs share one artifact root, so evidence from distinct service owners can interleave.</p>`,
+        where: ["console", "artifacts"],
+      },
+      t17: {
+        plan:
+          "CT-2151 defines one migration rule for every config-gated tool when a durable console session resumes.",
+        body:
+          `<p>A console constructs tool policy when a session starts. A later turn resumes the recorded session without passing the host's current policy, so enabling or disabling a backing can leave the durable session with stale authority.</p>`,
+        where: ["console", "policy"],
+      },
+      t18: {
+        plan:
+          "CT-2150 adds a no-provider preflight over Docker and the Fabric-session path.",
+        body:
+          `<p>The console can answer HTTP health while Docker or its Fabric session is dead. Without a substrate round trip before the first model turn, provider spend can measure a broken environment rather than model behavior.</p>`,
+        where: ["console", "docker", "toolshed"],
+      },
+      t19: {
+        plan:
+          "CT-2199 maps and labels program text and its diagnostics before choosing the release mechanism.",
+        body:
+          `<p>A pattern's source can carry sensitive identifiers derived from its context. Inline <code>run_pattern</code> compile and settle diagnostics return model-facing text so the child can repair its program, and a child's structured return can carry inert numbers that encode a sealed string. No data label follows the program text across either boundary.</p>`,
+        where: ["child_pa", "runner", "g_release", "g_return"],
+      },
+      t20: {
+        plan:
+          "CT-2198 joins the model-facing transcript to the retained artifact fields and records which omission rule applied.",
+        body:
+          `<p>The durable transcript is the rendering the model saw. Full tool outputs remain in artifacts, but the retrospective does not show which fields were withheld, which identifiers were scrubbed, or which earlier diagnostics were collapsed. That hides omissions from an operator reviewing the run later.</p>`,
+        where: ["artifacts", "console"],
       },
       t11: {
         body:
@@ -2142,7 +2272,7 @@
       e_parent_gateway:
         `<p>What the harness sends the provider and what the provider sends back. Outbound bytes are model-visible by definition; inbound completions are untrusted proposals. There is no label gate on this edge; see the gate.</p>`,
       e_run_pattern:
-        `<p><code>run_pattern</code> is the central tool: the child writes a pattern and runs it in the trusted fabric session against the handles it holds. Its fabric identity stays outside Docker and its authority is one configured space. Computation goes to the data.</p><p>The result of a run comes back as <code>resultRef</code>, a handle, on success and on a release refusal alike. A commit refusal (write floor, missing policy input, writer fit under strict) or a run failure returns an error with no handle. Fields the <code>resultSchema</code> models as inert (numbers, booleans, enums) come back as themselves if the ceiling admits them; everything else as a reference token.</p>`,
+        `<p><code>run_pattern</code> is the central tool: the child writes a pattern and runs it in the trusted fabric session against the handles it holds. Its fabric identity stays outside Docker and its authority is one configured space. Computation goes to the data.</p><p>The result of a run comes back as <code>resultRef</code>, a handle, on success and on a release refusal alike. A commit refusal (write floor, missing policy input, writer fit under strict) or a run failure returns an error with no handle. Fields the <code>resultSchema</code> models as inert (numbers, booleans, enums) come back as themselves if the ceiling admits them; everything else as a reference token.</p><p>Inline source and its compile or settle diagnostics are a separate, unlabeled side channel: the diagnostics remain model-facing so the author can repair the program (CT-2199).</p>`,
       e_handles_spaces:
         `<p>A <code>cfh:a:</code> token is a deterministic per-run name for a cell address. Bare fabric IDs are not converted. The mapping lives in <code>run-state.json</code> and survives batch resume; an interactive (console) restore does not persist it yet.</p>`,
       e_render:
@@ -2156,13 +2286,15 @@
       e_parent_child:
         `<p>Delegation seeds the child's handle table with the parent entries the brief names, and nothing else. The brief itself is prose.</p>`,
       e_child_parent:
-        `<p>Return is validated, sanitized and re-minted through the parent's boundary. Raw child evidence is retained outside the parent's return channel.</p>`,
+        `<p>Return is validated, sanitized and re-minted through the parent's boundary. Raw child evidence is retained outside the parent's return channel. CT-2036 tracks inert numeric fields that can encode sealed strings; CT-2199 tracks program text and diagnostics crossing in the summary.</p>`,
       e_skillssh:
         `<p><code>acquire_skill</code>: fetch a skill from skills.sh, pin it by digest, stamp ExternalIngest, return a capability-typed handle.</p>`,
       e_web_www:
         `<p>Only the web child profiles or an explicit parent allowlist reach here. Request out, untrusted content in.</p>`,
       e_runner_artifacts:
         `<p>Labels, decisions, commit refusals and, since today, the cell-label snapshot for touched cells, written in the same write as the run's outcome.</p>`,
+      e_parent_artifacts:
+        `<p>The run retains its transcript, state, policy snapshot, and full tool outputs. The transcript is only the model-facing rendering; it does not identify fields withheld or diagnostics compressed from that rendering (CT-2198).</p>`,
       e_audit_operator:
         `<p>Findings for a person to act on. Operator access to raw artifacts is the intended gate that has no code yet.</p>`,
       e_operator_policy:
@@ -2234,7 +2366,7 @@
             ],
             sel: "audit",
             h: "7 · Prove it",
-            t: "Labels and decisions are written in the same write as the outcome. The checker grades the record against quoted spec clauses; inconclusive is never pass.",
+            t: "Labels and decisions are written with the outcome. The checker grades the record, shared posture, sink registry and deployment matrix against quoted spec clauses; inconclusive is never pass. AUD-16 counts release refusals in tool outputs today; CT-2200 moves them into the policy trace.",
           },
           {
             f: [
@@ -2248,11 +2380,18 @@
               "t8",
               "t12",
               "t13",
+              "t14",
+              "t15",
+              "t16",
+              "t17",
+              "t18",
+              "t19",
+              "t20",
               "policy",
             ],
             sel: "g_release",
             h: "8 · Where the circuit is still open",
-            t: "Policy discharge at the release gate and a door for records (CT-2175). The prose delegation brief. Web and browser tools without label input, and bridge networking in the sandbox. A pattern's llm calls uncapped. The sandbox reading the run's own artifacts (CT-2117). Connector rows unlabeled (CT-2189). Refusals absent from the decision channel. The display ceiling off. Operator access unaudited.",
+            t: "Policy discharge at the release gate and a door for records (CT-2175). The prose delegation brief. Web and browser tools without label input, and bridge networking in the sandbox. A pattern's llm calls uncapped. The sandbox reading the run's own artifacts (CT-2117). Connector rows unlabeled (CT-2189). Refusals absent from policy-trace (CT-2200). Projected posture, store identity, console concurrency, stale session policy, and substrate liveness remain tracked. Program diagnostics and retrospective omissions are unlabeled boundaries (CT-2199, CT-2198). The display ceiling is off. Operator access is unaudited.",
           },
         ],
       },
@@ -2424,7 +2563,7 @@
             ],
             sel: "audit",
             h: "The attempt is on the record",
-            t: "Skill provenance, the tool proposals, the refusal. Open: the refusal needs to be a policy event so the checker can count it, and the ingest stamp needs to be read at the egress gate.",
+            t: "Skill provenance, the tool proposals, the refusal. AUD-16 counts the refusal in tool outputs today. Open: CT-2200 moves it into the policy trace, and the ingest stamp still needs to be read at the egress gate.",
           },
         ],
       },
