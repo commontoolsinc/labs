@@ -10,9 +10,7 @@
 })()
 
 {
-  x: {
-    "/unconvertible": "nope"
-  }
+  x: /unconvertible("nope")
 }
 
-{x:{"/unconvertible":"nope"}}
+{x:/unconvertible("nope")}

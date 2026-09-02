@@ -6,8 +6,6 @@ new Proxy({}, {
   },
 })
 
-{
-  "/unconvertible": "no keys"
-}
+/unconvertible("no keys")
 
-{"/unconvertible":"no keys"}
+/unconvertible("no keys")

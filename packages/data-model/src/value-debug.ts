@@ -23,6 +23,16 @@ import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 
 /**
+ * Returns the class name of the given object, or `<anonymous>` when it has
+ * none. A class with no name reports it as the empty string, which counts.
+ */
+function classNameOf(value: object): string {
+  const name = (value as { constructor?: { name?: unknown } }).constructor
+    ?.name;
+  return ((typeof name === "string") && (name !== "")) ? name : "<anonymous>";
+}
+
+/**
  * Renders a key -- an object property name or a symbol's key -- bare when it
  * is a valid identifier, and as a quoted string otherwise. The identifier
  * check is the ASCII one.
@@ -134,9 +144,7 @@ class DebugConverter {
    * known to be at the indicated nesting depth.
    */
   #convertInstance(value: any, depth: number): FabricValue {
-    const className =
-      (value as { constructor?: { name?: string } }).constructor?.name ??
-        "<anonymous>";
+    const className = classNameOf(value);
     const tag = `/${className}`;
 
     const stringForm = value.toString();
@@ -375,7 +383,7 @@ class DebugStringifier {
       tag = codecOf(value, JSON_CODEC).tagForValue(value);
     } catch {
       // Never let the debug renderer throw; fall back to the class name.
-      tag = value.constructor?.name ?? "<anonymous>";
+      tag = classNameOf(value);
     }
 
     return DebugStringifier.#renderElidedInstance(tag);
@@ -462,10 +470,15 @@ class DebugStringifier {
           break;
         }
 
-        case "...":
         case "unconvertible": {
-          // The remaining markers, rendered as the objects they are, their
-          // keys included.
+          // A value the conversion could not read, whose payload is the
+          // error's message.
+          return this.#renderInstance(tag, payload, indent);
+        }
+
+        case "...": {
+          // The depth-limit marker, rendered as the object it is, its key
+          // included.
           const parts = this.#renderProperties(value, indent, false);
           return this.#renderContainer("{", "}", parts, indent);
         }
@@ -578,12 +591,19 @@ class DebugStringifier {
 }
 
 /**
+ * Nesting depth a debug string renders to. TODO(danfuzz): Make this
+ * adjustable by the caller, once there is a caller that wants to.
+ */
+const DEBUG_STRING_MAX_DEPTH = 10;
+
+/**
  * Renders the debug-string form of the given value with optional indentation,
  * by converting it with `toStructuredDebugValue()` and rendering the result.
  */
 function renderDebugString(value: unknown, indent?: number): string {
   try {
-    return new DebugStringifier(indent).render(toStructuredDebugValue(value));
+    const converted = toStructuredDebugValue(value, DEBUG_STRING_MAX_DEPTH);
+    return new DebugStringifier(indent).render(converted);
     // deno-coverage-ignore-start
   } catch {
     // Neither the conversion nor the rendering is meant to throw. This `catch`

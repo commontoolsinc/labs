@@ -6,10 +6,10 @@
 }
 
 {
-  instance: /(...),
-  "with props": /(
+  instance: /<anonymous>(...),
+  "with props": /<anonymous>(
     x: 1
   )
 }
 
-{instance:/(...),"with props":/(x:1)}
+{instance:/<anonymous>(...),"with props":/<anonymous>(x:1)}
