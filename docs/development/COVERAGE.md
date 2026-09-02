@@ -219,7 +219,7 @@ place for the reason:
 // deno-coverage-ignore-file -- runs only in a browser, as inlined text
 ```
 
-The comment is for a file Deno's coverage cannot measure. The usual case is a
+The comment is for a file Deno's coverage cannot measure. A notable case is a
 source file that runs only in a browser, such as one imported as text and
 inlined into a document a frame loads: no Deno-run test can load it, so no
 test could pay its debt down, and the browser tests that do drive it report
