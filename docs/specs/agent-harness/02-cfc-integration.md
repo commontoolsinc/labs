@@ -118,7 +118,11 @@ artifacts it explains.
 MUST occur before invocation policy evaluation. Possession or successful
 resolution of a handle supplies neither prompt-slot authority nor a CFC release;
 the resulting invocation remains subject to the same label, authority, and
-side-effect checks as a directly supplied reference.
+side-effect checks as a directly supplied reference. The converse holds too:
+minting or returning a handle to the model is not a release. A handle names a
+referent without carrying it, so a tool MAY return one for a result whose
+labels a model-context ceiling refuses, and a release ceiling applies only to
+a value that crosses into model context.
 
 **AH-CFC-19.** Handle mappings are sensitive provenance evidence. Their access,
 retention, child-transfer, and model-disclosure boundaries MUST be at least as
