@@ -1,6 +1,6 @@
 {
-  "empty": "",
-  "plain": "hello",
+  empty: "",
+  plain: "hello",
   "with quotes": "say \"hi\"",
   "with newline": "a\nb",
   "with backslash": "a\\b",

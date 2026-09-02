@@ -2,7 +2,7 @@
   "interned, identifier key": Symbol.for("k"),
   "interned, other key": Symbol.for("my-key"),
   "interned, empty key": Symbol.for(""),
-  "unique": Symbol("d"),
+  unique: Symbol("d"),
   "unique, no description": Symbol(),
   "unique, empty description": Symbol(""),
 }

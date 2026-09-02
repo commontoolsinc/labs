@@ -1,5 +1,5 @@
 {
-  "plain": null,
+  plain: null,
 }
 
 {
