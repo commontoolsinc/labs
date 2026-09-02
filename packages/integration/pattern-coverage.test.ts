@@ -202,3 +202,64 @@ Deno.test("a worker built without a collector reports the loss", async () => {
   assertEquals(warnings.length, 1);
   assert(warnings[0].includes("without a collector"), warnings[0]);
 });
+
+Deno.test("a second runtime's dump adds to the first rather than replacing it", async () => {
+  // One page runs several runtimes, because the shell builds a new one for
+  // every navigation and every identity set on it, and each is pulled from
+  // before it goes. What the second hands over joins what the first did.
+  const fileName = "/api/patterns/system/profile-create.tsx";
+  const compiled = { ...span(fileName), id: 2 };
+  const warnings = await collectingWarnings(async (dir) => {
+    await collectPatternCoverage(
+      respondingPage(() => ({
+        data: { spans: [compiled], hits: [{ fileName, id: 2, count: 1 }] },
+      })),
+    );
+    assertEquals(
+      (await lcovCounts(dir, "system/profile-create.tsx")).get(1),
+      1,
+      "the first runtime's hit",
+    );
+
+    await collectPatternCoverage(
+      respondingPage(() => ({
+        data: { spans: [compiled], hits: [{ fileName, id: 2, count: 1 }] },
+      })),
+    );
+    assertEquals(
+      (await lcovCounts(dir, "system/profile-create.tsx")).get(1),
+      2,
+      "both runtimes' hits, added rather than the second standing alone",
+    );
+  });
+  assertEquals(warnings, []);
+});
+
+Deno.test("a later dump leaves an earlier dump's record standing", async () => {
+  // Each dump rewrites the whole merged report, which is what lets the file on
+  // disk stand complete at every moment without a process-exit hook. A dump
+  // that names one pattern carries every earlier pattern out with it.
+  const first = "/api/patterns/system/piece-grid.tsx";
+  const second = "/api/patterns/system/backlinks-index.tsx";
+  const dumpOf = (fileName: string, id: number) => ({
+    data: {
+      spans: [{ ...span(fileName), id }],
+      hits: [{ fileName, id, count: 1 }],
+    },
+  });
+  const warnings = await collectingWarnings(async (dir) => {
+    await collectPatternCoverage(respondingPage(() => dumpOf(first, 3)));
+    await collectPatternCoverage(respondingPage(() => dumpOf(second, 4)));
+    assertEquals(
+      (await lcovCounts(dir, "system/piece-grid.tsx")).get(1),
+      1,
+      "the first dump's record survived the second dump's rewrite",
+    );
+    assertEquals(
+      (await lcovCounts(dir, "system/backlinks-index.tsx")).get(1),
+      1,
+      "the second dump's own record",
+    );
+  });
+  assertEquals(warnings, []);
+});
