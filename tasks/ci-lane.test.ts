@@ -10,6 +10,7 @@ import { loadTopology } from "./test-topology.ts";
 import {
   batchesOf,
   changedFiles,
+  describeConflicts,
   describePlan,
   describeWithheld,
   everyBatch,
@@ -635,6 +636,40 @@ describe("running a lane's work", () => {
     expect(printed).toContain("| no |");
   });
 
+  it("names the records no suite describes", () => {
+    // The only report they get before the store half of the drift guard
+    // fails on them on the next run on `main`.
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      describeConflicts([{
+        line: "record",
+        test: { k: "integration", s: "runner", n: "attaches" },
+        outcome: "pass",
+        durationMs: 1,
+      }]);
+    } finally {
+      console.log = log;
+    }
+    expect(lines.join("\n")).toContain(
+      testIdentityKey({ k: "integration", s: "runner", n: "attaches" }),
+    );
+    expect(lines.join("\n")).toContain("kept as written");
+  });
+
+  it("says nothing when every record was one its suite describes", () => {
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      describeConflicts([]);
+    } finally {
+      console.log = log;
+    }
+    expect(lines).toEqual([]);
+  });
+
   it("says nothing about a manifest that withheld nothing", () => {
     const lines: string[] = [];
     const log = console.log;
@@ -710,6 +745,28 @@ describe("planning a lane the manifest chose", () => {
     }
     return lines.join("\n");
   }
+
+  it("refuses a lane the plan has no share for", async () => {
+    // Taking an empty share instead would run nothing and exit zero,
+    // reporting a pass over a set no lane ran.
+    await expect(runLane(
+      {
+        lane: 3,
+        of: 2,
+        full: false,
+        dryRun: true,
+        root,
+        at: "2026-09-01T00:00:00Z",
+      },
+      {
+        manifest: () =>
+          Promise.resolve({
+            manifest: manifestOf([{}]),
+            objectName: "manifest-fixture.json.gz",
+          }),
+      },
+    )).rejects.toThrow("lane 3 has no share of a plan for 2 lanes");
+  });
 
   it("names the manifest it planned from", async () => {
     const printed = await planned([]);

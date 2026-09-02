@@ -16,6 +16,7 @@ import {
   Fold,
   foldReports,
   identityOfKey,
+  lastRun,
   localReporter,
   locateSurfaces,
   parseAggregate,
@@ -546,6 +547,22 @@ describe("build", () => {
       expect(unplaced.unclaimed).toEqual([KEY]);
     });
 
+    it("passes over a key that names no identity", () => {
+      // The surfaces come from a stored aggregate, which is untrusted
+      // input like every other object in the store, so a key nothing can
+      // read is skipped rather than thrown on.
+      const { placed, unplaced } = locateSurfaces(
+        [claiming("workspace-unit", () => ({ level: "unit", unit: "one" }))],
+        new Map([["not an identity key", {
+          suite: "unit:memory",
+          unit: "space > writes",
+          fromFile: false,
+        }]]),
+      );
+      expect(placed.size).toBe(0);
+      expect(unplaced).toEqual({ suiteLevel: [], unclaimed: [] });
+    });
+
     it("passes on an identity two suites claim", () => {
       // Two claims on one identity is a topology defect that the drift
       // guard fails on, and placing it either way would put the work in
@@ -611,6 +628,20 @@ describe("build", () => {
       expect(manifest.withheld.map((held) => held.reason)).toEqual([
         "main-red",
       ]);
+    });
+
+    it("takes the last day an identity actually ran, not the last it holds", () => {
+      // A day can be carried with no runs in it once the counters have
+      // been aged, and reading that as the last run would tell the
+      // exploration draw a test it has been ignoring was just run.
+      expect(lastRun({
+        ...emptyState(),
+        runsByDay: { "2026-08-18": 3, "2026-08-19": 0, "2026-08-20": 0 },
+      })).toBe("2026-08-18");
+    });
+
+    it("has no last day for an identity nothing has run", () => {
+      expect(lastRun(emptyState())).toBeUndefined();
     });
 
     it("carries the last day anything ran an identity", () => {

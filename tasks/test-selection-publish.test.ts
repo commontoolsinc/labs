@@ -345,6 +345,67 @@ describe("publish()", () => {
     expect(lines.join("\n")).toContain("1 identities no suite claims");
   });
 
+  it("carries what each configuration declares unavailable", async () => {
+    // A lane reads it to say why a test is absent. Without it the test
+    // looks merely unrecorded, which is reported and never failed on.
+    const { store, created } = fakeStore(seed());
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      () =>
+        Promise.resolve([{
+          ...TOPOLOGY[0]!,
+          variant: "server-execution",
+          unavailable: [{
+            unit: "packages/memory/test/space.test.ts",
+            leafName: "space > writes a fact",
+            phase: "phase-2",
+            reason: "the ON arm cannot run it yet",
+          }],
+        }]),
+    );
+    const manifestName = [...created.keys()].find((name) =>
+      name.includes("/manifest-")
+    );
+    const manifest = parseManifest(
+      await gunzipToText(created.get(manifestName!)!),
+    );
+    expect(manifest!.unavailable).toEqual([{
+      suite: "workspace-unit",
+      variant: "server-execution",
+      unit: "packages/memory/test/space.test.ts",
+      leafName: "space > writes a fact",
+      phase: "phase-2",
+      reason: "the ON arm cannot run it yet",
+    }]);
+  });
+
+  it("says how many identities measure a suite rather than a unit", async () => {
+    // An overlapping whole-invocation record names no unit, so nothing
+    // can be asked to run one, and it must not be summed with the steps
+    // inside it either.
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    const { store } = fakeStore(seed());
+    try {
+      await publish(
+        ["--bootstrap", "--days", "1"],
+        store,
+        NOW,
+        () =>
+          Promise.resolve([{
+            ...TOPOLOGY[0]!,
+            locate: () => ({ level: "suite" as const }),
+          }]),
+      );
+    } finally {
+      console.log = log;
+    }
+    expect(lines.join("\n")).toContain("1 identities measure a suite");
+  });
+
   it("folds from the state it left rather than the objects again", async () => {
     const { store, created } = fakeStore(seed());
     await publish(["--bootstrap", "--days", "1"], store, NOW, suites);

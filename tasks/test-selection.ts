@@ -457,7 +457,7 @@ const LIVE: Sources = {
   manifest: newestManifest,
   members: gatedMembers,
   aliases: loadAliasResolver,
-  topology: () => loadTopology(),
+  topology: loadTopology,
 };
 
 /**

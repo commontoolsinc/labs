@@ -748,10 +748,20 @@ export async function runLane(
       const mine = laid.lanes.find((lane) =>
         lane.lane === options.lane
       );
-      batches = batchesOf(suites, manifest.manifest, mine?.selections ?? []);
+      if (mine === undefined) {
+        // A lane outside the run it belongs to. Taking an empty share
+        // instead would run nothing and exit zero, reporting a pass over
+        // a set no lane ran, which is the one failure of this design
+        // that would be silent.
+        throw new RangeError(
+          `lane ${options.lane} has no share of a plan for ${options.of} ` +
+            `lanes`,
+        );
+      }
+      batches = batchesOf(suites, manifest.manifest, mine.selections);
       chosen = {
-        selections: mine?.selections ?? [],
-        projectedSeconds: mine?.projectedSeconds ?? 0,
+        selections: mine.selections,
+        projectedSeconds: mine.projectedSeconds,
       };
       sayWithheld = () => describeWithheld(laid.withheld, mandatory);
       // A discretionary identity costing more than a lane's hard bound

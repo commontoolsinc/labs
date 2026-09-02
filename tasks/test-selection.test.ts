@@ -517,6 +517,41 @@ describe("dispatch()", () => {
     expect(result.out).toContain("accounts for every unit");
   });
 
+  it("passes over a unit the configuration declares unavailable", async () => {
+    // A manifest holding nothing for a test that does not run is the
+    // manifest being right, so it is not something to fail on.
+    const suite = suiteHolding([
+      "packages/memory/test/memory.test.ts",
+      "packages/memory/test/skipped.test.ts",
+    ]);
+    const result = await ran(["plan", "--verify"], {
+      topology: () =>
+        Promise.resolve([{
+          ...suite,
+          unavailable: [{
+            unit: "packages/memory/test/skipped.test.ts",
+            phase: "phase-2",
+            reason: "the server-execution arm cannot run it yet",
+          }],
+        }]),
+    });
+    expect(result.code).toBe(0);
+    expect(result.out).not.toContain("skipped.test.ts");
+  });
+
+  it("reports a manifest entry the tree no longer enumerates", async () => {
+    // Nothing can be asked to run it, and the packer drops it without a
+    // word, so reporting it is the only place it is ever mentioned. It
+    // does not fail: a manifest is hours old, so a unit deleted since it
+    // was published is expected to linger in it.
+    const result = await ran(["plan", "--verify"], {
+      topology: () => Promise.resolve([suiteHolding(["packages/memory/x.ts"])]),
+    });
+    expect(result.out).toContain(
+      "no longer enumerates packages/memory/test/memory.test.ts",
+    );
+  });
+
   it("fails --verify on a unit the manifest holds nothing for", async () => {
     // Every lane treats such a unit as unknown and therefore mandatory,
     // so a manifest missing many of them is a run that selects nothing
