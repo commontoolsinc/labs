@@ -442,6 +442,11 @@ value. An `observes` update is rejected when it would combine with an existing
 observation class instead of preserving the requested class. Omitting `observes`
 from a later update preserves an existing unambiguous class.
 
+The path is followed through the links it crosses, as `get-label` reads it, so
+the update lands on the doc that holds the value rather than the doc the path
+started in. The classes it is checked against are that doc's: asking for `shape`
+where the resolved doc declares `value` is refused rather than replacing it.
+
 ## Invocation sessions
 
 An invocation id is the caller's own word for one call, and another caller can
