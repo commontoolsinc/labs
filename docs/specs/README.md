@@ -46,6 +46,7 @@ decision is reversed or superseded).
 - [Sparse-array preservation](sparse-array-preservation.md)
 - [Space model](space-model/README.md)
 - [Formal space-model data specification](space-model-formal-spec/README.md)
+- [Naming in collections](collection-naming.md)
 - [Memory v2](memory-v2/README.md)
 - [FUSE filesystem](fuse-filesystem/README.md)
 - [SQLite builtins](sqlite-builtin/README.md)
