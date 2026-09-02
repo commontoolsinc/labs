@@ -444,10 +444,14 @@ function moveDown(from: Standing, segment: string): Step {
  * is the one a scope suffix may ride, since that is where the canonical
  * grammar carries it, and a suffix here moves the scope half of the place.
  *
- * A `#` is refused rather than taken as part of the id, matching what the
- * CLI's own bare-alias intake does with the same spelling: the alias grammar
+ * A `#` is refused rather than taken as part of the id, for one of two
+ * reasons. `#argument` is a real suffix in the wrong place: the alias grammar
  * has no fragments, and letting one through would bury the suffix inside the
- * id and fail as an unknown piece later.
+ * id and fail as an unknown piece later, which is what the CLI's own
+ * bare-alias intake says of the same spelling. Any other fragment is a
+ * spelling nothing carries, `#` being reserved for `#argument` in the
+ * reference form too, so the refusal says that rather than naming a form
+ * which would refuse it again for a second reason.
  */
 function moveIntoPiece(
   place: Place,
@@ -455,11 +459,19 @@ function moveIntoPiece(
   segment: string,
   trail: Trail,
 ): Step {
-  if (segment.includes("#")) {
-    return refuse(
-      `The "#argument" suffix rides the reference form ` +
-        `(/of:fid1:...#argument), not the bare piece id.`,
-    );
+  const hash = segment.indexOf("#");
+  if (hash !== -1) {
+    const suffix = segment.slice(hash);
+    return suffix === "#argument"
+      ? refuse(
+        `The "#argument" suffix rides the reference form ` +
+          `(/of:fid1:...#argument), not the bare piece id.`,
+      )
+      : refuse(
+        `Unknown reference suffix "${suffix}". The one supported suffix ` +
+          `is "#argument", which the reference form carries and a bare ` +
+          `piece id does not.`,
+      );
   }
   let scoped;
   try {

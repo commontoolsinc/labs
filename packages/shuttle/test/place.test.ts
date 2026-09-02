@@ -499,11 +499,37 @@ describe("place", () => {
             });
           });
 
-          it("refuses `#` in a segment naming a piece", () => {
+          it("refuses `#argument` in a segment naming a piece", () => {
             expect(inSlugs().cd("board#argument")).toEqual({
               kind: "refused",
               reason: 'The "#argument" suffix rides the reference form ' +
                 "(/of:fid1:...#argument), not the bare piece id.",
+            });
+          });
+
+          it("refuses any other fragment for carrying no suffix at all", () => {
+            expect(inSlugs().cd("board#result")).toEqual({
+              kind: "refused",
+              reason: 'Unknown reference suffix "#result". The one ' +
+                'supported suffix is "#argument", which the reference form ' +
+                "carries and a bare piece id does not.",
+            });
+          });
+
+          it("names the whole fragment, not the part before a second `#`", () => {
+            expect(inSlugs().cd("board#argument#x")).toEqual({
+              kind: "refused",
+              reason: 'Unknown reference suffix "#argument#x". The one ' +
+                'supported suffix is "#argument", which the reference form ' +
+                "carries and a bare piece id does not.",
+            });
+          });
+
+          it("refuses a facet segment carrying a fragment for naming no facet", () => {
+            expect(atSpaceRoot().cd("slugs#argument")).toEqual({
+              kind: "refused",
+              reason: "A space root lists facets, and `slugs#argument` " +
+                "names none. The facets are `slugs/` and `pieces/`.",
             });
           });
 
