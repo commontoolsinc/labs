@@ -122,6 +122,43 @@ These properties of this mechanism are worth keeping in mind:
   `ACCEPT_COVERAGE_DEBT` marker.
   [pattern-testing.md](../common/workflows/pattern-testing.md) shows how.
 
+#### What a pattern test has to read
+
+The last bullet generalizes past handlers and derived expressions. Almost every
+line of a pattern outside a handler body runs when something reads the value the
+pattern returns, and a pattern test that drives streams and compares scalars
+reads hardly any of it. Three groups go uncovered that way, and one pattern test
+can take all three.
+
+The view is the first. A pattern's view helpers are ordinary functions, and
+nothing calls one until something reads `[UI]`. Reaching for a node is what
+builds the tree, so one assertion that walks to a node covers every helper the
+tree called on the way there. `packages/patterns/test/vnode-helpers.ts` holds
+the walk. Tie the assertion to something the file already claims rather than to
+a node's bare existence:
+`hasText(findNodeById(instance[UI], "gallery-count"), "16 total examples")`
+states the rendered header against the count the same test asserts through
+`totalExamples`, so a gallery that computed its count and rendered nothing
+fails.
+
+The returned record is the second. A `computed()` sitting in it runs when a
+reader asks for that field, so `[NAME]` and any output the test never compares
+against goes unrun. State those against the values the test's own actions put
+there, which says the setter stream reached the cell the field reports.
+
+A stream nobody sends to is the third. A handler the pattern exposes and no test
+drives has a body that runs in neither lane, so it sits at zero on every run
+rather than moving between them. That is permanent debt rather than flap, and it
+costs one more action apiece to clear.
+
+`packages/patterns/cfc-spec-gallery/main.test.tsx` is the worked example. It
+reads its view, states its name and the four inputs it reports back out, and
+drives every stream the gallery exposes, which takes the file from 385 of its
+522 measured lines to all of them. Before that the integration lane was the only
+one covering the other 137, and
+[the investigation record](../history/development/coverage-flake-cfc-spec-gallery-view-2026-09-01.md)
+is what that cost the group on a run where the lane's report went missing.
+
 `CF_PATTERN_COVERAGE_DIR` names the directory the `*.pattern-coverage.lcov`
 files are written to. The `cf test` command in
 `packages/cli/commands/test-command.ts` reads it directly. The browser
