@@ -94,6 +94,46 @@ describe("PatternsRoute", () => {
     });
   });
 
+  it("answers 400 for a path that is not valid percent-encoding", async () => {
+    // A stray `%` survives URL parsing and reaches the route as written, so
+    // the route is what has to decide about it.
+
+    await withRoute({ "main.tsx": ENTRY }, async (route) => {
+      const response = await route.serve(get("/api/patterns/%ZZ.tsx"));
+      expect(response?.status).toBe(400);
+    });
+  });
+
+  it("answers 400 for an entry the light identity path cannot model", async () => {
+    // A fabric import folds another pattern's identity into this entry, which
+    // only a compile resolves. The entry is answerable, just not this way, and
+    // a runtime told `500` would read it as a host to try again later.
+
+    await withRoute(
+      { "main.tsx": 'import "cf:some/pattern";' },
+      async (route) => {
+        const response = await route.serve(
+          get("/api/patterns/main.tsx?identity"),
+        );
+        expect(response?.status).toBe(400);
+        expect((await response?.json()).error).toContain("fabric import");
+      },
+    );
+  });
+
+  it("answers 500 for a read failure it does not recognize", async () => {
+    // The route names the ways a path fails to name a file and answers 404 for
+    // each. Anything else the read reports is this host's own fault until
+    // somebody says otherwise, which is the answer that gets looked at.
+
+    await withRoute({ "main.tsx": ENTRY }, async (route) => {
+      const response = await route.serve(
+        get(`/api/patterns/${"a".repeat(300)}.tsx`),
+      );
+      expect(response?.status).toBe(500);
+    });
+  });
+
   it("answers 400 for a path that would leave the tree", async () => {
     await withRoute({ "main.tsx": ENTRY }, async (route) => {
       for (
@@ -120,6 +160,17 @@ describe("PatternsRoute", () => {
           }),
         ),
       ).toBeUndefined();
+    });
+  });
+
+  it("refuses a name that resolves outside the directory it serves", async () => {
+    // `serve` rejects such a path before this, so the guard here is what a
+    // host calling the file accessors directly relies on.
+
+    await withRoute({ "main.tsx": ENTRY }, async (route) => {
+      await expect(route.get("../outside.tsx")).rejects.toThrow(
+        "Path traversal detected",
+      );
     });
   });
 
