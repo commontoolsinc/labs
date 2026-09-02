@@ -5170,12 +5170,19 @@ export class Server {
             // lost frame's docs as already-snapshotted (CT-1927 review,
             // round 6).
             const commitEntities = () => {
-              // (d′) — design §2.8 flag 2: a push pass that
-              // GROWS the session's tracked set is a demand change (a
-              // newly reachable doc entered the closure through the
-              // tracker's re-traversal); notify so the demand pass sees
-              // it without waiting for the next input.
-              const sizeBefore = session.trackedIds.size;
+              // (d′) — design §2.8 flag 2: a push pass that changes the
+              // session's tracked set is a demand change; notify so the
+              // demand pass sees it without waiting for the next input.
+              // The set is rebuilt rather than grown, so the change can
+              // be a same-size swap (a crossing manifest rewritten from
+              // one lazy target to another) or a shrink — compared by
+              // membership, exactly as the full-evaluation branch below
+              // does, and like there the O(tracked) scan runs only when
+              // a demand observer is attached (the serving posture; its
+              // NIT-6 note covers the `push-growth` reason on a shrink).
+              const wantsDemandNotify =
+                this.#serverExecutionObserver?.demandChanged !== undefined;
+              const previous = session.trackedIds;
               for (const [key, entry] of updates) {
                 session.entities.set(key, entry);
               }
@@ -5197,7 +5204,19 @@ export class Server {
                 session.trackedIds,
                 session.graphs.values(),
               );
-              if (session.trackedIds.size > sizeBefore) {
+              let changed = false;
+              if (wantsDemandNotify) {
+                changed = previous.size !== session.trackedIds.size;
+                if (!changed) {
+                  for (const key of session.trackedIds) {
+                    if (!previous.has(key)) {
+                      changed = true;
+                      break;
+                    }
+                  }
+                }
+              }
+              if (changed) {
                 this.#notifyDemandChanged(
                   space,
                   "push-growth",

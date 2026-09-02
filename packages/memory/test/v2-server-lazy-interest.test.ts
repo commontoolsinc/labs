@@ -217,4 +217,108 @@ describe("v2-server-lazy-interest", () => {
     const framesSince = JSON.stringify(messages.slice(framesBefore));
     expect(framesSince.includes("of:derived-cell")).toBe(false);
   });
+
+  it("notifies demand when a rewrite swaps one lazy target for another", async () => {
+    // Sol's A→B repro: the wake set is rebuilt on refresh, so rewriting a
+    // crossing's manifest from lazy target A to B replaces one tracked id
+    // with another at the same cardinality. The demand pass must hear about
+    // the swap — a size-growth check stays silent on it, and server
+    // execution would keep the old demand registry and never activate B.
+
+    const space = "did:key:z6Mk-memory-v2-lazy-swap";
+    const sessionId = await openSession(space);
+    const seeded = await server.transact(
+      transactMessage(space, sessionId, {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: "of:lazy-a", value: { value: { n: 1 } } },
+          { op: "set", id: "of:lazy-b", value: { value: { n: 1 } } },
+          {
+            op: "set",
+            id: "of:crossing",
+            value: {
+              value: { name: "crossing" },
+              internal: [{ link: link(space, "of:lazy-a") }],
+            },
+          },
+          {
+            op: "set",
+            id: "of:root",
+            value: { value: { child: link(space, "of:crossing") } },
+          },
+        ],
+      }),
+    );
+    expect(seeded.error).toBeUndefined();
+
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.watch.add",
+      requestId: "watch",
+      space,
+      sessionId,
+      watches: [{
+        id: "lazy-swap-watch",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:root",
+            selector: {
+              path: [],
+              schema: {
+                type: "object",
+                properties: {
+                  child: {
+                    type: "object",
+                    properties: { name: { type: "string" } },
+                  },
+                },
+              },
+            },
+          }],
+        },
+      }],
+    }));
+
+    const aKey = toDirtyKey("of:lazy-a");
+    const bKey = toDirtyKey("of:lazy-b");
+    expect(server.sessionTracksAny(space, sessionId, new Set([aKey])))
+      .toBe(true);
+    expect(server.sessionTracksAny(space, sessionId, new Set([bKey])))
+      .toBe(false);
+
+    // Attached after the watch, so the captures below are the swap's own.
+    const reasons: (string | undefined)[] = [];
+    server.setServerExecutionObserver({
+      demandChanged: (_space, reason) => {
+        reasons.push(reason);
+      },
+    });
+
+    const arrived = nextMessage();
+    const swapped = await server.transact(
+      transactMessage(space, sessionId, {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:crossing",
+          value: {
+            value: { name: "crossing" },
+            internal: [{ link: link(space, "of:lazy-b") }],
+          },
+        }],
+      }),
+    );
+    expect(swapped.error).toBeUndefined();
+    await arrived;
+
+    // The membership swapped at unchanged cardinality...
+    expect(server.sessionTracksAny(space, sessionId, new Set([aKey])))
+      .toBe(false);
+    expect(server.sessionTracksAny(space, sessionId, new Set([bKey])))
+      .toBe(true);
+    // ...and the swap still reached the demand pass.
+    expect(reasons).toContain("push-growth");
+  });
 });
