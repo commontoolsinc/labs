@@ -57,11 +57,38 @@ the test result.
 ### Focused browser regressions
 
 A package can reserve a `*.browser.test.ts` file for DOM behavior that needs a
-real browser but not a running shell, toolshed, or piece. The package test task
-must explicitly exclude that file from its plain `deno test` discovery and run
-it through `deno-web-test` in a separate browser step. The package-level task
-remains the one command authors and the root workspace runner invoke; it owns
-both steps.
+real browser but not a running shell, toolshed, or piece. The name is the whole
+of the wiring. Every package that splits its tests this way matches
+`*.browser.test.ts` twice: once as an `--ignore` pattern that keeps the file out
+of plain `deno test` discovery, and once as the argument list handed to
+`deno-web-test`. Adding a browser test means naming the file and nothing
+further.
+
+The two matches need not sit on one task line. `packages/dashboard` spreads
+them across the runner script its test task starts and the `test-browser` task
+that runner then calls. What matters is that both are the same glob, so neither
+can fall behind the other. The package-level task remains the one command
+authors and the root workspace runner invoke, and it owns every step.
+
+The glob hands its files to `deno-web-test` in the order the shell expands
+them, which is alphabetical rather than the order anyone chose. Tests in one
+file share a browser with the tests in the others, so a file that only passes
+after some particular sibling has run is relying on something no longer written
+down anywhere. Each file has to stand on its own.
+
+A package whose tests all need a browser, `packages/identity` among them, hands
+its whole test directory to `deno-web-test` and has no such split to get wrong.
+
+Name a test that way whenever it needs a browser, including when its subject is
+not a component.
+`packages/ui/src/v2/components/cf-svg/sanitize-svg.browser.test.ts` needs a
+browser for `DOMParser` and for nothing else. Under any other name the glob
+does not reach it and the plain `deno test` pass collects it instead.
+
+Do not guard the body with `typeof document === "undefined"`. A file the glob
+routes always has a document. The guard turns a file that reached the wrong
+runner into a reported pass over zero assertions, which is how such a file goes
+unnoticed.
 
 Use this route for a narrow browser boundary such as event propagation or
 layout API behavior. Use the browser integration lane when the test needs the
