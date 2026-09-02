@@ -1825,12 +1825,12 @@ them the audit stays what it is above — a per-run reading of an artifact tree 
 so an ordinary audit's exit code is not spent on a question nobody asked. A
 Group D finding is stamped `(corpus)` rather than with a run id.
 
-| Check  | Subject                                                                                                                                                                                                                      | Turned on by                    |
-| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| AUD-16 | how many label-driven refusals the corpus produced, beside the count of runs recording `not-attested` and `permissive-if-absent`. Zero refusals warns, and fails when the corpus is declared adversarial                     | `--corpus`, `--expect-refusals` |
-| AUD-17 | the posture a deployment publishes on `/api/meta`, against the expected-posture spec. A deployment publishing none fails: what it enforces is indistinguishable from the default                                             | `--toolshed-url`                |
-| AUD-18 | whether every surface in the corpus resolved the same posture. The harness's own surfaces diverge by default — the console opts sessions into the max-enforcement bundle, the CLI does not — so a mixed corpus surfaces that | `--corpus`                      |
-| AUD-19 | the shell's render ceiling, which nothing publishes: a permanent `inconclusive` line item, retiring when a publisher exists                                                                                                  | any deployment flag             |
+| Check  | Subject                                                                                                                                                                                                                                                                         | Turned on by                    |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| AUD-16 | how many label-driven refusals the corpus produced, beside the count of runs recording `not-attested` and `permissive-if-absent`. Zero refusals warns, and fails when the corpus is declared adversarial                                                                        | `--corpus`, `--expect-refusals` |
+| AUD-17 | the posture a deployment publishes on `/api/meta`, against the expected-posture spec. A deployment publishing none fails: what it enforces is indistinguishable from the default. So does one publishing a `projected` record — a prediction where an attestation was asked for | `--toolshed-url`                |
+| AUD-18 | whether every surface in the corpus resolved the same posture. The harness's own surfaces diverge by default — the console opts sessions into the max-enforcement bundle, the CLI does not — so a mixed corpus surfaces that                                                    | `--corpus`                      |
+| AUD-19 | the shell's render ceiling, which nothing publishes: a permanent `inconclusive` line item, retiring when a publisher exists                                                                                                                                                     | any deployment flag             |
 
 `--expected-posture` names a JSON profile stating what a posture record is
 supposed to hold — dial rungs, which sinks must carry a ceiling, which may
@@ -1840,6 +1840,20 @@ the first. A profile asserts only the fields it carries, and one asserting
 nothing is refused rather than passing: a spec that checks nothing is
 indistinguishable, in every line the audit prints, from a deployment whose every
 field held.
+
+### What a recorded posture is
+
+A posture record carries its own `provenance`. `resolved` was read off a
+constructed Runtime — an attestation. `projected` was computed from the options
+a runtime will be built with, before it exists — a prediction. The harness
+records `projected`: its fabric session's runtime is built lazily on the first
+`run_pattern`, may never be built at all, and a host may supply its own session
+factory. So AUD-13, AUD-14 and AUD-15 over harness artifacts report on what a
+run **declared it would be at**, and every one of their messages says so. Only
+AUD-17, reading `/api/meta`, weighs an attestation. Re-stamping the run state's
+record from the real runtime once one exists is what would make the harness's
+records attestations too; until then the field is what stops the audit reading
+one for the other.
 
 The matrix itself is data: [audit/matrix.ts](audit/matrix.ts) holds the
 conforming states and the ordering rules of

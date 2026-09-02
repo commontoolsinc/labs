@@ -73,8 +73,68 @@ describe("the expected-posture spec", () => {
         .toThrow("asserts something only as true");
     });
 
+    it("refuses a rung field that is not a non-empty string", () => {
+      expect(() => parseExpectedPosture({ flowLabels: "" })).toThrow(
+        "must be a non-empty string",
+      );
+      expect(() => parseExpectedPosture({ flowLabels: 3 })).toThrow(
+        "must be a non-empty string",
+      );
+    });
+
+    it("refuses a boolean field that is not a boolean", () => {
+      expect(() => parseExpectedPosture({ triggerReadGating: "true" })).toThrow(
+        "must be true or false",
+      );
+    });
+
+    it("refuses a policyDigest that is neither a string nor null", () => {
+      expect(() => parseExpectedPosture({ policyDigest: 7 })).toThrow(
+        "must be a string or null",
+      );
+    });
+
+    it("admits a null policyDigest, which asserts that none is configured", () => {
+      expect(parseExpectedPosture({ policyDigest: null })).toEqual({
+        policyDigest: null,
+      });
+    });
+
+    it("refuses a sink list that is not a list of strings", () => {
+      expect(() => parseExpectedPosture({ ceilingedSinks: "fetchText" }))
+        .toThrow("must be a list of strings");
+      expect(() => parseExpectedPosture({ ungatedSinks: [1] })).toThrow(
+        "must be a list of strings",
+      );
+    });
+
+    it("refuses a label that is not a non-empty string", () => {
+      expect(() => parseExpectedPosture({ label: "  ", flowLabels: "persist" }))
+        .toThrow("label must be a non-empty string");
+    });
+
     it("refuses a spec that is not a JSON object", () => {
       expect(() => parseExpectedPosture([])).toThrow("must be a JSON object");
+    });
+  });
+
+  describe("loading a spec file", () => {
+    it("says which file could not be read, rather than throwing a bare ENOENT", async () => {
+      await expect(loadExpectedPosture("/nonexistent/spec.json")).rejects
+        .toThrow("could not be read");
+    });
+
+    it("says which file is not JSON", async () => {
+      const dir = await Deno.makeTempDir({ prefix: "cfc-audit-spec-" });
+      const path = join(dir, "broken.json");
+      try {
+        await Deno.writeTextFile(path, "{not json");
+        await expect(loadExpectedPosture(path)).rejects.toThrow(
+          "is not valid JSON",
+        );
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
     });
   });
 
@@ -97,6 +157,14 @@ describe("the expected-posture spec", () => {
       expect(mismatches.map((mismatch) => mismatch.field)).toContain(
         "ceilingedSinks[fetchText]",
       );
+    });
+
+    it("names a policy digest the record does not carry", () => {
+      const spec = parseExpectedPosture({ policyDigest: null });
+      expect(
+        postureMismatches(spec, MAX_ENFORCEMENT_RECORD)
+          .map((mismatch) => mismatch.field),
+      ).toEqual(["policyDigest"]);
     });
 
     it("names an ungated sink the spec does not permit ungated", () => {

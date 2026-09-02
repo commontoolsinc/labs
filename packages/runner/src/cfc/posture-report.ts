@@ -17,11 +17,26 @@
  * the un-rewritten label. And every known sink appears, whether or not a
  * ceiling governs it: a list of the governed sinks reads as coverage, and a
  * sink missing from it is exactly the gap a reader needed to see.
+ *
+ * A third: the record says which of the two things it is. A surface that
+ * publishes after its runtime exists reads the resolved fields; a surface that
+ * publishes before — a console printing at startup, a harness recording a
+ * session built lazily on first use — projects what those fields will be. The
+ * two are not interchangeable. A projection is a claim about a path that has
+ * not run, and an artifact asserting a posture the path did not honor is
+ * exactly what an audit of these records exists to catch, so the record must
+ * not be able to pass one off as the other. The two entry points below are the
+ * only ways to build one, and each stamps its own provenance.
  */
 
 import type { CfcConfClause } from "./clause.ts";
-import type { PolicySnapshot } from "./policy.ts";
 import {
+  buildCfcPolicySnapshot,
+  type CfcPolicyRecordInput,
+  type PolicySnapshot,
+} from "./policy.ts";
+import {
+  DEFAULT_SINK_MAX_CONFIDENTIALITY,
   KNOWN_SINKS,
   type KnownSinkName,
   SINK_UNGATED_RATIONALES,
@@ -37,6 +52,17 @@ import type {
   CfcTriggerReadGating,
   CfcWriteFloorMode,
 } from "./types.ts";
+
+/**
+ * Where a record's values came from.
+ *
+ * - `resolved` — read off a constructed Runtime's fields. An attestation:
+ *   this is what that runtime is at.
+ * - `projected` — computed from the options a runtime WILL be constructed
+ *   with, before it exists. A prediction: this is what the surface expects,
+ *   and nothing has yet honored it.
+ */
+export type CfcPostureProvenance = "resolved" | "projected";
 
 /**
  * One dial's resolved rung, with what that rung decides on.
@@ -84,6 +110,9 @@ export interface CfcPostureDeviation {
 
 /** What a runtime is enforcing, as one record. */
 export interface CfcPostureReport {
+  /** Whether this record attests a constructed runtime or predicts one. */
+  readonly provenance: CfcPostureProvenance;
+
   readonly enforcementMode: CfcDialReport;
   readonly flowLabels: CfcDialReport;
   readonly writeFloor: CfcDialReport;
@@ -304,10 +333,12 @@ export const resolveCfcDials = (
     RUNTIME_CFC_DIAL_DEFAULTS.cfcDeclaredMonotonicity,
 });
 
-/** The posture record for a constructed runtime's resolved CFC fields. */
-export const cfcPostureReport = (
+/** The values of a record, whichever way its provenance was arrived at. */
+const buildReport = (
+  provenance: CfcPostureProvenance,
   source: CfcPostureSource,
 ): CfcPostureReport => ({
+  provenance,
   enforcementMode: dial(
     source.cfcEnforcementMode,
     ENFORCEMENT_MODE_DECIDES[source.cfcEnforcementMode],
@@ -338,3 +369,43 @@ export const cfcPostureReport = (
   sinks: sinkReports(source.cfcSinkMaxConfidentiality),
   deviations: postureDeviations(source.cfcSinkMaxConfidentiality),
 });
+
+/**
+ * The posture record a constructed runtime is at, from its resolved fields.
+ * An attestation: `provenance: "resolved"`.
+ */
+export const cfcPostureReport = (
+  source: CfcPostureSource,
+): CfcPostureReport => buildReport("resolved", source);
+
+/**
+ * The CFC options a runtime will be constructed with — the subset of
+ * `RuntimeOptions` a posture is read from, every field optional because a
+ * construction that states none still resolves a posture.
+ */
+export interface CfcPostureOptions extends CfcDialOptions {
+  readonly cfcPolicyRecords?: readonly CfcPolicyRecordInput[];
+  readonly cfcSinkMaxConfidentiality?: SinkMaxConfidentiality;
+}
+
+/**
+ * The posture record a runtime constructed with `options` WILL be at, for a
+ * surface that has to publish before that runtime exists. A prediction:
+ * `provenance: "projected"`.
+ *
+ * Every value goes through the same resolution the constructor uses — the
+ * shared dial table, the same policy-snapshot digest, the same sink registry —
+ * so the projection is that resolution rather than a second statement of it.
+ * What it cannot promise is that the runtime the surface eventually builds is
+ * the one these options describe, which is why the record says it is a
+ * projection rather than leaving a reader to assume otherwise.
+ */
+export const projectedCfcPostureReport = (
+  options: CfcPostureOptions,
+): CfcPostureReport =>
+  buildReport("projected", {
+    ...resolveCfcDials(options),
+    cfcPolicySnapshot: buildCfcPolicySnapshot(options.cfcPolicyRecords),
+    cfcSinkMaxConfidentiality: options.cfcSinkMaxConfidentiality ??
+      DEFAULT_SINK_MAX_CONFIDENTIALITY,
+  });

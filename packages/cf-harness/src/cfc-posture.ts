@@ -14,11 +14,8 @@
  */
 
 import {
-  buildCfcPolicySnapshot,
   type CfcPostureReport,
-  cfcPostureReport,
-  DEFAULT_SINK_MAX_CONFIDENTIALITY,
-  resolveCfcDials,
+  projectedCfcPostureReport,
 } from "@commonfabric/runner/cfc";
 import { presetCfcOptions } from "@commonfabric/runner";
 
@@ -32,6 +29,14 @@ import type { HarnessFabricSessionConfig } from "./config.ts";
  * bundle, then the host dials over both — is what decides the values, and
  * whatever the preset leaves unset resolves through the Runtime's dial
  * defaults.
+ *
+ * A PROJECTION, and the record says so. Two things it cannot promise. The
+ * session may never be built at all — nothing constructs one until the first
+ * `run_pattern` — and a host may supply its own session factory
+ * (`fabricSessionFactory`), whose runtime this config does not describe. So a
+ * reader gets a claim about what the run expected to be at, never an
+ * attestation of what a runtime was at. Re-stamping the record from the real
+ * runtime once one exists is what would make it the second thing.
  */
 export const harnessFabricSessionPosture = (
   config: HarnessFabricSessionConfig,
@@ -47,12 +52,7 @@ export const harnessFabricSessionPosture = (
       ? { cfcFlowLabels: config.cfcFlowLabels }
       : {}),
   });
-  return cfcPostureReport({
-    ...resolveCfcDials(options),
-    cfcPolicySnapshot: buildCfcPolicySnapshot(options.cfcPolicyRecords),
-    cfcSinkMaxConfidentiality: options.cfcSinkMaxConfidentiality ??
-      DEFAULT_SINK_MAX_CONFIDENTIALITY,
-  });
+  return projectedCfcPostureReport(options);
 };
 
 const dialLine = (
@@ -76,6 +76,11 @@ export const renderCfcPostureReport = (
   record: CfcPostureReport,
 ): readonly string[] => {
   const lines = [
+    `    ${"provenance".padEnd(24)}${record.provenance}${
+      record.provenance === "projected"
+        ? " — what the session's runtime is expected to resolve, not what one attested"
+        : ""
+    }`,
     dialLine("enforcement mode", record.enforcementMode),
     dialLine("flow labels", record.flowLabels),
     dialLine("write floor", record.writeFloor),

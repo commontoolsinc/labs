@@ -15,11 +15,9 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
-  buildCfcPolicySnapshot,
   cfcPostureReport,
-  DEFAULT_SINK_MAX_CONFIDENTIALITY,
   KNOWN_SINKS,
-  resolveCfcDials,
+  projectedCfcPostureReport,
   RUNTIME_CFC_DIAL_DEFAULTS,
 } from "../src/cfc/mod.ts";
 import type { RuntimeOptions } from "../src/runtime.ts";
@@ -28,12 +26,7 @@ import { Runtime, signer, StorageManager } from "./engine-test-support.ts";
 
 /** The record a surface projects from options alone, with no Runtime. */
 const projected = (options: RuntimeOptions) =>
-  cfcPostureReport({
-    ...resolveCfcDials(options),
-    cfcPolicySnapshot: buildCfcPolicySnapshot(options.cfcPolicyRecords),
-    cfcSinkMaxConfidentiality: options.cfcSinkMaxConfidentiality ??
-      DEFAULT_SINK_MAX_CONFIDENTIALITY,
-  });
+  projectedCfcPostureReport(options);
 
 describe("the CFC posture record", () => {
   describe("dial rendering", () => {
@@ -159,10 +152,18 @@ describe("the CFC posture record", () => {
 
     for (const [name, build] of cases) {
       it(`${name} projects the record its Runtime resolves`, async () => {
+        // Every value equal, and exactly one field not: the projection says it
+        // is a projection. That difference is the point of the field, so the
+        // comparison names it rather than stripping it — a projection that
+        // deep-equalled an attestation would be one nothing could tell apart.
         const options = build();
         const runtime = new Runtime(options);
         try {
-          expect(cfcPostureReport(runtime)).toEqual(projected(options));
+          const resolved = cfcPostureReport(runtime);
+          const prediction = projected(options);
+          expect(resolved.provenance).toBe("resolved");
+          expect(prediction.provenance).toBe("projected");
+          expect(resolved).toEqual({ ...prediction, provenance: "resolved" });
         } finally {
           await runtime.dispose();
           await options.storageManager.close();
@@ -181,8 +182,8 @@ describe("the CFC posture record", () => {
         cfcPosture: "max-enforcement",
       });
       expect(projected(options)).toEqual(
-        projected(
-          presetCfcOptions({ cfcPosture: "max-enforcement" }) as RuntimeOptions,
+        projectedCfcPostureReport(
+          presetCfcOptions({ cfcPosture: "max-enforcement" }),
         ),
       );
     });

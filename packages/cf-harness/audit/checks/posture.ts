@@ -11,7 +11,17 @@
  * These checks WARN and FAIL on a recording; they do not stop a run. The
  * runtime does not yet refuse a non-conforming tuple at construction time
  * (CT-2179), so what an audit can say about one is that it was recorded.
+ *
+ * What a recorded posture IS, is the other thing to hold on to. The harness
+ * writes its record before the session's runtime exists, so the record is a
+ * projection — what the run expected to be at — and it says so
+ * (`provenance`). A finding here therefore reports on a declaration, and every
+ * message says which it read: a projected record establishes nothing about
+ * what a runtime honored, and an audit that let one read as an attestation
+ * would be the very confusion it exists to catch.
  */
+
+import type { CfcPostureReport } from "@commonfabric/runner/cfc";
 
 import type { HarnessCfcPolicySnapshot } from "../../src/contracts/cfc-policy-snapshot.ts";
 import type { HarnessFabricSessionCfcPosture } from "../../src/run-state.ts";
@@ -97,6 +107,19 @@ const tupleOf = (
   };
 };
 
+/**
+ * How the finding names what it read.
+ *
+ * A projected record is the run's claim about a runtime that had not been
+ * constructed when the claim was written; a resolved one is a reading of a
+ * runtime that had. The words go in every message rather than in a footnote,
+ * because a reader acting on the finding is deciding what the run establishes.
+ */
+const readAs = (record: CfcPostureReport): string =>
+  record.provenance === "projected"
+    ? "recorded posture (projected before the session runtime was constructed)"
+    : "resolved posture";
+
 const renderTuple = (tuple: MatrixDialTuple): string =>
   `${tuple.enforcementMode} / flow ${tuple.flowLabels} / floor ${tuple.writeFloor} / trigger ${tuple.triggerReadGating} / policy ${tuple.policyEvaluation}`;
 
@@ -156,9 +179,9 @@ const conformingPoint: AuditCheck = {
       verdict: violations.some((rule) => rule.verdict === "fail")
         ? "fail"
         : "warn",
-      message: `this run's dials (${renderTuple(tuple)}) violate ${
-        violations.map((rule) => `\`${rule.id}\``).join(", ")
-      }`,
+      message: `this run's ${readAs(posture.record!)} (${
+        renderTuple(tuple)
+      }) violates ${violations.map((rule) => `\`${rule.id}\``).join(", ")}`,
       evidence,
     };
   },
@@ -231,7 +254,7 @@ const llmSinkGap: AuditCheck = {
     if (record.deviations.length === 0) {
       return {
         verdict: "fail",
-        message: `this run's posture record publishes no deviation while ${
+        message: `this run's ${readAs(record)} publishes no deviation while ${
           ungated.map((entry) => `\`${entry.sink}\``).join(", ")
         } release with no ceiling, so the record claims a coverage its own sink list contradicts`,
         evidence,
@@ -239,9 +262,11 @@ const llmSinkGap: AuditCheck = {
     }
     return {
       verdict: "warn",
-      message: `under the max-enforcement posture, ${
+      message: `under the max-enforcement posture this run's ${
+        readAs(record)
+      } leaves ${
         ungated.map((entry) => `\`${entry.sink}\``).join(", ")
-      } release with no confidentiality ceiling and therefore no gate`,
+      } releasing with no confidentiality ceiling and therefore no gate`,
       evidence,
     };
   },

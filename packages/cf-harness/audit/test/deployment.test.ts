@@ -30,6 +30,15 @@ const MAX_ENFORCEMENT_RECORD = harnessFabricSessionPosture({
   cfcPosture: "max-enforcement",
 });
 
+/**
+ * The same posture as a deployment would publish it: read off a constructed
+ * Runtime rather than projected. `/api/meta` serves this kind.
+ */
+const ATTESTED_MAX_ENFORCEMENT_RECORD = {
+  ...MAX_ENFORCEMENT_RECORD,
+  provenance: "resolved",
+} as const;
+
 const FLEET_RECORD = harnessFabricSessionPosture({
   apiUrl: "https://fabric.test/",
   identityKeyPath: "/dev/null",
@@ -129,7 +138,7 @@ describe("Group D deployment checks", () => {
         toolshedMeta: {
           status: "read",
           url: "http://stub.test/api/meta",
-          cfc: MAX_ENFORCEMENT_RECORD,
+          cfc: ATTESTED_MAX_ENFORCEMENT_RECORD,
         },
       });
       expect(verdictOf(results, "AUD-17")).toBe("pass");
@@ -144,9 +153,27 @@ describe("Group D deployment checks", () => {
         toolshedMeta: {
           status: "read",
           url: "http://stub.test/api/meta",
-          cfc: FLEET_RECORD,
+          cfc: { ...FLEET_RECORD, provenance: "resolved" },
         },
       });
+      expect(verdictOf(results, "AUD-17")).toBe("fail");
+    });
+
+    it("fails a deployment that publishes a projection rather than an attestation", () => {
+      const results = auditDeployment({
+        families: [family],
+        paths: [FIXTURE_RUNS_DIR],
+        expectRefusals: false,
+        expected: MAX_ENFORCEMENT_SPEC,
+        toolshedMeta: {
+          status: "read",
+          url: "http://stub.test/api/meta",
+          cfc: MAX_ENFORCEMENT_RECORD,
+        },
+      });
+      // MAX_ENFORCEMENT_RECORD is the harness's projection, and satisfies
+      // every field the spec asserts — so the only thing that can fail it here
+      // is the kind of record it is.
       expect(verdictOf(results, "AUD-17")).toBe("fail");
     });
 

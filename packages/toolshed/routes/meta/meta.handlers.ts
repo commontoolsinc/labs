@@ -47,6 +47,11 @@ export const MetaResponseSchema = z.object({
   // `cfcPostureReport`), published identically by every surface that
   // publishes one. `null` means no Runtime yet.
   cfc: z.object({
+    // `resolved` here always: the route publishes what a constructed Runtime
+    // is at. A surface that publishes before its runtime exists says
+    // `projected`, and the field is what keeps a reader from taking one for
+    // the other.
+    provenance: z.enum(["resolved", "projected"]),
     enforcementMode: CfcDialSchema,
     flowLabels: CfcDialSchema,
     writeFloor: CfcDialSchema,

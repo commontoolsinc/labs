@@ -607,16 +607,27 @@ Every surface that publishes a posture publishes the same record,
 resolved rung together with whether that rung decides anything and what it
 decides on, the policy-snapshot digest, every known sink as a ceiling or an
 explicit ungated release, and every published deviation as
-`{what, owner, retirement}`. Two of those are load-bearing. An `observe` rung
+`{what, owner, retirement}`. Three of those are load-bearing. An `observe` rung
 carries `diagnosticOnly: true`, so `policyEvaluation: observe` cannot be read
-as active enforcement. And the sink list is total, so a sink's absence from a
-list of ceilings can no longer read as coverage. The record is derived from a
-constructed Runtime's resolved fields; a surface that has not built its runtime
-yet — the console printing at startup, cf-harness recording the posture of a
-lazily-built fabric session — projects it through the same `presetCfcOptions`
-and `resolveCfcDials` the Runtime itself resolves from, rather than restating
-the defaults. `deno task cfc-audit --expected-posture` compares a published
-record against a written-down profile; see the cf-harness README.
+as active enforcement. The sink list is total, so a sink's absence from a list
+of ceilings can no longer read as coverage. And the record carries its own
+`provenance`.
+
+`provenance` is what keeps a prediction from reading as an attestation.
+`cfcPostureReport(runtime)` reads a constructed Runtime's resolved fields and
+stamps `resolved`; `projectedCfcPostureReport(options)` computes what a runtime
+built with those options will resolve, before it exists, and stamps
+`projected`. Those are the only two ways to build a record, so neither can be
+mislabelled. Toolshed's `/api/meta` publishes `resolved`. The cf-harness
+console and run state publish `projected`: the session's runtime is built
+lazily on the first `run_pattern` and may never be built at all, and a host may
+supply its own session factory, so what those surfaces know at the time they
+publish is what the run expects to be at. A projection goes through the same
+`presetCfcOptions` and `resolveCfcDials` the Runtime itself resolves from —
+the same resolution, not a second statement of it — but the field says what it
+is. `deno task cfc-audit --expected-posture` compares a published record
+against a written-down profile, and fails a deployment that publishes a
+projection; see the cf-harness README.
 The interactive `cf-harness` and the `fuse` mount expose the enforcement mode
 through `CF_CFC_MODE` for testing. Because these dials are keys of
 `RuntimeOptions`, the exhaustive `RUNTIME_OPTION_KEYS` registry in the same file

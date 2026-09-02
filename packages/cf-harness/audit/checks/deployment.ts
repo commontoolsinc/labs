@@ -227,6 +227,26 @@ const toolshedPosture = (audit: DeploymentAudit): CheckResult | undefined => {
       [{ artifact: "/api/meta", pointer: "cfc", detail: "null" }],
     );
   }
+  if (meta.cfc.provenance !== "resolved") {
+    // A deployment publishing a projection has published what it expects to
+    // be at rather than what it is at, and a client adopting it would be
+    // adopting a prediction. `/api/meta` is served from a constructed
+    // Runtime, so this cannot be a shape the route produces — it is a
+    // deployment answering the question with the wrong kind of record.
+    return corpusResult(
+      audit,
+      "AUD-17",
+      "toolshed posture",
+      citations,
+      "fail",
+      `\`${meta.url}\` publishes a projected posture, which is what a runtime is expected to resolve rather than what one attested`,
+      [{
+        artifact: "/api/meta",
+        pointer: "cfc.provenance",
+        detail: meta.cfc.provenance,
+      }],
+    );
+  }
   if (audit.expected === undefined) {
     return corpusResult(
       audit,
