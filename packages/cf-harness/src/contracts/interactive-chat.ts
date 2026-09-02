@@ -311,7 +311,6 @@ export interface HarnessChatSessionStatus {
   context?: HarnessChatContext;
   model?: string;
   loomLocalHostBinding?: LoomLocalHostBinding;
-  harnessRunId?: string;
   artifactRoot?: string;
   capabilities: HarnessChatCapabilities;
   policy: HarnessChatPolicy;
@@ -485,7 +484,6 @@ export interface CreateHarnessChatSessionStatusOptions {
   context?: HarnessChatContext;
   model?: string;
   loomLocalHostBinding?: LoomLocalHostBinding;
-  harnessRunId?: string;
   artifactRoot?: string;
   capabilities?: Partial<HarnessChatCapabilities>;
   policy?: HarnessChatPolicy;
@@ -511,9 +509,6 @@ export const createHarnessChatSessionStatus = (
     ...(options.model !== undefined ? { model: options.model } : {}),
     ...(options.loomLocalHostBinding !== undefined
       ? { loomLocalHostBinding: structuredClone(options.loomLocalHostBinding) }
-      : {}),
-    ...(options.harnessRunId !== undefined
-      ? { harnessRunId: options.harnessRunId }
       : {}),
     ...(options.artifactRoot !== undefined
       ? { artifactRoot: options.artifactRoot }

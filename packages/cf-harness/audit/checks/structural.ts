@@ -1242,6 +1242,24 @@ interface RetentionRequirement {
   detail: string;
 }
 
+/**
+ * Helper for AUD-9, which says what became of a run's cell-labels read: the
+ * artifact's own state, and, for a run without one, whether the harness
+ * tried and failed — which it records on the run — or never asked.
+ */
+const cellLabelsRetentionDetail = (run: RunEvidence): string => {
+  if (run.cellLabels.status === "present") {
+    return "present";
+  }
+  const failed = runStateOf(run)?.failureRecords?.find((record) =>
+    record.source === "cell_labels"
+  );
+  if (failed !== undefined) {
+    return `${run.cellLabels.status}; the read was attempted and failed: ${failed.detail}`;
+  }
+  return `${run.cellLabels.status}; no read was attempted`;
+};
+
 const evidenceRetention: AuditCheck = {
   id: "AUD-9",
   title: "evidence retention",
@@ -1285,7 +1303,7 @@ const evidenceRetention: AuditCheck = {
         name: "a recorded cell-labels read",
         held: run.cellLabels.status === "present" ||
           runStateOf(run)?.cellLabels !== undefined,
-        detail: run.cellLabels.status,
+        detail: cellLabelsRetentionDetail(run),
       },
     ];
     const missing = requirements.filter((requirement) => !requirement.held);

@@ -3411,20 +3411,6 @@ export const runCfHarnessCli = async (
         onTranscriptEvent,
       });
     }
-    // A run's own artifacts say which cells it made and read; the space says
-    // what each of them is labelled, and nothing else joins the two. The
-    // cells are settled once the loop is, so the space is read here — and a
-    // snapshot that cannot be written leaves a finished run finished, since
-    // the record of what the run did is already on disk.
-    try {
-      await activeEngine?.snapshotCellLabels();
-    } catch (error) {
-      io.stderr(
-        `cell label snapshot failed: ${
-          error instanceof Error ? error.message : String(error)
-        }\n`,
-      );
-    }
     const durationMs = Date.now() - startedAt;
     const structuredResultValidation = parsed.structuredResult === undefined
       ? undefined

@@ -132,6 +132,7 @@ export type HarnessFailureKind =
 
 export type HarnessFailureSource =
   | "capability_snapshot"
+  | "cell_labels"
   | "policy_snapshot"
   | "policy_trace"
   | "policy_event"

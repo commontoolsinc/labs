@@ -112,7 +112,6 @@ import type {
   HarnessInputCellSpec,
 } from "./contracts/input-cells.ts";
 import { mintInputCellHandles } from "./input-cells.ts";
-import type { HarnessCellLabels } from "./contracts/cell-labels.ts";
 import {
   appendHarnessCfcModelContextObservations,
   appendHarnessFailureRecord,
@@ -311,9 +310,10 @@ export interface CreateHarnessEngineOptions
   inputCells?: readonly HarnessInputCellSpec[];
 
   /**
-   * The space database `snapshotCellLabels` reads, for a host where the
-   * store is not where the discovery walk looks. Absent, the space named by
-   * the fabric session is resolved against the caches on this host.
+   * The space database the run's cell-label snapshot reads as it ends, for a
+   * host where the store is not where the discovery walk looks. Absent, the
+   * space named by the fabric session is resolved against the caches on this
+   * host.
    */
   spaceDbPath?: string;
 
@@ -802,6 +802,16 @@ export class CfHarnessEngine {
   }
 
   /**
+   * The space database the run's cell-label snapshot reads, or `undefined`
+   * when the space is found by discovery. A delegating parent hands it to
+   * the child engine, so a subagent that ends in the same space reads the
+   * same store.
+   */
+  get spaceDbPath(): string | undefined {
+    return this.#spaceDbPath;
+  }
+
+  /**
    * Whether the run can reach the pattern index — either an injected factory
    * or `patternIndex` connection config. The prompt loop offers
    * `search_patterns` and `record_feedback` exactly when this holds.
@@ -941,18 +951,19 @@ export class CfHarnessEngine {
 
   /**
    * Ends the run as `completed` for `terminalReason`, persisted. A run has
-   * one outcome and its driver writes it once.
+   * one outcome and its driver writes it once, and the labels its space
+   * holds for the cells it touched land in that same write; see
+   * `#withCellLabels()`.
    *
    * @throws Error when the run already has its outcome.
    */
   async completeRun(
     terminalReason: HarnessRunTerminalReason,
   ): Promise<HarnessRunState> {
-    this.#runState = setHarnessRunStatus(
-      this.#runState,
-      "completed",
-      this.#now(),
-      terminalReason,
+    const now = this.#now();
+    this.#runState = await this.#withCellLabels(
+      setHarnessRunStatus(this.#runState, "completed", now, terminalReason),
+      now,
     );
     await this.persistRunState();
     return this.getRunState();
@@ -961,7 +972,8 @@ export class CfHarnessEngine {
   /**
    * Ends the run as `failed` for `terminalReason`, persisted, recording
    * `error` as the failure when one is given. A run has one outcome and its
-   * driver writes it once.
+   * driver writes it once, and the labels its space holds for the cells it
+   * touched land in that same write; see `#withCellLabels()`.
    *
    * @throws Error when the run already has its outcome.
    */
@@ -978,11 +990,9 @@ export class CfHarnessEngine {
         now,
       );
     }
-    this.#runState = setHarnessRunStatus(
-      this.#runState,
-      "failed",
+    this.#runState = await this.#withCellLabels(
+      setHarnessRunStatus(this.#runState, "failed", now, terminalReason),
       now,
-      terminalReason,
     );
     await this.persistRunState();
     return this.getRunState();
@@ -1191,55 +1201,6 @@ export class CfHarnessEngine {
     );
     await this.persistRunState();
     return minted.inputCells;
-  }
-
-  /**
-   * Reads the run's space for what it holds about the cells this run touched,
-   * and records the answer beside the run.
-   *
-   * The run's own artifacts say which cells it made and read and what the
-   * sandbox decided about each call; the space says what each of those cells
-   * is labelled. Nothing else joins the two, so a reader working from the
-   * tree alone sees an unlabelled cell whatever the run was enforcing. The
-   * snapshot is that join, taken at the run's own space, over every cell the
-   * handle table names.
-   *
-   * Read-only and best-effort by construction: the space database is opened
-   * read-only, and a host that holds no copy of it yields an unavailable
-   * snapshot rather than a failed run. What it must never do is yield a bare
-   * one — "the space holds no label for this cell" and "nobody asked" are
-   * different findings, and the snapshot's `status` is what keeps them apart.
-   *
-   * A run with no fabric session names no space and touches no cell, so it
-   * takes no snapshot at all.
-   */
-  async snapshotCellLabels(): Promise<HarnessCellLabels | undefined> {
-    const space = this.config.fabricSession?.space;
-    const refs = (this.#runState.handleTable?.entries ?? []).map((entry) =>
-      entry.ref
-    );
-    if (space === undefined || refs.length === 0) {
-      return undefined;
-    }
-    const generatedAt = this.#now();
-    // deno-lint-ignore cf-imports/no-inline-module-import -- costs at import time: reading a space database is the one thing the engine does through a native library, and a process that never takes a snapshot must not load one to run
-    const { readSpaceCellLabels } = await import("./space-labels.ts");
-    const cellLabels = await readSpaceCellLabels({
-      space,
-      ...(this.#spaceDbPath !== undefined ? { dbPath: this.#spaceDbPath } : {}),
-      refs,
-      generatedAt,
-    });
-    const cellLabelsPath = await this.artifactStore?.persistCellLabels?.(
-      cellLabels,
-    );
-    this.#runState = patchHarnessRunState(
-      this.#runState,
-      { cellLabels, cellLabelsPath },
-      generatedAt,
-    );
-    await this.persistRunState();
-    return cellLabels;
   }
 
   async ensureRunManifestPersisted(): Promise<string | undefined> {
@@ -1461,6 +1422,72 @@ export class CfHarnessEngine {
     );
     await this.persistRunState();
     return policyTracePath;
+  }
+
+  /**
+   * Helper for `completeRun()` and `failRun()`, which reads the run's space
+   * for what it holds about the cells the run touched and returns `state`
+   * with the answer recorded on it and written beside the run.
+   *
+   * The run's own artifacts say which cells it made and read and what the
+   * sandbox decided about each call; the space says what each of those cells
+   * is labelled. Nothing else joins the two, so a reader working from the
+   * tree alone sees an unlabelled cell whatever the run was enforcing. The
+   * snapshot is that join, taken at the run's own space, over every cell the
+   * handle table names — and taken as the run ends, once its cells are
+   * settled, so the outcome and the labels reach the disk in one write and
+   * whoever waits on the outcome finds the labels beside it.
+   *
+   * Read-only and best-effort by construction: the space database is opened
+   * read-only, and a host that holds no copy of it yields an unavailable
+   * snapshot rather than a failed run. What it must never do is yield a bare
+   * one — "the space holds no label for this cell" and "nobody asked" are
+   * different findings, and the snapshot's `status` is what keeps them apart.
+   * A snapshot that could not be taken or written at all is a third finding,
+   * recorded as a failure record on the run so a reader can tell it from a
+   * run nobody asked about; the run's outcome stands either way.
+   *
+   * A run with no fabric session names no space and touches no cell, so it
+   * takes no snapshot at all.
+   */
+  async #withCellLabels(
+    state: HarnessRunState,
+    now: string,
+  ): Promise<HarnessRunState> {
+    const space = this.config.fabricSession?.space;
+    const refs = (state.handleTable?.entries ?? []).map((entry) => entry.ref);
+    if (space === undefined || refs.length === 0) {
+      return state;
+    }
+    try {
+      // deno-lint-ignore cf-imports/no-inline-module-import -- costs at import time: reading a space database is the one thing the engine does through a native library, and a process that never takes a snapshot must not load one to run
+      const { readSpaceCellLabels } = await import("./space-labels.ts");
+      const cellLabels = await readSpaceCellLabels({
+        space,
+        ...(this.#spaceDbPath !== undefined
+          ? { dbPath: this.#spaceDbPath }
+          : {}),
+        refs,
+        generatedAt: now,
+      });
+      const cellLabelsPath = await this.artifactStore?.persistCellLabels?.(
+        cellLabels,
+      );
+      return patchHarnessRunState(state, { cellLabels, cellLabelsPath }, now);
+    } catch (error) {
+      return appendHarnessFailureRecord(
+        state,
+        createHarnessFailureRecord({
+          kind: "harness_error",
+          source: "cell_labels",
+          detail: `cell label snapshot failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          at: now,
+        }),
+        now,
+      );
+    }
   }
 
   // Fail fast before any sandbox execution under enforcement on a sandbox that
