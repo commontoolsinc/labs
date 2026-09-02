@@ -304,7 +304,8 @@ From [packages/cf-harness](.):
 - `deno task test`
 - `deno task test:integration`
 - `deno task cfc-audit <runDir | artifactRoot> [more paths...] [--json]
-  [--fail-on fail|warn|inconclusive]`
+  [--fail-on fail|warn|inconclusive] [--corpus] [--expect-refusals]
+  [--expected-posture <spec.json>] [--toolshed-url <url>]`
   — audit session artifacts against the CFC integration profile. See
   [The CFC audit](#the-cfc-audit)
 - `deno task cfc-audit-fixtures` — rewrite the committed artifact tree the audit
@@ -1776,26 +1777,35 @@ cd packages/cf-harness
 deno task cfc-audit .cf-harness-console/runs
 deno task cfc-audit .cf-harness-console/runs/<runId> --json
 deno task cfc-audit .cf-harness-console/runs --fail-on fail
+deno task cfc-audit .cf-harness-console/runs --corpus --expect-refusals
+deno task cfc-audit .cf-harness-console/runs \
+  --expected-posture audit/profiles/max-enforcement.json \
+  --toolshed-url https://toolshed.example
 ```
 
 A run directory audits that run together with the `delegate_task` children
 written beside it; an artifact root, or a directory of run directories, audits
 every run under it.
 
-The checks are in [audit/checks/structural.ts](audit/checks/structural.ts), one
-per clause family:
+The per-run checks are in
+[audit/checks/structural.ts](audit/checks/structural.ts) (Group A: what a run
+did) and [audit/checks/posture.ts](audit/checks/posture.ts) (Group C: what it
+declared it was doing), one per clause family:
 
-| Check | Subject                                                                                                                                                                                   | Clauses                                    |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| AUD-1 | one enforcement mode, present in both the run state and the run report and agreeing across every decision record and invocation context                                                   | AH-CFC-14                                  |
-| AUD-2 | decision reason codes belong to the claimed mode, and its side effects carry invocation contexts. A run whose side effects all took paths that record none warns: the claim went untested | AH-CFC-14, AH-CFC-15                       |
-| AUD-3 | every side effect joins to a policy decision, and the counts reconcile                                                                                                                    | AH-CFC-9, AH-CFC-11, AH-TOOL-3             |
-| AUD-4 | every denial was recorded as a policy event and reached the model only as a typed denial carrying no payload                                                                              | AH-CFC-6, AH-CFC-11                        |
-| AUD-5 | the handle table is well formed, no token precedes its disclosure, no parent token crosses into a child untransferred                                                                     | AH-CFC-12, AH-CFC-13, AH-CFC-18, AH-CFC-19 |
-| AUD-6 | tool calls and tool results pair                                                                                                                                                          | AH-CFC-16, AH-LIFE-6                       |
-| AUD-7 | a run with a dial at `observe` warns rather than passes, so its evidence is never read as enforcement. Disagreement about the mode is AUD-1's finding                                     | AH-CFC-15, §6                              |
-| AUD-8 | labeled observations the model read are accumulated as influence, and denied ones are not                                                                                                 | AH-CFC-7, AH-CFC-8                         |
-| AUD-9 | the artifacts that would explain why a result was exposed or denied are present; what each holds is not read here                                                                         | AH-CFC-16                                  |
+| Check  | Subject                                                                                                                                                                                                                       | Clauses                                    |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| AUD-1  | one enforcement mode, present in both the run state and the run report and agreeing across every decision record and invocation context                                                                                       | AH-CFC-14                                  |
+| AUD-2  | decision reason codes belong to the claimed mode, and its side effects carry invocation contexts. A run whose side effects all took paths that record none warns: the claim went untested                                     | AH-CFC-14, AH-CFC-15                       |
+| AUD-3  | every side effect joins to a policy decision, and the counts reconcile                                                                                                                                                        | AH-CFC-9, AH-CFC-11, AH-TOOL-3             |
+| AUD-4  | every denial was recorded as a policy event and reached the model only as a typed denial carrying no payload                                                                                                                  | AH-CFC-6, AH-CFC-11                        |
+| AUD-5  | the handle table is well formed, no token precedes its disclosure, no parent token crosses into a child untransferred                                                                                                         | AH-CFC-12, AH-CFC-13, AH-CFC-18, AH-CFC-19 |
+| AUD-6  | tool calls and tool results pair                                                                                                                                                                                              | AH-CFC-16, AH-LIFE-6                       |
+| AUD-7  | a run with a dial at `observe` warns rather than passes, so its evidence is never read as enforcement. Disagreement about the mode is AUD-1's finding                                                                         | AH-CFC-15, §6                              |
+| AUD-8  | labeled observations the model read are accumulated as influence, and denied ones are not                                                                                                                                     | AH-CFC-7, AH-CFC-8                         |
+| AUD-9  | the artifacts that would explain why a result was exposed or denied are present; what each holds is not read here                                                                                                             | AH-CFC-16                                  |
+| AUD-13 | the run's recorded fabric-session dial tuple is a point the enforcement matrix admits: `enforce-strict` without persisted flow labels fails, and a dial that is sound anywhere but credits nothing at this flow setting warns | matrix §2, §3                              |
+| AUD-14 | under a claimed enforcement posture, every sink releasing with no confidentiality ceiling is named with its recorded reason; a record publishing no deviation while a sink is ungated fails                                   | AH-CFC-14, AH-CFC-15                       |
+| AUD-15 | a dial the run resolved from a default landed no weaker than the posture the run claims                                                                                                                                       | AH-CFC-14, AH-CFC-15                       |
 
 Five verdicts, and the distinctions between them are the point. `inconclusive`
 is a check whose evidence was absent or unreadable — it is never `pass`, and
@@ -1805,6 +1815,36 @@ whatever the threshold: nothing was audited, so no threshold applies.
 `not-applicable` is stronger: the evidence was there and said the check's
 subject does not arise. `warn` is a run whose posture makes its own assurance
 weaker than an enforcing run's.
+
+### The deployment questions
+
+Four flags ask something no single run's artifacts answer, and they are what
+turns the Group D checks
+([audit/checks/deployment.ts](audit/checks/deployment.ts)) on. Without one of
+them the audit stays what it is above — a per-run reading of an artifact tree —
+so an ordinary audit's exit code is not spent on a question nobody asked. A
+Group D finding is stamped `(corpus)` rather than with a run id.
+
+| Check  | Subject                                                                                                                                                                                                                      | Turned on by                    |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| AUD-16 | how many label-driven refusals the corpus produced, beside the count of runs recording `not-attested` and `permissive-if-absent`. Zero refusals warns, and fails when the corpus is declared adversarial                     | `--corpus`, `--expect-refusals` |
+| AUD-17 | the posture a deployment publishes on `/api/meta`, against the expected-posture spec. A deployment publishing none fails: what it enforces is indistinguishable from the default                                             | `--toolshed-url`                |
+| AUD-18 | whether every surface in the corpus resolved the same posture. The harness's own surfaces diverge by default — the console opts sessions into the max-enforcement bundle, the CLI does not — so a mixed corpus surfaces that | `--corpus`                      |
+| AUD-19 | the shell's render ceiling, which nothing publishes: a permanent `inconclusive` line item, retiring when a publisher exists                                                                                                  | any deployment flag             |
+
+`--expected-posture` names a JSON profile stating what a posture record is
+supposed to hold — dial rungs, which sinks must carry a ceiling, which may
+release ungated, whether every ungated sink must be published as a deviation.
+[audit/profiles/max-enforcement.json](audit/profiles/max-enforcement.json) is
+the first. A profile asserts only the fields it carries, and one asserting
+nothing is refused rather than passing: a spec that checks nothing is
+indistinguishable, in every line the audit prints, from a deployment whose every
+field held.
+
+The matrix itself is data: [audit/matrix.ts](audit/matrix.ts) holds the
+conforming states and the ordering rules of
+[`docs/specs/cfc-enforcement-matrix.md`](../../docs/specs/cfc-enforcement-matrix.md),
+each rule carrying the clause it turns on.
 
 Every check carries the clauses it rests on and an exact quote from each, both
 printed with the finding and included in `--json`.

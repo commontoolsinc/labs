@@ -10,7 +10,12 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
 
-import { parseAuditCliArgs, renderAuditReport, runAuditCli } from "../cli.ts";
+import {
+  asksDeploymentQuestion,
+  parseAuditCliArgs,
+  renderAuditReport,
+  runAuditCli,
+} from "../cli.ts";
 import type { CheckResult } from "../report.ts";
 import { DEFAULT_FAIL_ON, verdictFailsThreshold } from "../report.ts";
 import { FIXTURE_RUN_ID, FIXTURE_RUNS_DIR } from "./regenerate-fixtures.ts";
@@ -52,6 +57,43 @@ describe("cli", () => {
     it("throws given a threshold outside the three verdicts", () => {
       expect(() => parseAuditCliArgs(["a-run", "--fail-on", "pass"])).toThrow(
         "not one of fail, warn, inconclusive",
+      );
+    });
+
+    it("asks no deployment question when only paths are named", () => {
+      expect(asksDeploymentQuestion(parseAuditCliArgs(["a-run"]))).toBe(false);
+    });
+
+    it("asks one once a corpus is named", () => {
+      const options = parseAuditCliArgs(["a-run", "--corpus"]);
+      expect(options.corpus).toBe(true);
+      expect(asksDeploymentQuestion(options)).toBe(true);
+    });
+
+    it("reads a declared-adversarial corpus as a corpus", () => {
+      // The claim `--expect-refusals` makes is about the set of runs, so it
+      // is the corpus flag as much as it is its own.
+      const options = parseAuditCliArgs(["a-run", "--expect-refusals"]);
+      expect(options.expectRefusals).toBe(true);
+      expect(options.corpus).toBe(true);
+    });
+
+    it("returns the named expected-posture spec and toolshed URL", () => {
+      const options = parseAuditCliArgs([
+        "a-run",
+        "--expected-posture",
+        "profiles/max-enforcement.json",
+        "--toolshed-url",
+        "http://toolshed.test",
+      ]);
+      expect(options.expectedPosture).toBe("profiles/max-enforcement.json");
+      expect(options.toolshedUrl).toBe("http://toolshed.test");
+      expect(asksDeploymentQuestion(options)).toBe(true);
+    });
+
+    it("throws given an option whose value is missing", () => {
+      expect(() => parseAuditCliArgs(["a-run", "--expected-posture"])).toThrow(
+        "needs a value",
       );
     });
 

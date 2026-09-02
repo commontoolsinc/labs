@@ -4,6 +4,8 @@
  * ```
  * deno task cfc-audit <runDir | artifactRoot> [more paths...]
  *                     [--json] [--fail-on fail|warn|inconclusive]
+ *                     [--corpus] [--expect-refusals]
+ *                     [--expected-posture <spec.json>] [--toolshed-url <url>]
  * ```
  *
  * A run directory audits that run and the `delegate_task` children beside it;
@@ -12,12 +14,29 @@
  * the finding to the sentence that makes it a finding without leaving the
  * output.
  *
+ * The four deployment flags ask a question no single run's artifacts answer,
+ * and they are what turns the Group D checks on. Without one of them the audit
+ * is what Phase 1 made it: a per-run reading of an artifact tree, whose exit
+ * code is not spent on a question nobody asked.
+ *
  * The audit reads. It opens no run for writing and creates nothing inside an
  * artifact tree.
  */
 
+import type { CfcPostureReport } from "@commonfabric/runner/cfc";
+
+import {
+  auditDeployment,
+  type DeploymentAudit,
+  type ToolshedMeta,
+} from "./checks/deployment.ts";
+import { RUN_CHECKS } from "./checks/registry.ts";
 import { auditRunFamily } from "./checks/structural.ts";
-import { discoverRunFamilies } from "./evidence.ts";
+import { discoverRunFamilies, type RunFamily } from "./evidence.ts";
+import {
+  type ExpectedPosture,
+  loadExpectedPosture,
+} from "./expected-posture.ts";
 import {
   type CheckResult,
   type CheckVerdict,
@@ -33,7 +52,24 @@ export interface AuditCliOptions {
   paths: readonly string[];
   json: boolean;
   failOn: FailOnThreshold;
+
+  /** Whether the named paths are to be read as one corpus (Group D). */
+  corpus: boolean;
+
+  /** Whether that corpus is declared adversarial, so no refusal is a failure. */
+  expectRefusals: boolean;
+
+  /** Path of the expected-posture spec, when one was named. */
+  expectedPosture?: string;
+
+  /** Base URL of a deployment whose `/api/meta` posture is to be read. */
+  toolshedUrl?: string;
 }
+
+/** Whether the command line asked a question the Group D checks answer. */
+export const asksDeploymentQuestion = (options: AuditCliOptions): boolean =>
+  options.corpus || options.expectRefusals ||
+  options.expectedPosture !== undefined || options.toolshedUrl !== undefined;
 
 const FAIL_ON_VALUES: readonly FailOnThreshold[] = [
   "fail",
@@ -41,8 +77,12 @@ const FAIL_ON_VALUES: readonly FailOnThreshold[] = [
   "inconclusive",
 ];
 
-const USAGE =
-  "usage: cfc-audit <runDir | artifactRoot> [more paths...] [--json] [--fail-on fail|warn|inconclusive]";
+const USAGE = [
+  "usage: cfc-audit <runDir | artifactRoot> [more paths...]",
+  "                 [--json] [--fail-on fail|warn|inconclusive]",
+  "                 [--corpus] [--expect-refusals]",
+  "                 [--expected-posture <spec.json>] [--toolshed-url <url>]",
+].join("\n");
 
 /**
  * Reads the command line.
@@ -55,10 +95,41 @@ export const parseAuditCliArgs = (
   const paths: string[] = [];
   let json = false;
   let failOn: FailOnThreshold = DEFAULT_FAIL_ON;
+  let corpus = false;
+  let expectRefusals = false;
+  let expectedPosture: string | undefined;
+  let toolshedUrl: string | undefined;
+  const valueOf = (option: string, value: string | undefined): string => {
+    if (value === undefined) {
+      throw new Error(`\`${option}\` needs a value`);
+    }
+    return value;
+  };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
     if (arg === "--json") {
       json = true;
+      continue;
+    }
+    if (arg === "--corpus") {
+      corpus = true;
+      continue;
+    }
+    if (arg === "--expect-refusals") {
+      // Declaring the corpus adversarial is declaring it a corpus: the claim
+      // is about the set of runs, and a set of one run cannot support it.
+      expectRefusals = true;
+      corpus = true;
+      continue;
+    }
+    if (arg === "--expected-posture") {
+      expectedPosture = valueOf(arg, args[index + 1]);
+      index += 1;
+      continue;
+    }
+    if (arg === "--toolshed-url") {
+      toolshedUrl = valueOf(arg, args[index + 1]);
+      index += 1;
       continue;
     }
     if (arg === "--fail-on") {
@@ -83,20 +154,66 @@ export const parseAuditCliArgs = (
   if (paths.length === 0) {
     throw new Error("name at least one run directory or artifact root");
   }
-  return { paths, json, failOn };
+  return {
+    paths,
+    json,
+    failOn,
+    corpus,
+    expectRefusals,
+    ...(expectedPosture !== undefined ? { expectedPosture } : {}),
+    ...(toolshedUrl !== undefined ? { toolshedUrl } : {}),
+  };
+};
+
+/** Every run family under every named path. */
+export const loadRunFamilies = async (
+  paths: readonly string[],
+): Promise<readonly RunFamily[]> => {
+  const families: RunFamily[] = [];
+  for (const path of paths) {
+    families.push(...await discoverRunFamilies(path));
+  }
+  return families;
 };
 
 /** Audits every run family under every named path. */
 export const auditPaths = async (
   paths: readonly string[],
-): Promise<readonly CheckResult[]> => {
-  const results: CheckResult[] = [];
-  for (const path of paths) {
-    for (const family of await discoverRunFamilies(path)) {
-      results.push(...auditRunFamily(family));
+): Promise<readonly CheckResult[]> =>
+  (await loadRunFamilies(paths)).flatMap((
+    family,
+  ) => [...auditRunFamily(family, RUN_CHECKS)]);
+
+/**
+ * Reads a deployment's published posture.
+ *
+ * A deployment that cannot be reached is `unreachable` rather than an
+ * exception: the audit's subject is the artifact trees, and a network that
+ * did not answer must not cost the findings on those.
+ */
+export const readToolshedMeta = async (
+  url: string,
+  fetchMeta: typeof fetch = fetch,
+): Promise<ToolshedMeta> => {
+  const metaUrl = new URL("/api/meta", url).toString();
+  try {
+    const response = await fetchMeta(metaUrl);
+    if (!response.ok) {
+      return {
+        status: "unreachable",
+        url: metaUrl,
+        detail: `HTTP ${response.status}`,
+      };
     }
+    const body = await response.json() as { cfc?: CfcPostureReport | null };
+    return { status: "read", url: metaUrl, cfc: body.cfc ?? null };
+  } catch (error) {
+    return {
+      status: "unreachable",
+      url: metaUrl,
+      detail: error instanceof Error ? error.message : String(error),
+    };
   }
-  return results;
 };
 
 const VERDICT_LABEL: Record<CheckVerdict, string> = {
@@ -172,7 +289,34 @@ export const runAuditCli = async (
     );
     return 2;
   }
-  const results = await auditPaths(options.paths);
+  let expected: ExpectedPosture | undefined;
+  if (options.expectedPosture !== undefined) {
+    try {
+      expected = await loadExpectedPosture(options.expectedPosture);
+    } catch (error) {
+      // A spec that asserts nothing, or that could not be read, is the same
+      // failure as an unreadable command line: the audit did not run the
+      // comparison the caller asked for, and a green exit would say it had.
+      write(`${error instanceof Error ? error.message : String(error)}`);
+      return 2;
+    }
+  }
+  const families = await loadRunFamilies(options.paths);
+  const results: CheckResult[] = families.flatMap((
+    family,
+  ) => [...auditRunFamily(family, RUN_CHECKS)]);
+  if (asksDeploymentQuestion(options)) {
+    const audit: DeploymentAudit = {
+      families,
+      paths: options.paths,
+      expectRefusals: options.expectRefusals,
+      ...(expected !== undefined ? { expected } : {}),
+      ...(options.toolshedUrl !== undefined
+        ? { toolshedMeta: await readToolshedMeta(options.toolshedUrl) }
+        : {}),
+    };
+    results.push(...auditDeployment(audit));
+  }
   if (results.length === 0) {
     // Nothing was audited, so no threshold applies: a green exit here would
     // report the absence of a run as the absence of findings. This is the same

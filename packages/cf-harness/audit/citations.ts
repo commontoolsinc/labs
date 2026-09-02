@@ -37,6 +37,7 @@ export interface SpecCitation {
 
 const CFC_SPEC = "docs/specs/agent-harness/02-cfc-integration.md";
 const RUNTIME_SPEC = "docs/specs/agent-harness/01-runtime-contract.md";
+const MATRIX_SPEC = "docs/specs/cfc-enforcement-matrix.md";
 
 /**
  * Every citation the checks draw on, keyed by the clause id where the clause
@@ -119,6 +120,42 @@ export const SPEC_CITATIONS = {
     clause: "§6 Enforcement modes",
     quote:
       "This is a diagnostic mode and MUST NOT be described as CFC enforcement.",
+  },
+  "MATRIX-conforming": {
+    doc: MATRIX_SPEC,
+    clause: "\u00a73 Conforming deployment states",
+    quote:
+      "A **conforming state** is one where no enforcement consumes a label the flow dial is not yet producing.",
+  },
+  "MATRIX-strict-persist": {
+    doc: MATRIX_SPEC,
+    clause: "\u00a73 Non-conforming",
+    quote:
+      "any `enforce-strict` with `cfcFlowLabels \u2260 persist` (strict consumes derived labels the dial isn't producing)",
+  },
+  "MATRIX-persist-pointless": {
+    doc: MATRIX_SPEC,
+    clause: "\u00a73 Non-conforming",
+    quote:
+      "is *permitted but pointless* (labels written, never consulted) \u2014 a warning, not an error.",
+  },
+  "MATRIX-floor-credits-nothing": {
+    doc: MATRIX_SPEC,
+    clause: "\u00a72 rule 3",
+    quote:
+      "the floor credits the flow meet only when `cfcFlowLabels: persist` (else it credits nothing, fail-closed)",
+  },
+  "MATRIX-trigger-one-hop": {
+    doc: MATRIX_SPEC,
+    clause: "\u00a72 rule 4",
+    quote:
+      "Multi-hop closure requires `cfcFlowLabels: persist` stamping the intermediate doc's derived label so the second hop's trigger read picks it up.",
+  },
+  "MATRIX-policy-observe": {
+    doc: MATRIX_SPEC,
+    clause: "\u00a72 rule 5",
+    quote:
+      "So `observe` is the honest dial-up step (diagnose which labels the rewrite would have changed, decide on the un-rewritten label) before `enforce` lets the rewrite actually admit.",
   },
   "AH-LIFE-6": {
     doc: RUNTIME_SPEC,

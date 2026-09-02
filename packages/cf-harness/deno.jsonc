@@ -7,7 +7,7 @@
     "console:watch": "cd console && deno run -A ../../felt/cli.ts dev .",
     "console": "deno task console:build && deno run -A console/server.ts",
     "test": "ENV=test deno test --allow-read --allow-write --allow-run --allow-ffi --allow-net --allow-env test audit/test",
-    "cfc-audit": "deno run --allow-read audit/cli.ts",
+    "cfc-audit": "deno run --allow-read --allow-net audit/cli.ts",
     "cfc-audit-fixtures": "deno run --allow-read --allow-write --allow-env --allow-net audit/test/regenerate-fixtures.ts",
     "test:integration": "CF_HARNESS_INTEGRATION=1 deno test -A integration",
     "probe-skills-sh": "deno run --allow-net=skills.sh scripts/probe-skills-sh.ts",

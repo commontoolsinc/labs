@@ -577,12 +577,19 @@ accepts `cfcPosture: "max-enforcement"`, which spreads
 `persist`, write floor / policy evaluation / declared monotonicity /
 label-metadata protection at `enforce`, trigger-read gating on, the §10.1
 standard prompt-caveat policy as the deployment's `cfcPolicyRecords`, and
-public-only confidentiality ceilings on the network-fetch sinks
-(`MAX_ENFORCEMENT_SINK_CEILINGS`). The llm sinks carry no ceiling, and a sink
-with no ceiling gets no gate: llm-sink release is ungoverned under this
-posture — pending a boundary-scoped admission mechanism, since an exact-match
-ceiling cannot admit the source-varying material-risk caveats an llm sink
-exists to process. The bundle deliberately leaves the
+public-only confidentiality ceilings on the network-fetch sinks.
+
+The bundle's sink decisions are total over the sink registry
+(`MAX_ENFORCEMENT_SINK_GOVERNANCE`, from which `MAX_ENFORCEMENT_SINK_CEILINGS`
+derives): every sink `KNOWN_SINKS` names carries either a ceiling or an
+explicit ungated release with its reason, its owner, and the condition that
+retires it, so a sink added to the inventory without a decision is a compile
+error rather than a sink that quietly releases ungated. The llm sinks are the
+explicit ungated ones, and a sink with no ceiling gets no gate: llm-sink
+release is ungoverned under this posture — pending a boundary-scoped admission
+mechanism, since an exact-match ceiling cannot admit the source-varying
+material-risk caveats an llm sink exists to process. The bundle deliberately
+leaves the
 enforcement-mode pin at `enforce-explicit` (strict stays a per-session host
 raise), and leaves `cfcDecomposedEnvelopes`, `cfcTrustConfig`, and
 `cfcPrefixProvenanceStats` alone. It is opt-in per runtime, never a fleet
@@ -594,6 +601,22 @@ cf-harness console is the one surface that opts in by default — it exists to
 show CFC working, so its fabric session takes the bundle unless
 `--fabric-cfc-posture none` says otherwise, and it prints the posture it
 resolved at startup.
+
+Every surface that publishes a posture publishes the same record,
+`cfcPostureReport` in `packages/runner/src/cfc/posture-report.ts`: each dial's
+resolved rung together with whether that rung decides anything and what it
+decides on, the policy-snapshot digest, every known sink as a ceiling or an
+explicit ungated release, and every published deviation as
+`{what, owner, retirement}`. Two of those are load-bearing. An `observe` rung
+carries `diagnosticOnly: true`, so `policyEvaluation: observe` cannot be read
+as active enforcement. And the sink list is total, so a sink's absence from a
+list of ceilings can no longer read as coverage. The record is derived from a
+constructed Runtime's resolved fields; a surface that has not built its runtime
+yet — the console printing at startup, cf-harness recording the posture of a
+lazily-built fabric session — projects it through the same `presetCfcOptions`
+and `resolveCfcDials` the Runtime itself resolves from, rather than restating
+the defaults. `deno task cfc-audit --expected-posture` compares a published
+record against a written-down profile; see the cf-harness README.
 The interactive `cf-harness` and the `fuse` mount expose the enforcement mode
 through `CF_CFC_MODE` for testing. Because these dials are keys of
 `RuntimeOptions`, the exhaustive `RUNTIME_OPTION_KEYS` registry in the same file

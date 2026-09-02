@@ -10,8 +10,9 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { dirname, fromFileUrl, join } from "@std/path";
 
-import { STRUCTURAL_CHECKS } from "../checks/structural.ts";
-import { SPEC_CITATIONS } from "../citations.ts";
+import { RUN_CHECKS } from "../checks/registry.ts";
+import { SPEC_CITATIONS, type SpecCitationKey } from "../citations.ts";
+import { MATRIX_RULES } from "../matrix.ts";
 
 const REPO_ROOT = join(
   dirname(fromFileUrl(import.meta.url)),
@@ -69,10 +70,10 @@ describe("citation drift", () => {
     });
   });
 
-  describe("STRUCTURAL_CHECKS", () => {
+  describe("RUN_CHECKS", () => {
     it("cites at least one clause from every check", () => {
       expect(
-        STRUCTURAL_CHECKS.filter((check) => check.citations.length === 0)
+        RUN_CHECKS.filter((check) => check.citations.length === 0)
           .map((check) => check.id),
       ).toEqual([]);
     });
@@ -82,12 +83,53 @@ describe("citation drift", () => {
         Object.values(SPEC_CITATIONS).map((citation) => citation.clause),
       );
       expect(
-        STRUCTURAL_CHECKS.flatMap((check) =>
+        RUN_CHECKS.flatMap((check) =>
           check.citations
             .filter((citation) => !known.has(citation.clause))
             .map((citation) => `${check.id} ${citation.clause}`)
         ),
       ).toEqual([]);
+    });
+  });
+
+  describe("MATRIX_RULES", () => {
+    it("rests every rule on a clause of the matrix document", () => {
+      // The rules encode one document, and a rule citing a clause of another
+      // is a rule that has drifted out of the matrix into a neighbor's words.
+      expect(
+        MATRIX_RULES
+          .filter((rule) =>
+            SPEC_CITATIONS[rule.citation].doc !==
+              "docs/specs/cfc-enforcement-matrix.md"
+          )
+          .map((rule) => rule.id),
+      ).toEqual([]);
+    });
+
+    it("leaves no matrix citation nothing rests on", () => {
+      const cited = new Set(MATRIX_RULES.map((rule) => rule.citation));
+      expect(
+        Object.entries(SPEC_CITATIONS)
+          .filter(([key, citation]) =>
+            citation.doc === "docs/specs/cfc-enforcement-matrix.md" &&
+            !cited.has(key as SpecCitationKey) &&
+            key !== "MATRIX-conforming"
+          )
+          .map(([key]) => key),
+      ).toEqual([]);
+    });
+
+    it("states what is wrong with a violating tuple, for every rule", () => {
+      expect(
+        MATRIX_RULES.filter((rule) => rule.statement.trim() === "")
+          .map((rule) => rule.id),
+      ).toEqual([]);
+    });
+
+    it("gives every rule a distinct id", () => {
+      expect(new Set(MATRIX_RULES.map((rule) => rule.id)).size).toBe(
+        MATRIX_RULES.length,
+      );
     });
   });
 });
