@@ -157,9 +157,10 @@ Still to come:
   deciding together. Segment validation is the same question, across three
   doors rather than two — a slug's vocabulary holds a reference, and
   neither a relative segment nor a resolved target is held to it. What is
-  settled is narrower: a segment no rendering would name back, empty or
-  padded with whitespace, is refused at every door, which leaves those keys
-  with no spelling rather than one that prints as a different cell.
+  settled is narrower: a segment no rendering would name back — empty,
+  ending in whitespace, or holding a line break — is refused at every door,
+  which leaves those keys with no spelling rather than one that prints as a
+  different cell.
 - **`where`**, the printing surface for the ambient record; later
   milestones add their dimensions to it as they add the dimensions
   themselves. It prints the record `pwd` prints, so it chooses the format

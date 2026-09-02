@@ -72,11 +72,11 @@ export interface PiecePosition {
 
   /**
    * Path inside the piece's result; empty while standing at the piece. Every
-   * segment of it is one a rendering names back: neither empty nor padded
-   * with whitespace, because a place prints as a reference and a reference
-   * is read back trimmed and with a trailing empty segment dropped. A path
-   * holding either would render as a reference to a different cell — the
-   * piece above it, or the key of the trimmed spelling.
+   * segment of it is one a rendering names back, which rules out three: an
+   * empty segment, one ending in whitespace, and one holding a line break.
+   * A path holding any of them renders as a reference to a different cell,
+   * because writing the rendering and reading it back each lose characters
+   * that {@link unnameableSegment} describes.
    */
   readonly path: readonly PathSegment[];
 }
@@ -256,7 +256,10 @@ export class CurrentPlace {
     }
     const fault = firstUnnameableSegment(move.path);
     if (fault !== undefined) {
-      return this.#commit(refuseUnnameableSegment(move.piece, fault));
+      return this.#commit(refuse(
+        `The reference naming space \`${move.name}\` has ${fault}, so a ` +
+          `rendering of the place would name a different cell.`,
+      ));
     }
     return this.#commit(land({
       position: {
@@ -529,6 +532,12 @@ function moveIntoPiece(
         `piece id does not.`,
     );
   }
+  if (segment.startsWith("@")) {
+    return refuse(
+      `\`${segment}\` names no piece. A scope suffix rides a piece id, and ` +
+        `a scope on its own is a whole operand rather than a segment.`,
+    );
+  }
   let scoped;
   try {
     scoped = parseScopedIdSegment(segment);
@@ -622,15 +631,24 @@ function refuseOtherSpace(clause: string, connected: MemorySpace): Step {
  * holding `segment` from naming that path back, and returns nothing when
  * nothing does.
  *
- * A place prints as a reference, and a reference is read back trimmed and
- * with a trailing empty segment dropped. So an empty segment renders as the
- * piece above, and a padded one renders as the key of its trimmed spelling.
- * A number renders as its digits and always names itself back.
+ * Two things lose characters between a path and the rendering that names it,
+ * and each rules out what it can lose. Reading a rendering back is a parse of
+ * a reference, which trims the string it is given and drops a trailing empty
+ * segment; a segment ending in whitespace, and an empty one, are what that
+ * reaches. Writing the rendering separates its lines with a newline, so a
+ * segment holding one splits the position line and leaves a shorter reference
+ * that names another cell. A number renders as its digits and survives both.
+ *
+ * Leading whitespace survives both and is admitted: the parse trims the whole
+ * string, which no leading segment character sits at the end of. What a
+ * terminal does with the other control characters is the format's concern
+ * rather than this one's, since a reference carrying them reads back whole.
  */
 function unnameableSegment(segment: PathSegment): string | undefined {
   if (typeof segment === "number") return undefined;
   if (segment === "") return "an empty segment";
-  if (segment !== segment.trim()) return "a segment padded with whitespace";
+  if (segment !== segment.trimEnd()) return "a segment ending in whitespace";
+  if (segment.includes("\n")) return "a segment holding a line break";
   return undefined;
 }
 

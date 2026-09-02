@@ -62,18 +62,23 @@ How a reading is matched says where it holds, and there are three ways.
 neither governs a segment: a key named `-` is reachable relatively wherever
 it is not the whole operand. `@scope` and a lone leading `#` are matched
 against the operand's head, so each governs a first segment and is an
-ordinary data character in every later one. `..` is matched segment by
+ordinary data character in every later segment that is data — inside a
+piece. A later segment naming a piece is read by the canonical grammar
+instead, which carries both readings itself, so a scope suffix there moves
+the scope and a fragment there is refused. `..` is matched segment by
 segment as the walk splits them, so it is reserved in all of them and a key
 named `..` has no relative spelling — it reaches a place through a
 reference, the door that reads no `..` at all. `/` is the separator
 besides, so no segment of an operand holds one, and a key that does is
 spelled `~1`, which a reference unescapes and a walk does not.
 
-However a reading is matched, a segment no rendering would name back —
-empty, or padded with whitespace — is refused at every door. A place prints
-as a reference, and a reference is read back trimmed and with a trailing
-empty segment dropped, so a place holding such a segment would print as a
-reference to a different cell.
+However a reading is matched, a segment no rendering would name back is
+refused at every door. Two steps lose characters between a path and the
+rendering that names it: reading a rendering back is a parse of a
+reference, which trims the string and drops a trailing empty segment, and
+writing one separates its lines with a newline. So an empty segment, one
+ending in whitespace, and one holding a line break are refused, while a
+segment that merely starts with whitespace survives both and is not.
 
 A segment lifted out of a rendering is an operand in its own right, so
 these readings decide it rather than the key it was printed from.
