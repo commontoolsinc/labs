@@ -264,9 +264,9 @@ reads back the cell the address just wrote to.
 cf get -s demo --piece 'thermostat#argument' target
 ```
 
-One refusal bounds it: a command that takes no `--input` takes no `#argument`
-either. The refusal names the flag rather than the suffix, because they are one
-selection with two spellings.
+What bounds it is the flag it is a spelling of: a command that takes no
+`--input` takes no `#argument` either. The refusal names the flag rather than
+the suffix, because they are one selection with two spellings.
 
 ```bash
 cf call -s demo "$ADDRESS#argument" setTarget '{"celsius":21}'

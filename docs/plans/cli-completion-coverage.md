@@ -230,22 +230,23 @@ it with: the embedded space, the `@scope` suffix, a trailing path, and the
 `#argument` suffix that selects the arguments cell the way `--input` does. What
 that does not recognize falls through to the alias grammar,
 `id[@scope][#argument]` (`splitArgumentSuffix` then `parseScopedIdSegment`).
-Taking the word verbatim as a piece id — which this
-did — meant every documented spelling but the bare id resolved to a listing
-call that could not succeed, and so to a slot that silently offered nothing.
+Every spelling that intake accepts has to reach one of those two readings. A
+word taken verbatim as a piece id resolves to a listing call that cannot
+succeed, and completion answers a failure with silence, so the slot offers
+nothing and says nothing about why.
 
 An embedded space DID supplies the space where the line names none, the way
 `parsePieceOptions` does with the same reference. Where the line names one it
 wins, and a mismatch between the two is the command's to report.
 
-The positional address was a second, independent break: it occupied positional
-index 0, so the cursor resolved to the variadic `tail` rather than to
-`callable`. `resolveCompletionLine` now reads it out as `line.address` instead
-of counting it, which shifts the index the way `readCallTarget` and
-`readTargetPositionals` shift it. Which commands accept one is carried in
-`POSITIONAL_ADDRESS_COMMANDS`, for the reason `PRE_PARSE_GLOBALS` is carried:
-nothing on the command tree distinguishes those arguments from an ordinary
-string.
+A positional address is the second thing this item settles, independent of the
+grammar above. `resolveCompletionLine` reads it out as `line.address` rather
+than counting it, which shifts the index the way `readCallTarget` and
+`readTargetPositionals` shift it; counted, it would hold positional index 0 and
+put the cursor on the variadic `tail` where `callable` belongs. Which commands
+accept one is carried in `POSITIONAL_ADDRESS_COMMANDS`, for the reason
+`PRE_PARSE_GLOBALS` is carried: nothing on the command tree distinguishes those
+arguments from an ordinary string.
 
 ## Pattern vocabulary
 
