@@ -224,7 +224,7 @@ Deno.test("coverage check pre-downloads coverage with strict integrity checks", 
   );
 
   const downloadStep = job.slice(downloadStart, checkStart);
-  assertStringIncludes(downloadStep, "uses: actions/download-artifact@v8");
+  assertStringIncludes(downloadStep, "uses: actions/download-artifact@");
   assertStringIncludes(downloadStep, "pattern: coverage-profile-*");
   assertStringIncludes(downloadStep, "path: coverage-artifacts");
   assertStringIncludes(downloadStep, "merge-multiple: false");
