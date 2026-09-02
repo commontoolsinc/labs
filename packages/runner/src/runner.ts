@@ -141,6 +141,7 @@ import {
 } from "./storage/interface.ts";
 import {
   machineryRead,
+  markDurableReadTx,
   schedulerDependencyRead,
 } from "./storage/reactivity-log.ts";
 import {
@@ -3422,6 +3423,13 @@ export class Runner {
           actionId: `piece-instantiate/${resultCell.sourceURI}`,
           kind: "bookkeeping",
         });
+        // The instantiation's writes are authored bookkeeping bound for
+        // the wire, so it reads the durable replica view: a commit basis
+        // naming a client speculation layer is refused terminally
+        // (speculation.md §6), and the arm that catches that refusal
+        // retires the piece registration along with the event handlers
+        // its graph installed.
+        markDurableReadTx(actualTx);
       }
       // A boot snapshot belongs to exactly one pattern instantiation. A later
       // patternIdentity hot-swap must register fresh under the same durable
