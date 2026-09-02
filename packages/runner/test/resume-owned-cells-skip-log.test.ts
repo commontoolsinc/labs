@@ -216,7 +216,11 @@ describe("resume owned-cell walk skip logging", () => {
             {},
           );
           await seedCell.pull();
-          await seedRuntime.dispose();
+          // The manager outlives the seed runtime: the resume below reuses
+          // it, so the seed's work settles and lands before the handoff.
+          await seedRuntime.settled();
+          await storageManager.synced();
+          await seedRuntime.dispose({ closeStorage: false });
         }
 
         const runtime = new Runtime({
@@ -237,7 +241,9 @@ describe("resume owned-cell walk skip logging", () => {
             await run;
           }
         });
-        await runtime.dispose();
+        await runtime.settled();
+        await storageManager.synced();
+        await runtime.dispose({ closeStorage: false });
 
         const skips = skipEmissions(emissions);
         const emission = skips.find((candidate) =>
