@@ -228,6 +228,16 @@ export const EnvSchema = z.object({
   // denies access shortfalls. See packages/memory/v2/server.ts.
   MEMORY_ACL_MODE: z.enum(["off", "observe", "enforce"]).default("enforce"),
 
+  // Bounds for each space's decoded-document cache on the memory v2 server
+  // (packages/memory/v2/engine.ts, DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES): a
+  // byte budget in encoded bytes and an entry cap. Unset means the engine's
+  // defaults. Raise the budget when /api/health/stats `documentCaches` shows
+  // `evictions` climbing for a space that is being read repeatedly.
+  MEMORY_DOCUMENT_CACHE_BUDGET_BYTES: z.coerce.number().int().positive()
+    .optional(),
+  MEMORY_DOCUMENT_CACHE_MAX_ENTRIES: z.coerce.number().int().positive()
+    .optional(),
+
   // Set ONLY when a trusted reverse proxy sits in front of this process and
   // overwrites X-Forwarded-For. Rate limiting keys on the real TCP peer by
   // default; behind a proxy every caller would otherwise collapse onto the

@@ -1354,22 +1354,29 @@ export const DEFAULT_OPERATION_CHECKPOINT_INTERVAL = 100;
 /**
  * Defaults for the decoded-document cache ({@link Engine.documentCache}).
  *
- * Sized to keep one active corpus's working set resident. The Topics board
- * (129 topics, measured 2026-09-02 on a copy of the production space) reads
- * about a thousand documents per load, the same thousand on every load and
- * on every refresh. Under the earlier bound — 256 entries, cleared wholesale
- * when full — no walk over that set ever found a document cached, and every
- * walk paid decode plus deep-freeze for every document: about a second of
- * server time per walk, most of it in the freeze. With the set resident the
- * same walk is under 200 ms, and a board load's server time fell from 4.1 s
- * to 0.8 s.
+ * Sized to keep one active corpus's working set resident, measured on a copy
+ * of the production Topics board (129 topics, 2026-09-02): reading the
+ * board's argument under its demand touches 1,465 documents whose retained
+ * encoded size is 18.7 MB — 135 topic piece docs at ~66 KB each and ~800
+ * computed cells at ~10 KB — and a page load reads more on top. Under the
+ * earlier bound (256 entries, cleared wholesale when full) no walk over that
+ * set ever found a document cached, and every walk paid decode plus
+ * deep-freeze for every document: about a second of server time per walk,
+ * most of it in the freeze. With the set resident the same walk is under
+ * 100 ms and a board load's server time fell from 4.1 s to 0.8 s.
  *
- * The byte budget is the retention bound (encoded bytes, a proxy for the
- * decoded graphs kept alive); the entry cap is the cardinality backstop.
- * Eviction is least-recently-read, so superseded revisions — read once more
- * at most — age out on their own, which is what the old bound existed for.
+ * The byte budget is the retention bound — encoded bytes, a proxy for the
+ * decoded graphs kept alive (expect a few times that in heap) — and the
+ * entry cap is the cardinality backstop. Least-recently-read eviction under a
+ * budget SMALLER than a corpus's working set serves nothing (each miss
+ * displaces what the next read wants), so the budget errs on the side of
+ * fitting; a host that cannot afford it lowers it through the toolshed's
+ * MEMORY_DOCUMENT_CACHE_BUDGET_BYTES, and `documentCaches` on
+ * /api/health/stats shows `evictions` when a space does not fit. Superseded
+ * revisions, read once more at most, age out on their own, which is what the
+ * old bound existed for.
  */
-export const DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES = 8 * 1024 * 1024;
+export const DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES = 64 * 1024 * 1024;
 export const DEFAULT_DOCUMENT_CACHE_MAX_ENTRIES = 8192;
 
 const prepareStatements = (database: Database): PreparedStatements => ({
@@ -6623,20 +6630,24 @@ const reconstructPatchedDocument = (
   let baseSeq = 0;
   let baseOpIndex = -1;
   let document = emptyEntityDocument();
-  // The encoded bytes this reconstruction read — the base or snapshot plus
-  // every patch — which is what the document cache weighs the result by.
+  // What the document cache weighs the result by: the encoded size of the
+  // largest row the reconstruction read. A patch that rewrites most of a
+  // document is about the document's size, and a small patch on a large
+  // base leaves the base the measure — so the larger of the two tracks the
+  // retained document rather than the replay work (a Topics piece replayed
+  // from a base and five near-whole patches decodes ~300 KB to retain ~55).
   let encodedBytes = 0;
   if (snapshotRow && (!baseRow || snapshotRow.seq >= baseRow.seq)) {
     baseSeq = snapshotRow.seq;
     baseOpIndex = Number.MAX_SAFE_INTEGER;
     document = decodeStoredDocument(snapshotRow.value);
-    encodedBytes += snapshotRow.value?.length ?? 0;
+    encodedBytes = snapshotRow.value?.length ?? 0;
   } else if (baseRow) {
     baseSeq = baseRow.seq;
     baseOpIndex = baseRow.op_index;
     if (baseRow.op === "set") {
       document = decodeStoredDocument(baseRow.data);
-      encodedBytes += baseRow.data?.length ?? 0;
+      encodedBytes = baseRow.data?.length ?? 0;
     }
   }
 
@@ -6655,7 +6666,7 @@ const reconstructPatchedDocument = (
       document,
       decodeStoredPatchList(patch.data),
     );
-    encodedBytes += patch.data?.length ?? 0;
+    encodedBytes = Math.max(encodedBytes, patch.data?.length ?? 0);
   }
 
   return { document, encodedBytes };
