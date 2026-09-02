@@ -80,7 +80,7 @@ export interface PiecePosition {
 }
 
 /**
- * Where in a space shuttle stands. A position answers which cell this is and
+ * Where in a space shuttle stands. A position is which cell this is and
  * nothing else, so two arrivals at one cell are one position however
  * differently they were reached; how shuttle got there is the trail
  * {@link CurrentPlace} keeps.
