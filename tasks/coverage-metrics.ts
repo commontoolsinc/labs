@@ -139,13 +139,16 @@ async function debtWithoutCoverageRecord(source: SourceFile): Promise<number> {
 
 /**
  * Returns whether `content` opts its file out of coverage, which a
- * `// deno-coverage-ignore-file` comment on the file's first line does. That
- * is the line Deno reads it from: the same comment anywhere later leaves the
- * file in the report, and so leaves it charged here.
+ * `// deno-coverage-ignore-file` line comment does when it is the file's first
+ * line, or the line after a shebang. Those are the lines Deno reads it from:
+ * the same comment anywhere later leaves the file in the report, and so
+ * leaves it charged here. Text may follow the directive after whitespace, as
+ * in `// deno-coverage-ignore-file -- runs only in a browser`.
  */
 export function isCoverageIgnoredFile(content: string): boolean {
-  const [firstLine] = content.split("\n", 1);
-  return firstLine.trim() === "// deno-coverage-ignore-file";
+  const lines = content.split(/\r?\n/, 2);
+  const line = lines[0].startsWith("#!") ? lines[1] ?? "" : lines[0];
+  return /^\s*\/\/\s*deno-coverage-ignore-file(?:\s|$)/.test(line);
 }
 
 /**

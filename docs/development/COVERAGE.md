@@ -202,16 +202,22 @@ only while nothing loads the file.
 
 ### A file that opts out of coverage is charged nothing
 
-A `// deno-coverage-ignore-file` comment on a file's first line opts the file
-out of Deno's coverage: `deno coverage` leaves it out of the report it writes,
-whether or not a test loaded it. The gate reads the same line for a file the
-report has no record for, and charges such a file nothing, so the comment
-means the same thing on a file no test can load as on one a test did.
+A `// deno-coverage-ignore-file` comment on a file's first line, or on the line
+after its shebang, opts the file out of Deno's coverage: `deno coverage` leaves
+it out of the report it writes, whether or not a test loaded it. The gate reads
+the same line for a file the report has no record for, and charges such a file
+nothing, so the comment means the same thing on a file no test can load as on
+one a test did.
 
-The line it must be is the first one, ahead of every other comment and pragma,
-because that is the line Deno reads it from; the same comment anywhere later
-leaves the file in Deno's report and charged by the gate. A `// @ts-check` or
-a `deno-lint-ignore-file` goes on the line after it.
+Those are the only lines Deno reads it from, ahead of every other comment and
+pragma; the same comment anywhere later leaves the file in Deno's report and
+charged by the gate. A `// @ts-check` or a `deno-lint-ignore-file` goes on the
+line after it. Text may follow the directive after whitespace, which is the
+place for the reason:
+
+```text
+// deno-coverage-ignore-file -- runs only in a browser, as inlined text
+```
 
 The comment is for a file Deno's coverage cannot measure. The usual case is a
 source file that runs only in a browser, such as one imported as text and

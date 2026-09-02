@@ -227,14 +227,26 @@ Deno.test("a file that opts out of coverage carries no debt", async () => {
       await Deno.writeTextFile(fullPath, content);
     };
 
-    // Opted out on the first line, which is where Deno reads the comment: no
-    // test loaded it, and it owes nothing.
+    // Opted out on the first line, which is where Deno reads the comment, with
+    // a reason after the directive: no test loaded it, and it owes nothing.
     await writeSourceFile(
       "packages/example/src/browser-only.js",
       [
-        "// deno-coverage-ignore-file",
+        "// deno-coverage-ignore-file -- runs only in a browser",
         "// @ts-check",
         "export function browserOnly() {",
+        "  return 1;",
+        "}",
+      ].join("\n"),
+    );
+    // Opted out on the line after a shebang, the other line Deno reads it
+    // from.
+    await writeSourceFile(
+      "packages/example/src/script.ts",
+      [
+        "#!/usr/bin/env -S deno run",
+        "// deno-coverage-ignore-file",
+        "export function script() {",
         "  return 1;",
         "}",
       ].join("\n"),
@@ -270,10 +282,12 @@ Deno.test("a file that opts out of coverage carries no debt", async () => {
       lcov: "",
       files: [
         "packages/example/src/browser-only.js",
+        "packages/example/src/script.ts",
         "packages/example/src/late-comment.ts",
       ],
     });
     expect(uncovered.has("packages/example/src/browser-only.js")).toBe(false);
+    expect(uncovered.has("packages/example/src/script.ts")).toBe(false);
     expect(uncovered.get("packages/example/src/late-comment.ts")?.length).toBe(
       3,
     );
