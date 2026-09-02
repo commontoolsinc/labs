@@ -73,7 +73,9 @@ export class BrowserController extends EventTarget {
     if (this.#page) {
       await this.#page.goto(testUrl);
     } else {
-      this.#browser = await launchWithRetry(extractAstralConfig(config));
+      this.#browser = await launchWithRetry(
+        extractAstralConfig(config, this.#manifest.profileDir),
+      );
       this.#page = await this.#browser.newPage(testUrl);
       this.#page.addEventListener("console", (e) => {
         // Not sure why this event needs reconstructed in order

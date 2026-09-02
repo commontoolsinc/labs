@@ -75,7 +75,6 @@ export class Runner {
           await this.browser.load(tsTestPath);
         } catch (e: unknown) {
           this.reporter.onLoadError(tsTestPath, e as TestResultError);
-          await this.browser.close();
           return false;
         }
 
@@ -100,14 +99,16 @@ export class Runner {
         }
         this.reporter.onFileEnd(tsTestPath);
       }
+
+      const summary = summarize(this.results);
+      this.reporter.onRunEnd(summary);
+      return summary.failed.length === 0;
     } finally {
       recordsFragment?.close();
+      // The manifest's directories are removed once this returns, so the
+      // browser closes first, whichever way the run ended.
+      await this.browser.close();
     }
-
-    const summary = summarize(this.results);
-    this.reporter.onRunEnd(summary);
-    await this.browser.close();
-    return summary.failed.length === 0;
   }
 
   onConsole(e: ConsoleEvent) {

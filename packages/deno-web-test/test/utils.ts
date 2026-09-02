@@ -175,8 +175,8 @@ export class HarnessRun {
   }
 }
 
-// Runs deno-web-test in `projectDir` and caches
-// the results for multiple test usages.
+// Runs deno-web-test in `projectDir` with `environment` added to the
+// variables it inherits, and caches the results for multiple test usages.
 //
 // Due to running within a workspace, these test subprojects
 // need to be workspace members in order to run deno tasks.
@@ -184,8 +184,10 @@ export class HarnessRun {
 // before running tests.
 export const runDenoWebTest = async (
   projectDir: string,
+  environment: Record<string, string> = {},
 ): Promise<HarnessRun> => {
-  const fromCache = DenoWebTestCache.get(projectDir);
+  const cacheKey = `${projectDir} ${JSON.stringify(environment)}`;
+  const fromCache = DenoWebTestCache.get(cacheKey);
   if (fromCache) {
     return fromCache;
   }
@@ -238,13 +240,19 @@ export const runDenoWebTest = async (
       // directory rather than tests of this repository, so the child is
       // given no spool to write them to.
       [RECORDS_DIR_VARIABLE]: "",
+      ...environment,
     },
-  }).output().then((output) =>
-    new HarnessRun(
-      projectDir,
-      sanitizeDenoWebTestOutput(output, stderrBoundary),
+  }).output()
+    .then((output) =>
+      new HarnessRun(
+        projectDir,
+        sanitizeDenoWebTestOutput(output, stderrBoundary),
+      )
     )
-  );
-  DenoWebTestCache.set(projectDir, run);
+    // The copy is the run's working directory, and a `HarnessRun` holds what
+    // the run printed rather than anything under it, so the copy goes once
+    // the run has ended.
+    .finally(() => Deno.remove(tmp, { recursive: true }));
+  DenoWebTestCache.set(cacheKey, run);
   return run;
 };

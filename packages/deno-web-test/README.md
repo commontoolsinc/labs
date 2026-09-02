@@ -98,5 +98,6 @@ For testing `deno-web-test` itself, the test suites (running in Deno itself) run
 `deno-web-test` for subprojects to test features. Due to being in a workspace,
 and not wanting to clutter the workspace with these test directories, and Deno
 attempting to enforce this, the test packages are moved to a temporary directory
-and the test task rewritten to target the local `cli.ts` export. This could be
-relaxed if moved outside of the workspace.
+and the test task rewritten to target the local `cli.ts` export. That directory
+is removed once the run it was made for has finished. This could be relaxed if
+moved outside of the workspace.
