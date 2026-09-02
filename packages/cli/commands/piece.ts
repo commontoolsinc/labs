@@ -66,6 +66,7 @@ import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
 import {
   isReference,
   normalizeLLMFriendlyRef,
+  splitArgumentSuffix,
 } from "../lib/llm-friendly-ref.ts";
 import { renderPiece } from "../lib/piece-render.ts";
 import type {
@@ -1559,8 +1560,9 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
 ADDRESS: The target is best written in the first positional, as a reference
 (it begins with "/"): cf ${spelling} /tracker/items 0/name. A reference names
 the piece by handle or by slug, and may carry the space by name or by DID
-(/@my-space/tracker). A trailing #argument selects the arguments cell the way
---input does. --cell takes the same word when a flag suits better.`,
+(/@my-space/tracker). --cell takes the same word when a flag suits better, and
+is where the bare id and slug spellings go. A trailing #argument selects the
+arguments cell the way --input does, on any of them.`,
     )
     .usage(`${pieceUsage} [addressOrPath] [path]`)
     .example(
@@ -1633,7 +1635,7 @@ the piece by handle or by slug, and may carry the space by name or by DID
     .option(
       "--input",
       "Read from the piece's input cell instead of result cell (the " +
-        '"#argument" reference suffix spells the same selection)',
+        '"#argument" suffix on the target spells the same selection)',
     )
     .option(
       "--step",
@@ -1683,9 +1685,10 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf ${spelling} ...
 ADDRESS: The target is best written in the first positional, as a reference
 (it begins with "/"): a path embedded in it counts, so cf ${spelling}
 /tracker/title needs no path argument. A reference names the piece by handle
-or by slug, and may carry the space (/@my-space/tracker). A trailing #argument
-selects the arguments cell the way --input does. --cell takes the same word
-when a flag suits better.`,
+or by slug, and may carry the space (/@my-space/tracker). --cell takes the
+same word when a flag suits better, and is where the bare id and slug
+spellings go. A trailing #argument selects the arguments cell the way --input
+does, on any of them.`,
       ),
     )
     .usage(`${pieceUsage} [addressOrPath] [path]`)
@@ -1711,7 +1714,7 @@ when a flag suits better.`,
     .option(
       "--input",
       "Write to the piece's input cell instead of result cell (the " +
-        '"#argument" reference suffix spells the same selection)',
+        '"#argument" suffix on the target spells the same selection)',
     )
     .arguments("[addressOrPath:string] [path:string]")
     .action(withNoSectionMarker(spelling, setCellValueFromCommand));
@@ -2689,7 +2692,7 @@ declared, derived, and link-carried labels. Omit path to inspect the root.`,
   .option(
     "--input",
     "Read from the piece's input cell instead of result cell (the " +
-      '"#argument" reference suffix spells the same selection)',
+      '"#argument" suffix on the target spells the same selection)',
   )
   .option(
     "--json",
@@ -2729,7 +2732,7 @@ updated effective label view.`),
   .option(
     "--input",
     "Write to the piece's input cell instead of result cell (the " +
-      '"#argument" reference suffix spells the same selection)',
+      '"#argument" suffix on the target spells the same selection)',
   )
   .option(
     "--json",
@@ -3649,6 +3652,13 @@ export function readBulkSelection(
           throw new ValidationError(
             `A scoped piece cannot be selected for a bulk operation; drop ` +
               `the @scope suffix on ${JSON.stringify(entry)}.`,
+            { exitCode: 1 },
+          );
+        }
+        if (splitArgumentSuffix(entry).input) {
+          throw new ValidationError(
+            `A bulk operation reads whole pieces; drop the #argument suffix ` +
+              `on ${JSON.stringify(entry)}.`,
             { exitCode: 1 },
           );
         }
@@ -4962,16 +4972,12 @@ export function parseSpaceOptions(
         if (!targetSpace) output.space = llmRef.embeddedSpace;
       }
     } else {
-      // The alias grammar has no fragments, and letting one through would
-      // bury the suffix inside the id and fail as an unknown piece later.
-      if (cell.includes("#")) {
-        throw new ValidationError(
-          `The "#argument" suffix rides the reference form ` +
-            `(/of:fid1:...#argument), not the bare piece id.`,
-          { exitCode: 1 },
-        );
-      }
-      const parsedPiece = parseScopedId(cell);
+      // A bare id and a slug designate the piece a reference designates, so
+      // the suffix means the same on them. It comes off first: left on, it
+      // sits inside the id and surfaces as an unknown piece.
+      const bare = splitArgumentSuffix(cell);
+      if (bare.input) output.pieceInput = true;
+      const parsedPiece = parseScopedId(bare.target);
       output.piece = parsedPiece.id;
       if (parsedPiece.scope) output.pieceScope = parsedPiece.scope;
     }
@@ -5050,6 +5056,17 @@ export function parseLink(
       ...(llmRef.embeddedSpace && { embeddedSpace: llmRef.embeddedSpace }),
       ...(llmRef.path.length > 0 && { path: llmRef.path }),
     };
+  }
+
+  // The bare spelling reaches the same refusal, so the suffix is turned down
+  // wherever it is written rather than buried in an id nothing resolves. Only
+  // this suffix: an endpoint's path has no positional spelling to fall back
+  // on, so a `#` anywhere else in one stays part of the key it sits in.
+  if (ref.endsWith("#argument")) {
+    throw new ValidationError(
+      `The "#argument" suffix does not apply to a link endpoint.`,
+      { exitCode: 1 },
+    );
   }
 
   const parts = ref.split("/");
