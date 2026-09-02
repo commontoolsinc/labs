@@ -47,10 +47,10 @@ const SUPERSEDED: readonly Spelling[] = [
 ];
 
 /**
- * How a drill names the CLI: `cf` itself, or the `$CF` — `${CF}` too — that the
- * scripts run their commands through. A pattern that saw only the literal word
- * would find nothing in any of these files, and would report a clean scan of a
- * script that had gone back to the old spellings everywhere.
+ * How a drill names the CLI. Some write the word, which those scripts bind to
+ * a shell function; the rest write `$CF`, or `${CF}`. A pattern that saw
+ * only the word finds nothing at all in a drill of the second kind, and reports
+ * one that had gone back to the old spellings everywhere as clean.
  */
 const INVOCATION = String.raw`(?:cf|\$\{?CF\}?)`;
 
