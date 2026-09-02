@@ -88,18 +88,16 @@ export function listCoordinatorPlan(
     : undefined;
   // `array` callback arguments should observe the actual list entity, not
   // the alias/boxed reference used to pass that list into the builtin.
-  const listCell = sourceListCell.withTx(tx).resolveAsCell();
-  const rawList = listCell.withTx(tx).getRaw() as unknown;
-  const listBase = listCell.getAsNormalizedFullLink();
+  const { listCell, rawList, slots } = listSlotResolutions(
+    runtime,
+    tx,
+    inputsCell,
+  );
   const list: Cell<any>[] | undefined = rawList === undefined
     ? undefined
     : !Array.isArray(rawList)
     ? rawList as unknown as Cell<any>[] // non-array: the caller's guard
-    : rawList.map((slot, i) => {
-      const slotLink = listElementLink(listBase, slot, i);
-      const resolved = resolveLink(runtime, tx, slotLink, "value");
-      return runtime.getCellFromLink(resolved, undefined, tx);
-    });
+    : slots.map((resolved) => runtime.getCellFromLink(resolved, undefined, tx));
   // `.getRaw()` because the pattern itself is wanted, not what its aliases
   // reach: a compact `{ $patternRef }` sentinel (resolved to the live
   // canonical pattern by identity) or, on the legacy path, the embedded
@@ -144,6 +142,38 @@ export function listCoordinatorPlan(
     container,
     elementKeys,
   };
+}
+
+/**
+ * A list input's entity and the value resolution of each of its slots — the
+ * cells a coordinator's element keys are built from. One derivation, shared
+ * by the plan and by the resume pre-sync: a slot's value chain is followed
+ * only through documents that are local, so the identity it ends on depends
+ * on what has arrived (a slot holding a cell whose stored value redirects to
+ * a piece resolves to the piece when warm and to the cell when cold), and a
+ * key derived from a cold chase names a child the warm coordinator never
+ * mints. The pre-sync therefore pulls what each round of this resolution
+ * ends on, until a round ends where the last one did, before deriving a
+ * plan. `slots` is empty when the list is not an array.
+ */
+export function listSlotResolutions(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  inputsCell: Cell<any>,
+): {
+  listCell: Cell<any>;
+  rawList: unknown;
+  slots: NormalizedFullLink[];
+} {
+  const listCell = inputsCell.key("list").withTx(tx).resolveAsCell();
+  const rawList = listCell.withTx(tx).getRaw() as unknown;
+  const listBase = listCell.getAsNormalizedFullLink();
+  const slots = Array.isArray(rawList)
+    ? rawList.map((slot, i) =>
+      resolveLink(runtime, tx, listElementLink(listBase, slot, i), "value")
+    )
+    : [];
+  return { listCell, rawList, slots };
 }
 
 /**

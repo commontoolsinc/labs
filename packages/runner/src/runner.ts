@@ -78,6 +78,7 @@ import { FLATMAP_INPUT_SCHEMA } from "./builtins/flatmap.ts";
 import {
   listCoordinatorPlan,
   listElementResultCell,
+  listSlotResolutions,
 } from "./builtins/list-coordinator-plan.ts";
 import { MAP_INPUT_SCHEMA } from "./builtins/map.ts";
 import {
@@ -6095,6 +6096,88 @@ export class Runner {
   }
 
   /**
+   * Pull what the list coordinators' slot resolutions end on, to their
+   * ends. Each round resolves every slot the way the plan does and syncs
+   * the documents those resolutions end on; a round that ends where the
+   * previous one did is the fixpoint, and the bound is the chain depth. A
+   * list whose entity is not yet local is synced as such, so the next
+   * round can read its slots.
+   */
+  async #syncListSlotResolutions(
+    instances: readonly ResumePatternInstance[],
+  ): Promise<void> {
+    const RESOLUTION_ROUNDS = 4;
+    const synced = new Set<string>();
+    for (let round = 0; round < RESOLUTION_ROUNDS; round++) {
+      const fresh: Cell<any>[] = [];
+      const planTx = this.runtime.edit();
+      try {
+        for (const { pattern, resultCell } of instances) {
+          if (getMetaLink(resultCell, "argument") === undefined) continue;
+          for (const node of pattern.nodes) {
+            const module = node.module;
+            if (!isModule(module) || module.type !== "ref") continue;
+            const op = module.implementation;
+            if (op !== "map" && op !== "filter" && op !== "flatMap") continue;
+            let links: NormalizedFullLink[];
+            try {
+              const resolved = this.runtime.moduleRegistry.getModule(
+                op,
+                module.defaultScope,
+              );
+              const { inputsCell } = this.#buildRawNodeInputs(
+                planTx,
+                resolved,
+                node.inputs,
+                node.outputs,
+                resultCell,
+                pattern,
+                op,
+              );
+              const { listCell, rawList, slots } = listSlotResolutions(
+                this.runtime,
+                planTx,
+                inputsCell,
+              );
+              links = rawList === undefined
+                ? [listCell.getAsNormalizedFullLink()]
+                : slots;
+            } catch (error) {
+              logger.debug("resume-list-children", () => [
+                "skipping a list node whose slots could not be resolved",
+                error,
+              ]);
+              continue;
+            }
+            for (const link of links) {
+              const key = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
+              if (synced.has(key)) continue;
+              synced.add(key);
+              fresh.push(this.runtime.getCellFromLink(link));
+            }
+          }
+        }
+      } finally {
+        planTx.abort("resume list slots: read-only resolution");
+      }
+      if (fresh.length === 0) return;
+      await Promise.all(fresh.map((cell) => {
+        const syncStart = performance.now();
+        return Promise.resolve(documentBoundedResumeCell(cell).sync())
+          .catch((error) => {
+            logger.warn("resume-list-children", () => [
+              "list slot resolution sync failed; resuming without it",
+              error,
+            ]);
+          })
+          .finally(() =>
+            logger.time(syncStart, "start", "resumeListChildSync")
+          );
+      }));
+    }
+  }
+
+  /**
    * Name the children the pattern tree's list coordinators (map/filter/
    * flatMap) will run, before anything instantiates.
    *
@@ -6111,7 +6194,16 @@ export class Runner {
    *
    * Which children a coordinator will run is derived exactly as the
    * coordinator derives it (`listCoordinatorPlan`, shared with its
-   * reconcile), from inputs the first wave delivered. Each child is then
+   * reconcile) — from inputs that are LOCAL to the same depth the
+   * coordinator's own derivation will read them. An element's key is the
+   * value resolution of its slot (`listSlotResolutions`), and that chase
+   * ends wherever the replica goes cold: a slot holding a cell whose stored
+   * value redirects to a piece keys the element on the piece when warm and
+   * on the cell when cold, and a child keyed on the cold chase is one the
+   * warm coordinator never mints. So each round first pulls what every
+   * coordinator's slot resolutions end on, until a round ends where the
+   * last one did — the cells the coordinator's reconcile reads as well, so
+   * it reads them warm rather than at seq 0. Each child is then
    * a resumed instance like any other: the cells it owns — its derived
    * internal cells, and those of the sub-patterns nested in it — are
    * collected the way the owned-cell walk collects them for the root, so
@@ -6136,6 +6228,7 @@ export class Runner {
     }
     let frontier = [...instances];
     while (frontier.length > 0) {
+      await this.#syncListSlotResolutions(frontier);
       const next: ResumePatternInstance[] = [];
       const promises: Promise<unknown>[] = [];
       const planTx = this.runtime.edit();
