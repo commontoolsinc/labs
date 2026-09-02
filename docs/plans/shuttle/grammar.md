@@ -96,17 +96,33 @@ holding a line break are refused, while one that merely starts with
 whitespace survives and is not. The first two are refused wherever they sit
 and not only last, because `..` makes any segment the last one.
 
-Only the newline reaches a piece. The scope suffix the rendering always
-writes sits between the piece and the end of the string, so the trim takes
-the suffix rather than the piece, and the parse's split at the last `@`
-takes the suffix's own — a piece comes back whole whatever it holds. The
-piece is nonetheless held to more, for a different reason: one that is
+Only the newline reaches a piece that has one. The scope suffix the
+rendering always writes sits between the piece and the end of the string,
+so the trim takes the suffix rather than the piece, and the parse's split
+at the last `@` takes the suffix's own. An empty piece is the exception,
+and one fact generates it: its rendered id segment is the suffix and
+nothing else, so the split finds no id in front of it and the parse refuses
+the whole reference rather than handing anything back.
+
+The piece is nonetheless held to more, for a different reason: one that is
 empty, ends in whitespace, or holds an `@` is refused because no slug or
-handle carries such a name. The parse would take it, its handle test being
-a length rule rather than an alphabet one, and hand back verbatim a name
-the `fid1` encoding could not have produced — a rendering that round-trips
-exactly and denotes nothing. That is neither a wrong address nor a dead
-one, which is why the reason cannot be either.
+handle carries such a name. The reason covers all three. The mechanism
+behind it covers two: for a piece shaped like a handle — a colon, and
+twenty characters — the parse takes it, its handle test being a length rule
+rather than an alphabet one, and hands back verbatim a name the `fid1`
+encoding could not have produced, a rendering that round-trips exactly and
+denotes nothing. That is neither a wrong address nor a dead one, which is
+why the reason cannot be either. For an empty piece, and for anything
+shaped like a slug, the parse refuses it already; refusing at the door
+moves the refusal earlier and names the vocabulary where the parse names
+only the failure.
+
+One rule rather than three is a choice about wording, not about safety: the
+redundant cases cost nothing, and the rule buys no guarantee that every
+rendering is followable — a piece like `Not_A_Slug!!` passes it and the
+parse refuses that afterwards. Which pieces are held to the vocabulary at
+all is B1b's question, recorded with the other validation work in
+[`build-sequence.md`](build-sequence.md).
 
 A segment lifted out of a rendering is an operand in its own right, so
 these readings decide it rather than the key it was printed from.
