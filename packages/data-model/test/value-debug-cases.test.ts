@@ -8,8 +8,15 @@
  *
  * The expression is evaluated with every `FabricInstance` and
  * `FabricPrimitive` class in scope under its own name, and nothing else beyond
- * the language. Running with `UPDATE_GOLDENS=1` rewrites each file's recorded
- * renderings from the actual ones.
+ * the language.
+ *
+ * To rewrite each file's recorded renderings from the actual ones, run this
+ * from the package directory:
+ *
+ * ```
+ * UPDATE_GOLDENS=1 deno test --allow-read --allow-write --allow-env \
+ *   test/value-debug-cases.test.ts
+ * ```
  */
 
 import { describe, it } from "@std/testing/bdd";
