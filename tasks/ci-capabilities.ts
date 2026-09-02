@@ -4,12 +4,12 @@
  *
  * A lane works out the union of what its batches need, opens each one
  * once, and runs the batches inside it. Naming them is what lets two ways
- * of providing the same thing coexist: `toolshed` runs a server from
- * source, which is cheap enough for a pull request, while
- * `toolshed-baked-on` restores or builds a binary because the
- * server-execution ON posture is baked into the browser shell inside it
- * and a source run cannot reproduce that. A suite says which it needs and
- * neither the workflow nor the other suites know the difference.
+ * of providing the same thing coexist: `toolshed` runs the default posture
+ * from source, which is cheap enough for a pull request, while
+ * `toolshed-baked-off` restores or builds a binary because the explicit-OFF
+ * server-execution posture is baked into the browser shell inside it and a
+ * source run cannot reproduce that. A suite says which it needs and neither
+ * the workflow nor the other suites know the difference.
  *
  * Every capability is idempotent: opening one that is already open is the
  * same as not opening it. The lane runner relies on that when a batch it
@@ -26,7 +26,8 @@ export type CapabilityId =
   | "browser"
   | "git-history"
   | "toolshed"
-  | "toolshed-baked-on"
+  | "toolshed-baked-off"
+  | "bg-piece-service-binary"
   | "cf"
   | "local-dev-servers"
   | "compile-cache";
@@ -378,19 +379,18 @@ const toolshed: Capability = {
 };
 
 /**
- * The same server with server execution on, from a compiled binary. The
- * ON posture is a compile-time define baked into the browser shell inside
- * the binary, so a source run cannot reproduce it. The lane's workflow
- * restores the binary from the Actions cache before the runner starts;
+ * The same server with server execution explicitly off, from a compiled
+ * binary. The OFF posture is a compile-time define baked into the browser
+ * shell inside the binary, so a source run cannot reproduce it. The lane's
+ * workflow restores the binary from the Actions cache before the runner starts;
  * building it here is what happens when that cache missed.
  */
-const toolshedBakedOn: Capability = {
-  id: "toolshed-baked-on",
-  description:
-    "a Toolshed server with the server-execution define baked into its shell",
+const toolshedBakedOff: Capability = {
+  id: "toolshed-baked-off",
+  description: "a Toolshed server with server execution OFF in its baked shell",
   needs: ["deno"],
   async open(context) {
-    const binary = path.join(context.root, BINARY_CACHE_DIR, "toolshed-on");
+    const binary = path.join(context.root, BINARY_CACHE_DIR, "toolshed-off");
     if (!context.dryRun) {
       let present = true;
       try {
@@ -410,7 +410,7 @@ const toolshedBakedOn: Capability = {
             cwd: context.root,
             env: {
               ...Deno.env.toObject(),
-              EXPERIMENTAL_SERVER_EXECUTION: "true",
+              EXPERIMENTAL_SERVER_EXECUTION: "false",
             },
           },
         );
@@ -425,8 +425,48 @@ const toolshedBakedOn: Capability = {
     return await startToolshed(context, {
       command: [binary],
       cwd: context.root,
-      env: { EXPERIMENTAL_SERVER_EXECUTION: "true" },
+      env: { EXPERIMENTAL_SERVER_EXECUTION: "false" },
     });
+  },
+};
+
+/**
+ * The compiled background-piece-service binary used by its deployed-topology
+ * gate. That gate deliberately starts the shipped artifact rather than a
+ * source process, so the binary is a capability like the baked Toolshed.
+ */
+const bgPieceServiceBinary: Capability = {
+  id: "bg-piece-service-binary",
+  description: "the compiled background-piece-service binary",
+  needs: ["deno"],
+  async open(context) {
+    const binary = path.join(
+      context.root,
+      BINARY_CACHE_DIR,
+      "bg-piece-service",
+    );
+    if (!context.dryRun) {
+      let present = true;
+      try {
+        await Deno.stat(binary);
+      } catch {
+        present = false;
+      }
+      if (!present) {
+        await execOf(context)(
+          Deno.execPath(),
+          ["task", "build-binaries", "bg-piece-service"],
+          { cwd: context.root },
+        );
+        await Deno.mkdir(path.dirname(binary), { recursive: true });
+        await Deno.copyFile(
+          path.join(context.root, "dist", "bg-piece-service"),
+          binary,
+        );
+      }
+      await Deno.chmod(binary, 0o755);
+    }
+    return exported({ BG_PIECE_SERVICE_BIN: binary });
   },
 };
 
@@ -492,7 +532,8 @@ export const CAPABILITIES: ReadonlyMap<CapabilityId, Capability> = new Map(
     browser,
     gitHistory,
     toolshed,
-    toolshedBakedOn,
+    toolshedBakedOff,
+    bgPieceServiceBinary,
     cf,
     localDevServers,
     compileCache,

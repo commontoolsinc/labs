@@ -51,6 +51,7 @@ describe("ci capabilities", () => {
     // type and not to the registry, or the other way round, and a suite
     // asking for one that is not there fails the lane before it starts.
     expect([...CAPABILITIES.keys()].toSorted()).toEqual([
+      "bg-piece-service-binary",
       "browser",
       "cf",
       "compile-cache",
@@ -60,7 +61,7 @@ describe("ci capabilities", () => {
       "jq",
       "local-dev-servers",
       "toolshed",
-      "toolshed-baked-on",
+      "toolshed-baked-off",
     ]);
   });
 
@@ -135,6 +136,9 @@ describe("ci capabilities", () => {
     expect(opened.env.API_URL).toBeDefined();
     expect(opened.env.TOOLSHED_PORT).toBeDefined();
     expect(opened.env.CF_LABS_ROOT).toBe(Deno.cwd());
+    expect(opened.env.BG_PIECE_SERVICE_BIN).toBe(
+      `${Deno.cwd()}/${BINARY_CACHE_DIR}/bg-piece-service`,
+    );
     expect(opened.env.PATH?.startsWith(`${Deno.cwd()}/bin`)).toBe(true);
     expect(opened.env.CF_COMPILE_CACHE_FILE).toBe(
       `${Deno.cwd()}/${COMPILE_CACHE_FILE}`,
@@ -355,8 +359,8 @@ describe("opening a capability on a machine that answers", () => {
   });
 
   it("builds the server-execution binary only when none was restored", async () => {
-    const answers = { "toolshed-on": "listening (pid 999999). Logs: x\n" };
-    const openOn = async (restored: boolean) => {
+    const answers = { "toolshed-off": "listening (pid 999999). Logs: x\n" };
+    const openOff = async (restored: boolean) => {
       const m = machine(answers);
       const root = await Deno.makeTempDir({ prefix: "capability-" });
       // What a build leaves behind, so the copy into the cache has
@@ -365,9 +369,12 @@ describe("opening a capability on a machine that answers", () => {
       await Deno.writeTextFile(`${root}/dist/toolshed`, "");
       if (restored) {
         await Deno.mkdir(`${root}/${BINARY_CACHE_DIR}`, { recursive: true });
-        await Deno.writeTextFile(`${root}/${BINARY_CACHE_DIR}/toolshed-on`, "");
+        await Deno.writeTextFile(
+          `${root}/${BINARY_CACHE_DIR}/toolshed-off`,
+          "",
+        );
       }
-      const opened = await openCapabilities(["toolshed-baked-on"], {
+      const opened = await openCapabilities(["toolshed-baked-off"], {
         root,
         dryRun: false,
         workDir: root,
@@ -379,8 +386,37 @@ describe("opening a capability on a machine that answers", () => {
     };
     // A cache miss builds; a restore does not, which is the difference
     // between forty seconds and seventeen on every lane that needs it.
-    expect(await openOn(false)).toBe(true);
-    expect(await openOn(true)).toBe(false);
+    expect(await openOff(false)).toBe(true);
+    expect(await openOff(true)).toBe(false);
+  });
+
+  it("builds the background service binary only when none was restored", async () => {
+    const openBinary = async (restored: boolean) => {
+      const m = machine();
+      const root = await Deno.makeTempDir({ prefix: "capability-" });
+      await Deno.mkdir(`${root}/dist`, { recursive: true });
+      await Deno.writeTextFile(`${root}/dist/bg-piece-service`, "");
+      if (restored) {
+        await Deno.mkdir(`${root}/${BINARY_CACHE_DIR}`, { recursive: true });
+        await Deno.writeTextFile(
+          `${root}/${BINARY_CACHE_DIR}/bg-piece-service`,
+          "",
+        );
+      }
+      const opened = await openCapabilities(["bg-piece-service-binary"], {
+        root,
+        dryRun: false,
+        workDir: root,
+        exec: m.exec,
+      }, CAPABILITIES);
+      await opened.close();
+      await Deno.remove(root, { recursive: true });
+      return m.asked.some((line) =>
+        line.includes("build-binaries bg-piece-service")
+      );
+    };
+    expect(await openBinary(false)).toBe(true);
+    expect(await openBinary(true)).toBe(false);
   });
 });
 

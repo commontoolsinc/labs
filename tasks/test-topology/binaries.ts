@@ -38,7 +38,7 @@ import {
   type Suite,
   type Unit,
 } from "./suite.ts";
-import { SERVER_EXECUTION_VARIANT } from "./patterns.ts";
+import { SERVER_EXECUTION_OFF_VARIANT } from "./patterns.ts";
 
 /** What a unit's record is named for. */
 const PREFIX = "build-binary";
@@ -109,9 +109,9 @@ function binarySuite(
 export function loadBinarySuites(): Suite[] {
   return [
     binarySuite("binaries", BINARY_NAMES),
-    binarySuite("binaries-on", ["toolshed"], {
-      variant: SERVER_EXECUTION_VARIANT,
-      env: { EXPERIMENTAL_SERVER_EXECUTION: "true" },
+    binarySuite("binaries-off", ["toolshed"], {
+      variant: SERVER_EXECUTION_OFF_VARIANT,
+      env: { EXPERIMENTAL_SERVER_EXECUTION: "false" },
     }),
   ];
 }
