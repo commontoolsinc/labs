@@ -1,0 +1,39 @@
+(() => {
+  // A real stack names this file and a line in it, so each error gets a
+  // representative one instead.
+  const withStack = (error) => {
+    error.stack = `${error.name}: ${error.message}\n` +
+      "    at frob (file:///example/frob.ts:12:34)\n" +
+      "    at main (file:///example/main.ts:5:6)";
+    return error;
+  };
+  class FrobError extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "FrobError";
+    }
+  }
+  return {
+    plain: withStack(new Error("boom")),
+    type: withStack(new TypeError("not a thing")),
+    range: withStack(new RangeError("out of bounds")),
+    custom: withStack(new FrobError("frob failed")),
+    "with cause": withStack(
+      new Error("outer", { cause: withStack(new Error("inner")) }),
+    ),
+    "with extra property": Object.assign(withStack(new Error("extra")), {
+      code: 42,
+    }),
+  };
+})()
+
+{
+  plain: /Error("Error: boom"),
+  type: /TypeError("TypeError: not a thing"),
+  range: /RangeError("RangeError: out of bounds"),
+  custom: /FrobError("FrobError: frob failed"),
+  "with cause": /Error("Error: outer"),
+  "with extra property": /Error("Error: extra")
+}
+
+{plain:/Error("Error: boom"),type:/TypeError("TypeError: not a thing"),range:/RangeError("RangeEr...

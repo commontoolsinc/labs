@@ -1,4 +1,12 @@
-FabricError.fromNativeError(new Error("boom"))
+(() => {
+  // A real stack names this file and a line in it, so the error gets a
+  // representative one instead.
+  const error = new Error("boom");
+  error.stack = "Error: boom\n" +
+    "    at frob (file:///example/frob.ts:12:34)\n" +
+    "    at main (file:///example/main.ts:5:6)";
+  return FabricError.fromNativeError(error);
+})()
 
 /Error(...)
 
