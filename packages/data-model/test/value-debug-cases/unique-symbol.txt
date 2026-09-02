@@ -1,0 +1,12 @@
+{ described: Symbol("d"), bare: Symbol() }
+
+{
+  "described": {
+    "/uniqueSymbol": "d"
+  },
+  "bare": {
+    "/uniqueSymbol": undefined
+  }
+}
+
+{"described":{"/uniqueSymbol":"d"},"bare":{"/uniqueSymbol":undefined}}

@@ -1,0 +1,7 @@
+{ s: Symbol.for("k") }
+
+{
+  "s": Symbol.for("k")
+}
+
+{"s":Symbol.for("k")}

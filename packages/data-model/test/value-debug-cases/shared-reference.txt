@@ -1,0 +1,15 @@
+(() => {
+  const shared = { v: 1 };
+  return { a: shared, b: shared };
+})()
+
+{
+  "a": {
+    "v": 1
+  },
+  "b": {
+    "v": 1
+  }
+}
+
+{"a":{"v":1},"b":{"v":1}}

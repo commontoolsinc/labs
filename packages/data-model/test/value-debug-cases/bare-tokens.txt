@@ -1,0 +1,12 @@
+{ big: 42n, nothing: undefined, nan: NaN, inf: Infinity, negInf: -Infinity, negZero: -0 }
+
+{
+  "big": 42n,
+  "nothing": undefined,
+  "nan": NaN,
+  "inf": Infinity,
+  "negInf": -Infinity,
+  "negZero": -0
+}
+
+{"big":42n,"nothing":undefined,"nan":NaN,"inf":Infinity,"negInf":-Infinity,"negZero":-0}

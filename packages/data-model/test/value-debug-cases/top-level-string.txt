@@ -1,0 +1,5 @@
+"a string with \"quotes\" and a\nnewline"
+
+"a string with \"quotes\" and a\nnewline"
+
+"a string with \"quotes\" and a\nnewline"

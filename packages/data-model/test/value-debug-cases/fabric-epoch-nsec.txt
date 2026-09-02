@@ -1,0 +1,7 @@
+new FabricEpochNsec(123456789n)
+
+{
+  "/EpochNsec@1": "B1vNFQ"
+}
+
+{"/EpochNsec@1":"B1vNFQ"}
