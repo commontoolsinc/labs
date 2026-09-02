@@ -15,7 +15,6 @@ export {
   CELL_SCOPE_VALUES,
   createLLMFriendlyLink,
   encodeJsonPointer,
-  isAliasBinding,
   isPieceHandle,
   isSigilLink,
   linkPathSegmentToCellPathSegment,
@@ -26,6 +25,7 @@ export {
   parseScopedIdSegment,
   type ReferenceParts,
 } from "./link-types.ts";
+export { type AliasBinding, isAliasBinding } from "./alias-binding.ts";
 export {
   isLinkRef,
   type LinkRef,

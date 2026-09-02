@@ -294,7 +294,7 @@ export function inlineExternalSchemaRefsInValue<T extends FabricValue>(
 }
 
 /**
- * Creates a sigil reference (link or alias) with shared logic
+ * Creates a sigil link, optionally a write redirect, with shared logic
  */
 export function createSigilLinkFromParsedLink(
   link: NormalizedLink,

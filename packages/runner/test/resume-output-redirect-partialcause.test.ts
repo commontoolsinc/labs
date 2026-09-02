@@ -12,13 +12,13 @@ import {
 
 // Seen live on estuary home spaces (2026-07-29): a sub-pattern node whose
 // stored outputs carry a DEFERRED partialCause alias unwraps to a bare
-// `{"$alias":{"partialCause":…}}` record, which parseAliasBinding refuses by
-// design — and the resume walk's catch then skipped the WHOLE node's
-// owned-cell pre-sync ("resume-owned-cells skipping a sub-pattern node whose
-// outputs did not bind or resolve"), silently re-exposing the cold-cache
-// commit-revert race the pre-sync exists to prevent. A partialCause alias is
-// a derived internal cell, never the node's reserved result spot: the scan
-// must skip the entry and keep looking, not abandon the node.
+// `{"$alias":{"partialCause":…}}` record, and the resume walk's catch then
+// skipped the WHOLE node's owned-cell pre-sync ("resume-owned-cells skipping
+// a sub-pattern node whose outputs did not bind or resolve"), silently
+// re-exposing the cold-cache commit-revert race the pre-sync exists to
+// prevent. A partialCause alias is a derived internal cell, never the node's
+// reserved result spot: the scan must step over the entry and keep looking,
+// not abandon the node.
 
 const signer = await Identity.fromPassphrase("resume-output-partialcause");
 const space = signer.did();

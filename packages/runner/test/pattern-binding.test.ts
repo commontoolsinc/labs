@@ -14,6 +14,7 @@ import {
 } from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
+import { isAliasBinding } from "../src/alias-binding.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import {
   linkCfcLabelView,
@@ -25,7 +26,6 @@ import {
   areNormalizedLinksSame,
   getDerivedInternalCellLink,
   getMetaCell,
-  isAliasBinding,
   parseLink,
 } from "../src/link-utils.ts";
 import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";

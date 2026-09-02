@@ -111,7 +111,8 @@ mapped in [`../README.md`](../README.md).
 - [`skill-audit.md`](skill-audit.md) — the two mechanisms that keep the facts
   in a skill honest, including the `deno task check-skill-facts` tripwire
 - [`runtime-glossary.md`](runtime-glossary.md) — the storage and memory
-  vocabulary of the runtime. Pattern authors want the
+  vocabulary of the runtime, including the difference between a link and an
+  `$alias` pattern binding. Pattern authors want the
   [author-facing glossary](../common/concepts/glossary.md) instead
 
 ## Tools

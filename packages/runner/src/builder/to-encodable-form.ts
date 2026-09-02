@@ -9,7 +9,7 @@ import {
   shallowFabricFromNativeObjectElseUndefined,
 } from "@commonfabric/data-model";
 import { refuseFabricInstance } from "../fabric-special-object.ts";
-import { type AliasBinding } from "../sigil-types.ts";
+import { type AliasBinding, isAliasBinding } from "../alias-binding.ts";
 import {
   type FabricExecPlainObject,
   type FabricExecValue,
@@ -29,7 +29,6 @@ import {
   noteDerivedCopy,
 } from "./pattern-metadata.ts";
 import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
-import { isAliasBinding } from "../link-utils.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,

@@ -53,18 +53,27 @@ Example:
 }
 ```
 
-#### Legacy Formats
+#### Not a Link: `$alias` Bindings
 
-**`$alias` format** — no longer a link. Generic link recognition and parsing
-(`isWriteRedirectLink`, `parseLink`, `isCellLink`) are sigil-only, so an
-`$alias` record found in data is a plain value. The form survives solely as
-Pattern *binding* vocabulary (produced by `withAliasBindings`, consumed
-via `isAliasBinding`/`parseAliasBinding`), where it marks intermediate
-bindings — e.g.
+An `$alias` record is Pattern *binding* vocabulary, and it is not a link.
+Generic link recognition and parsing (`isWriteRedirectLink`, `parseLink`,
+`isCellLink`) are sigil-only, so an `$alias` record found in data is a plain
+value. The form is defined in `runner/src/alias-binding.ts`, produced by
+pattern compilation, and recognized only inside Pattern objects — e.g.
 ```json
 { "$alias": { "cell": "argument", "path": ["items"] } }
 ```
-— not cross-document references.
+
+A link addresses a document that exists: it carries that document's
+identifier, and a read or a write through it lands there. A binding carries
+no identifier. It names a position that acquires a document only when the
+pattern graph is instantiated — by role (`cell: "argument"` or
+`cell: "result"`), by derivation (`partialCause`, naming a document to mint
+from the instance's result cell and that cause), or at a nesting level not yet
+reached (`defer`). Those are different kinds of thing, so this is not a legacy
+link format awaiting replacement by a sigil one. It is a separate vocabulary
+that the link model does not reach into, and both its writers and its readers
+are permanent. `runner/src/alias-binding.ts` gives the full reasoning.
 
 The plain-value reading applies to *data* only. Inside a Pattern object the
 interpretation is positional and shape-based with no escape encoding: pattern
@@ -75,6 +84,8 @@ state, or a pattern's outputs) is therefore not preserved as data: the
 serializer rewrites it as a nested-pattern binding (incrementing `defer`), and
 instantiation later resolves it as a write redirect into the pattern's own
 documents.
+
+#### Legacy Formats
 
 **`LegacyJSONCellLink`** (`{ cell: { "/": string }, path: [...] }`) — removed
 from write and recognition code paths. The type definition still exists in
@@ -205,9 +216,14 @@ simplify content addressing.
 `LegacyJSONCellLink` and bare string links (`{ "/": string }`) have been removed
 from write and recognition code paths. `LegacyJSONCellLink` retains
 backwards-compatible reading for previously persisted data, but is otherwise
-inactive. `$alias` has been removed from link recognition entirely — in data it
-is a plain value. It remains in use as Pattern-binding vocabulary only, and can
-be retired once pattern serialization emits sigil bindings.
+inactive.
+
+`$alias` is not on this list. It is Pattern-binding vocabulary rather than a
+link format, so there is nothing here to deprecate: link recognition already
+ignores it, and it is not a candidate for replacement by a sigil encoding
+because a binding names a position in a pattern instance while a link
+addresses a document. See
+[Not a Link: `$alias` Bindings](#not-a-link-alias-bindings).
 
 ---
 

@@ -3,7 +3,6 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { resolveLink } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
-import { parseAliasBinding } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -25,14 +24,15 @@ Deno.bench("followWriteRedirects with simple alias", () => {
     tx,
   );
   testCell.set({ value: 42 });
-  // `$alias` is a Pattern binding, not a link, so parse it against the base
-  // full link via parseAliasBinding; `cell` satisfies the AliasBinding shape.
-  const binding = { $alias: { cell: "result" as const, path: ["value"] } };
 
   resolveLink(
     runtime,
     tx,
-    parseAliasBinding(binding, testCell.getAsNormalizedFullLink()),
+    {
+      ...testCell.getAsNormalizedFullLink(),
+      path: ["value"],
+      overwrite: "redirect",
+    },
     "writeRedirect",
   );
 
@@ -72,11 +72,14 @@ Deno.bench("followWriteRedirects with nested aliases (5 levels)", () => {
     });
   }
 
-  const binding = { $alias: { cell: "result" as const, path: ["next"] } };
   resolveLink(
     runtime,
     tx,
-    parseAliasBinding(binding, cells[0].getAsNormalizedFullLink()),
+    {
+      ...cells[0].getAsNormalizedFullLink(),
+      path: ["next"],
+      overwrite: "redirect",
+    },
     "writeRedirect",
   );
 

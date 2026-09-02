@@ -21,7 +21,6 @@ import {
   createSigilLinkFromParsedLink,
   getDerivedInternalCellLink,
   getMetaLink,
-  isAliasBinding,
   isCellLink,
   isSigilLink,
   isWriteRedirectLink,
@@ -31,6 +30,7 @@ import {
   sanitizeSchemaForLinks,
   sigilLinkAddressOnly,
 } from "./link-utils.ts";
+import { isAliasBinding } from "./alias-binding.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import {
@@ -255,9 +255,12 @@ function sendValueToBindingInner<T>(
   if (argumentCellLink === undefined) {
     argumentCellLink = getMetaLink(cell as Cell<unknown>, "argument")!;
   }
-  // Handle both legacy $alias format and new sigil link format. `$alias` is
-  // only meaningful here because `binding` comes from a Pattern object;
-  // `isWriteRedirectLink` itself no longer matches it.
+  // A binding reaches a write target either as a sigil write redirect or as
+  // an `$alias` record. The second is only meaningful because `binding` comes
+  // from a pattern node graph; the link predicates do not match it, so this
+  // function resolves it here against the instance's argument and result
+  // cells. This and `unwrapOneLevelAndBindToDoc` below are the only two
+  // places that do.
   if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
     if (isAliasBinding(binding)) {
       const alias = binding.$alias;

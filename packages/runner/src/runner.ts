@@ -30,6 +30,7 @@ import {
   isPlainObject,
 } from "@commonfabric/utils/types";
 
+import { isAliasBinding } from "./alias-binding.ts";
 import {
   patternFromFrame,
   popFrame,
@@ -89,13 +90,11 @@ import {
   getDerivedInternalCellLink,
   getMetaCell,
   getMetaLink,
-  isAliasBinding,
   isCellLink,
   isSigilLink,
   isWriteRedirectLink,
   KeepAsCell,
   type NormalizedFullLink,
-  parseAliasBinding,
   parseLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
@@ -495,11 +494,13 @@ const recordOutputSchemaPolicyInputs = (
     return;
   }
 
-  if (isWriteRedirectLink(outputBinding) || isAliasBinding(outputBinding)) {
+  // Sigil redirects only. `outputBinding` has been through
+  // `unwrapOneLevelAndBindToDoc`, which turns this level's `$alias` bindings
+  // into sigil links; a record still carrying `$alias` here belongs to a
+  // nested pattern and names nothing at this level.
+  if (isWriteRedirectLink(outputBinding)) {
     const bindingBase = resultCell.getAsNormalizedFullLink();
-    const bindingLink = isAliasBinding(outputBinding)
-      ? parseAliasBinding(outputBinding, bindingBase)
-      : parseLink(outputBinding, bindingBase);
+    const bindingLink = parseLink(outputBinding, bindingBase);
     // Output-redirect resolution is result-plumbing machinery
     // (machineryRead, same family as sendValueToBinding's walk): its reads
     // must not consume `*`-path membership templates (bot review on this
@@ -615,11 +616,10 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
   resultCell: Cell<any>, // used as the base for output bindings
   outputBinding: unknown,
 ): void => {
-  if (isWriteRedirectLink(outputBinding) || isAliasBinding(outputBinding)) {
+  // Sigil redirects only, as in recordOutputSchemaPolicyInputs.
+  if (isWriteRedirectLink(outputBinding)) {
     const bindingBase = resultCell.getAsNormalizedFullLink();
-    const bindingLink = isAliasBinding(outputBinding)
-      ? parseAliasBinding(outputBinding, bindingBase)
-      : parseLink(outputBinding, bindingBase);
+    const bindingLink = parseLink(outputBinding, bindingBase);
     // Result-plumbing machinery, as in recordOutputSchemaPolicyInputs.
     const link = tx.runWithAmbientReadMeta(
       machineryRead,
@@ -671,13 +671,12 @@ const schemaForRawBuiltinRootOutputBinding = (
   resultCell: Cell<any>, // used as the base for output bindings
   outputBinding: unknown,
 ): JSONSchema | undefined => {
-  if (!isWriteRedirectLink(outputBinding) && !isAliasBinding(outputBinding)) {
+  // Sigil redirects only, as in recordOutputSchemaPolicyInputs.
+  if (!isWriteRedirectLink(outputBinding)) {
     return undefined;
   }
   const bindingBase = resultCell.getAsNormalizedFullLink();
-  const bindingLink = isAliasBinding(outputBinding)
-    ? parseAliasBinding(outputBinding, bindingBase)
-    : parseLink(outputBinding, bindingBase);
+  const bindingLink = parseLink(outputBinding, bindingBase);
   // Result-plumbing machinery, as in recordOutputSchemaPolicyInputs.
   const link = tx.runWithAmbientReadMeta(
     machineryRead,
@@ -783,25 +782,15 @@ export function firstResolvedOutputRedirect(
   baseCell: Cell<any>,
   causeOnlyIds?: ReadonlySet<string>,
 ): NormalizedFullLink | undefined {
-  if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
-    // A partialCause alias denotes a DERIVED INTERNAL cell — of the child
-    // level it was deferred to when it still carried `defer` — never the
-    // node's reserved result spot, and it cannot be parsed as a link
-    // (parseAliasBinding throws by design). Before 2026-07 this threw here,
-    // and the caller's catch skipped the WHOLE node's owned-cell pre-sync —
-    // silently re-exposing the cold-cache commit-revert race the pre-sync
-    // exists to prevent, for every sub-pattern whose outputs lead with such
-    // an alias (seen live on estuary home spaces as "resume-owned-cells
-    // skipping…"). Skip just this entry and keep scanning: the derived
-    // cells themselves are collected from each pattern's own
-    // derivedInternalCells manifest.
-    if (isAliasBinding(binding) && binding.$alias.partialCause !== undefined) {
-      return undefined;
-    }
+  // Sigil redirects only, as in recordOutputSchemaPolicyInputs. A surviving
+  // `$alias` record — most often a partialCause binding deferred to a child
+  // level — names a derived internal cell of THAT level, never this node's
+  // reserved result spot, so it contributes no redirect here. The walk below
+  // steps over it and keeps scanning; the derived cells themselves are
+  // collected from each pattern's own derivedInternalCells manifest.
+  if (isWriteRedirectLink(binding)) {
     const bindingBase = baseCell.getAsNormalizedFullLink();
-    const parsed = isAliasBinding(binding)
-      ? parseAliasBinding(binding, bindingBase)
-      : parseLink(binding, bindingBase);
+    const parsed = parseLink(binding, bindingBase);
     if (causeOnlyIds?.has(parsed.id)) return parsed;
     return resolveLink(runtime, tx, parsed, "writeRedirect");
   }
@@ -878,15 +867,15 @@ const recordSetupProjectionPolicyInputs = (
     return;
   }
 
-  // Sigil redirects only, deliberately NOT paired with `isAliasBinding`: the
-  // projection is about to be STORED (argument via diffAndUpdate, result via
-  // setRawUntyped), and in stored data only sigil links function as
-  // redirects — a residual `$alias` record (e.g. a still-deferred binding of
-  // an embedded pattern) is inert there. The prepare gate agrees: marker
-  // verification requires the stored value to be a sigil redirect
-  // (`setupProjectionSourceMatchesValue`), and recording a marker for an
-  // alias would wrongly widen `writeIsPatternSetupInitialization`'s
-  // trusted-initialization exemption to a path nothing redirects to.
+  // Sigil redirects only: the projection is about to be STORED (argument via
+  // diffAndUpdate, result via setRawUntyped), and in stored data only sigil
+  // links function as redirects — a residual `$alias` record (e.g. a
+  // still-deferred binding of an embedded pattern) is inert there. The
+  // prepare gate agrees: marker verification requires the stored value to be
+  // a sigil redirect (`setupProjectionSourceMatchesValue`), and recording a
+  // marker for an alias would wrongly widen
+  // `writeIsPatternSetupInitialization`'s trusted-initialization exemption to
+  // a path nothing redirects to.
   if (isWriteRedirectLink(projection)) {
     const target = resultCell.getAsNormalizedFullLink();
     const source = parseLink(projection, target);
@@ -7418,11 +7407,10 @@ export class Runner {
     };
 
     const visit = (schema: unknown, currentValue: unknown): void => {
-      // Sigil-only, deliberately NOT paired with `isAliasBinding`: the value
-      // is post-unwrap, where the only `$alias` records left belong to
-      // embedded Pattern values (their `defer` bookkeeping resolves them at
-      // that pattern's own instantiation) — parsing one here would read it at
-      // the wrong nesting level.
+      // Sigil-only: the value is post-unwrap, where the only `$alias`
+      // records left belong to embedded Pattern values (their `defer`
+      // bookkeeping resolves them at that pattern's own instantiation) —
+      // parsing one here would read it at the wrong nesting level.
       if (isWriteRedirectLink(currentValue)) {
         const link = parseLink(currentValue, resultCell);
         links.push({
