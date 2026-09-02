@@ -78,6 +78,7 @@ describe("posture", () => {
         "AUD-13": "not-applicable",
         "AUD-14": "not-applicable",
         "AUD-15": "not-applicable",
+        "AUD-15a": "not-applicable",
       });
     });
   });
@@ -92,6 +93,7 @@ describe("posture", () => {
         "AUD-13": "inconclusive",
         "AUD-14": "inconclusive",
         "AUD-15": "inconclusive",
+        "AUD-15a": "inconclusive",
       });
     });
   });
@@ -110,7 +112,8 @@ describe("posture", () => {
       ).toEqual({
         "AUD-13": "inconclusive",
         "AUD-14": "inconclusive",
-        "AUD-15": "pass",
+        "AUD-15": "not-applicable",
+        "AUD-15a": "pass",
       });
     });
   });
@@ -128,6 +131,56 @@ describe("posture", () => {
   });
 
   describe("AUD-15 over the policy snapshot", () => {
+    /** The fixture with the snapshot's mode source and mode set. */
+    const withSnapshotMode = (
+      source: string,
+      mode: string,
+    ): Record<string, CheckVerdict> =>
+      verdicts((root) => {
+        stateOf(root).fabricSessionCfc = recordedPosture({});
+        if (root.policySnapshot.status !== "present") {
+          throw new Error("the fixture's policy snapshot did not load");
+        }
+        const snapshot = root.policySnapshot.value as {
+          cfc: { enforcementMode: string; enforcementModeSource: string };
+        };
+        snapshot.cfc.enforcementModeSource = source;
+        snapshot.cfc.enforcementMode = mode;
+      });
+
+    it("is inconclusive when the snapshot is absent, so the source is unknown", () => {
+      expect(
+        verdicts((root) => {
+          stateOf(root).fabricSessionCfc = recordedPosture({});
+          delete stateOf(root).cfcPolicySnapshot;
+          root.policySnapshot = {
+            status: "absent",
+            path: root.policySnapshot.path,
+          };
+        })["AUD-15"],
+      ).toBe("inconclusive");
+    });
+
+    it("passes a default-sourced mode no weaker than the session claims", () => {
+      // The default landed on the claim, which is the ordinary case and is not
+      // a fallback of any kind.
+      expect(withSnapshotMode("default", "enforce-explicit")["AUD-15"]).toBe(
+        "pass",
+      );
+    });
+
+    it("passes a default-sourced mode stricter than the session claims", () => {
+      expect(withSnapshotMode("default", "enforce-strict")["AUD-15"]).toBe(
+        "pass",
+      );
+    });
+
+    it("does not arise for a mode the operator configured", () => {
+      expect(withSnapshotMode("explicit-config", "observe")["AUD-15"]).toBe(
+        "not-applicable",
+      );
+    });
+
     it("fails a default-sourced enforcement mode weaker than the session claims", () => {
       expect(
         verdicts((root) => {

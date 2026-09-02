@@ -367,7 +367,8 @@ describe("seeded violations", () => {
       // leaving it to be inferred from a sink's absence.
       expect(SESSION_CLEAN[at("AUD-13")]).toBe("pass");
       expect(SESSION_CLEAN[at("AUD-14")]).toBe("warn");
-      expect(SESSION_CLEAN[at("AUD-15")]).toBe("pass");
+      expect(SESSION_CLEAN[at("AUD-15")]).toBe("not-applicable");
+      expect(SESSION_CLEAN[at("AUD-15a")]).toBe("pass");
     });
   });
 
@@ -403,9 +404,9 @@ describe("seeded violations", () => {
     });
   });
 
-  describe("AUD-15 default-sourced drift", () => {
+  describe("AUD-15a default-sourced dial drift", () => {
     it("fails a default-sourced flow dial under a max-enforcement claim", () => {
-      sessionTurnsOnly("AUD-15", "fail", (posture) => {
+      sessionTurnsOnly("AUD-15a", "fail", (posture) => {
         posture.flowLabels = "off";
         posture.flowLabelsSource = "default";
       });

@@ -11,7 +11,7 @@ import { expect } from "@std/expect";
 import { dirname, fromFileUrl, join } from "@std/path";
 
 import { RUN_CHECKS } from "../checks/registry.ts";
-import { SPEC_CITATIONS, type SpecCitationKey } from "../citations.ts";
+import { SPEC_CITATIONS } from "../citations.ts";
 import { MATRIX_RULES } from "../matrix.ts";
 
 const REPO_ROOT = join(
@@ -126,6 +126,7 @@ describe("citation drift", () => {
         "AUD-8",
         "AUD-9",
         "AUD-13",
+        "AUD-15",
       ]);
     });
   });

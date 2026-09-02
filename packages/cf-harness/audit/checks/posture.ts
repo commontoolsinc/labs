@@ -25,6 +25,8 @@ import type { CfcPostureReport } from "@commonfabric/runner/cfc";
 
 import type { HarnessCfcPolicySnapshot } from "../../src/contracts/cfc-policy-snapshot.ts";
 import type { HarnessFabricSessionCfcPosture } from "../../src/run-state.ts";
+import { cfcEnforcementStrictness } from "@commonfabric/runner/cfc";
+
 import { extendsClause, requiredBy } from "../citations.ts";
 import type { RunEvidence } from "../evidence.ts";
 import {
@@ -279,75 +281,115 @@ const llmSinkGap: AuditCheck = {
 };
 
 //
-// AUD-15 default drift
+// AUD-15 default-sourced enforcement mode, AUD-15a default-sourced dial drift
+//
+// Two checks rather than one, because they are two properties with two
+// authorities. A run whose enforcement MODE resolved from a default to
+// something weaker than it claims has silently fallen back from an enforcing
+// mode, which AH-CFC-15 states in those words. A run whose flow-label dial did
+// the same has done something no clause names — worth catching, and ours. One
+// check reporting both would lend the clause's authority to the half it does
+// not cover.
 //
 
-/** One dial whose value came from a default, under a claim of something stronger. */
-interface DefaultDrift {
-  dial: string;
-  artifact: string;
-  pointer: string;
-  detail: string;
-}
-
-const defaultDrift: AuditCheck = {
+const defaultModeDrift: AuditCheck = {
   id: "AUD-15",
-  title: "default-sourced drift",
-  // OURS: AH-CFC-15 forbids a silent fallback from an enforcing MODE, and one
-  // arm of this check reads exactly that — but the rest reads dials the clause
-  // does not name, so the whole check is an extension rather than half of one.
-  citations: extendsClause("AH-CFC-14", "AH-CFC-15"),
+  title: "default-sourced enforcement mode",
+  citations: requiredBy("AH-CFC-15"),
   falsifiedBy:
-    "a dial the run resolved from a default landing weaker than the posture the run claims — flow labels defaulting away from persist under the max-enforcement claim, or a policy snapshot whose enforcement mode is default-sourced and weaker than the mode the run claims",
+    "a policy snapshot whose enforcement mode came from a default and is weaker than the mode the run's session claims",
   inspect(run) {
     const posture = fabricPostureOf(run);
     if (posture === undefined) {
       return noFabricSession(run);
     }
-    const drifts: DefaultDrift[] = [];
-    if (
-      posture.posture === "max-enforcement" &&
-      posture.flowLabelsSource === "default" &&
-      posture.flowLabels !== "persist"
-    ) {
-      drifts.push({
-        dial: "cfcFlowLabels",
-        artifact: "run-state.json",
-        pointer: "fabricSessionCfc.flowLabelsSource",
-        detail:
-          `default-sourced \`${posture.flowLabels}\` under a max-enforcement claim, which asserts \`persist\``,
-      });
-    }
     const snapshot = policySnapshotOf(run);
-    if (
-      snapshot?.cfc.enforcementModeSource === "default" &&
-      snapshot.cfc.enforcementMode !== posture.enforcementMode
-    ) {
-      drifts.push({
-        dial: "cfcEnforcementMode",
-        artifact: "policy-snapshot.json",
-        pointer: "cfc.enforcementModeSource",
-        detail:
-          `default-sourced \`${snapshot.cfc.enforcementMode}\` while the session claims \`${posture.enforcementMode}\``,
-      });
+    if (snapshot === undefined) {
+      return {
+        verdict: "inconclusive",
+        message:
+          "`policy-snapshot.json` is absent, so where this run's enforcement mode came from is not established",
+        evidence: [{ artifact: "policy-snapshot.json", detail: "absent" }],
+      };
     }
-    if (drifts.length === 0) {
+    if (snapshot.cfc.enforcementModeSource !== "default") {
+      return {
+        verdict: "not-applicable",
+        message:
+          `this run's enforcement mode came from \`${snapshot.cfc.enforcementModeSource}\`, not from a default`,
+        evidence: [{
+          artifact: "policy-snapshot.json",
+          pointer: "cfc.enforcementModeSource",
+          detail: snapshot.cfc.enforcementModeSource ?? "absent",
+        }],
+      };
+    }
+    const claimed = cfcEnforcementStrictness(posture.enforcementMode);
+    const resolved = cfcEnforcementStrictness(snapshot.cfc.enforcementMode);
+    if (resolved >= claimed) {
       return {
         verdict: "pass",
         message:
-          "every dial this run resolved from a default lands at the posture it claims",
+          `this run's enforcement mode came from a default and landed at \`${snapshot.cfc.enforcementMode}\`, no weaker than the \`${posture.enforcementMode}\` its session claims`,
       };
     }
     return {
       verdict: "fail",
-      message: `${
-        drifts.map((drift) => `\`${drift.dial}\``).join(", ")
-      } resolved from a default to a weaker rung than this run's posture claims`,
-      evidence: drifts.map((drift) => ({
-        artifact: drift.artifact,
-        pointer: drift.pointer,
-        detail: drift.detail,
-      })),
+      message:
+        `this run's enforcement mode came from a default and landed at \`${snapshot.cfc.enforcementMode}\`, weaker than the \`${posture.enforcementMode}\` its session claims`,
+      evidence: [{
+        artifact: "policy-snapshot.json",
+        pointer: "cfc.enforcementModeSource",
+        detail:
+          `default-sourced \`${snapshot.cfc.enforcementMode}\` under a \`${posture.enforcementMode}\` claim`,
+      }],
+    };
+  },
+};
+
+const defaultDialDrift: AuditCheck = {
+  id: "AUD-15a",
+  title: "default-sourced dial drift",
+  // OURS: no clause names the flow-label dial or what a named posture bundle
+  // asserts about it. These are the clauses whose purpose it serves.
+  citations: extendsClause("AH-CFC-14", "AH-CFC-15"),
+  falsifiedBy:
+    "a flow-label dial the run resolved from a default, landing weaker than the named posture bundle the run claims asserts",
+  inspect(run) {
+    const posture = fabricPostureOf(run);
+    if (posture === undefined) {
+      return noFabricSession(run);
+    }
+    if (posture.posture !== "max-enforcement") {
+      return {
+        verdict: "not-applicable",
+        message:
+          "this run claims no named posture bundle, so no dial of it can have defaulted away from one",
+        evidence: [{
+          artifact: "run-state.json",
+          pointer: "fabricSessionCfc.posture",
+          detail: posture.posture ?? "absent",
+        }],
+      };
+    }
+    if (
+      posture.flowLabelsSource === "default" && posture.flowLabels !== "persist"
+    ) {
+      return {
+        verdict: "fail",
+        message:
+          `this run's flow-label dial came from a default and landed at \`${posture.flowLabels}\`, while the max-enforcement bundle it claims asserts \`persist\``,
+        evidence: [{
+          artifact: "run-state.json",
+          pointer: "fabricSessionCfc.flowLabelsSource",
+          detail: `default-sourced \`${posture.flowLabels}\``,
+        }],
+      };
+    }
+    return {
+      verdict: "pass",
+      message:
+        `this run's flow-label dial came from \`${posture.flowLabelsSource}\` and lands at \`${posture.flowLabels}\`, which the bundle it claims asserts`,
     };
   },
 };
@@ -356,5 +398,6 @@ const defaultDrift: AuditCheck = {
 export const POSTURE_CHECKS: readonly AuditCheck[] = [
   conformingPoint,
   llmSinkGap,
-  defaultDrift,
+  defaultModeDrift,
+  defaultDialDrift,
 ];
