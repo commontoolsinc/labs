@@ -7,6 +7,7 @@ import {
 } from "@astral/astral";
 import { astralBinaryPath, closeAstralBrowser } from "./astral-adapter.ts";
 import { Page } from "./page.ts";
+import { collectPatternCoverage } from "./pattern-coverage.ts";
 
 const DEFAULT_ASTRAL_TIMEOUT = 60_000;
 
@@ -47,8 +48,14 @@ export class Browser {
     options?: WaitForOptions & SandboxOptions & UserAgentOptions,
   ): Promise<Page> {
     this.#checkIsOk();
-    const page = await this.#browser!.newPage(url, options);
-    return new Page(page, { timeout: this.#timeout });
+    const page = new Page(
+      await this.#browser!.newPage(url, options),
+      { timeout: this.#timeout },
+    );
+    // The worker's pattern-coverage hits live in the page's realm and go with
+    // the document. A page that booted no runtime hands over nothing here.
+    page.addBeforeUnloadHook(() => collectPatternCoverage(page));
+    return page;
   }
 
   // The browser-level CDP websocket endpoint. Chrome supports multiple

@@ -575,7 +575,8 @@ export type CfcPosture = "max-enforcement";
  * ungoverned — any confidentiality, a secret as much as a risk caveat,
  * reaches them without a policy evaluation running. The posture record
  * publishes that as a deviation rather than leaving it to be inferred from a
- * sink's absence from a ceiling list.
+ * sink's absence from a ceiling list. Building the mechanism that retires the
+ * gap is planned in `docs/plans/cfc-llm-sink-admission.md`.
  */
 export const MAX_ENFORCEMENT_SINK_GOVERNANCE: SinkGovernanceRegistry = Object
   .freeze({

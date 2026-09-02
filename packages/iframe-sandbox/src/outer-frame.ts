@@ -1,8 +1,8 @@
 /**
  * The outer frame's document: the Content Security Policy the guest
- * inherits, the inner frame, and the script that loads guests into that frame
- * and talks to the host. The script is a file of its own, imported as text and
- * inlined here.
+ * inherits, and the script that loads each guest into an inner frame of its
+ * own and talks to the host. The script is a file of its own, imported as
+ * text and inlined here.
  */
 
 import { CSP, HOST_ORIGIN } from "./csp.ts";
@@ -49,9 +49,6 @@ iframe {
 </style>
 </head>
 <body>
-<iframe
-  allow="clipboard-write"
-  sandbox="allow-popups allow-popups-to-escape-sandbox allow-scripts allow-modals"></iframe>
 <script data-host-origin="${HOST_ORIGIN}">
 ${script}
 </script>

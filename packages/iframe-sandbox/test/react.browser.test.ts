@@ -30,7 +30,6 @@ function perform(action: () => void): Promise<void> {
 }
 
 Deno.test("React renders bridged Cells and SQLite invalidations", async () => {
-  if (typeof document === "undefined") return;
   const environment = globalThis as typeof globalThis & {
     IS_REACT_ACT_ENVIRONMENT?: boolean;
   };
@@ -180,7 +179,6 @@ Deno.test("React renders bridged Cells and SQLite invalidations", async () => {
 });
 
 Deno.test("React keeps supported SQLite parameter identities distinct", async () => {
-  if (typeof document === "undefined") return;
   const environment = globalThis as typeof globalThis & {
     IS_REACT_ACT_ENVIRONMENT?: boolean;
   };
