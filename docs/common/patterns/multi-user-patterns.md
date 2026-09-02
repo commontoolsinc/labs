@@ -625,7 +625,11 @@ Three escalating options:
    (`packages/patterns/integration/multi-runtime-harness.ts`): opens an
    existing piece in several worker-isolated runtimes (distinct identities,
    or one identity in two sessions); supports trusted-surface CFC events
-   headlessly. See `cfc-group-chat-demo-multi-runtime.test.ts`.
+   headlessly. It serves the authored patterns tree beside its in-process
+   storage server, so a `#profile` wish opens the real create surface and a
+   pattern whose identity is a profile cell can be driven without a test seam
+   standing in for one. See `cfc-group-chat-demo-multi-runtime.test.ts` and
+   `profile-create-surface-multi-runtime.test.ts`.
 3. **Two simultaneous browsers**
    (`cfc-group-chat-demo-two-browsers.test.ts`,
    `lunch-poll-vote.test.ts`): guards the real DOM input binding /

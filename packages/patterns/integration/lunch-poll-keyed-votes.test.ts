@@ -30,10 +30,12 @@
  * rolled-back writes keyed against 63 whole-list (2026-09-01, this harness), so
  * the bound of one per vote sits between them with room either side.
  *
- * The poll's identity is a shared `#profile` cell and that wish does not resolve
- * in this harness, so the sessions claim identities through the
- * `lunch-poll-keyed-votes` fixture. Everything under test is the poll's own
- * handlers, driven through the poll's own streams.
+ * The poll's identity is a shared `#profile` cell. The wish resolves in this
+ * harness, and in a space holding no profile it resolves to the surface that
+ * offers to create one — not to an identity a session can vote with. So the
+ * sessions claim identities through the `lunch-poll-keyed-votes` fixture, and
+ * everything under test is the poll's own handlers, driven through the poll's
+ * own streams.
  *
  * No toolshed or browser required (Deno workers + in-process storage server).
  */
