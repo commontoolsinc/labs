@@ -29,9 +29,10 @@ import LunchPoll, {
  *
  * Two jobs, neither of which changes what the poll does.
  *
- * IDENTITY. The poll's identity is a shared `#profile` cell, and that wish does
- * not resolve in the multi-runtime harness's self-hosted server, so a session
- * there can never join and never vote. `claim` supplies what the wish would: a
+ * IDENTITY. The poll's identity is a shared `#profile` cell. In a space holding
+ * no profile that wish resolves to the surface offering to create one, so a
+ * session there has nothing to join or vote with until somebody uses it.
+ * `claim` supplies what a resolved wish would: a
  * shared-space profile per claimed name, handed to the poll through its
  * `overrideViewer` seam. One session claims "Alice", another claims "Bob", and
  * the poll sees two participants whose identities are two distinct documents —
