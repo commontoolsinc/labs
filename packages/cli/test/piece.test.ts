@@ -658,6 +658,22 @@ describe("cli piece parsing", () => {
       .toThrow(/does not apply to a link endpoint/);
   });
 
+  it("parseLink() keeps a `#` inside a bare endpoint's path key", () => {
+    // Why the refusal above tests `endsWith` rather than reading the fragment
+    // the way the shared reader does. A bare endpoint carries its piece and
+    // path in one word and has no positional path beside it, so reading every
+    // fragment here would leave a key holding `#` with no spelling at all.
+
+    expect(parseLink("tracker/we#ird")).toEqual({
+      pieceId: "tracker",
+      path: ["we#ird"],
+    });
+    // The reference form reserves `#` outright, which is the difference the
+    // two readers exist for.
+    expect(() => parseLink("/tracker/we#ird"))
+      .toThrow(/Unknown suffix "#ird"/);
+  });
+
   it("parseSpaceOptions() refuses a piece reference beside a URL that names a piece", () => {
     // Silently preferring either target is how a caller reads a piece they
     // did not name; before this rule the URL's piece won without a word.

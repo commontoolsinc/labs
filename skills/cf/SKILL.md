@@ -156,8 +156,11 @@ answer composes into the next command.
   `cf get`, `cf set`, and `cf piece get-label|set-label`. A reference, a bare id
   and a slug all take it, since all three designate the same piece. A command
   that takes no `--input` refuses the suffix rather than ignoring it, `cf call`
-  among them. A `--url` carries no fragment, so there `--input` is the spelling
-  that reaches the arguments cell.
+  among them. A `--url` carries no fragment into the reference it decomposes to,
+  so where the URL names the piece `--input` is the spelling that reaches the
+  arguments cell; where it names only the space, the piece arrives on `--cell`
+  and takes the suffix. A `#argument` written on a piece-naming `--url` is the
+  one place the suffix is dropped rather than refused.
 
 ## Where the read options go
 

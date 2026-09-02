@@ -278,9 +278,9 @@ say "does, on both the read and the write."
 run cf get -s "$SPACE" "$ADDRESS#argument" target
 run_stdin '30' cf set -s "$SPACE" "$ADDRESS#argument" target
 run cf get -s "$SPACE" --piece thermostat target --input
-say "The suffix rides every spelling of the target, because every spelling"
-say "names the same piece. On the slug it selects the cell the address just"
-say "wrote to:"
+say "A slug and a bare id designate the piece a reference designates, so the"
+say "selection written after one means what it means after the other. Here the"
+say "slug reads back the cell the address just wrote to:"
 run cf get -s "$SPACE" --piece 'thermostat#argument' target
 say "And a command that takes no --input takes no #argument either, so a"
 say "call cannot quietly be aimed at the arguments cell:"
@@ -317,10 +317,11 @@ say "is not effect-free."
 
 printf '\n%s━━ The shape of it %s\n' "$B" "$N"
 say "A piece has two cells and one flag that chooses between them, spelled"
-say "again as a suffix on the target. A read shapes its own answer and"
-say "changes nothing. A write commits a value and runs nothing — not a set,"
-say "and not a verb call either — so a derived field keeps answering to the"
-say "state it was last computed from until cf piece step observes the piece."
+say "again as a suffix on a reference, a bare id or a slug. A read shapes"
+say "its own answer and changes nothing. A write commits a value and runs"
+say "nothing — not a set, and not a verb call either — so a derived field"
+say "keeps answering to the state it was last computed from until cf piece"
+say "step observes the piece."
 say "And the one read here that is not free is the one that never named an"
 say "address: a wish resolves by writing."
 say ""

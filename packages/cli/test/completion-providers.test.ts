@@ -189,8 +189,11 @@ Deno.test("piece context: #argument reads the same on both spellings of a target
     );
     assert(rooted);
     assert(bare);
+    // The whole context, not just the suffix: "read the same" is the claim,
+    // and a spelling that agreed on `pieceInput` while disagreeing on the
+    // space or the piece would satisfy a narrower one.
+    assertEquals(bare, rooted);
     assertEquals(bare.piece, "thermostat");
-    assertEquals(bare.pieceInput, rooted.pieceInput);
     assertEquals(bare.pieceInput, true);
     // A scope written in front of the suffix survives it.
     assertEquals(

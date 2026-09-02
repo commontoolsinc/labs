@@ -5059,9 +5059,16 @@ export function parseLink(
   }
 
   // The bare spelling reaches the same refusal, so the suffix is turned down
-  // wherever it is written rather than buried in an id nothing resolves. Only
-  // this suffix: an endpoint's path has no positional spelling to fall back
-  // on, so a `#` anywhere else in one stays part of the key it sits in.
+  // wherever it is written rather than buried in an id nothing resolves.
+  //
+  // This suffix and no other fragment, which is why the test is `endsWith`
+  // rather than the shared reader: a bare endpoint carries its path in the
+  // same word and has no positional path to fall back on, so a `#` elsewhere
+  // in one is part of the key it sits in and stays readable. A reference
+  // endpoint is already past `normalizeLLMFriendlyRef`, which reserves `#`
+  // outright, so the two spellings differ here on purpose. The test named
+  // "parseLink() keeps a `#` inside a bare endpoint's path key" is what holds
+  // this apart from the shared reader.
   if (ref.endsWith("#argument")) {
     throw new ValidationError(
       `The "#argument" suffix does not apply to a link endpoint.`,
