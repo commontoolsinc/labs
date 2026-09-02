@@ -481,8 +481,8 @@ class DebugStringifier {
       );
 
       if (tagged !== undefined) {
-        // A marker in a plain object's shape, rendered as what it stands for
-        // rather than spread as properties.
+        // A marker form, rendered as what it stands for rather than spread as
+        // properties.
         return `${open}${this.#renderTaggedForm(tagged, indent)})`;
       } else {
         const parts = this.#renderProperties(
