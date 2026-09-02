@@ -3,6 +3,8 @@
   "tasks": {
     // --no-check: this package is type-checked by `deno task check`
     // (tasks/check.sh).
-    "test": "deno test --no-check"
+    // --allow-env: `@commonfabric/cli/lib/piece`, the entry `src/connection.ts`
+    // opens its connection through, reads the environment as it loads.
+    "test": "deno test --no-check --allow-env"
   }
 }
