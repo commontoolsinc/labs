@@ -89,5 +89,10 @@ export function diskHandleSeed(
   id: string,
   prior: DiskHandleValue | undefined,
 ): DiskHandleValue | undefined {
-  return prior === undefined ? { id, tables: {}, rev: 0 } : undefined;
+  // "Committed" is decided by the handle's OWN id, not by the doc being
+  // present. A doc holding `null`, or a partial value with no `id`, is not a
+  // handle any query can use — `readDbRef` refuses a value whose `id` is not a
+  // string — so treating it as committed would leave the link pointing at a
+  // handle that can never resolve, and nothing would re-seed it.
+  return typeof prior?.id === "string" ? undefined : { id, tables: {}, rev: 0 };
 }

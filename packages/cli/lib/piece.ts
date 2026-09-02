@@ -3880,8 +3880,9 @@ export async function linkSqliteDiskSource(
   targetPieceId: string,
   targetPath: (string | number)[],
   options?: { start?: boolean; targetScope?: CellScope },
+  deps: PieceOperationDependencies = {},
 ): Promise<void> {
-  const pieces = await loadPieces(config);
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const space = pieces.getSpace();
   const id = deriveDiskHandleId(space, absPath);
 
@@ -3899,15 +3900,26 @@ export async function linkSqliteDiskSource(
     undefined,
   );
   await handle.sync();
+  let kept: DiskHandleValue | undefined;
   const writeRes = await pieces.runtime.editWithRetry((tx) => {
     const target = handle.withTx(tx);
-    const seed = diskHandleSeed(
-      id,
-      target.get() as DiskHandleValue | undefined,
-    );
+    const prior = target.get() as DiskHandleValue | undefined;
+    const seed = diskHandleSeed(id, prior);
     if (seed !== undefined) target.set(seed);
+    kept = seed === undefined ? prior : undefined;
   });
   if (writeRes.error) throw writeRes.error;
+  if (kept !== undefined) {
+    // Say so. Keeping the contract is right — its per-column `ifc` may only
+    // strengthen — but the file on disk can have moved on since someone
+    // declared it, and a schema kept silently is the same unreported state the
+    // clobber this replaced used to produce, pointing the other way.
+    const tables = Object.keys(kept.tables ?? {}).length;
+    console.warn(
+      `cf piece link: kept the existing contract, ${tables} ` +
+        `${tables === 1 ? "table" : "tables"} (re-linking does not reset it)`,
+    );
+  }
   // The handle is committed, so the space has been written to whether or not
   // the registration and link below succeed.
   noteWroteTo(config.space);
@@ -3926,6 +3938,7 @@ export async function linkSqliteDiskSource(
     pieces,
     targetPieceId,
     targetPath,
+    deps,
   );
   await pieces.link(id, [], resolvedTarget.piece, resolvedTarget.pathAfter, {
     start: options?.start,
