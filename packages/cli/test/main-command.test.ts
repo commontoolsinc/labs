@@ -378,19 +378,26 @@ describe("main command", () => {
             "CF_API_URL  = http://127.0.0.1:8000 (set, no need to pass --api-url)",
           );
 
-          // The CF_SPACE line promises "no need to pass --space" per command,
-          // so every name on it has to be one the variable actually reaches.
-          // Read back off the rendered line rather than restated here: a list
-          // restated in the test is a list that agrees with itself while
-          // disagreeing with the CLI.
+          // The CF_SPACE line promises "no need to pass --space" per
+          // command, so every name on it has to be one the variable actually
+          // reaches. Read back off the rendered line rather than restated
+          // here: a list restated in the test is a list that agrees with
+          // itself while disagreeing with the CLI.
           //
-          // A bare noun is claimable only when the noun itself declares
-          // CF_SPACE or all of its subcommands do. `space` fails on both
-          // counts: it declares no CF_SPACE of its own, and four of its six
-          // name their target themselves — two as a positional space, two as
-          // a clone directory — so an ambient default reaches none of those
-          // four. Failing both counts is what makes the noun unclaimable,
-          // and why the line names the two subcommands that do read it.
+          // What a name has to earn differs by what it claims, so the check
+          // does too. A noun claims its whole subtree, and the most a noun
+          // can promise structurally is that every subcommand takes the
+          // option — so that is what is asked of it. A name written as one
+          // command is written that way because its noun could not be
+          // promised, so the structural answer is already known to be no and
+          // asking it again proves nothing: those are driven instead, and
+          // must refuse for want of a space when the variable is absent.
+          //
+          // Declaring the option is not reading it. `space set-home` takes
+          // `--space` through the shared target flags and acts on the
+          // identity's own home space regardless, so it satisfies every
+          // structural check and belongs on no list of what the variable
+          // serves. That is the failure this shape exists to catch.
           const spaceLine = description.split("\n").find((text: string) =>
             text.includes("CF_SPACE    = ambient")
           );
@@ -403,41 +410,50 @@ describe("main command", () => {
           expect(named.length).toBeGreaterThan(0);
 
           // deno-lint-ignore no-explicit-any
-          const readsSpace = (command: any): boolean =>
+          const declaresSpace = (command: any): boolean =>
             // deno-lint-ignore no-explicit-any
             command.getEnvVars(true).some((envVar: any) =>
               envVar.names.includes("CF_SPACE")
             );
-          // deno-lint-ignore no-explicit-any
-          const resolve = (path: string[]): any =>
-            // deno-lint-ignore no-explicit-any
-            path.reduce((command: any, name: string) =>
-              command?.getCommands(true).find((child: { getName(): string }) =>
-                child.getName() === name
-              ), main);
 
           for (const entry of named) {
-            // "space recreate-root/set-home" names two commands under one noun.
-            const [head, ...rest] = entry.split(" ");
-            const paths = rest.length === 0
-              ? [[head]]
-              : rest.join(" ").split("/").map((leaf) => [head, leaf]);
-            for (const path of paths) {
-              const where = path.join(" ");
-              const command = resolve(path);
-              expect(command, where).toBeDefined();
-              if (readsSpace(command)) continue;
-              // deno-lint-ignore no-explicit-any
-              const children = command.getCommands(true).filter((
-                child: { getName(): string },
-              ) => child.getName() !== "help");
-              expect(children.length, where).toBeGreaterThan(0);
-              for (const child of children) {
-                expect(readsSpace(child), `${where} ${child.getName()}`).toBe(
-                  true,
-                );
-              }
+            if (entry.includes(" ")) continue;
+            const noun = main.getCommands(true).find((
+              child: { getName(): string },
+            ) => child.getName() === entry);
+            expect(noun, entry).toBeDefined();
+            if (declaresSpace(noun)) continue;
+            // deno-lint-ignore no-explicit-any
+            const children = (noun as any).getCommands(true).filter((
+              child: { getName(): string },
+            ) => child.getName() !== "help");
+            expect(children.length, entry).toBeGreaterThan(0);
+            for (const child of children) {
+              expect(declaresSpace(child), `${entry} ${child.getName()}`)
+                .toBe(true);
             }
+          }
+
+          // The identity and api-url are supplied so the run reaches the
+          // space, and are deliberately not valid: what is read back is which
+          // option the refusal names, and nothing here should get far enough
+          // to open a key file.
+          const reachesSpace = {
+            CF_IDENTITY: "/nonexistent/identity.key",
+            CF_API_URL: "http://127.0.0.1:8000",
+          };
+          for (const entry of named) {
+            if (!entry.includes(" ")) continue;
+            const absent = await cf(entry, { env: reachesSpace });
+            expect(stripAnsi(absent.stderr.join("\n")), entry).toContain(
+              'Missing required option: "--space"',
+            );
+            const ambient = await cf(entry, {
+              env: { ...reachesSpace, CF_SPACE: "ambient" },
+            });
+            expect(stripAnsi(ambient.stderr.join("\n")), entry).not.toContain(
+              'Missing required option: "--space"',
+            );
           }
         });
       });

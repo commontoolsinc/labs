@@ -100,6 +100,29 @@ describe("JSON command contracts", () => {
     ).toBe(false);
     expect(reservesStdoutForCommandOutput(["piece", "new", "get-label"]))
       .toBe(false);
+    // Bundled short options, which cliffy accepts and the walk has to take
+    // apart by arity. The value belongs to the last value-taking letter, and
+    // is the next token only when that letter ends the bundle.
+    expect(
+      reservesStdoutForCommandOutput(["piece", "-qs", "team", "call", "verb"]),
+    ).toBe(true);
+    expect(
+      reservesStdoutForCommandOutput(["piece", "-qsi", "key", "call", "verb"]),
+    ).toBe(true);
+    expect(
+      reservesStdoutForCommandOutput(["cell", "-qs", "team", "get", "path"]),
+    ).toBe(true);
+    // The same bundle over a word that would reserve if it were read as the
+    // subcommand rather than as `-s`'s value.
+    expect(reservesStdoutForCommandOutput(["piece", "-qs", "survey"]))
+      .toBe(false);
+    // `-q` alone takes no value, so the word after it is the subcommand.
+    expect(reservesStdoutForCommandOutput(["piece", "-q", "survey"]))
+      .toBe(true);
+    // A bundle carrying its own value consumes no following token, so the
+    // subcommand is still the word after it.
+    expect(reservesStdoutForCommandOutput(["piece", "-s=team", "call", "verb"]))
+      .toBe(true);
     expect(reservesStdoutForCommandOutput(["exec", "/tmp/search.tool"]))
       .toBe(true);
     expect(reservesStdoutForCommandOutput(["wish", "#profile"])).toBe(true);
@@ -140,6 +163,14 @@ describe("JSON command contracts", () => {
         "piece set-label --bogus",
         "piece --bogus survey",
         "wish --bogus #profile",
+        // Bundled beside unbundled, because cliffy accepts both and only the
+        // walk here tells them apart. A bundle whose value was not skipped
+        // reads `team` as the subcommand, reserves nothing, and prints the
+        // usage page onto the stream the caller is parsing.
+        "piece -q -s team call --bogus",
+        "piece -qs team call --bogus",
+        "piece -qsi key call --bogus",
+        "cell -qs team get --bogus",
       ]
     ) {
       const { code, stdout, stderr } = await cf(command);
@@ -155,6 +186,10 @@ describe("JSON command contracts", () => {
       const command of [
         "piece new get-label --bogus",
         "piece ls --space survey --bogus",
+        // The same value under a bundle. `survey` reserves stdout as a
+        // subcommand, so a walk that read this one as the subcommand rather
+        // than as `-s`'s value would suppress the help this asserts.
+        "piece -qs survey --bogus",
       ]
     ) {
       const { code, stdout, stderr } = await cf(command);

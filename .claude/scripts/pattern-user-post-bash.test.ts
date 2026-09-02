@@ -346,6 +346,37 @@ describe("pattern-user-post-bash", () => {
       ).toContain("Run 'cf piece step'");
     });
 
+    it("says nothing for a verb under a noun that does not carry it", () => {
+      // The nouns and the verbs are matched as pairs, not as two independent
+      // sets. Matched separately, every guided verb answers under every noun,
+      // and the hook advises on lines the CLI refuses: `cf space set` gets the
+      // recomputation note and `cf cell new` the deployment one.
+      for (
+        const command of [
+          "cf space set x",
+          "cf space new main.tsx",
+          "cf space inspect --piece ID",
+          "cf cell new main.tsx",
+          "cf cell setsrc main.tsx",
+          "cf piece set --piece ID title",
+        ]
+      ) {
+        expect(suggestionForPatternUserCommand(command), command).toBe("");
+      }
+    });
+
+    it("advises on both spellings of a command that moved", () => {
+      // `set-home` moved to `cf space` and answers under `cf piece` until its
+      // removal date, so the guidance follows the command rather than the
+      // spelling a caller reached it by.
+      for (const noun of ["space", "piece"]) {
+        expect(
+          suggestionForPatternUserCommand(`cf ${noun} set-home main.tsx`),
+          noun,
+        ).toContain("verify the custom home pattern");
+      }
+    });
+
     it("still ignores a bare cf whose next word carries no guidance", () => {
       // The widened match must not swallow every `cf` invocation, and must not
       // claim a verb this hook has nothing to say about.

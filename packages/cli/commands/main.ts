@@ -42,14 +42,16 @@ function envStatus(): string {
     // a space and do not read this, so a blanket "no need to pass --space"
     // would be wrong exactly where a caller is most surprised to be asked.
     //
-    // `space` is named by subcommand for the same reason. Two of its six read
-    // this; the other four name their target themselves — two as a clone
-    // directory, two as a positional space — so an ambient default reaches
-    // none of them, and the bare noun would promise something `cf space
-    // clone` disproves in one line.
+    // `space` is named by subcommand for the same reason, and by the one
+    // subcommand rather than by two: `recreate-root` resolves the target space
+    // and refuses without one, while `clone`, `verify`, `reset` and
+    // `fingerprint` each name their target themselves, and `set-home` acts on
+    // the identity's own home space — it declares the option through the
+    // shared target flags and never reads it. Declaring is not consuming,
+    // which is the way an entry here goes wrong without going missing.
     lines.push(
       `  CF_SPACE    = ${space} (set, no need to pass --space on cell, ` +
-        `piece, wish, acl, deps, space recreate-root/set-home)`,
+        `piece, wish, acl, deps, space recreate-root)`,
     );
   }
   return lines.join("\n");
@@ -67,7 +69,7 @@ FIRST TIME SETUP:
   export CF_IDENTITY=./claude.key   # Set default identity
   export CF_API_URL=http://localhost:${ports.toolshed}  # Set default API URL
   export CF_SPACE=my-space          # Default space for cell, piece, wish, acl,
-                                    # deps and space recreate-root/set-home
+                                    # deps and space recreate-root
                                     # (--space overrides)
 
 SHELL COMPLETION:
