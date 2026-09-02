@@ -55,3 +55,39 @@ export function deriveDiskHandleId(space: string, absPath: string): string {
   // handle's `value.id`.
   return ref.taggedHashString;
 }
+
+/** The stored shape of an injected on-disk source's handle cell. */
+export interface DiskHandleValue {
+  id: string;
+  tables?: Record<string, unknown>;
+  scope?: string;
+  owner?: string;
+  rev?: number;
+}
+
+/**
+ * The handle value a link action should write for the on-disk source at `id`,
+ * or `undefined` to leave an already-committed handle exactly as it stands.
+ *
+ * A first link seeds an EMPTY contract: v1 does not migrate external files, so
+ * the on-disk db owns its schema and the server skips `ensureTables` for a
+ * registered source. A RE-link must not re-seed that empty contract over a
+ * handle whose `tables` someone has since declared. `tables[].ifc` carries the
+ * per-column read labels, and a store's effective label is monotone (§8.12.1) —
+ * it may strengthen, never weaken. Overwriting a declared contract with `{}`
+ * lowers every column's read label to nothing, and because a contract-less
+ * query still returns its rows (`labelResultSchema` labels nothing rather than
+ * refusing), the downgrade is silent: same rows, no label, no error.
+ *
+ * The handle's other fields are as fixed as its labels. `owner` resolves
+ * `dbOwner()` row admission, `scope` partitions the db, and `rev` is what every
+ * handle hasher reads to decide a query has new inputs — so a re-link that
+ * dropped them would rotate row admission and re-issue every live query.
+ * Preserving the whole prior value keeps all four properties together.
+ */
+export function diskHandleSeed(
+  id: string,
+  prior: DiskHandleValue | undefined,
+): DiskHandleValue | undefined {
+  return prior === undefined ? { id, tables: {}, rev: 0 } : undefined;
+}

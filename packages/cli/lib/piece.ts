@@ -124,7 +124,11 @@ import { loadIdentity } from "./identity.ts";
 import { stderrConsoleHandler } from "./json-output.ts";
 import { validateEmbeddedSpaces } from "./llm-friendly-ref.ts";
 import { claimProcessDeployment } from "./process-deployment.ts";
-import { deriveDiskHandleId } from "./sqlite-source.ts";
+import {
+  deriveDiskHandleId,
+  diskHandleSeed,
+  type DiskHandleValue,
+} from "./sqlite-source.ts";
 import { timeCliPhase } from "./trace-timing.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
 import { startVersionCheck } from "./version-check.ts";
@@ -3871,17 +3875,25 @@ export async function linkSqliteDiskSource(
 
   // 1. Seed the handle cell AT the deterministic id. Its entity id == its
   //    value.id == the server registry key, so a pattern read of the linked
-  //    handle resolves to the id the server holds a disk descriptor for. tables
-  //    is empty — v1 does not migrate external files (the on-disk db owns its
-  //    schema); the server skips ensureTables for a registered source.
+  //    handle resolves to the id the server holds a disk descriptor for.
+  //    `diskHandleSeed` decides whether to write at all: a first link seeds an
+  //    empty contract, and a RE-link leaves a committed handle alone rather
+  //    than lowering labels someone has since declared on it. The sync is what
+  //    makes that decision see a handle this process has not loaded.
   const handle = pieces.runtime.getCellFromEntityId(
     space,
     entityIdFrom(id),
     [],
     undefined,
   );
+  await handle.sync();
   const writeRes = await pieces.runtime.editWithRetry((tx) => {
-    handle.withTx(tx).set({ id, tables: {}, rev: 0 });
+    const target = handle.withTx(tx);
+    const seed = diskHandleSeed(
+      id,
+      target.get() as DiskHandleValue | undefined,
+    );
+    if (seed !== undefined) target.set(seed);
   });
   if (writeRes.error) throw writeRes.error;
   // The handle is committed, so the space has been written to whether or not
