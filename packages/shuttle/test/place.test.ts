@@ -558,7 +558,7 @@ describe("place", () => {
             });
           });
 
-          it("reads a segment inside a piece as data, `@` included", () => {
+          it("reads `@` inside a segment as part of a data key", () => {
             const place = atPiece();
             place.cd("mail@example");
             expect(place.place.position).toEqual({
@@ -569,10 +569,19 @@ describe("place", () => {
             });
           });
 
+          it("refuses a leading `@` inside a piece, reading it as a scope word", () => {
+            expect(atReferencedPiece().cd("@foo")).toEqual({
+              kind: "refused",
+              reason: "`@foo` names no scope. The scopes are `@space`, " +
+                "`@user`, and `@session`.",
+            });
+          });
+
           it("reads `~1` in a segment as two characters of a data key", () => {
             // A relative operand is not a reference, so the reference
             // grammar's `~1` escaping does not reach it: `~1` is literal
-            // here where a reference reads it as the separator. The case
+            // here where a reference reads it as a literal `/` inside the
+            // key. The case
             // below is the consequence — a key holding a `/` has no
             // relative spelling at all, since neither candidate reaches it
             // — and both are pinned so that teaching the walk to unescape
@@ -749,6 +758,26 @@ describe("place", () => {
             space: SPACE,
             piece: HANDLE,
             path: [],
+          });
+        });
+
+        it("normalizes the path the way a reference's is normalized", () => {
+          // A position names its cell and nothing about how it was reached,
+          // so the three doors have to agree on what a segment means. A
+          // canonical index is where they would part: the two `cd` branches
+          // convert one to a number and a resolution hands over what it
+          // read.
+
+          const entered = atSpaceRoot();
+          entered.enter({ space: SPACE, piece: HANDLE, path: ["3"] }, "#x");
+          const referenced = atSpaceRoot();
+          referenced.cd(`/${HANDLE}/3`);
+          expect(entered.place).toEqual(referenced.place);
+          expect(entered.place.position).toEqual({
+            kind: "piece",
+            space: SPACE,
+            piece: HANDLE,
+            path: [3],
           });
         });
 

@@ -15,7 +15,8 @@ prerequisites land.
 **A1 — export entries.** Done (#6626). Importing `@commonfabric/cli`'s `.`
 entry runs CLI startup, so the package carries workspace-internal entries
 for the modules a sibling calls: `./lib/piece`, `./commands/piece`,
-`./lib/wish`, `./lib/piece-render`. The completion listing is not a plain
+`./lib/wish`, `./lib/piece-render`, and `./lib/llm-friendly-ref`, which a
+place reads every reference operand through. The completion listing is not a plain
 entry: it is `listCellKeys` in `packages/cli/lib/cell-listing.ts`,
 exported as `./lib/cell-listing` behind a `PieceResolutionDeps` seam with
 `keysOf` beside it. The providers are designed to fail silently and
@@ -144,12 +145,16 @@ Still to come:
   (`resolveStoredPieceAddress`, `listSpaceSlugs`), so no CLI-surface arc
   step gates B1.
 - **The vocabulary a relative segment speaks.** A relative operand splits
-  on `/` and its segments are literal, so a key holding the separator has
-  no relative spelling, and the reference grammar's `~1` escaping reaches
-  a reference and not a walk. `ls` settles it: how such a key prints and
-  how it is typed back want deciding together. Segment validation is the
-  same question — a slug's vocabulary holds a reference and not a relative
-  segment.
+  on `/` and its segments are literal, so three characters read differently
+  in a key depending on the door. A key holding the separator has no
+  relative spelling, and a segment lifted out of a rendering reads as a
+  different key without saying so — the one half that misleads. A leading
+  `@` reads as a scope word, and a `#` anywhere in the path makes the whole
+  rendering a reference `cd` refuses; both stop a reader rather than moving
+  one, and both leave the key reachable by its rooted spelling. `ls`
+  settles all three: how such a key prints and how it is typed back want
+  deciding together. Segment validation is the same question — a slug's
+  vocabulary holds a reference and not a relative segment.
 - **`where`**, the printing surface for the ambient record; later
   milestones add their dimensions to it as they add the dimensions
   themselves.

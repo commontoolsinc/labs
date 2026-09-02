@@ -137,8 +137,13 @@ export interface ResolvedTarget {
   /** The piece the target resolved to. */
   readonly piece: string;
 
-  /** Path inside that piece; absent or empty for the piece itself. */
-  readonly path?: readonly PathSegment[];
+  /**
+   * Path inside that piece, absent or empty for the piece itself, with each
+   * segment as the resolution spelled it. {@link CurrentPlace.enter}
+   * normalizes them, so a caller hands over what it read rather than what a
+   * cell path holds.
+   */
+  readonly path?: readonly string[];
 }
 
 /** The place a shuttle starts in: the space's root, read at the base scope. */
@@ -151,11 +156,14 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
  *
  * A leading `/` is what makes a string a reference, so it marks the one
  * position that is a cell. A piece therefore renders as a complete reference —
- * the form that denotes the same cell read from anywhere, and so the form
- * worth copying — while a root and a facet are containers and render without
- * one, which is what keeps a container's own rendering from resolving as a
- * piece whose slug happens to match. The scope renders here rather than
- * through the reference serializer, which emits no suffix for the base scope.
+ * the form that denotes the same cell read from anywhere — while a root and a
+ * facet are containers and render without one, which is what keeps a
+ * container's own rendering from resolving as a piece whose slug happens to
+ * match. `cd` reads a piece rendering back whole, except where a path segment
+ * holds a `#`, which the reference grammar reserves: `cd` refuses such a
+ * rendering rather than reading it as some other cell. The scope renders here
+ * rather than through the reference serializer, which emits no suffix for the
+ * base scope.
  */
 export function renderPlace(place: Place): string {
   return `position  ${renderPosition(place.position)}\n` +
@@ -486,6 +494,10 @@ function moveIntoPiece(
  * named it. A target that resolved in another space — which is what a
  * home-anchored entry point does whenever the reading identity's home space
  * is not the connected one — is refused: one connection serves one space.
+ *
+ * The path is normalized the way a reference's and a relative walk's are, so
+ * that a position names its cell the same however it was reached, which is
+ * what {@link Position} promises.
  */
 function enterTarget(
   place: Place,
@@ -505,7 +517,7 @@ function enterTarget(
       kind: "piece",
       space: target.space,
       piece: target.piece,
-      path: target.path ?? [],
+      path: target.path?.map(linkPathSegmentToCellPathSegment) ?? [],
     },
   }, []);
 }

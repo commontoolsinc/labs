@@ -173,8 +173,10 @@ invisible, the prompt renders the whole ambient record — place and scope
     suffix on an operand overrides the ambient scope for that operand. All
     three scope words are canonical, and a suffix on a reference is
     verified against the canonical parser; a scope-only `@scope` is
-    shuttle navigation syntax that only `cd` and `where` accept, alongside
-    `..` and `-`. A suffix names the base scope or the reading identity's own
+    shuttle navigation syntax, accepted by `cd` and `where` and printed by
+    `pwd`, and it sits alongside `/`, `..` and `-`, the other spellings
+    `cd` takes and the canonical grammar does not parse. A suffix names the
+    base scope or the reading identity's own
     overlays, never another identity's; standing in another identity's
     overlay is a canonical-grammar extension, out of v1.
 21. **The native tool set v0 is ruled and deferred** with decision 16's
@@ -261,9 +263,9 @@ The ambient context is one record:
   inside it) and scope.
 - **External working location**, **invocation session**.
 
-`cd` accepts relative path segments, `..`, rooted and complete canonical
-references, slugs, wish targets, and scope suffixes (space names join
-when multi-space sessions do). Every
+`cd` accepts relative path segments, `..`, `-`, `/`, rooted and complete
+canonical references, slugs, wish targets, and scope suffixes (space names
+join when multi-space sessions do). Every
 reference a command takes resolves against the cwd, and how much of the
 cwd it needs varies: a rooted `/of:…` fixes the piece and path but still
 draws its space from the place, so only a complete

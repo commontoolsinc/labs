@@ -57,12 +57,15 @@ prefix, overriding it with the embedded space when one is present. A
 rooted reference is therefore exactly as space-dependent as a relative
 one; it is the piece and path it fixes, not the space.
 
-Two spellings share the `#` character and nothing else. A lone `#name`
-token is a wish target, as above. `#argument` is a suffix on a reference
-and only that — it selects the piece's arguments cell, the same selection
-`--input` spells as a flag (`normalizeLLMFriendlyRef` in
-`packages/cli/lib/llm-friendly-ref.ts`, which strips it before the runner
-grammar sees the string, and refuses every other fragment).
+The `#` character has three readings, and they share nothing but the
+character. A lone `#name` token is a wish target, as above. `#argument` is
+a suffix on a reference and only that — it selects the piece's arguments
+cell, the same selection `--input` spells as a flag
+(`normalizeLLMFriendlyRef` in `packages/cli/lib/llm-friendly-ref.ts`, which
+strips it before the runner grammar sees the string, and refuses every
+other fragment). And inside a piece it is an ordinary character of a data
+key, because every segment there is data: neither reserved reading reaches
+a path segment.
 
 A place is **result-rooted**, and holds exactly space, piece, path, and
 scope. `cd` refuses a reference carrying `#argument` rather than dropping
@@ -162,9 +165,10 @@ and that the canonical grammar does not parse. `parseScopedIdSegment`
 suffix and throws without one, so `@session` alone addresses nothing, and
 `parseReferenceParts` in the same module throws on a lone `/`, which names
 no piece handle, so the space root has no canonical spelling either. The
-no-growth rule holds because the spelling never leaves `cd` and `where`: an
-operand and a full reference always carry an id, no link endpoint can hold
-a scope-only suffix, and nothing serializes one. Setting the ambient scope
+no-growth rule holds because the scope spelling never leaves the verbs that
+move and print the cwd — `cd`, `where`, and `pwd`: an operand and a full
+reference always carry an id, no link endpoint can hold a scope-only
+suffix, and nothing serializes one. Setting the ambient scope
 is all `cd @session` does, and ordinary references pick it up from there.
 
 The canonical grammar bounds what a suffix on a reference can say
