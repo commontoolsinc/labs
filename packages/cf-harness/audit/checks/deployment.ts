@@ -15,7 +15,7 @@ import type { CfcPostureReport } from "@commonfabric/runner/cfc";
 
 import type { HarnessCfcPolicySnapshot } from "../../src/contracts/cfc-policy-snapshot.ts";
 import type { HarnessPolicyDecisionRecord } from "../../src/contracts/policy-trace.ts";
-import { citationsFor, type SpecCitation } from "../citations.ts";
+import { type CheckCitation, extendsClause } from "../citations.ts";
 import { familyRuns, type RunEvidence, type RunFamily } from "../evidence.ts";
 import {
   type ExpectedPosture,
@@ -85,7 +85,7 @@ const corpusResult = (
   audit: DeploymentAudit,
   checkId: string,
   title: string,
-  citations: readonly SpecCitation[],
+  citations: readonly CheckCitation[],
   verdict: CheckVerdict,
   message: string,
   evidence: readonly CheckEvidence[] = [],
@@ -252,7 +252,7 @@ const refusalLiveness = (audit: DeploymentAudit): CheckResult => {
       audit,
       "AUD-16",
       "refusal liveness",
-      citationsFor("AH-CFC-11", "AH-CFC-15"),
+      extendsClause("AH-CFC-11", "AH-CFC-15"),
       "inconclusive",
       `the tool outputs of ${
         count(unreadable.length, "run", "runs")
@@ -265,7 +265,7 @@ const refusalLiveness = (audit: DeploymentAudit): CheckResult => {
       audit,
       "AUD-16",
       "refusal liveness",
-      citationsFor("AH-CFC-11", "AH-CFC-15"),
+      extendsClause("AH-CFC-11", "AH-CFC-15"),
       audit.expectRefusals ? "fail" : "warn",
       audit.expectRefusals
         ? `this corpus was declared adversarial and its ${
@@ -284,7 +284,7 @@ const refusalLiveness = (audit: DeploymentAudit): CheckResult => {
     audit,
     "AUD-16",
     "refusal liveness",
-    citationsFor("AH-CFC-11", "AH-CFC-15"),
+    extendsClause("AH-CFC-11", "AH-CFC-15"),
     weakened ? "warn" : "pass",
     `${count(refusals.length, "release refusal", "release refusals")} across ${
       count(runs.length, "run", "runs")
@@ -308,7 +308,7 @@ const refusalLiveness = (audit: DeploymentAudit): CheckResult => {
 const toolshedPosture = (audit: DeploymentAudit): CheckResult | undefined => {
   const meta = audit.toolshedMeta;
   if (meta === undefined) return undefined;
-  const citations = citationsFor("AH-CFC-14", "AH-CFC-15");
+  const citations = extendsClause("AH-CFC-14", "AH-CFC-15");
   if (meta.status === "unreachable") {
     return corpusResult(
       audit,
@@ -427,7 +427,7 @@ const distinctRecords = (
 };
 
 const postureUniformity = (audit: DeploymentAudit): CheckResult => {
-  const citations = citationsFor("AH-CFC-14", "AH-CFC-15");
+  const citations = extendsClause("AH-CFC-14", "AH-CFC-15");
   const records = distinctRecords(audit);
   if (records.size === 0) {
     return corpusResult(
@@ -513,7 +513,7 @@ const renderCeiling = (audit: DeploymentAudit): CheckResult =>
     audit,
     "AUD-19",
     "render ceiling",
-    citationsFor("AH-CFC-14"),
+    extendsClause("AH-CFC-14"),
     "inconclusive",
     "no surface publishes the shell's render ceiling, so this audit establishes nothing about it; the line item retires when a publisher exists",
   );

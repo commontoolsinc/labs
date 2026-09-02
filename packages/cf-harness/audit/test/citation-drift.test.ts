@@ -92,6 +92,44 @@ describe("citation drift", () => {
     });
   });
 
+  describe("citation kinds", () => {
+    it("gives every citation a kind", () => {
+      // A citation with no kind is one whose authority nobody decided about,
+      // and it renders as though the specification demanded the check.
+      expect(
+        RUN_CHECKS.flatMap((check) =>
+          check.citations
+            .filter((citation) =>
+              citation.kind !== "required-by" && citation.kind !== "extends"
+            )
+            .map((citation) => `${check.id} ${citation.clause}`)
+        ),
+      ).toEqual([]);
+    });
+
+    it("keeps the checks that rest on the specification separable from the checks that do not", () => {
+      // Not an assertion that either set is right — an assertion that the
+      // split is visible, so a reader of a finding can tell which they hold.
+      const restingOnSpec = RUN_CHECKS
+        .filter((check) =>
+          check.citations.some((citation) => citation.kind === "required-by")
+        )
+        .map((check) => check.id);
+      expect(restingOnSpec).toEqual([
+        "AUD-1",
+        "AUD-2",
+        "AUD-3",
+        "AUD-4",
+        "AUD-5",
+        "AUD-6",
+        "AUD-7",
+        "AUD-8",
+        "AUD-9",
+        "AUD-13",
+      ]);
+    });
+  });
+
   describe("MATRIX_RULES", () => {
     it("leaves no matrix citation nothing rests on", () => {
       // A quote nothing cites is a quote nobody has to keep true, which is the

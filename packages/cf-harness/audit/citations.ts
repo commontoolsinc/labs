@@ -12,7 +12,26 @@
  * Line numbers are deliberately absent. A clause id and a quote survive a
  * document being reordered; a line number names a different clause the moment
  * a paragraph is inserted above it.
+ *
+ * A check names a clause with a KIND, because there are two honest ways to
+ * rest on one and they carry different authority. `required-by` says the
+ * clause states the requirement the check enforces — a finding is the
+ * specification speaking. `extends` says the check serves the clause's purpose
+ * without the clause stating it — a finding is our judgment, and the clause is
+ * why we think the judgment is worth having. Citing a clause as `required-by`
+ * when it does not state the requirement lends specification authority to a
+ * check the specification never asked for, which is the same divergence this
+ * table exists to prevent, pointed inward.
  */
+
+/**
+ * How a check rests on a clause.
+ *
+ * - `required-by` — the clause states the requirement the check enforces.
+ * - `extends` — the check serves the clause's purpose; the clause does not
+ *   state the requirement. The finding is ours, not the specification's.
+ */
+export type CitationKind = "required-by" | "extends";
 
 /** One clause an audit check rests on. */
 export interface SpecCitation {
@@ -168,7 +187,25 @@ export const SPEC_CITATIONS = {
 /** A key of {@link SPEC_CITATIONS}. */
 export type SpecCitationKey = keyof typeof SPEC_CITATIONS;
 
-/** The citations a check declares, in the order it named them. */
-export const citationsFor = (
+/** One clause a check rests on, and how. */
+export interface CheckCitation extends SpecCitation {
+  kind: CitationKind;
+}
+
+/**
+ * Clauses that STATE what the check enforces. A finding citing one of these
+ * is the specification speaking.
+ */
+export const requiredBy = (
   ...keys: readonly SpecCitationKey[]
-): readonly SpecCitation[] => keys.map((key) => SPEC_CITATIONS[key]);
+): readonly CheckCitation[] =>
+  keys.map((key) => ({ ...SPEC_CITATIONS[key], kind: "required-by" }));
+
+/**
+ * Clauses whose purpose the check serves without their stating its
+ * requirement. A finding citing only these is our judgment, and says so.
+ */
+export const extendsClause = (
+  ...keys: readonly SpecCitationKey[]
+): readonly CheckCitation[] =>
+  keys.map((key) => ({ ...SPEC_CITATIONS[key], kind: "extends" }));

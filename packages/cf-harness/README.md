@@ -1882,7 +1882,20 @@ conforming states and the ordering rules of
 each rule carrying the clause it turns on.
 
 Every check carries the clauses it rests on and an exact quote from each, both
-printed with the finding and included in `--json`.
+printed with the finding and included in `--json`, **and how it rests on them**.
+A citation is `required-by` when the clause states the requirement the check
+enforces, and `extends` when the check serves the clause's purpose without the
+clause stating it. A finding with no `required-by` citation renders as
+`[our requirement, not the specification's]`, because citing a clause that does
+not state the requirement lends specification authority to a check the
+specification never asked for — the same divergence the citation table exists to
+prevent, pointed inward.
+
+Today AUD-1 through AUD-9 and AUD-13 rest on clauses that state what they
+enforce. AUD-14 through AUD-19 are ours: no clause requires that an ungated sink
+be published as a deviation, that a deployment answer on `/api/meta`, that a
+corpus hold one posture, or that the render ceiling be published. They are worth
+checking anyway, and the report says whose requirement they are.
 [audit/citations.ts](audit/citations.ts) holds that table and
 `audit/test/citation-drift.test.ts` reads every cited document and requires each
 quote to still be in it, so a specification edit that invalidates a check breaks

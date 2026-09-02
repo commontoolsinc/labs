@@ -217,12 +217,25 @@ const VERDICT_LABEL: Record<CheckVerdict, string> = {
 };
 
 const renderFinding = (result: CheckResult): string => {
+  const restsOnSpec = result.citations.some((citation) =>
+    citation.kind === "required-by"
+  );
   const lines = [
-    `  ${result.checkId} ${result.title} — ${result.runId}`,
+    `  ${result.checkId} ${result.title} — ${result.runId}${
+      restsOnSpec ? "" : " [our requirement, not the specification's]"
+    }`,
     `    ${result.message}`,
   ];
   for (const citation of result.citations) {
-    lines.push(`    ${citation.clause} (${citation.doc})`);
+    // The kind rides on the clause line, so a reader never has to ask whether
+    // a finding is the specification speaking or our judgment.
+    lines.push(
+      `    ${citation.clause} (${citation.doc}) — ${
+        citation.kind === "required-by"
+          ? "states this requirement"
+          : "this check extends this clause's purpose; the clause does not state the requirement"
+      }`,
+    );
     lines.push(`      "${citation.quote}"`);
   }
   for (const evidence of result.evidence) {

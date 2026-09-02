@@ -25,7 +25,7 @@ import type { CfcPostureReport } from "@commonfabric/runner/cfc";
 
 import type { HarnessCfcPolicySnapshot } from "../../src/contracts/cfc-policy-snapshot.ts";
 import type { HarnessFabricSessionCfcPosture } from "../../src/run-state.ts";
-import { citationsFor } from "../citations.ts";
+import { extendsClause, requiredBy } from "../citations.ts";
 import type { RunEvidence } from "../evidence.ts";
 import {
   conformingPointOf,
@@ -130,7 +130,9 @@ const renderTuple = (tuple: MatrixDialTuple): string =>
 const conformingPoint: AuditCheck = {
   id: "AUD-13",
   title: "conforming matrix point",
-  citations: citationsFor(
+  // The matrix states which dial combinations are conforming and which a
+  // deploy-check should reject, so these clauses state what AUD-13 enforces.
+  citations: requiredBy(
     "MATRIX-conforming",
     "MATRIX-strict-persist",
     "MATRIX-persist-pointless",
@@ -203,7 +205,11 @@ const ungatedSinks = (
 const llmSinkGap: AuditCheck = {
   id: "AUD-14",
   title: "ungated sink coverage",
-  citations: citationsFor("AH-CFC-15", "AH-CFC-14"),
+  // OURS, not the specification's: no clause requires that a sink releasing
+  // without a ceiling be published as a deviation. These are the clauses whose
+  // purpose it serves — a posture that is readable, and an enforcing claim that
+  // does not quietly fall short of itself.
+  citations: extendsClause("AH-CFC-15", "AH-CFC-14"),
   falsifiedBy:
     "a posture record that publishes no deviation while listing a sink that releases with no confidentiality ceiling — a claim of coverage the record's own sink list contradicts",
   inspect(run) {
@@ -287,7 +293,10 @@ interface DefaultDrift {
 const defaultDrift: AuditCheck = {
   id: "AUD-15",
   title: "default-sourced drift",
-  citations: citationsFor("AH-CFC-14", "AH-CFC-15"),
+  // OURS: AH-CFC-15 forbids a silent fallback from an enforcing MODE, and one
+  // arm of this check reads exactly that — but the rest reads dials the clause
+  // does not name, so the whole check is an extension rather than half of one.
+  citations: extendsClause("AH-CFC-14", "AH-CFC-15"),
   falsifiedBy:
     "a dial the run resolved from a default landing weaker than the posture the run claims — flow labels defaulting away from persist under the max-enforcement claim, or a policy snapshot whose enforcement mode is default-sourced and weaker than the mode the run claims",
   inspect(run) {

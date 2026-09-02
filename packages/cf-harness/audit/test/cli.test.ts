@@ -35,7 +35,12 @@ const result = (overrides: Partial<CheckResult> = {}): CheckResult => ({
   runDir: "/runs/a-run",
   verdict: "pass",
   message: "nothing to report",
-  citations: [{ doc: "docs/spec.md", clause: "X-1", quote: "MUST hold." }],
+  citations: [{
+    doc: "docs/spec.md",
+    clause: "X-1",
+    quote: "MUST hold.",
+    kind: "required-by",
+  }],
   evidence: [],
   ...overrides,
 });
@@ -184,6 +189,30 @@ describe("cli", () => {
         }),
       ).toBe(0);
       expect(written.join("")).toContain("FAIL 0");
+    });
+
+    it("marks a finding that rests on our judgment rather than the specification", () => {
+      // A reader of the human report should never have to go and look up
+      // whether a clause demanded the check.
+      const rendered = renderAuditReport([
+        result({
+          verdict: "warn",
+          citations: [{
+            doc: "docs/spec.md",
+            clause: "X-1",
+            quote: "MUST hold.",
+            kind: "extends",
+          }],
+        }),
+      ], "warn");
+      expect(rendered).toContain("[our requirement, not the specification's]");
+      expect(rendered).toContain("does not state the requirement");
+    });
+
+    it("leaves a specification-backed finding unmarked, and says the clause states it", () => {
+      const rendered = renderAuditReport([result({ verdict: "warn" })], "warn");
+      expect(rendered).not.toContain("[our requirement");
+      expect(rendered).toContain("states this requirement");
     });
 
     it("returns 0 over the clean fixture asked for JSON", async () => {

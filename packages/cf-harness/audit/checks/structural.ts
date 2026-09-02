@@ -35,7 +35,7 @@ import type {
 import { inspectHarnessTranscriptPairing } from "../../src/contracts/transcript.ts";
 import { assertValidHarnessHandleTable } from "../../src/handle-table.ts";
 import type { HarnessRunState } from "../../src/run-state.ts";
-import { citationsFor, type SpecCitation } from "../citations.ts";
+import { type CheckCitation, extendsClause, requiredBy } from "../citations.ts";
 import {
   type ArtifactState,
   familyRuns,
@@ -59,7 +59,7 @@ export interface AuditCheck {
   /** What the check is about, in two or three words. */
   title: string;
 
-  citations: readonly SpecCitation[];
+  citations: readonly CheckCitation[];
 
   /**
    * What in an artifact tree turns this check away from `pass`.
@@ -300,7 +300,7 @@ const modeSourceOf = (run: RunEvidence): string => {
 const postureConsistency: AuditCheck = {
   id: "AUD-1",
   title: "posture consistency",
-  citations: citationsFor("AH-CFC-14"),
+  citations: requiredBy("AH-CFC-14"),
   falsifiedBy:
     "two claims of one run naming different enforcement modes — a run state, policy-trace header, run report, or any decision record or invocation context disagreeing with the rest — or a run state or run report that states no mode at all",
   inspect(run) {
@@ -402,7 +402,7 @@ const executedSideEffects = (
 const modeBehaviorAttestation: AuditCheck = {
   id: "AUD-2",
   title: "mode-behavior attestation",
-  citations: citationsFor("AH-CFC-14", "AH-CFC-15"),
+  citations: [...requiredBy("AH-CFC-15"), ...extendsClause("AH-CFC-14")],
   falsifiedBy:
     "a decision reason code from another mode's family than the run claims — a `cfc_observe_*` or `cfc_disabled` code under an enforcing claim — or a call to a tool this run elsewhere recorded an invocation context for, made with none",
   inspect(run) {
@@ -547,7 +547,10 @@ const describeCounts = (counts: HarnessPolicyDecisionCounts): string =>
 const decisionCoverage: AuditCheck = {
   id: "AUD-3",
   title: "decision coverage",
-  citations: citationsFor("AH-CFC-9", "AH-CFC-11", "AH-TOOL-3"),
+  citations: [
+    ...requiredBy("AH-TOOL-3"),
+    ...extendsClause("AH-CFC-9", "AH-CFC-11"),
+  ],
   falsifiedBy:
     "a side-effect tool activity with no policy decision on its `toolCallId`, a declared decision count that does not match the decisions beside it, or a persisted tool output no activity accounts for",
   inspect(run) {
@@ -775,7 +778,7 @@ const deniedMessageDefect = (
 const denialChannel: AuditCheck = {
   id: "AUD-4",
   title: "denial channel",
-  citations: citationsFor("AH-CFC-6", "AH-CFC-11"),
+  citations: requiredBy("AH-CFC-6", "AH-CFC-11"),
   falsifiedBy:
     "a denial the run recorded no policy event for, or a denied `toolCallId` whose tool message is untyped free text, carries the withheld observation's payload beside the denial, or is absent from the transcript altogether",
   inspect(run) {
@@ -938,7 +941,7 @@ const delegatedTokens = (
 const handleDiscipline: AuditCheck = {
   id: "AUD-5",
   title: "handle discipline",
-  citations: citationsFor("AH-CFC-18", "AH-CFC-19", "AH-CFC-12", "AH-CFC-13"),
+  citations: requiredBy("AH-CFC-18", "AH-CFC-19", "AH-CFC-12", "AH-CFC-13"),
   falsifiedBy:
     "a handle table `assertValidHarnessHandleTable` refuses, a token the model wrote before the harness disclosed it, or a parent token in a child transcript that no delegation named and the child's own table does not hold",
   inspect(run, family) {
@@ -1036,7 +1039,7 @@ const handleDiscipline: AuditCheck = {
 const transcriptPairing: AuditCheck = {
   id: "AUD-6",
   title: "transcript pairing",
-  citations: citationsFor("AH-CFC-16", "AH-LIFE-6"),
+  citations: [...requiredBy("AH-LIFE-6"), ...extendsClause("AH-CFC-16")],
   falsifiedBy:
     "a transcript `inspectHarnessTranscriptPairing` reports a defect in — an orphan or duplicate tool result, a duplicate tool call, or a call left unanswered",
   inspect(run) {
@@ -1074,7 +1077,10 @@ const transcriptPairing: AuditCheck = {
 const observeDisclosure: AuditCheck = {
   id: "AUD-7",
   title: "observe disclosure",
-  citations: citationsFor("AH-CFC-modes-observe", "AH-CFC-15"),
+  citations: [
+    ...requiredBy("AH-CFC-modes-observe"),
+    ...extendsClause("AH-CFC-15"),
+  ],
   falsifiedBy:
     "a dial this run recorded at `observe`, which turns the verdict to `warn` and keeps it off `pass`. A run whose artifacts disagree about the mode is AUD-1's finding, not this one's: two checks failing on one shape would say the same thing twice and leave neither able to fail alone",
   inspect(run) {
@@ -1156,7 +1162,7 @@ const channelSummaries = (parsed: unknown): readonly ChannelSummary[] => {
 const influenceAccumulation: AuditCheck = {
   id: "AUD-8",
   title: "influence accumulation",
-  citations: citationsFor("AH-CFC-7", "AH-CFC-8"),
+  citations: requiredBy("AH-CFC-7", "AH-CFC-8"),
   falsifiedBy:
     "a confidentiality-labeled channel the model read that the run's model context holds no influence entry for, or an influence entry sourced from a channel the same result records as opaque or denied",
   inspect(run) {
@@ -1245,7 +1251,7 @@ interface RetentionRequirement {
 const evidenceRetention: AuditCheck = {
   id: "AUD-9",
   title: "evidence retention",
-  citations: citationsFor("AH-CFC-16"),
+  citations: requiredBy("AH-CFC-16"),
   falsifiedBy:
     "an enforcing run missing one of the artifacts that would explain why a result was exposed or denied: its policy trace, its policy snapshot or that snapshot's digest, an invocation context for a side effect it executed, or any recorded attempt to read its space's cell labels",
   inspect(run) {
