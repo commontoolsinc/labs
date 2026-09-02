@@ -172,7 +172,10 @@ function validatePieceSegment(pieceId: string): void {
  *
  * The split runs before anything else parses the target. Left on, the suffix
  * lands inside the piece id, and the refusal that follows names an unknown
- * piece — a message that says nothing about the `#` that caused it.
+ * piece — a message that says nothing about the `#` that caused it. A suffix
+ * with nothing in front of it is refused here for the same reason: what is
+ * left names no piece, and the refusal downstream would report a target the
+ * caller did write as one they did not.
  */
 export function splitArgumentSuffix(
   target: string,
@@ -186,6 +189,13 @@ export function splitArgumentSuffix(
       `Unknown suffix "${suffix}". The one supported suffix is ` +
         `"#argument", which selects the piece's arguments cell the way ` +
         `"--input" does.`,
+      { exitCode: 1 },
+    );
+  }
+  if (hash === 0) {
+    throw new ValidationError(
+      `"#argument" selects a piece's arguments cell, so it follows the ` +
+        `piece it selects.`,
       { exitCode: 1 },
     );
   }

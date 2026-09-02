@@ -262,5 +262,10 @@ describe("llm-friendly-ref", () => {
     expect(() => splitArgumentSuffix("thermostat#argument@user")).toThrow(
       /Unknown suffix "#argument@user"/,
     );
+    // Nothing in front of it leaves no piece to select the cell of, and the
+    // refusal downstream would report the target as one nobody wrote.
+    expect(() => splitArgumentSuffix("#argument")).toThrow(
+      /follows the piece it selects/,
+    );
   });
 });
