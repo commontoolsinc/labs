@@ -116,20 +116,29 @@ leaves `coverage-debt: packages/shuttle`, a metric group the gate
 derives from the path with no allowlist, at zero, so B1 lands its code
 and the tests covering it together.
 
-**B1 — walking skeleton** (after A1; A2 for nothing yet). The place value
-and its owner module — the whole pair, position *and* scope, because scope
-is half of what a place is (decision 20): `cd @user` and `cd @space` move
-it, the prompt renders it, and `pwd` prints both halves. The prompt, a
-readline loop, and `cd` / `ls` / `pwd` / `get` over one held
-`PiecesController`, with `cd -` for the previous place and `#name` wish
-targets navigable within the connected space (`cd #favorites`, and the
-`wish` verb, over the `./lib/wish` export entry A1 adds; a home-anchored
-target from elsewhere is refused with the reason — decision 5). Slug and
-name resolution rides the machinery `--piece` already uses
-(`resolveStoredPieceAddress`, `listSpaceSlugs`), so no CLI-surface arc
-step gates B1. `where` lands here as the printing
-surface for the ambient record; later milestones add their dimensions to it
-as they add the dimensions themselves. Facets `slugs/` and `pieces/` only.
+**B1 — walking skeleton** (after A1; A2 for nothing yet). Open, and landing
+in slices. In, as `packages/shuttle/src/place.ts`: the pair itself, `cd` over
+relative segments, `..`, `-`, a scope-only `@scope`, and rooted and complete
+references; the `slugs/` and `pieces/` facets a space root reserves; what
+`pwd` prints of both halves; and the refusals — a reference carrying
+`#argument`, and a move into a space other than the connected one, which is
+the gate a home-anchored entry point meets once resolution hands it a space.
+Still to come: the prompt, the readline loop, the verbs over a held
+controller, wish and slug resolution, `where`, and both halves of liveness.
+The place value and its owner module — the whole pair, position *and*
+scope, because scope is half of what a place is (decision 20):
+`cd @user` and `cd @space` move it, the prompt renders it, and `pwd`
+prints both halves. The prompt, a readline loop, and `cd` / `ls` / `pwd`
+/ `get` over one held `PiecesController`, with `cd -` for the previous
+place and `#name` wish targets navigable within the connected space
+(`cd #favorites`, and the `wish` verb, over the `./lib/wish` export
+entry A1 adds; a home-anchored target from elsewhere is refused with the
+reason — decision 5). Slug and name resolution rides the machinery
+`--piece` already uses (`resolveStoredPieceAddress`, `listSpaceSlugs`),
+so no CLI-surface arc step gates B1. `where` lands here as the printing
+surface for the ambient record; later milestones add their dimensions to
+it as they add the dimensions themselves. Facets `slugs/` and `pieces/`
+only.
 
 Liveness, in two halves. The held controller is memoized cf-harness-style,
 which covers the construction that never succeeds — the case that cache
