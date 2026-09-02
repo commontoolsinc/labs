@@ -30,7 +30,8 @@ pattern test in `main.test.tsx` instantiated the gallery, drove its streams,
 and asked for scalars. The browser-driven integration test in
 `integration/cfc-spec-gallery.test.ts` rendered the piece, which built the view
 and read the fields the view binds. So whether the 132 lines counted came down
-to whether the integration shard's teardown dump reached the report.
+to whether the integration lane's report for this file survived into the
+shard's artifact.
 
 ## What the runs measured
 
