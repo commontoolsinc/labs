@@ -512,9 +512,13 @@ const evaluationIdentityKey = (options: TrackGraphOptions): string =>
  * entry (Map insertion order — the order the weight budget evicts in too)
  * rather than going unrecorded, so a full cache keeps recording instead of
  * freezing at whatever filled it first. Insertion-order eviction serves a
- * repeated cycle of shapes only while the whole cycle fits under the cap.
+ * repeated cycle of shapes only while the whole cycle fits under the cap,
+ * so the cap is sized to clear one client's page load (a topics-board
+ * reload arrives as ~23 frames, most of them watch batches) with room for
+ * other clients' shapes and for per-session tainted entries, which never
+ * serve anyone else.
  */
-export const EVALUATION_CACHE_MAX_ENTRIES = 16;
+export const EVALUATION_CACHE_MAX_ENTRIES = 64;
 
 export type QueryEvaluationCacheDiagnostics = {
   seq: number;
