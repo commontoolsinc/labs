@@ -370,7 +370,7 @@ A console run lives at:
 ├── policy-snapshot.json
 ├── policy-trace.json
 ├── tool-outputs/
-└── cell-labels.json       # when the terminal label snapshot was written
+└── cell-labels.json       # read from the space as the run ended
 ```
 
 The console's Runs view renders the same tree. A caller may rely on
@@ -379,6 +379,13 @@ terminal `endedAt`/`terminalReason`; the selected model and provider; the
 harness and `fabricSessionCfc` postures; `inputCells`; artifact paths;
 `toolOutputs`; child lineage; and `failureRecords`/`primaryFailure`. A run stays
 `running` until one terminal write changes it to `completed` or `failed`.
+
+The terminal write that records the `run-state.json` outcome also writes
+`cell-labels.json`, from a read of the space as the run ended. The parent and
+every `delegate_task` child perform and record their own read. When `--space-db`
+selects the store, each child inherits it from the parent. A snapshot that
+cannot be taken or written produces a failure record on that run with
+`source: "cell_labels"`.
 
 Use the other records for their narrower evidence:
 
@@ -417,7 +424,8 @@ and their cited clauses. Read verdicts literally: `pass` is established;
 `not-applicable` means complete evidence showed the subject did not arise;
 `warn` means weaker assurance; `fail` is a contradicted requirement; and
 `inconclusive` means required evidence was absent or unreadable. `inconclusive`
-is never `pass`. A path containing no run exits `2` because nothing was audited.
+is never `pass`. AUD-9's detail says whether the terminal cell-label read was
+attempted. A path containing no run exits `2` because nothing was audited.
 
 ## 7. Run the CLI path instead
 
@@ -447,7 +455,7 @@ Success is exit status `0` and a completed operator summary naming the run
 artifact directory. A result handle or slug appears in the final response and
 retained tool output when the run produced one. `--space-db` is the exact space
 database used only by the terminal label reader; it does not change the Fabric
-session's target.
+session's target, and every `delegate_task` child inherits it.
 [Running patterns against a Fabric space](README.md#running-patterns-against-a-fabric-space)
 defines the three required session flags and the input-cell behavior.
 
@@ -479,8 +487,6 @@ The boundaries that affect this onboarding are:
 
 - CT-2175: value disclosure from labeled results needs declassification by
   policy; do not mistake a value refusal for loss of the piece or its handle.
-- CT-2184: a console terminal snapshot may omit `cell-labels.json`; use live
-  `cf piece get-label` and the correctly selected store when it does.
 - CT-2155 clause 5: protected web routes still use the `GET /` cookie exchange;
   there is no shared bearer-token shortcut.
 - CT-2185: `cf piece render --cell /<slug>` crashes; resolve with `cf get` and
