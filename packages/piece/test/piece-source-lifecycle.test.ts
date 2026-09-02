@@ -1537,15 +1537,15 @@ describe("piece source lifecycle", () => {
     }
 
     const mutablePieces = pieces as unknown as {
-      runWithPattern: typeof pieces.runWithPattern;
+      runPatternUpdate: typeof pieces.runPatternUpdate;
     };
-    const runWithPattern = pieces.runWithPattern.bind(pieces);
-    mutablePieces.runWithPattern = async (...args) => {
+    const runPatternUpdate = pieces.runPatternUpdate.bind(pieces);
+    mutablePieces.runPatternUpdate = async (...args) => {
       await seedLegacyModeLink(
         piece,
         (await secondSource.result.getCell()).key("value"),
       );
-      return await runWithPattern(...args);
+      return await runPatternUpdate(...args);
     };
     try {
       await expect(
@@ -1556,7 +1556,7 @@ describe("piece source lifecycle", () => {
         "retained piece input changed after compatibility was checked",
       );
     } finally {
-      mutablePieces.runWithPattern = runWithPattern;
+      mutablePieces.runPatternUpdate = runPatternUpdate;
     }
   });
 
@@ -1587,10 +1587,10 @@ describe("piece source lifecycle", () => {
     }
 
     const mutablePieces = pieces as unknown as {
-      runWithPattern: typeof pieces.runWithPattern;
+      runPatternUpdate: typeof pieces.runPatternUpdate;
     };
-    const runWithPattern = pieces.runWithPattern.bind(pieces);
-    mutablePieces.runWithPattern = async (...args) => {
+    const runPatternUpdate = pieces.runPatternUpdate.bind(pieces);
+    mutablePieces.runPatternUpdate = async (...args) => {
       const tx = runtime.edit();
       piece.getCell().withTx(tx).setMetaRaw(
         "argument",
@@ -1598,7 +1598,7 @@ describe("piece source lifecycle", () => {
         rawMetaWriteAuthorization,
       );
       await tx.commit();
-      return await runWithPattern(...args);
+      return await runPatternUpdate(...args);
     };
     try {
       await expect(
@@ -1607,7 +1607,7 @@ describe("piece source lifecycle", () => {
         }),
       ).rejects.toThrow("piece missing its current argument");
     } finally {
-      mutablePieces.runWithPattern = runWithPattern;
+      mutablePieces.runPatternUpdate = runPatternUpdate;
     }
   });
 
@@ -1626,15 +1626,15 @@ describe("piece source lifecycle", () => {
     webSources["/api/patterns/new-link-race.tsx"] = optionalModeProgram(2);
 
     const mutablePieces = pieces as unknown as {
-      runWithPattern: typeof pieces.runWithPattern;
+      runPatternUpdate: typeof pieces.runPatternUpdate;
     };
-    const runWithPattern = pieces.runWithPattern.bind(pieces);
-    mutablePieces.runWithPattern = async (...args) => {
+    const runPatternUpdate = pieces.runPatternUpdate.bind(pieces);
+    mutablePieces.runPatternUpdate = async (...args) => {
       await seedLegacyModeLink(
         piece,
         (await source.result.getCell()).key("value"),
       );
-      return await runWithPattern(...args);
+      return await runPatternUpdate(...args);
     };
     try {
       const result = await piece.changeSource({
@@ -1648,7 +1648,7 @@ describe("piece source lifecycle", () => {
         );
       }
     } finally {
-      mutablePieces.runWithPattern = runWithPattern;
+      mutablePieces.runPatternUpdate = runPatternUpdate;
     }
   });
 
@@ -1666,10 +1666,10 @@ describe("piece source lifecycle", () => {
     );
 
     const mutablePieces = pieces as unknown as {
-      runWithPattern: typeof pieces.runWithPattern;
+      runPatternUpdate: typeof pieces.runPatternUpdate;
     };
-    const runWithPattern = pieces.runWithPattern;
-    mutablePieces.runWithPattern = () => {
+    const runPatternUpdate = pieces.runPatternUpdate;
+    mutablePieces.runPatternUpdate = () => {
       throw new Error(
         "piece source is incompatible with retained input: synthetic",
       );
@@ -1682,7 +1682,7 @@ describe("piece source lifecycle", () => {
         }),
       ).rejects.toThrow("retained input: synthetic");
     } finally {
-      mutablePieces.runWithPattern = runWithPattern;
+      mutablePieces.runPatternUpdate = runPatternUpdate;
     }
   });
 
@@ -1698,12 +1698,12 @@ describe("piece source lifecycle", () => {
     webSources["/api/patterns/non-error.tsx"] = versionProgram("candidate");
 
     const mutablePieces = pieces as unknown as {
-      runWithPattern: typeof pieces.runWithPattern;
+      runPatternUpdate: typeof pieces.runPatternUpdate;
     };
-    const runWithPattern = pieces.runWithPattern;
-    mutablePieces.runWithPattern =
+    const runPatternUpdate = pieces.runPatternUpdate;
+    mutablePieces.runPatternUpdate =
       (() =>
-        Promise.reject("raw execution rejection")) as typeof runWithPattern;
+        Promise.reject("raw execution rejection")) as typeof runPatternUpdate;
     let reason: unknown;
     try {
       await piece.changeSource({
@@ -1713,12 +1713,18 @@ describe("piece source lifecycle", () => {
     } catch (error) {
       reason = error;
     } finally {
-      mutablePieces.runWithPattern = runWithPattern;
+      mutablePieces.runPatternUpdate = runPatternUpdate;
     }
     expect(reason).toBe("raw execution rejection");
   });
 
   it("reports a saved transition separately from a later refresh failure", async () => {
+    // Injected at the post-commit work the update path actually performs:
+    // `runPatternUpdate` synchronizes the pattern AFTER its setup transaction
+    // is accepted, so a failure there is the refresh failing over a committed
+    // transition, and the verdict below has to say so from that transaction's
+    // receipt rather than report the transition unsaved.
+
     const piece = await pieces.create(versionProgram("v1"), { input: {} });
     const origin = "system:post-commit.tsx";
     await stampOrigin(piece, origin);
@@ -1728,11 +1734,11 @@ describe("piece source lifecycle", () => {
     await piece.setPattern(versionProgram("v2"));
 
     const mutablePieces = pieces as unknown as {
-      runWithPattern: typeof pieces.runWithPattern;
+      syncPattern: typeof pieces.syncPattern;
     };
-    const runWithPattern = pieces.runWithPattern.bind(pieces);
-    mutablePieces.runWithPattern = async (...args) => {
-      await runWithPattern(...args);
+    const syncPattern = pieces.syncPattern.bind(pieces);
+    mutablePieces.syncPattern = async (...args) => {
+      await syncPattern(...args);
       throw new Error("post-commit refresh failed");
     };
     try {
@@ -1746,7 +1752,7 @@ describe("piece source lifecycle", () => {
         executionWarning: "post-commit refresh failed",
       });
     } finally {
-      mutablePieces.runWithPattern = runWithPattern;
+      mutablePieces.syncPattern = syncPattern;
     }
 
     const state = await readPieceSourceState(runtime, piece.getCell());
@@ -1845,6 +1851,11 @@ describe("piece source lifecycle", () => {
   });
 
   it("recognizes a saved transition even after a newer source change", async () => {
+    // The newer edit lands between this restore's accepted setup transaction
+    // and its failed refresh, so by the time the verdict is classified the
+    // piece is no longer on the restored revision. The transaction's own
+    // receipt is what keeps that verdict `applied`.
+
     const piece = await pieces.create(versionProgram("v1"), { input: {} });
     const origin = "system:concurrent-post-commit.tsx";
     await stampOrigin(piece, origin);
@@ -1854,15 +1865,15 @@ describe("piece source lifecycle", () => {
     await piece.setPattern(versionProgram("v2"));
 
     const mutablePieces = pieces as unknown as {
-      runWithPattern: typeof pieces.runWithPattern;
+      syncPattern: typeof pieces.syncPattern;
     };
-    const runWithPattern = pieces.runWithPattern.bind(pieces);
+    const syncPattern = pieces.syncPattern.bind(pieces);
     let changedAgain = false;
-    mutablePieces.runWithPattern = async (...args) => {
-      await runWithPattern(...args);
+    mutablePieces.syncPattern = async (...args) => {
+      await syncPattern(...args);
       if (!changedAgain) {
         changedAgain = true;
-        mutablePieces.runWithPattern = runWithPattern;
+        mutablePieces.syncPattern = syncPattern;
         await piece.setPattern(versionProgram("v3"));
       }
       throw new Error("older post-commit refresh failed");
@@ -1878,7 +1889,7 @@ describe("piece source lifecycle", () => {
         executionWarning: "older post-commit refresh failed",
       });
     } finally {
-      mutablePieces.runWithPattern = runWithPattern;
+      mutablePieces.syncPattern = syncPattern;
     }
 
     const state = await readPieceSourceState(runtime, piece.getCell());
