@@ -588,8 +588,10 @@ error rather than a sink that quietly releases ungated. The llm sinks are the
 explicit ungated ones, and a sink with no ceiling gets no gate: llm-sink
 release is ungoverned under this posture — pending a boundary-scoped admission
 mechanism, since an exact-match ceiling cannot admit the source-varying
-material-risk caveats an llm sink exists to process. The bundle deliberately
-leaves the
+material-risk caveats an llm sink exists to process. Building that mechanism
+is planned in
+[`docs/plans/cfc-llm-sink-admission.md`](../plans/cfc-llm-sink-admission.md).
+The bundle deliberately leaves the
 enforcement-mode pin at `enforce-explicit` (strict stays a per-session host
 raise), and leaves `cfcDecomposedEnvelopes`, `cfcTrustConfig`, and
 `cfcPrefixProvenanceStats` alone. It is opt-in per runtime, never a fleet
