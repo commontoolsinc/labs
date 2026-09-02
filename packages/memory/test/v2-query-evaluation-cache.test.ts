@@ -728,7 +728,7 @@ describe("v2 query evaluation cache", () => {
       hits: 0,
       misses: 0,
       rotations: 0,
-      capEvictions: 0,
+      capRefusals: 0,
       budgetEvictions: 0,
       hitsPure: 0,
       hitsAbsentResidue: 0,
@@ -1212,7 +1212,7 @@ describe("v2 query evaluation cache", () => {
     }
   });
 
-  it("evicts the oldest shape when one past the cap is recorded at a sequence", async () => {
+  it("keeps a full cache's working set and counts the shapes it turns away", async () => {
     const space = "did:key:z6Mk-eval-cache-cap";
     const engine = await openEngine({
       url: new URL("memory:///eval-cache-cap"),
@@ -1255,26 +1255,28 @@ describe("v2 query evaluation cache", () => {
       );
     for (let shape = 1; shape <= count; shape++) evaluate(shape);
 
-    // One shape past the cap at a single sequence: the newest recorded by
-    // displacing the oldest, so the cache stays full and current instead
-    // of freezing at whatever filled it first.
+    // One shape past the cap at a single sequence: the cache is full, the
+    // extra shape was turned away and counted, and the first cap shapes
+    // are still the working set.
     let diagnostics = queryEvaluationCacheDiagnostics(cache);
     expect(diagnostics.misses).toBe(count);
     expect(diagnostics.entries).toBe(EVALUATION_CACHE_MAX_ENTRIES);
     expect(diagnostics.weight).toBe(EVALUATION_CACHE_MAX_ENTRIES);
-    expect(diagnostics.capEvictions).toBe(1);
+    expect(diagnostics.capRefusals).toBe(1);
 
-    // The newest shape serves; the displaced one re-walks, and recording
-    // it again displaces the next-oldest in turn — no more than that: the
-    // shape after it is still served.
-    expect(evaluate(count).stats.rootsVisited).toBe(0);
-    expect(evaluate(1).stats.rootsVisited).toBe(1);
-    expect(evaluate(3).stats.rootsVisited).toBe(0);
-    expect(evaluate(2).stats.rootsVisited).toBe(1);
+    // A second cycle over the same shapes serves every retained one — the
+    // property displacing the oldest entry would destroy (each miss would
+    // evict the shape the cycle asks for next) — and turns the extra shape
+    // away again.
+    let served = 0;
+    for (let shape = 1; shape <= count; shape++) {
+      if (evaluate(shape).stats.rootsVisited === 0) served++;
+    }
+    expect(served).toBe(EVALUATION_CACHE_MAX_ENTRIES);
     diagnostics = queryEvaluationCacheDiagnostics(cache);
-    expect(diagnostics.hitsPure).toBe(2);
-    expect(diagnostics.misses).toBe(count + 2);
-    expect(diagnostics.capEvictions).toBe(3);
+    expect(diagnostics.hitsPure).toBe(EVALUATION_CACHE_MAX_ENTRIES);
+    expect(diagnostics.misses).toBe(count + 1);
+    expect(diagnostics.capRefusals).toBe(2);
     expect(diagnostics.entries).toBe(EVALUATION_CACHE_MAX_ENTRIES);
     expect(diagnostics.weight).toBe(EVALUATION_CACHE_MAX_ENTRIES);
   });
@@ -1330,16 +1332,29 @@ describe("v2 query evaluation cache", () => {
       }
     }
   });
-  it("withdraws its health provider on close, never a successor's", async () => {
+  it("reports the newest live server's caches, whichever order servers close", async () => {
+    // Earlier tests in this file leave servers open, and a live server is
+    // reported for as long as it lives — so measure relative to whatever is
+    // registered when this test starts, and expect to hand back to it.
+    const before = getEvaluationCachesDiagnostics()?.budget;
     const first = createServer("memory://eval-cache-provider-first", 7);
     const second = createServer("memory://eval-cache-provider-second", 9);
-    // Last registration wins: the second server is the one reported.
+    // The newest server is the one reported.
     expect(getEvaluationCachesDiagnostics()?.budget).toBe(9);
-    // Closing an earlier server leaves the live one's provider in place.
-    await first.close();
-    expect(getEvaluationCachesDiagnostics()?.budget).toBe(9);
-    // Closing the registered one withdraws it: nothing stale is reported.
+    // Closing the newest hands the report back to the older live server
+    // rather than hiding it.
     await second.close();
-    expect(getEvaluationCachesDiagnostics()).toBeUndefined();
+    expect(getEvaluationCachesDiagnostics()?.budget).toBe(7);
+    await first.close();
+    expect(getEvaluationCachesDiagnostics()?.budget).toBe(before);
+
+    // And the other order: closing an older server leaves the live newest
+    // in place; closing that withdraws it.
+    const third = createServer("memory://eval-cache-provider-third", 11);
+    const fourth = createServer("memory://eval-cache-provider-fourth", 13);
+    await third.close();
+    expect(getEvaluationCachesDiagnostics()?.budget).toBe(13);
+    await fourth.close();
+    expect(getEvaluationCachesDiagnostics()?.budget).toBe(before);
   });
 });

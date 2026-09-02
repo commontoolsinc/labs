@@ -508,11 +508,12 @@ const evaluationIdentityKey = (options: TrackGraphOptions): string =>
  * by the server's cross-space retained-entity budget, which evicts by
  * weight (see Server's evaluation-cache budget).
  *
- * The bound holds by eviction: at the cap a new shape displaces the oldest
- * entry (Map insertion order — the order the weight budget evicts in too)
- * rather than going unrecorded, so a full cache keeps recording instead of
- * freezing at whatever filled it first. Insertion-order eviction serves a
- * repeated cycle of shapes only while the whole cycle fits under the cap.
+ * The bound holds by ADMISSION: a full cache records no new shape until a
+ * commit rotates it. That keeps a stable working set stable — a repeated
+ * cycle of up to this many shapes keeps serving — where displacing the
+ * oldest entry instead would turn a cycle one shape longer than the cap
+ * into a miss on every step. What a full cache turns away is counted
+ * (`capRefusals`), so a frozen cache is visible rather than silent.
  */
 export const EVALUATION_CACHE_MAX_ENTRIES = 16;
 
@@ -527,8 +528,9 @@ export type QueryEvaluationCacheDiagnostics = {
   misses: number;
   rotations: number;
 
-  /** Entries displaced at the entry cap by a newer shape. */
-  capEvictions: number;
+  /** New shapes a full cache turned away (recorded again only after the
+   * next rotation). */
+  capRefusals: number;
 
   /** Entries removed by the server's cross-space weight budget. */
   budgetEvictions: number;
@@ -650,8 +652,8 @@ export type QueryEvaluationCache = {
    * engine object for the same space. */
   rotations: number;
 
-  /** Entries displaced at EVALUATION_CACHE_MAX_ENTRIES by a newer shape. */
-  capEvictions: number;
+  /** New shapes turned away at EVALUATION_CACHE_MAX_ENTRIES. */
+  capRefusals: number;
 
   /** Entries the server's weight budget removed (its enforcement pass
    * counts here; the cache itself never evicts by weight). */
@@ -669,7 +671,7 @@ export const createQueryEvaluationCache = (): QueryEvaluationCache => ({
   residueRefusals: 0,
   misses: 0,
   rotations: 0,
-  capEvictions: 0,
+  capRefusals: 0,
   budgetEvictions: 0,
 });
 
@@ -687,7 +689,7 @@ export const queryEvaluationCacheDiagnostics = (
     hits: cache.hitsPure + cache.hitsAbsentResidue + cache.hitsIdentity,
     misses: cache.misses,
     rotations: cache.rotations,
-    capEvictions: cache.capEvictions,
+    capRefusals: cache.capRefusals,
     budgetEvictions: cache.budgetEvictions,
     hitsPure: cache.hitsPure,
     hitsAbsentResidue: cache.hitsAbsentResidue,
@@ -1624,25 +1626,18 @@ export const trackGraph = (
     const weight = state.entities.size;
     const key = share.kind === "tainted" ? cacheKeys.identity : cacheKeys.pure;
     const previous = cache.entries.get(key);
-    if (
-      previous === undefined &&
-      cache.entries.size >= EVALUATION_CACHE_MAX_ENTRIES
-    ) {
-      // A new shape at the cap displaces the oldest entry; re-recording a
-      // present key (a refused absent-residue share re-evaluated) replaces
-      // in place and grows nothing.
-      const oldestKey = cache.entries.keys().next().value!;
-      const oldest = cache.entries.get(oldestKey)!;
-      cache.entries.delete(oldestKey);
-      cache.weight -= oldest.weight;
-      cache.capEvictions++;
+    if (cache.entries.size < EVALUATION_CACHE_MAX_ENTRIES) {
+      cache.entries.set(key, {
+        state: cloneTrackedGraphState(engine, state),
+        share,
+        weight,
+      });
+      cache.weight += weight - (previous?.weight ?? 0);
+    } else if (previous === undefined) {
+      // Full: the new shape waits for the next rotation (see the cap's doc).
+      // A present key is already served and is simply not re-recorded.
+      cache.capRefusals++;
     }
-    cache.entries.set(key, {
-      state: cloneTrackedGraphState(engine, state),
-      share,
-      weight,
-    });
-    cache.weight += weight - (previous?.weight ?? 0);
   }
   return {
     serverSeq: Engine.serverSeq(engine),

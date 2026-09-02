@@ -447,15 +447,18 @@ export type EvaluationCachesDiagnostics = {
   spaces: Record<string, QueryEvaluationCacheDiagnostics>;
 };
 
-let evaluationCachesDiagnosticsProvider:
-  | (() => EvaluationCachesDiagnostics)
-  | undefined;
+/** Live servers' providers in construction order; a server removes its own
+ * on close(), so the newest LIVE server is always the one reported. */
+const evaluationCachesDiagnosticsProviders: (
+  () => EvaluationCachesDiagnostics
+)[] = [];
 
 /** The co-hosted memory server's evaluation-cache counters for the health
- * route; undefined when no server has been constructed in this process. */
+ * route — the most recently constructed server still open; undefined when
+ * none is. */
 export const getEvaluationCachesDiagnostics = ():
   | EvaluationCachesDiagnostics
-  | undefined => evaluationCachesDiagnosticsProvider?.();
+  | undefined => evaluationCachesDiagnosticsProviders.at(-1)?.();
 
 const randomHex = (bytes: number): string => {
   const data = crypto.getRandomValues(new Uint8Array(bytes));
@@ -1418,7 +1421,7 @@ export class Server {
   #evaluationCacheSpacesDropped = 0;
 
   /** This server's health-route provider, kept so close() can withdraw
-   * exactly it and never a successor's. */
+   * exactly it and no other server's. */
   #evaluationCachesDiagnosticsProvider = () =>
     this.evaluationCachesDiagnostics();
 
@@ -1634,15 +1637,15 @@ export class Server {
       options.documentCacheTotalBudgetBytes ??
         DOCUMENT_CACHE_TOTAL_BUDGET_BYTES,
     );
-    // Module-level providers for the health route (push-priority counters,
-    // Phase 6; document caches): the newest live server is reported, and
-    // close() withdraws exactly this server's.
+    // Module-level providers for the health route: the newest live server is
+    // reported, and close() withdraws exactly this server's.
     pushPriorityStatsProviders.push(this.#pushPriorityStatsProvider);
     documentCachesDiagnosticsProviders.push(
       this.#documentCachesDiagnosticsProvider,
     );
-    evaluationCachesDiagnosticsProvider =
-      this.#evaluationCachesDiagnosticsProvider;
+    evaluationCachesDiagnosticsProviders.push(
+      this.#evaluationCachesDiagnosticsProvider,
+    );
   }
 
   /** This server's health-route providers, kept so close() can withdraw
@@ -2166,16 +2169,10 @@ export class Server {
       documentCachesDiagnosticsProviders,
       this.#documentCachesDiagnosticsProvider,
     );
-    // Withdraw the health-route provider if it is still this server's, so
-    // a closed server is neither reported nor kept alive by the route.
-    // Synchronous, ahead of the first await: an un-awaited close still
-    // withdraws it at once.
-    if (
-      evaluationCachesDiagnosticsProvider ===
-        this.#evaluationCachesDiagnosticsProvider
-    ) {
-      evaluationCachesDiagnosticsProvider = undefined;
-    }
+    withdrawProvider(
+      evaluationCachesDiagnosticsProviders,
+      this.#evaluationCachesDiagnosticsProvider,
+    );
     this.#cancelScheduledRefresh();
     await this.#refreshing;
     await this.#drainSpacePublicationLocks();

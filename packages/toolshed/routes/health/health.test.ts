@@ -2,9 +2,9 @@ import { assertEquals } from "@std/assert";
 import { Server } from "@commonfabric/memory/v2/server";
 
 import env from "@/env.ts";
-import { stats as statsRoute } from "@/routes/health/health.routes.ts";
 import createApp from "@/lib/create-app.ts";
 import router from "@/routes/health/health.index.ts";
+import { stats as statsRoute } from "@/routes/health/health.routes.ts";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
@@ -123,7 +123,29 @@ Deno.test("health routes", async (t) => {
         );
         assertEquals(typeof json.evaluationCaches.budget, "number");
         assertEquals(json.evaluationCaches.weight, 0);
+        assertEquals(json.evaluationCaches.spacesDropped, 0);
         assertEquals(json.evaluationCaches.spaces, {});
+
+        // The declared response schema admits the live response and requires
+        // the continuity signal a reader depends on (`spacesDropped`).
+        const declared = (statsRoute.responses as Record<
+          number,
+          {
+            content: {
+              "application/json": {
+                schema: { safeParse(value: unknown): { success: boolean } };
+              };
+            };
+          }
+        >)[200].content["application/json"].schema;
+        assertEquals(declared.safeParse(json).success, true);
+        const { spacesDropped: _dropped, ...withoutDropped } =
+          json.evaluationCaches;
+        assertEquals(
+          declared.safeParse({ ...json, evaluationCaches: withoutDropped })
+            .success,
+          false,
+        );
       } finally {
         await server.close();
       }

@@ -373,15 +373,18 @@ process:
   the Topics board that was most of a second of server time per walk.
 - `evaluationCaches` — the memory server's query evaluation caches
   (`QueryEvaluationCache` in `packages/memory/v2/query.ts`): one entry per
-  space the server has evaluated in, under the caches' retained `weight`
-  against the cross-space `budget`. Each space carries the cache's current
+  space whose cache the server currently retains (the eight most recently
+  evaluated; `spacesDropped` counts the ones let go), under the caches'
+  retained `weight` against the cross-space `budget`. Each space carries the
+  cache's current
   `seq`, its live `entries` split by share class (`entriesPure`,
   `entriesAbsentResidue`, `entriesTainted`) and the lifetime counters for
   what became of the evaluations it saw: `hits` (split as `hitsPure`,
   `hitsAbsentResidue`, `hitsIdentity`), `misses`, `residueRefusals`,
-  `rotations` (a commit or engine change cleared it), `capEvictions` (a new
-  shape displaced the oldest at the entry cap) and `budgetEvictions` (the
-  weight budget removed it). Know what the cache covers before reading it:
+  `rotations` (a commit or engine change cleared it), `capRefusals` (a full
+  cache turned a new shape away until the next rotation) and
+  `budgetEvictions` (the weight budget removed an entry). Know what the cache
+  covers before reading it:
   fresh evaluations only — a session's first watch group per branch, a
   whole-set establishment on resume, and `graph.query`. A later `watch.add`
   in the same session extends that session's graph and never touches the
@@ -392,8 +395,9 @@ process:
   means it is being served. Misses rising together with `entriesTainted`
   means the entries are keyed to the (principal, session) that recorded
   them, which a new session never matches. A `rotations` step between the
-  captures means a commit landed and the comparison is void. An eviction
-  counter rising says which bound moved. Per-space records live as long as
+  captures means a commit landed and the comparison is void. `capRefusals`
+  rising means the seq's distinct shapes outnumber the cap; `budgetEvictions`
+  rising means they outweigh the budget. Per-space records live as long as
   the space's cache object: the space bound keeps the eight most recently
   evaluated, and a budget pass sweeps empty leftovers, so compare two
   captures only while `spacesDropped` holds still between them.
@@ -403,9 +407,11 @@ process:
   per-authored-input latency series: admission to watermark coverage, with the
   wave and cycle counts behind each entry.
 
-Everything here accumulates for the process's whole life, across every space it
-has served, so a phase is a difference between two captures rather than any
-single one — and **only `count` and `totalTime` subtract**. `min`, `max`, `p50`,
+`timingStats` and `logCounts` accumulate for the process's whole life, across
+every space the process has served, so a phase is a difference between two
+captures rather than any single one — and **only `count` and `totalTime`
+subtract**. (`evaluationCaches` is the exception: its per-space records live
+with their cache objects, as above.) `min`, `max`, `p50`,
 `p95` and the CDF describe the whole lifetime; differencing them yields a number
 that looks like a phase percentile and is not one. What a diff of the two
 additive fields does give you honestly is the phase's call count and its mean.

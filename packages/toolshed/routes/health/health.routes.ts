@@ -58,6 +58,10 @@ export const stats = createRoute({
         evaluationCaches: z.object({
           budget: z.number(),
           weight: z.number(),
+          // Cache objects dropped so far; a reader compares two captures
+          // only while this holds still (profiling.md, "Read
+          // /api/health/stats").
+          spacesDropped: z.number(),
           spaces: z.record(z.string(), z.any()),
         }).optional(),
         // The serving loop's counters (server-execution v2,
