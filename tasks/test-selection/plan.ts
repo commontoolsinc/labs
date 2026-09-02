@@ -490,16 +490,29 @@ export function plan(input: PlanInput): Plan {
     withRepeats,
   );
 
-  // Exploration: a seeded draw over what the value ordering did not pick,
-  // so the whole corpus is swept over time rather than sampled with
+  // Exploration: a draw over what the value ordering did not pick, so
+  // the whole corpus is swept over time rather than sampled with
   // replacement forever.
+  //
+  // Longest-unrun first, with the seeded shuffle breaking ties. Sweeping
+  // is what the ordering buys: a test the draw reaches goes to the back
+  // of the queue until everything else has had a turn, where a shuffle
+  // alone would keep drawing from the whole corpus and leave part of it
+  // unvisited for as long as chance allowed. It also covers whatever the
+  // value model is currently blind to, without anything having to know
+  // what that is.
   const pool = remaining();
   const order = seededOrder(manifest.seed, pool.length);
+  const drawn = order.map((i) => pool[i]!);
+  // An identity nothing has run inside the aggregate's reach carries no
+  // day at all, and it is the one most worth drawing, so it sorts ahead
+  // of every day there is.
+  drawn.sort((a, b) => (a.lastRun ?? "").localeCompare(b.lastRun ?? ""));
   fill(
     input,
     lanes,
     taken,
-    order.map((i) => pool[i]!),
+    drawn,
     "exploration",
     mandatoryLoad +
       left * (FILL_VALUE_SHARE + FILL_DENSITY_SHARE + FILL_EXPLORATION_SHARE),

@@ -1,6 +1,10 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { loadCliSuites, stepArms } from "./cli.ts";
+import { dispatchArms, loadCliSuites, phaseAnnouncements } from "./cli.ts";
+
+/** The reader `integration.sh`'s arms are read with. */
+const stepsForTest = (body: string): string[] =>
+  [...body.matchAll(/^ {4}cf_test_step_begin (\S+)$/gm)].map((f) => f[1]!);
 import type { Suite } from "./suite.ts";
 
 const root = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
@@ -51,24 +55,80 @@ describe("the command-line suites", () => {
 
   it("keeps the three suites' records apart by name", () => {
     const [core, fuse, deno] = ["cli-core", "cli-fuse", "cli-deno"].map(byId);
-    const step = { k: "integration", s: "cli", n: "fuse-exec.sh mounts" };
+    const step = {
+      k: "integration",
+      s: "cli",
+      n: "fuse-exec.sh Legacy handler write-through still works",
+    };
     expect(fuse.locate({ test: step })).toEqual({
       level: "unit",
-      unit: "fuse-exec.sh",
+      unit: "fuse-exec.sh writes",
     });
     expect(core.locate({ test: step })).toBeUndefined();
     expect(deno.locate({ test: step })).toBeUndefined();
   });
 
-  it("runs the FUSE script whole, because it cannot be asked for less", async () => {
-    const fuse = byId("cli-fuse");
-    expect(fuse.units).toEqual(["fuse-exec.sh"]);
-    const [invocation] = await fuse.command(
-      [{ unit: "fuse-exec.sh", skip: [] }],
+  it("claims no record its script's arms do not run", () => {
+    // Claiming one by the name it starts with would put every
+    // unaccounted record beyond the drift guard's reach, since a claim
+    // is what stops the guard failing on it.
+    for (const id of ["cli-core", "cli-fuse"]) {
+      const suite = byId(id);
+      const script = suite.units[0]!.split(" ")[0];
+      expect(
+        suite.locate({
+          test: { k: "integration", s: "cli", n: `${script} no such step` },
+        }),
+      ).toBeUndefined();
+    }
+  });
+
+  it("makes each FUSE section a unit and leaves `all` to hand runs", () => {
+    expect(byId("cli-fuse").units).toEqual([
+      "fuse-exec.sh callables",
+      "fuse-exec.sh exec",
+      "fuse-exec.sh status",
+      "fuse-exec.sh writes",
+    ]);
+  });
+
+  it("dispatches the section a unit names", async () => {
+    const invocations = await byId("cli-fuse").command(
+      [{ unit: "fuse-exec.sh status", skip: [] }],
       context,
     );
-    expect(invocation!.command).toEqual(["./integration/fuse-exec.sh"]);
-    expect(await fuse.command([], context)).toEqual([]);
+    expect(invocations.length).toBe(1);
+    expect(invocations[0]!.command).toEqual(["./integration/fuse-exec.sh"]);
+    expect(invocations[0]!.env?.CF_FUSE_INTEGRATION_SECTION).toBe("status");
+    expect(await byId("cli-fuse").command([], context)).toEqual([]);
+  });
+
+  it("gives a phase to the one section that runs it", () => {
+    // The whole point of the sections: a phase only `writes` runs is
+    // scored and scheduled as part of `writes` and nothing else.
+    expect(
+      byId("cli-fuse").locate({
+        test: {
+          k: "integration",
+          s: "cli",
+          n: "fuse-exec.sh Legacy handler write-through still works",
+        },
+      }),
+    ).toEqual({ level: "unit", unit: "fuse-exec.sh writes" });
+  });
+
+  it("holds a phase several sections run to the suite", () => {
+    // It runs whenever any section does, which is what makes the
+    // sections independent, so it belongs to none of them.
+    expect(
+      byId("cli-fuse").locate({
+        test: {
+          k: "integration",
+          s: "cli",
+          n: "fuse-exec.sh Mounted callable entries exist",
+        },
+      }),
+    ).toEqual({ level: "suite" });
   });
 
   it("accounts for the scripts its steps call", () => {
@@ -90,16 +150,93 @@ describe("the command-line suites", () => {
   });
 });
 
-describe("reading a script with no dispatch table", () => {
-  it("finds no arms rather than guessing at them", () => {
+describe("reading a script's dispatch table", () => {
+  /** A table in the shape both scripts write one in. */
+  const table = [
+    'case "$SECTION" in',
+    "  all)",
+    "    cf_test_step_begin one",
+    "    cf_test_step_begin two",
+    "    ;;",
+    "  just-one)",
+    "    cf_test_step_begin one",
+    "    ;;",
+    "  quiet)",
+    "    echo nothing to record",
+    "    ;;",
+    "  *)",
+    '    error "Unknown section: $SECTION"',
+    "    ;;",
+    "esac",
+    "",
+  ].join("\n");
+
+  it("reads each arm against what the reader finds in it", () => {
+    expect([...dispatchArms(table, stepsForTest)]).toEqual([
+      ["all", ["one", "two"]],
+      ["just-one", ["one"]],
+    ]);
+  });
+
+  it("passes over the unknown-section arm and one naming no work", () => {
+    // Either would become a unit that then runs whatever the script does
+    // with it.
+    const arms = dispatchArms(table, stepsForTest);
+    expect(arms.has("*")).toBe(false);
+    expect(arms.has("quiet")).toBe(false);
+  });
+
+  it("finds no arms in a script that has no table", () => {
     // A script that lost its table has no arms to enumerate, and
     // inventing some would schedule work nothing can run.
-    expect([...stepArms("#!/usr/bin/env bash\necho hello\n")]).toEqual([]);
+    expect([...dispatchArms("#!/usr/bin/env bash\necho hello\n", stepsForTest)])
+      .toEqual([]);
+  });
+});
+
+describe("reading what a FUSE phase announces", () => {
+  const script = [
+    "run_mount() {",
+    '  phase "the mount"',
+    "}",
+    "run_probe() {",
+    '  if [ "$DEEP" = "1" ]; then',
+    '    phase "the deep probe"',
+    "  else",
+    '    phase "the probe, skipped"',
+    "  fi",
+    "}",
+    "",
+  ].join("\n");
+
+  it("names each phase by the sentence its function announces", () => {
+    // The table names a phase by identifier and the record carries the
+    // sentence, so this is what joins the two.
+    expect(phaseAnnouncements(script).get("mount")).toEqual(["the mount"]);
+  });
+
+  it("takes every name a phase announces conditionally", () => {
+    // A phase that announces one of two sentences records under either,
+    // and both are that phase, so both reach the section running it.
+    expect(phaseAnnouncements(script).get("probe")).toEqual([
+      "the deep probe",
+      "the probe, skipped",
+    ]);
+  });
+
+  it("finds nothing in a script with no phase functions", () => {
+    expect([...phaseAnnouncements("#!/usr/bin/env bash\necho hello\n").keys()])
+      .toEqual([]);
   });
 });
 
 describe("deciding which scripts a suite is built from", () => {
-  /** A root holding one dispatch script, with the text given. */
+  /**
+   * A root holding one dispatch script, with the text given, beside an
+   * empty FUSE script. Both are read when the suites are built, and the
+   * FUSE script being present is what makes passing over it a decision
+   * rather than the same silence a missing script would get.
+   */
   async function rooted(script: string): Promise<string> {
     const at = await Deno.makeTempDir({ prefix: "cli-sources-" });
     await Deno.mkdir(`${at}/packages/cli/integration`, { recursive: true });
@@ -107,6 +244,7 @@ describe("deciding which scripts a suite is built from", () => {
       `${at}/packages/cli/integration/integration.sh`,
       script,
     );
+    await Deno.writeTextFile(`${at}/packages/cli/integration/fuse-exec.sh`, "");
     return at;
   }
 
@@ -115,9 +253,6 @@ describe("deciding which scripts a suite is built from", () => {
     // claim a surface `cli-fuse` already holds, and the drift guard
     // reports a surface claimed twice.
     const at = await rooted("#!/usr/bin/env bash\n./fuse-exec.sh run\n");
-    // Present in the tree, so passing over it is a decision rather than
-    // the same silence a missing script would get.
-    await Deno.writeTextFile(`${at}/packages/cli/integration/fuse-exec.sh`, "");
     try {
       const sources = (await loadCliSuites(at))
         .find((suite) => suite.id === "cli-core")!.sources;

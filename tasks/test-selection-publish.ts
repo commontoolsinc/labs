@@ -7,10 +7,16 @@
  *   deno run -A tasks/test-selection-publish.ts [--days N] [--bootstrap]
  *     [--out <dir>] [--dry-run] [--concurrency N]
  *
- * The incremental path reads the newest aggregate and fetches only the
- * objects it has not already folded, which in the steady state is about
- * two thousand of them. A cold start cannot read three weeks of history
- * in one job, so `--bootstrap` is the one-off that does, run by hand.
+ * A run reads the newest aggregate and folds what that aggregate does not
+ * already hold, which in the steady state is about two thousand objects.
+ * A cold start has no aggregate to read and cannot fold three weeks of
+ * raw history in one job either, so `--bootstrap` is the one-off that
+ * starts from an empty one over a wider window, run by hand.
+ *
+ * That is the whole of what the flag does. What to read is `inputChoice`
+ * asked of each source and date the window covers, and both modes ask it
+ * alike; their answers differ because their aggregates differ, and not
+ * because one of them chooses inputs a second way.
  *
  * When the publisher fails nothing breaks: the previous manifest is still
  * the newest one and lanes keep using it. A manifest going stale degrades
@@ -38,11 +44,17 @@ import { rollupShards } from "./test-records-compact.ts";
 import {
   type AggregateState,
   buildManifest,
+  CI_SOURCE,
   dayOf,
   emptyAggregate,
   Fold,
+  locateSurfaces,
   parseAggregate,
+  partitionOf,
+  type Unplaced,
 } from "./test-selection/build.ts";
+import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
+import type { Suite } from "./test-topology/suite.ts";
 import {
   manifestBody,
   manifestObjectName,
@@ -75,13 +87,16 @@ export interface StoreAccess {
    * which shards it holds. Reading those replaces reading the day's
    * thousands of raw objects.
    *
-   * Only a bootstrap reads them, and not because the incremental path
-   * declines to: compaction waits a week for late arrivals, and the
-   * window that path reads is two days, so it never reaches a day that
-   * has one. A rollup is a read optimization rather than the record of
-   * its day — an object arriving after its shard is written stays in the
-   * raw area alone — which suits seeding sixty days of catch counts once
-   * and would not suit the run that keeps the manifest current.
+   * Neither mode asks for one because of the flag it was given: the rule
+   * asks wherever a source and date is one nothing has been folded from
+   * yet. In the steady state the incremental path never reaches such a
+   * day, because compaction waits a week for late arrivals and that path
+   * reads two days, so in practice this answers a bootstrap and a run
+   * catching up after an outage or a widened window.
+   *
+   * A rollup is a read optimization rather than the record of its day —
+   * an object arriving after its shard is written stays in the raw area
+   * alone — so a pair taken this way keeps only what the rollup held.
    */
   rollupShards(day: string): Promise<string[] | undefined>;
 
@@ -222,37 +237,75 @@ async function mapConcurrent<T, R>(
 }
 
 /**
- * Every submission object under the days asked for, across both areas.
- * A continuous-integration object's day is a path segment, so its day is
- * a prefix and one listing per day is exact. A local object's path puts
- * the reporting person ahead of the day, so that area is listed once and
+ * Every submission object of the days each area was asked for. A
+ * continuous-integration object's day is a path segment, so its day is a
+ * prefix and one listing per day is exact. A local object's path puts the
+ * reporting person ahead of the day, so that area is listed once and
  * filtered.
+ *
+ * The two areas are asked for different days because the rule answers
+ * differently for them. A continuous-integration day whose rollup is
+ * folded owes nothing more; no local day is ever in that position, since
+ * rollups cover the continuous-integration area alone.
  */
 async function listSubmissions(
   store: StoreAccess,
-  days: readonly string[],
+  ciDays: readonly string[],
+  localDays: readonly string[],
 ): Promise<string[]> {
-  const wanted = new Set(days);
+  const wanted = new Set(localDays);
   const names: string[] = [];
   // A listing that fails is not an empty day. Folding what did list and
   // publishing from it would score every identity in the missing day as
   // though it had not run, and the manifest saying so would become the
   // one every lane obeys. The run ends instead, and the previous manifest
   // stays newest.
-  for (const day of days) {
+  for (const day of ciDays) {
     names.push(...await store.list(`${ciSubmissionsPrefix()}/v1/${day}/`));
   }
   const local = `${storePrefix()}/submissions/local/`;
   for (const name of await store.list(local)) {
-    const day = name.match(/\/v1\/(\d{4}\/\d{2}\/\d{2})\//)?.[1];
-    if (day !== undefined && wanted.has(day)) names.push(name);
+    const day = partitionOf(name);
+    if (day.length > 0 && wanted.has(day)) names.push(name);
   }
   return [...new Set(names)].sort(byDayThenName);
 }
 
-/** The day partition in a submission object's name. */
-export function partitionOf(objectName: string): string {
-  return objectName.match(/\/v1\/(\d{4}\/\d{2}\/\d{2})\//)?.[1] ?? "";
+/** What one source and date still owes the aggregate. */
+export type InputChoice = "settled" | "rollup" | "raw";
+
+/**
+ * What one source and date still has to give, which is the whole of how
+ * this program chooses what to read.
+ *
+ * A bootstrap and an ordinary run apply it alike. A bootstrap is
+ * permission to start from an empty aggregate and, by default, a wider
+ * window; it is not a second way to choose inputs. Both then ask this of
+ * each source and date the window covers, and the answers differ only
+ * because the aggregates differ.
+ *
+ * `settled` — a receipt says this pair's rollup is folded. Rollups of
+ * this format carry no record of which arrivals they cover, so nothing
+ * can say how much a raw object of that pair would repeat. The pair is
+ * closed rather than combined with objects whose overlap is unknown.
+ *
+ * `rollup` — nothing of this pair is folded and a rollup covers it, so
+ * the rollup is the baseline and a receipt is written for it. One object
+ * stands in for the day's thousands, which is what makes a cold start
+ * over a wide window affordable at all.
+ *
+ * `raw` — everything else, and two different things reach it. A pair
+ * with raw contributions already stays raw, because a rollup written
+ * afterwards would overlap them. A pair no rollup covers is raw because
+ * there is nothing else to read, which is every local source: rollups
+ * cover the continuous-integration area alone.
+ */
+export function inputChoice(
+  known: { settled: boolean; foldedRaw: boolean; rollup: boolean },
+): InputChoice {
+  if (known.settled) return "settled";
+  if (known.foldedRaw || !known.rollup) return "raw";
+  return "rollup";
 }
 
 /**
@@ -337,6 +390,7 @@ export async function publish(
   args: readonly string[],
   store: StoreAccess = liveStore(storeBucket()),
   now: Date = new Date(),
+  topology: () => Promise<readonly Suite[]> = () => loadTopology(),
 ): Promise<number> {
   const options = parseArgs(args);
   if (options === undefined) {
@@ -386,43 +440,69 @@ export async function publish(
     }
   };
 
-  // A bootstrap folds each closed day from its rollup where one exists,
-  // which is one object against the day's thousands. The days it takes
-  // this way are recorded, so no later run over a wide window folds their
-  // raw objects on top of them and doubles every catch in them.
-  const compacted: string[] = [];
-  if (options.bootstrap) {
-    for (const day of partitions) {
-      const shards = await store.rollupShards(day);
-      if (shards === undefined) continue;
-      try {
-        // A day is folded whole or not at all: a shard that failed to
-        // read would leave the day partly folded, and marking it
-        // compacted would then hide the rest of it from every later run.
-        const reports = await mapConcurrent(
-          shards,
-          options.concurrency,
-          (objectName) => store.read(objectName),
-        );
-        for (const report of reports) noteReport(report);
-        fold.add(reports);
-        fold.markCompacted(day);
-        compacted.push(day);
-      } catch (error) {
-        console.warn(
-          `test selection: reading the rollup of ${day} failed: ${error}`,
-        );
-      }
+  // What each source and date still owes, from the one rule both modes
+  // apply. Only the continuous-integration area can answer anything but
+  // `raw`, because it is the only one rollups cover, so it is the only
+  // one the store is asked about — and it is asked only where the answer
+  // could be a rollup, so a run over days it has already read raw asks
+  // nothing.
+  const rollups = new Map<string, readonly string[]>();
+  const ciDays: string[] = [];
+  for (const date of partitions) {
+    const settled = fold.settled(CI_SOURCE, date);
+    const foldedRaw = fold.hasRaw(CI_SOURCE, date);
+    const shards = settled || foldedRaw
+      ? undefined
+      : await store.rollupShards(date);
+    switch (
+      inputChoice({ settled, foldedRaw, rollup: shards !== undefined })
+    ) {
+      case "rollup":
+        rollups.set(date, shards!);
+        break;
+      case "raw":
+        ciDays.push(date);
+        break;
+      case "settled":
+        break;
     }
+  }
+
+  let settled = 0;
+  for (const [date, shards] of rollups) {
+    try {
+      // A pair is folded whole or not at all: a shard that failed to read
+      // would leave it partly folded, and writing its receipt would then
+      // hide the rest of it from every later run.
+      const reports = await mapConcurrent(
+        shards,
+        options.concurrency,
+        (objectName) => store.read(objectName),
+      );
+      for (const report of reports) noteReport(report);
+      fold.add(reports);
+      fold.markSettled(CI_SOURCE, date);
+      settled++;
+    } catch (error) {
+      console.warn(
+        `test selection: reading the rollup of ${date} failed: ${error}`,
+      );
+      // No receipt was written, so the pair still owes what it owed, and
+      // the raw path is what is left to read it by.
+      ciDays.push(date);
+    }
+  }
+  if (rollups.size > 0) {
     console.log(
-      `test selection: folded ${compacted.length} day(s) from their rollups`,
+      `test selection: folded ${settled} day(s) from their rollups`,
     );
   }
 
-  const open = partitions.filter((day) => !fold.knowsDay(day));
   let listed: string[];
   try {
-    listed = await listSubmissions(store, open);
+    // Every day of the window for the local area: no local pair is ever
+    // settled, so the rule answers `raw` for each of them.
+    listed = await listSubmissions(store, ciDays, partitions);
   } catch (error) {
     console.warn(`test selection: listing the submissions failed: ${error}`);
     console.warn(
@@ -433,7 +513,7 @@ export async function publish(
   }
   const fresh = listed.filter((name) => !fold.knows(name));
   console.log(
-    `test selection: ${listed.length} object(s) under ${open.length} ` +
+    `test selection: ${listed.length} object(s) under ${ciDays.length} ` +
       `open day(s), ${fresh.length} not yet folded`,
   );
 
@@ -468,20 +548,40 @@ export async function publish(
   }
   const folded = fold.finish();
 
+  // The topology is what says where an identity runs. Its suite
+  // identifiers and units are what a lane looks a suite up by and what
+  // the packer charges overheads and capabilities against, so a manifest
+  // built without it names surfaces nothing in the tree answers to.
+  const suites = await topology();
+  const { placed, unplaced } = locateSurfaces(suites, folded.surfaces);
+  const states = new Map(
+    [...folded.states].filter(([key]) => placed.has(key)),
+  );
+
   const manifest = buildManifest({
-    states: folded.states,
+    states,
     mainRed: folded.mainRed,
-    surfaces: folded.surfaces,
+    surfaces: placed,
     today,
     generatedAt: startedAt.toISOString(),
     seed: ulid(),
     commit,
     runs: runs.size,
   });
+  manifest.unavailable = suites.flatMap((suite) =>
+    suite.unavailable.map((entry) => ({
+      suite: suite.id,
+      ...(suite.variant === undefined ? {} : { variant: suite.variant }),
+      unit: entry.unit,
+      ...(entry.leafName === undefined ? {} : { leafName: entry.leafName }),
+      ...(entry.phase === undefined ? {} : { phase: entry.phase }),
+      reason: entry.reason,
+    }))
+  );
   const reference = plan({
     manifest,
     mandatory: new Map(),
-    capabilities: new Map(),
+    capabilities: capabilitiesBySuite(suites),
   });
   // What the packer refused, from the packer, carrying the cost the bound
   // was compared against rather than a raw one that leaves out every
@@ -499,7 +599,7 @@ export async function publish(
       })),
   }));
 
-  summarize(manifest, reference, folded.observations);
+  summarize(manifest, reference, folded.observations, unplaced);
 
   if (options.out !== undefined) {
     await Deno.mkdir(options.out, { recursive: true });
@@ -543,11 +643,27 @@ function summarize(
   manifest: ReturnType<typeof buildManifest>,
   reference: ReturnType<typeof plan>,
   observations: number,
+  unplaced: Unplaced,
 ): void {
   console.log(
     `test selection: folded ${observations} execution(s) into ` +
       `${manifest.entries.length} identities`,
   );
+  if (unplaced.suiteLevel.length > 0) {
+    console.log(
+      `test selection: ${unplaced.suiteLevel.length} identities measure a ` +
+        `suite rather than anything a lane can be asked to run`,
+    );
+  }
+  if (unplaced.unclaimed.length > 0) {
+    // Almost always an identity whose records predate the registration
+    // preload, so nothing knows which file registers it. It is placed
+    // again the first time it runs and records one.
+    console.log(
+      `test selection: ${unplaced.unclaimed.length} identities no suite ` +
+        `claims, so no lane can run them`,
+    );
+  }
   const held = new Map<string, number>();
   for (const entry of manifest.withheld) {
     held.set(entry.reason, (held.get(entry.reason) ?? 0) + 1);
@@ -586,7 +702,13 @@ function summarize(
 }
 
 // Re-exported so an offline check can build the same day list.
-export { dayOf, manifestPrefix, newestAtOrBefore, serializeManifest };
+export {
+  dayOf,
+  manifestPrefix,
+  newestAtOrBefore,
+  partitionOf,
+  serializeManifest,
+};
 
 if (import.meta.main) {
   Deno.exit(await publish(Deno.args));

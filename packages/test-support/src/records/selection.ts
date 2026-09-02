@@ -68,6 +68,14 @@ export interface ManifestEntry {
   repeats: number;
 
   /**
+   * The last day anything is known to have run it, absent where nothing
+   * within the aggregate's reach has. The exploration draw takes the
+   * longest-unrun first, so this is what stops the draw sampling the
+   * same corpus with replacement forever.
+   */
+  lastRun?: string;
+
+  /**
    * Whether it has been shown to pass as the only test in its unit. Until
    * it has, its siblings are not skipped and the unit is what runs.
    */
@@ -290,6 +298,9 @@ function parseEntry(value: unknown): ManifestEntry | undefined {
   ) {
     return undefined;
   }
+  if (value.lastRun !== undefined && !isNonEmptyString(value.lastRun)) {
+    return undefined;
+  }
   const entry: ManifestEntry = {
     test,
     suite: value.suite,
@@ -300,6 +311,7 @@ function parseEntry(value: unknown): ManifestEntry | undefined {
     flakeRate: value.flakeRate,
     repeats: value.repeats,
   };
+  if (value.lastRun !== undefined) entry.lastRun = value.lastRun;
   if (value.independent !== undefined) entry.independent = value.independent;
   return entry;
 }

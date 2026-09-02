@@ -9,7 +9,6 @@ import {
   topologyUnits,
 } from "./test-topology.ts";
 import { CAPABILITIES } from "./ci-capabilities.ts";
-import { stepArms } from "./test-topology/cli.ts";
 
 const suites = await loadTopology(
   new URL("..", import.meta.url).pathname.replace(/\/$/, ""),
@@ -142,39 +141,42 @@ describe("reading the topology as a whole", () => {
   });
 });
 
-describe("reading the command-line dispatch table", () => {
-  it("takes the arm that runs a step alone, never a group arm", () => {
-    const arms = stepArms([
-      'case "$SECTION" in',
-      "  all)",
-      "    cf_test_step_begin one",
-      "    run_one",
-      "    cf_test_step_begin two",
-      "    run_two",
-      "    ;;",
-      "  one-only)",
-      "    cf_test_step_begin one",
-      "    run_one",
-      "    ;;",
-      "  two)",
-      "    cf_test_step_begin two",
-      "    run_two",
-      "    ;;",
-      "esac",
-    ].join("\n"));
-    expect([...arms]).toEqual([["one", "one-only"], ["two", "two"]]);
-  });
-
-  it("gives every recorded step of the real script an arm of its own", async () => {
+describe("what the command-line dispatch table becomes", () => {
+  /** Every step the dispatch script begins itself. */
+  async function recordedSteps(): Promise<string[]> {
     const script = await Deno.readTextFile(
       new URL("../packages/cli/integration/integration.sh", import.meta.url),
     );
-    const arms = stepArms(script);
-    const all = new Set<string>();
-    for (const line of script.split("\n")) {
-      const begins = /^ {4}cf_test_step_begin (\S+)$/.exec(line);
-      if (begins !== null) all.add(begins[1]!);
+    return [
+      ...new Set(
+        [...script.matchAll(/^ {4}cf_test_step_begin (\S+)$/gm)]
+          .map((found) => found[1]!),
+      ),
+    ];
+  }
+
+  it("makes a unit of every recorded step, and of nothing else", async () => {
+    // Both halves matter. A step with no arm running it alone is a step
+    // nothing can be asked to run; a group arm that became a unit would
+    // run steps another unit already holds, and the packer would pay for
+    // them twice.
+    const steps = await recordedSteps();
+    const suite = suiteById(suites, "cli-core")!;
+    const fromSteps = suite.units
+      .filter((unit) => unit.startsWith("integration.sh "))
+      .map((unit) => unit.slice("integration.sh ".length));
+    expect(fromSteps.sort()).toEqual(steps.sort());
+  });
+
+  it("gives each recorded step's identity to its own unit", async () => {
+    for (const step of await recordedSteps()) {
+      const name = `integration.sh ${step}`;
+      expect([
+        name,
+        suiteById(suites, "cli-core")!.locate({
+          test: { k: "integration", s: "cli", n: name },
+        }),
+      ]).toEqual([name, { level: "unit", unit: name }]);
     }
-    expect([...all].filter((step) => !arms.has(step))).toEqual([]);
   });
 });

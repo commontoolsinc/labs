@@ -1,12 +1,17 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { testIdentityKey } from "@commonfabric/test-support/records";
+import {
+  type TestIdentity,
+  testIdentityKey,
+  type TestRecord,
+} from "@commonfabric/test-support/records";
 import { loadTopology } from "./test-topology.ts";
 
 import {
   batchesOf,
   changedFiles,
   describePlan,
+  describeWithheld,
   everyBatch,
   main,
   mandatoryFor,
@@ -551,6 +556,47 @@ describe("running a lane's work", () => {
     expect(printed).toContain("build-binary toolshed");
   });
 
+  it("says what each batch costs and why each test is in it", () => {
+    // "Why did my test not run" is the question a selected run provokes,
+    // and a summary naming only the suites cannot begin to answer it.
+    const entry: ManifestEntry = {
+      test: { k: "unit", s: "bakery", n: "glaze > sets" },
+      suite: "workspace-unit",
+      unit: "packages/bakery/glaze.test.ts",
+      cost: 1.5,
+      score: 0.5,
+      inputs: { catches: 0, mainCatches: 0, sources: 0, churn: 0 },
+      flakeRate: 0,
+      repeats: 1,
+    };
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      describePlan(
+        lane,
+        [{
+          suite: runnable(["true"], "workspace-unit"),
+          units: [{ unit: "packages/bakery/glaze.test.ts", skip: [] }],
+          repeats: 2,
+        }],
+        ["deno"],
+        { objectName: "manifest-x.json.gz" },
+        [],
+        {
+          selections: [{ entry, reason: "value", repeats: 2 }],
+          projectedSeconds: 96,
+        },
+      );
+    } finally {
+      console.log = log;
+    }
+    const printed = lines.join("\n");
+    expect(printed).toContain("Projected: 96s");
+    expect(printed).toContain("3.0s");
+    expect(printed).toContain("value 1");
+  });
+
   it("says it is running unselected when there is no manifest", () => {
     const lines: string[] = [];
     const log = console.log;
@@ -561,6 +607,44 @@ describe("running a lane's work", () => {
       console.log = log;
     }
     expect(lines.join("\n")).toContain("the store is unreachable");
+  });
+
+  it("names what the manifest withheld, and what came back", () => {
+    const red = { k: "unit", s: "bakery", n: "glaze > sets" };
+    const flaky = { k: "unit", s: "bakery", n: "proof > rises" };
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      describeWithheld(
+        [
+          { test: red, suite: "workspace-unit", reason: "main-red" },
+          { test: flaky, suite: "workspace-unit", reason: "flaky" },
+        ],
+        new Map([[testIdentityKey(red), "changed"]]),
+      );
+    } finally {
+      console.log = log;
+    }
+    const printed = lines.join("\n");
+    expect(printed).toContain("already failing in the latest run on `main`");
+    expect(printed).toContain("too noisy to judge a change by");
+    // The change reaches the failing one, which is very likely a fix, so
+    // it runs in spite of being withheld.
+    expect(printed).toContain("yes, the change reaches it");
+    expect(printed).toContain("| no |");
+  });
+
+  it("says nothing about a manifest that withheld nothing", () => {
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      describeWithheld([], new Map());
+    } finally {
+      console.log = log;
+    }
+    expect(lines).toEqual([]);
   });
 });
 
@@ -638,7 +722,7 @@ describe("planning a lane the manifest chose", () => {
     // rather than by anything coordinating them.
     const counted = (printed: string): number =>
       printed.split("\n")
-        .map((line) => /^\| \S+ \| (\d+) \| \d+ \|$/.exec(line))
+        .map((line) => /^\| \S+ \| (\d+) \| /.exec(line))
         .reduce((total, row) => total + (row === null ? 0 : Number(row[1])), 0);
     let placed = 0;
     for (const lane of [1, 2, 3, 4, 5]) {
@@ -885,45 +969,99 @@ describe("what a lane records about itself", () => {
     await Deno.remove(spool, { recursive: true });
   });
 
-  it("marks a batch's records with the variant its suite declares", async () => {
+  /**
+   * A batch whose one invocation spools exactly this record, run against
+   * a suite declaring the surface and variant given.
+   */
+  async function spooling(
+    record: TestIdentity,
+    declared: Partial<Suite>,
+  ): Promise<{
+    ok: boolean;
+    records: TestRecord[];
+    conflicts: TestRecord[];
+  }> {
     const workDir = await Deno.makeTempDir({ prefix: "lane-variant-" });
     const written = JSON.stringify({
       line: "record",
-      test: { k: "integration", s: "runner", n: "attaches" },
+      test: record,
       outcome: "pass",
       durationMs: 1,
     });
-    const result = await runBatch(
-      {
-        suite: suite({
-          id: "package-integration-on",
-          variant: "server-execution",
-          units: ["one"],
-          command: (_units, context) =>
-            Promise.resolve([{
-              command: [
-                Deno.execPath(),
-                "eval",
-                `Deno.writeTextFileSync(
-                  Deno.env.get("CF_TEST_RECORDS_DIR") + "/fragment-a.ndjson",
-                  ${JSON.stringify(written + "\n")},
-                )`,
-              ],
-              cwd: context.root,
-            }]),
-        }),
-        units: [],
-        repeats: 1,
-      },
-      lane,
-      workDir,
-      undefined,
-      {},
-    );
+    try {
+      return await runBatch(
+        {
+          suite: suite({
+            id: "package-integration-on",
+            units: ["one"],
+            command: (_units, context) =>
+              Promise.resolve([{
+                command: [
+                  Deno.execPath(),
+                  "eval",
+                  `Deno.writeTextFileSync(
+                    Deno.env.get("CF_TEST_RECORDS_DIR") + "/fragment-a.ndjson",
+                    ${JSON.stringify(written + "\n")},
+                  )`,
+                ],
+                cwd: context.root,
+              }]),
+            ...declared,
+          }),
+          units: [],
+          repeats: 1,
+        },
+        lane,
+        workDir,
+        undefined,
+        {},
+      );
+    } finally {
+      await Deno.remove(workDir, { recursive: true });
+    }
+  }
+
+  it("marks a batch's records with the variant its suite declares", async () => {
     // A variant belongs to the suite that ran, not to the producer that
     // reported, so it is written on regardless of what the producer said.
+    const result = await spooling(
+      { k: "integration", s: "runner", n: "attaches" },
+      {
+        variant: "server-execution",
+        recordSurfaces: [{ kind: "integration", scope: "runner" }],
+      },
+    );
     expect(result.records[0]!.test.v).toBe("server-execution");
-    await Deno.remove(workDir, { recursive: true });
+    expect(result.conflicts).toEqual([]);
+  });
+
+  it("leaves a record off the suite's surfaces as its producer wrote it", async () => {
+    const result = await spooling(
+      { k: "integration", s: "runner", n: "attaches" },
+      {
+        variant: "server-execution",
+        recordSurfaces: [{ kind: "integration", scope: "shell" }],
+      },
+    );
+    expect(result.records[0]!.test.v).toBeUndefined();
+    expect(result.conflicts.length).toBe(1);
+    expect(result.ok).toBe(true);
+  });
+
+  it("reports a producer's own variant in a default batch", async () => {
+    // The execution was a default one, so a marker on its record
+    // describes a configuration that did not run.
+    const result = await spooling(
+      {
+        k: "integration",
+        s: "runner",
+        n: "attaches",
+        v: "server-execution",
+      },
+      { recordSurfaces: [{ kind: "integration", scope: "runner" }] },
+    );
+    expect(result.records[0]!.test.v).toBe("server-execution");
+    expect(result.conflicts.length).toBe(1);
   });
 
   it("says how far past a lane's budget the mandatory set went", async () => {

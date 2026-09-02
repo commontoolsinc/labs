@@ -39,6 +39,8 @@ import {
   trimWindows,
   value,
 } from "./score.ts";
+import { claimsFor } from "../test-topology.ts";
+import type { Suite } from "../test-topology/suite.ts";
 import {
   type Calibration,
   dialSnapshot,
@@ -80,12 +82,19 @@ export interface AggregateState {
   context?: StoredFoldContext;
 
   /**
-   * Days folded from a rollup rather than from their raw objects,
-   * "yyyy/mm/dd". A rollup carries a day's reports whole, so its raw
-   * objects are not in `folded` and a later run over a wide window would
-   * otherwise fold that day a second time and double every catch in it.
+   * The source-and-date pairs folded from a rollup rather than from their
+   * raw objects, each `"<source>\t<date>"`. A rollup carries its pair's
+   * reports whole, so those raw objects are not in `folded` and a later
+   * run over a wide window would otherwise fold them on top of it and
+   * double every catch in them.
+   *
+   * Scoped to the source and not only to the date, because rollups cover
+   * the continuous-integration area alone. A receipt naming the date by
+   * itself would say the day is accounted for, and the local submissions
+   * of that day — the evidence the score weighs highest — would never be
+   * read.
    */
-  compactedDays: string[];
+  compacted: string[];
 
   states: Record<string, IdentityState>;
 }
@@ -97,9 +106,32 @@ export function emptyAggregate(day: string): AggregateState {
     day,
     folded: [],
     context: serializeContext(emptyContext()),
-    compactedDays: [],
+    compacted: [],
     states: {},
   };
+}
+
+/** The submission area an object was written into. */
+export const CI_SOURCE = "ci";
+
+/**
+ * The area a submission object belongs to: the shared
+ * continuous-integration one, or one person's own. It is what a rollup
+ * covers and what a receipt is scoped to.
+ */
+export function sourceOf(objectName: string): string {
+  const who = localReporter(objectName);
+  return who === undefined ? CI_SOURCE : `local/${who}`;
+}
+
+/** The day partition in a submission object's name. */
+export function partitionOf(objectName: string): string {
+  return objectName.match(/\/v1\/(\d{4}\/\d{2}\/\d{2})\//)?.[1] ?? "";
+}
+
+/** How a source and a date name one pair, for a receipt or a lookup. */
+export function sourceDateKey(source: string, date: string): string {
+  return `${source}\t${date}`;
 }
 
 /**
@@ -137,17 +169,25 @@ export function parseAggregate(text: string): AggregateState | undefined {
   // The context is an optimization rather than a stored fact, so an
   // aggregate written without one, or with a malformed one, simply starts
   // the two cross-run rules from nothing.
-  const compactedDays = state.compactedDays ?? [];
-  if (!Array.isArray(compactedDays)) return undefined;
-  for (const day of compactedDays) {
-    if (typeof day !== "string") return undefined;
+  //
+  // A receipt written before the source was part of one names a date
+  // alone. Reading it forward as the continuous-integration area is
+  // exact rather than a guess: that area is the only one a rollup has
+  // ever covered, so nothing else could have written the receipt.
+  const written = state.compacted ?? state.compactedDays ?? [];
+  if (!Array.isArray(written)) return undefined;
+  for (const pair of written) {
+    if (typeof pair !== "string") return undefined;
   }
+  const compacted = state.compacted === undefined
+    ? (written as string[]).map((day) => sourceDateKey(CI_SOURCE, day))
+    : written as string[];
   return {
     schema: MANIFEST_SCHEMA_VERSION,
     day: state.day,
     folded: state.folded as string[],
     context: serializeContext(parseContext(state.context)),
-    compactedDays: compactedDays as string[],
+    compacted,
     states: state.states as Record<string, IdentityState>,
   };
 }
@@ -278,6 +318,78 @@ export function recordSurface(
   return { suite, unit: file ?? test.n, fromFile: file !== undefined };
 }
 
+/** What the topology could not place, and why. */
+export interface Unplaced {
+  /**
+   * Identities whose only claim is on the suite as a whole: the
+   * overlapping whole-invocation measurements a script records beside
+   * its own steps. They name no unit, so nothing can be asked to run one
+   * of them, and summing them with their own steps would count that work
+   * twice.
+   */
+  suiteLevel: string[];
+
+  /**
+   * Identities no suite claims at a unit level. An identity recorded
+   * before the registration preload carried its file is the usual one:
+   * the store knows the test and nothing knows which file registers it,
+   * so it will be placed again the first time it runs and records one.
+   */
+  unclaimed: string[];
+}
+
+/**
+ * Where each identity runs, as the topology says rather than as its own
+ * record surface guesses.
+ *
+ * Both halves of the system key on the suite identifier and unit a
+ * manifest carries: the lane runner asks the topology for the suite by
+ * that name, and the packer charges that suite's overhead and its
+ * capabilities. A manifest naming a surface derived from the record's
+ * own kind and scope matches no suite, so every unit reads as unknown
+ * and every selection is dropped for naming a suite the tree does not
+ * hold.
+ *
+ * An identity this cannot place is left out of the manifest rather than
+ * carried under a name nothing can run, and is reported so that the two
+ * reasons for it stay visible.
+ */
+export function locateSurfaces(
+  suites: readonly Suite[],
+  surfaces: ReadonlyMap<string, Surface>,
+): { placed: Map<string, Surface>; unplaced: Unplaced } {
+  const placed = new Map<string, Surface>();
+  const unplaced: Unplaced = { suiteLevel: [], unclaimed: [] };
+  for (const [key, surface] of surfaces) {
+    const test = identityOfKey(key);
+    if (test === undefined) continue;
+    const claims = claimsFor(suites, {
+      test,
+      // The unit a record's own surface fell back to is the file where
+      // one was recorded, and the identity's own name where none was.
+      // Only the first is a file, and only that is what `locate` joins
+      // on.
+      ...(surface.fromFile ? { file: surface.unit } : {}),
+    });
+    // Two suites claiming one identity is a topology defect rather than
+    // an ambiguity to settle here, and the drift guard is what fails on
+    // it. Placing it either way would put the work in whichever suite
+    // came first.
+    const unit = claims.length === 1 ? claims[0]!.unit : undefined;
+    if (unit !== undefined) {
+      placed.set(key, {
+        suite: claims[0]!.suite.id,
+        unit,
+        fromFile: surface.fromFile,
+      });
+      continue;
+    }
+    if (claims.length === 1) unplaced.suiteLevel.push(key);
+    else unplaced.unclaimed.push(key);
+  }
+  return { placed, unplaced };
+}
+
 /** How many times a lane runs an identity, given how flaky it is. */
 export function repeatsFor(rate: number): number {
   if (rate > FLAKE_EXCLUSION_RATE) return 1;
@@ -332,6 +444,21 @@ export function identityOfKey(key: string): TestIdentity | undefined {
   return test;
 }
 
+/**
+ * The last day this identity is known to have run. The run counts are
+ * kept per day and aged rather than kept forever, so an identity nothing
+ * has run inside that reach has no answer, which the exploration draw
+ * reads as the longest unrun of all.
+ */
+export function lastRun(state: IdentityState): string | undefined {
+  let latest: string | undefined;
+  for (const [day, runs] of Object.entries(state.runsByDay)) {
+    if (runs <= 0) continue;
+    if (latest === undefined || day > latest) latest = day;
+  }
+  return latest;
+}
+
 /** Builds a manifest from folded state. */
 export function buildManifest(input: BuildInput): Manifest {
   const entries: ManifestEntry[] = [];
@@ -347,6 +474,7 @@ export function buildManifest(input: BuildInput): Manifest {
     // the difference between a rounded float and a full one is megabytes.
     inputs.catches = round(inputs.catches, 2);
     inputs.churn = round(inputs.churn, 6);
+    const ran = lastRun(state);
     entries.push({
       test,
       suite: surface.suite,
@@ -356,6 +484,7 @@ export function buildManifest(input: BuildInput): Manifest {
       inputs,
       flakeRate: round(rate, 4),
       repeats: repeatsFor(rate),
+      ...(ran === undefined ? {} : { lastRun: ran }),
     });
     if (input.mainRed.has(key)) {
       withheld.push({ test, suite: surface.suite, reason: "main-red" });
@@ -400,7 +529,13 @@ export class Fold {
   readonly #samples = new Map<string, Map<string, DaySamples>>();
   readonly #folded: string[];
   readonly #foldedIndex: Set<string>;
-  readonly #compactedDays: string[];
+  readonly #compacted: string[];
+
+  /**
+   * The source-and-date pairs `folded` holds raw objects from, which is
+   * what says a rollup written later would overlap them.
+   */
+  readonly #rawPairs: Set<string>;
   readonly #resolver: AliasResolver;
   readonly #today: string;
   #observations = 0;
@@ -421,7 +556,12 @@ export class Fold {
     // object per run, and the list grows without bound, so the question
     // is answered against a set rather than by scanning.
     this.#foldedIndex = new Set(this.#folded);
-    this.#compactedDays = [...aggregate.compactedDays];
+    this.#compacted = [...aggregate.compacted];
+    this.#rawPairs = new Set(
+      this.#folded.map((name) =>
+        sourceDateKey(sourceOf(name), partitionOf(name))
+      ),
+    );
     this.#resolver = resolver;
     this.#today = today;
   }
@@ -437,20 +577,31 @@ export class Fold {
   }
 
   /**
-   * Whether this day was folded from a rollup. Its raw objects are not in
-   * `folded`, so a caller listing them has to ask about the day instead
-   * or it will fold the day twice.
+   * Whether this source and date were folded from a rollup. Their raw
+   * objects are not in `folded`, so a caller listing them has to ask
+   * about the pair instead or it will fold the pair twice.
    */
-  knowsDay(day: string): boolean {
-    return this.#compactedDays.includes(day);
+  settled(source: string, date: string): boolean {
+    return this.#compacted.includes(sourceDateKey(source, date));
   }
 
   /**
-   * Records that a day came from its rollup, so no later run folds the
-   * raw objects the rollup summarizes.
+   * Whether any raw object of this source and date is already folded. A
+   * rollup written later would overlap those contributions, and nothing
+   * in a rollup of this format says by how much, so a pair that answers
+   * yes stays on the raw path.
    */
-  markCompacted(day: string): void {
-    if (!this.#compactedDays.includes(day)) this.#compactedDays.push(day);
+  hasRaw(source: string, date: string): boolean {
+    return this.#rawPairs.has(sourceDateKey(source, date));
+  }
+
+  /**
+   * Records that a source and date came from their rollup, so no later
+   * run folds the raw objects the rollup summarizes.
+   */
+  markSettled(source: string, date: string): void {
+    const key = sourceDateKey(source, date);
+    if (!this.#compacted.includes(key)) this.#compacted.push(key);
   }
 
   /**
@@ -540,7 +691,7 @@ export class Fold {
         day: this.#today,
         folded: this.#folded,
         context: serializeContext(this.#context),
-        compactedDays: this.#compactedDays,
+        compacted: this.#compacted,
         states: Object.fromEntries(this.#states),
       },
       states: this.#states,

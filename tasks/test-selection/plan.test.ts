@@ -381,6 +381,40 @@ describe("plan", () => {
       const reasons = new Set(selected(result).map((s) => s.reason));
       expect(reasons.has("exploration")).toBe(true);
     });
+
+    it("draws the longest-unrun first", () => {
+      // What makes the draw a sweep of the corpus rather than a sample
+      // of it: everything ran yesterday except one that has not run for
+      // a year, and that one is what the draw reaches for.
+      const manifest = sampleManifest({
+        entries: entries(60, (i) => ({
+          cost: 1,
+          score: 0.05,
+          lastRun: i === 41 ? "2025-09-01" : "2026-08-31",
+        })),
+      });
+      const result = run(manifest, { budgetSeconds: 2, lanes: 1 });
+      const drawn = selected(result).filter((s) => s.reason === "exploration");
+      expect(drawn.length).toBeGreaterThan(0);
+      expect(testIdentityKey(drawn[0]!.entry.test)).toBe(
+        testIdentityKey({ k: "unit", s: "memory", n: "case 41" }),
+      );
+    });
+
+    it("draws an identity nothing has run ahead of every day there is", () => {
+      const manifest = sampleManifest({
+        entries: entries(60, (i) => ({
+          cost: 1,
+          score: 0.05,
+          ...(i === 17 ? {} : { lastRun: "2020-01-01" }),
+        })),
+      });
+      const result = run(manifest, { budgetSeconds: 2, lanes: 1 });
+      const drawn = selected(result).filter((s) => s.reason === "exploration");
+      expect(testIdentityKey(drawn[0]!.entry.test)).toBe(
+        testIdentityKey({ k: "unit", s: "memory", n: "case 17" }),
+      );
+    });
   });
 
   describe("capabilities", () => {

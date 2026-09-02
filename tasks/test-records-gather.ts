@@ -97,6 +97,30 @@ export interface CollectOptions {
    * producer that reported.
    */
   variant?: string;
+
+  /**
+   * The kinds and scopes this execution's records may carry. Given, a
+   * record outside them is not one the caller's topology describes, and
+   * neither is one a producer marked with a variant of its own where
+   * none was declared. Such a record keeps what its producer wrote and
+   * is reported rather than being given a configuration it did not run
+   * in. Absent, every record takes the declared variant.
+   */
+  surfaces?: ReadonlyArray<{ kind: string; scope: string }>;
+}
+
+/** What one execution left behind. */
+export interface Collected {
+  /** Everything it recorded, the conflicts among them. */
+  records: TestRecord[];
+
+  /**
+   * Those of them the declared surfaces do not describe. They are kept
+   * as their producer wrote them rather than dropped, so they reach the
+   * store, belong to no suite there, and the store half of the topology
+   * drift guard is what fails on them.
+   */
+  conflicts: TestRecord[];
 }
 
 /**
@@ -111,7 +135,7 @@ export interface CollectOptions {
  */
 export async function collectRecords(
   options: CollectOptions,
-): Promise<TestRecord[]> {
+): Promise<Collected> {
   if (options.variant !== undefined && options.variant.length === 0) {
     throw new Error("a declared variant must not be empty");
   }
@@ -160,10 +184,23 @@ export async function collectRecords(
     }
   }
 
-  if (options.variant !== undefined) {
-    for (const record of records) record.test.v = options.variant;
+  const conflicts: TestRecord[] = [];
+  for (const record of records) {
+    if (options.surfaces !== undefined) {
+      const described = options.surfaces.some((surface) =>
+        surface.kind === record.test.k && surface.scope === record.test.s
+      );
+      // A record marked with a variant where none was declared is the
+      // other half of the same mistake: the execution was a default one,
+      // so a marker on it describes a configuration that did not run.
+      if (!described || (options.variant === undefined && record.test.v)) {
+        conflicts.push(record);
+        continue;
+      }
+    }
+    if (options.variant !== undefined) record.test.v = options.variant;
   }
-  return records;
+  return { records, conflicts };
 }
 
 export interface GatherOptions {
@@ -178,7 +215,7 @@ export interface GatherOptions {
 
 /** Gathers the spool and JUnit files into the artifact directory. */
 export async function gather(options: GatherOptions): Promise<void> {
-  const records = await collectRecords({
+  const { records } = await collectRecords({
     ...(options.spoolDir === undefined ? {} : { spoolDir: options.spoolDir }),
     junit: options.junit,
     ...(options.variant === undefined ? {} : { variant: options.variant }),

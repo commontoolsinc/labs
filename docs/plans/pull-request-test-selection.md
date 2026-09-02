@@ -473,14 +473,17 @@ is what the feedback loop then closes. The deploy and attestation jobs stay exac
 are, since they only ever ran on `main`.
 
 **`cli-fuse` carries the fine granularity the rest of this depends on.**
-`packages/cli/integration/fuse-exec.sh` records 25 identities, one for each
-phase it goes through, through the `cf_test_step_begin` markers
-`integration.sh` also uses. Each marker leads the phase it names, so a
-phase that fails is the record that carries the failure, and the two
-phases that bring the mount up and wait for it to hydrate record like the
-rest, so a mount that never comes up is reported as the mount. Scoring, the flake rate and the
-60-second ratchet each get a number per phase where they had one covering
-a FUSE mount, a Toolshed server and everything the script does with them.
+`packages/cli/integration/fuse-exec.sh` records an identity for each phase
+it goes through, through the `cf_test_step_begin` markers `integration.sh`
+also uses. Its 23 phases record under 25 names, because one of them
+announces under one of three sentences depending on how deeply it probes,
+and each of those is an identity of its own. Each marker leads the phase
+it names, so a phase that fails is the record that carries the failure,
+and the two phases that bring the mount up and wait for it to hydrate
+record like the rest, so a mount that never comes up is reported as the
+mount. Scoring, the flake rate and the 60-second ratchet each get a
+number per phase where they had one covering a FUSE mount, a Toolshed
+server and everything the script does with them.
 
 The script also takes a section, so a lane can be pointed at part of it.
 Which phases can stand alone was a question about the script rather than
@@ -490,7 +493,12 @@ is four sections rather than one per phase. A section is a group of phases over 
 mount rather than a phase on its own, because the mount, the daemon and
 the piece cost more than every phase together and each section needs all
 three. Four phases therefore run whichever section was asked for, and are
-not selectable.
+not selectable. A fifth is not selectable for the same reason without
+being in that group: the phase that puts the callable files in place is a
+precondition of three of the four sections, so each of those runs it
+first. The rule the topology applies covers both — a phase more than one
+section runs names no single section, so it is a suite-level record
+rather than one belonging to a unit.
 
 Two dependencies decide where the boundaries fall, and both are about
 state a phase leaves behind. The handler phases assert `messageCount` as
@@ -724,7 +732,7 @@ build's 17,999 executions.
 | One gate command | `repo-gates` | One, named for the gate that ran | Nothing to reach. |
 | One `deno check` invocation | `typecheck` | One, named for the path group it checked, which the task records itself | Nothing to reach. |
 | A whole task carrying one record | `cfcheck`, `pattern-vintage` | One, for everything the task did | Nothing to reach, and nothing finer exists: the suite is its own identity. |
-| A section of `fuse-exec.sh` | `cli-fuse` | The four phases every section runs, and the phases that section selects | Nothing to reach below the section. A mount comes up for the section, not for the phase, so its phases run or are skipped together. |
+| A section of `fuse-exec.sh` | `cli-fuse` | The phases that section alone selects. The phases more than one section runs record against the suite instead, since they name no single section | Nothing to reach below the section. A mount comes up for the section, not for the phase, so its phases run or are skipped together. |
 
 Six of the eight rows are one identity per invocation, which is why this
 change is smaller than removing a concept sounds. The topology does not
@@ -2012,7 +2020,8 @@ The object carries:
   `suiteOverhead` and `correction` per suite;
 - every item: its complete identity or identities, optional variants
   included, its suite, its file, its cost, its score, the inputs behind
-  that score, its flake rate, and its repeat count;
+  that score, its flake rate, its repeat count, and the last day
+  anything ran it, which is what orders the exploration draw;
 - the withheld sets — failing on `main`, and above the flake exclusion
   rate — each with the reason, so a lane can say why something is absent;
 - the tests declared unavailable in a configuration-specific skip
@@ -3119,6 +3128,8 @@ tape measure.
 | `ENVIRONMENTAL_MIN_SOURCES` | 5 | sources | Chosen | How many distinct sources a failure spans inside that window before it reads as the environment. Up when a genuinely broad regression is written off; down when a broken runner's failures still count as catches. |
 | `BREADTH_SATURATION` | 2 | sources | Chosen | Where the breadth term reaches half its ceiling. Up when four sources should outrank one by more; down when one source should already be worth nearly all of it. |
 | `CHURN_WINDOW_DAYS` | 60 | days | Chosen | How far back the decayed counts are read. Past this the weight is under one part in sixteen, so this is a performance decision rather than a policy one. |
+| `SAME_COMMIT_REACH_DAYS` | 2 | days | Chosen | How far back the fold remembers a commit's outcomes, so that a rerun landing in a later batch than the run it repeats is still read as the test disagreeing with itself. Up when reruns land far enough behind that their disagreement is counted as a catch; down when the fold's memory is what will not fit. It costs the number of identities that have failed times the number of commits, so it is the first dial to look at when a publisher run runs out of memory. |
+| `FLAKE_COMMIT_REACH` | 8 | commits | Chosen | How many of the most recently observed commits the fold keeps outcomes at, alongside the span above. Moves for the same two reasons and against the same cost. |
 | `FLAKE_WINDOW_DAYS` | 60 | days | Chosen | Up when a flake rate swings about on too little evidence; down when a test since fixed stays excluded. |
 | `COST_WINDOW_DAYS` | 7 | days | Chosen | Up when cost estimates are noisy; down when durations drift faster than the estimate follows. |
 | `ATTRIBUTION_MAP_DAYS` | 7 | days | Chosen | Up when rebuilding the map costs more than its staleness does; down when changed lines keep resolving to tests that have moved. |
@@ -3270,11 +3281,16 @@ answers somewhere people can see them.
       durably pending. Readers do not use the journal before that receipt.
 - [ ] Build the next rollup format from journal entries through a recorded
       position, accounting exactly once for every eligible entry through
-      that position for its source and date. Give bootstrap and ordinary
-      publishing one source-and-date input planner over those rollups and
-      later journal entries. Replace the date-only compacted receipt and
-      keep local records on their raw path until they have rollups of their
-      own.
+      that position for its source and date, and let the input plan
+      consume the journal entries after a rollup's position.
+  - [x] One source-and-date input plan, which bootstrap and ordinary
+        publishing both apply. A flag is permission to start from an
+        empty aggregate and a wider default window, and nothing else
+        decides what is read.
+  - [x] A source-scoped receipt in place of the date-only one, so that a
+        rollup of the shared area cannot say a day is accounted for and
+        take that day's local submissions with it. Local records stay on
+        their raw path until they have rollups of their own.
 - [ ] Rebuild aggregates seeded from version-one rollups; do not migrate
       their ambiguous date receipts into journal cursors.
 - [ ] Once readers have migrated to the journal, keep partition listing as
@@ -3295,8 +3311,9 @@ answers somewhere people can see them.
         catches, but over unbounded history, so a rate needs the state to
         keep those per day as well as in total.
 - [x] The `deno task test-selection` entry point and its modes: `dials`,
-      `coverage`, `explain <identity>`, and `plan` with `--dry-run`.
-      `--verify` needs the topology and lands with part two.
+      `coverage`, `explain <identity>`, and `plan` with `--dry-run` and
+      `--verify`. Every mode that packs reads the topology, so the
+      capability setup a lane opens is charged here as it is there.
 
 On its own this part gives the repository a flake list derived from
 evidence rather than from anecdote, and a coverage trend nobody has today.
@@ -3316,7 +3333,7 @@ exercised on the branch on its own.
       distinguishes item identities from overlapping suite-level
       measurements, and returns at most one item for an identity that
       several arms or entry points can run. Add `tasks/ci-capabilities.ts`.
-      Twenty suites hold 2,360 units. The repository gates are two
+      Twenty suites hold 2,396 units. The repository gates are two
       suites rather than one, because `mandatory` belongs to a suite and
       the `always` set has to stay tiny: `repo-gates` holds formatting,
       linting and the drift guard, and `repo-checks` holds the rest of
@@ -3327,11 +3344,13 @@ exercised on the branch on its own.
       only the named leaf identity from unknown and coverage rules.
 - [x] Give `packages/cli/integration/fuse-exec.sh` fine granularity.
   - [x] Every phase records, so the suite records 25 identities rather
-        than one. Each marker leads the phase it names, through the same
+        than one, across the 23 phases the script goes through. Each
+        marker leads the phase it names, through the same
         `cf_test_step_begin` `integration.sh` uses, so a phase that fails
-        is the record that carries the failure rather than the script's own
-        record carrying it. The two phases that bring the mount up are the
-        identities this adds beyond the 23 the phases already named.
+        is the record that carries the failure rather than the script's
+        own record carrying it. The two phases that bring the mount up
+        are the identities this adds beyond the phases that already
+        named one.
   - [x] It gains a section dispatch over the four groups of phases that
         stand alone, so `cli-fuse` becomes an item suite like its sibling.
         A section is a group of phases over one mount, and the
@@ -3357,12 +3376,15 @@ exercised on the branch on its own.
       would be found only on `main`.
 - [x] `tasks/check-test-topology.ts`, both halves, wired into
       `repo-gates`, with exact variant matching and one source-item claim
-      allowed per variant. Its first run found ten test files that
-      nothing in this repository executes; they are recorded with the
-      reason each runs nowhere and reported rather than failed on, so a
-      new unclaimed surface still fails. The five projects under
-      `packages/deno-web-test/test/` that the harness drives are declared
-      as the fixtures they are.
+      allowed per variant. Two test files under
+      `packages/cf-harness/integration/` are reached only by a package
+      task nothing dispatches; they are recorded with the reason each
+      runs nowhere and reported rather than failed on, so a new
+      unclaimed surface still fails. Eight paths that look like tests
+      and are not are declared as the fixtures they are: the five
+      projects under `packages/deno-web-test/test/` that the harness
+      drives, and the three command-line tours the verb-session gate
+      holds the documentation to rather than running.
 - [x] Extract the part of `tasks/test-records-gather.ts` that reads records,
       ingests JUnit, and applies a declared variant as the shared gather
       function. Its command-line entry point and `tasks/ci-lane.ts` both
