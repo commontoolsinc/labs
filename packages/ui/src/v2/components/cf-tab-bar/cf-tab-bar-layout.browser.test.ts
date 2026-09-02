@@ -1,4 +1,5 @@
 import { assert, assertAlmostEquals, assertEquals } from "@std/assert";
+import "./index.ts";
 import "../cf-screen/index.ts";
 
 type UpdatingElement = HTMLElement & {
@@ -17,10 +18,6 @@ async function settleLayout(root: ParentNode): Promise<void> {
 }
 
 Deno.test("cf-tab-bar remains fixed when used standalone", async () => {
-  if (typeof document === "undefined") {
-    return;
-  }
-
   const tabBar = document.createElement("cf-tab-bar");
   tabBar.innerHTML = `
     <cf-tab-bar-item value="home" label="Home"></cf-tab-bar-item>
@@ -37,10 +34,6 @@ Deno.test("cf-tab-bar remains fixed when used standalone", async () => {
 });
 
 Deno.test("cf-screen reserves space for footer-slotted inset cf-tab-bar", async () => {
-  if (typeof document === "undefined") {
-    return;
-  }
-
   const fixture = document.createElement("div");
   fixture.style.cssText = [
     "position: fixed",

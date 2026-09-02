@@ -149,10 +149,16 @@ piece-management concern, and the spelling says so. They were once mounted under
 `cf piece` as well; those spellings are removed
 (docs/plans/cli-surface-shape.md, step 6b).
 
-A reference may also end in `#argument`, which selects the piece's arguments
-cell the way `--input` does. Only commands that take `--input` accept it; `#` is
-reserved for the suffix, so a path key containing `#` needs the positional path
-spelling.
+A target may also end in `#argument`, which selects the piece's arguments cell
+the way `--input` does — on a reference, on a bare id, and on a slug alike,
+since all three designate the same piece. Only commands that take `--input`
+accept it; `#` is reserved for the suffix, so a path key containing `#` needs
+the positional path spelling. A `--url` carries no fragment into the reference
+it decomposes to, whatever the URL names, so a `#argument` written on one is
+dropped rather than refused. A URL that names the piece admits no `--cell` or
+positional address beside it, and `--input` is what reaches the arguments cell
+there; a URL that names only the space leaves the target to arrive as it always
+does — a positional address, or `--cell` — carrying the suffix like any other.
 
 `cf piece apply` replaces a piece's whole input rather than one path within it.
 It validates the document against the pattern's `argumentSchema` and re-executes
@@ -296,10 +302,10 @@ standard error and continues searching that piece and the rest of the space.
 ## Piece CFC labels
 
 `cf piece get-label` returns the effective CFC label view for a result path.
-Pass `--input` to select the input cell — a `--cell` reference ending in
-`#argument` selects it too. The paths in the returned view are relative to the
-selected path, and the view includes declared, derived, and link-carried labels.
-An unlabeled value returns JSON `null`.
+Pass `--input` to select the input cell — a `--cell` value ending in `#argument`
+selects it too. The paths in the returned view are relative to the selected
+path, and the view includes declared, derived, and link-carried labels. An
+unlabeled value returns JSON `null`.
 
 ```bash
 cf piece get-label --cell ID messages/0/body
@@ -1276,9 +1282,9 @@ line, in either of its spellings — `--remote=<url>` or bare.
 
 An option's value completes the same whether it is written after a space or
 after `=`, and every spelling of a target reaches the same slots behind it: the
-bare id, the reference (space-qualified or not, with an `@scope` suffix, an
-embedded path, or the `#argument` suffix), and a reference written positionally
-in place of the flag.
+bare id, the slug, the reference (space-qualified or not, with an embedded
+path), and a reference written positionally in place of the flag — each of them
+carrying the `@scope` and `#argument` suffixes.
 
 Past a `stopEarly()` boundary — after `cf call`'s callable name, after
 `cf exec`'s mounted file — nothing is offered. The CLI's own flags are refused

@@ -20,7 +20,10 @@ import type { Candidate } from "./static.ts";
 import type { CompletionLine } from "./line.ts";
 import { longName } from "./line.ts";
 import { absPath } from "../utils.ts";
-import { normalizeLLMFriendlyRef } from "../llm-friendly-ref.ts";
+import {
+  normalizeLLMFriendlyRef,
+  splitArgumentSuffix,
+} from "../llm-friendly-ref.ts";
 import { parseScopedIdSegment } from "@commonfabric/runner/shared";
 import type { PieceConfig, SpaceConfig } from "../piece.ts";
 import ports from "@commonfabric/ports" with { type: "json" };
@@ -127,16 +130,16 @@ function writtenPieceRef(line: CompletionLine): string | undefined {
  *
  * `normalizeLLMFriendlyRef` reads the reference: the embedded space, the
  * `@scope` suffix, an embedded path, and the `#argument` suffix that selects
- * the arguments cell the way `--input` does. What it does not
- * recognize falls through to the alias grammar, which is `id[@scope]`. Taking
- * the word verbatim as a piece id — which this did — meant every documented
- * spelling but the bare id resolved to a listing call that could not succeed,
- * and so to a slot that silently offered nothing.
+ * the arguments cell the way `--input` does. What it does not recognize falls
+ * through to the alias grammar, `id[@scope][#argument]`. Every spelling the
+ * command's intake accepts has to reach one of the two readings: a word taken
+ * verbatim as a piece id resolves to a listing call that cannot succeed, and
+ * so to a slot that silently offers nothing.
  *
  * A malformed reference is `null` rather than a throw: the caller is a
  * provider, and a half-typed word is the normal state of one.
  */
-function resolvePieceContext(line: CompletionLine): PieceConfig | null {
+export function resolvePieceContext(line: CompletionLine): PieceConfig | null {
   const written = writtenPieceRef(line);
   if (!written) return null;
 
@@ -150,9 +153,11 @@ function resolvePieceContext(line: CompletionLine): PieceConfig | null {
   }
 
   if (!ref) {
+    let bare;
     let alias;
     try {
-      alias = parseScopedIdSegment(written);
+      bare = splitArgumentSuffix(written);
+      alias = parseScopedIdSegment(bare.target);
     } catch {
       return null;
     }
@@ -162,6 +167,7 @@ function resolvePieceContext(line: CompletionLine): PieceConfig | null {
       ...space,
       piece: alias.id,
       ...(alias.scope && { pieceScope: alias.scope }),
+      ...(bare.input && { pieceInput: true }),
     };
   }
 
@@ -339,8 +345,8 @@ async function cellPathCandidates(
   const { parentPath, prefix } = splitPathPrefix(line.word);
   const { listCellKeys } = await import("../cell-listing.ts");
   const keys = await listCellKeys(config, parentPath, {
-    // `#argument` on the reference and `--input` as a flag are two spellings
-    // of one selection, so both reach the arguments cell here.
+    // `#argument` on the target and `--input` as a flag are two spellings of
+    // one selection, so both reach the arguments cell here.
     input: line.flags.has("input") || config.pieceInput === true,
   });
   if (keys.length === 0) return NOTHING;

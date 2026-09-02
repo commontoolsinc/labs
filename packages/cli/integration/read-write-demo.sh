@@ -2,7 +2,7 @@
 # Reading and writing a piece's cells as something to watch — the half of the
 # CLI a caller reaches for before any verb: a shaped read, the two cells one
 # piece has and the flag that chooses between them, the `#argument` suffix
-# that spells the same choice on an address, the write that runs nothing, the
+# that spells the same choice on the target, the write that runs nothing, the
 # step that recomputes, and the wish that answers with an address it had to
 # write a cell to find.
 #
@@ -278,12 +278,10 @@ say "does, on both the read and the write."
 run cf get -s "$SPACE" "$ADDRESS#argument" target
 run_stdin '30' cf set -s "$SPACE" "$ADDRESS#argument" target
 run cf get -s "$SPACE" --piece thermostat target --input
-say "The suffix rides the canonical reference form and nothing else. On a"
-say "slug or a bare id there is no reference for it to attach to, and it is"
-say "refused rather than folded into the id:"
-refused "the suffix rides the canonical reference, not a slug or bare id" \
-  "rides the canonical reference form" \
-  cf get -s "$SPACE" --piece 'thermostat#argument' target
+say "A slug and a bare id designate the piece a reference designates, so the"
+say "selection written after one means what it means after the other. Here the"
+say "slug reads back the cell the address just wrote to:"
+run cf get -s "$SPACE" --piece 'thermostat#argument' target
 say "And a command that takes no --input takes no #argument either, so a"
 say "call cannot quietly be aimed at the arguments cell:"
 refused "a command without --input has no arguments cell to select" \
@@ -319,10 +317,11 @@ say "is not effect-free."
 
 printf '\n%s━━ The shape of it %s\n' "$B" "$N"
 say "A piece has two cells and one flag that chooses between them, spelled"
-say "again as a suffix on an address. A read shapes its own answer and"
-say "changes nothing. A write commits a value and runs nothing — not a set,"
-say "and not a verb call either — so a derived field keeps answering to the"
-say "state it was last computed from until cf piece step observes the piece."
+say "again as a suffix on a reference, a bare id or a slug. A read shapes"
+say "its own answer and changes nothing. A write commits a value and runs"
+say "nothing — not a set, and not a verb call either — so a derived field"
+say "keeps answering to the state it was last computed from until cf piece"
+say "step observes the piece."
 say "And the one read here that is not free is the one that never named an"
 say "address: a wish resolves by writing."
 say ""

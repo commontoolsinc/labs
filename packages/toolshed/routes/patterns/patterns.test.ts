@@ -4,11 +4,11 @@ import { generateETag } from "@commonfabric/static/etag";
 import env from "@/env.ts";
 import createApp from "@/lib/create-app.ts";
 import router from "@/routes/patterns/patterns.index.ts";
-import { PatternsServer } from "@/routes/patterns/patterns-server.ts";
 import {
   classifyPatternError,
   patternResponseHeaders,
-} from "@/routes/patterns/patterns.handlers.ts";
+} from "@commonfabric/runner/patterns-route.deno";
+import { createPatternsRoute } from "@/routes/patterns/patterns-server.ts";
 
 const IDENTITY_RE = /^[A-Za-z0-9_-]{43}$/;
 
@@ -62,6 +62,19 @@ describe("Patterns API", () => {
         "/api/patterns/non-existent-pattern.tsx",
       );
       expect(response.status).toBe(404);
+    });
+
+    it("returns 404 for a path naming a directory or reaching below a file", async () => {
+      // Neither names a file this route can serve, and the route lists no
+      // directories, so both are absent rather than a fault of this server.
+
+      const directory = await app.request("/api/patterns/system");
+      expect(directory.status).toBe(404);
+
+      const belowAFile = await app.request(
+        "/api/patterns/record.tsx/below.ts",
+      );
+      expect(belowAFile.status).toBe(404);
     });
   });
 
@@ -193,7 +206,7 @@ describe("Patterns API", () => {
       // The same value the shared helper computes over default-app.tsx's actual
       // authored import closure — proves the endpoint wires through the runner
       // helper AND that the real system pattern's closure resolves cleanly.
-      const direct = await new PatternsServer().identity(
+      const direct = await createPatternsRoute().identity(
         "system/default-app.tsx",
       );
       expect(httpIdentity).toBe(direct);

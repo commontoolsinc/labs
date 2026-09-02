@@ -1,4 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
+import "./index.ts";
 import "../cf-hstack/index.ts";
 
 type UpdatingElement = HTMLElement & {
@@ -20,10 +21,6 @@ const LONG_TEXT =
   "instead of overflowing or wrapping onto additional lines in the row.";
 
 Deno.test("cf-text truncate applies single-line ellipsis styles", async () => {
-  if (typeof document === "undefined") {
-    return;
-  }
-
   const text = document.createElement("cf-text");
   text.setAttribute("truncate", "");
   text.textContent = LONG_TEXT;
@@ -43,10 +40,6 @@ Deno.test("cf-text truncate applies single-line ellipsis styles", async () => {
 });
 
 Deno.test("cf-text truncate shrinks and clips inside a cf-hstack", async () => {
-  if (typeof document === "undefined") {
-    return;
-  }
-
   const fixture = document.createElement("div");
   fixture.style.cssText = "width: 240px;";
   fixture.innerHTML = `

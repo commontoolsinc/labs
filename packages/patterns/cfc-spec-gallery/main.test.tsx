@@ -1,4 +1,5 @@
-import { assert, handler, pattern, Stream, TESTS } from "commonfabric";
+import { assert, handler, pattern, Stream, TESTS, UI } from "commonfabric";
+import { findNodeById, hasText } from "../test/vnode-helpers.ts";
 import Gallery from "./main.tsx";
 
 const trigger = handler<void, { stream: Stream<void> }>((_, { stream }) => {
@@ -63,6 +64,13 @@ export default pattern(() => {
   });
 
   const assert_count = assert(() => instance.totalExamples === 16);
+  // Reaching into the rendered view is what builds it. Every card here is a
+  // call to one of this pattern's view helpers, and nothing else in this file
+  // asks for the view, so without this they run only where a browser renders
+  // the gallery — which is to say on some CI runs and not others.
+  const assert_renders_header = assert(() =>
+    hasText(findNodeById(instance[UI], "gallery-count"), "16 total examples")
+  );
   const assert_forward_prepared = assert(() => instance.completedCount === 0);
   const assert_forward_committed = assert(() =>
     instance.completedCount === 1 &&
@@ -93,6 +101,7 @@ export default pattern(() => {
   return {
     [TESTS]: [
       { assertion: assert_count },
+      { assertion: assert_renders_header },
       { action: action_change_forward_recipient },
       { action: action_prepare_forward },
       { assertion: assert_forward_prepared },

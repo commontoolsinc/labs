@@ -90,6 +90,13 @@ export async function login(page: Page, identity: Identity): Promise<void> {
 
   const serializedId = jsonFromFabricValue(keyPair);
 
+  // Setting an identity builds a new runtime and drops the one the page is
+  // holding: `resolveIdentity` mints a fresh `Identity` from what crosses the
+  // boundary, so `shouldRecreateRuntime` fires on the object even for the DID
+  // already logged in. Take the outgoing worker's pattern-coverage hits while
+  // it is still there to ask.
+  await collectPatternCoverage(page);
+
   // Everything from here on runs against the page, and every way it can fail
   // says nothing about the page it failed against. The runtime handshake below
   // reports which of its two stages ran out, and no more than that.
@@ -459,9 +466,6 @@ export class ShellIntegration {
   #afterAll = async () => {
     if (this.#page) {
       await getPresentationSession()?.close(this.#page);
-      // Before disposing: the worker owns the collector, and disposing the
-      // runtime takes it with it.
-      await collectPatternCoverage(this.#page);
     }
     await this.#disposePageRuntime();
     await this.#page?.close();
@@ -475,6 +479,9 @@ export class ShellIntegration {
   async #disposePageRuntime(): Promise<void> {
     const page = this.#page;
     if (!page) return;
+    // Before disposing: the worker owns the collector, and disposing the
+    // runtime takes it with it.
+    await collectPatternCoverage(page);
     try {
       await page.evaluate(async () => {
         await globalThis.commonfabric?.rt?.dispose();
