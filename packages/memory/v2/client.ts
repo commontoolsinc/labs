@@ -64,6 +64,18 @@ export type ConnectOptions = {
   signal?: AbortSignal;
 };
 
+/**
+ * The connection states a `Client` distinguishes, one member per branch of
+ * its `#ensureConnected()` guard — the decision every request passes through,
+ * which reads the same fields to settle whether to proceed, to reconnect, or
+ * to throw. A branch added to that guard is a member owed here.
+ */
+export type ConnectionState =
+  | "connected"
+  | "reconnecting"
+  | "failed"
+  | "closed";
+
 export type MountOptions = {
   sessionId?: string;
   seenSeq?: number;
@@ -192,6 +204,14 @@ export class Client {
   // for other spaces on this client alive.
   #fatalError: Error | null = null;
 
+  /**
+   * The promise handed to every current `whenStateChanged()` caller, or
+   * `null` when nobody is waiting. One promise is shared by all waiters and
+   * replaced on each change, so a waiter that re-registers gets the next
+   * transition rather than the one it has just observed.
+   */
+  #stateChanged: PromiseWithResolvers<void> | null = null;
+
   readonly #transport: Transport;
 
   private constructor(
@@ -235,6 +255,7 @@ export class Client {
   async close(): Promise<void> {
     this.#closed = true;
     this.#connected = false;
+    this.#noteStateChange();
     this.#cancelReconnectDelay?.();
     this.#rejectPending(new Error("memory client closed"));
     await Promise.all([...this.#spaces].map((space) => space.close()));
@@ -364,6 +385,56 @@ export class Client {
     return this.#connected;
   }
 
+  /**
+   * The state this client is in now, decided in the branch order
+   * `#ensureConnected()` uses so that `connected` here means what
+   * `isConnected()` means. The order is what makes them agree across the
+   * window a successful reconnect opens, where the handshake has already
+   * marked the client connected while the reconnect it belongs to is still in
+   * flight: both read `#connected` first, and so both call the transport up.
+   */
+  get connectionState(): ConnectionState {
+    if (this.#closed) return "closed";
+    if (this.#fatalError) return "failed";
+    if (this.#connected) return "connected";
+    return "reconnecting";
+  }
+
+  /**
+   * Resolves when `.connectionState` next changes, so that a caller waits on
+   * a transition without registering and removing a listener:
+   *
+   * ```js
+   * while (client.connectionState !== desired) {
+   *   await client.whenStateChanged();
+   * }
+   * ```
+   *
+   * That loop reads the getter and calls this in one synchronous step, which
+   * is what stops a transition slipping between the two. A caller that awaits
+   * anything else in between can miss one.
+   *
+   * It yields no value, deliberately: the state can change again between the
+   * resolution and the caller resuming, so anything handed over would be
+   * stale by construction. Losing a socket shows it concretely. `#onClose()`
+   * marks the client disconnected and arms the reconnect a few statements
+   * later, and a waiter resumes on a microtask, after both — so re-reading
+   * the getter yields `reconnecting`, true at the moment it is read, where a
+   * value captured at the transition would report a disconnection that was
+   * never observable for a whole turn.
+   *
+   * A wakeup carrying no change is harmless for the same reason: the loop
+   * re-tests and waits again. Calling `close()` on a closed client is one.
+   *
+   * The bound on it: `failed` and `closed` are terminal, so once the client
+   * reaches either, this never resolves and a loop of the shape above never
+   * leaves. Test for those states rather than waiting through them.
+   */
+  whenStateChanged(): Promise<void> {
+    this.#stateChanged ??= Promise.withResolvers<void>();
+    return this.#stateChanged.promise;
+  }
+
   sessionOpenAuthContext(): SessionOpenAuthContext {
     if (this.#sessionOpenAuthContext === null) {
       const error = new Error(
@@ -402,6 +473,7 @@ export class Client {
         ack.promise,
       ]);
       this.#connected = true;
+      this.#noteStateChange();
     } finally {
       this.#helloPending = null;
     }
@@ -549,6 +621,7 @@ export class Client {
       return;
     }
     this.#connected = false;
+    this.#noteStateChange();
     for (const session of this.#spaces) {
       session.handleDisconnect();
     }
@@ -583,6 +656,7 @@ export class Client {
             // protocol-flag mismatch). Stop looping and remember the failure so
             // every present and future request fails fast with it.
             this.#fatalError = err;
+            this.#noteStateChange();
             this.#rejectPending(err);
             return;
           }
@@ -620,6 +694,18 @@ export class Client {
         resolve();
       };
     });
+  }
+
+  /**
+   * Wakes every caller waiting on `whenStateChanged()`. Runs after a write
+   * that can move `.connectionState`, including one that leaves it where it
+   * was: a wakeup with nothing behind it costs a waiter one re-read, which is
+   * the loop it is already in.
+   */
+  #noteStateChange(): void {
+    const waiting = this.#stateChanged;
+    this.#stateChanged = null;
+    waiting?.resolve();
   }
 
   #rejectPending(error: Error): void {

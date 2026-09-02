@@ -1,0 +1,241 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import type { FabricValue } from "@commonfabric/data-model";
+import {
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
+  getMemoryProtocolFlags,
+  MEMORY_PROTOCOL,
+} from "../v2.ts";
+import { connect, type ConnectionState, type Transport } from "../v2/client.ts";
+
+const TEST_AUDIENCE = "did:key:z6Mk-connection-state-audience";
+
+const helloOk = (flags = getMemoryProtocolFlags()): FabricValue => ({
+  type: "hello.ok",
+  protocol: MEMORY_PROTOCOL,
+  flags,
+  sessionOpen: {
+    audience: TEST_AUDIENCE,
+    challenge: { value: "challenge:connection-state", expiresAt: 1_000_000 },
+  },
+});
+
+const openOk = (requestId: string): FabricValue => ({
+  type: "response",
+  requestId,
+  ok: {
+    sessionId: "session-A",
+    sessionToken: "token:session-A",
+    serverSeq: 0,
+    sessionOpen: {
+      audience: TEST_AUDIENCE,
+      challenge: {
+        value: `challenge:connection-state:${requestId}`,
+        expiresAt: 1_000_000,
+      },
+    },
+  },
+});
+
+/** What a reconnect's `hello` receives, which is what decides whether that
+ *  reconnect completes, stalls, or is given up on. */
+type ReconnectHello = "ok" | "mismatch" | "silence";
+
+/**
+ * A transport that answers the first `hello` compatibly and can be severed on
+ * demand, the way a lost socket severs a real one. Every `session.open` runs
+ * `onSessionOpen` before it is answered, so a test can read the client from
+ * inside the reopen that a completing reconnect performs.
+ */
+class SeverableTransport implements Transport {
+  /** Runs at the top of each `session.open`, the mount's included. */
+  onSessionOpen: () => void = () => {};
+
+  #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
+  #helloCount = 0;
+  readonly #reconnectHello: ReconnectHello;
+
+  constructor(reconnectHello: ReconnectHello) {
+    this.#reconnectHello = reconnectHello;
+  }
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
+  }
+
+  /** Drops the connection by firing the close receiver the client registered,
+   *  which is the same entry point a real transport's socket loss takes. */
+  sever(): void {
+    this.#closeReceiver(new Error("socket lost"));
+  }
+
+  send(payload: string): Promise<void> {
+    const message = decodeMemoryBoundary(payload) as {
+      type: string;
+      requestId?: string;
+    };
+    switch (message.type) {
+      case "hello":
+        this.#helloCount += 1;
+        this.#respondToHello();
+        return Promise.resolve();
+      case "session.open":
+        this.onSessionOpen();
+        this.#respond(openOk(message.requestId!));
+        return Promise.resolve();
+      default:
+        throw new Error(`Unhandled message: ${message.type}`);
+    }
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  #respondToHello(): void {
+    if (this.#helloCount === 1 || this.#reconnectHello === "ok") {
+      this.#respond(helloOk());
+      return;
+    }
+    if (this.#reconnectHello === "mismatch") {
+      const flags = getMemoryProtocolFlags();
+      this.#respond(helloOk({ ...flags, modernCellRep: !flags.modernCellRep }));
+    }
+    // "silence" answers nothing, leaving the reconnect in flight. `close()`
+    // still ends it: rejecting the pending hello unblocks the handshake, and
+    // the reconnect loop then sees the client closed and stops.
+  }
+
+  #respond(message: FabricValue): void {
+    this.#receiver(encodeMemoryBoundary(message));
+  }
+}
+
+const connectSeverable = async (reconnectHello: ReconnectHello) => {
+  const transport = new SeverableTransport(reconnectHello);
+  const client = await connect({ transport });
+  await client.mount("did:key:z6Mk-connection-state-space");
+  return { transport, client };
+};
+
+describe("Client", () => {
+  describe("instance members", () => {
+    describe("connectionState and whenStateChanged()", () => {
+      // Each case drives one transition and reads it back through both
+      // members: `whenStateChanged()` says when to look, `.connectionState`
+      // says what is there. Every wait here resolves on an event the client
+      // raises — a severed socket, a refused handshake, a `close()` — so
+      // nothing polls and nothing sleeps.
+      //
+      // Each waiter is registered before the transition it observes. That is
+      // how a caller uses it too: the loop in the doc comment reads the getter
+      // and calls `whenStateChanged()` in one synchronous step, with no chance
+      // for the state to move in between.
+
+      it("returns `connected` for a client whose transport is up", async () => {
+        const { client } = await connectSeverable("ok");
+
+        try {
+          expect(client.connectionState).toBe("connected");
+          expect(client.isConnected()).toBe(true);
+        } finally {
+          await client.close();
+        }
+      });
+
+      it("moves to `reconnecting` when the transport is severed", async () => {
+        const { transport, client } = await connectSeverable("silence");
+
+        try {
+          const changed = client.whenStateChanged();
+          transport.sever();
+          await changed;
+
+          expect(client.connectionState).toBe("reconnecting");
+          expect(client.isConnected()).toBe(false);
+        } finally {
+          await client.close();
+        }
+      });
+
+      it("moves back to `connected` when a reconnect succeeds", async () => {
+        const { transport, client } = await connectSeverable("ok");
+
+        try {
+          const severed = client.whenStateChanged();
+          transport.sever();
+          await severed;
+          expect(client.connectionState).toBe("reconnecting");
+
+          const restored = client.whenStateChanged();
+          await restored;
+
+          expect(client.connectionState).toBe("connected");
+          expect(client.isConnected()).toBe(true);
+        } finally {
+          await client.close();
+        }
+      });
+
+      it("moves to `failed` when the client gives up reconnecting", async () => {
+        const { transport, client } = await connectSeverable("mismatch");
+
+        try {
+          const severed = client.whenStateChanged();
+          transport.sever();
+          await severed;
+          expect(client.connectionState).toBe("reconnecting");
+
+          // The refused handshake is still travelling: its rejection was
+          // queued behind this waiter's wakeup, so registering the next waiter
+          // here happens before the client gives up.
+          const gaveUp = client.whenStateChanged();
+          await gaveUp;
+
+          expect(client.connectionState).toBe("failed");
+          expect(client.isConnected()).toBe(false);
+        } finally {
+          await client.close();
+        }
+      });
+
+      it("moves to `closed` when the client is closed", async () => {
+        const { client } = await connectSeverable("ok");
+        const changed = client.whenStateChanged();
+
+        await client.close();
+        await changed;
+
+        expect(client.connectionState).toBe("closed");
+        expect(client.isConnected()).toBe(false);
+      });
+
+      it("returns `connected` while a reconnect reopens its sessions", async () => {
+        const { transport, client } = await connectSeverable("ok");
+        const readings: ConnectionState[] = [];
+
+        try {
+          // The reopen runs after the reconnect's handshake has marked the
+          // client connected and before the reconnect itself has finished, so
+          // it is the one moment the two are true at once.
+          transport.onSessionOpen = () => {
+            readings.push(client.connectionState);
+          };
+          transport.sever();
+          await client.restoreConnection();
+
+          expect(readings).toEqual(["connected"]);
+          expect(client.isConnected()).toBe(true);
+        } finally {
+          await client.close();
+        }
+      });
+    });
+  });
+});
