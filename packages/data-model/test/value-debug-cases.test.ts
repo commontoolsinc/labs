@@ -7,8 +7,10 @@
  * the renderer, to be read as such when it changes.
  *
  * The expression is evaluated with every `FabricInstance` and
- * `FabricPrimitive` class in scope under its own name, and nothing else beyond
- * the language.
+ * `FabricPrimitive` class in scope under its own name, along with the three
+ * abstract base classes and the realm codec's binding symbol, so that a case
+ * can define a class of its own; nothing else beyond the language is in
+ * scope.
  *
  * To rewrite each file's recorded renderings from the actual ones, run this
  * from the package directory:
@@ -22,8 +24,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { REALM_CODEC } from "@/codec-interface/interface.ts";
 import * as fabricInstances from "@/fabric-instances/index.ts";
 import * as fabricPrimitives from "@/fabric-primitives/index.ts";
+import {
+  FabricInstance,
+  FabricPrimitive,
+  FabricSpecialObject,
+} from "@/interface.ts";
 import { toCompactDebugString, toIndentedDebugString } from "@/value-debug.ts";
 
 /** Directory holding the case files. */
@@ -43,14 +51,20 @@ const UPDATE_GOLDENS = (() => {
 })();
 
 /** Names and values in scope when a case's expression is evaluated. */
-const SCOPE: Record<string, unknown> = Object.fromEntries(
-  [...Object.entries(fabricInstances), ...Object.entries(fabricPrimitives)]
+const SCOPE: Record<string, unknown> = Object.fromEntries([
+  ...[...Object.entries(fabricInstances), ...Object.entries(fabricPrimitives)]
     .filter(([, value]) =>
       typeof value === "function" && /^Fabric/.test(
         (value as { name: string }).name,
       )
     ),
-);
+  ...Object.entries({
+    FabricInstance,
+    FabricPrimitive,
+    FabricSpecialObject,
+    REALM_CODEC,
+  }),
+]);
 
 /** Evaluates a case's expression, producing the value it describes. */
 function evaluateExpression(expression: string): unknown {

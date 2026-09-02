@@ -19,14 +19,28 @@ import {
 // initialization". `codecOf.ts` itself is a leaf.
 import { codecOf } from "@/codec-common/codecOf.ts";
 import { isCodecTypeTag } from "@/codec-common/isCodecTypeTag.ts";
-import { JSON_CODEC } from "@/codec-interface/interface.ts";
+import { REALM_CODEC } from "@/codec-interface/interface.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
+import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 
 /**
  * Nesting depth a debug string renders to. TODO(danfuzz): Make this
  * adjustable by the caller, once there is a caller that wants to.
  */
 const DEBUG_STRING_MAX_DEPTH = 10;
+
+/**
+ * What a `FabricPrimitive`'s codec hands back to be rendered: the
+ * realm-crossing encoding of a terminal codec, or the expansion of a
+ * nonterminal one into other `FabricValue`s.
+ */
+type PrimitiveState = RealmCodecValue | FabricValue;
+
+/**
+ * One of the conversion's single-key tagged forms, taken apart: the tag,
+ * less its leading slash, and the payload under it.
+ */
+type TaggedForm = { readonly tag: string; readonly payload: FabricValue };
 
 /**
  * Returns the class name of the given object, or `<anonymous>` when it has
@@ -36,61 +50,6 @@ function classNameOf(value: object): string {
   const name = (value as { constructor?: { name?: unknown } }).constructor
     ?.name;
   return ((typeof name === "string") && (name !== "")) ? name : "<anonymous>";
-}
-
-/**
- * Returns the tag and payload of the given plain object when it is one of the
- * conversion's single-key tagged forms, and `undefined` when it is not. No key
- * of an original value can arrive in such a form, because the conversion
- * escapes a key with a leading slash and an unsafe key alike, by prefixing a
- * slash; the second-character check rules out the one and the unsafe-key
- * check the other.
- */
-function taggedFormOf(
-  value: FabricPlainObject,
-): { tag: string; payload: FabricValue } | undefined {
-  const keys = Object.keys(value);
-  const onlyKey = (keys.length === 1) ? keys[0] : undefined;
-
-  if (
-    (onlyKey === undefined) || (onlyKey[0] !== "/") || (onlyKey[1] === "/") ||
-    isUnsafeObjectKey(onlyKey.slice(1))
-  ) {
-    return undefined;
-  }
-
-  return { tag: onlyKey.slice(1), payload: value[onlyKey] };
-}
-
-/**
- * Renders a key -- an object property name or a symbol's key -- bare when it
- * is a valid identifier, and as a quoted string otherwise. The identifier
- * check is the ASCII one.
- */
-function renderKey(key: string): string {
-  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? key : JSON.stringify(key);
-}
-
-/**
- * Produces the `/unconvertible` result form which stands in for a value whose
- * conversion threw, carrying the message of the error thrown.
- */
-function makeUnconvertibleResult(error: any): FabricValue {
-  const message = (() => {
-    try {
-      if (error instanceof Error) {
-        const msg = error.message;
-        if (typeof msg === "string") {
-          return msg;
-        }
-      }
-      return String(error);
-    } catch {
-      return "/unconvertibleError";
-    }
-  })();
-
-  return { "/unconvertible": message };
 }
 
 /**
@@ -137,7 +96,7 @@ class DebugConverter {
       // close to where they're thrown. This `catch` is a prophylactic "just
       // in case" to help nail down the intention of really really trying not to
       // `throw` out of this method.
-      return makeUnconvertibleResult(e);
+      return DebugConverter.#makeUnconvertibleResult(e);
     }
     // deno-coverage-ignore-stop
   }
@@ -162,7 +121,7 @@ class DebugConverter {
       try {
         byName[key] = this.#convertSubvalue(value[key], depth + 1);
       } catch (e) {
-        byName[key] = makeUnconvertibleResult(e);
+        byName[key] = DebugConverter.#makeUnconvertibleResult(e);
       }
     }
 
@@ -213,7 +172,7 @@ class DebugConverter {
       try {
         result[resultKey] = this.#convertSubvalue(value[key], depth + 1);
       } catch (e) {
-        result[resultKey] = makeUnconvertibleResult(e);
+        result[resultKey] = DebugConverter.#makeUnconvertibleResult(e);
       }
     }
 
@@ -260,7 +219,7 @@ class DebugConverter {
           const content = (name != "") ? `${name}(...)` : "<anonymous>(...)";
           return { "/function": content };
         } catch (e) {
-          return { "/function": makeUnconvertibleResult(e) };
+          return { "/function": DebugConverter.#makeUnconvertibleResult(e) };
         }
       }
 
@@ -319,8 +278,34 @@ class DebugConverter {
         this.#nestingStack.delete(value);
       }
     } catch (e) {
-      return makeUnconvertibleResult(e);
+      return DebugConverter.#makeUnconvertibleResult(e);
     }
+  }
+
+  //
+  // Static members
+  //
+
+  /**
+   * Produces the `/unconvertible` result form which stands in for a value whose
+   * conversion threw, carrying the message of the error thrown.
+   */
+  static #makeUnconvertibleResult(error: any): FabricValue {
+    const message = (() => {
+      try {
+        if (error instanceof Error) {
+          const msg = error.message;
+          if (typeof msg === "string") {
+            return msg;
+          }
+        }
+        return String(error);
+      } catch {
+        return "/unconvertibleError";
+      }
+    })();
+
+    return { "/unconvertible": message };
   }
 }
 
@@ -399,24 +384,79 @@ class DebugStringifier {
   }
 
   /**
-   * Renders a `FabricPrimitive`, in the elided form `/TypeName(...)`, where the
-   * type name is that of its codec type tag. When the codec cannot be found,
-   * the class name stands in for the type name.
+   * Renders a `FabricPrimitive` as `/TypeName(<state>)`, where the type name
+   * is that of its codec type tag and the state is its realm-crossing
+   * encoding, in the same form a class instance's properties take. When the
+   * codec cannot be found, the class name stands in for the type name and the
+   * state is elided.
    */
-  #renderFabricPrimitive(value: FabricPrimitive): string {
-    let tag;
+  #renderFabricPrimitive(value: FabricPrimitive, indent: string): string {
+    let tag: string;
+    let state: PrimitiveState;
 
     try {
-      // A `FabricPrimitive` binds no `[CODEC]`, so its JSON codec supplies the
-      // tag. TODO(danfuzz): Replace `JSON_CODEC` with `DEBUG_CODEC` once the
-      // latter exists.
-      tag = codecOf(value, JSON_CODEC).tagForValue(value);
+      // A `FabricPrimitive` binds no `[CODEC]`, so its realm codec supplies
+      // the tag and the state. That codec is the one whose terminals are the
+      // richest -- a `bigint` stays a `bigint`, bytes stay bytes -- which is
+      // what makes it the one to render. TODO(danfuzz): Replace `REALM_CODEC`
+      // with `DEBUG_CODEC` once the latter exists.
+      const codec = codecOf<RealmCodecValue>(value, REALM_CODEC);
+      tag = codec.tagForValue(value);
+      state = codec.encode(value, NULL_LIVE_ENVIRONMENT);
     } catch {
-      // Never let the debug renderer throw; fall back to the class name.
-      tag = classNameOf(value);
+      // Never let the debug renderer throw; fall back to the class name, with
+      // the state elided.
+      return DebugStringifier.#renderElidedInstance(classNameOf(value));
     }
 
-    return DebugStringifier.#renderElidedInstance(tag);
+    // Trim off the encoding version number.
+    const open = `/${tag.replace(/@.*$/, "")}(`;
+    const realm = (v: PrimitiveState, i: string) =>
+      this.#renderRealmState(v, i);
+
+    if (isPlainObject(state)) {
+      const parts = this.#renderProperties(
+        state as { readonly [key: string]: PrimitiveState },
+        indent,
+        realm,
+        false,
+      );
+      return this.#renderContainer(open, ")", parts, indent);
+    } else {
+      return `${open}${this.#renderRealmState(state, indent)})`;
+    }
+  }
+
+  /**
+   * Renders a realm-crossing encoding, or a piece of one. The encoding's own
+   * terminal, an `ArrayBuffer`, is rendered as `buf [...]`; its containers are
+   * walked as they stand; and anything else takes the ordinary path through
+   * the conversion.
+   */
+  #renderRealmState(value: PrimitiveState, indent: string): string {
+    const realm = (v: PrimitiveState, i: string) =>
+      this.#renderRealmState(v, i);
+
+    if (value instanceof ArrayBuffer) {
+      return DebugStringifier.#renderBuffer(value);
+    } else if (Array.isArray(value)) {
+      const inner = this.#innerIndent(indent);
+      const parts = value.map((element) => realm(element, inner));
+      return this.#renderContainer("[", "]", parts, indent);
+    } else if (isPlainObject(value)) {
+      const parts = this.#renderProperties(
+        value as { readonly [key: string]: PrimitiveState },
+        indent,
+        realm,
+        false,
+      );
+      return this.#renderContainer("{", "}", parts, indent);
+    } else {
+      return this.#renderSubvalue(
+        toStructuredDebugValue(value, DEBUG_STRING_MAX_DEPTH),
+        indent,
+      );
+    }
   }
 
   /**
@@ -435,15 +475,22 @@ class DebugStringifier {
 
     if (payload === "/...") {
       return `${open}...)`;
-    } else if (
-      isPlainObject(payload) &&
-      (taggedFormOf(payload as FabricPlainObject) === undefined)
-    ) {
-      const parts = this.#renderProperties(
+    } else if (isPlainObject(payload)) {
+      const tagged = DebugStringifier.#taggedFormOf(
         payload as FabricPlainObject,
-        indent,
       );
-      return this.#renderContainer(open, ")", parts, indent);
+
+      if (tagged !== undefined) {
+        // A marker form, rendered as what it stands for rather than spread as
+        // properties.
+        return `${open}${this.#renderTaggedForm(tagged, indent)})`;
+      } else {
+        const parts = this.#renderProperties(
+          payload as FabricPlainObject,
+          indent,
+        );
+        return this.#renderContainer(open, ")", parts, indent);
+      }
     } else {
       // The payload sits where the parenthesis opens, so it takes the
       // indentation of the parenthesis itself.
@@ -456,81 +503,38 @@ class DebugStringifier {
    * multi-line) is indented by `indent`.
    */
   #renderPlainObject(value: FabricPlainObject, indent: string): string {
-    const tagged = taggedFormOf(value);
+    const tagged = DebugStringifier.#taggedFormOf(value);
 
     if (tagged !== undefined) {
-      const { tag, payload } = tagged;
-
-      if (isCodecTypeTag(tag)) {
-        // A `FabricInstance`, carried as its encoding under its codec type tag.
-        return DebugStringifier.#renderElidedInstance(tag);
-      }
-
-      switch (tag) {
-        case "circle": {
-          // A reference back to an enclosing object.
-          return "<circle>";
-        }
-
-        case "uniqueSymbol": {
-          // A unique (uninterned) symbol, whose payload is its description.
-          return (payload === undefined)
-            ? "Symbol()"
-            : `Symbol(${JSON.stringify(payload)})`;
-        }
-
-        case "function": {
-          // A function, whose payload names it, or is `/unconvertible` when
-          // even that failed; the latter falls through to render as it is.
-          const name = (typeof payload === "string")
-            ? payload.match(/^(?<name>.*)\(\.\.\.\)$/)?.groups?.name
-            : undefined;
-          if (name === "<anonymous>") {
-            return "(...) => {...}";
-          } else if (name !== undefined) {
-            return `function ${name}(...) {...}`;
-          }
-          return this.#renderInstance(tag, payload, indent);
-        }
-
-        case "unconvertible": {
-          // A value the conversion could not read, whose payload is the
-          // error's message.
-          return this.#renderInstance(tag, payload, indent);
-        }
-
-        case "...": {
-          // The depth-limit marker. What kind of value was elided is left
-          // out of the rendering.
-          return "...";
-        }
-
-        default: {
-          // A class instance, carried under its class name.
-          return this.#renderInstance(tag, payload, indent);
-        }
-      }
+      return this.#renderTaggedForm(tagged, indent);
+    } else {
+      const parts = this.#renderProperties(value, indent);
+      return this.#renderContainer("{", "}", parts, indent);
     }
-
-    const parts = this.#renderProperties(value, indent);
-    return this.#renderContainer("{", "}", parts, indent);
   }
 
   /**
    * Renders the properties of a plain object, one part per property, for a
-   * container whose closing bracket is indented by `indent`. A key is
-   * rendered as the original value's key: the conversion prefixes a slash to
-   * a key that starts with one and to an unsafe key, and that slash comes
-   * back off here.
+   * container whose closing bracket is indented by `indent`, each value
+   * rendered by `render` (by default, as a converted value). When `unescape`
+   * is `true` (the default), a key is rendered as the original value's key:
+   * the conversion prefixes a slash to a key that starts with one and to an
+   * unsafe key, and that slash comes back off here.
    */
-  #renderProperties(value: FabricPlainObject, indent: string): string[] {
+  #renderProperties<T>(
+    value: { readonly [key: string]: T },
+    indent: string,
+    render: (value: T, indent: string) => string = (v, i) =>
+      this.#renderSubvalue(v as unknown as FabricValue, i),
+    unescape = true,
+  ): string[] {
     const inner = this.#innerIndent(indent);
     const separator = (this.#indent === undefined) ? ":" : ": ";
 
-    return Object.keys(value).map((key) => {
-      const original = (key[0] === "/") ? key.slice(1) : key;
-      const rendered = this.#renderSubvalue(value[key], inner);
-      return `${renderKey(original)}${separator}${rendered}`;
+    return Object.entries(value).map(([key, subvalue]) => {
+      const original = (unescape && (key[0] === "/")) ? key.slice(1) : key;
+      const rendered = render(subvalue, inner);
+      return `${DebugStringifier.#renderKey(original)}${separator}${rendered}`;
     });
   }
 
@@ -562,7 +566,7 @@ class DebugStringifier {
       case "symbol": {
         // The conversion represents a unique symbol as a tagged object, so
         // only an interned symbol arrives here.
-        return `@${renderKey(Symbol.keyFor(value) ?? "")}`;
+        return `@${DebugStringifier.#renderKey(Symbol.keyFor(value) ?? "")}`;
       }
 
       case "object": {
@@ -571,7 +575,7 @@ class DebugStringifier {
         } else if (Array.isArray(value)) {
           return this.#renderArray(value, indent);
         } else if (value instanceof FabricPrimitive) {
-          return this.#renderFabricPrimitive(value);
+          return this.#renderFabricPrimitive(value, indent);
         } else {
           // The conversion represents every other non-plain object as a plain
           // one, so what is left is a plain object.
@@ -588,6 +592,65 @@ class DebugStringifier {
     }
   }
 
+  /**
+   * Renders one of the conversion's single-key tagged forms, as what it
+   * stands for, with a container's closing bracket (when there is one and
+   * the rendering is multi-line) indented by `indent`.
+   */
+  #renderTaggedForm(tagged: TaggedForm, indent: string): string {
+    const { tag, payload } = tagged;
+
+    if (isCodecTypeTag(tag)) {
+      // A `FabricInstance`, carried as its encoding under its codec type tag.
+      return DebugStringifier.#renderElidedInstance(tag);
+    }
+
+    switch (tag) {
+      case "circle": {
+        // A reference back to an enclosing object.
+        return "<circle>";
+      }
+
+      case "uniqueSymbol": {
+        // A unique (uninterned) symbol, whose payload is its description.
+        return (payload === undefined)
+          ? "Symbol()"
+          : `Symbol(${JSON.stringify(payload)})`;
+      }
+
+      case "function": {
+        // A function, whose payload names it, or is `/unconvertible` when
+        // even that failed; the latter falls through to render as it is.
+        const name = (typeof payload === "string")
+          ? payload.match(/^(?<name>.*)\(\.\.\.\)$/)?.groups?.name
+          : undefined;
+        if (name === "<anonymous>") {
+          return "(...) => {...}";
+        } else if (name !== undefined) {
+          return `function ${name}(...) {...}`;
+        }
+        return this.#renderInstance(tag, payload, indent);
+      }
+
+      case "unconvertible": {
+        // A value the conversion could not read, whose payload is the
+        // error's message.
+        return this.#renderInstance(tag, payload, indent);
+      }
+
+      case "...": {
+        // The depth-limit marker. What kind of value was elided is left
+        // out of the rendering.
+        return "...";
+      }
+
+      default: {
+        // A class instance, carried under its class name.
+        return this.#renderInstance(tag, payload, indent);
+      }
+    }
+  }
+
   /** Returns the indentation for the contents of a container indented by `indent`. */
   #innerIndent(indent: string): string {
     return `${indent}${this.#indent ?? ""}`;
@@ -598,13 +661,56 @@ class DebugStringifier {
   //
 
   /**
-   * Renders the elided form of a `FabricInstance` or `FabricPrimitive`, given
-   * its codec type tag (or, failing that, its class name). The slash suggests
-   * a known encodable type rather than an instance of some random class, and
-   * the version of the tag is left out.
+   * Renders an `ArrayBuffer` as `buf [...]`, with its bytes in hexadecimal, a
+   * space after every fourth byte.
+   */
+  static #renderBuffer(buffer: ArrayBuffer): string {
+    const hex = [...new Uint8Array(buffer)]
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+      .replace(/.{8}(?=.)/g, "$& ");
+    return `buf [${hex}]`;
+  }
+
+  /**
+   * Renders the elided form of a `FabricInstance`, or of a `FabricPrimitive`
+   * whose state cannot be had, given its codec type tag (or, failing that,
+   * its class name). The slash suggests a known encodable type rather than an
+   * instance of some random class, and the version of the tag is left out.
    */
   static #renderElidedInstance(tag: string): string {
     return `/${tag.replace(/@.*$/, "")}(...)`;
+  }
+
+  /**
+   * Renders a key -- an object property name or a symbol's key -- bare when it
+   * is a valid identifier, and as a quoted string otherwise. The identifier
+   * check is the ASCII one.
+   */
+  static #renderKey(key: string): string {
+    return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? key : JSON.stringify(key);
+  }
+
+  /**
+   * Returns the tag and payload of the given plain object when it is one of the
+   * conversion's single-key tagged forms, and `undefined` when it is not. No key
+   * of an original value can arrive in such a form, because the conversion
+   * escapes a key with a leading slash and an unsafe key alike, by prefixing a
+   * slash; the second-character check rules out the one and the unsafe-key
+   * check the other.
+   */
+  static #taggedFormOf(value: FabricPlainObject): TaggedForm | undefined {
+    const keys = Object.keys(value);
+    const onlyKey = (keys.length === 1) ? keys[0] : undefined;
+
+    if (
+      (onlyKey === undefined) || (onlyKey[0] !== "/") || (onlyKey[1] === "/") ||
+      isUnsafeObjectKey(onlyKey.slice(1))
+    ) {
+      return undefined;
+    }
+
+    return { tag: onlyKey.slice(1), payload: value[onlyKey] };
   }
 }
 

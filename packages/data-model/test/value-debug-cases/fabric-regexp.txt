@@ -1,5 +1,0 @@
-new FabricRegExp(/ab+c/gi)
-
-/RegExp(...)
-
-/RegExp(...)
