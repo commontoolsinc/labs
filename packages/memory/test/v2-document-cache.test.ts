@@ -10,7 +10,7 @@
  * something starts to.
  */
 
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import { toFileUrl } from "@std/path";
 
@@ -219,5 +219,24 @@ describe("v2 document cache", () => {
     }
     // Closing withdraws the provider (back to whatever was registered before).
     assertEquals(getDocumentCachesDiagnostics(), registeredBefore);
+  });
+  it("rejects cache bounds that are not positive integers at open", async () => {
+    const url = toFileUrl(await Deno.makeTempFile({ suffix: ".sqlite" }));
+    try {
+      for (const bad of [0, -1, 1.5]) {
+        await assertRejects(
+          () => open({ url, documentCacheBudgetBytes: bad }),
+          TypeError,
+          "documentCacheBudgetBytes",
+        );
+        await assertRejects(
+          () => open({ url, documentCacheMaxEntries: bad }),
+          TypeError,
+          "documentCacheMaxEntries",
+        );
+      }
+    } finally {
+      await Deno.remove(new URL(url));
+    }
   });
 });
