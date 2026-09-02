@@ -12,8 +12,8 @@
 }
 
 {
-  "empty": "",
-  "plain": "hello",
+  empty: "",
+  plain: "hello",
   "with quotes": "say \"hi\"",
   "with newline": "a\nb",
   "with backslash": "a\\b",
@@ -24,4 +24,4 @@
   "reads like a symbol": "@k"
 }
 
-{"empty":"","plain":"hello","with quotes":"say \"hi\"","with newline":"a\nb","with backslash":"a\...
+{empty:"",plain:"hello","with quotes":"say \"hi\"","with newline":"a\nb","with backslash":"a\\b",...

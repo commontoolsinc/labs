@@ -3,7 +3,7 @@
 }
 
 {
-  "plain": null
+  plain: null
 }
 
-{"plain":null}
+{plain:null}

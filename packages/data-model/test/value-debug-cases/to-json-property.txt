@@ -1,9 +1,9 @@
 { toJSON: () => ({ simplified: 1 }) }
 
 {
-  "toJSON": {
+  toJSON: {
     "/function": "toJSON(...)"
   }
 }
 
-{"toJSON":{"/function":"toJSON(...)"}}
+{toJSON:{"/function":"toJSON(...)"}}

@@ -102,7 +102,7 @@ describe("getAsLink method", () => {
     const link = toCompactDebugString(cell.toSigilLinkOrNull());
     const rendered = `{"/CellImpl":${link}}`;
     expect(toCompactDebugString(cell)).toBe(rendered);
-    expect(toCompactDebugString({ held: cell })).toBe(`{"held":${rendered}}`);
+    expect(toCompactDebugString({ held: cell })).toBe(`{held:${rendered}}`);
   });
 
   it("should return sigil format for both getAsLink and toSigilLinkOrNull", () => {

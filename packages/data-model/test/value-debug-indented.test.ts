@@ -24,8 +24,8 @@ describe("toIndentedDebugString()", () => {
     // Two leading spaces before the first key confirm `indent === 2` reached
     // the renderer. A deeper key carries four spaces.
     const result = toIndentedDebugString({ a: 1, nested: { b: 2 } });
-    expect(result).toContain('\n  "a"');
-    expect(result).toContain('\n    "b"');
+    expect(result).toContain("\n  a:");
+    expect(result).toContain("\n    b:");
   });
 
   it("indents array elements with 2 spaces", () => {
@@ -41,10 +41,11 @@ describe("toIndentedDebugString()", () => {
   });
 
   it("delegates with `indent === 2`, matching the equivalent JSON layout", () => {
-    // For JSON-native values the wrapper's output equals the two-space
-    // `JSON.stringify` of the same value, which is what the private
-    // `renderDebugString(value, 2)` produces. This pins the forwarded indent.
-    for (const value of [{ a: 1, b: { c: 2 } }, [1, [2, 3]], "x", 7, false]) {
+    // For JSON-native values with no object keys, the wrapper's output equals
+    // the two-space `JSON.stringify` of the same value, which is what the
+    // private `renderDebugString(value, 2)` produces. This pins the forwarded
+    // indent. (An identifier key would be written bare, and so is left out.)
+    for (const value of [[1, [2, 3]], [[], "x", [{}]], "x", 7, false]) {
       expect(toIndentedDebugString(value)).toBe(JSON.stringify(value, null, 2));
     }
   });
@@ -68,7 +69,7 @@ describe("toIndentedDebugString()", () => {
     a.self = a;
     expect(() => toIndentedDebugString(a)).not.toThrow();
     expect(toIndentedDebugString(a)).toBe(
-      '{\n  "x": 1,\n  "self": <circle>\n}',
+      "{\n  x: 1,\n  self: <circle>\n}",
     );
   });
 
@@ -82,7 +83,7 @@ describe("toIndentedDebugString()", () => {
     });
     expect(() => toIndentedDebugString(value)).not.toThrow();
     expect(toIndentedDebugString(value)).toBe(
-      '{\n  "x": {\n    "/unconvertible": "nope"\n  }\n}',
+      '{\n  x: {\n    "/unconvertible": "nope"\n  }\n}',
     );
   });
 });

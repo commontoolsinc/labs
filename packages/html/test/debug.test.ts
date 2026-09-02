@@ -30,7 +30,7 @@ describe("debug", () => {
       // of the stack.
       expect(formatTree(FabricError.fromNativeError(new Error("boom"))))
         .toMatch(
-          /^\{"\/Error@1":\{"type":"Error","name":null,"message":"boom"/,
+          /^\{"\/Error@1":\{type:"Error",name:null,message:"boom"/,
         );
     });
 

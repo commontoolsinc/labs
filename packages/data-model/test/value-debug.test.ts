@@ -32,7 +32,7 @@ describe("value-debug", () => {
   describe("toCompactDebugString", () => {
     it("compactly stringifies a plain object", () => {
       expect(toCompactDebugString({ a: 1, b: "two" }))
-        .toBe('{"a":1,"b":"two"}');
+        .toBe('{a:1,b:"two"}');
     });
 
     it("compactly stringifies an array", () => {
@@ -58,7 +58,7 @@ describe("value-debug", () => {
 
     it("renders `undefined` as object value as a bare token", () => {
       expect(toCompactDebugString({ a: undefined, b: 1 }))
-        .toBe('{"a":undefined,"b":1}');
+        .toBe("{a:undefined,b:1}");
     });
 
     it("renders top-level `bigint` as a bare token with `n` suffix", () => {
@@ -79,7 +79,7 @@ describe("value-debug", () => {
 
     it("renders `bigint` as object value as a bare token", () => {
       expect(toCompactDebugString({ n: 42n }))
-        .toBe('{"n":42n}');
+        .toBe("{n:42n}");
     });
 
     it("does not throw on mixed `bigint`/`undefined` values", () => {
@@ -90,7 +90,7 @@ describe("value-debug", () => {
       };
       expect(() => toCompactDebugString(v)).not.toThrow();
       expect(toCompactDebugString(v))
-        .toBe('{"count":100n,"missing":undefined,"items":[1n,2n,undefined]}');
+        .toBe("{count:100n,missing:undefined,items:[1n,2n,undefined]}");
     });
 
     it("renders a hole in an array as `<hole>` and a run of holes as `<N holes>`", () => {
@@ -102,12 +102,19 @@ describe("value-debug", () => {
         .toBe("[<hole>,2,<2 holes>,5,<hole>]");
     });
 
+    it("renders an object key bare when it is an identifier and quoted otherwise", () => {
+      expect(
+        toCompactDebugString({ a: 1, _b$2: 2, "my-key": 3, "9x": 4, "": 5 }),
+      )
+        .toBe('{a:1,_b$2:2,"my-key":3,"9x":4,"":5}');
+    });
+
     it("renders a string that resembles a bare token as a quoted string", () => {
       expect(toCompactDebugString("undefined"))
         .toBe('"undefined"');
       expect(toCompactDebugString("42n")).toBe('"42n"');
       expect(toCompactDebugString({ a: "undefined" }))
-        .toBe('{"a":"undefined"}');
+        .toBe('{a:"undefined"}');
     });
 
     it("renders a named function under the `/function` tag", () => {
@@ -118,7 +125,7 @@ describe("value-debug", () => {
     it("renders a named function inside a structure", () => {
       function bar() {}
       expect(toCompactDebugString({ fn: bar }))
-        .toBe('{"fn":{"/function":"bar(...)"}}');
+        .toBe('{fn:{"/function":"bar(...)"}}');
       expect(toCompactDebugString([bar]))
         .toBe('[{"/function":"bar(...)"}]');
     });
@@ -147,7 +154,7 @@ describe("value-debug", () => {
 
       const inst = FabricError.fromNativeError(new Error("eek!"));
       expect(toCompactDebugString(inst)).toMatch(
-        /^\{"\/Error@1":\{"type":"Error","name":null,"message":"eek!","stack":/,
+        /^\{"\/Error@1":\{type:"Error",name:null,message:"eek!",stack:/,
       );
     });
 
@@ -174,7 +181,7 @@ describe("value-debug", () => {
 
     it("renders an interned symbol inside a structure", () => {
       const s = Symbol.for("k");
-      expect(toCompactDebugString({ s })).toBe('{"s":@k}');
+      expect(toCompactDebugString({ s })).toBe("{s:@k}");
       expect(toCompactDebugString([s])).toBe("[@k]");
     });
 
@@ -192,7 +199,7 @@ describe("value-debug", () => {
 
     it("renders an uninterned symbol inside a structure", () => {
       const s = Symbol("inner");
-      expect(toCompactDebugString({ s })).toBe('{"s":Symbol("inner")}');
+      expect(toCompactDebugString({ s })).toBe('{s:Symbol("inner")}');
       expect(toCompactDebugString([s])).toBe('[Symbol("inner")]');
     });
 
@@ -227,7 +234,7 @@ describe("value-debug", () => {
     it("renders non-finite numbers and -0 inside an object", () => {
       const v = { a: NaN, b: Infinity, c: -Infinity, d: -0, e: 1 };
       expect(toCompactDebugString(v))
-        .toBe('{"a":NaN,"b":Infinity,"c":-Infinity,"d":-0,"e":1}');
+        .toBe("{a:NaN,b:Infinity,c:-Infinity,d:-0,e:1}");
     });
 
     it("renders non-finite numbers and -0 inside an array", () => {
@@ -246,7 +253,7 @@ describe("value-debug", () => {
         const a: Record<string, unknown> = { x: 1 };
         a.self = a;
         expect(toCompactDebugString(a))
-          .toBe('{"x":1,"self":<circle>}');
+          .toBe("{x:1,self:<circle>}");
       });
 
       it("renders a self-referential array with `<circle>` for the back-ref", () => {
@@ -260,7 +267,7 @@ describe("value-debug", () => {
         const b: Record<string, unknown> = { a };
         a.b = b;
         expect(toCompactDebugString(a))
-          .toBe('{"b":{"a":<circle>}}');
+          .toBe("{b:{a:<circle>}}");
       });
 
       it("renders a cycle that closes through several intermediate objects", () => {
@@ -268,14 +275,14 @@ describe("value-debug", () => {
         const a: Record<string, unknown> = { b: { c } };
         c.back = a;
         expect(toCompactDebugString(a))
-          .toBe('{"b":{"c":{"back":<circle>}}}');
+          .toBe("{b:{c:{back:<circle>}}}");
       });
 
       it("renders a cycle nested under a non-circular root", () => {
         const cyc: Record<string, unknown> = {};
         cyc.self = cyc;
         expect(toCompactDebugString({ x: 1, y: cyc }))
-          .toBe('{"x":1,"y":{"self":<circle>}}');
+          .toBe("{x:1,y:{self:<circle>}}");
       });
 
       it("renders multiple independent cycles in the same value", () => {
@@ -285,7 +292,7 @@ describe("value-debug", () => {
         c2.self = c2;
         expect(toCompactDebugString({ a: c1, b: c2 }))
           .toBe(
-            '{"a":{"v":1,"self":<circle>},"b":{"v":2,"self":<circle>}}',
+            "{a:{v:1,self:<circle>},b:{v:2,self:<circle>}}",
           );
       });
 
@@ -300,7 +307,7 @@ describe("value-debug", () => {
 
         const x = { v: 1 };
         expect(toCompactDebugString({ a: x, b: x }))
-          .toBe('{"a":{"v":1},"b":{"v":1}}');
+          .toBe("{a:{v:1},b:{v:1}}");
       });
     });
 
@@ -336,11 +343,11 @@ describe("value-debug", () => {
           },
         };
         expect(toCompactDebugString(v))
-          .toBe('{"toJSON":{"/function":"toJSON(...)"}}');
+          .toBe('{toJSON:{"/function":"toJSON(...)"}}');
         expect(toCompactDebugString({ a: 1, b: v }))
-          .toBe('{"a":1,"b":{"toJSON":{"/function":"toJSON(...)"}}}');
+          .toBe('{a:1,b:{toJSON:{"/function":"toJSON(...)"}}}');
         expect(toCompactDebugString([1, v, 3]))
-          .toBe('[1,{"toJSON":{"/function":"toJSON(...)"}},3]');
+          .toBe('[1,{toJSON:{"/function":"toJSON(...)"}},3]');
       });
 
       it("renders the error message in place of a value whose enumerable getter throws", () => {
@@ -351,7 +358,7 @@ describe("value-debug", () => {
           },
           enumerable: true,
         });
-        expect(toCompactDebugString(v)).toBe('{"x":{"/unconvertible":"nope"}}');
+        expect(toCompactDebugString(v)).toBe('{x:{"/unconvertible":"nope"}}');
       });
 
       it("renders the error message in the indented form too", () => {
@@ -363,7 +370,7 @@ describe("value-debug", () => {
           enumerable: true,
         });
         expect(toIndentedDebugString(v)).toBe(
-          '{\n  "x": {\n    "/unconvertible": "nope"\n  }\n}',
+          '{\n  x: {\n    "/unconvertible": "nope"\n  }\n}',
         );
       });
 
@@ -391,8 +398,11 @@ describe("value-debug", () => {
         it("truncates to `maxLength` when it is smaller than the whole rendered length", () => {
           const largeString = "This is a very large string! ".repeat(40);
           const item = { a: 123, b: 456, c: 789, d: largeString };
-          const expected = JSON.stringify(item).slice(0, len - 3) + "...";
+          const whole = toCompactDebugString(item);
+          const expected = whole.slice(0, len - 3) + "...";
+          expect(whole.length).toBeGreaterThan(len);
           expect(toCompactDebugString(item, len)).toBe(expected);
+          expect(toCompactDebugString(item, len).length).toBe(len);
         });
       }
     });
@@ -401,7 +411,7 @@ describe("value-debug", () => {
   describe("toIndentedDebugString", () => {
     it("indents object output with 2 spaces", () => {
       expect(toIndentedDebugString({ a: 1, b: "two" }))
-        .toBe('{\n  "a": 1,\n  "b": "two"\n}');
+        .toBe('{\n  a: 1,\n  b: "two"\n}');
     });
 
     it("indents array output with 2 spaces", () => {
@@ -420,7 +430,7 @@ describe("value-debug", () => {
     it("renders nested `bigint` and `undefined` as bare tokens", () => {
       const v = { n: 42n, m: undefined };
       expect(toIndentedDebugString(v))
-        .toBe('{\n  "n": 42n,\n  "m": undefined\n}');
+        .toBe("{\n  n: 42n,\n  m: undefined\n}");
     });
 
     it("renders `undefined` and `bigint` inside arrays as bare tokens", () => {
@@ -443,8 +453,8 @@ describe("value-debug", () => {
       const v = { fn: qux, sym: Symbol("s") };
       expect(toIndentedDebugString(v))
         .toBe(
-          '{\n  "fn": {\n    "/function": "qux(...)"\n  },\n' +
-            '  "sym": Symbol("s")\n}',
+          '{\n  fn: {\n    "/function": "qux(...)"\n  },\n' +
+            '  sym: Symbol("s")\n}',
         );
     });
 
@@ -459,7 +469,7 @@ describe("value-debug", () => {
       const v = { a: NaN, b: Infinity, c: -Infinity, d: -0 };
       expect(toIndentedDebugString(v))
         .toBe(
-          '{\n  "a": NaN,\n  "b": Infinity,\n  "c": -Infinity,\n  "d": -0\n}',
+          "{\n  a: NaN,\n  b: Infinity,\n  c: -Infinity,\n  d: -0\n}",
         );
     });
 
@@ -467,7 +477,7 @@ describe("value-debug", () => {
       const a: Record<string, unknown> = { x: 1 };
       a.self = a;
       expect(toIndentedDebugString(a))
-        .toBe('{\n  "x": 1,\n  "self": <circle>\n}');
+        .toBe("{\n  x: 1,\n  self: <circle>\n}");
     });
   });
 
@@ -547,7 +557,7 @@ describe("value-debug", () => {
     it("renders a FabricInstance as its debug string, not `{}`", () => {
       const err = FabricError.fromNativeError(new Error("boom"));
       expect(Deno.inspect(err)).toMatch(
-        /^\{"\/Error@1":\{"type":"Error","name":null,"message":"boom","stack":/,
+        /^\{"\/Error@1":\{type:"Error",name:null,message:"boom",stack:/,
       );
     });
 

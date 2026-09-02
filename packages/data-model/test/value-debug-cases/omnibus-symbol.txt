@@ -11,9 +11,9 @@
   "interned, identifier key": @k,
   "interned, other key": @"my-key",
   "interned, empty key": @"",
-  "unique": Symbol("d"),
+  unique: Symbol("d"),
   "unique, no description": Symbol(),
   "unique, empty description": Symbol("")
 }
 
-{"interned, identifier key":@k,"interned, other key":@"my-key","interned, empty key":@"","unique"...
+{"interned, identifier key":@k,"interned, other key":@"my-key","interned, empty key":@"",unique:S...

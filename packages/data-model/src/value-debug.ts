@@ -22,6 +22,15 @@ import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 
 /**
+ * Renders a key -- an object property name or a symbol's key -- bare when it
+ * is a valid identifier, and as a quoted string otherwise. The identifier
+ * check is the ASCII one.
+ */
+function renderKey(key: string): string {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? key : JSON.stringify(key);
+}
+
+/**
  * Produces the `/unconvertible` result form which stands in for a value whose
  * conversion threw, carrying the message of the error thrown.
  */
@@ -279,7 +288,8 @@ class DebugConverter {
 /**
  * Helper class for rendering the result of `toStructuredDebugValue()` as a
  * debug string. The rendering is JSON syntax wherever JSON can express the
- * value, and a bare token -- `42n`, `undefined`, `NaN`, `-0`, `Infinity`,
+ * value, except that an object key which is a valid identifier is written
+ * bare, and a bare token -- `42n`, `undefined`, `NaN`, `-0`, `Infinity`,
  * `@name`, `Symbol("name")`, `<circle>`, `<hole>` -- wherever it cannot. A
  * `FabricPrimitive`, which the conversion passes through as itself, is
  * rendered under its codec tag with its JSON encoding, in the same shape the
@@ -406,7 +416,7 @@ class DebugStringifier {
     const separator = (this.#indent === undefined) ? ":" : ": ";
     const parts = keys.map((key) => {
       const rendered = this.#renderSubvalue(value[key], inner);
-      return `${JSON.stringify(key)}${separator}${rendered}`;
+      return `${renderKey(key)}${separator}${rendered}`;
     });
 
     return this.#renderContainer("{", "}", parts, indent);
@@ -439,12 +449,8 @@ class DebugStringifier {
 
       case "symbol": {
         // The conversion represents a unique symbol as a tagged object, so
-        // only an interned symbol arrives here. Its key is rendered bare when
-        // it is a valid identifier, and quoted otherwise.
-        const key = Symbol.keyFor(value) ?? "";
-        return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)
-          ? `@${key}`
-          : `@${JSON.stringify(key)}`;
+        // only an interned symbol arrives here.
+        return `@${renderKey(Symbol.keyFor(value) ?? "")}`;
       }
 
       case "object": {
@@ -501,7 +507,8 @@ function renderDebugString(value: unknown, indent?: number): string {
  *
  * The value is first converted with `toStructuredDebugValue()`, and it is that
  * result which gets rendered. The rendering is JSON syntax wherever JSON can
- * express the value, and a bare token wherever it cannot:
+ * express the value, except that an object key which is a valid identifier is
+ * written bare, and a bare token wherever it cannot:
  * * `bigint`s, as `42n`.
  * * `undefined`, as such.
  * * non-finite numbers and `-0`, as such.

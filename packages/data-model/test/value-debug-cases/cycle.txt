@@ -7,13 +7,13 @@
 })()
 
 {
-  "x": 1,
-  "inner": {
-    "y": 2,
-    "root": <circle>,
-    "self": <circle>
+  x: 1,
+  inner: {
+    y: 2,
+    root: <circle>,
+    self: <circle>
   },
-  "self": <circle>
+  self: <circle>
 }
 
-{"x":1,"inner":{"y":2,"root":<circle>,"self":<circle>},"self":<circle>}
+{x:1,inner:{y:2,root:<circle>,self:<circle>},self:<circle>}

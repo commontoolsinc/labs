@@ -1,15 +1,15 @@
 { named: function foo() {}, arrow: () => 1, method() {} }
 
 {
-  "named": {
+  named: {
     "/function": "foo(...)"
   },
-  "arrow": {
+  arrow: {
     "/function": "arrow(...)"
   },
-  "method": {
+  method: {
     "/function": "method(...)"
   }
 }
 
-{"named":{"/function":"foo(...)"},"arrow":{"/function":"arrow(...)"},"method":{"/function":"metho...
+{named:{"/function":"foo(...)"},arrow:{"/function":"arrow(...)"},method:{"/function":"method(...)"}}

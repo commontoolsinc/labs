@@ -4,8 +4,8 @@
 }
 
 {
-  "plain": undefined,
+  plain: undefined,
   "via void": undefined
 }
 
-{"plain":undefined,"via void":undefined}
+{plain:undefined,"via void":undefined}
