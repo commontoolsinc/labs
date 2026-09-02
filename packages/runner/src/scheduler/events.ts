@@ -1,7 +1,10 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { recordTrustedEventPolicyInputs } from "../cfc/ui-contract.ts";
 import type { Cancel } from "../cancel.ts";
-import { ensurePieceRunning } from "../ensure-piece-running.ts";
+import {
+  ensurePieceRunningVerdict,
+  type EnsurePieceVerdict,
+} from "../ensure-piece-running.ts";
 import { waveRunContextOf } from "../executor/wave.ts";
 import {
   areNormalizedLinksSame,
@@ -174,7 +177,7 @@ export interface SchedulerEventQueueState {
   readonly loadPieceForEvent?: (
     runtime: Runtime,
     eventLink: NormalizedFullLink,
-  ) => Promise<boolean>;
+  ) => Promise<EnsurePieceVerdict>;
   readonly queueExecution: () => void;
   readonly recordLineageEvent: (
     originTx: IExtendedStorageTransaction,
@@ -593,10 +596,11 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
 
     const startTask = (async () => {
       try {
-        const started = await (state.loadPieceForEvent ?? ensurePieceRunning)(
-          state.runtime,
-          args.eventLink,
-        );
+        const verdict = await (state.loadPieceForEvent ??
+          ensurePieceRunningVerdict)(
+            state.runtime,
+            args.eventLink,
+          );
         // The origin may have failed while the piece was loading.
         if (
           queuedEvent.finalOutcomeNotified ||
@@ -611,25 +615,43 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           queuedEvent.handler = loadedHandler;
           queuedEvent.action = (tx) => loadedHandler(tx, args.event);
           delete queuedEvent.handlerLoadPending;
-        } else if (started) {
-          // The piece ran and registered NOTHING for this stream —
-          // events.md §5's drop predicate ("no runnable handler").
+        } else if (
+          verdict.started && verdict.graphIsInstalled?.() !== false
+        ) {
+          // The piece is running with its pattern graph installed and
+          // registered NOTHING for this stream — events.md §5's drop
+          // predicate ("no runnable handler"). A verdict carrying no
+          // graph probe reads as installed: only a start walk mints
+          // one, and its absence says nothing about the piece.
           dropQueuedEvent(
             state,
             queuedEvent,
             `Event dropped: no handler registered for ${args.eventLink.id} after starting its piece`,
           );
         } else {
-          // The piece could not be STARTED — for a served (drained)
-          // event this is a cold-view deferral (the creation-race
-          // shape), never the drop predicate: the durable entry stays
-          // pending and a later wave re-drains it. Client-side the
-          // distinction is moot (no durable entry to re-drain) and the
-          // drop keeps its existing shape.
+          // Either the piece could not be STARTED, or it has no
+          // pattern graph installed: a refused instantiation commit
+          // retires the graph the start walk installed, and the runner
+          // then either re-instantiates once from a caught-up view or
+          // retires the registration with it. The walk ran before any
+          // of that, so `started` reports a piece that has nothing
+          // registered for any of its streams. Neither shape is the
+          // drop predicate — the handler is missing because the commit
+          // was raced, not because there is none, and events.md §5
+          // calls for a requeue there. For a served (drained) event
+          // that is a deferral: the durable entry stays pending and a
+          // later wave re-drains it, under the serving loop's bounded
+          // deferral budget — a condition that outlasts the budget
+          // hardens into §5's drop notice rather than wedging the
+          // stream. Client-side the distinction is moot (no durable
+          // entry to re-drain) and the drop keeps its existing shape.
+          const pieceState = verdict.started
+            ? "has no pattern graph installed"
+            : "could not be started";
           dropQueuedEvent(
             state,
             queuedEvent,
-            `Event dropped: no handler registered for ${args.eventLink.id} and its piece could not be started`,
+            `Event dropped: no handler registered for ${args.eventLink.id} and its piece ${pieceState}`,
             queuedEvent.served !== undefined ? "deferred" : "dropped",
           );
           if (queuedEvent.served !== undefined) {
@@ -640,7 +662,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
             deferLaterSameSpaceServedEvents(
               state,
               queuedEvent,
-              "whose piece could not be started",
+              `whose piece ${pieceState}`,
             );
           }
         }

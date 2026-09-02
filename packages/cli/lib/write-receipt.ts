@@ -34,6 +34,11 @@ import type {
 /**
  * Spaces already receipted in this process, so a command whose work runs
  * through several write functions reports the space once rather than per call.
+ *
+ * The memo is the process's rather than one connection's, so a caller that
+ * holds a connection across many writes names a space once for the life of
+ * the process; `docs/plans/shuttle/runtime-integration.md` carries what that
+ * costs such a caller.
  */
 const receipted = new Set<string>();
 

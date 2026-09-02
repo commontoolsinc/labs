@@ -20,7 +20,10 @@
 // - a speculative run's post-commit effects follow the egress rule:
 //   external-sink kinds are DROPPED (the client never performs egress
 //   under the flag — README §3.5), while the reversible `navigateTo`
-//   kind still enacts (optimistic navigation, speculation.md §2).
+//   kind still enacts (optimistic navigation, speculation.md §2);
+// - the runner's own piece-start instantiation reads the DURABLE view,
+//   so its bookkeeping commit never names an overlay layer and the
+//   piece keeps the registration its event handlers hang off.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -34,6 +37,7 @@ import { Runtime } from "../src/runtime.ts";
 import type {
   IExtendedStorageTransaction,
   MemorySpace,
+  SealedCommitVerdict,
 } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { waitForSettled } from "../src/executor/watermark.ts";
@@ -58,7 +62,8 @@ import { getDirectTransactionReadActivities } from "../src/storage/transaction-i
 import { isTerminalRejection } from "../src/storage/rejection.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import type { JSONSchema, Module, Pattern } from "../src/builder/types.ts";
+import type { Cell } from "../src/cell.ts";
 import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("speculation overlay space");
@@ -2168,6 +2173,285 @@ describe("Phase 2 speculation overlay", () => {
     );
     verdict.resolve({ withdrawn: { message: "test complete" } });
     await sealed.settled;
+  });
+
+  it("a piece-start instantiation reads through the durable view while a speculative echo stands: its bookkeeping commit lands and the piece stays registered (speculation.md §6)", async () => {
+    // The runner's own piece-instantiation transaction is an authored
+    // write bound for the wire, so its read basis must never name a
+    // speculative layer. The refusal is terminal by ruling, and the arm
+    // that catches it retires the whole piece registration — which takes
+    // the event handlers the graph installed with it, so the next send
+    // to one of those streams finds no handler and drops. That is the
+    // shape the record-module-chrome integration test hit on the ON
+    // lane: a dropped `addModule` send three milliseconds after a
+    // `SpeculativeBasisError` on `piece-instantiate/...`.
+    //
+    // The piece is a hand-built witness whose one raw node reads a shared
+    // document through the instantiation's own transaction and writes a
+    // changing value, so every instantiation carries a real bookkeeping
+    // commit instead of being optimized away to a no-op — the device
+    // executor-wave.test.ts uses for this same machinery.
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+    const engine = await server.engineForSpace(space);
+
+    const shared = clientRuntime.getCell<{ n: number }>(
+      space,
+      "piece-start-shared-input",
+      undefined,
+    );
+    await shared.sync();
+    {
+      const seed = clientRuntime.edit();
+      shared.withTx(seed).set({ n: 1 });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+
+    let instantiations = 0;
+    const readPerInstantiation: unknown[] = [];
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {
+        type: "object",
+        properties: { witness: { type: "number" } },
+      },
+      result: {},
+      nodes: [{
+        module: {
+          type: "raw",
+          implementation: (...args: unknown[]) => {
+            const parentCell = args[4] as Cell<Record<string, unknown>>;
+            instantiations += 1;
+            readPerInstantiation.push(
+              shared.withTx(parentCell.tx).key("n").get(),
+            );
+            parentCell.key("witness").set(instantiations);
+            return { action: () => {} };
+          },
+        } as Module,
+        inputs: {},
+        outputs: {},
+      }],
+    };
+
+    const witness = clientRuntime.getCell<Record<string, unknown>>(
+      space,
+      "piece-start-witness",
+      undefined,
+    );
+    {
+      const tx = clientRuntime.edit();
+      const running = clientRuntime.runner.run(
+        tx,
+        pattern,
+        {},
+        witness.withTx(tx),
+      );
+      expect((await tx.commit()).error).toBeUndefined();
+      await running.pull();
+    }
+    await clientRuntime.storageManager.synced();
+    expect(instantiations).toBe(1);
+    const registrationsWhileRunning = clientRuntime.runner.cancels.size;
+    clientRuntime.runner.stop(witness);
+    expect(clientRuntime.runner.cancels.size).toBe(
+      registrationsWhileRunning - 1,
+    );
+
+    // The window: an echo stands on the shared document, so an
+    // instantiation that reads it through the ordinary view names a
+    // process-local layer in its commit basis.
+    const replica = clientManager.open(space).replica;
+    const sharedLink = shared.getAsNormalizedFullLink();
+    const durableDoc = replica.getDocument(sharedLink.id, sharedLink.scope);
+    const verdict = Promise.withResolvers<SealedCommitVerdict>();
+    const sealed = replica.sealNative!(
+      {
+        operations: [{
+          op: "set",
+          id: sharedLink.id,
+          type: "application/json",
+          value: {
+            ...(durableDoc as Record<string, unknown>),
+            value: { n: 99 },
+          },
+        }],
+      },
+      undefined,
+      verdict.promise,
+      { speculative: true },
+    );
+    expect(shared.get()).toEqual({ n: 99 });
+
+    const failures: Array<{ actionId: string; name?: string }> = [];
+    clientRuntime.pieceStartCommitFailureObserver = ({ actionId, error }) => {
+      failures.push({ actionId, name: (error as { name?: string })?.name });
+    };
+    try {
+      expect(await clientRuntime.start(witness)).toBe(true);
+      await clientRuntime.idle();
+      await clientRuntime.runner.idlePieceInstantiationSettlements();
+
+      // Its setup write landed: nothing refused it.
+      expect(failures).toEqual([]);
+      // The instantiation ran against the durable value, not the echo's,
+      // which is the value side of the basis it names.
+      expect(instantiations).toBe(2);
+      expect(readPerInstantiation[1]).toBe(1);
+      // And the store holds what it wrote.
+      await clientRuntime.storageManager.synced();
+      expect(
+        (Engine.read(engine, { id: witness.getAsNormalizedFullLink().id })
+          ?.value as { witness?: number } | undefined)?.witness,
+      ).toBe(2);
+      // So the piece is still registered, and the handlers its graph
+      // installed are still reachable by an event.
+      expect(clientRuntime.runner.cancels.size).toBe(registrationsWhileRunning);
+    } finally {
+      verdict.resolve({ withdrawn: { message: "test complete" } });
+      await sealed.settled.catch(() => {});
+    }
+  });
+
+  it("a piece-start instantiation still consumes a DURABLE in-flight layer: the mark excludes speculation, not everything pending (speculation.md §6)", async () => {
+    // The reverse pin of the case above, and the one that catches the
+    // wrong implementation of it. The durable-read mark must skip the
+    // process-local speculation layers and nothing else: a durable
+    // sealed layer is a real write on its way to the store, its localSeq
+    // is nameable in a commit basis, and an instantiation that stopped
+    // consuming it would build the graph from a value the store is
+    // already past. Written as "skip every pending layer" the case above
+    // still passes and this one reads 1.
+    //
+    // The two seals differ in exactly one token — the `speculative`
+    // option — so the values the two tests expect are what separates the
+    // two layer classes.
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+
+    const shared = clientRuntime.getCell<{ n: number }>(
+      space,
+      "piece-start-durable-input",
+      undefined,
+    );
+    await shared.sync();
+    {
+      const seed = clientRuntime.edit();
+      shared.withTx(seed).set({ n: 1 });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+
+    let instantiations = 0;
+    const readPerInstantiation: unknown[] = [];
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {
+        type: "object",
+        properties: { witness: { type: "number" } },
+      },
+      result: {},
+      nodes: [{
+        module: {
+          type: "raw",
+          implementation: (...args: unknown[]) => {
+            const parentCell = args[4] as Cell<Record<string, unknown>>;
+            instantiations += 1;
+            readPerInstantiation.push(
+              shared.withTx(parentCell.tx).key("n").get(),
+            );
+            parentCell.key("witness").set(instantiations);
+            return { action: () => {} };
+          },
+        } as Module,
+        inputs: {},
+        outputs: {},
+      }],
+    };
+
+    const witness = clientRuntime.getCell<Record<string, unknown>>(
+      space,
+      "piece-start-durable-witness",
+      undefined,
+    );
+    {
+      const tx = clientRuntime.edit();
+      const running = clientRuntime.runner.run(
+        tx,
+        pattern,
+        {},
+        witness.withTx(tx),
+      );
+      expect((await tx.commit()).error).toBeUndefined();
+      await running.pull();
+    }
+    await clientRuntime.storageManager.synced();
+    expect(instantiations).toBe(1);
+    expect(readPerInstantiation[0]).toBe(1);
+    clientRuntime.runner.stop(witness);
+
+    // A DURABLE sealed layer: the same shape as the speculative one
+    // above without the `speculative` option, so it is a write bound for
+    // the store whose verdict has not landed yet.
+    const replica = clientManager.open(space).replica;
+    const sharedLink = shared.getAsNormalizedFullLink();
+    const durableDoc = replica.getDocument(sharedLink.id, sharedLink.scope);
+    const verdict = Promise.withResolvers<SealedCommitVerdict>();
+    const sealed = replica.sealNative!(
+      {
+        operations: [{
+          op: "set",
+          id: sharedLink.id,
+          type: "application/json",
+          value: {
+            ...(durableDoc as Record<string, unknown>),
+            value: { n: 42 },
+          },
+        }],
+      },
+      undefined,
+      verdict.promise,
+    );
+    expect(shared.get()).toEqual({ n: 42 });
+
+    const refusals: unknown[] = [];
+    clientRuntime.pieceStartCommitFailureObserver = ({ error }) => {
+      refusals.push(error);
+    };
+    try {
+      expect(await clientRuntime.start(witness)).toBe(true);
+      await clientRuntime.idle();
+
+      // The layer is durable, so the instantiation consumed it.
+      expect(instantiations).toBe(2);
+      expect(readPerInstantiation[1]).toBe(42);
+      // And naming it is legitimate: whatever this commit's fate, it is
+      // never the terminal refusal a speculative basis earns. Its fate
+      // rides the seal's undischarged verdict, which is why the outcome
+      // itself is not asserted here.
+      await clientRuntime.runner.idlePieceInstantiationSettlements();
+      expect(
+        refusals.filter((error) =>
+          isTerminalRejection(error as { name?: string })
+        ),
+      ).toEqual([]);
+    } finally {
+      verdict.resolve({ withdrawn: { message: "test complete" } });
+      await sealed.settled.catch(() => {});
+    }
   });
 
   it("under a standing overlay layer whose writes include /cfc, a blind-write tx's verifier-shaped read sees the DURABLE doc while an ordinary read sees the overlay — verify-durable and name-durable travel together (RULED 2026-08-21)", async () => {

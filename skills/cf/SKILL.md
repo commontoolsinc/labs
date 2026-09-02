@@ -151,12 +151,17 @@ answer composes into the next command.
   Naming the target twice — the flag beside a positional reference — is refused.
 - `--url <browser url>` is a convenience for pasting. It is not a spelling of
   its own: the host becomes `--api-url` and the rest becomes a reference.
-- A reference ending `#argument` selects the piece's arguments cell — the same
+- A target ending `#argument` selects the piece's arguments cell — the same
   selection `--input` makes, and it is accepted exactly where `--input` is:
-  `cf get`, `cf set`, and `cf piece get-label|set-label`. A command that takes
-  no `--input` refuses the suffix rather than ignoring it, `cf call` among them.
-  The suffix needs a reference, so with `--url` or a bare id, `--input` is the
-  spelling that reaches it.
+  `cf get`, `cf set`, and `cf piece get-label|set-label`. A reference, a bare id
+  and a slug all take it, since all three designate the same piece. A command
+  that takes no `--input` refuses the suffix rather than ignoring it, `cf call`
+  among them. A `--url` carries no fragment into the reference it decomposes to,
+  whatever the URL names, so a `#argument` written on one is dropped rather than
+  refused. A URL naming the piece admits no `--cell` or positional address
+  beside it, so `--input` is what reaches the arguments cell there; a URL naming
+  only the space leaves the target to arrive as it always does — a positional
+  address, or `--cell` — carrying the suffix like any other.
 
 ## Where the read options go
 

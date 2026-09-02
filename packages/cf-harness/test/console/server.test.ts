@@ -4,17 +4,12 @@ import { join, resolve, toFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import {
-  consoleChatPolicy,
   ConsoleServer,
   createConsoleInteractiveServiceOptions,
   resolveConsoleConfig,
 } from "../../console/server.ts";
+import { harnessSessionChatPolicy } from "../../src/session-assembly.ts";
 import type { ConsoleSessionListing } from "../../console/sessions.ts";
-import {
-  createHarnessChatEventEnvelope,
-  type HarnessChatEventEnvelope,
-  type HarnessChatStructuredEvent,
-} from "../../src/contracts/interactive-chat.ts";
 import type { HarnessFetch } from "../../src/contracts/http-fetch.ts";
 import { PatternIndexClient } from "../../src/pattern-index/client.ts";
 import {
@@ -24,6 +19,7 @@ import {
 } from "../../src/interactive-chat-service.ts";
 import { openSqliteHarnessChatSessionStore } from "../../src/sqlite-session-store.ts";
 import type {
+  CreateHarnessPromptLoopOptions,
   HarnessPromptLoopResult,
   RunHarnessTranscriptOptions,
 } from "../../src/prompt-loop.ts";
@@ -104,6 +100,9 @@ const advancingClock = () => {
 
 /** The identity the proxied index client signs with in these tests. */
 const signer = await Identity.fromPassphrase("cf-harness console index proxy");
+
+/** An entity id of the shape an input-cell reference has to carry. */
+const CELL_ID = `of:fid1:${"A".repeat(43)}`;
 
 const config = () =>
   resolveConsoleConfig(
@@ -188,7 +187,7 @@ describe("console/server", () => {
 
   beforeEach(async () => {
     server = new ConsoleServer(
-      config(),
+      await config(),
       (onEvent) =>
         new HarnessInteractiveChatService({
           createPromptLoop: answeringLoop,
@@ -251,7 +250,7 @@ describe("console/server", () => {
       return Promise.resolve(response);
     };
     const indexed = new ConsoleServer(
-      configWithIndex(),
+      await configWithIndex(),
       (onEvent) =>
         new HarnessInteractiveChatService({
           createPromptLoop: answeringLoop,
@@ -276,37 +275,6 @@ describe("console/server", () => {
     };
   };
 
-  /**
-   * A server whose cell-label snapshot the test releases by hand, and an
-   * event stream already open on it. The snapshot is handed in because it
-   * reads a space database this test has none of, and because when it settles
-   * is the whole of what these tests are about.
-   */
-  const snapshotServer = async (
-    recordCellLabels: (sessionId: string) => Promise<void>,
-  ): Promise<{ server: ConsoleServer; stream: Response }> => {
-    const held = new ConsoleServer(
-      config(),
-      (onEvent) =>
-        new HarnessInteractiveChatService({
-          createPromptLoop: answeringLoop,
-          now: advancingClock(),
-          onEvent,
-        }),
-      undefined,
-      recordCellLabels,
-    );
-    const page = await held.handle(getRequest("/"));
-    await page.body?.cancel();
-    const streamCookie = page.headers.get("set-cookie")!.split(";")[0];
-    return {
-      server: held,
-      stream: await held.handle(
-        getRequest("/api/events?afterSequence=0", { cookie: streamCookie }),
-      ),
-    };
-  };
-
   /** Reads one live completed event backed by its durable run transcript. */
   const liveTurnResult = async (
     messages: readonly HarnessTranscriptMessage[],
@@ -315,7 +283,7 @@ describe("console/server", () => {
       prefix: "cf-harness-console-result-event-",
     });
     try {
-      const resultConfig = resolveConsoleConfig(
+      const resultConfig = await resolveConsoleConfig(
         [
           "--fabric-identity",
           "key.pkcs8",
@@ -339,8 +307,6 @@ describe("console/server", () => {
             onEvent,
             runIdForTurn: (_sessionId, turnId) => turnId,
           }),
-        undefined,
-        () => Promise.resolve(),
       );
       const page = await resultServer.handle(getRequest("/"));
       await page.body?.cancel();
@@ -362,19 +328,9 @@ describe("console/server", () => {
     }
   };
 
-  const envelope = (
-    sequence: number,
-    event: HarnessChatStructuredEvent,
-  ): HarnessChatEventEnvelope =>
-    createHarnessChatEventEnvelope({
-      sessionId: "session-1",
-      sequence,
-      event,
-    });
-
   describe("console prompt configuration", () => {
-    it("threads configured skills.sh discovery into the run and policy", () => {
-      const resolved = resolveConsoleConfig(
+    it("threads configured skills.sh discovery into the run and policy", async () => {
+      const resolved = await resolveConsoleConfig(
         [
           "--fabric-identity",
           "key.pkcs8",
@@ -407,16 +363,21 @@ describe("console/server", () => {
       expect(serviceOptions.runIdForTurn?.("session-1", "turn-1")).toBe(
         "turn-1",
       );
-      expect(consoleChatPolicy(false, true).allowedToolIds).toContain(
-        "search_skills",
-      );
-      expect(consoleChatPolicy(false, false).allowedToolIds).not.toContain(
-        "search_skills",
-      );
+      // A registry and a fabric session back both skill tools, so a session
+      // configured for one offers acquisition as well as discovery.
+      const policy = harnessSessionChatPolicy(resolved);
+      expect(policy.allowedToolIds).toContain("search_skills");
+      expect(policy.allowedToolIds).toContain("acquire_skill");
     });
 
-    it("reads the skills.sh discovery registry from the environment", () => {
-      const resolved = resolveConsoleConfig(
+    it("withholds the skill tools from a session with no registry", async () => {
+      const policy = harnessSessionChatPolicy(await config());
+      expect(policy.allowedToolIds).not.toContain("search_skills");
+      expect(policy.allowedToolIds).not.toContain("acquire_skill");
+    });
+
+    it("reads the skills.sh discovery registry from the environment", async () => {
+      const resolved = await resolveConsoleConfig(
         [
           "--fabric-identity",
           "key.pkcs8",
@@ -434,8 +395,8 @@ describe("console/server", () => {
       });
     });
 
-    it("rejects a skills.sh discovery registry that is not a URL", () => {
-      expect(() =>
+    it("rejects a skills.sh discovery registry that is not a URL", async () => {
+      await expect(
         resolveConsoleConfig(
           [
             "--fabric-identity",
@@ -449,8 +410,8 @@ describe("console/server", () => {
           ],
           {},
           "/console",
-        )
-      ).toThrow("--skills-registry-url must be a valid URL");
+        ),
+      ).rejects.toThrow("--skills-registry-url must be a valid URL");
     });
 
     it("reads the named prompt and disables child composition guidance", async () => {
@@ -462,7 +423,7 @@ describe("console/server", () => {
           join(directory, "system.txt"),
           "COMPOSE FIRST\n",
         );
-        const resolved = resolveConsoleConfig(
+        const resolved = await resolveConsoleConfig(
           [
             "--fabric-identity",
             "key.pkcs8",
@@ -479,7 +440,7 @@ describe("console/server", () => {
         );
 
         expect(resolved.systemPrompt).toBe("COMPOSE FIRST\n");
-        expect(resolved.childCompositionGuidance).toBe(false);
+        expect(resolved.subagentCompositionGuidance).toBe(false);
         const serviceOptions = createConsoleInteractiveServiceOptions(
           resolved,
           {
@@ -498,8 +459,8 @@ describe("console/server", () => {
       }
     });
 
-    it("rejects a prompt file that cannot be read", () => {
-      expect(() =>
+    it("rejects a prompt file that cannot be read", async () => {
+      await expect(
         resolveConsoleConfig(
           [
             "--fabric-identity",
@@ -513,8 +474,8 @@ describe("console/server", () => {
           ],
           {},
           "/console-prompt-test",
-        )
-      ).toThrow(
+        ),
+      ).rejects.toThrow(
         "--system-prompt-file could not be read: /console-prompt-test/missing.txt",
       );
     });
@@ -527,7 +488,7 @@ describe("console/server", () => {
         const promptPath = join(directory, "empty.txt");
         await Deno.writeTextFile(promptPath, " \n\t");
 
-        expect(() =>
+        await expect(
           resolveConsoleConfig(
             [
               "--fabric-identity",
@@ -541,73 +502,20 @@ describe("console/server", () => {
             ],
             {},
             directory,
-          )
-        ).toThrow(`--system-prompt-file is empty: ${promptPath}`);
+          ),
+        ).rejects.toThrow(`--system-prompt-file is empty: ${promptPath}`);
       } finally {
         await Deno.remove(directory, { recursive: true });
       }
     });
   });
 
-  describe("the cell-label snapshot a terminal event waits on", () => {
-    it("writes a terminal event to a stream only once its snapshot has landed", async () => {
-      let land: (() => void) | undefined;
-      const snapshot = new Promise<void>((resolve) => {
-        land = resolve;
-      });
-      const held = await snapshotServer(() => snapshot);
-      const frames = frameReader(held.stream);
-      try {
-        held.server.broadcast(
-          envelope(1, { kind: "assistant_completed", text: "built it" }),
-        );
-        // Reading that frame back is what says the stream has drained its
-        // backfill: until it has, an envelope is buffered rather than written.
-        expect(await frames.next()).toBe("chat:assistant_completed");
-
-        held.server.broadcast(
-          envelope(2, { kind: "turn_completed", turnId: "turn-1" }),
-        );
-        // A frame written while the terminal event is still waiting. A stream
-        // delivers in the order it was written, so the terminal event arriving
-        // after this one is what says it did not overtake its snapshot.
-        held.server.ping();
-        land!();
-
-        expect(await frames.next()).toBe("ping");
-        expect(await frames.next()).toBe("chat:turn_completed");
-      } finally {
-        await frames.cancel();
-      }
-    });
-
-    it("writes a terminal event whose snapshot could not be taken", async () => {
-      const held = await snapshotServer(() =>
-        Promise.reject(new Error("no space database for console-test"))
-      );
-      const frames = frameReader(held.stream);
-      try {
-        held.server.broadcast(
-          envelope(1, { kind: "assistant_completed", text: "built it" }),
-        );
-        expect(await frames.next()).toBe("chat:assistant_completed");
-
-        held.server.broadcast(envelope(2, {
-          kind: "turn_failed",
-          turnId: "turn-1",
-          error: { code: "internal_error", message: "the model gave up" },
-        }));
-
-        expect(await frames.next()).toBe("chat:turn_failed");
-      } finally {
-        await frames.cancel();
-      }
-    });
-
-    it("loads the server module on a host with no FFI permission", async () => {
+  describe("the module", () => {
+    it("loads on a host with no FFI permission", async () => {
       // The console promises a machine without the SQLite native library can
-      // serve its page, and a run whose cells there are none of takes no
-      // snapshot. So evaluating this module must not open that library.
+      // serve its page: a run reads its space through that library only as
+      // it ends, and only when it holds a cell to ask about. So evaluating
+      // this module must not open that library.
       const repoRoot = resolve(import.meta.dirname!, "..", "..", "..", "..");
       const wrapperDir = await Deno.makeTempDir({
         prefix: "cf-harness-console-import-",
@@ -684,7 +592,7 @@ describe("console/server", () => {
 
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({
-        artifactRoot: config().artifactRoot,
+        artifactRoot: (await config()).artifactRoot,
         sessions: [],
       });
     });
@@ -697,13 +605,14 @@ describe("console/server", () => {
       );
 
       expect(response.status).toBe(200);
-      const policy = consoleChatPolicy(false, false);
+      const resolved = await config();
+      const policy = harnessSessionChatPolicy(resolved);
       expect(await response.json()).toEqual({
         systemPromptSha256: null,
         allowedToolIds: [...policy.allowedToolIds],
         allowedSubagentProfiles: [...policy.allowedSubagentProfiles],
-        fabricSpace: config().fabricSession.space,
-        artifactRoot: config().artifactRoot,
+        fabricSpace: resolved.fabricSession.space,
+        artifactRoot: resolved.artifactRoot,
         sessionDbPath: null,
       });
     });
@@ -722,7 +631,7 @@ describe("console/server", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({
         ok: true,
-        fabricApiUrl: config().fabricSession.apiUrl,
+        fabricApiUrl: (await config()).fabricSession.apiUrl,
         fabricSession: "unverified",
       });
     });
@@ -781,7 +690,7 @@ describe("console/server", () => {
         prefix: "cf-harness-console-result-route-",
       });
       try {
-        const resultConfig = resolveConsoleConfig(
+        const resultConfig = await resolveConsoleConfig(
           [
             "--fabric-identity",
             "key.pkcs8",
@@ -803,8 +712,6 @@ describe("console/server", () => {
               now: advancingClock(),
               onEvent,
             }),
-          undefined,
-          () => Promise.resolve(),
         );
         const page = await resultServer.handle(getRequest("/"));
         await page.body?.cancel();
@@ -861,7 +768,7 @@ describe("console/server", () => {
         url: toFileUrl(join(artifactRoot, "sessions.sqlite")),
       });
       try {
-        const resultConfig = resolveConsoleConfig(
+        const resultConfig = await resolveConsoleConfig(
           [
             "--fabric-identity",
             "key.pkcs8",
@@ -888,8 +795,6 @@ describe("console/server", () => {
         const firstServer = new ConsoleServer(
           resultConfig,
           createService,
-          undefined,
-          () => Promise.resolve(),
         );
         const firstPage = await firstServer.handle(getRequest("/"));
         await firstPage.body?.cancel();
@@ -908,8 +813,6 @@ describe("console/server", () => {
         const restoredServer = new ConsoleServer(
           resultConfig,
           createService,
-          undefined,
-          () => Promise.resolve(),
         );
         await restoredServer.service.initializeFromStore();
         const restoredPage = await restoredServer.handle(getRequest("/"));
@@ -941,7 +844,7 @@ describe("console/server", () => {
         finish = resolve;
       });
       const waitingServer = new ConsoleServer(
-        config(),
+        await config(),
         (onEvent) =>
           new HarnessInteractiveChatService({
             createPromptLoop: () => ({
@@ -953,8 +856,6 @@ describe("console/server", () => {
             now: advancingClock(),
             onEvent,
           }),
-        undefined,
-        () => Promise.resolve(),
       );
       const page = await waitingServer.handle(getRequest("/"));
       await page.body?.cancel();
@@ -983,6 +884,104 @@ describe("console/server", () => {
           started.turnId,
         );
       }
+    });
+
+    it("answers 410 `turn_failed` with the turn's error for a turn that failed", async () => {
+      // A failed turn will never have a result, so a poller is told to stop
+      // rather than to ask again.
+      const failingServer = new ConsoleServer(
+        await config(),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: () => ({
+              runTranscript: () =>
+                Promise.reject(new Error("model stream returned an error")),
+            }),
+            now: advancingClock(),
+            onEvent,
+          }),
+      );
+      const page = await failingServer.handle(getRequest("/"));
+      await page.body?.cancel();
+      const failingCookie = page.headers.get("set-cookie")!.split(";")[0];
+      const startedResponse = await failingServer.handle(
+        jsonRequest("/api/task", { text: "build it" }, {
+          cookie: failingCookie,
+        }),
+      );
+      const started = await startedResponse.json();
+      await failingServer.service.waitForTurn(
+        started.sessionId,
+        started.turnId,
+      );
+
+      const response = await failingServer.handle(getRequest(
+        `/api/turns/${started.turnId}/result`,
+        { cookie: failingCookie },
+      ));
+
+      expect(response.status).toBe(410);
+      expect(await response.json()).toEqual({
+        code: "turn_failed",
+        error: `turn ${started.turnId} failed`,
+        detail: {
+          code: "internal_error",
+          message: "model stream returned an error",
+        },
+      });
+    });
+
+    it("answers 410 `turn_canceled` for a turn that was canceled", async () => {
+      let finish: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const waitingServer = new ConsoleServer(
+        await config(),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: () => ({
+              runTranscript: async (options) => {
+                await gate;
+                return await answeringLoop({} as never).runTranscript(options);
+              },
+            }),
+            now: advancingClock(),
+            onEvent,
+          }),
+      );
+      const page = await waitingServer.handle(getRequest("/"));
+      await page.body?.cancel();
+      const waitingCookie = page.headers.get("set-cookie")!.split(";")[0];
+      const startedResponse = await waitingServer.handle(
+        jsonRequest("/api/task", { text: "keep working" }, {
+          cookie: waitingCookie,
+        }),
+      );
+      const started = await startedResponse.json();
+      const canceled = await waitingServer.handle(
+        jsonRequest("/api/cancel", { sessionId: started.sessionId }, {
+          cookie: waitingCookie,
+        }),
+      );
+      expect(canceled.status).toBe(200);
+      finish!();
+      await waitingServer.service.waitForTurn(
+        started.sessionId,
+        started.turnId,
+      );
+
+      const response = await waitingServer.handle(getRequest(
+        `/api/turns/${started.turnId}/result`,
+        { cookie: waitingCookie },
+      ));
+
+      expect(response.status).toBe(410);
+      expect(await response.json()).toEqual({
+        code: "turn_canceled",
+        error: `turn ${started.turnId} was canceled`,
+        detail: "canceled from the console page",
+      });
     });
   });
 
@@ -1021,6 +1020,127 @@ describe("console/server", () => {
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toBe("sessionId must be a string");
+    });
+
+    it("attaches the task's input cells to the run that answers it", async () => {
+      // The weaver flow: a caller names cells it wants the task computed
+      // over, by reference and under its own names. What reaches the run is
+      // the specification; the run mints the tokens the model sees.
+      const loopOptions: CreateHarnessPromptLoopOptions[] = [];
+      const capturing = new ConsoleServer(
+        await config(),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: (options) => {
+              loopOptions.push(options);
+              return answeringLoop(options);
+            },
+            now: advancingClock(),
+            onEvent,
+          }),
+      );
+      const page = await capturing.handle(getRequest("/"));
+      await page.body?.cancel();
+      const capturedCookie = page.headers.get("set-cookie")!.split(";")[0];
+
+      const response = await capturing.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [{ name: "itinerary", ref: `/${CELL_ID}/days` }],
+      }, { cookie: capturedCookie }));
+      expect(response.status).toBe(200);
+      const started = await response.json();
+      await capturing.service.waitForTurn(started.sessionId, started.turnId);
+
+      expect(loopOptions.at(-1)?.inputCells).toEqual([
+        { name: "itinerary", ref: `/${CELL_ID}/days` },
+      ]);
+    });
+
+    it("answers 400 for an input cell the flag's own grammar refuses", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [{ name: "not a name", ref: `/${CELL_ID}/days` }],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain("--input-cell name");
+    });
+
+    it("answers 400 for an input-cell ref that names no entity, before any turn starts", async () => {
+      // The mint would refuse this ref; refusing it here costs no turn.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "make a budget dashboard",
+        inputCells: [{
+          name: "transactions",
+          ref: `/fid1:${"A".repeat(43)}/account`,
+        }],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain(
+        "reference does not parse",
+      );
+      expect((await listSessions()).sessions).toHaveLength(0);
+    });
+
+    it("answers 400 for input cells that are not a list of name and ref", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [{ name: "itinerary" }],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "each input cell needs a string name and ref",
+      );
+    });
+
+    it("answers 400 for input cells that are not a list at all", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: { itinerary: `/${CELL_ID}/days` },
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe("inputCells must be an array");
+    });
+
+    it("answers 400 for an input cell that is not an object", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [`itinerary=/${CELL_ID}/days`],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "each input cell must be an object",
+      );
+    });
+
+    it("answers 400 for a name the request uses twice", async () => {
+      // Two references under one name is a request that has not said which
+      // cell the model's `itinerary` is.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [
+          { name: "itinerary", ref: `/${CELL_ID}/days` },
+          { name: "itinerary", ref: `/${CELL_ID}/nights` },
+        ],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "inputCells names `itinerary` twice",
+      );
+    });
+
+    it("starts a task that names no input cells at all", async () => {
+      const started = await startTask({
+        text: "track my books",
+        inputCells: null,
+      });
+
+      expect(started.turnId).toBeDefined();
     });
   });
 
@@ -1133,7 +1253,7 @@ describe("console/server", () => {
       // unreadable keyfile names the path the operator configured, which the
       // page must not read.
       const server = new ConsoleServer(
-        config(),
+        await config(),
         (onEvent) =>
           new HarnessInteractiveChatService({
             createPromptLoop: answeringLoop,
@@ -1516,55 +1636,6 @@ const envelopesUntil = async (
   } finally {
     await reader.cancel();
   }
-};
-
-/**
- * One SSE frame at a time, named `<event>` for a frame the server writes
- * itself and `chat:<kind>` for a chat envelope. Each read resolves on the
- * chunk the server enqueued, so it ends when a frame is written rather than
- * after any span of time.
- */
-const frameReader = (response: Response): {
-  next: () => Promise<string>;
-  cancel: () => Promise<void>;
-} => {
-  const reader = response.body!.pipeThrough(new TextDecoderStream())
-    .getReader();
-  const named = (frame: string): string | undefined => {
-    const lines = frame.split("\n");
-    const event = lines.find((line) => line.startsWith("event: "))?.slice(7);
-    if (event === undefined) {
-      return undefined;
-    }
-    if (event !== "chat") {
-      return event;
-    }
-    const data = lines.find((line) => line.startsWith("data: "))!.slice(6);
-    return `chat:${(JSON.parse(data) as StreamedEnvelope).event.kind}`;
-  };
-  const read: string[] = [];
-  let buffered = "";
-  return {
-    next: async (): Promise<string> => {
-      while (read.length === 0) {
-        const chunk = await reader.read();
-        if (chunk.done) {
-          throw new Error("the stream closed before it wrote another frame");
-        }
-        buffered += chunk.value;
-        const frames = buffered.split("\n\n");
-        buffered = frames.pop() ?? "";
-        for (const frame of frames) {
-          const name = named(frame);
-          if (name !== undefined) {
-            read.push(name);
-          }
-        }
-      }
-      return read.shift()!;
-    },
-    cancel: () => reader.cancel(),
-  };
 };
 
 const kindsUntil = async (

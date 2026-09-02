@@ -18,6 +18,7 @@ import {
   resolveHarnessConfig,
   type ResolveHarnessConfigOptions,
 } from "./config.ts";
+import { harnessFabricSessionPosture } from "./cfc-posture.ts";
 import {
   createHarnessCfcInvocationContext,
   type HarnessCfcInvocationContext,
@@ -41,6 +42,7 @@ import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import { harnessCredentialOwnersEqual } from "./contracts/run-manifest.ts";
 import type { HarnessRunReport } from "./contracts/run-report.ts";
 import type {
+  HarnessSkillAcquisition,
   HarnessSkillActivations,
   HarnessSkillRegistry,
   HarnessSkillResourceRead,
@@ -111,7 +113,6 @@ import type {
   HarnessInputCellSpec,
 } from "./contracts/input-cells.ts";
 import { mintInputCellHandles } from "./input-cells.ts";
-import type { HarnessCellLabels } from "./contracts/cell-labels.ts";
 import {
   appendHarnessCfcModelContextObservations,
   appendHarnessFailureRecord,
@@ -119,6 +120,7 @@ import {
   createHarnessRunState,
   type HarnessRunState,
   type HarnessRunTerminalReason,
+  isTerminalHarnessRunStatus,
   patchHarnessRunState,
   setHarnessRunStatus,
   setHarnessSubagentRun,
@@ -309,9 +311,10 @@ export interface CreateHarnessEngineOptions
   inputCells?: readonly HarnessInputCellSpec[];
 
   /**
-   * The space database `snapshotCellLabels` reads, for a host where the
-   * store is not where the discovery walk looks. Absent, the space named by
-   * the fabric session is resolved against the caches on this host.
+   * The space database the run's cell-label snapshot reads as it ends, for a
+   * host where the store is not where the discovery walk looks. Absent, the
+   * space named by the fabric session is resolved against the caches on this
+   * host.
    */
   spaceDbPath?: string;
 
@@ -692,6 +695,15 @@ export class CfHarnessEngine {
     // restate what `runtimePresets.remoteClient` and the Runtime constructor
     // supply when the dial is unset (`coreOptions` in
     // `packages/runner/src/runtime-presets.ts`).
+    // A host that supplies its own session factory overrides the config the
+    // projection is computed from, so `config.fabricSession` no longer
+    // describes the runtime that will execute. Publishing a record from it
+    // would assert a posture nothing honors — the very shape this record
+    // exists to make visible — so the record is omitted and the two itemized
+    // dials stand alone, which is what the config still truthfully says was
+    // asked for.
+    const sessionFactoryOverridesConfig = options.fabricSessionFactory !==
+      undefined;
     const fabricSessionCfc = this.config.fabricSession !== undefined
       ? {
         enforcementMode: this.config.fabricSession.cfcEnforcementMode ??
@@ -712,6 +724,9 @@ export class CfHarnessEngine {
         ...(this.config.fabricSession.cfcPosture !== undefined
           ? { posture: this.config.fabricSession.cfcPosture }
           : {}),
+        ...(sessionFactoryOverridesConfig
+          ? {}
+          : { record: harnessFabricSessionPosture(this.config.fabricSession) }),
       }
       : undefined;
     // A resumed run keeps its recorded fabric-session posture, so a session
@@ -740,7 +755,20 @@ export class CfHarnessEngine {
       } else if (
         recorded.enforcementMode !== fabricSessionCfc.enforcementMode ||
         recorded.flowLabels !== fabricSessionCfc.flowLabels ||
-        recorded.posture !== fabricSessionCfc.posture
+        recorded.posture !== fabricSessionCfc.posture ||
+        // A resume whose session comes from an injected factory publishes no
+        // record, so a recorded one cannot be current: it describes a runtime
+        // this resume is not building.
+        (sessionFactoryOverridesConfig && recorded.record !== undefined) ||
+        // The whole record too, where the run recorded one. The two dials
+        // above can agree while a dial neither of them names has moved under
+        // the run — a changed runtime default, a changed posture bundle — and
+        // a resume that kept the recorded record would attest a posture the
+        // executing runtime is not at. A run that recorded no record predates
+        // one and is compared on the dials alone.
+        (recorded.record !== undefined &&
+          JSON.stringify(recorded.record) !==
+            JSON.stringify(fabricSessionCfc.record))
       ) {
         throw new Error(
           `fabric session CFC posture mismatch on resume: run state records ` +
@@ -797,6 +825,16 @@ export class CfHarnessEngine {
    */
   get fabricSessionFactory(): HarnessFabricSessionFactory | undefined {
     return this.#fabricSessionFactory;
+  }
+
+  /**
+   * The space database the run's cell-label snapshot reads, or `undefined`
+   * when the space is found by discovery. A delegating parent hands it to
+   * the child engine, so a subagent that ends in the same space reads the
+   * same store.
+   */
+  get spaceDbPath(): string | undefined {
+    return this.#spaceDbPath;
   }
 
   /**
@@ -921,28 +959,68 @@ export class CfHarnessEngine {
     return this.getRunState();
   }
 
-  appendFailureFromError(
-    error: unknown,
-    options: Omit<ClassifyHarnessRunErrorOptions, "at"> = {},
-  ): HarnessRunState {
-    return this.appendFailureRecord(
-      classifyHarnessRunError(error, {
-        ...options,
-        at: this.#now(),
-      }),
-    );
-  }
-
-  setRunStatus(
-    status: HarnessRunState["status"],
-    terminalReason?: HarnessRunTerminalReason,
-  ): HarnessRunState {
+  /**
+   * Takes the run: `running`, with any earlier outcome cleared. The run's
+   * driver calls this when it begins bringing the run up, and again on
+   * resume, when a run re-enters its loop from a terminal record. The
+   * driver's next persist carries it to disk; a run that ends before one is
+   * persisted by the transition that ends it.
+   */
+  startRun(): HarnessRunState {
     this.#runState = setHarnessRunStatus(
       this.#runState,
-      status,
+      "running",
       this.#now(),
-      terminalReason,
     );
+    return this.getRunState();
+  }
+
+  /**
+   * Ends the run as `completed` for `terminalReason`, persisted. A run has
+   * one outcome and its driver writes it once, and the labels its space
+   * holds for the cells it touched land in that same write; see
+   * `#withCellLabels()`.
+   *
+   * @throws Error when the run already has its outcome.
+   */
+  async completeRun(
+    terminalReason: HarnessRunTerminalReason,
+  ): Promise<HarnessRunState> {
+    const now = this.#now();
+    this.#runState = await this.#withCellLabels(
+      setHarnessRunStatus(this.#runState, "completed", now, terminalReason),
+      now,
+    );
+    await this.persistRunState();
+    return this.getRunState();
+  }
+
+  /**
+   * Ends the run as `failed` for `terminalReason`, persisted, recording
+   * `error` as the failure when one is given. A run has one outcome and its
+   * driver writes it once, and the labels its space holds for the cells it
+   * touched land in that same write; see `#withCellLabels()`.
+   *
+   * @throws Error when the run already has its outcome.
+   */
+  async failRun(
+    terminalReason: HarnessRunTerminalReason,
+    error?: unknown,
+    options: Omit<ClassifyHarnessRunErrorOptions, "at"> = {},
+  ): Promise<HarnessRunState> {
+    const now = this.#now();
+    if (error !== undefined) {
+      this.#runState = appendHarnessFailureRecord(
+        this.#runState,
+        classifyHarnessRunError(error, { ...options, at: now }),
+        now,
+      );
+    }
+    this.#runState = await this.#withCellLabels(
+      setHarnessRunStatus(this.#runState, "failed", now, terminalReason),
+      now,
+    );
+    await this.persistRunState();
     return this.getRunState();
   }
 
@@ -1051,12 +1129,20 @@ export class CfHarnessEngine {
     await this.persistRunState();
   }
 
-  /** Mints and records a handle consumable only as delegated skill context. */
-  async mintSkillContextHandle(ref: string): Promise<string> {
+  /**
+   * Mints and records a handle consumable only as delegated skill context,
+   * carrying `acquisition` as the entry's record of where the value came
+   * from. Only a host step that performed the fetch can supply that record,
+   * and it is what a later delegation's activation names.
+   */
+  async mintSkillContextHandle(
+    ref: string,
+    acquisition: HarnessSkillAcquisition,
+  ): Promise<string> {
     const minted = await mintAddressHandle(
       this.handleTable ?? createHarnessHandleTable(this.#runState.runId),
       ref,
-      { capability: "skill-context" },
+      { capability: "skill-context", acquisition },
     );
     await this.recordHandleTable(minted.table);
     return minted.token;
@@ -1141,55 +1227,6 @@ export class CfHarnessEngine {
     );
     await this.persistRunState();
     return minted.inputCells;
-  }
-
-  /**
-   * Reads the run's space for what it holds about the cells this run touched,
-   * and records the answer beside the run.
-   *
-   * The run's own artifacts say which cells it made and read and what the
-   * sandbox decided about each call; the space says what each of those cells
-   * is labelled. Nothing else joins the two, so a reader working from the
-   * tree alone sees an unlabelled cell whatever the run was enforcing. The
-   * snapshot is that join, taken at the run's own space, over every cell the
-   * handle table names.
-   *
-   * Read-only and best-effort by construction: the space database is opened
-   * read-only, and a host that holds no copy of it yields an unavailable
-   * snapshot rather than a failed run. What it must never do is yield a bare
-   * one — "the space holds no label for this cell" and "nobody asked" are
-   * different findings, and the snapshot's `status` is what keeps them apart.
-   *
-   * A run with no fabric session names no space and touches no cell, so it
-   * takes no snapshot at all.
-   */
-  async snapshotCellLabels(): Promise<HarnessCellLabels | undefined> {
-    const space = this.config.fabricSession?.space;
-    const refs = (this.#runState.handleTable?.entries ?? []).map((entry) =>
-      entry.ref
-    );
-    if (space === undefined || refs.length === 0) {
-      return undefined;
-    }
-    const generatedAt = this.#now();
-    // deno-lint-ignore cf-imports/no-inline-module-import -- costs at import time: reading a space database is the one thing the engine does through a native library, and a process that never takes a snapshot must not load one to run
-    const { readSpaceCellLabels } = await import("./space-labels.ts");
-    const cellLabels = await readSpaceCellLabels({
-      space,
-      ...(this.#spaceDbPath !== undefined ? { dbPath: this.#spaceDbPath } : {}),
-      refs,
-      generatedAt,
-    });
-    const cellLabelsPath = await this.artifactStore?.persistCellLabels?.(
-      cellLabels,
-    );
-    this.#runState = patchHarnessRunState(
-      this.#runState,
-      { cellLabels, cellLabelsPath },
-      generatedAt,
-    );
-    await this.persistRunState();
-    return cellLabels;
   }
 
   async ensureRunManifestPersisted(): Promise<string | undefined> {
@@ -1300,14 +1337,15 @@ export class CfHarnessEngine {
     return this.getRunState();
   }
 
+  /**
+   * Fails the run as `process_interrupted` when the process is going down
+   * before its loop ended. A run that already has its outcome keeps it: the
+   * signal raced the loop's own end, and the record stands as written.
+   */
   async terminalizeInterruptedRun(
     signalName: string,
   ): Promise<HarnessRunState> {
-    const currentState = this.#runState;
-    if (
-      currentState.status === "failed" ||
-      currentState.terminalReason === "assistant_completed"
-    ) {
+    if (isTerminalHarnessRunStatus(this.#runState.status)) {
       return this.getRunState();
     }
     const now = this.#now();
@@ -1322,14 +1360,7 @@ export class CfHarnessEngine {
       }),
       now,
     );
-    this.#runState = setHarnessRunStatus(
-      this.#runState,
-      "failed",
-      now,
-      "process_interrupted",
-    );
-    await this.persistRunState();
-    return this.getRunState();
+    return await this.failRun("process_interrupted");
   }
 
   async persistTranscript(
@@ -1419,6 +1450,72 @@ export class CfHarnessEngine {
     return policyTracePath;
   }
 
+  /**
+   * Helper for `completeRun()` and `failRun()`, which reads the run's space
+   * for what it holds about the cells the run touched and returns `state`
+   * with the answer recorded on it and written beside the run.
+   *
+   * The run's own artifacts say which cells it made and read and what the
+   * sandbox decided about each call; the space says what each of those cells
+   * is labelled. Nothing else joins the two, so a reader working from the
+   * tree alone sees an unlabelled cell whatever the run was enforcing. The
+   * snapshot is that join, taken at the run's own space, over every cell the
+   * handle table names — and taken as the run ends, once its cells are
+   * settled, so the outcome and the labels reach the disk in one write and
+   * whoever waits on the outcome finds the labels beside it.
+   *
+   * Read-only and best-effort by construction: the space database is opened
+   * read-only, and a host that holds no copy of it yields an unavailable
+   * snapshot rather than a failed run. What it must never do is yield a bare
+   * one — "the space holds no label for this cell" and "nobody asked" are
+   * different findings, and the snapshot's `status` is what keeps them apart.
+   * A snapshot that could not be taken or written at all is a third finding,
+   * recorded as a failure record on the run so a reader can tell it from a
+   * run nobody asked about; the run's outcome stands either way.
+   *
+   * A run with no fabric session names no space and touches no cell, so it
+   * takes no snapshot at all.
+   */
+  async #withCellLabels(
+    state: HarnessRunState,
+    now: string,
+  ): Promise<HarnessRunState> {
+    const space = this.config.fabricSession?.space;
+    const refs = (state.handleTable?.entries ?? []).map((entry) => entry.ref);
+    if (space === undefined || refs.length === 0) {
+      return state;
+    }
+    try {
+      // deno-lint-ignore cf-imports/no-inline-module-import -- costs at import time: reading a space database is the one thing the engine does through a native library, and a process that never takes a snapshot must not load one to run
+      const { readSpaceCellLabels } = await import("./space-labels.ts");
+      const cellLabels = await readSpaceCellLabels({
+        space,
+        ...(this.#spaceDbPath !== undefined
+          ? { dbPath: this.#spaceDbPath }
+          : {}),
+        refs,
+        generatedAt: now,
+      });
+      const cellLabelsPath = await this.artifactStore?.persistCellLabels?.(
+        cellLabels,
+      );
+      return patchHarnessRunState(state, { cellLabels, cellLabelsPath }, now);
+    } catch (error) {
+      return appendHarnessFailureRecord(
+        state,
+        createHarnessFailureRecord({
+          kind: "harness_error",
+          source: "cell_labels",
+          detail: `cell label snapshot failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          at: now,
+        }),
+        now,
+      );
+    }
+  }
+
   // Fail fast before any sandbox execution under enforcement on a sandbox that
   // lacks the CFC sidecar transports — capability probes included, since they
   // run scripts inside the same sandbox (not just builtin tools). Checked at
@@ -1494,6 +1591,14 @@ export class CfHarnessEngine {
     return this.getRunState();
   }
 
+  /**
+   * Runs one builtin tool and records its output on the run. A tool call is
+   * one step of a run, not the run: the run's status is the driver's to
+   * write, and this touches neither it nor `endedAt`. A tool that throws is
+   * recorded as a failure and rethrown for the driver to end the run on.
+   *
+   * @throws Error from the tool, after the failure is recorded.
+   */
   async invokeBuiltinTool<TToolId extends BuiltinToolId>(
     toolId: TToolId,
     input: BuiltinToolInputMap[TToolId],
@@ -1505,11 +1610,6 @@ export class CfHarnessEngine {
     }
     this.#assertCfcTransportReady();
     await this.ensureDiagnosticsInitialized();
-    this.#runState = setHarnessRunStatus(
-      this.#runState,
-      "running",
-      this.#now(),
-    );
     try {
       const output = await tool.invoke(
         this.#createToolContext(options.signal),
@@ -1518,12 +1618,6 @@ export class CfHarnessEngine {
       return await this.recordBuiltinToolOutput(toolId, input, output);
     } catch (error) {
       const failureTime = this.#now();
-      this.#runState = setHarnessRunStatus(
-        this.#runState,
-        "failed",
-        failureTime,
-        "tool_error",
-      );
       this.#runState = appendHarnessFailureRecord(
         this.#runState,
         classifyHarnessRunError(error, {
@@ -1559,12 +1653,7 @@ export class CfHarnessEngine {
     );
     const completionTime = this.#now();
     this.#runState = appendToHarnessRunState(
-      setHarnessRunStatus(
-        this.#runState,
-        "completed",
-        completionTime,
-        "tool_completed",
-      ),
+      this.#runState,
       "toolOutputs",
       resultRef,
       completionTime,
@@ -1888,7 +1977,10 @@ export class CfHarnessEngine {
           getSkillsShAcquisitionClient: this.#skillsShAcquisitionClientFactory,
         }
         : {}),
-      mintSkillContextHandle: (ref: string) => this.mintSkillContextHandle(ref),
+      mintSkillContextHandle: (
+        ref: string,
+        acquisition: HarnessSkillAcquisition,
+      ) => this.mintSkillContextHandle(ref, acquisition),
       ...(this.#taskText !== undefined ? { taskText: this.#taskText } : {}),
       sandbox: this.sandbox,
       hostProcessRunner: this.hostProcessRunner,

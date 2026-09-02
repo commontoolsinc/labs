@@ -467,6 +467,74 @@ contradiction would refuse every correctly configured night. The report prints
 the server's block as the server's, beside the console's as the console's, and
 leaves the comparison to a reader who knows which runtime they are asking about.
 
+The comment above `ServerMeta` in `scripts/run-measurement-batch.ts` is the
+canonical statement of that rule, and is the thing to read before treating the
+server's block as evidence about anything a run wrote.
+
+## Which dial decides whether a label is written
+
+**The writing session's, and only the writing session's.** A `labelMap` is a
+field of the document a transaction commits, written by the runtime that commits
+it — the fabric session's runtime here, whose dials `--fabric-cfc-flow-labels`
+and `--fabric-cfc-posture` set. The memory server stores what it is given and
+mints no label of its own, so no server configuration turns label persistence on
+or off for these runs, and there is no toolshed environment variable that would.
+A toolshed reporting `flowLabels: "off"` while a session writes labeled
+documents into it is the system working.
+
+Two consequences worth stating, because assuming either way round is expensive:
+
+- The server's posture is **not** evidence about what a run wrote. To find out
+  what a run wrote, read the space.
+- A run's own `cell-labels.json` is not evidence either, unless it says
+  `status: "read"`. An `unavailable` snapshot is a reader that never reached the
+  store, which is the section below.
+
+## Reading the labels back
+
+The labels live in the serving toolshed's own store, and a run reads them from
+that file rather than over the wire. Finding it is the operator's job whenever
+the harness and the toolshed do not share a working tree.
+
+The search walks up from the working directory looking for
+`packages/toolshed/cache/memory` and `cache/memory` at each level, so it finds
+the store of a toolshed serving from the same checkout and no other. A
+measurement run from a second worktree — the ordinary arrangement, since the
+toolshed holds a branch still while the work moves on — shares no ancestor with
+the serving tree, and the search comes up empty. That reads as
+`unavailableReason: "space-not-found"`, under which every cell of the run is
+recorded as unasked-about.
+
+The worse case is a second worktree that has served the same space itself at
+some point, and so holds a file of the same name. The search finds that one,
+opens it, and finds none of the cells the run wrote. Each such cell is recorded
+with `unreadReason: "no-document"` rather than with an empty entry list, and a
+snapshot in which every cell reads that way is warned about as the wrong store.
+Neither reading is "the run wrote no labels".
+
+Point it at the store instead. Either of these names the same place:
+
+```sh
+# The environment the search consults first, for any run.
+MEMORY_DIR=/path/to/serving-tree/packages/toolshed/cache/memory
+
+# The flag, which names one database file directly.
+--space-db /path/to/serving-tree/packages/toolshed/cache/memory/engine-v3/engine-v3/<did>.sqlite
+```
+
+`--space-db` (`CF_HARNESS_SPACE_DB`) takes a file and needs the three fabric
+session flags beside it. `MEMORY_DIR` takes the cache directory and lets the
+space the session names resolve within it, which is what a batch spanning
+several spaces wants.
+
+A snapshot that then says `status: "read"` is a positive finding: the cells it
+lists carry the labels it shows, and a cell with an empty `entries` and no
+`unreadReason` is a cell the space holds no label for. The read follows the
+links out of each cell as far as the pattern's shape runs — a piece names its
+results, and each result may name cells of its own — so a label derived on a
+computed value sits in the snapshot under the path of links that reaches it,
+naming the cell it was read from as `source`.
+
 ## The failure this measurement exists to not commit
 
 Three separate things went wrong in the same shape while this was being built,

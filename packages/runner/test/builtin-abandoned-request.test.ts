@@ -2,6 +2,12 @@
  * What a builtin leaves behind when the transaction staging its request is
  * abandoned.
  *
+ * Every case here abandons that transaction the same way: the request carries
+ * a caveat the sink's declared ceiling does not admit, so the sink-request
+ * check refuses the commit. The stores each builtin writes on the way there
+ * are the runtime's own, and declare what flows into them rather than
+ * refusing it.
+ *
  * Each of these stages its request in the transaction that schedules the work
  * and does the work once that transaction commits, so an abandoned one means
  * the request is never sent. The settled shape differs per builtin, but the
@@ -36,7 +42,10 @@ import { createBuilder } from "../src/builder/factory.ts";
 import type { Cell } from "../src/builder/types.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 import { Runtime } from "../src/runtime.ts";
-import { MAX_ENFORCEMENT_CFC_OPTIONS } from "../src/runtime-presets.ts";
+import {
+  MAX_ENFORCEMENT_CFC_OPTIONS,
+  MAX_ENFORCEMENT_SINK_CEILINGS,
+} from "../src/runtime-presets.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
@@ -44,10 +53,10 @@ import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value"
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-// A caveat the result store does not declare. The builtin reads the input
-// carrying it, so its writes derive that confidentiality, and the undeclared
-// store resolves to the empty ceiling — the writer-fit misfit, which rejects
-// at `enforce-strict`.
+// A caveat no sink here is cleared for. The builtin reads the input carrying
+// it, so the request it stages carries it too, and the ceiling declared for
+// that sink above admits none — the sink-request refusal, which rejects the
+// staging transaction at `enforce-strict`.
 const PROMPT_INFLUENCE = {
   type: "https://commonfabric.org/cfc/atom/Caveat",
   kind: "https://commonfabric.org/cfc/concepts/prompt-influence",
@@ -70,6 +79,21 @@ describe("a builtin whose staged request is abandoned", () => {
       // per-session raise on top of it, and the bundle's persisted flow labels
       // are what make that raise conform.
       cfcEnforcementMode: "enforce-strict",
+      // The bundle declares a ceiling for the fetch and streamData sinks and
+      // none for the LLM ones, so an LLM request is ungated on
+      // confidentiality there. These cases are about the ENDING a refused
+      // request leaves behind, so they declare the ceiling the refusal comes
+      // from. Before the runtime's own stores declared what flowed into them,
+      // the refusal arrived by accident instead: the builtin's result store
+      // could not hold the caveat, so the transaction staging the request was
+      // refused for a reason about the store rather than about the request.
+      cfcSinkMaxConfidentiality: {
+        ...MAX_ENFORCEMENT_SINK_CEILINGS,
+        llm: [],
+        llmDialog: [],
+        generateText: [],
+        generateObject: [],
+      },
     });
     tx = runtime.edit();
     ({ commonfabric } = createTrustedBuilder(runtime));
@@ -382,6 +406,13 @@ describe("a builtin whose staged request is abandoned", () => {
     // the run materializes it as a cell reference without reading its fields,
     // and the handler reads a field to build the request the turn would send.
     // So the caveat goes on the field.
+    //
+    // What refuses is the SINK: the log the dialog is given already carries
+    // the caveat, so the request the turn would send carries it too, and the
+    // llmDialog ceiling above admits none. The stores the turn writes on its
+    // way there — the dialog's own result and internal documents, and the
+    // document each appended message becomes — are the runtime's, and declare
+    // what flows into them rather than refusing it.
 
     const { pattern, llmDialog, Cell: BuilderCell } = commonfabric;
     const resultSchema = {
@@ -397,9 +428,8 @@ describe("a builtin whose staged request is abandoned", () => {
       required: ["addMessage"],
     } as const satisfies JSONSchema;
 
-    const testPattern = pattern(
-      () => {
-        const messages = BuilderCell.of<BuiltInLLMMessage[]>([]);
+    const testPattern = pattern<{ messages: BuiltInLLMMessage[] }>(
+      ({ messages }) => {
         const briefing = BuilderCell.of({ note: "a hostile briefing" }, {
           type: "object",
           properties: {
@@ -420,13 +450,29 @@ describe("a builtin whose staged request is abandoned", () => {
       resultSchema,
     );
 
+    const messagesCell = runtime.getCell<BuiltInLLMMessage[]>(
+      space,
+      "llmDialog-abandoned-messages",
+      {
+        type: "array",
+        items: { type: "object", additionalProperties: true },
+        ifc: { confidentiality: [PROMPT_INFLUENCE] },
+      },
+      tx,
+    );
+    messagesCell.set([{ role: "assistant", content: "an earlier turn" }]);
     const resultCell = runtime.getCell(
       space,
       "llmDialog-abandoned",
       resultSchema,
       tx,
     );
-    const result = runtime.run(tx, testPattern, {}, resultCell);
+    const result = runtime.run(
+      tx,
+      testPattern,
+      { messages: messagesCell },
+      resultCell,
+    );
     runtime.prepareTxForCommit(tx);
     // The run that sets the dialog up has to land: a refusal here would be the
     // caveat reaching the wrong transaction, and the wait below would then be
@@ -448,10 +494,106 @@ describe("a builtin whose staged request is abandoned", () => {
 
     expect(settled.pending).toBe(false);
     // The turn is not in the conversation: the message the handler appended
-    // rode the abandoned transaction, so the ending has no turn to answer and
-    // writes no assistant message.
-    expect(result.withTx().key("messages").get()).toEqual([]);
+    // rode the abandoned transaction, so the log still holds what it held
+    // before the send, and the ending has no turn to answer.
+    expect(result.withTx().key("messages").get()).toEqual([
+      { role: "assistant", content: "an earlier turn" },
+    ]);
   });
+  describe("and an llm sink the shipped bundle declares no ceiling for", () => {
+    // What the bundle refuses here, and what it does not. The ceilings above
+    // are this file's own: `MAX_ENFORCEMENT_SINK_CEILINGS` names the fetch and
+    // streamData sinks and no llm one, and a sink with no ceiling gets no gate
+    // (`sink-inventory.ts`; `max-enforcement-posture.test.ts` pins the same
+    // verdict for a hand-staged request).
+    //
+    // Until the §8.12.5 route-2 widening one path was gated anyway, by
+    // accident: the transaction staging the request also wrote the builtin's
+    // own result store, that store declared nothing, and the writer-fit misfit
+    // refused the commit — on every such call, so an llm call over caveated
+    // content did not work at all under this posture. The store declares what
+    // flows into it now, so the request goes. This case is where that shows,
+    // and it flips to asserting the refusal when the boundary-scoped admission
+    // mechanism `MAX_ENFORCEMENT_SINK_CEILINGS` describes lands.
+
+    let bundleStorage: ReturnType<typeof StorageManager.emulate>;
+    let bundleRuntime: Runtime;
+    let bundleTx: IExtendedStorageTransaction;
+    let bundleBuilder: ReturnType<typeof createBuilder>["commonfabric"];
+
+    beforeEach(() => {
+      enableMockMode();
+      clearMockResponses();
+      bundleStorage = StorageManager.emulate({ as: signer });
+      bundleRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: bundleStorage,
+        ...MAX_ENFORCEMENT_CFC_OPTIONS,
+        cfcEnforcementMode: "enforce-strict",
+      });
+      bundleTx = bundleRuntime.edit();
+      ({ commonfabric: bundleBuilder } = createTrustedBuilder(bundleRuntime));
+    });
+
+    afterEach(async () => {
+      resetMockMode();
+      await bundleTx.commit();
+      await bundleRuntime.idle();
+      await bundleRuntime.dispose();
+      await bundleStorage.close();
+    });
+
+    it("sends llm's request even though the messages carry a caveat", async () => {
+      const { pattern, llm, Cell: BuilderCell } = bundleBuilder;
+      let requestsSent = 0;
+      addMockResponse(() => {
+        requestsSent += 1;
+        return true;
+      }, {
+        role: "assistant",
+        content: "an answer",
+        id: "ungated-llm-sink",
+      });
+      const testPattern = pattern<Record<string, never>>(() => {
+        const messages = BuilderCell.of([{
+          role: "user",
+          content: "a briefing the result store does not declare",
+        }], {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+          ifc: { confidentiality: [PROMPT_INFLUENCE] },
+        });
+        // deno-lint-ignore no-explicit-any
+        return llm({ messages } as any);
+      });
+      const resultCell = bundleRuntime.getCell(
+        space,
+        "llm-ungated-sink",
+        testPattern.resultSchema,
+        bundleTx,
+      );
+      const result = bundleRuntime.run(
+        bundleTx,
+        testPattern,
+        {},
+        resultCell,
+      );
+      bundleRuntime.prepareTxForCommit(bundleTx);
+      await bundleTx.commit();
+
+      const settled = await waitForCellValue<{ pending?: boolean }>(
+        bundleRuntime,
+        result,
+        (value) => value?.pending === false,
+      );
+      await bundleRuntime.settled();
+
+      expect(settled.pending).toBe(false);
+      expect(result.withTx().key("error").get()).toBeUndefined();
+      expect(requestsSent).toBe(1);
+    });
+  });
+
   describe("and the same builtins when the transaction commits", () => {
     // An unlabelled input leaves the result store's ceiling nothing to
     // refuse, so the staging transaction commits and the work starts. The

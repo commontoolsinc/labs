@@ -180,21 +180,42 @@ test-selection publisher rather than by anything recording:
 ```
 <repo>/test-selection/v1/manifest-<ISO 8601 timestamp>-<ULID>.json.gz
 <repo>/test-selection/v1/state/<yyyy-mm-dd>-<ULID>.json.gz
+<repo>/test-selection/v1/pins/<workflow-run-id>.json.gz
 ```
 
-The timestamp leads a manifest's name, so a lexical listing is a
-chronological one and a reader takes the newest that is not after the
-moment it asks about. There is no name meaning "the current one": the
-writer holds create and nothing else, so nothing can be overwritten, and
-that is the property the whole store rests on.
+The leading timestamp keeps manifest names chronologically useful, but it
+does not decide publication order. A workflow without a manifest pin lists
+object metadata once on its first attempt, chooses the object with the
+newest server-assigned `timeCreated`, using the object name to break a tie,
+and stores its exact object name, generation, and validated contents in a
+create-only run pin. The generation is a canonical digits-only decimal
+string, not a JSON number. An empty or failed listing stores an explicit
+unselected result. An absent pin on a later attempt also produces
+unselected rather than another listing. Pin retention exceeds the full
+workflow rerun period. Readers and later workflow attempts use the embedded
+result rather than resolving "newest" or depending on source-manifest
+retention. There is no object name meaning "the current one": writers hold
+create and nothing else, so nothing can be overwritten, and that is the
+property the whole store rests on.
 
-The date partition comes from the run's start, so late-shipped orphans
-land in their run's partition; readers list a trailing window rather than
-only the newest partition. The whole dataset is readable by `allUsers`.
-Writers hold `roles/storage.objectCreator` pinned to their own folder,
-which cannot read, list, overwrite, or delete; nothing already stored can
-be modified by any append credential. An incompatible schema writes under
-`v2/` and readers migrate at their own pace.
+A local object's date partition comes from its run's start. The CI relay
+currently takes the date from the workflow run's `run_started_at`. That
+field is the current attempt's start and GitHub advances it when another
+attempt starts. Re-shipping an earlier artifact after a rerun can therefore
+move it to the new attempt's date and create a second object instead of
+colliding with its first shipment.
+
+The planned relay contract puts the immutable start of the attempt that
+produced an artifact inside that artifact. Its context and object name use
+that value on every relay invocation. Late-shipped objects then land in
+the partition where their report was produced, not where it was uploaded.
+A trailing window can make late arrivals likely to be found, but cannot
+make discovery exact; an exact incremental reader needs the arrival index
+described below. The whole dataset is readable by `allUsers`. Writers hold
+`roles/storage.objectCreator` pinned to their own folder, which cannot
+read, list, overwrite, or delete; nothing already stored can be modified
+by any append credential. An incompatible schema writes under `v2/` and
+readers migrate at their own pace.
 
 Four writer principals exist, three of them recording. The **relay** —
 the only one that writes what CI produced — holds create on
@@ -215,10 +236,12 @@ the relay's arrangement again, and rewrites each closed day of raw
 records — after a seven-day late-arrival lag — as validated rollup shards
 that keep each report's context line ahead of its records; a day with
 no records stays open, since a write-once rollup would permanently
-exclude late arrivals. Rollups are a read optimization, and
-full-fidelity readers list the raw area. The **publisher** holds create on
-`test-selection/` through a provider pinned to its own workflow file on
-the default branch, on the relay's pattern and for the relay's reason.
+exclude late arrivals. A rollup covers one source and date: today's
+rollups cover CI, and say nothing about local submissions with the same
+date. Rollups are a read optimization, and full-fidelity readers list the
+raw area. The **publisher** holds create on `test-selection/` through a
+provider pinned to its own workflow file on the default branch, on the
+relay's pattern and for the relay's reason.
 
 A day is several shards. A busy day is over a gigabyte of NDJSON, against
 V8's maximum string length of about half that, and an object has to fit in
@@ -242,8 +265,68 @@ an object arriving between two runs is in the rollup when its shard is one
 of the ones still to be written, and in the raw area only otherwise, the
 same as any arrival after a day is compacted. The `rollup.json` manifest
 names the day's shards and is written after all of them, so a day counts
-as compacted when its manifest exists, and a reader that finds no manifest
-reads the raw area for that day.
+as compacted when its manifest exists. This means that every named shard
+exists, not that the shards are one atomic snapshot or that no more objects
+can arrive for that source and date. A reader that finds no manifest reads
+the raw area for that source and date.
+
+The version-one rollup manifest records neither the source object names it
+contains nor an arrival position through which it is complete. An exact
+reader cannot combine one with raw objects from the same source and date:
+it cannot tell whether a raw object is a later arrival or is already in a
+shard. Folding it may count it twice, while suppressing it may lose it. The
+current bootstrap uses a version-one rollup as a one-time baseline and
+closes that date to later raw arrivals. The common publisher path described
+in the test-selection plan requires the next rollup format instead. Its
+receipt is scoped by source as well as by date; a CI receipt cannot
+suppress local submissions.
+
+An aggregate seeded from a version-one rollup cannot migrate in place to
+the arrival index. Its receipt cannot distinguish journal entries already
+represented in its shards from later arrivals. A reader rebuilds such an
+aggregate from raw objects or from the next rollup format and its later
+journal entries. The previous published result stays current until that
+replacement succeeds.
+
+The planned arrival index is an ordered record of storage arrivals and
+identifies the created object and its generation. A consumer of Cloud
+Storage object-finalize notifications appends them to a durable journal;
+the uploader does not make a second, non-atomic marker write. Journal
+positions are assigned when an entry commits. Assignment and deduplication
+by object and generation are atomic, as is the uniqueness check on the
+logical submission: repository, workflow run, attempt, and artifact for
+CI; repository and report id for local records. The notification is
+acknowledged only after that commit. A delayed notification therefore
+receives a position after the journal entries already present rather than
+being inserted behind a reader's cursor. A reader advances only through
+contiguous committed positions and persists that cursor with the aggregate
+the entries produced.
+
+Only canonical raw objects under `submissions/ci/` and
+`submissions/local/` enter the journal. Rollup shards and manifests,
+test-selection outputs, and the journal's own storage are not inputs. The
+same allowlist governs notification ingestion and the historical backfill,
+so a derived object cannot feed itself back into aggregation.
+
+Before the journal's genesis receipt is published, the backfill groups
+existing CI objects by logical submission. Cross-date objects produced by
+the mutable retry timestamp are one submission, not two arrivals. The
+first-created valid object is retained, later copies are recorded as
+excluded, and a disagreement in their artifact-derived records or stable
+context is reported rather than silently choosing one. The repaired relay
+prevents new copies; the backfill prevents old ones from becoming two
+observations in every rebuilt aggregate.
+
+The compactor builds the next rollup format from journal entries through a
+recorded position. Before it publishes the manifest, it accounts exactly
+once for every eligible entry at or before that position for the manifest's
+source and date. A failed read or incomplete shard leaves the manifest
+absent. An exact reader can then start from the rollup and consume every
+later journal entry, in both a cold start and an ordinary update. Listing a
+trailing window remains a recovery audit rather than the authority for
+finding new objects. Recording the exact source object names in the rollup
+can prove which raw objects overlap it, but does not discover a later
+object without an arrival index or another listing of that partition.
 
 ## CI movement
 
@@ -254,10 +337,15 @@ one credential-free `test-records-<job>-a<attempt>` artifact,
 `if: always()`. The artifact holds `records.ndjson` — always written,
 zero records or not — and `job.json`; an artifact without a readable
 `records.ndjson` is truncated, and the relay fails it visibly rather
-than ship a context-only object that would read as a run with no tests. The attempt lives in the artifact name because artifacts
-are scoped to the run: a re-run's relay re-ships an earlier attempt's
-artifacts into collisions and ships the re-run jobs' new artifacts as new
-objects, so re-runs neither drop nor double-count records.
+than ship a context-only object that would read as a run with no tests.
+The attempt lives in the artifact name because artifacts are scoped to
+the run. The artifact also needs the immutable start of the attempt that
+produced it. Under the planned relay contract, a re-run re-ships earlier
+attempts' artifacts using their own attempt numbers and start times, so
+those objects collide with their first shipment, while the new attempt's
+artifacts create new objects. The current relay instead uses the workflow
+run's mutable `run_started_at` for all of them. That can move an earlier
+artifact to another date and create a second copy instead of a collision.
 
 The shared shipping action's optional `variant` input stamps every spooled
 and JUnit-derived record gathered by that job. Jobs omit it for the default

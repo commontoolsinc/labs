@@ -228,6 +228,16 @@ Deno.test("jumplist: pagedown and pageup jump the selection to the ends", () => 
   assertEquals(s.view().overlay?.selectedLine, 0, "clamped to the first entry");
 });
 
+Deno.test("jumplist: the mouse wheel moves three entries", () => {
+  const s = diffSession(LOG);
+  press(s, "i");
+  assertEquals(s.view().overlay?.selectedLine, 0);
+  press(s, "wheel-down");
+  assertEquals(s.view().overlay?.selectedLine, 3);
+  press(s, "wheel-up");
+  assertEquals(s.view().overlay?.selectedLine, 0);
+});
+
 Deno.test("jumplist: space pages the selection down", () => {
   const s = diffSession(LOG);
   press(s, "i");

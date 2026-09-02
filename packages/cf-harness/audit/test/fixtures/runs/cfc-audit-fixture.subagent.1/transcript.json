@@ -1,0 +1,14 @@
+[
+  {
+    "role": "system",
+    "content": "You are a focused cf-harness subagent working on one delegated task.\nYou start with a fresh context and do not know the parent conversation.\nUse only the task and context provided in this child run.\nDo not ask the user follow-up questions.\nDo not attempt to delegate further; nested subagents are not available.\nSubagent profile: default\nCurrent sandbox directory: /workspace\n\nWhen finished, return a concise summary with:\n- what you did or investigated\n- what you found or changed\n- files modified, if any\n- issues or blockers, if any"
+  },
+  {
+    "role": "user",
+    "content": "Task:\nSummarize cfh:a:jvhdg for the operator."
+  },
+  {
+    "role": "assistant",
+    "content": "The child summarized the notes."
+  }
+]

@@ -21,10 +21,11 @@
  * - Open host takeover: any joined participant can `claimHost`, transferring
  *   the role (and the host controls) to themselves. Deliberately ungated
  *   beyond "must be joined"; see `ADMIN-FUTURE.md`.
- * - A vote carries its voter's profile cell and is found by comparison, so a
- *   vote cannot be keyed by a mergeable per-vote write: two viewers voting at
- *   once conflict and the loser retries. Both votes survive; that retry is the
- *   accepted cost of identity that cannot be spoofed.
+ * - A vote carries its voter's profile cell, and its key is that profile's
+ *   ENTITY paired with the option. So a vote is addressed rather than searched
+ *   for: casting, recasting and clearing one read and write that vote alone,
+ *   two viewers voting at once touch different keys, and their commits merge
+ *   with no conflict and no retry.
  *
  * "We went here" history (Lunch Coordinator roadmap #1): the host logs where
  * the group actually ate via each option's "we went here" button. A host date
@@ -70,7 +71,9 @@ import {
   type Cell,
   computed,
   Default,
+  entityRefToString,
   equals,
+  getEntityId,
   handler,
   NAME,
   pattern,
@@ -405,21 +408,42 @@ const newOptionId = (
     ...votes.map((v) => v.optionId),
   ]);
 
-// A vote belongs to whoever's profile cell it carries, so it is found by
-// comparison rather than addressed by a key. Reading the list to find it puts
-// the list in this transaction's conflict set, so two people voting at once
-// conflict and the loser retries. That is the accepted trade for identity that
-// cannot be spoofed by a name: correctness is unaffected (both votes survive),
-// and once handler events serialize server-side they stop conflicting at all.
-const findVote = (
-  votes: readonly Vote[],
-  voter: LunchProfileCell,
+/**
+ * A vote's key: its voter's profile ENTITY and the option, in that order.
+ *
+ * One voter's vote for one option has a deterministic, content-only address, so
+ * casting, recasting and clearing it read and write that vote alone. Two people
+ * voting at once hold different keys and their commits merge. The same key
+ * names the same vote in every session, at any time, which is what lets a
+ * handler reach one vote without reading the list.
+ *
+ * Identity here is a profile cell, and a cell is not a string, so the key takes
+ * the entity the cell points at. `getEntityId` parses the link a cell or a
+ * read-back proxy carries, so this works both on `resolveAsCell()` in a caster
+ * and on `vote.voter` in a sweep. A vote whose `voter` is absent has no key.
+ *
+ * The address is part of the poll's storage contract, so it is exported;
+ * `packages/patterns/integration/lunch-poll-keyed-votes.test.ts` reads a cast
+ * vote back at this key from a session that never observed the write.
+ */
+export const voteKeyFor = (
+  voter: LunchProfileCell | undefined,
   optionId: string,
-): Vote | undefined =>
-  votes.find((v) => v.optionId === optionId && equals(v.voter, voter));
+): string | undefined => {
+  if (voter === undefined) return undefined;
+  const ref = getEntityId(voter);
+  if (ref === undefined) return undefined;
+  return JSON.stringify([entityRefToString(ref), optionId]);
+};
 
-const isSameVoter = (vote: Vote, voter: LunchProfileCell): boolean =>
-  equals(vote.voter, voter);
+// Clear a vote's entity document. The entity outlives its membership link, so a
+// removal that only drops the link would leave the entity holding the removed
+// vote's content; a later read by the same key (the castVote toggle decision)
+// would then see that stale content and treat the absent vote as present.
+const clearVoteEntity = (votes: VotesCell, key: string): void => {
+  const vote: Writable<Vote | undefined> = votes.elementById(key);
+  vote.set(undefined);
+};
 
 const COMBINING_MARK = /^\p{Mark}$/u;
 const EMOJI_MODIFIER = /^\p{Emoji_Modifier}$/u;
@@ -734,10 +758,18 @@ const removeOption = handler<RemoveOptionEvent, {
   const option = options.elementById(optionId);
   if (!option.get()) return;
   options.removeByValue(option);
-  // Cascade: drop every vote for the removed option in one read-modify-write.
-  // A concurrent cast conflicts with this read and retries, which is what
-  // catches a vote cast for this option after the read.
-  votes.set(votes.get().filter((v) => v.optionId !== optionId));
+  // Cascade: drop every vote for this option, each by its own key, so votes
+  // for other options merge through. The read of the vote list this sweep
+  // needs stays in the commit's conflict set, so a concurrent change to the
+  // list makes this commit retry, which is what catches a vote cast for this
+  // option after the read.
+  for (const v of votes.get()) {
+    if (v.optionId !== optionId) continue;
+    const key = voteKeyFor(v.voter, optionId);
+    if (key === undefined) continue;
+    votes.removeByValue(votes.elementById(key));
+    clearVoteEntity(votes, key);
+  }
 });
 
 const castVote = handler<CastVoteEvent, {
@@ -765,8 +797,13 @@ const castVote = handler<CastVoteEvent, {
   // votes): voting no-ops rather than reading an ambient clock.
   const now = nowTick;
   if (!now) return;
-  const current = votes.get();
-  const existing = findVote(current, myProfile, optionId);
+  // My vote for this option has a deterministic address, so this reads and
+  // edits just that one vote — never the whole list. Clicking the current
+  // color toggles the vote off; any other color sets it.
+  const key = voteKeyFor(voter, optionId);
+  if (key === undefined) return;
+  const myVote = votes.elementById(key);
+  const existing = myVote.get();
   // Toggle off only when the same color was cast TODAY. A same-color click on
   // a stale (hidden) vote re-casts it with a fresh timestamp instead of
   // removing a vote the voter cannot see.
@@ -774,17 +811,13 @@ const castVote = handler<CastVoteEvent, {
     existing.voteType === voteType &&
     typeof existing.castAt === "number" &&
     dayKeyOf(existing.castAt) === dayKeyOf(now);
-  const withoutMine = current.filter((v) =>
-    !(v.optionId === optionId && isSameVoter(v, myProfile))
-  );
   if (sameColorToday) {
-    votes.set(withoutMine);
+    votes.removeByValue(myVote);
+    clearVoteEntity(votes, key);
     return;
   }
-  votes.set([
-    ...withoutMine,
-    { voter, optionId, voteType, castAt: now },
-  ]);
+  myVote.set({ voter, optionId, voteType, castAt: now });
+  votes.addUnique(myVote);
 });
 
 const resetVotes = handler<ResetVotesEvent, {
@@ -793,6 +826,14 @@ const resetVotes = handler<ResetVotesEvent, {
   host: HostCell;
 }>((_, { votes, myProfile, host }) => {
   if (!isHost(host, myProfile)) return;
+  // Clearing the board is an intentional whole-list overwrite, so it empties
+  // the list itself and reaches rows no key names. Each vote's entity is
+  // cleared too, so a voter who re-casts their pre-reset color afterwards is
+  // not toggled off against content the reset left behind.
+  for (const v of votes.get()) {
+    const key = voteKeyFor(v.voter, v.optionId);
+    if (key !== undefined) clearVoteEntity(votes, key);
+  }
   votes.set([]);
 });
 
@@ -805,11 +846,12 @@ const clearMyVote = handler<ClearVoteEvent, {
   myProfile: LunchProfileCell | undefined;
 }>(({ optionId }, { votes, myProfile }) => {
   if (!myProfile) return;
-  votes.set(
-    votes.get().filter((v) =>
-      !(v.optionId === optionId && isSameVoter(v, myProfile))
-    ),
-  );
+  const voter = myProfile.resolveAsCell();
+  if (voter.get() === undefined) return;
+  const key = voteKeyFor(voter, optionId);
+  if (key === undefined) return;
+  votes.removeByValue(votes.elementById(key));
+  clearVoteEntity(votes, key);
 });
 
 // Host-only, same gate as the other mutating admin actions. Logs where the

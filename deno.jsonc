@@ -37,6 +37,7 @@
     "./packages/runner",
     "./packages/runtime-client",
     "./packages/shell",
+    "./packages/shuttle",
     "./packages/spec-model",
     "./packages/state-inspector",
     "./packages/static",

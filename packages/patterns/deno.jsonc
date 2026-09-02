@@ -41,8 +41,9 @@
   //
   // Every workspace member must define a `test` task. The root runner
   // (tasks/test.ts) calls `deno task test` in each member, and a member with no
-  // such task falls through to the root task and recurses over the whole
-  // workspace. So this lane stays a real task, never an empty stub.
+  // such task would fall through to the root task and recurse over the whole
+  // workspace; the runner refuses to start rather than let that happen, and
+  // names the member. So this lane stays a real task, never an empty stub.
   //
   // For how to write each kind of test and how CI measures them, see
   // docs/development/TESTING.md (the testing hub),
@@ -57,9 +58,10 @@
     // `data-model` helpers, whose internal `@/` graph the flat test import map
     // can't resolve. See test/source-coverage/pattern-source-coverage.test.ts.
     // The focused browser pass exercises the React event boundary in a real
-    // DOM. The first Deno-only pass excludes it so only executed tests count.
-    "test:browser": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts iframe-impossible-machine/interaction.browser.test.ts",
-    "test": "deno test -A --import-map ./test-import-map.json --ignore='**/*.test.tsx' --ignore='integration' --ignore='google/core/integration' --ignore='auth' --ignore='test/source-coverage' --ignore='iframe-impossible-machine/interaction.browser.test.ts' . && deno test -A test/source-coverage/ && deno task test:browser"
+    // DOM. The `*.browser.test.ts` name is what routes a file there: the same
+    // glob keeps it out of the Deno-only pass, so only executed tests count.
+    "test:browser": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts **/*.browser.test.ts",
+    "test": "deno test -A --import-map ./test-import-map.json --ignore='**/*.test.tsx' --ignore='integration' --ignore='google/core/integration' --ignore='auth' --ignore='test/source-coverage' --ignore='**/*.browser.test.ts' . && deno test -A test/source-coverage/ && deno task test:browser"
   },
   // File discovery for the first pass of the `test` task (lane 1). `include` keeps only
   // `.test.ts`, so pattern tests (`.test.tsx`, lane 2) are never collected;

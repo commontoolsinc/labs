@@ -4,7 +4,6 @@ import { getLogger } from "@commonfabric/utils/logger";
 import type { Pattern } from "../builder/types.ts";
 import type { AddCancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
-import { resolveLink } from "../link-resolution.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import type { RawBuiltinReturnType } from "../module.ts";
 import { setPatternCell } from "../result-utils.ts";
@@ -19,27 +18,22 @@ import {
   listElementKeys,
   releaseRemovedElements,
 } from "./list-element-keys.ts";
-import { listElementLink } from "./list-element-link.ts";
+import {
+  listCoordinatorPlan,
+  listElementResultCell,
+} from "./list-coordinator-plan.ts";
 import {
   type ElementRun,
   type SetupRecord,
   trackListSetupRollback,
 } from "./list-element-rollback.ts";
-import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { seedResultContainerWhenPullSettles } from "./list-result-container-seed.ts";
 import { issueResultContainerSetup } from "./list-result-container.ts";
-import { listResultSchema } from "./list-result-schema.ts";
-import { resolveOpPattern } from "./op-pattern-ref.ts";
 import {
   createResumeRepublisher,
   type ElementContribution,
   resumeSettleRunKind,
 } from "./resume-republish.ts";
-import {
-  narrowestCellScope,
-  outputSpotFromBinding,
-  scopedCell,
-} from "./scope-policy.ts";
 
 // Presence probe for the result container: slots resolve as cells, so the
 // coordinator can ask "is the container initialized?" without materializing
@@ -52,7 +46,7 @@ const RESULT_PRESENCE_SCHEMA = internSchema({
   items: { asCell: ["cell"], type: "unknown" },
 });
 
-const FLATMAP_INPUT_SCHEMA = internSchema({
+export const FLATMAP_INPUT_SCHEMA = internSchema({
   type: "object",
   properties: {
     list: { type: "array", items: { asCell: ["cell"], type: "unknown" } },
@@ -231,71 +225,31 @@ export function flatMap(
   const reconcile: Action = (tx: IExtendedStorageTransaction) => {
     const rollback = trackListSetupRollback(tx, runtime, elementRuns);
     const elementAwaitSync = resumeBatchAwaitSync;
-    // Identity-only list materialization (mirrors map.ts:163-188): read `op`
-    // through the schema, but build element cells from the raw slot links
-    // WITHOUT dereferencing element content. The previous
-    // `asSchema(FLATMAP_INPUT_SCHEMA).get()` walked the array as asCell items,
-    // and arrays "dereference one more link" (traverse.ts) — an ordinary content
-    // read of every element doc, joining each element's whole-doc label into the
-    // coordinator's per-tx J and smearing MEMBER content onto the result
-    // container's STRUCTURE label even when membership does not depend on element
-    // content (spec §8.5.6.1, SC-8). Membership taint now rides the op-result
-    // reads below + the structure re-stamp (see recordCfcStructureContainer).
-    const op = inputsCell.asSchema(FLATMAP_INPUT_SCHEMA).withTx(tx).key("op")
-      .get();
-    const sourceListCell = inputsCell.key("list");
-    const listCell = sourceListCell.withTx(tx).resolveAsCell();
-    const rawList = listCell.withTx(tx).getRaw() as unknown;
-    const listBase = listCell.getAsNormalizedFullLink();
-    const list: Cell<any>[] | undefined = rawList === undefined
-      ? undefined
-      : !Array.isArray(rawList)
-      ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
-      : rawList.map((slot, i) => {
-        const slotLink = listElementLink(listBase, slot, i);
-        const resolved = resolveLink(runtime, tx, slotLink, "value");
-        return runtime.getCellFromLink(resolved, undefined, tx);
-      });
-
-    const opPattern = resolveOpPattern(
+    // The identity-bearing prefix — op, list materialization, scope, the
+    // result container — is the plan the resume pre-sync shares, naming the
+    // children this reconcile runs before the parent instantiates; its
+    // reads and their rationale live in list-coordinator-plan.ts.
+    const plan = listCoordinatorPlan(
       runtime,
-      op.getRaw(),
+      tx,
       "flatMap",
       inputsCell,
+      FLATMAP_INPUT_SCHEMA,
+      parentCell,
+      outputBinding,
     );
-    const argumentUsage = inferListOpArgumentUsage(opPattern);
-    const outputScope = narrowestCellScope(runtime, tx, [
-      inputsCell.key("list"),
-      ...(Array.isArray(list) && argumentUsage.usesElement ? list : []),
-      argumentUsage.usesArray ? inputsCell.key("list") : undefined,
-      argumentUsage.usesParams ? inputsCell.key("params") : undefined,
-    ]);
+    const { opPattern, argumentUsage, list } = plan;
+    const outputScope = plan.scope;
 
     // Whether this reconcile issues the container's links: a container it
     // mints needs them, and one whose last issuance did not commit owes them.
     let issueLinks = containerSetup.needsSetup;
     if (!result || result.getAsNormalizedFullLink().scope !== outputScope) {
       const previousResult = result;
-      const resultSchema = listResultSchema();
-      // CT-1623: identify the result container by the reserved output spot
-      // (stable, program-independent). See map.ts for rationale.
-      const outputSpot = outputSpotFromBinding(outputBinding);
-      if (!outputSpot) {
-        throw new Error(
-          "flatMap: result container requires a write-redirect output binding",
-        );
-      }
-      const baseResult = runtime.getCell<any[]>(
-        parentCell.space,
-        { flatMap: parentCell.entityId, outputSpot },
-        resultSchema,
-        tx,
-      );
-      const boundResult = scopedCell(runtime, tx, baseResult, outputScope);
       // The container outlives this reconcile's transaction; a cell bound to
       // it would pin the settled transaction and its journal for the life of
       // the coordinator. Rebind per use instead.
-      result = boundResult.withTx();
+      result = plan.container.withTx();
       const installedResult = result;
       // Give back only what this reconcile installed. An overlapping reconcile
       // that has already replaced the container owns it, and its bookkeeping
@@ -487,11 +441,12 @@ export function flatMap(
         existing.lastIndex = i;
         if (previousIndex !== i) rollback.indexChanged(existing, previousIndex);
       } else {
-        const boundResultCell = runtime.getCell(
-          parentCell.space,
-          { flatMap: result, elementKey },
-          undefined,
+        const boundResultCell = listElementResultCell(
+          runtime,
           tx,
+          "flatMap",
+          result,
+          elementKey,
         );
         // The stored cell outlives this reconcile's transaction: it lives in
         // `elementRuns` and in the cancel closure below, both of which last as

@@ -122,6 +122,43 @@ These properties of this mechanism are worth keeping in mind:
   `ACCEPT_COVERAGE_DEBT` marker.
   [pattern-testing.md](../common/workflows/pattern-testing.md) shows how.
 
+#### What a pattern test has to read
+
+The last bullet generalizes past handlers and derived expressions. Almost every
+line of a pattern outside a handler body runs when something reads the value the
+pattern returns, and a pattern test that drives streams and compares scalars
+reads hardly any of it. Three groups go uncovered that way, and one pattern test
+can take all three.
+
+The view is the first. A pattern's view helpers are ordinary functions, and
+nothing calls one until something reads `[UI]`. Reaching for a node is what
+builds the tree, so one assertion that walks to a node covers every helper the
+tree called on the way there. `packages/patterns/test/vnode-helpers.ts` holds
+the walk. Tie the assertion to something the file already claims rather than to
+a node's bare existence:
+`hasText(findNodeById(instance[UI], "gallery-count"), "16 total examples")`
+states the rendered header against the count the same test asserts through
+`totalExamples`, so a gallery that computed its count and rendered nothing
+fails.
+
+The returned record is the second. A `computed()` sitting in it runs when a
+reader asks for that field, so `[NAME]` and any output the test never compares
+against goes unrun. State those against the values the test's own actions put
+there, which says the setter stream reached the cell the field reports.
+
+A stream nobody sends to is the third. A handler the pattern exposes and no test
+drives has a body that runs in neither lane, so it sits at zero on every run
+rather than moving between them. That is permanent debt rather than flap, and it
+costs one more action apiece to clear.
+
+`packages/patterns/cfc-spec-gallery/main.test.tsx` is the worked example. It
+reads its view, states its name and the four inputs it reports back out, and
+drives every stream the gallery exposes, which takes the file from 385 of its
+522 measured lines to all of them. Before that the integration lane was the only
+one covering the other 137, and
+[the investigation record](../history/development/coverage-flake-cfc-spec-gallery-view-2026-09-01.md)
+is what that cost the group on a run where the lane's report went missing.
+
 `CF_PATTERN_COVERAGE_DIR` names the directory the `*.pattern-coverage.lcov`
 files are written to. The `cf test` command in
 `packages/cli/commands/test-command.ts` reads it directly. The browser
@@ -199,6 +236,32 @@ file charges the whole file, which is the bill a new module of that size runs
 up. A file that gains code usually gains a coverage record with it, and that
 brings the charge down to the lines no test reached. The full charge stands
 only while nothing loads the file.
+
+### A file that opts out of coverage is charged nothing
+
+A `// deno-coverage-ignore-file` comment on a file's first line, or on the line
+after its shebang, opts the file out of Deno's coverage: `deno coverage` leaves
+it out of the report it writes, whether or not a test loaded it. The gate reads
+the same line for a file the report has no record for, and charges such a file
+nothing, so the comment means the same thing on a file no test can load as on
+one a test did.
+
+Those are the only lines Deno reads it from, ahead of every other comment and
+pragma; the same comment anywhere later leaves the file in Deno's report and
+charged by the gate. A `// @ts-check` or a `deno-lint-ignore-file` goes on the
+line after it. Text may follow the directive after whitespace, which is the
+place for the reason:
+
+```text
+// deno-coverage-ignore-file -- runs only in a browser, as inlined text
+```
+
+The comment is for a file Deno's coverage cannot measure. A notable case is a
+source file that runs only in a browser, such as one imported as text and
+inlined into a document a frame loads: no Deno-run test can load it, so no
+test could pay its debt down, and the browser tests that do drive it report
+into nothing this metric reads. A file a Deno test could load is not such a
+file, and the ratchet is what holds it to its tests.
 
 ## Coverage must not depend on the execution environment
 
@@ -893,14 +956,58 @@ the same trap.
 Getting the hits back out crosses two boundaries: the worker's and the browser's.
 `PatternCoverageCollector.toData()` and `ingest()` give the spans and hit counts a
 plain-JSON form. The worker exposes them over the RuntimeClient IPC
-(`GetPatternCoverage`), and the harness pulls them with `page.evaluate` at
-teardown — one batched dump per page, not a per-hit round trip. Every realm runs
-the same instrumented bytes, so the fileName-plus-span-id keys line up: a realm
-that only warm-loaded already-instrumented bytes reports hits that merge cleanly
-against the realm that compiled them and holds the spans. The harness merges the
-realms' hits and writes one `*.pattern-coverage.lcov` tagged
+(`GetPatternCoverage`), and the harness pulls them with `page.evaluate` — one
+batched dump per runtime, not a per-hit round trip. Every realm runs the same
+instrumented bytes, so the fileName-plus-span-id keys line up: a realm that only
+warm-loaded already-instrumented bytes reports hits that merge cleanly against
+the realm that compiled them and holds the spans. The harness merges the realms'
+hits and writes a `*.pattern-coverage.lcov` tagged
 `TN:pattern-runtime-integration`, which the job uploads in its
 `coverage-profile-*` artifact.
+
+### One report per test file, not one per shard
+
+`deno test` runs each test file in its own isolate. A shard's files therefore
+hold separate instances of the harness module, each with its own collector and
+its own space, and each writes its own `*.pattern-coverage.lcov` under
+`CF_PATTERN_COVERAGE_DIR`. The gate copies and joins every `.lcov` in an
+artifact, so a shard's coverage arriving in several files reads the same as one,
+and a report is named apart from every other in the run for that reason.
+
+The isolation runs the other way as well. A test file that runs its patterns
+only through a pieces controller in the test process, with no page to dump from,
+never reaches the write and contributes nothing — `all.test.ts` is the case in
+the tree.
+
+### The dump has to happen before the runtime is dropped
+
+A worker's collector lives and dies with the runtime that built it. A shell
+builds a new runtime whenever the page navigates and whenever its identity is
+set — `shouldRecreateRuntime` compares the `Identity` object, and the integration
+harness mints a fresh one from what crosses the page boundary — so one suite runs
+through several runtimes, and every hit a dropped runtime holds is gone. A suite
+that drives one page through two logins has two runtimes and two dumps to take:
+one before the second navigation, and one before the harness disposes what that
+navigation left. The pull happens in three places — before a login, before the
+harness disposes a runtime, and on the page itself
+(`Page.addBeforeUnloadHook`), which is what covers a reload and a page close as
+well as a `goto`.
+
+Taking only the last runtime's dump is what makes a line's coverage turn on the
+environment, which the section above rules out. The lines at risk are the ones a
+flow reaches late — a derived expression that runs when the view renders it, a
+handler body that runs when the user gets that far. Whether the runtime holding
+those hits is the one still standing at teardown depends on how the run was
+timed and which shard the file landed in, and a line that drops out that way is
+charged to whichever pull request happened to reshuffle the shards.
+
+A dump that comes back empty-handed is reported, with one exception: a page that
+never booted a runtime holds nothing, and is normal. A page that cannot be
+reached at all, a runtime that does not answer the request, and a worker built
+with no collector each name what was lost on the job's log. Coming back with
+hits and no spans is not one of those — that is exactly what a realm that
+warm-loaded somebody else's instrumented bytes reports, and those hits key
+against the spans the compiling realm registered.
 
 Integration coverage counts toward the gated `coverage-debt: packages/patterns`
 metric exactly like unit coverage, which means a broad end-to-end flow that runs a

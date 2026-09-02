@@ -3,6 +3,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/data-model";
+import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 import {
@@ -13,7 +14,12 @@ import {
   FabricBridgeHost,
 } from "../src/bridge.ts";
 import { connectFabric } from "../src/guest.ts";
-import { type BridgeResolvedCell, GUEST_PORT_HANDOFF } from "../src/ipc.ts";
+import {
+  BRIDGE_PROTOCOL,
+  BRIDGE_VERSION,
+  type BridgeResolvedCell,
+  GUEST_PORT_HANDOFF,
+} from "../src/ipc.ts";
 
 function handOff(port: MessagePort): void {
   globalThis.dispatchEvent(
@@ -997,6 +1003,53 @@ describe("Fabric iframe bridge", () => {
       });
     } finally {
       client.disconnect();
+      host.disconnect();
+    }
+  });
+
+  it("reports the first valid request once", async () => {
+    const channel = new MessageChannel();
+    const reported: FabricBridgeHost[] = [];
+    const host = new FabricBridgeHost(
+      createFabricBridge({ count: cellResource(() => 1) }),
+      channel.port1,
+      (session) => reported.push(session),
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      await expect(client.cell<number>("count").pull()).resolves.toBe(1);
+      await expect(client.cell<number>("count").pull()).resolves.toBe(1);
+      expect(reported.length).toBe(1);
+      expect(reported[0]).toBe(host);
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
+  it("acknowledges a flush to the guest port", async () => {
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge({}),
+      channel.port1,
+    );
+
+    try {
+      const arriving = new Promise((resolve) => {
+        channel.port2.onmessage = (event) =>
+          resolve(fabricFromRealmValue(event.data));
+        channel.port2.start();
+      });
+      host.acknowledgeFlush("n1");
+      await expect(arriving).resolves.toEqual({
+        protocol: BRIDGE_PROTOCOL,
+        version: BRIDGE_VERSION,
+        type: "flush",
+        nonce: "n1",
+      });
+    } finally {
       host.disconnect();
     }
   });

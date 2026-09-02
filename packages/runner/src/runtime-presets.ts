@@ -123,11 +123,14 @@
  */
 
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
-import type {
-  CfcEnforcementMode,
-  CfcFlowLabelsMode,
-  SinkMaxConfidentiality,
-  TrustSnapshot,
+import {
+  type CfcEnforcementMode,
+  type CfcFlowLabelsMode,
+  sinkCeilingsOf,
+  type SinkGovernanceRegistry,
+  type SinkMaxConfidentiality,
+  type TrustSnapshot,
+  ungatedSink,
 } from "./cfc/mod.ts";
 import { parseFlagValue } from "./experimental-posture.ts";
 import { STANDARD_PROMPT_CAVEAT_POLICY } from "./cfc/mod.ts";
@@ -560,32 +563,53 @@ export async function experimentalOptionsForDeployedClient(
 export type CfcPosture = "max-enforcement";
 
 /**
- * Confidentiality ceilings of the max-enforcement posture: every network-fetch
- * egress sink is public-only (an empty ceiling admits no confidential atom),
- * so labeled data cannot leave through the network-fetch sinks.
+ * How the max-enforcement posture governs every known sink — total over the
+ * sink registry, so a sink added to the inventory without a decision here is
+ * a compile error rather than a sink that silently releases ungated.
  *
- * The llm sinks (`llm`, `llmDialog`, `generateText`, `generateObject`) carry
- * no ceiling, and a sink with no ceiling gets NO gate: under this posture,
- * llm-sink release is ungoverned — any confidentiality, a secret as much as a
- * risk caveat, reaches the llm sinks without a policy evaluation running for
- * them. Ungated rather than public-only because ceiling membership is exact
- * clause subsumption (`atomsOutsideCeiling`) — a ceiling entry cannot admit
- * "any material-risk caveat regardless of `source`" — while risk-caveated
- * ingested content is exactly what an llm sink exists to process, so a
- * public-only ceiling would refuse the flows the sink is for. Governing llm
- * release needs a boundary-scoped admission mechanism (a public-only ceiling
- * paired with an exchange rule that admits the material-risk family at
- * llm-class boundaries), which this posture does not yet carry.
+ * Every network-fetch egress sink is public-only (an empty ceiling admits no
+ * confidentiality atom), so labeled data cannot leave through them. The
+ * llm-class sinks release ungated, carrying the reason, the owner, and the
+ * condition that retires the gap ({@link SINK_UNGATED_RATIONALES} in the
+ * runner's sink inventory): under this posture, llm-sink release is
+ * ungoverned — any confidentiality, a secret as much as a risk caveat,
+ * reaches them without a policy evaluation running. The posture record
+ * publishes that as a deviation rather than leaving it to be inferred from a
+ * sink's absence from a ceiling list. Building the mechanism that retires the
+ * gap is planned in `docs/plans/cfc-llm-sink-admission.md`.
+ *
+ * Until the §8.12.5 route-2 widening, one path was gated anyway, by accident:
+ * a pattern calling `llm(...)` staged its request in the transaction that also
+ * wrote the builtin's own result store, that store declared nothing, and the
+ * writer-fit misfit refused the commit. It fired on every such call, so under
+ * this posture an llm call over caveated content did not work at all — the
+ * opposite of what the rationale above says the sink is for. The store now
+ * declares what flows into it, so the ungoverned statement holds of the
+ * builtin path too. `max-enforcement-posture.test.ts` pins the hand-staged
+ * request and `builtin-abandoned-request.test.ts` the builtin one; both flip
+ * to asserting the refusal when the admission mechanism lands.
  */
-export const MAX_ENFORCEMENT_SINK_CEILINGS: SinkMaxConfidentiality = Object
+export const MAX_ENFORCEMENT_SINK_GOVERNANCE: SinkGovernanceRegistry = Object
   .freeze({
-    fetchBinary: Object.freeze([]),
-    fetchText: Object.freeze([]),
-    fetchJson: Object.freeze([]),
-    fetchJsonUnchecked: Object.freeze([]),
-    fetchProgram: Object.freeze([]),
-    streamData: Object.freeze([]),
+    fetchBinary: { ceiling: Object.freeze([]) },
+    fetchText: { ceiling: Object.freeze([]) },
+    fetchJson: { ceiling: Object.freeze([]) },
+    fetchJsonUnchecked: { ceiling: Object.freeze([]) },
+    fetchProgram: { ceiling: Object.freeze([]) },
+    streamData: { ceiling: Object.freeze([]) },
+    llm: ungatedSink("llm"),
+    llmDialog: ungatedSink("llmDialog"),
+    generateText: ungatedSink("generateText"),
+    generateObject: ungatedSink("generateObject"),
   });
+
+/**
+ * The ceilings {@link MAX_ENFORCEMENT_SINK_GOVERNANCE} declares, in the
+ * open-map shape `Runtime` takes: an ungated sink is absent, which is what
+ * "no ceiling, therefore no gate" is in `SinkMaxConfidentiality`.
+ */
+export const MAX_ENFORCEMENT_SINK_CEILINGS: SinkMaxConfidentiality =
+  sinkCeilingsOf(MAX_ENFORCEMENT_SINK_GOVERNANCE);
 
 /**
  * The max-enforcement CFC posture: every staged-rollout enforcement dial at
@@ -618,6 +642,42 @@ export const MAX_ENFORCEMENT_CFC_OPTIONS = Object.freeze(
     cfcSinkMaxConfidentiality: MAX_ENFORCEMENT_SINK_CEILINGS,
   } as const,
 ) satisfies Partial<RuntimeOptions>;
+
+/** The CFC dials a preset caller may state for one runtime. */
+export interface PresetCfcParams {
+  cfcPosture?: CfcPosture;
+  cfcEnforcementMode?: CfcEnforcementMode;
+  cfcFlowLabels?: CfcFlowLabelsMode;
+}
+
+/**
+ * The CFC options a preset composes for `params`: the core pin, then the
+ * named posture bundle where one is selected, then the host dials over both.
+ *
+ * Exported because a host sometimes has to know the posture of a runtime it
+ * has not built yet — cf-harness records the posture of a session whose
+ * runtime is built lazily, and its console prints one at startup. Reading it
+ * from here (and resolving what remains through `resolveCfcDials`) is what
+ * keeps that projection from being a second, drifting statement of the same
+ * resolution.
+ */
+export const presetCfcOptions = (
+  params: PresetCfcParams,
+): Partial<RuntimeOptions> => ({
+  // Pinned, not defaulted: several sites pinned this individually so that a
+  // changed constructor default could not silently relax them; the pin now
+  // lives once. Same value as the constructor default today.
+  cfcEnforcementMode: "enforce-explicit",
+  ...(params.cfcPosture === "max-enforcement"
+    ? MAX_ENFORCEMENT_CFC_OPTIONS
+    : {}),
+  ...(params.cfcEnforcementMode !== undefined
+    ? { cfcEnforcementMode: params.cfcEnforcementMode }
+    : {}),
+  ...(params.cfcFlowLabels !== undefined
+    ? { cfcFlowLabels: params.cfcFlowLabels }
+    : {}),
+});
 
 //
 // Gate 4: the shared core all presets compose.
@@ -684,10 +744,6 @@ function coreOptions(params: CoreParams): RuntimeOptions {
     apiUrl: params.apiUrl,
     storageManager: params.storageManager,
     experimental: params.experimental,
-    // Pinned, not defaulted: several sites pinned this individually so that a
-    // changed constructor default could not silently relax them; the pin now
-    // lives once. Same value as the constructor default today.
-    cfcEnforcementMode: "enforce-explicit",
     // cfcFlowLabels / cfcWriteFloor / cfcTriggerReadGating /
     // cfcDecomposedEnvelopes /
     // cfcPolicyEvaluation / cfcLabelMetadataProtection /
@@ -696,9 +752,11 @@ function coreOptions(params: CoreParams): RuntimeOptions {
     // defaults (off / none) — deliberately absent here until a first-party
     // rollout begins. A caller that opts into `cfcPosture` gets the named
     // bundle's values instead, for this one runtime.
-    ...(params.cfcPosture === "max-enforcement"
-      ? MAX_ENFORCEMENT_CFC_OPTIONS
-      : {}),
+    ...presetCfcOptions({
+      ...(params.cfcPosture !== undefined
+        ? { cfcPosture: params.cfcPosture }
+        : {}),
+    }),
   };
 }
 

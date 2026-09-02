@@ -15,6 +15,7 @@ import {
   linkEndpointPrefix,
   liveCandidates,
   projectionKeys,
+  resolvePieceContext,
   resolveSpaceContext,
   shapeEntityCandidates,
   shapePieceCandidates,
@@ -171,6 +172,47 @@ Deno.test("space context: the line's own --space wins over an embedded one", asy
         "did:key:zEmbedded",
       )?.space,
       "team",
+    );
+  });
+});
+
+Deno.test("piece context: #argument reads the same on both spellings of a target", async () => {
+  // Completion reads the target through the grammar the command's own intake
+  // reads it with, so a suffix the command honors is a suffix the keys
+  // offered behind it come from the arguments cell for.
+  await withEnv({ identity: "/env.key", apiUrl: "http://env:9999" }, () => {
+    const rooted = resolvePieceContext(
+      lineFor("cf get -s demo --piece /thermostat#argument "),
+    );
+    const bare = resolvePieceContext(
+      lineFor("cf get -s demo --piece thermostat#argument "),
+    );
+    assert(rooted);
+    assert(bare);
+    // The whole context, not just the suffix: "read the same" is the claim,
+    // and a spelling that agreed on `pieceInput` while disagreeing on the
+    // space or the piece would satisfy a narrower one.
+    assertEquals(bare, rooted);
+    assertEquals(bare.piece, "thermostat");
+    assertEquals(bare.pieceInput, true);
+    // A scope written in front of the suffix survives it.
+    assertEquals(
+      resolvePieceContext(
+        lineFor("cf get -s demo --piece thermostat@session#argument "),
+      )?.pieceScope,
+      "session",
+    );
+    // Nothing but the suffix selects that cell, and a plain slug still
+    // resolves — a context of `null` there is a slot offering nothing.
+    const plain = resolvePieceContext(
+      lineFor("cf get -s demo --piece thermostat "),
+    );
+    assert(plain);
+    assertFalse(plain.pieceInput);
+    // A fragment the grammar refuses is a half-typed word, not a throw.
+    assertEquals(
+      resolvePieceContext(lineFor("cf get -s demo --piece thermostat#res ")),
+      null,
     );
   });
 });

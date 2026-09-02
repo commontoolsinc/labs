@@ -57,7 +57,7 @@ export type ResolvedFullLink = NormalizedFullLink & {
 const schemaConstrainsNothing = (schema: JSONSchema | undefined): boolean =>
   schema === undefined || ContextualFlowControl.isTrueSchema(schema);
 
-const MAX_PATH_RESOLUTION_LENGTH = 100;
+export const MAX_PATH_RESOLUTION_LENGTH = 100;
 
 type LinkHop = {
   /**

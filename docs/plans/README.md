@@ -23,6 +23,11 @@ a record: archive it to `docs/history/plans/` following the procedure in
   tracks the remaining shipping gates after the core implementation.
 - [CFC exchange-rule authoring](cfc-exchange-rule-authoring.md) tracks the
   remaining owner decisions and blocked stages for exchange rules.
+- [CFC llm-sink admission](cfc-llm-sink-admission.md) tracks the
+  boundary-scoped admission mechanism the max-enforcement posture names as
+  pending for its llm sinks: public-only ceilings paired with class-scoped
+  exchange rules, the llm sink class those rules need, and the owner decisions
+  on which authority and which caveat tiers admit content to a model.
 - [CFC TypeScript authoring](cfc_typescript_authoring.md) sequences the
   TypeScript and JSX authoring surface for CFC metadata.
 - [`cf-code-editor` co-presence](cf-code-editor-copresence.md) adds an
@@ -162,7 +167,8 @@ a record: archive it to `docs/history/plans/` following the procedure in
   mutable current place — the context that fills in the omitted levels of the
   fabric's right-anchored references — plus full-screen live views, for
   inspecting and editing space and piece state. Decisions so far and open
-  questions; nothing is built yet.
+  questions; construction is under way, in the order its
+  [build sequence](shuttle/build-sequence.md) sets out.
 - [Shell completion coverage](cli-completion-coverage.md) sequences the work
   that makes `cf completion` answer correctly across the surface it claims and
   reach the verb surface it does not: the slots that offer a wrong candidate,

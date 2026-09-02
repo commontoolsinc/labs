@@ -9,6 +9,7 @@ import type {
 } from "../contracts/cfc-invocation-context.ts";
 import type {
   HarnessAllowedSkillScript,
+  HarnessSkillAcquisition,
   HarnessSkillActivations,
   HarnessSkillRegistry,
   HarnessSkillResourceRead,
@@ -81,8 +82,17 @@ export interface HarnessToolContext {
    */
   getSkillsShAcquisitionClient?: () => Promise<SkillsShAcquisitionClient>;
 
-  /** Mints the sole capability that may enter delegate_task.skillHandle. */
-  mintSkillContextHandle?(ref: string): Promise<string>;
+  /**
+   * Mints the sole capability that may enter delegate_task.skillHandle,
+   * recording where the caller fetched the value from. The provenance is
+   * mandatory because the mint is reachable only from the acquisition step,
+   * which always knows it, and an entry without it could name no commit when
+   * the handle is later delegated.
+   */
+  mintSkillContextHandle?(
+    ref: string,
+    acquisition: HarnessSkillAcquisition,
+  ): Promise<string>;
 
   /**
    * Whether a pattern the model authored and ran successfully is published

@@ -559,6 +559,30 @@ interface HarnessSubagentRunRefBase {
   parentToolCallId: string;
   childRunId: string;
   manifest: HarnessSubagentRunManifest;
+
+  /**
+   * The skill-context handle token this delegation carried, when it carried
+   * one. Absent means the child ran with no acquired skill, which is a fact
+   * about the run and not a gap in the record.
+   *
+   * The run's outstanding skill custody is read off this field and {@link
+   * HarnessTerminalSubagentRunRef.status}: a token whose most recent
+   * delegation did not complete has custody outstanding, and the next
+   * delegation must either carry that token again or say it is deliberately
+   * running without it. Deriving custody from the run state rather than from
+   * memory is what makes it survive a resume.
+   */
+  skillHandle?: string;
+
+  /**
+   * Set when this delegation stated it deliberately carries no acquired
+   * skill. It discharges the run's outstanding custody: the parent has
+   * answered the question the refusal asks, once, and later delegations are
+   * not asked again. Recording it here rather than in memory is what makes
+   * the answer survive a resume, and what lets a reader see that a
+   * skill-free child was chosen rather than a field dropped.
+   */
+  withoutSkillHandle?: boolean;
 }
 
 export interface HarnessRunningSubagentRunRef
@@ -616,6 +640,21 @@ export interface DelegateTaskToolInput {
    * unforgeable table membership instead of by name.
    */
   skillHandle?: string;
+
+  /**
+   * States that this delegation deliberately carries no acquired skill. It is
+   * required — and meaningful — only while the run has outstanding skill
+   * custody: a delegation that carried a handle did not complete, and the
+   * next one omitting {@link DelegateTaskToolInput.skillHandle} would
+   * otherwise silently produce work nothing records as skill-free.
+   *
+   * It grants nothing and attaches nothing. Its whole effect is to make the
+   * choice explicit in the transcript and the run state, so a reader can tell
+   * a considered decision from a dropped field. Stating it once discharges
+   * the custody it answers: a run does not carry the flag for the rest of its
+   * life because one child died.
+   */
+  withoutSkillHandle?: boolean;
 }
 
 export interface DelegateTaskToolOutput {

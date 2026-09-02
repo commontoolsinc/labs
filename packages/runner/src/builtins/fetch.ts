@@ -31,11 +31,11 @@ import {
   tryClaimMutex,
   tryWriteResult,
 } from "./fetch-utils.ts";
+import { ownedCell } from "./runtime-owned-store.ts";
 import {
   effectTargetKey,
   markEffectCompletion,
 } from "../executor/effect-completion.ts";
-import { scopedCell } from "./scope-policy.ts";
 
 type FetchRequestOptions = {
   body?: any;
@@ -381,41 +381,45 @@ function fetchBuiltin(kind: FetchKind) {
       const outputScope = tx.getNarrowestReadScope();
 
       if (!cellsInitialized || cellScope !== outputScope) {
-        const basePending = runtime.getCell<boolean>(
-          parentCell.space,
+        pending = ownedCell<boolean>(
+          runtime,
+          tx,
+          parentCell,
           { [kind.name]: { pending: cause } },
           undefined,
-          tx,
+          outputScope,
         );
-        pending = scopedCell(runtime, tx, basePending, outputScope);
 
-        const baseResult = runtime.getCell<any | undefined>(
-          parentCell.space,
+        result = ownedCell<any | undefined>(
+          runtime,
+          tx,
+          parentCell,
           {
             [kind.name]: { result: cause },
           },
           undefined,
-          tx,
+          outputScope,
         );
-        result = scopedCell(runtime, tx, baseResult, outputScope);
 
-        const baseError = runtime.getCell<any | undefined>(
-          parentCell.space,
+        error = ownedCell<any | undefined>(
+          runtime,
+          tx,
+          parentCell,
           {
             [kind.name]: { error: cause },
           },
           undefined,
-          tx,
+          outputScope,
         );
-        error = scopedCell(runtime, tx, baseError, outputScope);
 
-        const baseInternal = runtime.getCell(
-          parentCell.space,
+        internal = ownedCell(
+          runtime,
+          tx,
+          parentCell,
           { [kind.name]: { internal: cause } },
           internalSchema,
-          tx,
+          outputScope,
         );
-        internal = scopedCell(runtime, tx, baseInternal, outputScope);
 
         // Link the new result cells to the parent result cell
         setResultCell(pending, parentCell);

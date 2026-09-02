@@ -1274,7 +1274,40 @@ export type TraversalContext = {
   scopeKeyIdentity: ScopeKeyIdentity;
 
   includeMeta: boolean;
-  metaDocsVisited: Set<string>;
+
+  /**
+   * The metadata rails a document the traversal loads mid-walk chases
+   * (`loadMetaLinkedDocs`). Every rail by default: a runtime traversal
+   * that loads a document generally intends to interpret it. The memory
+   * server's graph-query walk narrows this to the rails a reader needs of
+   * a document it reached but did not name — `result` and `internal`, the
+   * rails computed values arrive through — and reserves the full family
+   * for the documents a query NAMES as roots, because chasing every rail
+   * at every load multiplies a wide walk by each visited piece's whole
+   * doc set. Consulted only where `includeMeta` already gates the chase;
+   * it does not affect `traverseCells`, which `includeMeta` also carries.
+   */
+  loadedMetaRails: readonly MetaRail[];
+
+  /**
+   * Rails whose linked documents a mid-walk chase REGISTERS without
+   * loading or delivering: each target's tracker-style key goes to
+   * `lazyMetaSink`, derived from the manifest link alone — no read. The
+   * receiver keeps the subscription reactive to those documents and
+   * delivers one when a later commit touches it. Empty (with no sink)
+   * everywhere except the memory server's graph-query walk, which lazies
+   * the `internal` rail: a crossed piece's derived cells stay subscribed
+   * without shipping every one of them to every subscriber that can see
+   * the piece. A named root's chase bypasses this routing and loads every
+   * rail eagerly.
+   */
+  lazyMetaRails: readonly MetaRail[];
+  lazyMetaSink?: (key: string, referrerKey: string) => void;
+
+  /** Tracker key → the rails already chased for that document within this
+   * traversal, so a later chase under a wider rail set still walks the
+   * rails an earlier, narrower one did not. */
+  metaDocsVisited: Map<string, Set<MetaRail>>;
 
   /**
    * Reports a followed link whose target document is absent from the local
@@ -1321,7 +1354,10 @@ export function createTraversalContext(
   schemaTracker: MapSet<string, SchemaPathSelector>,
   scopeKeyIdentity: ScopeKeyIdentity,
   includeMeta: boolean = false,
-  metaDocsVisited: Set<string> = new Set<string>(),
+  metaDocsVisited: Map<string, Set<MetaRail>> = new Map<
+    string,
+    Set<MetaRail>
+  >(),
   onMissingLinkTarget?: (
     link: NormalizedFullLink,
     sourceSpace: MemorySpace,
@@ -1329,12 +1365,18 @@ export function createTraversalContext(
   ) => void,
   schemaDocsLoaded: Set<string> = new Set<string>(),
   schemaDocsAvailable: Set<string> = new Set<string>(),
+  loadedMetaRails: readonly MetaRail[] = ALL_META_RAILS,
+  lazyMetaRails: readonly MetaRail[] = [],
+  lazyMetaSink?: (key: string, referrerKey: string) => void,
 ): TraversalContext {
   return {
     tracker,
     schemaTracker,
     scopeKeyIdentity,
     includeMeta,
+    loadedMetaRails,
+    lazyMetaRails,
+    lazyMetaSink,
     metaDocsVisited,
     onMissingLinkTarget,
     schemaDocsLoaded,
@@ -1347,7 +1389,10 @@ export function createDefaultTraversalContext(
   includeMeta: boolean = true,
   schemaTracker: MapSet<string, SchemaPathSelector> =
     new MapSetStringToPathSelectors(true),
-  metaDocsVisited: Set<string> = new Set<string>(),
+  metaDocsVisited: Map<string, Set<MetaRail>> = new Map<
+    string,
+    Set<MetaRail>
+  >(),
   onMissingLinkTarget?: (
     link: NormalizedFullLink,
     sourceSpace: MemorySpace,
@@ -2575,8 +2620,9 @@ function trackVisitedDoc(
     );
   }
   // Load the metadata-linked docs recursively unless the address holds no
-  // value.
-  if (context.includeMeta) {
+  // value, over the rails the context grants a mid-walk load
+  // (`loadedMetaRails`).
+  if (context.includeMeta && context.loadedMetaRails.length > 0) {
     // Loading metadata requires the full doc. Ignore this read for scheduling.
     const { ok: fullDoc } = tx.read(
       { ...target, path: [] },
@@ -2590,16 +2636,81 @@ function trackVisitedDoc(
           value: fullDoc.value,
         },
         context,
+        context.loadedMetaRails,
       );
     }
   }
 }
 
 // These meta links don't have full link chains. We only follow the first link.
+/**
+ * The key-only half of `loadMetaLinkedDoc`: derive each of `meta`'s target
+ * keys from the links the document already carries and hand them to `sink`,
+ * reading nothing. What the sink does with a key — typically register it
+ * for delivery on its next commit — is the caller's contract.
+ *
+ * A metadata family is a SAME-SPACE structure: a registration is promoted
+ * by the registering space's own refresh, which a foreign space's commits
+ * never reach, and the per-space engine could not read the target either.
+ * A manifest entry resolving to another space selects nothing here and is
+ * logged, exactly as a malformed entry is.
+ */
+export function sinkMetaLinkedDocKeys(
+  valueEntry: IMemorySpaceAttestation,
+  meta: MetaRail,
+  identity: ScopeKeyIdentity,
+  sink: (key: string, referrerKey: string) => void,
+): void {
+  const targetObj = valueEntry.value as Immutable<JSONObject>;
+  if (!isObjectOrArray(targetObj) || !(meta in targetObj)) return;
+  const links: SigilLink[] = [];
+  if (meta === "internal") {
+    if (!Array.isArray(targetObj["internal"])) return;
+    for (const manifestEntry of targetObj["internal"]) {
+      if (
+        isObjectOrArray(manifestEntry) && "link" in manifestEntry &&
+        isSigilLink(manifestEntry.link)
+      ) {
+        links.push(manifestEntry.link);
+      }
+    }
+  } else {
+    const linkObj = isSigilLink(targetObj[meta])
+      ? targetObj[meta] as SigilLink
+      : (meta === "cfc")
+      ? cfcMetaToSigilLink(targetObj["cfc"])
+      : undefined;
+    if (linkObj !== undefined) links.push(linkObj);
+  }
+  for (const linkObj of links) {
+    const link = parseLink(linkObj, valueEntry.address);
+    if (link?.id === undefined) continue;
+    if (link.space !== valueEntry.address.space) {
+      logger.warn(
+        "traverse",
+        () => [
+          "Foreign-space metadata link ignored in",
+          valueEntry.address,
+          "->",
+          link.space,
+        ],
+      );
+      continue;
+    }
+    sink(
+      getTrackerKey(
+        { space: link.space, id: link.id, scope: link.scope },
+        identity,
+      ),
+      getTrackerKey(valueEntry.address, identity),
+    );
+  }
+}
+
 function loadMetaLinkedDoc(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
-  meta: "cfc" | "result" | "pattern" | "argument" | "internal",
+  meta: MetaRail,
   schemaTracker: MapSet<string, SchemaPathSelector>,
   identity: ScopeKeyIdentity,
 ): IMemorySpaceAttestation[] {
@@ -2672,6 +2783,21 @@ function loadMetaLinkedDocFromLink(
   linkObj: SigilLink,
 ) {
   const link = parseLink(linkObj, valueEntry.address)!;
+  // A metadata family is a same-space structure (05-queries.md): a link
+  // resolving to another space selects nothing on the eager path exactly
+  // as on the key-only sink — the per-space engine could not read it.
+  if (link.space !== valueEntry.address.space) {
+    logger.warn(
+      "traverse",
+      () => [
+        "Foreign-space metadata link ignored in",
+        valueEntry.address,
+        "->",
+        link.space,
+      ],
+    );
+    return undefined;
+  }
   const address = {
     space: link.space,
     id: link.id!,
@@ -2824,36 +2950,82 @@ function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
   return undefined;
 }
 
-// Recursively load the meta linked docs from the doc. Every loaded doc is
+/** The rails a document's metadata family hangs off. */
+export type MetaRail = "cfc" | "result" | "pattern" | "argument" | "internal";
+
+export const ALL_META_RAILS: readonly MetaRail[] = [
+  "cfc",
+  "result",
+  "pattern",
+  "argument",
+  "internal",
+];
+
+// Recursively load the meta linked docs from the doc, over the given rails
+// (every rail unless the caller narrows them). Every loaded doc is
 // delivered whole — tracked under the rejecting selector — and never
 // schema-traversed; narrowing a meta document by schema is not a policy
 // this traversal has.
+//
+// The visited record is per RAIL, not per document: one traversal can chase
+// a document under the crossing subset first and under every rail later —
+// a walk crosses into a piece before a root names it — and the later call
+// must still chase the rails the earlier one did not.
 export function loadMetaLinkedDocs(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
   context: TraversalContext,
+  rails: readonly MetaRail[] = ALL_META_RAILS,
+  // A named root's chase passes false: every rail loads eagerly no matter
+  // what the context routes lazily for mid-walk crossings.
+  sinkLazyRails = true,
 ) {
+  const seenRailsOf = (key: string): Set<MetaRail> | undefined =>
+    context.metaDocsVisited.get(key);
+  const recordRails = (key: string): void => {
+    let seen = context.metaDocsVisited.get(key);
+    if (seen === undefined) {
+      seen = new Set<MetaRail>();
+      context.metaDocsVisited.set(key, seen);
+    }
+    for (const rail of rails) seen.add(rail);
+  };
+  const coveredForCall = (key: string): boolean => {
+    const seen = seenRailsOf(key);
+    return seen !== undefined && rails.every((rail) => seen.has(rail));
+  };
+
   const valueEntryKey = getTrackerKey(
     valueEntry.address,
     context.scopeKeyIdentity,
   );
-  if (context.metaDocsVisited.has(valueEntryKey)) {
+  if (coveredForCall(valueEntryKey)) {
     return;
   }
-  context.metaDocsVisited.add(valueEntryKey);
+  recordRails(valueEntryKey);
 
-  const pendingDocs = [valueEntry];
+  const pendingDocs: IMemorySpaceAttestation[] = [valueEntry];
   while (pendingDocs.length > 0) {
     const currentDoc = pendingDocs.shift()!;
-    for (
-      const meta of [
-        "cfc",
-        "result",
-        "pattern",
-        "argument",
-        "internal",
-      ] as const
-    ) {
+    for (const meta of rails) {
+      if (
+        sinkLazyRails &&
+        context.lazyMetaSink !== undefined &&
+        context.lazyMetaRails.includes(meta)
+      ) {
+        // Registered, not loaded: the sink receives each same-space
+        // target's key, derived from the manifest link alone. No read, no
+        // tracker entry, no recursion — and no visited record, so a later
+        // eager chase of this document's rail (a root naming it) still
+        // runs.
+        sinkMetaLinkedDocKeys(
+          currentDoc,
+          meta,
+          context.scopeKeyIdentity,
+          context.lazyMetaSink,
+        );
+        continue;
+      }
       const linkedDocs = loadMetaLinkedDoc(
         tx,
         currentDoc,
@@ -2870,8 +3042,13 @@ export function loadMetaLinkedDocs(
           linkedDoc.address,
           context.scopeKeyIdentity,
         );
-        if (context.metaDocsVisited.has(linkedDocKey)) continue;
-        context.metaDocsVisited.add(linkedDocKey);
+        // Recurse unless this call's whole rail set is already recorded
+        // for the child: a document first chased under a narrower set —
+        // a crossing before a root named its ancestor — still has its
+        // descendants upgraded, because coverage is judged against THIS
+        // call's rails, not against having been seen at all.
+        if (coveredForCall(linkedDocKey)) continue;
+        recordRails(linkedDocKey);
         pendingDocs.push(linkedDoc);
       }
     }

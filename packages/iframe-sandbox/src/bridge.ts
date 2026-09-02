@@ -320,10 +320,26 @@ export class FabricBridgeHost {
   #nextCellHandle = 0;
   #operationTail: Promise<void> | undefined;
   #connected = true;
+  #firstRequestReported = false;
 
-  constructor(bridge: FabricBridge, port: MessagePort) {
+  readonly #onFirstRequest:
+    | ((session: FabricBridgeHost) => void)
+    | undefined;
+
+  /**
+   * Constructs an instance serving `bridge` over `port`. `onFirstRequest`,
+   * when supplied, is called once, ahead of handling the first valid request
+   * to arrive: a request proves the guest holds this session's port, which is
+   * what an embedder deciding between offered sessions needs to know.
+   */
+  constructor(
+    bridge: FabricBridge,
+    port: MessagePort,
+    onFirstRequest?: (session: FabricBridgeHost) => void,
+  ) {
     this.#bridge = bridge;
     this.#port = port;
+    this.#onFirstRequest = onFirstRequest;
     this.#port.onmessage = this.#onMessage;
     this.#port.start();
   }
@@ -342,6 +358,20 @@ export class FabricBridgeHost {
     this.#subscriptions.clear();
     this.#cells.clear();
     this.#port.close();
+  }
+
+  /**
+   * Sends the acknowledgement for a flush marker carrying `nonce`. A marker
+   * cannot say which session its guest holds, so an embedder answers every
+   * session it has open; only the guest that minted the nonce acts on it.
+   */
+  acknowledgeFlush(nonce: string): void {
+    this.#post({
+      protocol: BRIDGE_PROTOCOL,
+      version: BRIDGE_VERSION,
+      type: "flush",
+      nonce,
+    });
   }
 
   #post(message: BridgeHostMessage): void {
@@ -373,6 +403,10 @@ export class FabricBridgeHost {
       return;
     }
     if (!isBridgeRequest(decoded)) return;
+    if (!this.#firstRequestReported) {
+      this.#firstRequestReported = true;
+      this.#onFirstRequest?.(this);
+    }
     if (decoded.operation === "disconnect") {
       this.disconnect();
       return;

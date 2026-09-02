@@ -98,6 +98,16 @@ export interface ProbeApi {
    */
   isRendered(element: Element): boolean;
 
+  /**
+   * Whether `element` declines a click: it carries `disabled`, or
+   * `aria-disabled="true"`. This is the "will this control act on a click"
+   * question a predicate asks alongside {@link ProbeApi.isRendered}, because a
+   * control can be laid out and take no click. A component that wraps its
+   * control in a host asks this of both: `disabled` does not inherit, so a host
+   * carrying it over a control that does not is a separate answer.
+   */
+  isDisabled(element: Element): boolean;
+
   /** Whether `element` is rendered and also on-screen. */
   isVisible(element: Element): boolean;
 
@@ -171,6 +181,10 @@ function installWaiter(
     return rect.width > 0 && rect.height > 0;
   };
 
+  const isDisabled = (element: Element): boolean =>
+    element.hasAttribute("disabled") ||
+    element.getAttribute("aria-disabled") === "true";
+
   // Typed as the ProbeApi the predicates are handed, so a method added to that
   // interface has to be implemented here too. The annotation is erased before
   // this function is serialized into the page, so it adds no runtime reference
@@ -192,6 +206,7 @@ function installWaiter(
       return out;
     },
     isRendered,
+    isDisabled,
     isVisible(element) {
       if (!isRendered(element)) return false;
       const rect = element.getBoundingClientRect();

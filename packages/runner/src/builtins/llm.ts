@@ -59,7 +59,7 @@ import {
   LLMResultSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
-import { scopedCell } from "./scope-policy.ts";
+import { ownedCell } from "./runtime-owned-store.ts";
 
 const logger = getLogger("llm", {
   enabled: true,
@@ -749,13 +749,14 @@ export function llm(
       if (cellsInitialized && cellScope !== outputScope) {
         previousCallHash = undefined;
       }
-      const baseResultCell = runtime.getCell(
-        parentCell.space,
+      resultCell = ownedCell(
+        runtime,
+        tx,
+        parentCell,
         { llm: { result: cause } },
         LLMResultSchema,
-        tx,
+        outputScope,
       );
-      resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
       resultCell.sync();
       sendResult(tx, resultCell);
       cellsInitialized = true;
@@ -1135,13 +1136,14 @@ export function generateText(
       if (cellsInitialized && cellScope !== outputScope) {
         previousCallHash = undefined;
       }
-      const baseResultCell = runtime.getCell(
-        parentCell.space,
+      resultCell = ownedCell(
+        runtime,
+        tx,
+        parentCell,
         { generateText: { result: cause } },
         GenerateTextResultSchema,
-        tx,
+        outputScope,
       );
-      resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
       resultCell.sync();
       sendResult(tx, resultCell);
       cellsInitialized = true;
@@ -1496,13 +1498,14 @@ export function generateObject<T extends Record<string, unknown>>(
       if (cellsInitialized && cellScope !== outputScope) {
         previousCallHash = undefined;
       }
-      const baseResultCell = runtime.getCell(
-        parentCell.space,
+      resultCell = ownedCell(
+        runtime,
+        tx,
+        parentCell,
         { generateObject: { result: cause } },
         GenerateObjectResultSchema,
-        tx,
+        outputScope,
       );
-      resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
       resultCell.sync();
       sendResult(tx, resultCell);
       cellsInitialized = true;

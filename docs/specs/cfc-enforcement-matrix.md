@@ -316,17 +316,21 @@ The strict-only delta is:
   What the skip does NOT do is release the value. A derivation's result
   leaves the fabric only through a sink, and a sink measures the join it is
   handed. Where the host is the one releasing — the `run_pattern` tool
-  answering a model with what a piece computed — there is no request to
-  record and no commit to gate, so that tool measures the release itself,
+  answering a model with the values a piece computed — there is no request
+  to record and no commit to gate, so that tool measures the release itself,
   against a public ceiling, through `describeSinkReleaseRefusal`
   ([run-pattern.ts](../../packages/cf-harness/src/tools/run-pattern.ts)).
-  The two routes fit their joins with one membership predicate, so a clause
-  outside a ceiling on one is outside it on the other. They differ in what
-  reaches the join: the host route measures what releasing the answer
-  resolved, and applies no exchange-rule rewriting to it, so a clause a
-  policy evaluation would have discharged is refused there. The ladder
-  governs it like any other gate — at `disabled` and `observe` it records
-  nothing that rejects.
+  What it measures is the values a `resultSchema` asks for. The result
+  reference it returns names the result without carrying it, so a call that
+  asks for no values is not measured, and a refusal withholds the values
+  while the reference goes out with them: a handle is not a release. The two
+  routes fit their joins with one membership predicate, so a clause outside
+  a ceiling on one is outside it on the other. They differ in what reaches
+  the join: the host route measures what releasing the values resolved, and
+  applies no exchange-rule rewriting to it, so a clause a policy evaluation
+  would have discharged is withheld there. The ladder governs it like any
+  other gate — at `disabled` and `observe` it records nothing that
+  withholds.
 
   The exemption is not a hole. A path counts as meta only while no payload
   write landed on it too, so a transaction writing both leaves the path
@@ -342,34 +346,77 @@ The strict-only delta is:
   direction is over-taint, so reads stay protected; giving the envelope seam
   a path space of its own is what removes the collision.
 
-- **Piece-substrate declaration (§8.12.5 route 2) — implemented.** The
-  runtime writes a small set of documents while it sets a piece up: the
-  piece's argument document, and the internal documents and streams its
-  result projects to. It fills them with whatever the setup transaction
-  read. An author cannot know which atoms a given transaction will carry, so
-  a declaration written into a schema either misses them or over-declares
-  every instance of the pattern. The transaction declares the policy
-  instead, which is §8.12.5's route 2: the write that puts the join on a
-  path also declares, in that same transaction, a policy covering it. What
-  lands is the ceiling that resolved at the path plus exactly the clauses
-  that had nowhere to go, as an ordinary `declared` entry, so the fit test
-  passes and the store's promise becomes the audience of what it holds.
+- **Runtime-owned-store declaration (§8.12.5 route 2) — implemented.** The
+  runtime materializes a set of documents to hold a piece's machinery rather
+  than data an author named. There are four kinds: a piece's argument
+  document, its result document, and the internal documents and streams its
+  result projects to, all minted by the runner from the piece's result cause;
+  the state documents a builtin mints from its own node's cause, such as a
+  dialog's result, internal state and pinned-cell list, or a list operation's
+  result container; the per-event documents a builtin mints inside one
+  transaction, such as a dialog message; and the documents anchoring splits
+  out of a value written into any of those. The runtime fills all of them
+  with whatever the writing transaction read. An author cannot know which
+  atoms a given transaction will carry, so a declaration written into a schema
+  either misses them or over-declares every instance of the pattern. The
+  transaction declares the policy instead, which is §8.12.5's route 2: the
+  write that puts the join on a path also declares, in that same transaction,
+  a policy covering it. What lands is the ceiling that resolved at the path
+  plus exactly the clauses that had nowhere to go, as an ordinary `declared`
+  entry, so the fit test passes and the store's promise becomes the audience
+  of what it holds.
 
   Declaring is what makes the route sound where an exemption would not be.
-  The declared clauses persist as store policy, so readers of the substrate
+  The declared clauses persist as store policy, so readers of the store
   consume them, and go on consuming them after an overwrite clears the
   derived stamp. They are the clauses the ceiling did not already cover
   rather than the whole join: a clause the residency alternative satisfies
   lands in the stamp and not in the declaration, because the store already
-  answers for it. The cost is the ratchet §8.12.2 asks for: a substrate
-  document that once held data derived from a labeled read keeps that clause
-  after the read stops. The direction is over-taint.
+  answers for it. The cost is the ratchet §8.12.2 asks for: a document that
+  once held data derived from a labeled read keeps that clause after the read
+  stops. The direction is over-taint.
 
-  The route is the strict rung's, like the reject it replaces. Every rung
-  below keeps its `writer-fit(persist-and-flag)` diagnostic, which is the
-  rollout signal, and stores no declared policy it could never take back —
-  so `enforce-explicit` keeps the shipped posture bit-for-bit here too. At
-  strict, a declaration records a `writer-fit(piece-substrate-declared)`
+  The route runs on every write to such a store, not only while the piece is
+  being set up. What makes that safe is a property of the declaration rather
+  than of when it is made. A declared clause list is read two ways, and the
+  two agree: as a ceiling, §8.12.4's `canWrite` admits a label clause when
+  SOME declared clause subsumes it, and as a reader's taint, that same
+  section makes the declared label a floor every reader carries — §8.12.8
+  has reader taint consume the effective label, which always includes the
+  declared component. Subsumption means satisfying the declared clause
+  implies satisfying the label, so every reader of the store satisfies every
+  clause the store admits. One upgrade therefore admits more data AND
+  narrows the audience by the same step, and so does the next one: an
+  unbounded reactive stream of upgrades leaves a store readable by fewer
+  people than it started with, never by more. That is why the route needs no
+  bound on how many times it may fire, or on which clauses it may take from
+  a later transaction. It is §8.12.5's own argument for option 2 — existing
+  readers already expect data at the original label level — applied once per
+  write rather than once per piece.
+
+  The declaration is the runtime's to make. §8.12.8's component table names
+  "explicit store-label operations (upgrades per §8.12.5)" as a provenance
+  of the declared component beside schema `ifc` declarations, and §8.12.5
+  states the discipline as atomically tightening the label and then writing,
+  which is what declaring in the writing transaction does. The authority
+  §8.12.7 and safety invariant 1 require is for WIDENING — adding an
+  alternative to a clause already stored, which grows that clause's reader
+  set and is admissible only through a grant record or an intent-gated
+  declassification event. This route adds clauses and never alternatives, so
+  it never asks for that authority; the mint folds clause LISTS, and a
+  stored disjunction comes back with the alternatives it went in with.
+
+  The route is the strict rung's, like the reject it replaces, and §18.6.3's
+  "strict only rejects more" holds across it: a writer-fit misfit is not a
+  rejection at `enforce-explicit` — it persists and flags — so admitting one
+  at strict with a declaration admits nothing a lower rung refused. Every
+  rung below keeps its `writer-fit(persist-and-flag)` diagnostic, which is
+  the rollout signal, and stores no declared policy it could never take back.
+  That last is a statement about the RUNG rather than about a deployment: the
+  shipped shell posture is `enforce-explicit` with per-transaction escalation
+  to strict, so an escalated transaction writes a permanent declared entry
+  that every rung's readers then consume, and §8.12.1 does not let it back.
+  At strict, a declaration records a `writer-fit(runtime-owned-store-declared)`
   diagnostic naming the document, the path, and the clauses added: a
   permanent change to a store's policy leaves a trace even at the rung that
   admits it.
@@ -386,16 +433,94 @@ The strict-only delta is:
     markers in the same file corroborate against transaction state, which
     suits a claim about a write that has already happened, while this one
     is a claim about whose write it is, and a forger supplies the write.
-  - **Which document it names.** The runner records only addresses it
-    MINTS from the piece's result cell — the argument address it would
-    derive, and each derived internal cell's — and only where the address
-    names a whole document rather than a path inside one. It reads the
-    argument address back out of the result cell's stored meta on every
-    setup after the first, and where that stored link names some other
-    document (a nested piece's argument lives in its HOST's) no marker is
-    recorded, so that document keeps its own ceiling. Every document the
-    route does not reach keeps the ceiling it resolves to, and a misfit
-    there is refused as before, with the §8.12.5 remedy in the reason.
+  - **Which document it names.** The runner derives every address from the
+    piece's result cell — the result cell itself, the argument address that
+    cell's cause mints, and each derived internal cell's — and never reads
+    one back out of stored metadata, where an `argument` or manifest link can
+    name another document (a nested piece's argument lives in its HOST's).
+    A builtin names only the stores it mints from its own node's cause. In
+    every case the address must name a whole document rather than a path
+    inside one, and must lie in the owner's own space: a store elsewhere
+    belongs to whoever holds that space's replicas, so a policy declared on
+    it out of this piece's join would put those bytes behind a promise made
+    here. The result document is the one address a caller may have chosen
+    rather than the runtime minted; from the moment setup writes the piece's
+    meta into it, it is that piece's store and nothing else's, and the route
+    reaches every path written there. Every document the route does not
+    reach keeps the ceiling it resolves to, and a misfit there is refused as
+    before, with the §8.12.5 remedy in the reason.
+  - **How long the claim lasts.** A store the runtime mints and fills in one
+    transaction is named for that transaction. A store it KEEPS — written by
+    the reactive updates, event handlers and settled requests that come
+    after the mint, each on a transaction of its own — is enrolled instead,
+    and every later transaction of the same runtime finds it. An enrollment
+    lasts as long as the piece's nodes do and goes out with them, which is
+    what bounds it: a list operation mints one piece per element, so an
+    enrollment that lived for the process would grow with every element a
+    churning list ever held. A store minted per event takes the marker alone
+    for the same reason. Both carry the runtime's authorization, and both
+    are refused for an address naming part of a document or another space.
+  - **Which builtins may take it.** A builtin whose result store moves onto
+    the route gives up whatever its own ceiling was refusing, so the test is
+    what refuses that write instead. A builtin that stages its request as a
+    `sink-request` write-policy input has a ceiling to move the refusal to;
+    one that stages its effect directly — `sqliteQuery` and `navigateTo`
+    both call `enqueuePostCommitEffect` themselves — has none, so its stores
+    keep their own ceilings until the gate that should own them exists. Most
+    builtins are in neither group: a list coordinator, `ifElse`, `when`,
+    `unless`, `compileAndRun`, `cellFromUrl` and `inspectConfLabel` stage
+    nothing at all, so there is no egress to govern and no refusal to move,
+    and their stores take the route on the node-keyed test alone. That is
+    the reading to apply to a new builtin: ask what it stages before asking
+    what its stores may declare. `builtin-ownership-route.test.ts` pairs the
+    two sets mechanically, so a builtin that stages an effect and takes the
+    route fails rather than passing on a reviewer noticing.
+    Two further stores stay off the route for the reasons above rather than
+    for this one. A store the runtime keys on something other than a node —
+    `wish`'s interval clock, keyed on the interval, and its shared hashtag
+    state, keyed on the space and scope — is shared by every piece that asks
+    for it, so no one piece's flow join may declare its policy. And a
+    sidecar's result cell is the result cell of the piece the sidecar runs,
+    which that piece's own instantiation enrolls and its stop releases;
+    enrolling it again under the piece that launched it would hold it past
+    the release that owns it.
+  - **How ownership reaches an anchored document.** Anchoring splits one
+    value across two documents, deriving the child's id from the parent's
+    rather than from anything an author named, and nothing but that write
+    puts anything in the child. §8.2 treats either representation of a
+    pass-through as valid so long as the label is preserved, which is the
+    nearest thing the spec says to "the choice must not decide a verdict";
+    the reading here goes one step past that text. A child the runtime split
+    out of a store it owns is therefore that store's, and it takes the marker
+    alone: the transaction that
+    anchors it writes it, and a later write reaching the same position walks
+    through the same place again. A transaction addressing the child
+    directly rather than through its parent finds no claim and measures
+    against the child's own ceiling, which is the fail-closed direction. The
+    marker also carries the claim down a nested anchor, whose own parent is
+    the child marked a step earlier.
+
+    That direction has a shape an author meets rather than predicts, so it is
+    stated here concretely. On a piece whose result projects a list of
+    objects, `items.key(0).set({ note: labeled })` commits: the write goes
+    through the parent, re-anchors the element, and the route declares.
+    `items.key(0).key("note").set(labeled)` is refused with a writer-fit
+    misfit naming the child: the write addresses the child directly, so the
+    marker the parent's walk would have recorded is never reached, and the
+    child's own declaration is what measures it. The two spellings put the
+    same value in the same place and disagree.
+
+    Enrolling anchored children would settle it and is ruled out on
+    measurement, not on taste. A whole-list `set` re-anchors every element
+    with a fresh id, so six appends mint twenty-one children and five
+    rewrites of one position mint thirty more: an enrollment keyed on
+    children would grow with total historical writes times list length
+    rather than with live data, undoing one level down what the per-piece
+    release bounds. The fix that is both coherent and bounded is
+    link-carried provenance (§8.12.8) — deriving the child's ownership from
+    the parent link a write traverses — which is tracked separately.
+    `cfc-runtime-owned-store-wiring.test.ts` pins both spellings, so the
+    refused half flips visibly the day that lands.
   - **How far it reaches inside that document.** Every path the
     transaction writes there, not only the paths setup wrote: the marker
     names the store, and the declaration is a statement about the store.
@@ -435,23 +560,68 @@ The strict-only delta is:
     the carried-forward stored entry rather than standing in for it. Adding
     clauses is the restricting direction, so the monotonicity gate that runs
     earlier in the same walk cannot be contradicted by what this route
-    pushes. Growth is also what reaches a piece whose substrate was written
-    before any labeled read entered a transaction writing it: that substrate
-    declares nothing, and the write that first carries a join is the one
-    that declares it.
+    pushes. Growth is also what reaches a store written before any labeled
+    read entered a transaction writing it: that store declares nothing, and
+    the write that first carries a join is the one that declares it.
 
-  What the route does NOT reach is the piece's running graph. A lift or
-  handler writing in a later transaction records no setup marker, so its
-  target — commonly a `computed:` document — measures against its own
-  ceiling and a misfit there still refuses. Under strict that turns "the
-  piece will not start" into "the piece starts and drops those writes",
-  which is progress on the setup seam and not a working strict rung.
+  What the route does NOT reach is a document nobody named. A write to an
+  ordinary document measures against its own ceiling whichever transaction
+  makes it: a bystander written by a later transaction of the same piece is
+  refused exactly as one written by the setup transaction is. A `computed:`
+  document is outside the route for a different reason — the measurement
+  skips it altogether, per the computed-cell exemption above.
+
+  It DOES reach further than the setup-time route in two ways worth stating,
+  because neither follows from "the same rule, later". The piece's result
+  document is on the route and was not before, and it is the member the
+  "no schema declares this" argument does not carry — an author may write
+  `ifc` into a pattern's `resultSchema`. Where they did, the route declines
+  and the misfit stands; where they did not, it reaches every path written
+  there. And what the route tests is the STORE, not the caller: once a store
+  is enrolled, any writer reaching it takes the route and contributes the
+  clause its own join carries. The direction stays refusal — every clause
+  added narrows the store's audience and its readers carry it — so this is a
+  permanent over-taint another writer can impose rather than a disclosure it
+  can obtain. Constraining it to the runtime's own writes would need
+  something the transaction does not carry: pattern-authored code runs in the
+  runtime's realm, so "who is writing" is not a question the write side can
+  ask.
+
+  Two costs come with it, both outside the store. The declared list is a
+  conjunction every reader carries, so a store that accumulates clauses with
+  disjoint audiences ends up readable by nobody while still admitting
+  writes; that is §8.12.2's ratchet reaching its end, and §8.12.7 records the
+  same outcome for its own case as safe and an operational footgun worth
+  flagging in review — the direction is refusal rather than disclosure. Two
+  shapes reach it soonest, and both are worth knowing before raising the rung.
+  A piece's RESULT document is what other pieces read, and it now accumulates
+  every clause the piece ever read. And a conditional keeps ONE result store
+  per node — `ifElse`, `when`, `unless`, and `inspectConfLabel` over whatever
+  it is pointed at — so a branch that fires once leaves its clause on the
+  store the other branch writes through afterwards. Both are the ratchet
+  behaving as specified rather than a defect in the route, and both are
+  arguments for the per-value components carrying the audience rather than
+  the declared one. And a transaction that could not commit
+  now commits, so whatever else it staged proceeds — a post-commit effect, a
+  sink request. That is why the condition above asks what refuses a
+  builtin's request once its store no longer does, and it is the whole of
+  what the LLM sinks lose: `MAX_ENFORCEMENT_SINK_CEILINGS` declares no
+  ceiling for them, so a request the store's misfit used to refuse by
+  accident now goes. `max-enforcement-posture.test.ts` and
+  `builtin-abandoned-request.test.ts` pin that, and both flip when the
+  boundary-scoped admission mechanism that preset describes lands.
 
   Implementation in
   [prepare.ts](../../packages/runner/src/cfc/prepare.ts)
-  (`prepareBoundaryCommit` writer-fit) and
-  [runner.ts](../../packages/runner/src/runner.ts) (`recordPieceSubstrate`),
-  asserted condition by condition in
+  (`prepareBoundaryCommit` writer-fit),
+  [runner.ts](../../packages/runner/src/runner.ts)
+  (`recordRuntimeOwnedStore`),
+  [runtime-owned-store.ts](../../packages/runner/src/builtins/runtime-owned-store.ts)
+  (`ownedCell`, which a builtin mints its own state store through where the
+  mint and the scoping sit together, and the two helpers beside it for the
+  sites where they do not), and
+  [data-updating.ts](../../packages/runner/src/data-updating.ts)
+  (`anchorValueAsEntity`), asserted condition by condition in
   [cfc-writer-fit.test.ts](../../packages/runner/test/cfc-writer-fit.test.ts),
   and against the cross-space representation transform in
   [cfc-label-metadata-protection.test.ts](../../packages/runner/test/cfc-label-metadata-protection.test.ts).

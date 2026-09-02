@@ -4258,7 +4258,7 @@ export class Server {
         message.watches,
         { principal: session.principal, sessionId: message.sessionId },
       );
-      this.#addMissedToTrackedIds(session.trackedIds, graphs.values());
+      this.#addUndeliveredToTrackedIds(session.trackedIds, graphs.values());
       session.lastSyncedSeq = serverSeq;
       this.#notifyDemandChanged(message.space, "watch", session.principal);
       return {
@@ -4465,16 +4465,23 @@ export class Server {
       const serverSeq = Engine.serverSeq(engine);
       const fromSeq = session.lastSyncedSeq;
       const entities = new Map(session.entities);
-      const trackedIds = new Set(session.trackedIds);
       for (const [key, entry] of updates) {
         entities.set(key, entry);
-        trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
       }
-      addOperationWatchTrackedIds(trackedIds, nextWatches, {
-        principal: session.principal,
-        sessionId: message.sessionId,
-      });
-      this.#addMissedToTrackedIds(trackedIds, graphs.values());
+      // Rebuilt from provenance — entities, operation watches, and every
+      // graph's undelivered interests — never unioned from the previous
+      // set: an interest a refresh RETIRED (a manifest entry dropped, its
+      // registration released) must leave the wake set with it, or every
+      // later commit to the orphaned document keeps waking this session.
+      const trackedIds = addOperationWatchTrackedIds(
+        trackedIdsFromEntries(entities.values()),
+        nextWatches,
+        {
+          principal: session.principal,
+          sessionId: message.sessionId,
+        },
+      );
+      this.#addUndeliveredToTrackedIds(trackedIds, graphs.values());
       const sync: SessionSync = {
         type: "sync",
         fromSeq,
@@ -4867,20 +4874,25 @@ export class Server {
    * are wake-reactivity only — they are never delivered, so they flow
    * into `trackedIds` beside the delivered entities at every site that
    * rebuilds or folds that set. */
-  #addMissedToTrackedIds(
+  #addUndeliveredToTrackedIds(
     trackedIds: Set<string>,
     graphs: Iterable<TrackedGraphState>,
   ): void {
-    for (const graph of graphs) {
-      for (const [key] of graph.missed) {
-        let parsed: { id: string; scopeKey: ScopeKey };
-        try {
-          parsed = fromDocKey(key as QueryDocKey);
-        } catch {
-          continue;
-        }
-        trackedIds.add(toDirtyKey(parsed.id, parsed.scopeKey));
+    // Missed and lazily registered documents are dirty interest exactly
+    // like delivered ones: a commit touching either must wake the session
+    // — to heal the miss, or to promote and deliver the lazy document.
+    const add = (key: string) => {
+      let parsed: { id: string; scopeKey: ScopeKey };
+      try {
+        parsed = fromDocKey(key as QueryDocKey);
+      } catch {
+        return;
       }
+      trackedIds.add(toDirtyKey(parsed.id, parsed.scopeKey));
+    };
+    for (const graph of graphs) {
+      for (const [key] of graph.missed) add(key);
+      for (const key of graph.lazy) add(key);
     }
   }
 
@@ -5158,23 +5170,53 @@ export class Server {
             // lost frame's docs as already-snapshotted (CT-1927 review,
             // round 6).
             const commitEntities = () => {
-              // (d′) — design §2.8 flag 2: a push pass that
-              // GROWS the session's tracked set is a demand change (a
-              // newly reachable doc entered the closure through the
-              // tracker's re-traversal); notify so the demand pass sees
-              // it without waiting for the next input.
-              const sizeBefore = session.trackedIds.size;
+              // (d′) — design §2.8 flag 2: a push pass that changes the
+              // session's tracked set is a demand change; notify so the
+              // demand pass sees it without waiting for the next input.
+              // The set is rebuilt rather than grown, so the change can
+              // be a same-size swap (a crossing manifest rewritten from
+              // one lazy target to another) or a shrink — compared by
+              // membership, exactly as the full-evaluation branch below
+              // does, and like there the O(tracked) scan runs only when
+              // a demand observer is attached (the serving posture; its
+              // NIT-6 note covers the `push-growth` reason on a shrink).
+              const wantsDemandNotify =
+                this.#serverExecutionObserver?.demandChanged !== undefined;
+              const previous = session.trackedIds;
               for (const [key, entry] of updates) {
                 session.entities.set(key, entry);
-                session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
               }
-              // A refresh's re-walk can DEAD-END on new absent targets;
-              // their misses are wake-reactivity the next commit needs.
-              this.#addMissedToTrackedIds(
+              // Rebuilt from provenance rather than grown in place: the
+              // refresh above may have RETIRED interests (a manifest
+              // entry dropped releases its registration), and a retired
+              // interest must leave the wake set with it — while a
+              // re-walk's new absent dead-ends and registrations are
+              // wake-reactivity the next commit needs.
+              session.trackedIds = addOperationWatchTrackedIds(
+                trackedIdsFromEntries(session.entities.values()),
+                session.watches,
+                {
+                  principal: session.principal,
+                  sessionId: session.id,
+                },
+              );
+              this.#addUndeliveredToTrackedIds(
                 session.trackedIds,
                 session.graphs.values(),
               );
-              if (session.trackedIds.size > sizeBefore) {
+              let changed = false;
+              if (wantsDemandNotify) {
+                changed = previous.size !== session.trackedIds.size;
+                if (!changed) {
+                  for (const key of session.trackedIds) {
+                    if (!previous.has(key)) {
+                      changed = true;
+                      break;
+                    }
+                  }
+                }
+              }
+              if (changed) {
                 this.#notifyDemandChanged(
                   space,
                   "push-growth",
@@ -5273,7 +5315,10 @@ export class Server {
           // the space is offered every batch — so no tracked key is
           // needed to bring the withheld instances back.)
           const evaluatedTrackedIds = trackedIdsFromEntries(entities.values());
-          this.#addMissedToTrackedIds(evaluatedTrackedIds, graphs.values());
+          this.#addUndeliveredToTrackedIds(
+            evaluatedTrackedIds,
+            graphs.values(),
+          );
           addOperationWatchTrackedIds(
             evaluatedTrackedIds,
             session.watches,
@@ -5665,7 +5710,10 @@ export class Server {
       // the graph-only provenance from delivered entries plus traversal misses
       // before producing demand rows.
       const graphTrackedIds = trackedIdsFromEntries(session.entities.values());
-      this.#addMissedToTrackedIds(graphTrackedIds, session.graphs.values());
+      this.#addUndeliveredToTrackedIds(
+        graphTrackedIds,
+        session.graphs.values(),
+      );
       const emit = (dirtyKey: string, root: boolean) => {
         const rowKey = `${dirtyKey}\0${session.id}`;
         if (rows.has(rowKey)) {

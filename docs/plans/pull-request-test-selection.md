@@ -196,7 +196,7 @@ subset costs, paid for rather than written off.
 
 ## The shape of the system
 
-Four pieces, with one direction of dependency between them.
+Five pieces, with one direction of dependency between them.
 
 **The topology** lives in the repository, at `tasks/test-topology.ts` and
 the modules it pulls in. It declares each suite: what capabilities the
@@ -211,8 +211,13 @@ scores every item-level identity, estimates every item's cost, packs the
 result into five lanes, and writes one manifest object into the store. It
 writes nothing into git.
 
+**The manifest selector** is a trusted reusable workflow referenced from
+the default branch. Before pull-request lanes start, it creates or recovers
+one create-only pin object for the workflow run. The pin embeds the selected
+manifest or records an explicit unselected result.
+
 **The lane runner** is `tasks/ci-lane.ts`. The five pull-request jobs all
-run it, passing their lane number. It fetches the newest manifest, reads
+run it, passing their lane number. It fetches the pinned manifest, reads
 the working tree through the topology, adjusts the plan for what this
 particular pull request changed, works out which batches belong to its own
 lane, sets up the capabilities those batches need, runs them, and records
@@ -1750,13 +1755,13 @@ already ratchets. 12 distinct identities currently break that rule; their
 split is valuable independently of this plan and becomes more valuable
 with it.
 
-### Why nothing coordinates the plan
+### Why the lanes do not coordinate the plan
 
-The five lanes do not talk to each other and there is no sixth job to tell
-them what to do. Packing is a pure function of the manifest, the diff, and
-the lane number, and all five lanes run the same function over the same
-inputs, so they agree by construction. Adding a mandatory item is part of
-that function, so the five agree about where it lands too.
+The five lanes do not talk to each other. Packing is a pure function of the
+manifest, the diff, and the lane number, and all five lanes run the same
+function over the same inputs, so they agree by construction. Adding a
+mandatory item is part of that function, so the five agree about where it
+lands too.
 
 Joining what the lanes measured is a different thing and does happen, in
 `Status`. The distinction is which side of the lanes the job sits on. A
@@ -1765,12 +1770,11 @@ and every lane would wait for it. A job that joins results sits *after*
 them, in a position that has to be occupied anyway because GitHub wants
 one required check to read. Nothing is bought by refusing to use it.
 
-The full run on `main` does have a job before its lanes, `plan-full`,
-because there the number of lanes is not fixed and GitHub needs the matrix
-before it can start anything. A pull request needs no such job precisely
-because `LANES` is a constant, so each lane can work out its own share.
-The full run pays a job's latency for the flexibility and `main` is the
-right place to pay it.
+The full run on `main` does have a planning job before its lanes,
+`plan-full`, because there the number of lanes is not fixed and GitHub
+needs the matrix before it can start anything. A pull request needs no
+planning job because `LANES` is a constant, so each lane can work out its
+own share.
 
 The function must therefore be deterministic: no wall clock, no unseeded
 randomness, no dependence on anything but its inputs. The exploration
@@ -1779,10 +1783,36 @@ draw's seed comes from the manifest. `plan()` lives in
 lane runner, and is straightforwardly testable offline against a recorded
 manifest.
 
-Re-running a single failed lane later must not shuffle the work. The lane
-resolves the manifest as *the newest one generated at or before the
-workflow run's start time*, which GitHub exposes as `run_started_at` and
-which is constant across re-runs of the same run.
+One small job does sit before the pull-request lanes: `select-manifest`.
+It selects an input rather than computing a plan. The job calls a reusable
+workflow by its default-branch ref. That workflow checks out no repository
+code and obtains a Workload Identity credential whose `objectCreator`
+access is restricted to `labs/test-selection/v1/pins/`.
+
+The selector first reads the public create-only pin at
+`pins/<workflow-run-id>.json.gz`. If it exists, the job validates and reuses
+it. On the first attempt only, an absent pin makes the job list the public
+manifest objects once and choose the object with the newest server-assigned
+`timeCreated`. It writes one compressed envelope containing the exact
+source object name and generation and the complete validated manifest. No
+objects or a failed listing produces an envelope with an explicit
+unselected result. On a later attempt, an absent pin also produces
+unselected; it never causes a fresh manifest selection.
+
+The pin object is retained beyond the full period in which GitHub permits
+a workflow rerun. Embedding the manifest means the source manifest may
+expire without changing a rerun. The selector succeeds only after it can
+read an existing valid pin or atomically create a new one. A read or create
+failure stops dependent lanes. Pull-request jobs hold no credential that
+can write the pin prefix, so they cannot replace its contents. The short
+selector job adds startup latency, but the durable pin makes the selected
+input stable without assuming that GitHub's clock and Cloud Storage's clock
+are ordered.
+
+The measured manifest compresses to 1.05 megabytes, so this stores one
+additional copy per pull-request workflow run until its rerun period ends.
+That bounded storage is the cost of keeping both the selection and its
+bytes stable after the source manifest's ordinary 30-day retention ends.
 
 ## What the census can project
 
@@ -1856,14 +1886,21 @@ never overwritten — under a new dataset area beside the records:
 ```text
 labs/test-selection/v1/manifest-<ISO 8601 timestamp>-<ULID>.json.gz
 labs/test-selection/v1/state/<yyyy-mm-dd>-<ULID>.json.gz
+labs/test-selection/v1/pins/<workflow-run-id>.json.gz
 ```
 
 Write-once naming is not a stylistic choice: the store's writer
 credentials hold `objectCreator` and nothing else, cannot overwrite, and
 that is the property that makes the whole store trustworthy. So there is
-no `current.json`. A reader lists the prefix, which sorts by timestamp
-because the timestamp leads the name, and takes the newest that is not
-after the time it is asking about.
+no `current.json`. The leading timestamp keeps object names
+chronologically useful, but it does not decide publication order. When a
+workflow has no manifest pin, its selector lists object metadata once,
+takes the object with the newest server-assigned `timeCreated`, using the
+object name to break a tie, and writes a create-only pin containing that
+object's name, generation, and validated manifest contents. This listing is
+allowed only on attempt one; a later missing pin records unselected. Lanes
+and later attempts fetch the pin rather than resolving "newest" or
+depending on the source manifest's retention.
 
 The object carries:
 
@@ -1919,14 +1956,12 @@ refresh without waiting.
 
 The job:
 
-1. Reads the newest state object, which holds, per day in the window, the
-   set of workflow run identifiers already folded in and the aggregate
-   they produced.
-2. Lists each day's prefix and fetches only the objects whose run
-   identifier is not already in that day's set. Object names carry the run
-   identifier, so this is exact rather than a timestamp heuristic, and it
-   handles a relay re-ship of an old run correctly. In the steady state
-   this is about 2,000 objects per run.
+1. Reads the newest state object, which holds the submission object names
+   and source-and-date rollup receipts already folded, along with the
+   aggregate they produced.
+2. Applies the one input plan described below. In the steady state this is
+   about 2,000 objects per run until the arrival index replaces the
+   partition listing.
 3. Folds them in, ages the decayed counters by a day, classifies each new
    failure as a catch or as flake evidence, scores everything, reads back
    the lane timing records to update the corrections, calls `plan()` with
@@ -1939,19 +1974,116 @@ A cold start cannot read a window's worth of raw objects in one job; at
 the volume the store now takes, sixty days of them is hundreds of
 thousands. The bootstrap is a manual dispatch with `--bootstrap --days 60`
 and high concurrency, run once; after that the incremental path keeps up.
-If the compactor is provisioned first, the bootstrap reads a manifest and
-its shards for each closed day — some hundreds of objects across the
-window — and seven days of raw records, which is a much better starting
-position, is the reason to do it in that order, and is what makes any
-horizon longer than this one affordable later.
+The current version-one rollups cannot seed an exact aggregate because
+they carry no coverage position or source-object list. Until the next
+rollup format exists, bootstrap reads raw objects for every source and
+date. Once that format exists, bootstrap reads its shards for each closed
+CI day — some hundreds of objects across the window — and reads later CI
+arrivals and all local records raw. That is what makes any horizon longer
+than this one affordable later.
+
+The manual workflow pins the window and a journal position, then fans out
+one job per source and date. Each job applies the common input plan only to
+discover and normalize its disjoint entries through that position. It
+writes a lossless immutable event shard rather than classifying catches or
+building an aggregate. A final job reads the much smaller set of event
+shards, combines all evidence, performs the single global fold and
+classification, applies later journal entries through the common input
+plan, and publishes one state and manifest.
+
+Every shard name is deterministic and scoped to the bootstrap workflow run,
+window, journal position, source, and date. The shard carries those fields
+and a content digest. The final job checks them against its pinned plan and
+requires exactly the planned shard set. A retried worker accepts a create
+collision only after the existing object's metadata, digest, and bytes
+match what it would write. No shard is a readable publisher state. This is
+how the raw version-one fallback spreads object reads across jobs without
+discarding evidence or creating a second input-selection rule.
+
+### One input plan for bootstrap and ordinary publishing
+
+In the replacement publisher, bootstrap is permission to start from an
+empty aggregate and a larger default window. It is not a second way to
+choose inputs. Both modes apply the same rule independently to each source
+and date:
+
+1. A source-and-date receipt already in the aggregate says its rollup
+   baseline and covered arrival position are folded. Continue with journal
+   entries after that position.
+2. When no raw object from the source and date has been folded, a complete
+   rollup carrying a journal position may supply the initial baseline.
+   Record a receipt scoped to that source and date, then consume later
+   journal entries.
+3. Once any raw object from the source and date is in the aggregate,
+   continue from individually unseen arrivals. Do not switch to a rollup
+   written later, because its records overlap those raw contributions.
+4. A version-one rollup has no coverage position or source-object list. An
+   exact run takes the raw path rather than combining it with later raw
+   arrivals whose overlap cannot be determined.
+
+An existing aggregate seeded from version-one rollups cannot enter this
+path in place. Its date receipt cannot identify which journal entries are
+already in its shards. Migration builds a fresh aggregate from raw objects
+or from the next rollup format and its later journal entries. The current
+manifest remains newest until that bootstrap publishes its replacement.
+
+The current rollups cover CI only. Local submissions always take the raw
+path. A date-only `compactedDays` receipt is therefore not sufficient: it
+can make a CI rollup suppress local submissions from the same date. The
+receipt becomes source-scoped before the common input plan uses it.
+
+After the next rollup format lands, this rule lets an ordinary publisher
+use a rollup for a previously unseen old date, such as one reached while
+catching up after an outage or after a window expands. It does not make a
+steady-state publisher switch a date from raw objects to a rollup seven
+days later, after the raw contributions are already in its aggregate.
+
+The exact steady-state path adds a Cloud Storage object-finalize
+notification feeding an immutable arrival journal. A journal writer
+assigns the next position and atomically deduplicates both object and
+generation and the logical submission identity. For CI that identity is
+the repository, workflow run, attempt, and artifact; for local records it
+is the repository and report id. The writer then acknowledges the
+notification. An event delivered late is appended after what is already
+present; it cannot appear behind a cursor a publisher has passed. The
+uploader does not perform a second write which can fail after its record
+succeeds.
+
+The notification consumer and the backfill accept only canonical raw
+objects under the CI and local submission prefixes. They reject aggregated
+rollups, test-selection outputs, and the journal's own objects. The journal
+therefore cannot ingest a derived output or recursively ingest itself.
+
+The aggregate carries the last contiguous journal position whose effects
+it contains, in the same immutable state object as those effects. The
+compactor builds the next rollup format from journal entries through a
+position. Its manifest means that every eligible journal entry through the
+position for that source and date was accounted for exactly once in its
+named shards. The common input plan can then fold that baseline and consume
+every later journal entry. The publisher's current listing of the current
+UTC calendar date and the immediately preceding UTC calendar date becomes
+a bounded integrity audit rather than a heuristic that decides which new
+data exists. A rollup manifest carrying its exact source object names can
+prove overlap, but cannot discover later arrivals without the index or
+another listing of that partition.
+
+The arrival index depends on canonical object identity. Before it lands,
+each CI artifact gains the immutable start time of the attempt that
+produced it. GitHub's workflow-run `run_started_at` advances on a rerun;
+using its current value for earlier artifacts changes their date prefix
+and can turn an intended create collision into a duplicate object. The
+relay uses the artifact's attempt number and stable attempt start for both
+its context and its object name.
 
 The publisher needs a writer credential for its own prefix. That is a new
 service account with `objectCreator` on `labs/test-selection/`, reached
 through a Workload Identity provider pinned to exactly this workflow file
 on `main` — the same pattern, and the same security argument, as the relay
-already uses. It is an infra-repository change under `tofu/test-records`,
-and it must land and be applied before this workflow can do anything. It
-is the one prerequisite [the work](#the-work) has that is not ours.
+already uses. The trusted selector workflow also needs create-only access,
+restricted to `labs/test-selection/v1/pins/`. These are infra-repository
+changes under `tofu/test-records`, and they must land and be applied before
+these workflows can write. They are the prerequisites [the work](#the-work)
+has that are not ours.
 
 When the publisher fails, nothing breaks: the previous manifest is still
 the newest and lanes keep using it. A manifest going stale degrades
@@ -1959,6 +2091,12 @@ selection quality slowly rather than failing anything, which is the right
 direction for a system nothing should gate on.
 
 ## The lane job
+
+The preceding `select-manifest` job checks out no repository code. It
+recovers or creates the public run-scoped manifest pin through the trusted
+reusable workflow. It completes successfully only after that create-only
+object exists and validates. The lane derives its fixed pin path from the
+workflow run id:
 
 ```yaml
 pr-tests:
@@ -1968,8 +2106,11 @@ pr-tests:
     !contains(github.event.pull_request.labels.*.name, 'ci: full')
   runs-on: ubuntu-latest
   timeout-minutes: *lane-job-timeout
+  needs: select-manifest
   env:
     CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
+  permissions:
+    contents: read
   strategy:
     fail-fast: false
     matrix:
@@ -1979,6 +2120,7 @@ pr-tests:
       uses: actions/checkout@v7
       with:
         fetch-depth: 0
+        persist-credentials: false
     - name: 🦕 Setup Deno
       uses: ./.github/actions/deno-setup
     - name: 🔍 Verify lock file & install dependencies
@@ -1992,7 +2134,7 @@ pr-tests:
         deno run -A tasks/ci-lane.ts
         --lane ${{ matrix.lane }} --of 5
         --base origin/${{ github.base_ref }}
-        --run-started-at ${{ github.run_started_at }}
+        --manifest-pin-run "$GITHUB_RUN_ID"
     - name: 📤 Ship test records
       if: always()
       uses: ./.github/actions/test-records-ship
@@ -2050,8 +2192,9 @@ alternate execution of one test.
 
 What the runner does, in order:
 
-1. Fetch the newest manifest at or before the run's start, and the
-   attribution map it names. On failure, fall back (see [Failure
+1. Fetch the run-scoped pin and its embedded manifest, then fetch the
+   attribution map that manifest names. An explicit unselected pin or a
+   lane-side fetch failure takes the fallback (see [Failure
    modes](#failure-modes)).
 2. Enumerate every suite against the working tree.
 3. Compute the diff against the merge base, and resolve the changed source
@@ -2642,15 +2785,16 @@ a way forward.** The job summary names every item the lane ran and why it
 was chosen — the catches behind its score, the change that made it
 mandatory, or the exploration draw — which makes "this is not mine" a fast
 conclusion rather than a guess. `--explain` answers the same question for
-any identity. Re-running the lane runs the same set, because the manifest
-is pinned to the run's start time. And if none of that settles it,
-`ci: full` runs everything.
+any identity. Re-running the lane runs the same set, because the exact
+manifest object is pinned to the workflow run. And if none of that settles
+it, `ci: full` runs everything.
 
 ## Failure modes
 
 | What goes wrong | What happens |
 | --- | --- |
 | The store is unreachable from a lane | The lane runs the mandatory set plus a deterministic slice of the corpus sized to its budget, prints that it is running unselected, and passes or fails on that. Pull requests keep flowing. |
+| The selector cannot read or create the run's storage pin | The selector fails and dependent lanes do not start. Pull-request jobs have no credential for the pin prefix. Re-running the selector recovers or creates the pin before lanes start. |
 | The publisher has not run for a day | Lanes use the last manifest. Selection quality decays slowly; nothing fails. |
 | The manifest is malformed or a newer schema | Rejected whole, treated as absent, same path as unreachable. |
 | A selected item no longer exists in the tree | Dropped with a line in the summary. A renamed test is simultaneously an unknown item, so it runs anyway. |
@@ -2668,7 +2812,7 @@ is pinned to the run's start time. And if none of that settles it,
 | A lane dies without uploading its coverage | `Status` is already failing for the dead lane. It says the coverage total is incomplete rather than gating on a partial one. |
 | A lane exceeds five minutes repeatedly | The correction factors rise on the next publisher run and less is packed. If it persists, the publisher's summary shows the miss and somebody looks. |
 | A fork pull request | Works unchanged. The manifest is world-readable, and the existing member gate decides whether the fork's records ship. |
-| A re-run of one failed lane | Runs the same set, because the manifest is resolved by the run's start time. |
+| A re-run of one failed lane with its pin available | Runs the same set from the manifest embedded in the workflow run's storage pin. A deleted pin on a later attempt creates and uses an explicit unselected pin instead of selecting newer data. |
 | Both `pr-tests` and `full-tests` skip | `Status` fails. Its second clause requires one of them to have succeeded, so a pull request that ran no tests can never report green. |
 | An `always` item is red on `main` | Every pull request fails on it, deliberately, and the job summary says it was already red and links the `main` run. See [Two rules that keep a test out](#two-rules-that-keep-a-test-out). |
 | `main` is broken and stays broken | Every test failing in the latest `main` run leaves the selectable set, so pull requests are unaffected while it is fixed. They come back on their own. |
@@ -2690,6 +2834,16 @@ Write access to the manifest prefix is one service account reachable only
 through a Workload Identity provider pinned to one workflow file on
 `main`, exactly as the relay is. Nothing else in the organization can
 write there, and the account cannot read, list, overwrite, or delete.
+
+The pin prefix has a separate create-only principal restricted to the
+trusted default-branch reusable selector workflow and the Labs repository's
+immutable GitHub `repository_id`. The workflow derives the repository and
+workflow run id from GitHub's trusted context rather than caller inputs.
+Pull-request jobs and callers from another repository cannot obtain that
+credential. The pin reader validates the envelope whole, including the
+workflow run id, selected source name under the trusted manifest prefix,
+source generation as a canonical digits-only decimal string, and embedded
+manifest, before using it.
 
 The lane runner treats the manifest as untrusted input and validates it
 whole. The only field that reaches a shell is a suite identifier, which is
@@ -2917,18 +3071,21 @@ The rest of this section is about what a single landing has to satisfy. It
 is worth reading before assuming a split is needed, because two of the
 three reasons that look like they force one turn out not to.
 
-### The one prerequisite that is not ours
+### The prerequisites that are not ours
 
 The publisher needs a writer credential: a `test-selection` service
-account with `objectCreator` on `labs/test-selection/`, a Workload
-Identity provider pinned to `.github/workflows/test-selection.yml` on
-`main`, and a lifecycle rule deleting objects there after 30 days. That is
-the same pattern, and the same security argument, as the relay already
-uses. It also wants the compactor provisioned, which is implemented and only
-needs its principal. That is an infra-repository
-change under `tofu/test-records`, and it must land and be applied before
-anything here can publish. That is a predecessor rather than a reason to
-split this work, and it is the only hard ordering outside this repository.
+account with `objectCreator` on the manifest and state prefixes and a
+Workload Identity provider pinned to `.github/workflows/test-selection.yml`
+on `main`. The selector needs a separate principal with `objectCreator`
+restricted to the pin prefix and pinned to its trusted reusable workflow
+and the Labs repository's immutable GitHub `repository_id`. Manifest and
+state objects expire after 30 days. Pin objects have a separate lifecycle
+rule that retains them beyond GitHub's workflow rerun period. The same
+infra change provisions the compactor principal. These are
+infra-repository changes under `tofu/test-records`, and they must land and
+be applied before anything here can publish. They are predecessors rather
+than a reason to split this work, and they are the only hard ordering
+outside this repository.
 
 ### Proving the topology before merging, not after
 
@@ -3000,6 +3157,49 @@ answers somewhere people can see them.
       offline against recorded manifests.
 - [x] `tasks/test-selection-publish.ts` and
       `.github/workflows/test-selection.yml`, on a four-hourly cron.
+- [ ] Put an immutable attempt start in each CI artifact and use it for
+      that artifact's context and object name. A later relay of an earlier
+      attempt must collide with its first shipment even when a rerun
+      crossed a date boundary.
+- [ ] Add a `select-manifest` job that calls a trusted reusable workflow by
+      its default-branch ref and checks out no pull-request code. Give its
+      Workload Identity principal create-only access restricted to the pin
+      prefix. Recover the public run-id pin or, on attempt one only, list
+      manifests once and create a compressed envelope containing the source
+      name, generation, and complete validated manifest. Create an explicit
+      unselected envelope when listing fails or finds nothing. On a later
+      attempt with no pin, create unselected rather than selecting again.
+- [ ] Retain pin objects beyond GitHub's full workflow rerun period. Fail
+      the selector and do not start lanes when a pin cannot be read or
+      created. Pull-request jobs receive no write credential for the pin
+      prefix and derive the public pin path only from their workflow run id.
+- [ ] Provision the storage-generated arrival journal. Assign contiguous
+      positions and deduplicate object and generation and logical
+      submission identity atomically before acknowledging notifications.
+      Persist the consumed position with the publisher aggregate.
+- [ ] Backfill the journal from the raw object listing while live storage
+      notifications are connected. Deduplicate cross-date CI copies by
+      repository, workflow run, attempt, and artifact. Keep the
+      first-created valid object, record later copies as excluded, and
+      report disagreements in artifact-derived records or stable context.
+      The object-and-generation key deduplicates the listing from live
+      notifications at the handover.
+- [ ] Publish the journal's genesis receipt only after the notification
+      subscription covers the whole listing interval, the listing has
+      completed without a missing page, every listed object is committed,
+      and every notification from the handover is committed or still
+      durably pending. Readers do not use the journal before that receipt.
+- [ ] Build the next rollup format from journal entries through a recorded
+      position, accounting exactly once for every eligible entry through
+      that position for its source and date. Give bootstrap and ordinary
+      publishing one source-and-date input planner over those rollups and
+      later journal entries. Replace the date-only compacted receipt and
+      keep local records on their raw path until they have rollups of their
+      own.
+- [ ] Rebuild aggregates seeded from version-one rollups; do not migrate
+      their ambiguous date receipts into journal cursors.
+- [ ] Once readers have migrated to the journal, keep partition listing as
+      an integrity audit rather than the discovery authority.
 - [ ] The one-off bootstrap dispatch.
 - [x] Repeat the record census after `main` emitted server-execution
       variant records, and replace the plan's projection inputs.

@@ -200,8 +200,6 @@ function assertContained(
 
 for (const variant of VARIANTS) {
   Deno.test(`${variant.name} stays inside its fixed-position containing block`, async () => {
-    if (typeof document === "undefined") return;
-
     const mounted = await mountModal(variant, "320px");
     try {
       assertContained(variant, mounted);
@@ -211,8 +209,6 @@ for (const variant of VARIANTS) {
   });
 
   Deno.test(`${variant.name} preserves its viewport height limit`, async () => {
-    if (typeof document === "undefined") return;
-
     const mounted = await mountModal(variant, "200vh");
     try {
       const dialogHeight = mounted.dialog.getBoundingClientRect().height;
@@ -234,8 +230,6 @@ for (const variant of VARIANTS) {
 }
 
 Deno.test("dialog preserves a custom maximum height", async () => {
-  if (typeof document === "undefined") return;
-
   const mounted = await mountModal(VARIANTS[0], "320px", "180px");
   try {
     assertAlmostEquals(

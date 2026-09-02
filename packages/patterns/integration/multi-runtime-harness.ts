@@ -16,8 +16,11 @@
  * runtimes (verified-load registries, frame stacks and similar module-level
  * state cross-talk), and production never does — every browser tab or CLI
  * process is its own realm. The storage server is self-hosted in-process
- * (@commonfabric/memory/v2/standalone), so no toolshed is needed; pass
- * `apiUrl` to target a running toolshed instead.
+ * (@commonfabric/memory/v2/standalone), and serves the authored patterns tree
+ * beside it, so no toolshed is needed; pass `apiUrl` to target a running
+ * toolshed instead. Serving that tree is what lets a session resolve a
+ * `system:` origin, and so what lets a `#profile` wish open its real create
+ * surface rather than an account of why it could not.
  *
  * POSTURE (server-execution v2): the self-hosted standalone server has no
  * serving host — no ExecutorHost, no serving loop — and its engine reads
@@ -36,6 +39,8 @@
  * to before: flag unset or false keeps the in-process standalone server.
  */
 
+import { fromFileUrl } from "@std/path/from-file-url";
+
 import type { FabricValue } from "@commonfabric/data-model";
 import {
   fabricFromRealmValue,
@@ -46,6 +51,7 @@ import { Identity } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { experimentalOptionsFromEnv } from "@commonfabric/runner";
+import { PatternsRoute } from "@commonfabric/runner/patterns-route.deno";
 import {
   type RuntimeDiagnosticsSnapshot,
   type TrustedUiDescriptor,
@@ -114,6 +120,27 @@ const RPC_TIMEOUT_MS = 120_000;
  * ~2–3 s serving drain of a 40-event pipelined storm, small against the
  * suite timeouts a wedged consequence would otherwise eat. */
 const SERVED_SETTLE_QUIESCENCE_BUDGET_MS = 10_000;
+
+/**
+ * The authored patterns tree this repository deploys, served at the same
+ * address as the in-process storage server.
+ *
+ * A runtime resolves a `system:` provenance ref — the origin the wish
+ * builtin's sidecar surfaces record, and the one a space root carries —
+ * against the host serving its space. Self-hosting storage and leaving that
+ * route unanswered is a topology no deployment has, and under it a piece
+ * whose identity is a profile cell never gets its create surface. Answering it
+ * here is what lets a headless multi-runtime test drive the real resolution.
+ *
+ * One route for the process: it computes each pattern's closure identity once
+ * and holds it, and every harness in a run wants the same answers.
+ */
+let patternsRoute: PatternsRoute | undefined;
+function systemPatternsRoute(): PatternsRoute {
+  return patternsRoute ??= new PatternsRoute(
+    fromFileUrl(new URL("..", import.meta.url)),
+  );
+}
 
 class WorkerClient {
   #worker: Worker;
@@ -450,7 +477,9 @@ export class MultiRuntimeHarness {
         SERVER_EXECUTION_DEFAULT_ENABLED;
     const targetUrl = options.apiUrl ??
       (serverExecutionOn ? new URL(env.API_URL) : undefined);
-    const server = targetUrl ? undefined : StandaloneMemoryServer.start();
+    const server = targetUrl ? undefined : StandaloneMemoryServer.start({
+      serve: (request) => systemPatternsRoute().serve(request),
+    });
     const apiUrl = (targetUrl ?? server!.url).href;
 
     const sessions: MultiRuntimeSession[] = [];
@@ -641,5 +670,18 @@ export class MultiRuntimeHarness {
       });
     }
     await this.#server?.close();
+  }
+
+  /**
+   * Drop every worker without asking it to shut down first, for a caller that
+   * has no `await` to spend — a process-exit listener, which Deno runs
+   * synchronously. `dispose()` is the ordinary path and says goodbye properly;
+   * this one exists so a harness held for the life of a process is still
+   * released deterministically rather than left to process teardown. The
+   * in-process server is not closed, because closing it is asynchronous and it
+   * has nothing outside this process to release.
+   */
+  terminate(): void {
+    for (const session of this.sessions) session.client().terminate();
   }
 }

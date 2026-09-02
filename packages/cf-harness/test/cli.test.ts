@@ -3,6 +3,10 @@ import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 
 import type { HarnessRunArtifacts } from "../src/artifacts.ts";
+import {
+  harnessFabricSessionPosture,
+  renderCfcPostureReport,
+} from "../src/cfc-posture.ts";
 import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
 import {
   buildCfHarnessBaseSystemPrompt,
@@ -688,6 +692,75 @@ Deno.test("parseCfHarnessCliArgs rejects fabric CFC dials without a fabric sessi
       ),
     Error,
     "need --fabric-api-url, --fabric-identity, and --fabric-space",
+  );
+});
+
+const withFabricSession = (...extra: string[]) => [
+  "--prompt",
+  "hi",
+  "--fabric-api-url",
+  "https://toolshed.example/",
+  "--fabric-identity",
+  "keys/agent.pkcs8",
+  "--fabric-space",
+  "my-space",
+  ...extra,
+];
+
+Deno.test("parseCfHarnessCliArgs resolves the space database against the working directory", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    withFabricSession("--space-db", "cache/memory/space.sqlite"),
+    { cwd: "/tmp/project", env: {} },
+  );
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.spaceDbPath, "/tmp/project/cache/memory/space.sqlite");
+});
+
+Deno.test("parseCfHarnessCliArgs takes the space database from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(withFabricSession(), {
+    cwd: "/tmp/project",
+    env: { CF_HARNESS_SPACE_DB: "/srv/toolshed/space.sqlite" },
+  });
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.spaceDbPath, "/srv/toolshed/space.sqlite");
+});
+
+Deno.test("parseCfHarnessCliArgs leaves the space database unset when nothing names one", async () => {
+  const parsed = await parseCfHarnessCliArgs(withFabricSession(), {
+    cwd: "/tmp/project",
+    env: {},
+  });
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.spaceDbPath, undefined);
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a space database without a fabric session", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--space-db", "space.sqlite"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "needs --fabric-api-url, --fabric-identity, and --fabric-space",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an empty space database value", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(withFabricSession("--space-db", "  "), {
+        cwd: "/tmp/project",
+        env: {},
+      }),
+    Error,
+    "--space-db requires a non-empty value",
   );
 });
 
@@ -2134,7 +2207,7 @@ Deno.test("installCfHarnessSignalHandlers terminalizes the active run before exi
       return () => timestamps.shift() ?? "2026-04-16T20:00:02.000Z";
     })(),
   });
-  engine.setRunStatus("running");
+  engine.startRun();
   let handler: CfHarnessCliSignalHandler | undefined;
   let disposed = false;
   let exitCode: number | undefined;
@@ -2249,6 +2322,14 @@ Deno.test("runCfHarnessCli registers and disposes signal handlers around a run",
   ]);
 });
 
+/** The record a max-enforcement session resolves, as the engine records it. */
+const POSTURED_SESSION_RECORD = harnessFabricSessionPosture({
+  apiUrl: "https://toolshed.example/",
+  identityKeyPath: "/keys/agent.pkcs8",
+  space: "my-space",
+  cfcPosture: "max-enforcement",
+});
+
 Deno.test("runCfHarnessCli prints the fabric-session posture bundle in the operator summary", async () => {
   const { io, stdout } = createIoBuffers();
   const exitCode = await runCfHarnessCli(
@@ -2283,6 +2364,7 @@ Deno.test("runCfHarnessCli prints the fabric-session posture bundle in the opera
                   flowLabels: "persist",
                   flowLabelsSource: "posture",
                   posture: "max-enforcement",
+                  record: POSTURED_SESSION_RECORD,
                 },
                 currentDir: "/workspace",
                 policyEvents: [],
@@ -2304,6 +2386,75 @@ Deno.test("runCfHarnessCli prints the fabric-session posture bundle in the opera
     ),
     true,
   );
+  // The two itemized dials say which the operator set; the record under them
+  // says what every dial resolved to, which sinks release ungated, and that
+  // the record is a projection. A summary carrying only the first reads as a
+  // posture without showing one.
+  assertEquals(
+    summary.includes("provenance"),
+    true,
+  );
+  assertEquals(summary.includes("UNGATED"), true);
+  for (
+    const line of renderCfcPostureReport(POSTURED_SESSION_RECORD)
+  ) {
+    assertEquals(summary.includes(line), true);
+  }
+});
+
+Deno.test("runCfHarnessCli omits the posture record for a run that recorded none", async () => {
+  // A run predating the record keeps the two itemized dials and nothing
+  // invented under them.
+  const { io, stdout } = createIoBuffers();
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--prompt",
+      "hello",
+      "--gateway-auth-mode",
+      "none",
+    ],
+    {
+      io,
+      env: {},
+      createPromptLoop: () => ({
+        runPrompt: () =>
+          Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Done.",
+              transcript: [],
+              modelTurns: 1,
+              runState: {
+                runId: "run-legacy-posture-summary",
+                status: "completed",
+                createdAt: "2026-04-16T20:10:00.000Z",
+                updatedAt: "2026-04-16T20:10:01.000Z",
+                cfcEnforcementMode: "enforce-explicit",
+                fabricSessionCfc: {
+                  enforcementMode: "enforce-explicit",
+                  enforcementModeSource: "preset-pin",
+                  flowLabels: "persist",
+                  flowLabelsSource: "posture",
+                  posture: "max-enforcement",
+                },
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          ),
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  const summary = stdout.join("");
+  assertEquals(summary.includes("fabricSessionCfc: enforce-explicit"), true);
+  assertEquals(summary.includes("provenance"), false);
 });
 
 Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata", async () => {

@@ -119,6 +119,7 @@ import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
 import { loadIdentity } from "./identity.ts";
 import { stderrConsoleHandler } from "./json-output.ts";
 import { validateEmbeddedSpaces } from "./llm-friendly-ref.ts";
+import { claimProcessDeployment } from "./process-deployment.ts";
 import { deriveDiskHandleId } from "./sqlite-source.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
 import { startVersionCheck } from "./version-check.ts";
@@ -173,10 +174,9 @@ export interface PieceConfig extends SpaceConfig {
   piecePath?: (string | number)[];
 
   /**
-   * True when the reference carried the `#argument` suffix: the caller
-   * selected the piece's arguments cell. A command that takes `--input`
-   * honors it as that flag; every other command rejects a reference that
-   * carries it.
+   * True when the target carried the `#argument` suffix: the caller selected
+   * the piece's arguments cell. A command that takes `--input` honors it as
+   * that flag; every other command rejects a target that carries it.
    */
   pieceInput?: boolean;
 }
@@ -502,9 +502,20 @@ async function makeSession(config: SpaceConfig): Promise<Session> {
   }
 }
 
+/**
+ * Opens a connection to the deployment at `config.apiUrl` and returns the
+ * controller over it: a space session, a runtime carrying that deployment's
+ * experimental options, and a server proven live before it returns.
+ *
+ * Throws when this process is already connected to a different deployment.
+ * The settings a connection writes — the LLM endpoint below among them — are
+ * the process's rather than the connection's, so a process serves one
+ * deployment; `process-deployment.ts` carries what that costs.
+ */
 export async function loadPieces(
   config: SpaceConfig,
 ): Promise<PiecesController> {
+  claimProcessDeployment(config.apiUrl);
   setLLMUrl(config.apiUrl);
   // The deployment's own flag posture, with this process's explicit
   // EXPERIMENTAL_* still winning per flag: a cf binary is installed

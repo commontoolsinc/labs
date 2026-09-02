@@ -16,6 +16,11 @@ import type { Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
+import {
+  enrollRuntimeOwnedStore,
+  ownedCell,
+  recordRuntimeOwnedStore,
+} from "./runtime-owned-store.ts";
 import { scopedCell } from "./scope-policy.ts";
 
 /**
@@ -229,33 +234,36 @@ export function fetchProgram(
     const outputScope = tx.getNarrowestReadScope();
 
     if (!cellsInitialized || cellScope !== outputScope) {
-      const basePending = runtime.getCell<boolean>(
-        parentCell.space,
+      pending = ownedCell<boolean>(
+        runtime,
+        tx,
+        parentCell,
         { fetchProgram: { pending: cause } },
         undefined,
-        tx,
+        outputScope,
       );
-      pending = scopedCell(runtime, tx, basePending, outputScope);
 
-      const baseResult = runtime.getCell<ProgramResult | undefined>(
-        parentCell.space,
+      result = ownedCell<ProgramResult | undefined>(
+        runtime,
+        tx,
+        parentCell,
         {
           fetchProgram: { result: cause },
         },
         undefined,
-        tx,
+        outputScope,
       );
-      result = scopedCell(runtime, tx, baseResult, outputScope);
 
-      const baseError = runtime.getCell<any | undefined>(
-        parentCell.space,
+      error = ownedCell<any | undefined>(
+        runtime,
+        tx,
+        parentCell,
         {
           fetchProgram: { error: cause },
         },
         undefined,
-        tx,
+        outputScope,
       );
-      error = scopedCell(runtime, tx, baseError, outputScope);
 
       const baseCache = runtime.getCell(
         parentCell.space,
@@ -269,6 +277,8 @@ export function fetchProgram(
         baseCache,
         outputScope,
       ) as Cell<Record<string, FetchCacheEntry>>;
+      recordRuntimeOwnedStore(tx, parentCell, cache);
+      enrollRuntimeOwnedStore(tx, parentCell, cache);
 
       // Link the new result cells to the parent result cell
       setResultCell(pending, parentCell);

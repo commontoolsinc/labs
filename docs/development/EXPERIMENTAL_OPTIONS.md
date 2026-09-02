@@ -577,12 +577,21 @@ accepts `cfcPosture: "max-enforcement"`, which spreads
 `persist`, write floor / policy evaluation / declared monotonicity /
 label-metadata protection at `enforce`, trigger-read gating on, the §10.1
 standard prompt-caveat policy as the deployment's `cfcPolicyRecords`, and
-public-only confidentiality ceilings on the network-fetch sinks
-(`MAX_ENFORCEMENT_SINK_CEILINGS`). The llm sinks carry no ceiling, and a sink
-with no ceiling gets no gate: llm-sink release is ungoverned under this
-posture — pending a boundary-scoped admission mechanism, since an exact-match
-ceiling cannot admit the source-varying material-risk caveats an llm sink
-exists to process. The bundle deliberately leaves the
+public-only confidentiality ceilings on the network-fetch sinks.
+
+The bundle's sink decisions are total over the sink registry
+(`MAX_ENFORCEMENT_SINK_GOVERNANCE`, from which `MAX_ENFORCEMENT_SINK_CEILINGS`
+derives): every sink `KNOWN_SINKS` names carries either a ceiling or an
+explicit ungated release with its reason, its owner, and the condition that
+retires it, so a sink added to the inventory without a decision is a compile
+error rather than a sink that quietly releases ungated. The llm sinks are the
+explicit ungated ones, and a sink with no ceiling gets no gate: llm-sink
+release is ungoverned under this posture — pending a boundary-scoped admission
+mechanism, since an exact-match ceiling cannot admit the source-varying
+material-risk caveats an llm sink exists to process. Building that mechanism
+is planned in
+[`docs/plans/cfc-llm-sink-admission.md`](../plans/cfc-llm-sink-admission.md).
+The bundle deliberately leaves the
 enforcement-mode pin at `enforce-explicit` (strict stays a per-session host
 raise), and leaves `cfcDecomposedEnvelopes`, `cfcTrustConfig`, and
 `cfcPrefixProvenanceStats` alone. It is opt-in per runtime, never a fleet
@@ -594,6 +603,33 @@ cf-harness console is the one surface that opts in by default — it exists to
 show CFC working, so its fabric session takes the bundle unless
 `--fabric-cfc-posture none` says otherwise, and it prints the posture it
 resolved at startup.
+
+Every surface that publishes a posture publishes the same record,
+`cfcPostureReport` in `packages/runner/src/cfc/posture-report.ts`: each dial's
+resolved rung together with whether that rung decides anything and what it
+decides on, the policy-snapshot digest, every known sink as a ceiling or an
+explicit ungated release, and every published deviation as
+`{what, owner, retirement}`. Three of those are load-bearing. An `observe` rung
+carries `diagnosticOnly: true`, so `policyEvaluation: observe` cannot be read
+as active enforcement. The sink list is total, so a sink's absence from a list
+of ceilings can no longer read as coverage. And the record carries its own
+`provenance`.
+
+`provenance` is what keeps a prediction from reading as an attestation.
+`cfcPostureReport(runtime)` reads a constructed Runtime's resolved fields and
+stamps `resolved`; `projectedCfcPostureReport(options)` computes what a runtime
+built with those options will resolve, before it exists, and stamps
+`projected`. Those are the only two ways to build a record, so neither can be
+mislabelled. Toolshed's `/api/meta` publishes `resolved`. The cf-harness
+console and run state publish `projected`: the session's runtime is built
+lazily on the first `run_pattern` and may never be built at all, and a host may
+supply its own session factory, so what those surfaces know at the time they
+publish is what the run expects to be at. A projection goes through the same
+`presetCfcOptions` and `resolveCfcDials` the Runtime itself resolves from —
+the same resolution, not a second statement of it — but the field says what it
+is. `deno task cfc-audit --expected-posture` compares a published record
+against a written-down profile, and fails a deployment that publishes a
+projection; see the cf-harness README.
 The interactive `cf-harness` and the `fuse` mount expose the enforcement mode
 through `CF_CFC_MODE` for testing. Because these dials are keys of
 `RuntimeOptions`, the exhaustive `RUNTIME_OPTION_KEYS` registry in the same file
@@ -644,9 +680,15 @@ the per-epic implementation notes).
 - **Purpose.** Controls flow-label propagation at the commit boundary. Values
   are `off`, `observe`, and `persist`. `observe` computes the conservative label
   join and emits diagnostics but writes nothing; `persist` writes the derived
-  label components onto every value write target. Propagation runs only when the
-  enforcement mode is at least `observe`; it derives and stores labels but never
-  rejects on its own.
+  label components onto value write targets, except where the target's declared
+  store policy already carries every clause the join would state there and the
+  component adds no integrity of its own — such an entry changes no label a
+  reader resolves, so the persist seam drops it. A transaction the runtime
+  attributes to an implementation carries derivation provenance in its
+  integrity, which no store policy states, so its value entries are kept and a
+  labeled collection an attributed writer maintains still grows per element.
+  Propagation runs only when the enforcement mode is at least `observe`; it
+  derives and stores labels but never rejects on its own.
 - **Current default and planned end state.** `off` by default. The target is to
   move toward `persist` as the downstream egress gates (render ceiling, sink
   ceilings, and the LLM path) come online.

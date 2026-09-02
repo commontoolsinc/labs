@@ -592,9 +592,40 @@ Both exclusions are about the NAMED BASIS of one commit, never a
 withdrawal: the echo itself stands until its ordinary retirement
 (§4). Value-consuming reads keep the refusal unchanged in every
 transaction shape, and a transaction outside the blind-write family —
-including its verifier reads — keeps naming every layer;
-`speculation-overlay.test.ts` pins the export, the scoping, the
-verify-durable consistency, and the content-addressed exemption.
+including its verifier reads — keeps naming every layer, unless it
+carries the durable-read mark below; `speculation-overlay.test.ts`
+pins the export, the scoping, the verify-durable consistency, the
+content-addressed exemption, and the durable-read mark on both a
+direct transaction and a piece start.
+
+### The durable-read mark, and the piece start that needs it
+
+An authored transaction whose writes must reach the wire can read the
+durable replica view instead of the ordinary one. `markDurableReadTx`
+(`storage/reactivity-log.ts`) is that mark: values and named basis
+both skip the process-local speculation layers, so what such a
+transaction consumed and what it names stay the same set — the
+verify-durable and name-durable pairing again, one shape wider. A
+document still short of its authoritative value re-derives reactively
+once that value lands, which is the recovery path §6's refusal
+message names. Two callers carry the mark. One is the direct SQLite
+capability's exec, an authored write with no reactive run around it.
+The other is the runner's piece start.
+
+A piece start mints its own transaction, instantiates the pattern's
+nodes into it, and commits it fire-and-forget as sanctioned
+bookkeeping (serving-loop.md §3d). It reads whatever the node
+bindings resolve through, which is as likely to be a document a
+standing echo rewrote as any other. Naming that echo's layer turns
+the start's commit into a terminal refusal, and the arm that catches
+one retires the piece's whole registration — taking with it the event
+handlers its graph installed, so the next send to one of those
+streams finds no handler and the scheduler drops the event. A list
+that grows by handler sends stops growing, one send at a time, with
+no error anywhere near the send. Reading durably is what keeps that
+commit exportable. The mark covers only the transaction the runner
+mints for itself; a start handed a caller's transaction keeps that
+caller's read semantics.
 
 One retirement wake completes the ruling's "fix infinitely stuck
 things" half (§4's evaluation detail): a sweep that runs while an

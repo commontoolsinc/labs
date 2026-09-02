@@ -45,8 +45,10 @@ import {
   UnknownCfcMetadataVersionError,
 } from "./cfc/metadata.ts";
 import {
+  CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
   type CfcAddress,
+  runtimeWritePolicyAuthorization,
 } from "./cfc/types.ts";
 import { createRef } from "./create-ref.ts";
 import { findAndInlineDataUriLinks } from "./data-uri.ts";
@@ -537,6 +539,44 @@ function anchorValueAsEntity(
     newEntryLink.schema,
     options?.schemaRole,
   );
+
+  // Anchoring splits one value across two documents, so the child is the
+  // runtime's store whenever the parent is: its id is derived here rather than
+  // named by an author, and nothing but this write puts anything in it.
+  // §8.2 treats either representation of a pass-through as valid so long as
+  // the label is preserved; this reads that one step further, as the choice
+  // not deciding a verdict. The
+  // claim rides the marker alone, not an enrollment — the anchored document is
+  // written by the transaction that anchors it, and a later write that reaches
+  // the same position walks through here again. A transaction that addresses
+  // the child directly rather than through its parent finds no claim and is
+  // measured against the child's own ceiling, which is the fail-closed
+  // direction. The marker also carries the claim down a nested anchor, whose
+  // own parent is the child this call just marked.
+  if (
+    tx.isRuntimeOwnedStore(
+      link.space,
+      link.id,
+      runtimeWritePolicyAuthorization,
+    )
+  ) {
+    tx.recordCfcWritePolicyInput({
+      kind: "structural-provenance",
+      target: {
+        space: newEntryLink.space,
+        id: newEntryLink.id,
+        scope: newEntryLink.scope,
+        path: [],
+      },
+      claim: CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
+      sources: [{
+        space: link.space,
+        id: link.id,
+        scope: link.scope,
+        path: [...path],
+      }],
+    }, runtimeWritePolicyAuthorization);
+  }
 
   return [
     // If it wasn't already, set the current value to be a doc link to this doc

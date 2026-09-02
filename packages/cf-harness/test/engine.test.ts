@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { normalize } from "@std/path/posix";
 import type { HarnessArtifactStore } from "../src/artifacts.ts";
+import { harnessFabricSessionPosture } from "../src/cfc-posture.ts";
 import { CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE } from "../src/contracts/cfc-invocation-context.ts";
 import { createHarnessCfcPolicySnapshot } from "../src/contracts/cfc-policy-snapshot.ts";
 import { createHarnessPolicyEvent } from "../src/contracts/policy.ts";
@@ -166,6 +167,16 @@ Deno.test("CfHarnessEngine constructs in enforce mode without CFC transports", (
   assertEquals(engine.getRunState().cfcEnforcementMode, "enforce-strict");
 });
 
+/**
+ * The posture record a session config resolves to. Built the way the engine
+ * builds it rather than written out here: the record's own shape is pinned in
+ * the runner's parity suite, and restating it in this file would make these
+ * cases assert the restatement.
+ */
+const recordFor = (
+  session: Parameters<typeof harnessFabricSessionPosture>[0],
+) => harnessFabricSessionPosture(session);
+
 Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in run state", () => {
   const configured = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
@@ -182,6 +193,13 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
     enforcementModeSource: "configured",
     flowLabels: "persist",
     flowLabelsSource: "configured",
+    record: recordFor({
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcEnforcementMode: "enforce-strict",
+      cfcFlowLabels: "persist",
+    }),
   });
 
   const pinned = new CfHarnessEngine({
@@ -197,6 +215,11 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
     enforcementModeSource: "preset-pin",
     flowLabels: "off",
     flowLabelsSource: "default",
+    record: recordFor({
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+    }),
   });
 
   // The named bundle supplies persist when the operator selects the posture
@@ -216,12 +239,72 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
     flowLabels: "persist",
     flowLabelsSource: "posture",
     posture: "max-enforcement",
+    record: recordFor({
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcPosture: "max-enforcement",
+    }),
   });
 
   const sessionless = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
   });
   assertEquals(sessionless.getRunState().fabricSessionCfc, undefined);
+});
+
+Deno.test("CfHarnessEngine publishes no posture record when a session factory overrides the config", () => {
+  // The factory decides which runtime executes, and the config no longer
+  // describes it — so a record projected from the config would assert a
+  // posture nothing honors. The two itemized dials stand alone: they still
+  // truthfully say what was asked for.
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcPosture: "max-enforcement",
+    },
+    fabricSessionFactory: () =>
+      Promise.reject(new Error("never built in this test")),
+  });
+  assertEquals(engine.getRunState().fabricSessionCfc, {
+    enforcementMode: "enforce-explicit",
+    enforcementModeSource: "preset-pin",
+    flowLabels: "persist",
+    flowLabelsSource: "posture",
+    posture: "max-enforcement",
+  });
+});
+
+Deno.test("CfHarnessEngine refuses to resume a recorded record under an overriding session factory", () => {
+  // The recorded record describes a runtime this resume is not building, so
+  // carrying it forward would publish a posture the executing session may not
+  // be at — the mismatch this guard exists to refuse.
+  const posturedSession = {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    cfcPosture: "max-enforcement",
+  } as const;
+  const runState = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: posturedSession,
+  }).getRunState();
+
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        fabricSession: posturedSession,
+        fabricSessionFactory: () =>
+          Promise.reject(new Error("never built in this test")),
+        runState,
+      }),
+    Error,
+    "fabric session CFC posture mismatch on resume",
+  );
 });
 
 Deno.test("CfHarnessEngine refuses to resume under a fabric-session posture that contradicts the recorded one", () => {
@@ -265,7 +348,42 @@ Deno.test("CfHarnessEngine refuses to resume under a fabric-session posture that
     flowLabels: "persist",
     flowLabelsSource: "posture",
     posture: "max-enforcement",
+    record: recordFor(posturedSession),
   });
+
+  // A dial neither itemized field names, moved under the run: the recorded
+  // record no longer describes what the resumed session would run, so the
+  // resume is refused rather than attesting a posture the runtime is not at.
+  const drifted = structuredClone(runState) as {
+    fabricSessionCfc?: {
+      record?: { writeFloor: { rung: string } };
+    };
+  } & typeof runState;
+  drifted.fabricSessionCfc!.record!.writeFloor.rung = "off";
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        fabricSession: posturedSession,
+        runState: drifted,
+      }),
+    Error,
+    "fabric session CFC posture mismatch on resume",
+  );
+
+  // A run recorded before the record existed is compared on the dials alone,
+  // and resumes: backfilling one would attest this checkout's resolution
+  // rather than the run's.
+  const legacy = structuredClone(runState);
+  delete legacy.fabricSessionCfc!.record;
+  assertEquals(
+    new CfHarnessEngine({
+      workspaceHostPath: "/host/project",
+      fabricSession: posturedSession,
+      runState: legacy,
+    }).getRunState().fabricSessionCfc?.record,
+    undefined,
+  );
 
   // A resume with no session at all keeps the record as history: no runtime
   // exists for it to contradict.
@@ -824,11 +942,13 @@ Deno.test("CfHarnessEngine records tool outputs into run state on success", asyn
     runId: "run-1",
   });
   assertEquals(engine.getRunState().runId, "run-1");
-  assertEquals(engine.getRunState().status, "completed");
+  // A tool call is a step of the run, not its outcome: the status is the
+  // driver's to write, and nothing here has ended the run.
+  assertEquals(engine.getRunState().status, "pending");
   assertEquals(engine.getRunState().createdAt, "2026-04-15T19:00:00.000Z");
   assertEquals(engine.getRunState().updatedAt, "2026-04-15T19:00:05.000Z");
-  assertEquals(engine.getRunState().endedAt, "2026-04-15T19:00:05.000Z");
-  assertEquals(engine.getRunState().terminalReason, "tool_completed");
+  assertEquals(engine.getRunState().endedAt, undefined);
+  assertEquals(engine.getRunState().terminalReason, undefined);
   assertEquals(engine.getRunState().cfcEnforcementMode, "observe");
   assertEquals(engine.getRunState().currentDir, "/workspace");
   assertEquals(engine.getRunState().policyEvents, []);
@@ -1181,15 +1301,15 @@ Deno.test("CfHarnessEngine timestamps CFC invocation contexts with mutation time
     state.cfcInvocationContexts?.length === 1 &&
     state.toolOutputs.length === 0
   );
-  assertEquals(invocationState?.updatedAt, "2026-04-17T21:00:04.000Z");
+  assertEquals(invocationState?.updatedAt, "2026-04-17T21:00:03.000Z");
   assertEquals(
     invocationState?.cfcInvocationContexts?.[0]?.createdAt,
-    "2026-04-17T21:00:04.000Z",
+    "2026-04-17T21:00:03.000Z",
   );
-  assertEquals(engine.getRunState().updatedAt, "2026-04-17T21:00:05.000Z");
+  assertEquals(engine.getRunState().updatedAt, "2026-04-17T21:00:04.000Z");
 });
 
-Deno.test("CfHarnessEngine marks the run as failed when a tool invocation errors", async () => {
+Deno.test("CfHarnessEngine records a tool invocation error without ending the run", async () => {
   const engine = new CfHarnessEngine({
     sandboxRuntime: new FakeSandboxRuntime([], new Error("sandbox boom")),
     runId: "run-fail",
@@ -1210,11 +1330,13 @@ Deno.test("CfHarnessEngine marks the run as failed when a tool invocation errors
   );
 
   assertEquals(engine.getRunState().runId, "run-fail");
-  assertEquals(engine.getRunState().status, "failed");
+  // The failure is on record for the driver to end the run on; the tool
+  // call itself does not decide the run's outcome.
+  assertEquals(engine.getRunState().status, "pending");
   assertEquals(engine.getRunState().createdAt, "2026-04-15T19:10:00.000Z");
   assertEquals(engine.getRunState().updatedAt, "2026-04-15T19:10:02.000Z");
-  assertEquals(engine.getRunState().endedAt, "2026-04-15T19:10:02.000Z");
-  assertEquals(engine.getRunState().terminalReason, "tool_error");
+  assertEquals(engine.getRunState().endedAt, undefined);
+  assertEquals(engine.getRunState().terminalReason, undefined);
   assertEquals(engine.getRunState().cfcEnforcementMode, "observe");
   assertEquals(engine.getRunState().currentDir, "/workspace");
   assertEquals(engine.getRunState().policyEvents, []);
@@ -1261,8 +1383,8 @@ Deno.test("CfHarnessEngine records recoverable file-tool failures without failin
       exitCode: 10,
     },
   });
-  assertEquals(engine.getRunState().status, "completed");
-  assertEquals(engine.getRunState().terminalReason, "tool_completed");
+  assertEquals(engine.getRunState().status, "pending");
+  assertEquals(engine.getRunState().terminalReason, undefined);
   assertEquals(engine.getRunState().toolOutputs, [result.resultRef]);
   assertEquals(engine.getRunState().failureRecords?.length, 1);
   assertEquals(
@@ -1278,7 +1400,7 @@ Deno.test("CfHarnessEngine records recoverable file-tool failures without failin
   assertEquals(engine.getRunState().primaryFailure?.kind, "file_not_found");
 });
 
-Deno.test("CfHarnessEngine terminalizes interrupted runs even after an intermediate tool completion", async () => {
+Deno.test("CfHarnessEngine fails an interrupted run that has recorded a tool output", async () => {
   const engine = new CfHarnessEngine({
     sandboxRuntime: new FakeSandboxRuntime([
       { stdout: "done\n", stderr: "", exitCode: 0 },
@@ -1297,8 +1419,8 @@ Deno.test("CfHarnessEngine terminalizes interrupted runs even after an intermedi
   });
 
   await engine.invokeBuiltinTool("bash", { command: "echo done" });
-  assertEquals(engine.getRunState().status, "completed");
-  assertEquals(engine.getRunState().terminalReason, "tool_completed");
+  assertEquals(engine.getRunState().status, "pending");
+  assertEquals(engine.getRunState().terminalReason, undefined);
 
   await engine.terminalizeInterruptedRun("SIGTERM");
 
@@ -1325,7 +1447,7 @@ Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
       createdAt: "2026-04-17T20:10:00.000Z",
       updatedAt: "2026-04-17T20:10:01.000Z",
       endedAt: "2026-04-17T20:10:01.000Z",
-      terminalReason: "tool_completed",
+      terminalReason: "assistant_completed",
       cfcEnforcementMode: "observe",
       currentDir: "/workspace",
       policyEvents: [createHarnessPolicyEvent({
@@ -1356,7 +1478,7 @@ Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
     createdAt: "2026-04-17T20:10:00.000Z",
     updatedAt: "2026-04-17T20:10:01.000Z",
     endedAt: "2026-04-17T20:10:01.000Z",
-    terminalReason: "tool_completed",
+    terminalReason: "assistant_completed",
     cfcEnforcementMode: "observe",
     currentDir: "/workspace",
     policyEvents: [createHarnessPolicyEvent({

@@ -1,6 +1,7 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { HarnessBrowserAccessLease } from "./browser-access.ts";
 import type { HarnessImageAttachment } from "./image.ts";
+import type { HarnessInputCellSpec } from "./input-cells.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
 import type { LoomLocalHostBinding } from "./run-manifest.ts";
 import {
@@ -183,6 +184,15 @@ export interface HarnessChatStartTurnParams {
   input: HarnessChatTurnInput;
   policy?: HarnessChatPolicy;
   browserAccess?: HarnessChatBrowserAccessLease;
+
+  /**
+   * Cells the caller attaches to this turn by reference, each under a name the
+   * model sees. A turn is its own run with its own handle table, so input
+   * cells are named per turn rather than per session: the tokens the model is
+   * given are the ones this turn's run minted.
+   */
+  inputCells?: readonly HarnessInputCellSpec[];
+
   metadata?: Record<string, unknown>;
 }
 
@@ -301,7 +311,6 @@ export interface HarnessChatSessionStatus {
   context?: HarnessChatContext;
   model?: string;
   loomLocalHostBinding?: LoomLocalHostBinding;
-  harnessRunId?: string;
   artifactRoot?: string;
   capabilities: HarnessChatCapabilities;
   policy: HarnessChatPolicy;
@@ -475,7 +484,6 @@ export interface CreateHarnessChatSessionStatusOptions {
   context?: HarnessChatContext;
   model?: string;
   loomLocalHostBinding?: LoomLocalHostBinding;
-  harnessRunId?: string;
   artifactRoot?: string;
   capabilities?: Partial<HarnessChatCapabilities>;
   policy?: HarnessChatPolicy;
@@ -501,9 +509,6 @@ export const createHarnessChatSessionStatus = (
     ...(options.model !== undefined ? { model: options.model } : {}),
     ...(options.loomLocalHostBinding !== undefined
       ? { loomLocalHostBinding: structuredClone(options.loomLocalHostBinding) }
-      : {}),
-    ...(options.harnessRunId !== undefined
-      ? { harnessRunId: options.harnessRunId }
       : {}),
     ...(options.artifactRoot !== undefined
       ? { artifactRoot: options.artifactRoot }

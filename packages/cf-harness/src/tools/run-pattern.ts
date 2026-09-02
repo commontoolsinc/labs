@@ -10,6 +10,7 @@ import {
 import {
   type CfcAddress,
   type CfcConfClause,
+  type CfcDereferenceTrace,
   type CfcRefusalAttribution,
   type CfcRefusalDetail,
   type CfcRefusalGate,
@@ -104,11 +105,22 @@ export interface RunPatternToolSuccessOutput {
   /**
    * What the release measurement refused, on a run the enforcement ladder did
    * not reject it on. Artifact-only, like the other fields the prompt loop
-   * strips: the answer went out, so the model has nothing to act on, while an
+   * strips: the values went out, so the model has nothing to act on, while an
    * operator staging the ladder has the population that raising it would
-   * start refusing.
+   * start withholding. Absent, like `policyRefusal`, on a run that asked for
+   * no values, since nothing was measured.
    */
   releaseObservation?: RunPatternPolicyRefusal;
+
+  /**
+   * What the answer's own sink refused to release and which of this call's
+   * inputs carried it, when the enforcement ladder withheld `value` over it.
+   * The result stands in the space under its own labels and `resultRef`
+   * names it: a reference discloses nothing, so what the refusal withholds
+   * is the values alone. `valueError` states the same refusal as an
+   * instruction.
+   */
+  policyRefusal?: RunPatternPolicyRefusal;
 
   /**
    * The compiled pattern's result schema — the shape of whatever
@@ -135,8 +147,11 @@ export interface RunPatternToolSuccessOutput {
 
   linkedStringCount?: number;
 
-  /** Why `value` is absent despite a `resultSchema`: the raw result did not
-   * match the schema. */
+  /**
+   * Why `value` is absent despite a `resultSchema`: the raw result did not
+   * match the schema, or the space's policy refused to release it, in which
+   * case `policyRefusal` carries the refusal as data.
+   */
   valueError?: string;
 
   /**
@@ -154,11 +169,14 @@ export interface RunPatternToolSuccessOutput {
   patternPublication?: RunPatternPublicationReport;
 
   /**
-   * What the render gate's probe THREW, when one did — never what it
-   * rendered. Retained for the persisted artifact and stripped from the
-   * model-facing rendering, on the same terms as every other thrown message
+   * Text retained for the persisted artifact and stripped from the
+   * model-facing rendering. The reason a release refusal stated, when
+   * `policyRefusal` is present, since it names the labels and documents the
+   * flow touched. And what the render gate's probe THREW, when one did —
+   * never what it rendered — on the same terms as every other thrown message
    * this tool withholds: a computation over data the model cannot read can
-   * carry that data in what it throws.
+   * carry that data in what it throws. A run with both carries the reason
+   * first and the thrown text after a blank line.
    *
    * **The artifact root is not a confidentiality boundary.** `bash` does not
    * reserve it the way `read_file`, `write_file`, `edit_file` and
@@ -278,10 +296,11 @@ export interface RunPatternToolErrorOutput {
   rawCauseMessage?: string;
 
   /**
-   * What a boundary refused and which of this call's own inputs carried it,
-   * when a policy refusal is what stopped the run. A refused commit landed no
-   * result; a refused release landed one, which stays in the space under its
-   * own labels while the answer is withheld.
+   * What the commit boundary refused and which of this call's own inputs
+   * carried it, when a policy refusal is what stopped the run: the write was
+   * rejected, so no result landed. A refusal at the answer's own sink is not
+   * this — the result landed and its reference is returned — so it rides on
+   * the success output instead.
    */
   policyRefusal?: RunPatternPolicyRefusal;
 }
@@ -297,6 +316,34 @@ export const isRunPatternToolSuccessOutput = (
   "status" in output && output.status === "ok" &&
   "resultRef" in output && typeof output.resultRef === "string" &&
   "resultRefSchema" in output;
+
+/** `RunPatternPolicyRefusal`, as the output schema states it. */
+const RUN_PATTERN_POLICY_REFUSAL_SCHEMA = {
+  type: "object",
+  properties: {
+    gates: {
+      type: "array",
+      items: { type: "string", enum: ["sink-ceiling", "writer-fit"] },
+    },
+    sinks: { type: "array", items: { type: "string" } },
+    offendingAtoms: { type: "array", items: { type: "string" } },
+    withheldAtomCount: { type: "integer", minimum: 0 },
+    inputKeys: { type: "array", items: { type: "string" } },
+    unattributedInputCount: { type: "integer", minimum: 0 },
+    attribution: {
+      type: "string",
+      enum: ["complete", "partial", "none"],
+    },
+  },
+  required: [
+    "gates",
+    "sinks",
+    "offendingAtoms",
+    "inputKeys",
+    "attribution",
+  ],
+  additionalProperties: false,
+} satisfies JSONSchema;
 
 export const runPatternToolDescriptor: HarnessToolDescriptor = {
   toolId: "run_pattern",
@@ -340,7 +387,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
           { type: "object", additionalProperties: true },
         ],
         description:
-          'JSON Schema for the result value. Without it you get resultRef only and no value at all, so pass it whenever you need to read what the pattern computed. A value is returned only for the fields the schema models: an inert one (a number, a boolean, an enum or const string) comes back as itself; anything else is withheld as text and comes back as a reference token addressing that position, which describe_handle can inspect and a later run_pattern can wire by reference. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. The framework\'s own result keys ($NAME, $UI and the other rendering variants) need not be declared.',
+          'JSON Schema for the result value. Without it you get resultRef only and no value at all, so pass it whenever you need to read what the pattern computed. A value is returned only for the fields the schema models: an inert one (a number, a boolean, an enum or const string) comes back as itself; anything else is withheld as text and comes back as a reference token addressing that position, which describe_handle can inspect and a later run_pattern can wire by reference. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. The framework\'s own result keys ($NAME, $UI and the other rendering variants) need not be declared. When the space\'s policy does not admit releasing the values to you, value is withheld, valueError says why and which input carried the refused label, and resultRef still names the result: pass it on by reference.',
       },
     },
     // Exactly one of `sourceText` and `patternId` is required, which is a
@@ -360,6 +407,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         value: {},
         linkedStringCount: { type: "integer", minimum: 0 },
         valueError: { type: "string" },
+        policyRefusal: RUN_PATTERN_POLICY_REFUSAL_SCHEMA,
         rawValue: {},
         patternPublication: {
           type: "object",
@@ -412,32 +460,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         message: { type: "string" },
         pieceId: { type: "string" },
         rawCauseMessage: { type: "string" },
-        policyRefusal: {
-          type: "object",
-          properties: {
-            gates: {
-              type: "array",
-              items: { type: "string", enum: ["sink-ceiling", "writer-fit"] },
-            },
-            sinks: { type: "array", items: { type: "string" } },
-            offendingAtoms: { type: "array", items: { type: "string" } },
-            withheldAtomCount: { type: "integer", minimum: 0 },
-            inputKeys: { type: "array", items: { type: "string" } },
-            unattributedInputCount: { type: "integer", minimum: 0 },
-            attribution: {
-              type: "string",
-              enum: ["complete", "partial", "none"],
-            },
-          },
-          required: [
-            "gates",
-            "sinks",
-            "offendingAtoms",
-            "inputKeys",
-            "attribution",
-          ],
-          additionalProperties: false,
-        },
+        policyRefusal: RUN_PATTERN_POLICY_REFUSAL_SCHEMA,
       },
       required: ["outputId", "status", "message"],
       additionalProperties: false,
@@ -532,6 +555,13 @@ const RUN_PATTERN_ANSWER_SINK = "run_pattern";
  * so no confidentiality clause names an audience it belongs to, and an empty
  * ceiling — "public only", per `sink-inventory.ts` — is the one that says so.
  *
+ * What crosses the sink is a VALUE. The result reference the tool returns is
+ * an opaque handle: it names the result without carrying it, and holding it
+ * discloses nothing (AH-CFC-18), so the ceiling is consulted only for a call
+ * that asks for values through `resultSchema`, and what a refusal withholds
+ * is those values and never the reference. The model composes work out of
+ * names it cannot read; that is what lets it route data it never sees.
+ *
  * Empty rather than absent, and the difference is the point. A sink absent
  * from the inventory goes ungated because a deployment has not decided about
  * it; this sink is not one a deployment declares, since the audience on the
@@ -563,21 +593,82 @@ interface RunPatternInputAddress {
   readonly path: readonly string[];
 }
 
-const pathStartsWith = (
+/** Whether `path` starts with `prefix`. */
+const pathHasPrefix = (
   path: readonly string[],
   prefix: readonly string[],
 ): boolean =>
   prefix.length <= path.length &&
   prefix.every((segment, index) => segment === path[index]);
 
+/** Whether one path is a prefix of the other, either way round. */
+const pathsComparable = (
+  a: readonly string[],
+  b: readonly string[],
+): boolean => pathHasPrefix(a, b) || pathHasPrefix(b, a);
+
+const inputAddressKey = (address: RunPatternInputAddress): string =>
+  JSON.stringify([address.key, address.hash, address.path]);
+
+/**
+ * The addresses an input's value reaches, given the dereferences a read of
+ * it performed: the address the caller's link named, and every address a
+ * link on the way to the value led on to, transitively.
+ *
+ * A caller's link commonly names a document that holds the value by
+ * reference rather than one that holds it — an operator-attached cell whose
+ * field links to the cell that carries the label — so the document a
+ * refused read names is one the caller's address never mentions. The
+ * dereference traces the attribution read recorded are the route from the
+ * one to the other, and following them is what places such a read.
+ *
+ * A trace's target is the address the resolution continued to, not the bare
+ * far end of the link: a link above the input's address — the document root
+ * is itself a link, say — lands its trace at the input's own position on the
+ * far side. So a link at, below, or above the address leads to the target as
+ * it stands, and only a link beside the address, on a sibling path, leads the
+ * input nowhere. Every trace is a value dereference: the transaction that
+ * records them only reads.
+ */
+const inputAddressesReached = (
+  addresses: readonly RunPatternInputAddress[],
+  traces: readonly CfcDereferenceTrace[],
+): readonly RunPatternInputAddress[] => {
+  const reached = [...addresses];
+  const seen = new Set(reached.map(inputAddressKey));
+  // A worklist: an address pushed here is visited in its turn, and the set
+  // above is what bounds the walk — a cycle of links adds nothing twice.
+  for (let index = 0; index < reached.length; index += 1) {
+    const from = reached[index];
+    for (const trace of traces) {
+      const targetHash = comparableEntityHash(trace.target.id);
+      if (
+        targetHash === undefined ||
+        comparableEntityHash(trace.source.id) !== from.hash
+      ) {
+        continue;
+      }
+      if (!pathsComparable(trace.source.path, from.path)) continue;
+      const next = { key: from.key, hash: targetHash, path: trace.target.path };
+      const key = inputAddressKey(next);
+      if (!seen.has(key)) {
+        seen.add(key);
+        reached.push(next);
+      }
+    }
+  }
+  return reached;
+};
+
 /**
  * The keys of `inputs` a refused read belongs to, empty when none does.
  *
- * A read reaches an input two ways. It reads the document the caller's link
- * addressed, which the retained addresses match. Or it reads the piece's
- * argument document, where every input — link or plain JSON — sits under its
- * own key, so the first path segment is the key. Both are matched, because
- * one refusal commonly reports the same input through both.
+ * A read reaches an input two ways. It reads a document the caller's link
+ * addressed or led on to, which the addresses the input reached match. Or it
+ * reads the piece's argument document, where every input — link or plain
+ * JSON — sits under its own key, so the first path segment is the key. Both
+ * are matched, because one refusal commonly reports the same input through
+ * both.
  *
  * Every match is returned. One document handed in under two keys is reached
  * by dropping either alias alone, and a remedy naming one of them would
@@ -596,7 +687,7 @@ const refusalReadInputKeys = (
   const keys: string[] = [];
   for (const address of addresses) {
     if (
-      address.hash === readHash && pathStartsWith(read.path, address.path) &&
+      address.hash === readHash && pathHasPrefix(read.path, address.path) &&
       !keys.includes(address.key)
     ) {
       keys.push(address.key);
@@ -647,10 +738,18 @@ const namableRefusalAtom = (rendered: string): boolean => {
 export const runPatternPolicyRefusal = (
   refusals: readonly CfcRefusalDetail[],
   inputKeysFor: (read: CfcAddress) => readonly string[],
-): RunPatternPolicyRefusal | undefined => {
-  if (refusals.length === 0) {
-    return undefined;
-  }
+): RunPatternPolicyRefusal | undefined =>
+  nonEmpty(refusals) ? foldPolicyRefusals(refusals, inputKeysFor) : undefined;
+
+/** Whether `items` has a first element, narrowing to the tuple that says so. */
+const nonEmpty = <T>(items: readonly T[]): items is readonly [T, ...T[]] =>
+  items.length > 0;
+
+/** {@link runPatternPolicyRefusal} over at least one detail. */
+const foldPolicyRefusals = (
+  refusals: readonly [CfcRefusalDetail, ...CfcRefusalDetail[]],
+  inputKeysFor: (read: CfcAddress) => readonly string[],
+): RunPatternPolicyRefusal => {
   const gates: CfcRefusalGate[] = [];
   const sinks: string[] = [];
   const offendingAtoms: string[] = [];
@@ -708,7 +807,8 @@ const quoteAll = (values: readonly string[]): string =>
 /**
  * Which boundary a refusal came from, which decides what the caller is told
  * became of the result: a refused commit landed no result, while a refused
- * release has one, in the space under its own labels.
+ * release has one, in the space under its own labels, whose reference the
+ * caller holds with the values withheld.
  */
 export type RunPatternRefusalBoundary = "commit" | "release";
 
@@ -729,21 +829,23 @@ export const policyRefusalMessage = (
   const atoms = refusal.offendingAtoms.length > 0
     ? ` (${refusal.offendingAtoms.join(", ")})`
     : "";
-  const refused = boundaryRefused === "commit"
-    ? "commit its result"
-    : "release its result";
-  const became = boundaryRefused === "commit"
-    ? "the result never landed"
-    : "the result stays in the space and is withheld here";
-  const opening =
-    `the pattern ran but the space's policy refused to ${refused}: ` +
-    `${boundary} does not admit the confidentiality${atoms} this run ` +
-    `carries, so ${became}`;
+  const opening = boundaryRefused === "commit"
+    ? `the pattern ran but the space's policy refused to commit its result: ` +
+      `${boundary} does not admit the confidentiality${atoms} this run ` +
+      `carries, so the result never landed`
+    : `the pattern ran and its result is in the space, but the space's ` +
+      `policy refused to release its values: ${boundary} does not admit ` +
+      `the confidentiality${atoms} the result carries, so value is ` +
+      `withheld here while resultRef still names the result, which can be ` +
+      `passed on by reference`;
   const plural = refusal.inputKeys.length > 1;
   const keys = `input${plural ? "s" : ""} ${quoteAll(refusal.inputKeys)}`;
+  const cleared = boundaryRefused === "commit"
+    ? "proceeds"
+    : "releases its values";
   const remedy = refusal.attribution === "complete"
     ? `Every label refused here came in through ${keys}, so the same run ` +
-      `without ${plural ? "them" : "it"} proceeds`
+      `without ${plural ? "them" : "it"} ${cleared}`
     : refusal.attribution === "partial"
     ? `Some of what was refused came in through ${keys}; dropping ` +
       `${plural ? "them" : "it"} narrows the flow without necessarily ` +
@@ -1371,23 +1473,22 @@ export const runPatternTool: HarnessToolDefinition<
       space,
     );
     /**
-     * The report a policy refusal produces, whichever boundary stated it.
+     * The report a policy refusal produces, whichever boundary stated it:
+     * each offending read resolved to a key of this call's `inputs`.
      *
-     * The refusal reason stays out of the model-facing message the same way
-     * thrown text does: it names the documents and label atoms involved —
-     * fabric identifiers and policy detail the model does not read — so the
-     * artifact keeps it and the model gets the fact of the refusal.
+     * The caller's own addresses are extended by the dereferences the
+     * attribution read below recorded, so a read of a document the caller's
+     * link reaches through a link it holds is placed as readily as a read of
+     * the document it names. The piece's argument document is where every
+     * input reaches the pattern under its own key, so a refused read of it
+     * names an input by its first path segment. Its address is resolved here
+     * rather than kept from creation because only a refusal asks for it, and
+     * an argument cell that will not resolve leaves the caller's own
+     * addresses as the route from a clause back to an input key.
      */
-    const policyRefusalOutput = async (
-      details: readonly CfcRefusalDetail[],
-      boundaryRefused: RunPatternRefusalBoundary,
-      rawCauseMessage: string,
-    ) => {
-      recordOutcome("run_failed");
-      // The piece's argument document is where every input reaches the
-      // pattern under its own key, so a refused read of it names an input
-      // by its first path segment. Its address is resolved here rather than
-      // kept from creation because only a refusal asks for it.
+    const describeRefusal = async (
+      details: readonly [CfcRefusalDetail, ...CfcRefusalDetail[]],
+    ): Promise<RunPatternPolicyRefusal> => {
       let argumentHash: string | undefined;
       try {
         argumentHash = comparableEntityHash(
@@ -1396,22 +1497,41 @@ export const runPatternTool: HarnessToolDefinition<
       } catch {
         argumentHash = undefined;
       }
-      const policyRefusal = runPatternPolicyRefusal(
+      const reached = inputAddressesReached(inputAddresses, attributionTraces);
+      return foldPolicyRefusals(
         details,
         (read) =>
           refusalReadInputKeys(
             read,
-            inputAddresses,
+            reached,
             argumentHash,
             suppliedInputKeys,
           ),
       );
+    };
+
+    /**
+     * What a refused commit reports: a failed run, since nothing landed.
+     *
+     * The refusal reason stays out of the model-facing message the same way
+     * thrown text does: it names the documents and label atoms involved —
+     * fabric identifiers and policy detail the model does not read — so the
+     * artifact keeps it and the model gets the fact of the refusal.
+     */
+    const commitRefusalOutput = async (
+      details: readonly CfcRefusalDetail[],
+      rawCauseMessage: string,
+    ) => {
+      recordOutcome("run_failed");
+      const policyRefusal = nonEmpty(details)
+        ? await describeRefusal(details)
+        : undefined;
       return {
         ...errorOutput(
           "error",
           policyRefusal === undefined
             ? RUN_PATTERN_OPAQUE_REFUSAL_MESSAGE
-            : policyRefusalMessage(policyRefusal, boundaryRefused),
+            : policyRefusalMessage(policyRefusal, "commit"),
         ),
         pieceId: piece.id,
         rawCauseMessage,
@@ -1419,40 +1539,49 @@ export const runPatternTool: HarnessToolDefinition<
       };
     };
 
-    // The answer is an egress: what this tool returns is read by a model,
-    // outside every space the fabric labels. A pattern's own egresses are
-    // sink requests the commit boundary gates, and this one records none, so
-    // it is measured here. The measurement is a transaction that reads what
-    // the answer stands for, and its consumed join is what the answer
-    // carries — the result document, and every computed cell the result links
-    // to. Nothing is committed.
+    // The result is read HERE, through a transaction, and the value below is
+    // that read rather than a second one: a result the reactive graph
+    // advances between two reads would otherwise let a later clean state
+    // answer for an earlier labeled one. The read is host-side and discloses
+    // nothing by itself. What the answer discloses is the VALUES a
+    // `resultSchema` asks for, and those are an egress: they are read by a
+    // model, outside every space the fabric labels. A pattern's own egresses
+    // are sink requests the commit boundary gates, and this one records
+    // none, so it is measured here, and only when values were asked for —
+    // the transaction's consumed join, the result document and every
+    // computed cell the result links to, against the ceiling a model's
+    // context carries. The result reference goes out either way: it names
+    // the result without carrying it, and a name is not a release
+    // (AH-CFC-18). Nothing is committed.
     //
-    // A second transaction reads the piece's argument document, and only that
-    // transaction does. Every input reaches the pattern through that document
-    // under its own key, so a clause it carries names an input the caller can
-    // drop; a clause reaching the answer by another route is reported as
-    // unattributed.
+    // A second transaction reads the piece's argument document and the
+    // caller's own live inputs, and only that transaction does. Every input
+    // reaches the pattern through that document under its own key, so a
+    // clause it carries names an input the caller can drop; a clause
+    // reaching the answer by another route is reported as unattributed. The
+    // dereferences that transaction records on the way are kept with it:
+    // they are what place a read of a document the caller's link reaches
+    // through a link rather than names. Whether a refusal comes from this
+    // measurement or from the commit boundary, the attribution read is the
+    // same, so it runs whether or not values were asked for.
     //
-    // The ladder decides whether a recorded reason REJECTS, not whether it is
-    // taken: the measurement runs at every rung, so an observe-stage rollout
-    // can size what turning the rung up would refuse, which is what the sink
-    // gate beside it does with the same reason.
+    // The ladder decides whether a recorded reason WITHHOLDS the values, not
+    // whether they are measured: the measurement runs at every rung, so an
+    // observe-stage rollout can size what turning the rung up would withhold,
+    // which is what the sink gate beside it does with the same reason.
     const releaseGateRejects =
       pieces.runtime.cfcEnforcementMode !== "disabled" &&
       pieces.runtime.cfcEnforcementMode !== "observe";
     let releaseRefusal: CfcRefusalDetail | undefined;
+    let attributionTraces: readonly CfcDereferenceTrace[] = [];
     let rawValue: unknown;
     const measureRelease = async () => {
       const releaseTx = pieces.runtime.edit();
       const inputsTx = pieces.runtime.edit();
       try {
-        // The answer the tool returns is read HERE, through the transaction
-        // that measures it, and the value below is that read rather than a
-        // second one. A result the reactive graph advances between two reads
-        // would otherwise let a later clean state answer for an earlier
-        // labeled one. The `required` relaxation is the piece controller's,
-        // so a scoped link the session cannot materialize degrades its member
-        // rather than voiding the whole read.
+        // The `required` relaxation is the piece controller's, so a scoped
+        // link the session cannot materialize degrades its member rather
+        // than voiding the whole read.
         const measuredResult = cellWithScopedLinkRequiredsRelaxed(
           resultCell.withTx(releaseTx),
         );
@@ -1472,12 +1601,16 @@ export const runPatternTool: HarnessToolDefinition<
           await measuredInput.pull();
           asSerializableValue(measuredInput.get());
         }
-        return describeSinkReleaseRefusal(
-          releaseTx,
-          inputsTx,
-          RUN_PATTERN_ANSWER_SINK,
-          RUN_PATTERN_ANSWER_CEILING,
-        );
+        // Copied before the abort below, which clears them.
+        attributionTraces = [...inputsTx.getCfcState().dereferenceTraces];
+        return parsedResultSchema === undefined
+          ? undefined
+          : describeSinkReleaseRefusal(
+            releaseTx,
+            inputsTx,
+            RUN_PATTERN_ANSWER_SINK,
+            RUN_PATTERN_ANSWER_CEILING,
+          );
       } finally {
         releaseTx.abort("run_pattern release measurement");
         inputsTx.abort("run_pattern release attribution");
@@ -1553,9 +1686,8 @@ export const runPatternTool: HarnessToolDefinition<
         record.name === "CfcCommitRefusalError"
       );
       if (refusal !== undefined) {
-        return await policyRefusalOutput(
+        return await commitRefusalOutput(
           refusal.refusals ?? [],
-          "commit",
           refusal.message,
         );
       }
@@ -1615,35 +1747,28 @@ export const runPatternTool: HarnessToolDefinition<
         };
       }
     }
-    // A measurement the ladder does not reject on is still an answer about
-    // this run, and the only place it can be read from is the artifact.
-    const releaseObservation =
-      releaseRefusal === undefined || releaseGateRejects
-        ? undefined
-        : runPatternPolicyRefusal(
-          [releaseRefusal],
-          (read) =>
-            refusalReadInputKeys(
-              read,
-              inputAddresses,
-              undefined,
-              suppliedInputKeys,
-            ),
-        );
-    if (releaseRefusal !== undefined && releaseGateRejects) {
-      return await policyRefusalOutput(
-        [releaseRefusal],
-        "release",
-        releaseRefusal.reason,
-      );
-    }
     // A result the caller's own `resultSchema` refused is reported as neither
     // outcome: the pattern ran and landed a result, and the schema it did not
     // match was written by whoever called the tool, so it is evidence about
-    // the caller's contract rather than about the pattern.
+    // the caller's contract rather than about the pattern. A release the
+    // ceiling refused is evidence about policy, and the run succeeded under
+    // it.
     if (valueError === undefined) {
       recordOutcome("run_succeeded");
     }
+    // What the measurement found goes one of two ways. Where the ladder
+    // rejects, the values are withheld and the refusal reaches the model as
+    // data and as an instruction, with its reason kept for the artifact.
+    // Where it does not, the values go out and the measurement is still an
+    // answer about this run, which only the artifact can carry.
+    const withheldRefusal = releaseGateRejects ? releaseRefusal : undefined;
+    const withheld = withheldRefusal === undefined
+      ? undefined
+      : await describeRefusal([withheldRefusal]);
+    const releaseObservation =
+      releaseGateRejects || releaseRefusal === undefined
+        ? undefined
+        : await describeRefusal([releaseRefusal]);
 
     /**
      * The render gate: what the pattern's own `$UI` does before the pattern
@@ -1883,19 +2008,31 @@ export const runPatternTool: HarnessToolDefinition<
         }
       }
     }
+    const retainedCauses = [withheldRefusal?.reason, probeThrown].filter(
+      (text): text is string => text !== undefined,
+    );
     return {
       outputId,
       status: "ok",
       resultRef,
       resultRefSchema: pattern.resultSchema,
       pieceId: piece.id,
-      ...(value !== undefined ? { value } : {}),
-      ...(linkedStringCount !== undefined ? { linkedStringCount } : {}),
-      ...(valueError !== undefined ? { valueError } : {}),
+      ...(withheld !== undefined
+        ? {
+          valueError: policyRefusalMessage(withheld, "release"),
+          policyRefusal: withheld,
+        }
+        : {
+          ...(value !== undefined ? { value } : {}),
+          ...(linkedStringCount !== undefined ? { linkedStringCount } : {}),
+          ...(valueError !== undefined ? { valueError } : {}),
+        }),
       ...(rawValue !== undefined ? { rawValue } : {}),
       ...(releaseObservation !== undefined ? { releaseObservation } : {}),
       ...(publication !== undefined ? { patternPublication: publication } : {}),
-      ...(probeThrown !== undefined ? { rawCauseMessage: probeThrown } : {}),
+      ...(retainedCauses.length > 0
+        ? { rawCauseMessage: retainedCauses.join("\n\n") }
+        : {}),
     };
   },
 };

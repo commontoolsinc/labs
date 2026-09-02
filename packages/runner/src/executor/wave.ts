@@ -1505,13 +1505,23 @@ export class WaveAccumulator
     if (this.#closed) return;
     this.#closed = true;
     for (const contribution of this.#contributions) {
-      this.#withdraw(contribution, `wave abandoned: ${reason}`);
+      this.#withdraw(
+        contribution,
+        `wave abandoned: ${reason}`,
+        "wave-abandoned",
+      );
     }
   }
 
-  #withdraw(contribution: WaveContribution, message: string): void {
+  #withdraw(
+    contribution: WaveContribution,
+    message: string,
+    cause?: "contribution-dropped" | "wave-abandoned",
+  ): void {
     for (const space of contribution.spaces) {
-      space.resolveVerdict({ withdrawn: { message } });
+      space.resolveVerdict({
+        withdrawn: { message, ...(cause !== undefined ? { cause } : {}) },
+      });
     }
   }
 
@@ -2971,7 +2981,7 @@ export class WaveAccumulator
             "contribution; its own reads re-run it when fresh state " +
             "lands (serving-loop.md §3d)";
         this.#warnDropped(contribution, message);
-        this.#withdraw(contribution, message);
+        this.#withdraw(contribution, message, "contribution-dropped");
         continue;
       }
       if (droppedDocs[idx].size > 0) {
@@ -2999,6 +3009,7 @@ export class WaveAccumulator
           contribution,
           "superseded pure derivation writes dropped from the wave commit " +
             "(serving-loop.md §3d)",
+          allDropped ? "contribution-dropped" : undefined,
         );
         continue;
       }

@@ -28,6 +28,7 @@ import { resolveInteractiveProvisioning } from "./host-mounts.ts";
 import { BUILTIN_TOOLS } from "./tools/registry.ts";
 import {
   createHarnessInteractiveChatService,
+  type HarnessInteractiveChatEventDeliveryErrorHandler,
   type HarnessInteractiveChatService,
   type HarnessInteractivePromptLoopFactory,
 } from "./interactive-chat-service.ts";
@@ -44,6 +45,7 @@ export interface RunHarnessInteractiveChatNdjsonTransportOptions {
   writeLine: (line: string) => void | Promise<void>;
   createService?: (
     onEvent: (event: HarnessChatEventEnvelope) => void | Promise<void>,
+    onEventDeliveryError: HarnessInteractiveChatEventDeliveryErrorHandler,
   ) => HarnessInteractiveChatService | Promise<HarnessInteractiveChatService>;
   closeService?: (
     service: HarnessInteractiveChatService,
@@ -65,6 +67,7 @@ export interface RunHarnessInteractiveChatStdioOptions {
   createPromptLoop?: HarnessInteractivePromptLoopFactory;
   createService?: (
     onEvent: (event: HarnessChatEventEnvelope) => void | Promise<void>,
+    onEventDeliveryError: HarnessInteractiveChatEventDeliveryErrorHandler,
   ) => HarnessInteractiveChatService | Promise<HarnessInteractiveChatService>;
 }
 
@@ -481,13 +484,25 @@ export const runHarnessInteractiveChatNdjsonTransport = async (
   ): Promise<void> => {
     await options.writeLine(JSON.stringify(envelope));
   };
-  const service = options.createService?.(writeEnvelope) ??
+  let transportError: unknown;
+  // A write that fails means the peer is no longer reading, which ends the
+  // transport rather than the turn that happened to be running.
+  const onEventDeliveryError = (
+    _envelope: HarnessChatEventEnvelope,
+    error: unknown,
+  ) => {
+    transportError ??= error;
+  };
+  const service = options.createService?.(
+    writeEnvelope,
+    onEventDeliveryError,
+  ) ??
     createHarnessInteractiveChatService({
       onEvent: writeEnvelope,
+      onEventDeliveryError,
     });
   const resolvedService = await service;
 
-  let transportError: unknown;
   let cleanupError: unknown;
   try {
     for await (const rawLine of options.lines) {
@@ -580,6 +595,7 @@ export const runHarnessInteractiveChatStdio = async (
   const createService = options.createService ??
     (async (
       onEvent: (event: HarnessChatEventEnvelope) => void | Promise<void>,
+      onEventDeliveryError: HarnessInteractiveChatEventDeliveryErrorHandler,
     ) => {
       let openedStore: HarnessChatSessionStore | undefined;
       try {
@@ -589,6 +605,7 @@ export const runHarnessInteractiveChatStdio = async (
         }
         const service = createHarnessInteractiveChatService({
           onEvent,
+          onEventDeliveryError,
           ...(options.basePromptLoopOptions !== undefined
             ? { basePromptLoopOptions: options.basePromptLoopOptions }
             : {}),

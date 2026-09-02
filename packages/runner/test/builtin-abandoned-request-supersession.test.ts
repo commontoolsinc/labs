@@ -27,7 +27,10 @@ import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value"
 import { createBuilder } from "../src/builder/factory.ts";
 import { getPatternEnvironment, setPatternEnvironment } from "../src/env.ts";
 import { Runtime } from "../src/runtime.ts";
-import { MAX_ENFORCEMENT_CFC_OPTIONS } from "../src/runtime-presets.ts";
+import {
+  MAX_ENFORCEMENT_CFC_OPTIONS,
+  MAX_ENFORCEMENT_SINK_CEILINGS,
+} from "../src/runtime-presets.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
@@ -75,6 +78,21 @@ describe("whose cells an abandoned request's ending writes", () => {
       storageManager,
       ...MAX_ENFORCEMENT_CFC_OPTIONS,
       cfcEnforcementMode: "enforce-strict",
+      // The bundle declares a ceiling for the fetch and streamData sinks and
+      // none for the LLM ones, so an LLM request is ungated on
+      // confidentiality there. These cases are about the ENDING a refused
+      // request leaves behind, so they declare the ceiling the refusal comes
+      // from. Before the runtime's own stores declared what flowed into them,
+      // the refusal arrived by accident instead: the builtin's result store
+      // could not hold the caveat, so the transaction staging the request was
+      // refused for a reason about the store rather than about the request.
+      cfcSinkMaxConfidentiality: {
+        ...MAX_ENFORCEMENT_SINK_CEILINGS,
+        llm: [],
+        llmDialog: [],
+        generateText: [],
+        generateObject: [],
+      },
     });
     tx = runtime.edit();
     ({ commonfabric } = createTrustedBuilder(runtime));

@@ -482,7 +482,8 @@ loop's duty).
   iteration stops the pass before it queues later arrivals behind the
   barrier's back — else a later arrival's consequence lands ahead of
   the withdrawn entry's re-drain, the b01 inversion. The piece-start
-  deferral (a served entry whose piece could not be started) carries
+  deferral (a served entry whose piece could not be started, or whose
+  piece stands registered between pattern graphs — T3) carries
   the same in-queue sweep; cross-space neighbours and LT1 in-process
   copies are excluded from the sweep,
   as everywhere. (α) preserved: the mark still commits exactly once, only
@@ -607,6 +608,22 @@ loop's duty).
   to unconsequenced and retried. Drop = the event is unrunnable;
   requeue = the event is fine and the commit was raced. §3d cites
   this predicate rather than restating it.
+
+  A piece reporting as STARTED does not settle the test on its own.
+  The instantiation commit that built its graph settles after the
+  start returns, and a refused one retires that graph: across the one
+  recovery the registration stands while the piece instantiates
+  again, and past that recovery the registration goes with it. Either
+  way the piece serves no handler on any of its streams while it
+  still reports as started. A send arriving in that window finds no
+  handler because the commit was raced, so it takes the piece-start
+  deferral of §4 — the durable entry stays pending and a later wave
+  re-drains it — never this drop. The deferral budget above is what
+  keeps that from wedging the stream: a piece that never regains a
+  graph runs the budget out and its events harden into this drop,
+  which is the honest outcome once the race window is long past. The
+  test reads whether the piece has a graph installed, not what its
+  start reported.
 
   **Where the notice lives, and when it retires (T7).** The
   dropped-event notice — `{ status: "dropped", reason }` naming the

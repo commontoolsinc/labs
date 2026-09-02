@@ -28,7 +28,7 @@ const clientWith = (
     new OpenAICompatibleGatewayClient({
       baseUrl: GATEWAY,
       authMode: "none",
-      chatCompletionTransportRetries: 0,
+      transportRetries: 0,
       fetchFn: (input, init) => {
         const url = String(input);
         if (init?.body !== undefined) {
@@ -293,7 +293,7 @@ Deno.test("transport failures name the operation that failed", async () => {
     new OpenAICompatibleGatewayClient({
       baseUrl: GATEWAY,
       authMode: "none",
-      chatCompletionTransportRetries: 0,
+      transportRetries: 0,
       fetchFn: () => Promise.reject(new Error("connection error: timed out")),
     }),
   );

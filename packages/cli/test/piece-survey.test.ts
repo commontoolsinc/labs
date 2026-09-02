@@ -493,6 +493,10 @@ describe("piece-survey", () => {
           [`/of:fid1:${HANDLE}/topics/0`, "drop the path"],
           [`/of:fid1:${HANDLE}@user`, "@scope suffix"],
           [`/of:fid1:${HANDLE}#argument`, "#argument suffix"],
+          // The bare spelling reaches the same refusal: an entry is one
+          // whole piece however the caller wrote it.
+          [`of:fid1:${HANDLE}#argument`, "#argument suffix"],
+          [`of:fid1:${HANDLE}#result`, 'Unknown suffix "#result"'],
         ]
       ) {
         await expect(

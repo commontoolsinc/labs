@@ -113,6 +113,7 @@ import {
   gatedSinkRequestExists,
   linkCfcLabelView,
   type PolicySnapshot,
+  resolveCfcDials,
   type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
@@ -156,6 +157,14 @@ import {
   type WriteStackTraceEntry,
   type WriteStackTraceMatcher,
 } from "./storage/write-stack-trace.ts";
+import {
+  runtimeOwnedStoreOwnerKey,
+  RuntimeOwnedStores,
+} from "./cfc/runtime-owned-stores.ts";
+import {
+  type RuntimeWritePolicyAuthorization,
+  runtimeWritePolicyAuthorized,
+} from "./cfc/types.ts";
 import type { NonIdempotentReport } from "./telemetry.ts";
 import {
   createUnsafeHostTrustToken,
@@ -949,6 +958,11 @@ export class Runtime {
   // into it instead of committing to the store. Never installed on a
   // client or in the OFF arm — installSealDestination throws off the flag.
   #transactionSealDestination: TransactionSealDestination | undefined;
+  // The stores this runtime owns: the documents it materializes to hold a
+  // piece's machinery. Every transaction `edit()` creates gets the same
+  // object, which is what lets a write outside the transaction that minted a
+  // store still find it. See `cfc/runtime-owned-stores.ts`.
+  readonly #runtimeOwnedStores = new RuntimeOwnedStores();
   // The serving loop's run stamper (installed WITH the destination): the
   // scheduler hands it each run's durable action id + kind, and it
   // attaches the wave run context before the tx seals.
@@ -1479,16 +1493,18 @@ export class Runtime {
       this.sourceReconciler = new SourceReconciler(this);
       this.runner = new Runner(this);
       this.onPatternInstantiated = options.onPatternInstantiated;
-      this.cfcEnforcementMode = options.cfcEnforcementMode ??
-        "enforce-explicit";
-      this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
-      this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
-      this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
-      this.cfcDecomposedEnvelopes = options.cfcDecomposedEnvelopes ?? false;
-      this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ?? "off";
-      this.cfcLabelMetadataProtection = options.cfcLabelMetadataProtection ??
-        "off";
-      this.cfcDeclaredMonotonicity = options.cfcDeclaredMonotonicity ?? "off";
+      // Resolved through the shared dial table (`cfc/posture-report.ts`), so
+      // a host that publishes the posture of a runtime it has not built yet
+      // reads the same defaults these fields do.
+      const dials = resolveCfcDials(options);
+      this.cfcEnforcementMode = dials.cfcEnforcementMode;
+      this.cfcFlowLabels = dials.cfcFlowLabels;
+      this.cfcWriteFloor = dials.cfcWriteFloor;
+      this.cfcTriggerReadGating = dials.cfcTriggerReadGating;
+      this.cfcDecomposedEnvelopes = dials.cfcDecomposedEnvelopes;
+      this.cfcPolicyEvaluation = dials.cfcPolicyEvaluation;
+      this.cfcLabelMetadataProtection = dials.cfcLabelMetadataProtection;
+      this.cfcDeclaredMonotonicity = dials.cfcDeclaredMonotonicity;
       this.cfcPrefixProvenanceStats = options.cfcPrefixProvenanceStats ?? false;
       // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
       // be able to mutate it (per-sink array or the map) after construction to
@@ -2124,7 +2140,29 @@ export class Runtime {
     wrapped.configureSealDestination(
       this.#transactionSealDestination ?? this.#speculationDestination(),
     );
+    wrapped.configureRuntimeOwnedStores(this.#runtimeOwnedStores);
     return wrapped;
+  }
+
+  /**
+   * Forget the stores enrolled for the piece at `owner` — its own documents
+   * and the state documents its builtins minted. Called when a piece stops,
+   * which is what keeps the enrollment bounded by the pieces running rather
+   * than by every piece the process has ever run. A store another piece — a
+   * second scope instance of this one, say — still holds stays.
+   *
+   * Takes the runtime's write-policy authorization, like the enrollment it
+   * undoes: pattern-authored code reaches this object through a cell, and a
+   * release it made would refuse another piece's writes.
+   */
+  releaseRuntimeOwnedStores(
+    owner: NormalizedFullLink,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): void {
+    if (!runtimeWritePolicyAuthorized(authorization)) return;
+    // The owner stands as its own store here, so the key's space test holds.
+    const key = runtimeOwnedStoreOwnerKey(owner, owner, this.scopeKeyIdentity)!;
+    this.#runtimeOwnedStores.releaseOwner(key);
   }
 
   /**

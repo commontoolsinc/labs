@@ -7,7 +7,8 @@ import { type RawBuiltinResult } from "../module.ts";
 import { type Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
+import { ownedCell } from "./runtime-owned-store.ts";
+import { resolvedCellScope } from "./scope-policy.ts";
 
 /**
  * Argument schema for ifElse. The action value-reads ONLY `condition`; the
@@ -55,13 +56,14 @@ export function ifElse(
   const action: Action = (tx: IExtendedStorageTransaction) => {
     const { cell: conditionCell, value: condition } = readCondition(tx);
     const resultScope = resolvedCellScope(runtime, tx, conditionCell);
-    const baseResult = runtime.getCell<any>(
-      parentCell.space,
+    const result = ownedCell<any>(
+      runtime,
+      tx,
+      parentCell,
       { ifElse: cause },
       undefined,
-      tx,
+      resultScope,
     );
-    const result = scopedCell(runtime, tx, baseResult, resultScope);
     sendResult(tx, result);
     const resultWithLog = result.withTx(tx);
     const inputsWithLog = inputsCell.withTx(tx);

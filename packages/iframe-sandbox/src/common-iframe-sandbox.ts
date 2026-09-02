@@ -1,7 +1,8 @@
-import { css, html, LitElement } from "lit";
+import { css, html, LitElement, type PropertyValues } from "lit";
 import { property } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
 import { type FabricBridge, FabricBridgeHost } from "./bridge.ts";
+import { GuestSessions } from "./guest-sessions.ts";
 import * as IPC from "./ipc.ts";
 import OuterFrame from "./outer-frame.ts";
 
@@ -23,9 +24,6 @@ export class CommonIframeSandboxElement extends LitElement {
     const previousValue = this.#src;
     this.#src = value;
     this.requestUpdate("src", previousValue);
-    if (this.readyWindow && value !== previousValue) {
-      this.#loadInnerDoc();
-    }
   }
 
   get bridge(): FabricBridge | undefined {
@@ -37,9 +35,6 @@ export class CommonIframeSandboxElement extends LitElement {
     const previousValue = this.#bridge;
     this.#bridge = value;
     this.requestUpdate("bridge", previousValue);
-    if (this.readyWindow && value !== previousValue && this.src) {
-      this.#loadInnerDoc();
-    }
   }
 
   @property({ attribute: "load-state", reflect: true })
@@ -58,16 +53,16 @@ export class CommonIframeSandboxElement extends LitElement {
   #src = "";
   #bridge: FabricBridge | undefined;
 
-  /** The capability session belonging to the currently loaded guest. */
-  #guestHost: FabricBridgeHost | undefined;
+  /** The capability sessions on offer to the loaded guest. */
+  #guestSessions = new GuestSessions<FabricBridgeHost>();
 
   /**
    * The frame this element renders, held so the guest can be reached through
    * it. TypeScript-private rather than `#`, as `readyWindow` and
-   * `onOuterReady` also are, because `test/iframe.test.ts` reaches for all
-   * three: it asserts the outer-ready refusal where the refusal is made, and
-   * a frame reports itself ready exactly once, from a window nothing outside
-   * this element can speak for.
+   * `onOuterReady` also are, because `test/iframe.browser.test.ts` reaches for
+   * all three: it asserts the outer-ready refusal where the refusal is made,
+   * and a frame reports itself ready exactly once, from a window nothing
+   * outside this element can speak for.
    */
   private iframeRef: Ref<HTMLIFrameElement> = createRef();
 
@@ -111,13 +106,13 @@ export class CommonIframeSandboxElement extends LitElement {
   }
 
   /**
-   * Gives the newly loaded guest one end of a fresh channel and takes the
-   * other. Each document is its own realm, so each gets a port of its own, and
-   * no earlier one is left open behind it.
+   * Offers the loaded guest one end of a fresh channel and takes the other.
+   * Each document is its own realm, so each gets a port of its own. Whether
+   * this offer reaches a new document or one already holding a port -- which
+   * refuses it -- is settled by which session the guest's requests arrive on;
+   * `GuestSessions` holds what that leaves undecided.
    */
   #openGuestPort() {
-    this.#closeGuestPort();
-
     // The guest is the inner frame, which is a frame of the outer one. A
     // cross-origin frame is unreachable for anything but this: indexed access
     // and `postMessage`, which is what a transfer rides.
@@ -128,21 +123,15 @@ export class CommonIframeSandboxElement extends LitElement {
     }
 
     const channel = new MessageChannel();
-    this.#guestHost = new FabricBridgeHost(
-      this.bridge ?? { resources: {} },
-      channel.port1,
+    this.#guestSessions.offer(
+      new FabricBridgeHost(
+        this.bridge ?? { resources: {} },
+        channel.port1,
+        (session) => this.#guestSessions.retireBefore(session),
+      ),
     );
+    guestWindow.postMessage(IPC.GUEST_PORT_ORDERED, "*");
     guestWindow.postMessage(IPC.GUEST_PORT_HANDOFF, "*", [channel.port2]);
-  }
-
-  /**
-   * Closes the port to the current guest, if there is one. What the guest sends
-   * afterwards reaches nothing, which is the point: the guest on the other end
-   * of a closed port is one this element is done with.
-   */
-  #closeGuestPort() {
-    this.#guestHost?.disconnect();
-    this.#guestHost = undefined;
   }
 
   /** Handles a message from the outer frame. */
@@ -180,7 +169,16 @@ export class CommonIframeSandboxElement extends LitElement {
         // it along without reading it, so this is the first look anything has
         // had at it.
         const raised = outerMessage.data;
-        if (IPC.isGuestAlarm(raised)) {
+        if (IPC.isGuestFlush(raised)) {
+          // Everything the relay carried ahead of this marker has been
+          // handled, which is what the acknowledgement asserts. A marker
+          // cannot say which session its guest holds, so every session on
+          // offer carries the answer; the nonce sees to it that only the
+          // guest that posted this marker acts on one.
+          for (const session of this.#guestSessions.offered) {
+            session.acknowledgeFlush(raised.nonce);
+          }
+        } else if (IPC.isGuestAlarm(raised)) {
           this.#dispatchGuestError(raised.data);
         } else {
           console.error(
@@ -229,7 +227,7 @@ export class CommonIframeSandboxElement extends LitElement {
    * holding it has gone.
    */
   #releaseGuest() {
-    this.#closeGuestPort();
+    this.#guestSessions.closeAll();
   }
 
   /**
@@ -269,6 +267,21 @@ export class CommonIframeSandboxElement extends LitElement {
     queueMicrotask(() => {
       if (!this.isConnected) this.#releaseGuest();
     });
+  }
+
+  /**
+   * Reloads on a change to `src` or `bridge`, once the frame is ready; until
+   * then `onOuterReady` does the first load. Reacting here rather than in the
+   * setters folds a batch of changes into one load: assigning both properties
+   * asks for one document, carrying both new values, rather than reloading
+   * the old document under the new bridge on the way.
+   */
+  protected override updated(changed: PropertyValues) {
+    super.updated(changed);
+    if (!this.readyWindow) return;
+    if (changed.has("src") || (changed.has("bridge") && this.src)) {
+      this.#loadInnerDoc();
+    }
   }
 
   /** @inheritDoc */

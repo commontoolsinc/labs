@@ -2,6 +2,7 @@ import {
   action,
   cellFromUrl,
   type ComparableCell,
+  computed,
   Default,
   equals,
   handler,
@@ -128,6 +129,98 @@ export interface MentionEvent {
   topic: Writable<{ title: string | Default<""> }>;
 }
 
+/**
+ * Retract a comment. The record stays, stamped; nothing is deleted.
+ *
+ * The comment is named by reference, which is the rule `TopicComment` states:
+ * array elements have stable entity identity, so a caller passes the element
+ * rather than a synthetic key nobody minted. A reader hands one over from the
+ * row it is already rendering.
+ */
+export interface RemoveCommentEvent extends AgentAuthoredEvent {
+  /** The comment to retract — the stored element, not a copy of its fields.
+   * Names only what this verb reads and writes, for the reason
+   * `MentionEvent.topic` names only `title`: the declaration bounds the
+   * validation read, and a payload that is not a reference reads back
+   * `undefined` and is refused rather than silently matching nothing.
+   * `sentAt` carries a default, so it is what makes a real element read back
+   * as an object; the stamp fields are optional, which is what lets this
+   * schema reach comments written before they existed. */
+  comment: Writable<{
+    sentAt: number | Default<0>;
+    removedAt?: number;
+    removedBy?: TopicAuthor;
+  }>;
+}
+
+/** Revise a comment's body in place. */
+export interface EditCommentEvent extends AgentAuthoredEvent {
+  /** The comment to revise, named and checked as in `RemoveCommentEvent`,
+   * and additionally naming `body`, which this verb writes. */
+  comment: Writable<{
+    sentAt: number | Default<0>;
+    body: string | Default<"">;
+    editedAt?: number;
+    removedAt?: number;
+  }>;
+
+  /** The complete replacement text, trimmed. Must be non-empty: emptying a
+   * comment is a retraction, and `removeComment` is what says so. */
+  body: string;
+}
+
+/**
+ * Retract a link. The record stays, stamped, and stops resolving into
+ * `mentions`.
+ *
+ * Takes EITHER the stored link or its `url`, and the url spelling is the
+ * reason this verb differs from the others. A link record is not a piece and
+ * carries no fid, so a caller that reaches this verb over the CLI has no way
+ * to name one by reference — and `addLink` is the verb agents use most.
+ * Exactly one of the two must be supplied.
+ */
+export interface RemoveLinkEvent extends AgentAuthoredEvent {
+  /** The stored link element. What a reader passes, from the row it renders.
+   * Named as in `RemoveCommentEvent`, with `url` playing the defaulted-field
+   * role `sentAt` plays there. */
+  link?: Writable<{
+    url: string | Default<"">;
+    removedAt?: number;
+    removedBy?: TopicAuthor;
+  }>;
+
+  /** The link's URL, for a caller that cannot pass a reference. Retracts the
+   * most recently added link still present with this URL, so retracting twice
+   * retracts two rather than re-stamping one.
+   *
+   * Sequentially. Two concurrent retractions naming the same URL both resolve
+   * the same newest-present element and merge into one stamped record, so
+   * they retract one link between them rather than two. Naming the link by
+   * reference is what makes a caller's target unambiguous under concurrency;
+   * this spelling trades that for being reachable at all. */
+  url?: string;
+}
+
+export interface RemoveCommentResult {
+  /** The retraction as stamped, so a caller need not read back to confirm. */
+  removedAt: number;
+  removedBy: TopicAuthor;
+}
+
+export interface EditCommentResult {
+  /** The body as persisted, and when the revision was stamped. */
+  body: string;
+  editedAt: number;
+}
+
+export interface RemoveLinkResult {
+  /** The URL of the link that was retracted, which tells a caller using the
+   * url spelling which of several same-url links it reached. */
+  url: string;
+  removedAt: number;
+  removedBy: TopicAuthor;
+}
+
 /** Stop referencing a piece. */
 export interface UnmentionEvent {
   /** Declared and checked exactly as `MentionEvent.topic` is, and for the same
@@ -189,6 +282,19 @@ export interface TopicComment {
   author?: TopicAuthor;
   body: string | Default<"">;
   sentAt: number | Default<0>;
+
+  /** When the body was last revised, absent on a comment never edited. The
+   * original `sentAt` and `author` are left alone: an edit changes what was
+   * said, not who said it or when the thread reached this point. */
+  editedAt?: number;
+
+  /** Set when the comment was retracted, and the retraction is the whole of
+   * it — the record stays, carrying what it always said. A reader hides it;
+   * `commentCount` stops counting it; `lastActivityOf` keeps reading its
+   * `sentAt`, which is what stops a retraction moving a topic backwards in
+   * the board's ordering. */
+  removedAt?: number;
+  removedBy?: TopicAuthor;
 }
 
 export interface TopicLink {
@@ -197,7 +303,57 @@ export interface TopicLink {
   label: string | Default<"">;
   addedBy?: TopicAuthor;
   addedAt?: number;
+
+  /** As on a comment, and with one consequence of its own: a retracted link
+   * stops resolving into `mentions`, so the reference it contributed goes
+   * with it rather than outliving the link that made it. */
+  removedAt?: number;
+  removedBy?: TopicAuthor;
 }
+
+/**
+ * Whether `candidate` is one of `array`'s own elements.
+ *
+ * "Is a reference" is not the check these verbs need. A cell that reads back
+ * as an object satisfies that while belonging to another piece entirely, and a
+ * verb that then stamps it writes into a document this topic does not own. So
+ * membership is proved by identity against the stored positions, which is the
+ * `equals()` addressing `TopicComment` names in place of a synthetic key.
+ *
+ * This is a tightening rather than a privilege boundary, and it was argued
+ * both ways before landing. A caller gains no authority here they lack
+ * calling the other topic's own verb under the same principal, and
+ * `MentionEvent.topic` accepts a foreign reference by design. What the check
+ * buys is that a wrong argument fails loudly instead of succeeding against
+ * something the caller did not mean to name — the write would otherwise land,
+ * report success, and move a count on a topic nobody was looking at.
+ */
+const isElementOf = (
+  array: {
+    get(): readonly unknown[];
+    key(index: number): { equals(other: object): boolean };
+  },
+  candidate: object,
+): boolean => {
+  const stored = array.get();
+  for (let index = 0; index < stored.length; index++) {
+    if (array.key(index).equals(candidate)) return true;
+  }
+  return false;
+};
+
+/** Whether a stamped record is still live.
+ *
+ * Used where the read is not reactive: `removeLink`'s own body scans the
+ * stored links for the url spelling, and callers outside the pattern — a
+ * test, a script — ask the same question. Inside a `computed()` the predicate
+ * is written out instead, and that is not a style
+ * choice: the schema a reactive read declares is what it can SEE, and a
+ * property tested behind a helper call is not named in it. Filtering through
+ * this function there yields a count that never changes, because `removedAt`
+ * was never demanded and so reads back absent on every element. */
+export const isPresent = (record: { removedAt?: number }): boolean =>
+  record.removedAt === undefined;
 
 export interface TopicInput {
   title?: Writable<string | Default<"">>;
@@ -405,12 +561,20 @@ export interface TopicPiece extends TopicSummary {
   /** The living document, verbatim Markdown. `setBody` replaces it whole. */
   body: string | Default<"">;
 
-  /** The thread, in arrival order: append-only point-in-time records, each
-   * carrying its author snapshot and `sentAt`. */
+  /** The thread, in arrival order, each record carrying its author snapshot
+   * and `sentAt`.
+   *
+   * MEMBERSHIP is append-only; a record is not. Nothing is ever removed from
+   * this array — `removeComment` stamps `removedAt` and leaves the record in
+   * place, and `editComment` revises a body and stamps `editedAt` — so a
+   * reader that wants the live thread filters on `removedAt` rather than
+   * taking the array as it stands. `commentCount` is that filtered count. */
   comments: TopicComment[];
 
-  /** Typed outbound links, in arrival order, each carrying its author
-   * snapshot and `addedAt`. */
+  /** Typed outbound links, in arrival order, each carrying its author snapshot
+   * and `addedAt`. Append-only in membership on the same terms as `comments`:
+   * `removeLink` stamps rather than removes, and a stamped link additionally
+   * stops resolving into `mentions`. */
   links: TopicLink[];
 
   /** Every piece this topic's prose and links point at, as references.
@@ -485,8 +649,11 @@ export interface TopicPiece extends TopicSummary {
  * to sibling pieces.
  *
  * Durable conclusions get folded up into the body — revise it whole with
- * `setBody`; the thread holds the deliberation as append-only, point-in-time
- * `addComment` records. Sign every authored-content mutation with `agentName`:
+ * `setBody`; the thread holds the deliberation as point-in-time `addComment`
+ * records. The thread only ever grows: `removeComment` and `removeLink` stamp
+ * a record as retracted and leave it where it is, and `editComment` revises a
+ * body in place, so what a reader shows is the array filtered rather than the
+ * array itself. Sign every authored-content mutation with `agentName`:
  * Fabric records the human principal behind the key; the name says which
  * agent acted under it. Reference-only `mention` and `unmention` calls carry
  * no content signature. The session-draft cells and `submit*` streams below
@@ -527,6 +694,31 @@ export interface TopicOutput extends TopicPiece {
    * with its attribution. This direct-address verb stays outside the board's
    * narrow `TopicPiece` demand. */
   setTitle: Stream<SetTitleEvent, SetTitleResult>;
+
+  /**
+   * Retract a comment, naming it by reference. The record is stamped rather
+   * than deleted, so the thread keeps its evidence while a reader stops
+   * showing it and `commentCount` stops counting it.
+   *
+   * Here rather than on `TopicPiece`, for the reason `setTitle` is: boards
+   * store that projection, so it is a demand on every topic they already
+   * hold, and a required verb added to it would refuse every one deployed
+   * before the verb existed. A verb has no default to be rescued by, so there
+   * is no compatible way to demand a new one. Addressing the topic directly
+   * reaches all three of these.
+   */
+  removeComment: Stream<RemoveCommentEvent, RemoveCommentResult>;
+
+  /** Revise a comment's body in place, naming it by reference. Stamps
+   * `editedAt` and leaves `author` and `sentAt` as they were. Outside the
+   * projection for the reason `removeComment` states. */
+  editComment: Stream<EditCommentEvent, EditCommentResult>;
+
+  /** Retract a link, by reference or by `url`. Stamped like a comment, and a
+   * retracted link stops resolving into `mentions`. The url spelling exists
+   * because a link record carries no fid for a CLI caller to name. Outside
+   * the projection for the reason `removeComment` states. */
+  removeLink: Stream<RemoveLinkEvent, RemoveLinkResult>;
 
   /** Attribution of the last rename; unset until the first `setTitle`.
    * Beside `setTitle` rather than on the projection, for the same reason. */
@@ -956,22 +1148,45 @@ const mentionsOf = lift((
   ].filter((destination) => destination !== undefined && destination !== null)
 );
 
+/** How many comments are there to read — retracted ones excluded, because the
+ * board's card would otherwise promise more than the topic shows.
+ *
+ * A module-scope `lift` rather than a `computed()` in the pattern body, and
+ * the difference is load-bearing: this value is in the board's demand, so it
+ * is projected onto every stored topic including generations written before
+ * retraction existed. The lift declares `removedAt` in its own parameter,
+ * which is what makes the property visible to the read at all. */
+const presentCommentCountOf = lift((
+  { comments }: { comments: { removedAt?: number }[] },
+): number => comments.filter((c) => c.removedAt === undefined).length);
+
 /** Max of creation, the newest comment, the newest link, the last body save,
- * and the last rename — declared over just those five timestamp surfaces. */
+ * and the last rename — declared over just those five timestamp surfaces.
+ *
+ * Every retracted and edited record still counts here, and that is the point
+ * rather than an oversight. This is a max over what the arrays hold, so
+ * skipping a retracted record would let the answer move BACKWARDS when the
+ * newest comment is the one retracted, reordering the board under a reader.
+ * A stamped retraction cannot do that, and a retraction is itself activity,
+ * so its own stamp moves the clock forward. */
 const lastActivityOf = lift((
   { comments, links, createdAt, bodyUpdatedAt, titleUpdatedAt }: {
-    comments: { sentAt: number }[];
-    links: { addedAt?: number }[];
+    comments: { sentAt: number; editedAt?: number; removedAt?: number }[];
+    links: { addedAt?: number; removedAt?: number }[];
     createdAt: number;
     bodyUpdatedAt: number;
     titleUpdatedAt: number;
   },
 ): number => {
   let newest = Math.max(createdAt, bodyUpdatedAt, titleUpdatedAt);
-  for (const c of comments) newest = Math.max(newest, c.sentAt);
+  for (const c of comments) {
+    newest = Math.max(newest, c.sentAt, c.editedAt ?? 0, c.removedAt ?? 0);
+  }
   // `addedAt` is optional on TopicLink: links written before it existed carry
   // no timestamp and simply do not move the clock.
-  for (const l of links) newest = Math.max(newest, l.addedAt ?? 0);
+  for (const l of links) {
+    newest = Math.max(newest, l.addedAt ?? 0, l.removedAt ?? 0);
+  }
   return newest;
 });
 
@@ -1057,6 +1272,107 @@ export default pattern<TopicInput, TopicOutput>(
           rejectMutation("addLink", "url must be http(s)");
         }
         return { link: appendLink(links, trimmedUrl, kind, label, author) };
+      },
+    );
+
+    const removeComment = action<RemoveCommentEvent, RemoveCommentResult>(
+      ({ comment, agentName }) => {
+        const author = topicAuthorFromAgent(agentName) ??
+          rejectMutation("removeComment", "agentName must be non-blank");
+        // The same reference check `mention` makes, and it earns its place for
+        // the same reason: a payload that is not a reference has no stored
+        // element behind it, so the writes below would land on nothing and
+        // report success.
+        if (!comment || comment.get() === undefined) {
+          rejectMutation("removeComment", "comment must be a reference");
+        }
+        if (!isElementOf(comments, comment)) {
+          rejectMutation("removeComment", "comment is not on this topic");
+        }
+        if (comment.get()?.removedAt !== undefined) {
+          rejectMutation("removeComment", "comment is already retracted");
+        }
+        const removedAt = Date.now();
+        // Two field writes into the element the caller named, not a rewrite of
+        // the array. Concurrent retractions of distinct comments merge, and
+        // every surviving reference stays a reference.
+        comment.key("removedAt").set(removedAt);
+        comment.key("removedBy").set(author);
+        return { removedAt, removedBy: author };
+      },
+    );
+
+    const editComment = action<EditCommentEvent, EditCommentResult>(
+      ({ comment, body: text, agentName }) => {
+        // Checked, not bound: `editComment` requires a signature like every
+        // other mutation here, and then stores nothing from it. `author` and
+        // `sentAt` stay as the comment was written — an edit changes what was
+        // said, not who said it. Fabric still records the principal behind
+        // the write.
+        if (!topicAuthorFromAgent(agentName)) {
+          rejectMutation("editComment", "agentName must be non-blank");
+        }
+        if (!comment || comment.get() === undefined) {
+          rejectMutation("editComment", "comment must be a reference");
+        }
+        if (!isElementOf(comments, comment)) {
+          rejectMutation("editComment", "comment is not on this topic");
+        }
+        if (comment.get()?.removedAt !== undefined) {
+          rejectMutation("editComment", "comment is retracted");
+        }
+        const trimmed = (text ?? "").trim();
+        if (!trimmed) rejectMutation("editComment", "body must be non-empty");
+        const editedAt = Date.now();
+        comment.key("body").set(trimmed);
+        comment.key("editedAt").set(editedAt);
+        return { body: trimmed, editedAt };
+      },
+    );
+
+    const removeLink = action<RemoveLinkEvent, RemoveLinkResult>(
+      ({ link, url, agentName }) => {
+        const author = topicAuthorFromAgent(agentName) ??
+          rejectMutation("removeLink", "agentName must be non-blank");
+        const named = (url ?? "").trim();
+        if (link && named) {
+          rejectMutation("removeLink", "pass link or url, not both");
+        }
+        let target = link;
+        if (!target) {
+          if (!named) {
+            rejectMutation("removeLink", "pass link or url");
+          }
+          // The url spelling resolves to an element the same way the reference
+          // spelling arrives as one, so both paths stamp a stored record.
+          // Newest first, so retracting twice retracts two rather than
+          // re-stamping the one already gone.
+          const stored = links.get();
+          for (let i = stored.length - 1; i >= 0; i--) {
+            const candidate = stored[i];
+            if (candidate?.url === named && isPresent(candidate)) {
+              target = links.key(i) as typeof link;
+              break;
+            }
+          }
+          if (!target) {
+            rejectMutation("removeLink", `no link present with url ${named}`);
+          }
+        } else if (target.get() === undefined) {
+          rejectMutation("removeLink", "link must be a reference");
+        } else if (!isElementOf(links, target)) {
+          rejectMutation("removeLink", "link is not on this topic");
+        } else if (target.get()?.removedAt !== undefined) {
+          rejectMutation("removeLink", "link is already retracted");
+        }
+        const removedAt = Date.now();
+        target!.key("removedAt").set(removedAt);
+        target!.key("removedBy").set(author);
+        return {
+          url: target!.get()?.url ?? named,
+          removedAt,
+          removedBy: author,
+        };
       },
     );
 
@@ -1207,7 +1523,16 @@ export default pattern<TopicInput, TopicOutput>(
     // Each of these reads its own topic's data, which the page renders in full
     // anyway, and the shrunk schemas say so: a `.length` read declares
     // `items: unknown` and never expands an element.
-    const commentCount = comments.get().length;
+    //
+    // Each filtered view goes inside `computed()`: a method call on an opaque
+    // pattern value is not lowerable on its own. The retraction rule is the
+    // same in all three — a stamped record is not there to read — and only
+    // `lastActivityAt` below is deliberately exempt from it.
+
+    // A count of what is there to read, so retracted comments are excluded —
+    // the board's card would otherwise promise more comments than the topic
+    // shows.
+    const commentCount = presentCommentCountOf({ comments });
 
     const lastActivityAt = lastActivityOf({
       comments,
@@ -1217,11 +1542,21 @@ export default pattern<TopicInput, TopicOutput>(
       titleUpdatedAt,
     });
 
-    const commentsView = comments.get().toSorted((a, b) => a.sentAt - b.sentAt);
+    const commentsView = computed(() =>
+      comments.get().filter((c) => c.removedAt === undefined).toSorted((a, b) =>
+        a.sentAt - b.sentAt
+      )
+    );
 
-    const linksView = links.get();
-    const hasLinks = linksView.length > 0;
-    const hasComments = commentCount > 0;
+    const linksView = computed(() =>
+      links.get().filter((l) => l.removedAt === undefined)
+    );
+    const hasLinks = computed(() =>
+      links.get().filter((l) => l.removedAt === undefined).length > 0
+    );
+    const hasComments = computed(() =>
+      comments.get().filter((c) => c.removedAt === undefined).length > 0
+    );
     const hasBody = body.get().trim().length > 0;
 
     // Inbound: who points at this topic, looked up in the board's pivot rather
@@ -1560,8 +1895,18 @@ export default pattern<TopicInput, TopicOutput>(
 
     // A link's URL, asked of `cellFromUrl` once per link. Most answer with no
     // cell — they are web pages — and those simply are not mentions.
-    const linkUrls = links.get().map((link) => link.url ?? "");
-    const linkTargets = linkUrls.map((url) => cellFromUrl({ url }));
+    // One map over an explicitly reactive receiver rather than two chained
+    // ones, which is #6465's shape, adopted here because this rule needs the
+    // whole link record: a retracted link stops resolving, so the reference
+    // it contributed to `mentions` goes with it instead of outliving the
+    // link that made it. The intermediate url-only array could not carry
+    // `removedAt` to say so.
+    const linksToResolve = computed(() =>
+      links.get().filter((l) => l.removedAt === undefined)
+    );
+    const linkTargets = linksToResolve.map((link) =>
+      cellFromUrl({ url: link.url ?? "" })
+    );
     // Outbound: what this topic points at. Only this half depends on the
     // topic's own content, which is what keeps the board's join reading one
     // small list per topic.
@@ -1588,6 +1933,9 @@ export default pattern<TopicInput, TopicOutput>(
       titleUpdatedAt,
       addComment,
       addLink,
+      removeComment,
+      editComment,
+      removeLink,
       setBody,
       setTitle,
       mention,

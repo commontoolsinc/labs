@@ -78,7 +78,9 @@ The current package provides:
   restored session whose recorded history does not pair its tool calls with tool
   results preserves that history and adds explicit unknown-outcome results for
   missing results, while orphan results and duplicate call IDs refuse the
-  session locally rather than sending malformed history to a provider;
+  session locally rather than sending malformed history to a provider; and a
+  listener that cannot take an event is reported to the host as a delivery
+  failure and does not change the outcome of the turn that produced it;
 - CFC modes `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`,
   plus prompt-slot, invocation-context, policy-event, and model-influence
   evidence;
