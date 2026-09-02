@@ -423,14 +423,16 @@ describe("place", () => {
 
             expect(atSpaceRoot().cd(`/${HANDLE}//`)).toEqual({
               kind: "refused",
-              reason: `\`/${HANDLE}//\` has an empty segment.`,
+              reason: `\`/${HANDLE}//\` has an empty segment, ` +
+                `so a rendering of the place would name a different cell.`,
             });
           });
 
           it("refuses a reference holding an empty segment mid-path", () => {
             expect(atSpaceRoot().cd(`/${HANDLE}/a//b`)).toEqual({
               kind: "refused",
-              reason: `\`/${HANDLE}/a//b\` has an empty segment.`,
+              reason: `\`/${HANDLE}/a//b\` has an empty segment, ` +
+                `so a rendering of the place would name a different cell.`,
             });
           });
 
@@ -442,6 +444,20 @@ describe("place", () => {
               space: SPACE,
               piece: HANDLE,
               path: [],
+            });
+          });
+
+          it("refuses a reference holding a padded segment", () => {
+            // A place prints as a reference and a reference is read back
+            // trimmed, so a padded segment would print as the key of its
+            // trimmed spelling. The empty segment above is the other half
+            // of one rule: a segment is admissible when a rendering names
+            // it back.
+
+            expect(atSpaceRoot().cd(`/${HANDLE}/a /b`)).toEqual({
+              kind: "refused",
+              reason: `\`/${HANDLE}/a /b\` has a segment padded with ` +
+                `whitespace, so a rendering of the place would name a different cell.`,
             });
           });
 
@@ -724,6 +740,36 @@ describe("place", () => {
               });
             });
 
+            it("reads `-` as a data key in the first segment", () => {
+              // `-` is matched against the whole operand exactly, where `@`
+              // and a leading `#` are matched against its head. So a key
+              // named `-` is spellable first and those two are not.
+
+              const place = atReferencedPiece();
+              place.cd("-/b");
+              expect(place.place.position).toEqual({
+                kind: "piece",
+                space: SPACE,
+                piece: HANDLE,
+                path: ["-", "b"],
+              });
+            });
+
+            it("reads `..` as a data key through a reference", () => {
+              // `..` is read segment by segment by the walk and by nothing
+              // else, so the reference door carries one as data. That is
+              // the only spelling a key named `..` has.
+
+              const place = atSpaceRoot();
+              place.cd(`/${HANDLE}/..`);
+              expect(place.place.position).toEqual({
+                kind: "piece",
+                space: SPACE,
+                piece: HANDLE,
+                path: [".."],
+              });
+            });
+
             it("reads `..` as a level to leave in a later segment", () => {
               const place = atReferencedPiece();
               place.cd("a/..");
@@ -757,10 +803,19 @@ describe("place", () => {
             });
           });
 
+          it("refuses an operand with a padded segment", () => {
+            expect(atSpaceRoot().cd("slugs/ board")).toEqual({
+              kind: "refused",
+              reason: "`slugs/ board` has a segment padded with whitespace, " +
+                "so a rendering of the place would name a different cell.",
+            });
+          });
+
           it("refuses an operand with an empty segment", () => {
             expect(atSpaceRoot().cd("slugs//board")).toEqual({
               kind: "refused",
-              reason: "`slugs//board` has an empty segment.",
+              reason: "`slugs//board` has an empty segment, " +
+                "so a rendering of the place would name a different cell.",
             });
           });
         });
@@ -926,8 +981,33 @@ describe("place", () => {
             ),
           ).toEqual({
             kind: "refused",
-            reason: "`#favorites` resolves to a path with an empty segment.",
+            reason: "`#favorites` resolves to a path with an empty " +
+              "segment, so a rendering of the place would name a different cell.",
           });
+        });
+
+        it("refuses a target whose path holds a padded segment", () => {
+          expect(
+            atSpaceRoot().enter(
+              { space: SPACE, piece: HANDLE, path: ["a "] },
+              "#favorites",
+            ),
+          ).toEqual({
+            kind: "refused",
+            reason: "`#favorites` resolves to a path with a segment padded " +
+              "with whitespace, so a rendering of the place would name a different cell.",
+          });
+        });
+
+        it("keeps the scope the place was reading through", () => {
+          // A resolved target names a cell and carries no scope of its own,
+          // so the scope the place already holds is what it is read
+          // through.
+
+          const place = atSpaceRoot();
+          place.cd("@session");
+          place.enter({ space: SPACE, piece: HANDLE }, "#favorites");
+          expect(place.place.scope).toBe("session");
         });
 
         it("refuses a target that resolved in another space", () => {
@@ -992,6 +1072,27 @@ describe("place", () => {
               "and this shuttle is connected to " +
               "`did:key:z6MkConnectedSpace`. One connection serves one " +
               "space.",
+          });
+          expect(place.place).toEqual(placeAtSpaceRoot(SPACE));
+        });
+
+        it("refuses a move whose path holds a segment no rendering names", () => {
+          // The arm is exported, so a caller can build one. `cd` cannot
+          // mint a bad path any more, which leaves a hand-built move as the
+          // way in — and this door builds a position from it exactly as
+          // `enter` builds one from a resolved target.
+
+          const place = atSpaceRoot();
+          expect(place.settle({
+            kind: "space-by-name",
+            name: "estuary",
+            piece: HANDLE,
+            path: ["a "],
+            scope: "space",
+          }, SPACE)).toEqual({
+            kind: "refused",
+            reason: `\`${HANDLE}\` has a segment padded with whitespace, ` +
+              `so a rendering of the place would name a different cell.`,
           });
           expect(place.place).toEqual(placeAtSpaceRoot(SPACE));
         });

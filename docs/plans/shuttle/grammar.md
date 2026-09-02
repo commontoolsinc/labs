@@ -57,14 +57,23 @@ prefix, overriding it with the embedded space when one is present. A
 rooted reference is therefore exactly as space-dependent as a relative
 one; it is the piece and path it fixes, not the space.
 
-Where a reading is decided says where it holds. `-`, `@scope`, and a lone
-leading `#` are read on the whole operand before it is split, so each
-governs the operand's head and is an ordinary data character in every later
-segment. `..` and an empty segment are read segment by segment, so they are
-reserved wherever they appear — which is why a key named `..` has no
-relative spelling at all, while a key named `-` has one in any position but
-the first. `/` is neither: it is the separator, so a lone `/` is an operand
-of its own and no segment holds one.
+How a reading is matched says where it holds, and there are three ways.
+`-` and a lone `/` are matched against the whole operand exactly, so
+neither governs a segment: a key named `-` is reachable relatively wherever
+it is not the whole operand. `@scope` and a lone leading `#` are matched
+against the operand's head, so each governs a first segment and is an
+ordinary data character in every later one. `..` is matched segment by
+segment as the walk splits them, so it is reserved in all of them and a key
+named `..` has no relative spelling — it reaches a place through a
+reference, the door that reads no `..` at all. `/` is the separator
+besides, so no segment of an operand holds one, and a key that does is
+spelled `~1`, which a reference unescapes and a walk does not.
+
+However a reading is matched, a segment no rendering would name back —
+empty, or padded with whitespace — is refused at every door. A place prints
+as a reference, and a reference is read back trimmed and with a trailing
+empty segment dropped, so a place holding such a segment would print as a
+reference to a different cell.
 
 A segment lifted out of a rendering is an operand in its own right, so
 these readings decide it rather than the key it was printed from.

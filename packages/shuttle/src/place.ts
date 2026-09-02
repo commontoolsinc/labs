@@ -71,10 +71,12 @@ export interface PiecePosition {
   readonly piece: string;
 
   /**
-   * Path inside the piece's result; empty while standing at the piece. No
-   * segment of it is itself empty: the reference grammar drops a trailing
-   * empty segment, so a path ending in one would render as a reference to
-   * the piece above it and name a different cell.
+   * Path inside the piece's result; empty while standing at the piece. Every
+   * segment of it is one a rendering names back: neither empty nor padded
+   * with whitespace, because a place prints as a reference and a reference
+   * is read back trimmed and with a trailing empty segment dropped. A path
+   * holding either would render as a reference to a different cell — the
+   * piece above it, or the key of the trimmed spelling.
    */
   readonly path: readonly PathSegment[];
 }
@@ -179,7 +181,9 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
  * container's own rendering from resolving as a piece whose slug happens to
  * match. `cd` reads a piece rendering back whole, except where a path segment
  * holds a `#`, which the reference grammar reserves: `cd` refuses such a
- * rendering rather than reading it as some other cell. The scope renders here
+ * rendering rather than reading it as some other cell. A segment holding a
+ * newline splits the two lines this prints rather than the reference inside
+ * them, so what breaks there is the format. The scope renders here
  * rather than through the reference serializer, which emits no suffix for the
  * base scope.
  */
@@ -249,6 +253,10 @@ export class CurrentPlace {
         `\`${move.name}\` resolves to space \`${confirmed}\``,
         connected,
       ));
+    }
+    const fault = firstUnnameableSegment(move.path);
+    if (fault !== undefined) {
+      return this.#commit(refuseUnnameableSegment(move.piece, fault));
     }
     return this.#commit(land({
       position: {
@@ -387,7 +395,10 @@ function moveByReference(
   operand: string,
 ): Step {
   if (reference.input === true) return refuseArgumentSuffix();
-  if (reference.path.includes("")) return refuseEmptySegment(operand);
+  const badSegment = firstUnnameableSegment(reference.path);
+  if (badSegment !== undefined) {
+    return refuseUnnameableSegment(operand, badSegment);
+  }
   const scope = reference.scope ?? place.scope;
   if (reference.embeddedSpace !== undefined) {
     return {
@@ -425,7 +436,8 @@ function moveBySegments(from: Standing, operand: string): Step {
 
   let moved = from;
   for (const segment of segments) {
-    if (segment === "") return refuseEmptySegment(operand);
+    const fault = unnameableSegment(segment);
+    if (fault !== undefined) return refuseUnnameableSegment(operand, fault);
     const step = segment === ".." ? moveUp(moved) : moveDown(moved, segment);
     if (step.kind !== "moved") return step;
     moved = step.to;
@@ -555,8 +567,12 @@ function enterTarget(
       place.position.space,
     );
   }
-  if (target.path?.includes("")) {
-    return refuse(`\`${operand}\` resolves to a path with an empty segment.`);
+  const badSegment = firstUnnameableSegment(target.path ?? []);
+  if (badSegment !== undefined) {
+    return refuse(
+      `\`${operand}\` resolves to a path with ${badSegment}, so a rendering ` +
+        `of the place would name a different cell.`,
+    );
   }
   return land({
     ...place,
@@ -602,13 +618,42 @@ function refuseOtherSpace(clause: string, connected: MemorySpace): Step {
 }
 
 /**
- * Helper for the movers, which refuses `operand` for holding an empty path
- * segment. A position's path holds none, because the reference grammar drops
- * a trailing empty segment: a position holding one would render as a
- * reference naming the piece above it.
+ * Helper for the movers, which names what stops a rendering of a path
+ * holding `segment` from naming that path back, and returns nothing when
+ * nothing does.
+ *
+ * A place prints as a reference, and a reference is read back trimmed and
+ * with a trailing empty segment dropped. So an empty segment renders as the
+ * piece above, and a padded one renders as the key of its trimmed spelling.
+ * A number renders as its digits and always names itself back.
  */
-function refuseEmptySegment(operand: string): Step {
-  return refuse(`\`${operand}\` has an empty segment.`);
+function unnameableSegment(segment: PathSegment): string | undefined {
+  if (typeof segment === "number") return undefined;
+  if (segment === "") return "an empty segment";
+  if (segment !== segment.trim()) return "a segment padded with whitespace";
+  return undefined;
+}
+
+/** Helper for the movers, which is the first fault in `path`, if it has one. */
+function firstUnnameableSegment(
+  path: readonly PathSegment[],
+): string | undefined {
+  for (const segment of path) {
+    const fault = unnameableSegment(segment);
+    if (fault !== undefined) return fault;
+  }
+  return undefined;
+}
+
+/**
+ * Helper for the movers, which refuses `operand` for a segment no rendering
+ * names back, `fault` saying which segment and why.
+ */
+function refuseUnnameableSegment(operand: string, fault: string): Step {
+  return refuse(
+    `\`${operand}\` has ${fault}, so a rendering of the place would name a ` +
+      `different cell.`,
+  );
 }
 
 /** Helper for the movers, which builds a refusal carrying `reason`. */
