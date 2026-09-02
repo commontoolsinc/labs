@@ -188,6 +188,7 @@ import { setResultCell } from "./result-utils.ts";
 import {
   describePatternOrModule,
   extractDefaultValues,
+  foldStoredArgumentSlots,
   mergeSchemaDefaults,
   sanitizeDebugLabel,
   schemaAcceptsOpaqueCellValue,
@@ -2193,6 +2194,7 @@ export class Runner {
     argumentLink: NormalizedFullLink,
     argument: T,
     argumentSchema: JSONSchema | undefined,
+    projection: unknown = argument,
   ): void {
     // The argument link can come from the result cell's stored `argument`
     // meta, which need not name the document this result cell's cause mints
@@ -2224,12 +2226,21 @@ export class Runner {
     // a serialized pattern graph it previously stopped at -- a function halts
     // its descent, a record does not -- and record structural-provenance
     // claims from positions it has never seen.
+    //
+    // What it walks is what this setup PROJECTS, which is `projection`: the
+    // argument itself wherever the two are one value, and the caller's own
+    // argument where the value being written folded the stored document's
+    // slots in. Each redirect it finds records a setup-projection marker, and
+    // a marker exempts writes at-or-below its target from `writeAuthorizedBy`
+    // for the rest of the transaction (`writeIsPatternSetupInitialization` in
+    // cfc/prepare.ts), so the redirects it walks are the ones this setup
+    // establishes rather than the ones the document already held.
     recordSetupProjectionPolicyInputs(
       tx,
       this.runtime,
       argumentCell,
       argumentSchema,
-      argument,
+      projection,
     );
     diffAndUpdate(
       this.runtime,
@@ -2444,8 +2455,13 @@ export class Runner {
     if (setupState.sameStoredSetup) {
       const argumentLink = getMetaLink(resultCell, "argument")!;
       const defaults = extractDefaultValues(pattern.argumentSchema);
-      const nextArgument = mergeSchemaDefaults(
+      const supplied = mergeSchemaDefaults(
         argument,
+        defaults,
+        pattern.argumentSchema,
+      );
+      const nextArgument = mergeSchemaDefaults(
+        this.#argumentOverStoredSlots(tx, argumentLink, argument),
         defaults,
         pattern.argumentSchema,
       );
@@ -2461,6 +2477,7 @@ export class Runner {
         argumentLink,
         nextArgument,
         pattern.argumentSchema,
+        supplied,
       );
       return { resultCell, patternRef, needsStart: false };
     }
@@ -2612,6 +2629,23 @@ export class Runner {
   }
 
   /**
+   * The argument to write for a piece whose argument document already exists,
+   * built from `argument` over the slots that document holds. The stored read
+   * goes through `tx`, so the write it shapes sits in the same conflict set.
+   */
+  #argumentOverStoredSlots<T>(
+    tx: IExtendedStorageTransaction,
+    argumentLink: NormalizedFullLink,
+    argument: T,
+  ): T {
+    if (argument === undefined) return argument;
+    const stored = this.runtime
+      .getCellFromLink(argumentLink, undefined, tx)
+      .getRaw({ meta: ignoreReadForScheduling });
+    return foldStoredArgumentSlots(argument, stored);
+  }
+
+  /**
    * When this function is first called, the resultCell may not have its
    * internal, argument, and pattern cells set up, so do that here.
    */
@@ -2642,6 +2676,9 @@ export class Runner {
     );
 
     let nextArgument: T | undefined = argument;
+    // What the setup projects, where that is not the value being written. Set
+    // only where the two differ; the write below falls back to `nextArgument`.
+    let suppliedProjection: T | undefined;
     let argumentUpdated = false;
     // The argument meta field of the result cell should be a link to the
     // argument cell. If it doesn't exist, we need to apply the defaults
@@ -2676,7 +2713,16 @@ export class Runner {
       if (argumentLink === undefined) {
         throw new Error("Invalid argument link in updateArgument");
       }
-    } else if (restageStoredArgument) {
+    } else if (!restageStoredArgument) {
+      // Same stored setup over an argument document that already exists. The
+      // write below replaces the whole document, so it carries the slots this
+      // caller does not name: a nested piece is replayed with the argument its
+      // parent's expression carries — `Poll({ votes })` names one slot — and
+      // the piece's own state lives in the rest. What the setup PROJECTS stays
+      // the argument this caller supplied.
+      suppliedProjection = argument;
+      nextArgument = this.#argumentOverStoredSlots(tx, argumentLink, argument);
+    } else {
       const previousArgumentCell = this.runtime.getCellFromLink(
         argumentLink,
         undefined,
@@ -2753,6 +2799,7 @@ export class Runner {
         argumentLink,
         nextArgument,
         pattern.argumentSchema,
+        suppliedProjection ?? nextArgument,
       );
     }
 

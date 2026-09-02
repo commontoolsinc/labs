@@ -408,6 +408,29 @@ export function mergeObjects<T>(
 }
 
 /**
+ * Fold the slots a stored argument holds into the argument a caller supplied,
+ * so a write of the result leaves untouched every top-level slot the caller
+ * did not name. A supplied slot wins over the stored one at every key it
+ * carries, including a key it carries as `undefined`.
+ *
+ * Both operands must be plain records for there to be slots to fold; anything
+ * else (a scalar, an array, a link) is a whole value, and the supplied one
+ * stands as it is.
+ */
+export function foldStoredArgumentSlots<T>(
+  supplied: T,
+  stored: unknown,
+): T {
+  if (
+    !isFabricPlainObject(supplied as FabricValue) || isCellLink(supplied) ||
+    !isFabricPlainObject(stored as FabricValue) || isCellLink(stored)
+  ) {
+    return supplied;
+  }
+  return { ...stored as object, ...supplied as object } as T;
+}
+
+/**
  * Merge schema defaults into an existing argument while avoiding optional
  * object defaults that would create an invalid partial value on their own.
  */
