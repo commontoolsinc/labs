@@ -24,7 +24,7 @@
 // fixed, so the check is an equality and a reader learns what is running.
 //
 // Usage: deno run --allow-read --allow-net=api.github.com --allow-env \
-//          ./tasks/check-action-pins.ts
+//          ./tasks/check-action-pins.ts [repository root]
 //
 // Set GITHUB_TOKEN (or GH_TOKEN) to raise the API rate limit from 60 requests
 // an hour to 5000.
@@ -198,7 +198,10 @@ async function* yamlPaths(directory: string): AsyncGenerator<string> {
   }
 }
 
-export async function main(root: string = REPO_ROOT): Promise<number> {
+export async function main(
+  root: string = REPO_ROOT,
+  resolve: Resolver = resolveFromGitHub,
+): Promise<number> {
   const base = `${root}/.github`;
   const steps: Step[] = [];
   for await (const path of yamlPaths(base)) {
@@ -218,7 +221,7 @@ export async function main(root: string = REPO_ROOT): Promise<number> {
 
   const problems: string[] = [];
   for (const key of [...distinct.keys()].sort()) {
-    const problem = await checkStep(distinct.get(key)!, resolveFromGitHub);
+    const problem = await checkStep(distinct.get(key)!, resolve);
     if (problem !== null) problems.push(problem);
   }
 
@@ -235,4 +238,4 @@ export async function main(root: string = REPO_ROOT): Promise<number> {
   return 0;
 }
 
-if (import.meta.main) Deno.exit(await main());
+if (import.meta.main) Deno.exit(await main(Deno.args[0] ?? REPO_ROOT));
