@@ -51,7 +51,7 @@ jobs:
       # an immutable commit, so a moved tag cannot alter the one privileged
       # write path.
       - name: 📥 Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -91,7 +91,7 @@ jobs:
 
       - name: 🔑 Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           project_id: commontools-core
           workload_identity_provider: ${{ vars.TEST_RECORDS_RELAY_WIF_PROVIDER }}
@@ -101,7 +101,7 @@ jobs:
 
       - name: 📥 Download test-records artifacts
         if: steps.run.outputs.artifact-count != '0'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: test-records-*
           path: test-records-artifacts

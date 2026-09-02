@@ -49,7 +49,7 @@ jobs:
       # repository's arrangement for every workflow rather than something
       # this one sets.
       - name: 📥 Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -58,7 +58,7 @@ jobs:
 
       - name: 🔑 Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           project_id: commontools-core
           workload_identity_provider: ${{ vars.TEST_RECORDS_COMPACTOR_WIF_PROVIDER }}

@@ -59,7 +59,7 @@ runs:
     # `cache: false` are covered too.
     - name: 💾 Restore Deno toolchain ${{ steps.resolve.outputs.version }}
       id: deno-toolchain-cache
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.tool_cache }}/deno/${{ steps.resolve.outputs.version }}
         key: deno-bin-${{ runner.os }}-${{ runner.arch }}-${{ steps.resolve.outputs.version }}
@@ -76,7 +76,7 @@ runs:
       # into the cached path above, so actions/cache saves it at job end and
       # later runs hit.
       if: steps.deno-toolchain-cache.outputs.cache-hit != 'true'
-      uses: denoland/setup-deno@v2
+      uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
       with:
         deno-version: ${{ steps.resolve.outputs.version }}
 
@@ -103,7 +103,7 @@ runs:
     # Cache version: bump to invalidate all caches (e.g., v2 -> v3)
     - name: 📦 Cache Deno dependencies
       if: inputs.cache == 'true'
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           ~/.deno
@@ -155,7 +155,7 @@ runs:
     - name: 🗃️ Restore SQLite native library ${{ steps.sqlite.outputs.version }}
       id: sqlite-cache
       if: inputs.cache == 'true' && steps.sqlite.outputs.version != ''
-      uses: actions/cache/restore@v6
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           ~/.cache/deno/plug
@@ -185,7 +185,7 @@ runs:
       # Runs only after a verified download, so a failed or misplaced download never
       # persists an empty cache under this version's key.
       if: inputs.cache == 'true' && steps.sqlite.outputs.version != '' && steps.sqlite-cache.outputs.cache-hit != 'true' && steps.sqlite-download.outcome == 'success'
-      uses: actions/cache/save@v6
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           ~/.cache/deno/plug
