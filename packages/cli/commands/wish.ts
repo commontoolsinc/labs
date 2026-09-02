@@ -1,12 +1,13 @@
 import { Command, ValidationError } from "@cliffy/command";
 import { type DID, isDID } from "@commonfabric/identity";
 import { parseCellPath } from "@commonfabric/runner";
+import { normalizeApiUrl } from "../lib/api-url.ts";
 import { cliText } from "../lib/cli-name.ts";
 import { refuseSectionMarker } from "../lib/section-marker.ts";
 import { render } from "../lib/render.ts";
 import { getDidFromFile } from "../lib/identity.ts";
 import { absPath } from "../lib/utils.ts";
-import { normalizeApiUrl, setQuietMode } from "./piece.ts";
+import { setQuietMode } from "./piece.ts";
 import { projectWishValue, readWish } from "../lib/wish.ts";
 import {
   type CellSelection,

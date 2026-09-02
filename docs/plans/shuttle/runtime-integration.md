@@ -254,7 +254,7 @@ Each of these is small and lands on its own; together they are what decision
    and `call` all reach. It wants a sink of its own rather than the hint
    stream, because `--quiet` deliberately does not silence it, and a memo
    per connection rather than per process — its `receipted` set, which
-   item 6 names beside the other two globals.
+   item 6 names among the state one process's callers share.
 
    The second is **lib-internal warnings no seam reaches**, all in
    `lib/piece.ts`, and the sweep is of every `console.*` there rather
@@ -283,13 +283,49 @@ Each of these is small and lands on its own; together they are what decision
    them, but writes nothing unless `CF_CLI_TRACE_TIMINGS=1` asks it to.
 
    Sweep each as views need it captured.
-6. **Module-global state.** `quietMode` is a file-level `let` set on every
-   `FromCommand` entry; `setLLMUrl` is a global written by both `loadPieces`
-   and `PiecesController.initialize`, so two connections on different API
-   URLs would fight; and `receipted` (`lib/write-receipt.ts`) memoizes the
-   write receipt per process, so a long-lived shell names a space once and
-   stays silent for every write after. Scope them, or accept
-   one-connection-per-process for v1 and record the limit.
+6. **Module-global state.** Done, as the recorded limit rather than as
+   scoping: **shuttle v1 holds one connection per process**, revisited
+   when multiple places arrive ([`futures.md`](futures.md) candidate 3).
+   Three kinds of state are the process's rather than a connection's, and
+   the first kind is what a connection writes for itself — the endpoint
+   `setLLMUrl` holds, written by `loadPieces` and by
+   `PiecesController.initialize` in another package; the base URL
+   `getPatternEnvironment()` hands a pattern's relative `fetch`, which the
+   `remoteClient` preset pins from `apiUrl`; and the ambient experimental
+   flags a `Runtime` applies as it is built (`modernCellRep`,
+   `contentAddressedSchemas`, `readerSchemaPrecedence`), which for a CLI
+   connection come from the deployment itself. The second is the posture a
+   caller sets: `quietMode`, which each `FromCommand` entry writes and
+   which therefore stands as the last caller left it. The third is a memo
+   of work already done: `receipted` (`lib/write-receipt.ts`), so a shell
+   holding a connection names a space once and stays silent for every
+   write after, and the version-skew note `deferSkewNoteUntilFailureExit`
+   holds for a failure exit, which is one note about one server and prints
+   at process end.
+
+   What a check can reach is narrower than the limit, and the two are not
+   the same claim. `claimProcessDeployment` (`lib/process-deployment.ts`)
+   refuses a connection to a second *deployment*: `loadPieces` claims the
+   one it opens against, and a connection to a different one throws
+   naming both rather than rewriting the first's settings. That is the
+   bound where those settings actually fight, and it is weaker than the
+   limit in two directions. A second connection to the *same* deployment
+   passes — it writes the same settings, and it is what a verb reaching an
+   un-injected library function already does — so the posture and the two
+   memos rest on the limit alone. And a connection opened through
+   `PiecesController.initialize` directly, as `packages/fuse` and
+   `packages/cf-harness` open one, passes no claim at all.
+
+   Three declarations name it, all of them in `packages/cli`: `quietMode`
+   and `receipted` say what holds of them under it, and `loadPieces` says
+   what it refuses and where the reasoning is kept. The globals in
+   `packages/llm` and `packages/runner` belong to other packages and say
+   nothing about it, so this inventory is the only record of them — and
+   the part of it that goes stale first if nobody reads it back against
+   those files. What `packages/cli/README.md` records is the deployment
+   rule, on `cf`'s own terms: one connection per process is false of `cf`,
+   where a single verb opens several, so the connection limit is recorded
+   here, and a shuttle process is what holds to it.
 7. **Disposal.** `withRuntimeCleanupOnFailure` disposes only on throw; the
    success path relies on process exit. In a long-lived shell every
    un-injected call leaks a runtime, a storage manager, and a WebSocket —

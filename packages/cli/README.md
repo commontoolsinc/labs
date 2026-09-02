@@ -347,6 +347,31 @@ replayable only within the session it was chosen in, and a session minted on the
 spot would make the replay name a different invocation. A call naming neither
 gets both, minted for that one call.
 
+## One deployment per process
+
+A `cf` process talks to one deployment. Opening a connection writes settings
+that belong to the deployment into state that belongs to the process — the
+endpoint an LLM call reaches, the base URL a pattern's relative `fetch` resolves
+against, the ambient experimental flags a runtime applies — and none of it is
+scoped to the connection that wrote it. So a connection to a second deployment
+is refused, naming both, rather than rewriting what the first one set while the
+first connection carries on against the new settings. `claimProcessDeployment`
+in `lib/process-deployment.ts` is where that is decided, and `loadPieces` claims
+on the way to opening a connection. What counts as the same deployment is the
+spelling `cf` normalizes an API URL to, so a trailing slash or a query string
+does not make a second one. Two deployments therefore need two processes, and
+restarting is how one process changes deployment — a claim stands whether or not
+the connection it was made for opened, so a well-formed host that answers
+nothing holds it too.
+
+One invocation of `cf` reaches one deployment, so the limit costs a command
+nothing. What it constrains is a caller holding a connection across many
+commands, and two more pieces of state constrain that caller the same way with
+no check behind them, because a second connection to one deployment is
+indistinguishable from the several a single verb already opens: the hint posture
+`--quiet` sets, which stands as the last caller left it, and the write receipt's
+memo, which names a space once for the life of the process.
+
 ## Output Conventions
 
 - stdout carries command output only; hints and diagnostics go to stderr.

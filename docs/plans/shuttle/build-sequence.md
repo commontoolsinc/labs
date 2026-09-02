@@ -79,14 +79,25 @@ drawing its own screen. The bulk seams — survey, repair, retarget,
 Each threaded seam carries the test the override makes possible: an
 injected exit that throws, and the report read back as a value.
 
-**A5 — module-global state.** `quietMode` is a file-level `let`;
-`setLLMUrl` is written by both `loadPieces` and
-`PiecesController.initialize`; `receipted` (`lib/write-receipt.ts`)
-memoizes the write receipt per process, so a shell names a space once and
-says nothing for the writes after. Either scope them per connection, or
-land a recorded limit: one connection per process for shuttle v1,
-revisited when multiple places arrive. The cheap honest move is the
-recorded limit; the PR is whichever the review rules.
+**A5 — module-global state.** Done (#6717), as the recorded limit rather
+than as scoping: **shuttle v1 holds one connection per process**, revisited
+when
+multiple places arrive ([`futures.md`](futures.md) candidate 3). What the
+limit covers is `quietMode` (`commands/piece.ts`), the process's hint
+posture; `receipted` (`lib/write-receipt.ts`), which memoizes the write
+receipt for the life of the process; and a connection's own settings —
+the LLM endpoint, the base URL a pattern's relative `fetch` resolves
+against, and the ambient experimental flags a `Runtime` applies — which
+land in globals under `packages/llm` and `packages/runner` that no
+connection owns. Part of that is mechanically enforced and the rest is
+prose: `claimProcessDeployment` (`lib/process-deployment.ts`) refuses a
+connection to a second *deployment*, a weaker bound than the limit and
+the one where those settings actually fight, since a verb reaching an
+un-injected library function opens another connection to the same
+deployment as a matter of course. The three declarations that name the
+limit are all in `packages/cli`; the inventory, both bounds, and the
+globals in the other two packages, recorded there and nowhere else, are
+in item 6 of [`runtime-integration.md`](runtime-integration.md).
 
 ## Stage B — the shuttle package
 

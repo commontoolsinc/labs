@@ -30,7 +30,6 @@ import {
   getCellValueFromCommand,
   localPatternEntry,
   mergePiecePath,
-  normalizeApiUrl,
   parseLink,
   parsePieceOptions,
   parseSpaceOptions,
@@ -42,6 +41,7 @@ import {
   setPieceSourceFromCommand,
   setsrcSuccessLine,
 } from "../commands/piece.ts";
+import { normalizeApiUrl } from "../lib/api-url.ts";
 import {
   CellSelectionError,
   parseCellSelectionOptions,
