@@ -3,6 +3,10 @@ import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 
 import type { HarnessRunArtifacts } from "../src/artifacts.ts";
+import {
+  harnessFabricSessionPosture,
+  renderCfcPostureReport,
+} from "../src/cfc-posture.ts";
 import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
 import {
   buildCfHarnessBaseSystemPrompt,
@@ -2318,6 +2322,14 @@ Deno.test("runCfHarnessCli registers and disposes signal handlers around a run",
   ]);
 });
 
+/** The record a max-enforcement session resolves, as the engine records it. */
+const POSTURED_SESSION_RECORD = harnessFabricSessionPosture({
+  apiUrl: "https://toolshed.example/",
+  identityKeyPath: "/keys/agent.pkcs8",
+  space: "my-space",
+  cfcPosture: "max-enforcement",
+});
+
 Deno.test("runCfHarnessCli prints the fabric-session posture bundle in the operator summary", async () => {
   const { io, stdout } = createIoBuffers();
   const exitCode = await runCfHarnessCli(
@@ -2352,6 +2364,7 @@ Deno.test("runCfHarnessCli prints the fabric-session posture bundle in the opera
                   flowLabels: "persist",
                   flowLabelsSource: "posture",
                   posture: "max-enforcement",
+                  record: POSTURED_SESSION_RECORD,
                 },
                 currentDir: "/workspace",
                 policyEvents: [],
@@ -2373,6 +2386,75 @@ Deno.test("runCfHarnessCli prints the fabric-session posture bundle in the opera
     ),
     true,
   );
+  // The two itemized dials say which the operator set; the record under them
+  // says what every dial resolved to, which sinks release ungated, and that
+  // the record is a projection. A summary carrying only the first reads as a
+  // posture without showing one.
+  assertEquals(
+    summary.includes("provenance"),
+    true,
+  );
+  assertEquals(summary.includes("UNGATED"), true);
+  for (
+    const line of renderCfcPostureReport(POSTURED_SESSION_RECORD)
+  ) {
+    assertEquals(summary.includes(line), true);
+  }
+});
+
+Deno.test("runCfHarnessCli omits the posture record for a run that recorded none", async () => {
+  // A run predating the record keeps the two itemized dials and nothing
+  // invented under them.
+  const { io, stdout } = createIoBuffers();
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--prompt",
+      "hello",
+      "--gateway-auth-mode",
+      "none",
+    ],
+    {
+      io,
+      env: {},
+      createPromptLoop: () => ({
+        runPrompt: () =>
+          Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Done.",
+              transcript: [],
+              modelTurns: 1,
+              runState: {
+                runId: "run-legacy-posture-summary",
+                status: "completed",
+                createdAt: "2026-04-16T20:10:00.000Z",
+                updatedAt: "2026-04-16T20:10:01.000Z",
+                cfcEnforcementMode: "enforce-explicit",
+                fabricSessionCfc: {
+                  enforcementMode: "enforce-explicit",
+                  enforcementModeSource: "preset-pin",
+                  flowLabels: "persist",
+                  flowLabelsSource: "posture",
+                  posture: "max-enforcement",
+                },
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          ),
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  const summary = stdout.join("");
+  assertEquals(summary.includes("fabricSessionCfc: enforce-explicit"), true);
+  assertEquals(summary.includes("provenance"), false);
 });
 
 Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata", async () => {

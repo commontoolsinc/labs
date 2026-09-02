@@ -18,6 +18,7 @@ import {
   resolveHarnessConfig,
   type ResolveHarnessConfigOptions,
 } from "./config.ts";
+import { harnessFabricSessionPosture } from "./cfc-posture.ts";
 import {
   createHarnessCfcInvocationContext,
   type HarnessCfcInvocationContext,
@@ -694,6 +695,15 @@ export class CfHarnessEngine {
     // restate what `runtimePresets.remoteClient` and the Runtime constructor
     // supply when the dial is unset (`coreOptions` in
     // `packages/runner/src/runtime-presets.ts`).
+    // A host that supplies its own session factory overrides the config the
+    // projection is computed from, so `config.fabricSession` no longer
+    // describes the runtime that will execute. Publishing a record from it
+    // would assert a posture nothing honors — the very shape this record
+    // exists to make visible — so the record is omitted and the two itemized
+    // dials stand alone, which is what the config still truthfully says was
+    // asked for.
+    const sessionFactoryOverridesConfig = options.fabricSessionFactory !==
+      undefined;
     const fabricSessionCfc = this.config.fabricSession !== undefined
       ? {
         enforcementMode: this.config.fabricSession.cfcEnforcementMode ??
@@ -714,6 +724,9 @@ export class CfHarnessEngine {
         ...(this.config.fabricSession.cfcPosture !== undefined
           ? { posture: this.config.fabricSession.cfcPosture }
           : {}),
+        ...(sessionFactoryOverridesConfig
+          ? {}
+          : { record: harnessFabricSessionPosture(this.config.fabricSession) }),
       }
       : undefined;
     // A resumed run keeps its recorded fabric-session posture, so a session
@@ -742,7 +755,20 @@ export class CfHarnessEngine {
       } else if (
         recorded.enforcementMode !== fabricSessionCfc.enforcementMode ||
         recorded.flowLabels !== fabricSessionCfc.flowLabels ||
-        recorded.posture !== fabricSessionCfc.posture
+        recorded.posture !== fabricSessionCfc.posture ||
+        // A resume whose session comes from an injected factory publishes no
+        // record, so a recorded one cannot be current: it describes a runtime
+        // this resume is not building.
+        (sessionFactoryOverridesConfig && recorded.record !== undefined) ||
+        // The whole record too, where the run recorded one. The two dials
+        // above can agree while a dial neither of them names has moved under
+        // the run — a changed runtime default, a changed posture bundle — and
+        // a resume that kept the recorded record would attest a posture the
+        // executing runtime is not at. A run that recorded no record predates
+        // one and is compared on the dials alone.
+        (recorded.record !== undefined &&
+          JSON.stringify(recorded.record) !==
+            JSON.stringify(fabricSessionCfc.record))
       ) {
         throw new Error(
           `fabric session CFC posture mismatch on resume: run state records ` +

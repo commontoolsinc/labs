@@ -141,10 +141,15 @@ Deno.test("createToolshedRuntime publishes the posture it resolved", async () =>
     // The CFC posture publishes alongside, from the same constructed Runtime
     // (lib/cfc-posture.ts): the preset core pin plus constructor defaults.
     const cfc = cfcPosture();
-    assertEquals(cfc?.enforcementMode, "enforce-explicit");
-    assertEquals(cfc?.flowLabels, "off");
+    assertEquals(cfc?.enforcementMode.rung, "enforce-explicit");
+    assertEquals(cfc?.flowLabels.rung, "off");
+    assertEquals(cfc?.flowLabels.diagnosticOnly, true);
     assertEquals(cfc?.policyDigest, null);
-    assertEquals(cfc?.sinkCeilings, []);
+    // Every known sink is named, none of them ceilinged: a server that has
+    // configured nothing publishes ten ungated sinks rather than an empty
+    // list a reader could take for full coverage.
+    assertEquals(cfc?.sinks.length, 10);
+    assertEquals(cfc?.sinks.every((sink) => "ungated" in sink), true);
     assertEquals(posture?.modernCellRep, true);
     // Resolved, not passed: the env reader said nothing about these, and a
     // client adopting the posture needs the values in effect rather than the

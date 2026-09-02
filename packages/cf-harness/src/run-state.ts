@@ -1,4 +1,7 @@
-import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type {
+  CfcEnforcementMode,
+  CfcPostureReport,
+} from "@commonfabric/runner/cfc";
 import type { HarnessCfcInvocationContext } from "./contracts/cfc-invocation-context.ts";
 import {
   appendHarnessCfcModelContextObservations as appendCfcModelContextObservations,
@@ -94,6 +97,25 @@ export interface HarnessFabricSessionCfcPosture {
    * `MAX_ENFORCEMENT_CFC_OPTIONS` in the runner's presets.
    */
   posture?: "max-enforcement";
+
+  /**
+   * The session runtime's whole posture, as the shared record every surface
+   * publishes (`cfc-posture.ts`). The itemized fields above are the two dials
+   * an operator sets and where each came from; this is what those dials, the
+   * named bundle, and the runtime's own defaults resolve to — every dial, the
+   * policy digest, every known sink governed or explicitly not, and every
+   * published deviation.
+   *
+   * Absent on a run recorded before the record existed. Such a run stays
+   * frozen as history rather than being backfilled: the values would be this
+   * checkout's resolution, not the run's.
+   *
+   * Absent too when a host supplied its own session factory. That factory
+   * overrides the configuration this record is projected from, so the
+   * configuration no longer describes the runtime that will execute, and a
+   * record from it would assert a posture nothing honors.
+   */
+  record?: CfcPostureReport;
 }
 
 export interface HarnessRunState {

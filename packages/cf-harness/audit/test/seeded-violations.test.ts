@@ -25,7 +25,10 @@ import type {
 import type { HarnessRunReport } from "../../src/contracts/run-report.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
 import type { HarnessRunState } from "../../src/run-state.ts";
-import { auditRunFamily, STRUCTURAL_CHECKS } from "../checks/structural.ts";
+import { RUN_CHECKS } from "../checks/registry.ts";
+import { auditRunFamily } from "../checks/structural.ts";
+import { harnessFabricSessionPosture } from "../../src/cfc-posture.ts";
+import type { HarnessFabricSessionCfcPosture } from "../../src/run-state.ts";
 import {
   loadRunFamily,
   type RunEvidence,
@@ -39,7 +42,7 @@ const family = await loadRunFamily(join(FIXTURE_RUNS_DIR, FIXTURE_RUN_ID));
 /** Every check's verdict, keyed by check and run. */
 const verdicts = (audited: RunFamily): Record<string, CheckVerdict> =>
   Object.fromEntries(
-    auditRunFamily(audited).map((
+    auditRunFamily(audited, RUN_CHECKS).map((
       result,
     ) => [`${result.checkId}@${result.runId}`, result.verdict]),
   );
@@ -114,6 +117,68 @@ const transcriptOf = (
   return run.transcript.value as Mutable<HarnessTranscriptMessage>[];
 };
 
+/**
+ * The fabric-session posture a run recorded when it ran a session at all.
+ *
+ * The fixture tree records none — the runs it was captured from had no
+ * fabric session — so the Group C cases install one first. It is built the
+ * way the harness builds it, from a session config, rather than written out
+ * by hand: a hand-written record would pass these checks by agreeing with
+ * the checks rather than by being what a session resolves.
+ */
+const CONFORMING_SESSION_POSTURE: HarnessFabricSessionCfcPosture = {
+  enforcementMode: "enforce-explicit",
+  enforcementModeSource: "preset-pin",
+  flowLabels: "persist",
+  flowLabelsSource: "posture",
+  posture: "max-enforcement",
+  record: harnessFabricSessionPosture({
+    apiUrl: "https://fabric.test/",
+    identityKeyPath: "/dev/null",
+    space: "did:key:seeded",
+    cfcPosture: "max-enforcement",
+  }),
+};
+
+/**
+ * A recorded posture as a seeding step may edit it.
+ *
+ * The posture record's fields are `readonly` all the way down, which is right
+ * for the code that produces it and wrong here: what a violation is, is a
+ * record saying something its producer would not have written.
+ */
+type DeepMutable<T> = { -readonly [K in keyof T]: DeepMutable<T[K]> };
+
+/** The family with a conforming session posture installed on its root run. */
+const withSessionPosture = (
+  mutate: (posture: DeepMutable<HarnessFabricSessionCfcPosture>) => void,
+): RunFamily =>
+  seeded((root) => {
+    const posture = structuredClone(
+      CONFORMING_SESSION_POSTURE,
+    ) as DeepMutable<HarnessFabricSessionCfcPosture>;
+    mutate(posture);
+    stateOf(root).fabricSessionCfc = posture;
+  });
+
+/** Every verdict of the family once a conforming session posture is installed. */
+const SESSION_CLEAN = verdicts(withSessionPosture(() => {}));
+
+/**
+ * Asserts that seeding `mutate` into the session posture turns exactly
+ * `checkId`'s verdict, against the baseline where that posture is conforming.
+ */
+const sessionTurnsOnly = (
+  checkId: string,
+  expected: CheckVerdict,
+  mutate: (posture: DeepMutable<HarnessFabricSessionCfcPosture>) => void,
+): void => {
+  expect(verdicts(withSessionPosture(mutate))).toEqual({
+    ...SESSION_CLEAN,
+    [at(checkId)]: expected,
+  });
+};
+
 describe("seeded violations", () => {
   describe("the clean fixture", () => {
     it("finds nothing to report against any check", () => {
@@ -126,7 +191,7 @@ describe("seeded violations", () => {
 
     it("exercises every check on the run that carries the delegation", () => {
       expect(
-        STRUCTURAL_CHECKS.filter((check) => CLEAN[at(check.id)] === undefined)
+        RUN_CHECKS.filter((check) => CLEAN[at(check.id)] === undefined)
           .map((check) => check.id),
       ).toEqual([]);
     });
@@ -135,14 +200,14 @@ describe("seeded violations", () => {
   describe("check registration", () => {
     it("names what falsifies every check", () => {
       expect(
-        STRUCTURAL_CHECKS.filter((check) => check.falsifiedBy.trim() === "")
+        RUN_CHECKS.filter((check) => check.falsifiedBy.trim() === "")
           .map((check) => check.id),
       ).toEqual([]);
     });
 
     it("gives every check a distinct id", () => {
-      expect(new Set(STRUCTURAL_CHECKS.map((check) => check.id)).size).toBe(
-        STRUCTURAL_CHECKS.length,
+      expect(new Set(RUN_CHECKS.map((check) => check.id)).size).toBe(
+        RUN_CHECKS.length,
       );
     });
   });
@@ -290,6 +355,60 @@ describe("seeded violations", () => {
     it("fails a labeled observation stripped from the model context", () => {
       turnsOnly("AUD-8", "fail", (root) => {
         stateOf(root).cfcModelContext!.observations = [];
+      });
+    });
+  });
+
+  describe("the conforming session posture", () => {
+    it("passes the matrix and the drift check, and names the llm gap", () => {
+      // The baseline the Group C cases move away from. AUD-14 is a WARN here
+      // by design: the max-enforcement posture leaves the llm sinks ungated,
+      // and the always-emitted finding is what publishes that rather than
+      // leaving it to be inferred from a sink's absence.
+      expect(SESSION_CLEAN[at("AUD-13")]).toBe("pass");
+      expect(SESSION_CLEAN[at("AUD-14")]).toBe("warn");
+      expect(SESSION_CLEAN[at("AUD-15")]).toBe("not-applicable");
+      expect(SESSION_CLEAN[at("AUD-15a")]).toBe("pass");
+    });
+  });
+
+  describe("AUD-13 conforming matrix point", () => {
+    it("fails a strict run whose flow labels are not persisted", () => {
+      sessionTurnsOnly("AUD-13", "fail", (posture) => {
+        posture.record!.enforcementMode.rung = "enforce-strict";
+        posture.record!.flowLabels.rung = "off";
+      });
+    });
+
+    it("warns a run whose policy evaluation only observes", () => {
+      sessionTurnsOnly("AUD-13", "warn", (posture) => {
+        posture.record!.policyEvaluation.rung = "observe";
+      });
+    });
+  });
+
+  describe("AUD-14 ungated sink coverage", () => {
+    it("fails a record that publishes no deviation while a sink is ungated", () => {
+      sessionTurnsOnly("AUD-14", "fail", (posture) => {
+        posture.record!.deviations = [];
+      });
+    });
+
+    it("retires once every known sink carries a ceiling", () => {
+      sessionTurnsOnly("AUD-14", "not-applicable", (posture) => {
+        posture.record!.sinks = posture.record!.sinks.map((sink) => ({
+          sink: sink.sink,
+          ceiling: [],
+        }));
+      });
+    });
+  });
+
+  describe("AUD-15a default-sourced dial drift", () => {
+    it("fails a default-sourced flow dial under a max-enforcement claim", () => {
+      sessionTurnsOnly("AUD-15a", "fail", (posture) => {
+        posture.flowLabels = "off";
+        posture.flowLabelsSource = "default";
       });
     });
   });

@@ -58,6 +58,7 @@ import {
   type HarnessSubagentProfile,
 } from "./contracts/subagent.ts";
 import { type BuiltinToolId } from "./contracts/tool-descriptor.ts";
+import { renderCfcPostureReport } from "./cfc-posture.ts";
 import type {
   HarnessTranscriptEvent,
   HarnessTranscriptMessage,
@@ -2564,6 +2565,9 @@ export const formatCfHarnessCliResult = (
         posture.posture !== undefined ? `, posture ${posture.posture}` : ""
       }`,
     );
+    if (posture.record !== undefined) {
+      lines.push(...renderCfcPostureReport(posture.record));
+    }
   }
   if (
     result.runState.wellKnownGrants !== undefined &&

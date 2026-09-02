@@ -12,7 +12,26 @@
  * Line numbers are deliberately absent. A clause id and a quote survive a
  * document being reordered; a line number names a different clause the moment
  * a paragraph is inserted above it.
+ *
+ * A check names a clause with a KIND, because there are two honest ways to
+ * rest on one and they carry different authority. `required-by` says the
+ * clause states the requirement the check enforces — a finding is the
+ * specification speaking. `extends` says the check serves the clause's purpose
+ * without the clause stating it — a finding is our judgment, and the clause is
+ * why we think the judgment is worth having. Citing a clause as `required-by`
+ * when it does not state the requirement lends specification authority to a
+ * check the specification never asked for, which is the same divergence this
+ * table exists to prevent, pointed inward.
  */
+
+/**
+ * How a check rests on a clause.
+ *
+ * - `required-by` — the clause states the requirement the check enforces.
+ * - `extends` — the check serves the clause's purpose; the clause does not
+ *   state the requirement. The finding is ours, not the specification's.
+ */
+export type CitationKind = "required-by" | "extends";
 
 /** One clause an audit check rests on. */
 export interface SpecCitation {
@@ -37,6 +56,7 @@ export interface SpecCitation {
 
 const CFC_SPEC = "docs/specs/agent-harness/02-cfc-integration.md";
 const RUNTIME_SPEC = "docs/specs/agent-harness/01-runtime-contract.md";
+const MATRIX_SPEC = "docs/specs/cfc-enforcement-matrix.md";
 
 /**
  * Every citation the checks draw on, keyed by the clause id where the clause
@@ -120,6 +140,36 @@ export const SPEC_CITATIONS = {
     quote:
       "This is a diagnostic mode and MUST NOT be described as CFC enforcement.",
   },
+  "MATRIX-conforming": {
+    doc: MATRIX_SPEC,
+    clause: "\u00a73 Conforming deployment states",
+    quote:
+      "A **conforming state** is one where no enforcement consumes a label the flow dial is not yet producing.",
+  },
+  "MATRIX-strict-persist": {
+    doc: MATRIX_SPEC,
+    clause: "\u00a73 Non-conforming",
+    quote:
+      "any `enforce-strict` with `cfcFlowLabels \u2260 persist` (strict consumes derived labels the dial isn't producing)",
+  },
+  "MATRIX-persist-pointless": {
+    doc: MATRIX_SPEC,
+    clause: "\u00a73 Non-conforming",
+    quote:
+      "is *permitted but pointless* (labels written, never consulted) \u2014 a warning, not an error.",
+  },
+  "MATRIX-floor-credits-nothing": {
+    doc: MATRIX_SPEC,
+    clause: "\u00a72 rule 3",
+    quote:
+      "the floor credits the flow meet only when `cfcFlowLabels: persist` (else it credits nothing, fail-closed)",
+  },
+  "MATRIX-trigger-one-hop": {
+    doc: MATRIX_SPEC,
+    clause: "\u00a72 rule 4",
+    quote:
+      "Multi-hop closure requires `cfcFlowLabels: persist` stamping the intermediate doc's derived label so the second hop's trigger read picks it up.",
+  },
   "AH-LIFE-6": {
     doc: RUNTIME_SPEC,
     clause: "AH-LIFE-6",
@@ -137,7 +187,25 @@ export const SPEC_CITATIONS = {
 /** A key of {@link SPEC_CITATIONS}. */
 export type SpecCitationKey = keyof typeof SPEC_CITATIONS;
 
-/** The citations a check declares, in the order it named them. */
-export const citationsFor = (
+/** One clause a check rests on, and how. */
+export interface CheckCitation extends SpecCitation {
+  kind: CitationKind;
+}
+
+/**
+ * Clauses that STATE what the check enforces. A finding citing one of these
+ * is the specification speaking.
+ */
+export const requiredBy = (
   ...keys: readonly SpecCitationKey[]
-): readonly SpecCitation[] => keys.map((key) => SPEC_CITATIONS[key]);
+): readonly CheckCitation[] =>
+  keys.map((key) => ({ ...SPEC_CITATIONS[key], kind: "required-by" }));
+
+/**
+ * Clauses whose purpose the check serves without their stating its
+ * requirement. A finding citing only these is our judgment, and says so.
+ */
+export const extendsClause = (
+  ...keys: readonly SpecCitationKey[]
+): readonly CheckCitation[] =>
+  keys.map((key) => ({ ...SPEC_CITATIONS[key], kind: "extends" }));

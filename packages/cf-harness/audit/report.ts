@@ -9,7 +9,7 @@
  * the check's subject does not arise in this run.
  */
 
-import type { SpecCitation } from "./citations.ts";
+import type { CheckCitation } from "./citations.ts";
 
 /**
  * How a check turned out.
@@ -61,7 +61,7 @@ export interface CheckResult {
   /** One sentence stating what the check found. */
   message: string;
 
-  citations: readonly SpecCitation[];
+  citations: readonly CheckCitation[];
   evidence: readonly CheckEvidence[];
 }
 
