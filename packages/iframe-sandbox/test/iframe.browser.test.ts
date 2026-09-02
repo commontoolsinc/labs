@@ -215,6 +215,43 @@ ${GUEST_EPILOG}`;
   }
 });
 
+Deno.test("loads the last document asked for when a second is asked for before the first has loaded", async () => {
+  cleanupFixtures();
+  try {
+    const context = new ContextShim({}, ["ran"]);
+    const body = (label: string) =>
+      `${GUEST_PROLOG}
+set("ran", ${JSON.stringify(label)});
+${GUEST_EPILOG}`;
+    const iframe = await render(body("first"), context);
+    await waitForContextValue(
+      context,
+      iframe,
+      "ran",
+      (value) => value === "first",
+    );
+
+    // Two documents asked for in one turn, so the second request reaches the
+    // outer frame while the first is still loading. Whichever document loads
+    // gets the port and writes its label, so the wait accepts either label
+    // and the assertion names the right one, which fails a wrong document at
+    // once rather than by the harness timeout.
+    // @ts-ignore This is a lit property.
+    iframe.src = body("second");
+    // @ts-ignore This is a lit property.
+    iframe.src = body("third");
+    await waitForContextValue(
+      context,
+      iframe,
+      "ran",
+      (value) => value === "second" || value === "third",
+    );
+    assertEquals(context.get(iframe, "ran"), "third");
+  } finally {
+    cleanupFixtures();
+  }
+});
+
 Deno.test("cancels subscriptions between documents", async () => {
   cleanupFixtures();
   try {

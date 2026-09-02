@@ -28,17 +28,14 @@ iframe {
   <\/style>
 <\/head>
 <body>
-<iframe
-  allow="clipboard-write"
-  sandbox="allow-popups allow-popups-to-escape-sandbox allow-scripts allow-modals"><\/iframe>
 <script>
-const iframe = document.querySelector("iframe");
 const HOST_ORIGIN = "${HOST_ORIGIN}";
 const HOST_WINDOW = window.parent;
-const INNER_WINDOW = iframe.contentWindow;
-let documentAsked = false;
 
-iframe.addEventListener("load", onInnerLoad);
+// The frame holding the guest, once the host has asked for a document. Each
+// document gets a frame of its own; see \`loadDocument()\`.
+let inner = null;
+
 window.addEventListener("message", onMessage);
 window.addEventListener("error", onOuterError);
 
@@ -48,7 +45,7 @@ function onMessage(e) {
   // Anything the guest posts here is forwarded without being read. It has a
   // port for every capability operation, so this route carries
   // only a guest reporting that it could not use that port.
-  if (e.source === INNER_WINDOW) {
+  if (inner && e.source === inner.contentWindow) {
     toHost({ type: "guest-error", data: e.data });
     return;
   }
@@ -58,19 +55,32 @@ function onMessage(e) {
   }
 
   if (e.data && e.data.type === "load-document") {
-    documentAsked = true;
-    iframe.srcdoc = e.data.data;
+    loadDocument(e.data.data);
   }
 }
 
-function onInnerLoad(e) {
-  // The frame fires this for the empty document it starts on, before there is
-  // a guest at all. Reporting that one would announce a load the host never
-  // asked for and offer a port to nothing, so the first document the host asks
-  // for is where this starts counting.
-  if (!documentAsked) {
-    return;
+// Loads \`html\` as the guest, in a fresh frame that replaces the one before
+// it. Removing a frame discards its browsing context, and with it any load
+// still in flight, so the document that ends up loaded is the one asked for
+// last however closely the requests follow one another. A frame given two
+// \`srcdoc\`s within a few milliseconds does not promise that: Chrome 152
+// commits the first document and drops the second.
+function loadDocument(html) {
+  if (inner) {
+    inner.remove();
   }
+  inner = document.createElement("iframe");
+  inner.setAttribute("allow", "clipboard-write");
+  inner.setAttribute(
+    "sandbox",
+    "allow-popups allow-popups-to-escape-sandbox allow-scripts allow-modals",
+  );
+  inner.addEventListener("load", onInnerLoad);
+  inner.srcdoc = html;
+  document.body.appendChild(inner);
+}
+
+function onInnerLoad() {
   // The host takes this as its cue to hand the new document a port: a fresh
   // document is a fresh realm, and the port the previous one held died with
   // it.
