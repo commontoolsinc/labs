@@ -373,6 +373,83 @@ refuses a clause a policy evaluation would have discharged. A residual stands wh
 computed document, from a schema-carrying write: it stops being a write
 ceiling there, and stays a read floor.
 
+A third narrowing does not skip the measurement but answers it. The runtime
+materializes documents to hold a piece's MACHINERY rather than data an author
+named: a piece's argument, result and internal documents, minted by the runner
+from the piece's result cause; the state documents a builtin mints from its own
+node's cause; and the documents that anchoring splits out of a value written
+into any of those. The atoms these carry are a property of the transaction that
+filled them, so a declaration written into a schema either misses them or
+over-declares every instance of the pattern. §8.12.5's route 2 is what the
+runtime uses instead: the write that puts the join on a path also declares, in
+that same transaction, a policy covering it — the ceiling that resolved at the
+path plus exactly the clauses that had nowhere to go. The store's promise
+becomes the audience of what it holds, rather than the check being skipped.
+
+This is not a new route. §8.12.8's component table already names "explicit
+store-label operations (upgrades per §8.12.5 …)" as a provenance of the
+declared component, alongside schema `ifc` declarations — so a runtime-made
+upgrade is a sanctioned way for that component to change, and §8.12.5 option 2
+states the discipline: atomically tighten the store's label, then write. The
+runtime declares in the transaction that writes, which is that atomicity.
+
+What the widening adds is that the route runs on every write to such a store
+rather than only while a piece is being set up, and what licenses that is a
+property of the declaration rather than of when it is made. A declared clause
+list is a ceiling under §8.12.4 — `canWrite` asks that the store's declared
+confidentiality be at least as restrictive as the data's, which is `∃` a
+declared clause subsuming each label clause — and it is the reader's floor
+under the same section: a reader is tainted by at least the declared label, and
+§8.12.8 makes reader taint consume the effective label, which always includes
+the declared component. Subsumption makes the two agree: satisfying a declared
+clause implies satisfying the label it admits, so every reader of the store
+satisfies every clause the store admits. Each upgrade therefore admits more
+data AND narrows the audience by the same step. An unbounded reactive stream of
+upgrades leaves the store readable by fewer principals than it started with,
+never by more, which is why the route needs no bound on how often it may fire
+or on which clauses a later transaction may contribute. §8.12.5's own
+soundness argument is the same one: existing readers already expect data at the
+original label level.
+
+The route adds CLAUSES and never alternatives, which is the line §8.12.7 and
+safety invariant 1 draw. Adding a clause is the tightening §8.12.1 admits.
+Adding an alternative to a clause already stored grows that clause's reader set
+and is a widening, which those sections admit only through a grant record
+consulted at access time or an intent-gated declassification event — neither of
+which a write-side fit check is or could be. The mint folds clause LISTS, so a
+stored disjunction comes back with the alternatives it went in with.
+
+The cost is §8.12.2's ratchet: a store that once held data derived from a
+labeled read keeps that clause after the read stops, which is the over-taint
+direction. Its end state is a declared list whose clauses have disjoint
+audiences, which no principal satisfies — the store keeps admitting writes and
+stops being readable. §8.12.7 records that outcome for its own case as safe and
+an operational footgun worth flagging in review, and the direction here is the
+same: refusal, not disclosure.
+
+The claim that a store is the runtime's is made by the runtime, never measured
+from an input's own fields: the recording method is on the public transaction
+interface, so a marker without the runtime's authorization names nothing, and
+neither does one naming a store outside the owner's own space. It lasts for one
+transaction where the store is minted and filled in one go, and is enrolled for
+as long as the piece's nodes run where the store is written by the reactive
+updates, event handlers and settled requests that follow the mint. Ownership
+passes to an anchored child, whose id is derived from its parent's rather than
+named by an author. A document nobody named is untouched: a write to an
+ordinary document measures against its own ceiling whichever transaction makes
+it, so widening the route in time does not widen it in scope.
+
+Two costs sit outside the store, and both belong to the route rather than to
+the widening. The declared list is a conjunction every reader carries, so a
+store accumulating clauses with disjoint audiences ends up readable by nobody
+while still admitting writes — §8.12.2's ratchet reaching its end, refusal
+rather than disclosure. And a transaction that could not commit now commits, so
+whatever else it staged proceeds: a post-commit effect, a sink request. A
+builtin whose store moves onto the route therefore needs something else to
+refuse its request, which is a `sink-request` ceiling where the builtin stages
+one and nothing where it does not. Contract text in
+`docs/specs/cfc-enforcement-matrix.md` §4; tests `cfc-writer-fit.test.ts`.
+
 (d) **[normative] Residency fit — the ceiling a document carries by living
 where it lives.** The fit measurement joins the target's declared policy with
 one RESIDENCY clause, `Space(<the space the document resides in>)`. A flow

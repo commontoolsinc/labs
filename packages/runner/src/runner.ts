@@ -100,6 +100,7 @@ import {
   toMemorySpaceAddress,
 } from "./link-utils.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
+import { runtimeOwnedStoreOwnerKey } from "./cfc/runtime-owned-stores.ts";
 import {
   resolveScopeKey,
   type ScopeKey,
@@ -172,7 +173,7 @@ import {
   validateSchemaValue,
 } from "./cfc/schema-sanitization.ts";
 import {
-  CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
+  CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type ImplementationIdentity,
   runtimeWritePolicyAuthorization,
@@ -952,11 +953,14 @@ const recordSetupProjectionPolicyInputs = (
 };
 
 /**
- * Name `substrate` as a document this transaction is setting `resultCell`'s
- * piece up in.
+ * Name `substrate` as a store the runtime owns for `resultCell`'s piece — its
+ * result document, its argument document, or an internal document or stream
+ * its result projects to. The result document is the one address on the route
+ * an author chose rather than the runtime derived, so a schema declaring at a
+ * written path there keeps its own policy and the route stands aside.
  *
- * A piece's substrate holds whatever the setup transaction read, and an
- * author cannot know which atoms a given transaction will carry, so no
+ * Such a store holds whatever the transaction filling it read, and an author
+ * cannot know which atoms a given transaction will carry, so no
  * confidentiality declaration written into a schema covers it. CFC's
  * write-side fit check (spec §8.12.4) reads this marker and declares that
  * policy itself; `docs/specs/cfc-enforcement-matrix.md` §4 states the route.
@@ -969,9 +973,11 @@ const recordSetupProjectionPolicyInputs = (
  *
  * The marker carries the runtime's authorization, which is what the fit check
  * asks for: the method that records it is reachable from anything holding a
- * cell, so an unmarked marker naming the same document counts for nothing.
+ * cell, so an unmarked marker naming the same document counts for nothing. It
+ * names the store for THIS transaction; the enrollment that carries the claim
+ * into later ones is {@link enrollPieceOwnedStores}.
  */
-const recordPieceSubstrate = (
+const recordRuntimeOwnedStore = (
   tx: IExtendedStorageTransaction,
   resultCell: Cell<any>,
   substrate: NormalizedFullLink,
@@ -985,7 +991,7 @@ const recordPieceSubstrate = (
       scope: substrate.scope,
       path: [...substrate.path],
     },
-    claim: CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
+    claim: CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
     sources: [{
       space: result.space,
       id: result.id,
@@ -995,14 +1001,91 @@ const recordPieceSubstrate = (
   }, runtimeWritePolicyAuthorization);
 };
 
-/** Whether two links name the same document, each at that document's root. */
-const sameRootDocument = (
-  left: NormalizedFullLink,
-  right: NormalizedFullLink,
-): boolean =>
-  left.space === right.space && left.id === right.id &&
-  left.scope === right.scope && left.path.length === 0 &&
-  right.path.length === 0;
+/**
+ * The stores the runtime owns for `resultCell`'s piece: its result document,
+ * its argument document, and each internal document its result projects to.
+ *
+ * Every address but the first is MINTED from `resultCell`'s cause, never read
+ * back out of stored metadata: a stored `argument` or manifest link can name
+ * another document — a nested piece's argument lives in its host's — and that
+ * document is its owner's store rather than this piece's. What the piece does
+ * not actually write is harmless to name, because nobody else mints these
+ * addresses.
+ *
+ * The RESULT document is the exception, and the weakest member of the set. It
+ * is often minted from a node's cause — a nested piece's is `{resultFor}`, and
+ * that is the case the widening exists for — but a top-level piece's is an
+ * address its caller chose, and unlike the others it HAS a value schema: the
+ * pattern's `resultSchema`, which an author may write `ifc` into. So the
+ * "no schema can declare this" argument does not carry it. What carries it is
+ * narrower: from the moment setup writes this piece's meta into it, the
+ * document is that piece's store, and the runtime fills it with what the
+ * transaction read. Where the author DID declare, `remintedDeclaredPaths`
+ * hands the path back to them and the route declines. Where they did not, the
+ * route reaches every path written there — by any writer, not only by the
+ * runtime, since what it tests is the store rather than the caller.
+ */
+const pieceOwnedStores = (
+  tx: IExtendedStorageTransaction,
+  resultCell: Cell<any>,
+  pattern: Pattern,
+): NormalizedFullLink[] => [
+  resultCell.getAsNormalizedFullLink(),
+  getMetaCell(resultCell, "argument", tx).getAsNormalizedFullLink(),
+  ...(pattern.derivedInternalCells ?? []).map((descriptor) =>
+    getDerivedInternalCellLink(resultCell, descriptor)
+  ),
+];
+
+/**
+ * Name this piece's stores for the transaction setting it up. Setup fills them
+ * in the transaction that names them, so the marker is all it needs.
+ */
+const markPieceOwnedStores = (
+  tx: IExtendedStorageTransaction,
+  resultCell: Cell<any>,
+  pattern: Pattern,
+): void => {
+  for (const store of pieceOwnedStores(tx, resultCell, pattern)) {
+    recordRuntimeOwnedStore(tx, resultCell, store);
+  }
+};
+
+/**
+ * Name this piece's stores and ENROLL them, which is what the graph about to
+ * run needs: its reactive updates, event handlers and settled requests each
+ * write on a transaction of their own, and none of them names anything.
+ *
+ * Called at node instantiation rather than at setup, so that a piece started
+ * from its stored identity — a cold replica loading one — enrolls too, and so
+ * that a setup attempt that never commits enrolls nothing. It runs again on
+ * every re-instantiation, which is idempotent; the enrollment goes out once,
+ * with the piece, at the release `startCore` registers.
+ */
+const enrollPieceOwnedStores = (
+  tx: IExtendedStorageTransaction,
+  resultCell: Cell<any>,
+  pattern: Pattern,
+): void => {
+  const owner = resultCell.getAsNormalizedFullLink();
+  const identity = resultCell.runtime.scopeKeyIdentity;
+  for (const store of pieceOwnedStores(tx, resultCell, pattern)) {
+    recordRuntimeOwnedStore(tx, resultCell, store);
+    // Same space by construction: every store here is minted in the result
+    // cell's space, which is the owner's.
+    const ownerKey = runtimeOwnedStoreOwnerKey(store, owner, identity)!;
+    tx.enrollRuntimeOwnedStore(
+      {
+        space: store.space,
+        id: store.id,
+        scope: store.scope,
+        path: [...store.path],
+      },
+      ownerKey,
+      runtimeWritePolicyAuthorization,
+    );
+  }
+};
 
 type SetupResult<R> = {
   resultCell: Cell<R>;
@@ -2203,22 +2286,11 @@ export class Runner {
 
   #updateArgument<T>(
     tx: IExtendedStorageTransaction,
-    resultCell: Cell<any>,
     argumentLink: NormalizedFullLink,
     argument: T,
     argumentSchema: JSONSchema | undefined,
     projection: unknown = argument,
   ): void {
-    // The argument link can come from the result cell's stored `argument`
-    // meta, which need not name the document this result cell's cause mints
-    // — a nested piece's argument lives in its HOST's document. Mark the
-    // substrate only where the two agree, so the marker never claims a store
-    // this piece does not own.
-    const mintedArgument = getMetaCell(resultCell, "argument", tx)
-      .getAsNormalizedFullLink();
-    if (sameRootDocument(argumentLink, mintedArgument)) {
-      recordPieceSubstrate(tx, resultCell, mintedArgument);
-    }
     const argumentCell = this.runtime.getCellFromLink(
       argumentLink,
       undefined,
@@ -2268,7 +2340,6 @@ export class Runner {
    * reject the transaction unless the resulting value satisfies its schema. */
   #updateAndValidateArgument<T>(
     tx: IExtendedStorageTransaction,
-    resultCell: Cell<any>,
     argumentLink: NormalizedFullLink,
     argument: T,
     argumentSchema: JSONSchema,
@@ -2276,7 +2347,6 @@ export class Runner {
   ): void {
     this.#updateArgument(
       tx,
-      resultCell,
       argumentLink,
       argument,
       argumentSchema,
@@ -2486,7 +2556,6 @@ export class Runner {
       // pattern-changing updates always take the validated path below.
       this.#updateArgument(
         tx,
-        resultCell,
         argumentLink,
         nextArgument,
         pattern.argumentSchema,
@@ -2608,13 +2677,6 @@ export class Runner {
         link: derivedSigilLink,
       });
       setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));
-      // Minted from the result cell's cause, so this address is the piece's
-      // own by construction.
-      recordPieceSubstrate(
-        tx,
-        resultCell,
-        getDerivedInternalCellLink(resultCell, descriptor),
-      );
       if (manifestMatch === -1) {
         // Seed the build-time default for the freshly created cell. The
         // manifest entry and this default are written together in one
@@ -2670,6 +2732,15 @@ export class Runner {
     argument: T,
     resultCell: Cell<R>,
   ): void {
+    // Every write below fills a store this piece owns — the argument
+    // document, each internal document the result projects to, and the result
+    // document the projection lands in — so the transaction making them has to
+    // name them. This is the one place all of that happens, and it is reached
+    // on a transaction of its own from a pattern swap and from a start repair
+    // as well as from `setupInternal`, neither of which the instantiation's
+    // enrollment covers: a swap commits its setup before instantiating, and a
+    // descriptor the incoming pattern adds is a document nothing has named.
+    markPieceOwnedStores(tx, resultCell, pattern);
     const { sameStoredSetup, restageStoredArgument } = setupState;
     const defaults = extractDefaultValues(pattern.argumentSchema);
     let argumentLink = getMetaLink(resultCell, "argument");
@@ -2792,7 +2863,6 @@ export class Runner {
         // case — so the merge yields a value.)
         this.#updateAndValidateArgument(
           tx,
-          resultCell,
           argumentLink,
           nextArgument,
           pattern.argumentSchema,
@@ -2808,7 +2878,6 @@ export class Runner {
       // validate their exact supplied value before entering Runner.
       this.#updateArgument(
         tx,
-        resultCell,
         argumentLink,
         nextArgument,
         pattern.argumentSchema,
@@ -3007,6 +3076,11 @@ export class Runner {
     }
 
     const { pattern, entryRef, resolvedPatternOrModule } = resolvedPattern;
+    // The reuse arms below write the argument without reaching
+    // `#applySetupState`, which names these stores for every other setup
+    // write. Naming them twice on one transaction costs a second marker
+    // record and decides nothing differently.
+    markPieceOwnedStores(tx, resultCell, pattern);
     // "Same pattern between runs" — drives name preservation and
     // reuse-running-setup. Compare the new pattern pointer against the stored
     // one. A keyless pattern carries a stable session-synthetic ref (minted per
@@ -3424,6 +3498,25 @@ export class Runner {
       active = false;
       this.#locallyCommittedHandlerResultStarts.delete(key);
       cancelGroup();
+      // AFTER the group, not inside it. The stores this piece owns are
+      // enrolled per instantiation and released once, with the piece — but a
+      // builtin's teardown writes into those same stores on a transaction of
+      // its own (a dialog takes its pending flag down, a fetch clears its
+      // request id), and a release that ran first would leave those writes
+      // measured against a ceiling the route can no longer answer. Releasing
+      // as a member of the group would do exactly that: `useCancelGroup` runs
+      // its members in insertion order, and this one is registered before the
+      // node group is.
+      //
+      // Hanging it on the per-instantiation node group instead would be wrong
+      // for a different reason: a swap, a repair and a withdrawn-contribution
+      // recovery each tear that group down and re-instantiate, so the
+      // enrollment would survive only while every such site happened to cancel
+      // before instantiating.
+      this.runtime.releaseRuntimeOwnedStores(
+        resultCell.getAsNormalizedFullLink(),
+        runtimeWritePolicyAuthorization,
+      );
     }) as PieceRegistration;
     // `cancelNodes` holds the live graph's cancellation, and stands empty
     // between the retirement a refused instantiation commit performs and the
@@ -3474,6 +3567,7 @@ export class Runner {
 
       // Instantiate nodes
       const actualTx = useTx ?? this.runtime.edit();
+      enrollPieceOwnedStores(actualTx, resultCell, pattern);
       const shouldCommit = !useTx;
       if (shouldCommit) {
         // Self-minted instantiation tx (the hot-swap watcher's

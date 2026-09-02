@@ -4,6 +4,10 @@ import { type Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
 import type { URI } from "../sigil-types.ts";
 import { slugIdForSpace } from "../slugs.ts";
+import {
+  enrollRuntimeOwnedStore,
+  recordRuntimeOwnedStore,
+} from "./runtime-owned-store.ts";
 import type {
   IExtendedStorageTransaction,
   MemorySpace,
@@ -51,6 +55,14 @@ export function cellFromUrl(
       undefined,
       tx,
     );
+    // Both stores are keyed on this node's cause and outlive the transaction
+    // that mints them, so each is named and enrolled the way every other
+    // builtin's state store is. The mint stays as it was: these two carry no
+    // instance scope, and `ownedCell` would address them at one.
+    for (const store of [pending, cell]) {
+      recordRuntimeOwnedStore(tx, parentCell, store);
+      enrollRuntimeOwnedStore(tx, parentCell, store);
+    }
     sendResult(tx, { pending, cell });
 
     const inputs = inputsCell.withTx(tx);

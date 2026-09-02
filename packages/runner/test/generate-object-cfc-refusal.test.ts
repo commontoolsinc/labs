@@ -25,7 +25,10 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
 import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
-import { MAX_ENFORCEMENT_CFC_OPTIONS } from "../src/runtime-presets.ts";
+import {
+  MAX_ENFORCEMENT_CFC_OPTIONS,
+  MAX_ENFORCEMENT_SINK_CEILINGS,
+} from "../src/runtime-presets.ts";
 import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { waitForLlmSettled } from "./support/llm-result.ts";
@@ -36,10 +39,10 @@ const space = signer.did();
 
 enableMockMode();
 
-// A caveat the pattern's own result store does not declare. The builtin reads
-// the messages carrying it, so its writes derive that confidentiality, and the
-// undeclared store resolves to the empty ceiling — the writer-fit misfit of
-// §8.12.4, which rejects at `enforce-strict`.
+// A caveat the generateObject sink is not cleared for. The builtin reads the
+// messages carrying it, so the request it stages carries it too, and the
+// ceiling declared for that sink below admits none — the sink-request refusal
+// of §8.12.4, which rejects at `enforce-strict`.
 const PROMPT_INFLUENCE = {
   type: "https://commonfabric.org/cfc/atom/Caveat",
   kind: "https://commonfabric.org/cfc/concepts/prompt-influence",
@@ -78,6 +81,21 @@ describe("generateObject under a refused commit", () => {
       // per-session raise on top of it, and the bundle's persisted flow labels
       // are what make that raise conform.
       cfcEnforcementMode: "enforce-strict",
+      // The bundle declares a ceiling for the fetch and streamData sinks and
+      // none for the LLM ones, so an LLM request is ungated on
+      // confidentiality there. These cases are about the ENDING a refused
+      // request leaves behind, so they declare the ceiling the refusal comes
+      // from. Before the runtime's own stores declared what flowed into them,
+      // the refusal arrived by accident instead: the builtin's result store
+      // could not hold the caveat, so the transaction staging the request was
+      // refused for a reason about the store rather than about the request.
+      cfcSinkMaxConfidentiality: {
+        ...MAX_ENFORCEMENT_SINK_CEILINGS,
+        llm: [],
+        llmDialog: [],
+        generateText: [],
+        generateObject: [],
+      },
     });
     tx = runtime.edit();
     ({ commonfabric } = createTrustedBuilder(runtime));
@@ -161,12 +179,10 @@ describe("generateObject under a refused commit", () => {
     expect(settled.error).toBe(
       "generateObject request was refused before it started",
     );
-    // The pattern is the writer whose write was refused, and the reason names
-    // the document the rule matched on, the confidentiality that did not fit,
-    // and the `source` of each caveat — the principal that introduced it, which
-    // the pattern-facing surface withholds (inv-12 / audit 28b). The refusal
-    // reaches the operator through the log instead.
-    expect(settled.error).not.toContain("writer-fit");
+    // The rule's own reason names the sink, the confidentiality that exceeded
+    // its ceiling, and the `source` of each caveat — the principal that
+    // introduced it, which the pattern-facing surface withholds (inv-12 /
+    // audit 28b). The refusal reaches the operator through the log instead.
     expect(settled.error).not.toContain(PROMPT_INFLUENCE.source);
     expect(settled.error).not.toContain(PROMPT_INFLUENCE.kind);
     // A refused request produces no answer and no record of a conversation:

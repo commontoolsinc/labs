@@ -9,10 +9,12 @@ import {
 } from "./cfc-seed-envelope.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import { runtimeOwnedStoreOwnerKey } from "../src/cfc/runtime-owned-stores.ts";
+import type { NormalizedFullLink } from "../src/link-types.ts";
 import { getDerivedInternalCellLink, parseLink } from "../src/link-utils.ts";
 import { CFC_LABEL_READ_FAILED_ATOM } from "../src/cfc/observation.ts";
 import {
-  CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
+  CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
   runtimeWritePolicyAuthorization,
 } from "../src/cfc/types.ts";
@@ -86,6 +88,10 @@ const ownSpacePrincipal = {
 // A second person, who is neither this space's DID nor its acting signer.
 const OTHER_PRINCIPAL = "did:key:zOtherPerson";
 
+// A third, for a clause that must land beside an existing one rather than
+// inside it.
+const THIRD_PRINCIPAL = "did:key:zThirdPerson";
+
 // The three spellings of one principal (§15.2): the identity atom, the
 // personal-space atom naming its owner, and the legacy bare DID string.
 const userPrincipal = (subject: string) => ({
@@ -96,6 +102,17 @@ const personalSpacePrincipal = (owner: string) => ({
   type: "https://commonfabric.org/cfc/atom/PersonalSpace",
   owner,
 });
+
+// A space that is not the one every document in this file lives in.
+const OTHER_SPACE = "did:key:z6MkfZ3gV6ZKqmyWLTPYnPYRUYQBqTHTNCJgqbCkNBzYqZ4H";
+
+// A list schema whose ELEMENT objects get anchored into documents of their
+// own. Neither the list nor the items declare a store policy, so an anchored
+// child starts from the empty ceiling.
+const anchoringList = (): JSONSchema => ({
+  type: "array",
+  items: { type: "object", properties: { note: { type: "string" } } },
+} as JSONSchema);
 
 // A target schema whose store policy is exactly `confidentiality`.
 const declaring = (
@@ -178,11 +195,14 @@ const writerFitDiagnostics = (
   tx: { getCfcState(): { diagnostics: string[] } },
 ) => tx.getCfcState().diagnostics.filter((d) => d.includes("writer-fit"));
 
-// The marker the runner records for each document it sets a piece up in,
-// naming the piece's result document as the source. `authorized` stands for
-// who recorded it: the runtime passes its authorization, and code that merely
-// holds a transaction cannot.
-const recordPieceSubstrate = (
+// The marker the runner records for each store it owns, naming the piece's
+// result document as the source. `authorized` stands for who recorded it: the
+// runtime passes its authorization, and code that merely holds a transaction
+// cannot. `enrol` stands for the enrollment the runner records beside the
+// marker, which is what carries the claim into later transactions; a store the
+// runtime mints and fills in one transaction gets the marker alone.
+const recordRuntimeOwnedStore = (
+  runtime: Runtime,
   tx: ReturnType<Runtime["edit"]>,
   resultCell: {
     getAsNormalizedFullLink(): { space: string; scope: string; id: string };
@@ -196,18 +216,20 @@ const recordPieceSubstrate = (
     };
   },
   authorized = true,
+  enrol = true,
 ): void => {
   const result = resultCell.getAsNormalizedFullLink();
   const substrate = substrateCell.getAsNormalizedFullLink();
+  const target = {
+    space: substrate.space as `did:${string}:${string}`,
+    scope: substrate.scope as "space",
+    id: substrate.id,
+    path: [...substrate.path],
+  };
   tx.recordCfcWritePolicyInput({
     kind: "structural-provenance",
-    target: {
-      space: substrate.space as `did:${string}:${string}`,
-      scope: substrate.scope as "space",
-      id: substrate.id,
-      path: [...substrate.path],
-    },
-    claim: CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
+    target,
+    claim: CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
     sources: [{
       space: result.space as `did:${string}:${string}`,
       scope: result.scope as "space",
@@ -215,6 +237,43 @@ const recordPieceSubstrate = (
       path: [],
     }],
   }, authorized ? runtimeWritePolicyAuthorization : undefined);
+  if (enrol) {
+    const ownerKey = runtimeOwnedStoreOwnerKey(
+      substrate,
+      result as NormalizedFullLink,
+      runtime.scopeKeyIdentity,
+    );
+    if (ownerKey !== undefined) {
+      tx.enrollRuntimeOwnedStore(
+        target,
+        ownerKey,
+        authorized ? runtimeWritePolicyAuthorization : undefined,
+      );
+    }
+  }
+};
+
+// Read the seeded source and write what it carries into `targetName`, with no
+// marker of its own — the transaction a reactive update makes.
+const writeSecretInto = async (
+  runtime: Runtime,
+  sourceName: string,
+  targetName: string,
+  suffix = "first",
+) => {
+  const tx = runtime.edit();
+  tx.setCfcEnforcementMode("enforce-strict");
+  const source = runtime.getCell(signer.did(), sourceName, undefined, tx);
+  const raw = source.getRaw() as { secret?: string };
+  const target = runtime.getCell<{ copied?: string }>(
+    signer.did(),
+    targetName,
+    undefined,
+    tx,
+  );
+  target.set({ copied: `${raw.secret}/${suffix}` });
+  tx.prepareCfc();
+  return await tx.commit();
 };
 
 describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
@@ -1435,15 +1494,16 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
     nodes: [],
   } satisfies Pattern;
 
-  describe("the piece-substrate declaration (§8.12.5 route 2)", () => {
-    // A piece's substrate is filled by the runtime out of whatever the setup
-    // transaction read: the argument document, and the internal documents
-    // and streams the result projects to. No value schema can declare a
-    // covering policy for them, because the atoms are a property of the
-    // transaction rather than of the pattern, so the transaction declares
-    // that policy itself. `docs/specs/cfc-enforcement-matrix.md` §4 states
-    // the route and the four conditions on it; one test per condition
-    // follows.
+  describe("the runtime-owned-store declaration (§8.12.5 route 2)", () => {
+    // A store the runtime owns is filled by the runtime out of whatever the
+    // writing transaction read: a piece's argument, result and internal
+    // documents, the state documents a builtin mints from its own node's
+    // cause, and the documents anchoring splits out of a value written into
+    // any of those. No value schema can declare a covering policy for them,
+    // because the atoms are a property of the transaction rather than of the
+    // pattern, so the transaction declares that policy itself.
+    // `docs/specs/cfc-enforcement-matrix.md` §4 states the route and the
+    // conditions on it; one test per condition follows.
 
     it("declares the join on a document the substrate marker names", async () => {
       const storageManager = StorageManager.emulate({ as: signer });
@@ -1472,7 +1532,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           undefined,
           tx,
         );
-        recordPieceSubstrate(tx, result, substrate);
+        recordRuntimeOwnedStore(runtime, tx, result, substrate);
         substrate.set({ copied: `${raw.secret}!` });
         const substrateId = substrate.getAsNormalizedFullLink().id;
         tx.prepareCfc();
@@ -1490,7 +1550,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         expect(flags.length).toBe(1);
         expect(
           flags.some((flag) =>
-            flag.includes("writer-fit(piece-substrate-declared)") &&
+            flag.includes("writer-fit(runtime-owned-store-declared)") &&
             flag.includes(`${substrateId} at /`) && flag.includes('"secret"')
           ),
         ).toBe(true);
@@ -1531,7 +1591,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           undefined,
           tx,
         );
-        recordPieceSubstrate(tx, result, substrate);
+        recordRuntimeOwnedStore(runtime, tx, result, substrate);
         const bystander = runtime.getCell(
           signer.did(),
           "writer-fit-seam-bystander",
@@ -1598,7 +1658,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
             undefined,
             tx,
           );
-          recordPieceSubstrate(tx, result, substrate);
+          recordRuntimeOwnedStore(runtime, tx, result, substrate);
           substrate.set({ copied });
           tx.prepareCfc();
           expect((await tx.commit()).ok).toBeDefined();
@@ -1626,6 +1686,861 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         // the narrower join: the declared component never shrinks.
         expect(await declaredClauses(["writer-fit-seam-grow-first"]))
           .toEqual(grown);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("declares on a later transaction that names no store of its own", async () => {
+      // Instance 1: a piece whose result projects a list. Setup is one
+      // transaction; the reactive update that appends to the list is another,
+      // and it records no marker of its own. The enrollment made at setup is
+      // what carries the claim there, so the array-length bookkeeping write
+      // declares rather than refusing.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-owned-later-source");
+
+        const setup = runtime.edit();
+        setup.setCfcEnforcementMode("enforce-strict");
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-later-result",
+          undefined,
+          setup,
+        );
+        const list = runtime.getCell<string[]>(
+          signer.did(),
+          "writer-fit-owned-later-list",
+          { type: "array", items: { type: "string" } } as JSONSchema,
+          setup,
+        );
+        recordRuntimeOwnedStore(runtime, setup, result, list);
+        list.set(["first"]);
+        const listId = list.getAsNormalizedFullLink().id;
+        setup.prepareCfc();
+        expect((await setup.commit()).ok).toBeDefined();
+        expect(replicaEntries(storageManager, listId)).toEqual([]);
+
+        const update = runtime.edit();
+        update.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-later-source",
+          undefined,
+          update,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const listInUpdate = runtime.getCell<string[]>(
+          signer.did(),
+          "writer-fit-owned-later-list",
+          { type: "array", items: { type: "string" } } as JSONSchema,
+          update,
+        );
+        listInUpdate.set(["first", `${raw.secret}!`]);
+        update.prepareCfc();
+        expect((await update.commit()).ok).toBeDefined();
+
+        const declared = replicaEntries(storageManager, listId)
+          .filter((entry) => entry.origin === "declared");
+        expect(declared.length).toBeGreaterThan(0);
+        expect(
+          declared.some((entry) =>
+            (entry.label.confidentiality ?? []).includes("secret")
+          ),
+        ).toBe(true);
+        expect(
+          writerFitDiagnostics(update).some((flag) =>
+            flag.includes("writer-fit(runtime-owned-store-declared)")
+          ),
+        ).toBe(true);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("declares a builtin's own result store on a later transaction", async () => {
+      // Instance 2: a dialog writes its own result while the conversation
+      // carries a material-risk caveat. The store is minted from the node's
+      // cause on the builtin's first run and written by every turn afterwards,
+      // each on a transaction of its own.
+
+      const caveat = {
+        type: "https://commonfabric.org/cfc/atom/Caveat",
+        kind:
+          "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
+        source: {
+          type: "https://commonfabric.org/cfc/atom/Resource",
+          class: "HostileVendorBriefing",
+          subject: "did:example:writer-fit-owned-builtin",
+        },
+      } as const;
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(
+          runtime,
+          "writer-fit-owned-builtin-source",
+          [caveat],
+        );
+
+        const mint = runtime.edit();
+        mint.setCfcEnforcementMode("enforce-strict");
+        const node = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-builtin-node",
+          undefined,
+          mint,
+        );
+        const store = runtime.getCell<{ copied?: string }>(
+          signer.did(),
+          "writer-fit-owned-builtin-store",
+          undefined,
+          mint,
+        );
+        recordRuntimeOwnedStore(runtime, mint, node, store);
+        store.set({});
+        const storeId = store.getAsNormalizedFullLink().id;
+        mint.prepareCfc();
+        expect((await mint.commit()).ok).toBeDefined();
+
+        const turn = runtime.edit();
+        turn.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-builtin-source",
+          undefined,
+          turn,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const storeInTurn = runtime.getCell<{ copied?: string }>(
+          signer.did(),
+          "writer-fit-owned-builtin-store",
+          undefined,
+          turn,
+        );
+        storeInTurn.set({ copied: `${raw.secret}!` });
+        turn.prepareCfc();
+        expect((await turn.commit()).ok).toBeDefined();
+
+        expect(
+          replicaEntries(storageManager, storeId).some((entry) =>
+            entry.origin === "declared" &&
+            JSON.stringify(entry.label.confidentiality ?? []).includes(
+              "prompt-injection-risk-unscreened",
+            )
+          ),
+        ).toBe(true);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("taints every reader with what a grown declaration admits", async () => {
+      // This is what makes the route safe to run on every write rather than
+      // only while a piece is being set up. A declared clause list is read two
+      // ways, and the two agree: as a ceiling a label clause is admitted when
+      // SOME declared clause subsumes it, and as a reader's taint the whole
+      // list is a conjunction every reader carries. So each upgrade admits
+      // more data AND narrows the audience by the same step, however many
+      // times it happens — a store an unbounded reactive stream has walked is
+      // readable by fewer people than when it started, never by more.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        for (const clause of ["alpha", "beta", "gamma"]) {
+          await seedSecretSource(
+            runtime,
+            `writer-fit-owned-walk-${clause}`,
+            [clause],
+          );
+        }
+
+        const born = runtime.edit();
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-walk-result",
+          undefined,
+          born,
+        );
+        const store = runtime.getCell<{ copied?: string }>(
+          signer.did(),
+          "writer-fit-owned-walk-store",
+          undefined,
+          born,
+        );
+        recordRuntimeOwnedStore(runtime, born, result, store);
+        store.set({ copied: "public" });
+        const storeId = store.getAsNormalizedFullLink().id;
+        expect((await born.commit()).ok).toBeDefined();
+
+        // One upgrade per clause, each on its own transaction, none of which
+        // names a store: the enrollment above is all they have.
+        for (const clause of ["alpha", "beta", "gamma"]) {
+          const tx = runtime.edit();
+          tx.setCfcEnforcementMode("enforce-strict");
+          const source = runtime.getCell(
+            signer.did(),
+            `writer-fit-owned-walk-${clause}`,
+            undefined,
+            tx,
+          );
+          const raw = source.getRaw() as { secret?: string };
+          const storeInTx = runtime.getCell<{ copied?: string }>(
+            signer.did(),
+            "writer-fit-owned-walk-store",
+            undefined,
+            tx,
+          );
+          // A distinct value per round: an identical write diffs to nothing
+          // and would leave the declaration where the round before put it.
+          storeInTx.set({ copied: `${raw.secret}/${clause}` });
+          tx.prepareCfc();
+          expect((await tx.commit()).ok).toBeDefined();
+        }
+
+        const declared = replicaEntries(storageManager, storeId)
+          .filter((entry) => entry.origin === "declared");
+        expect(declared.length).toBe(1);
+        expect(declared[0].label.confidentiality).toEqual([
+          "alpha",
+          "beta",
+          "gamma",
+        ]);
+
+        // The negative the growth implies: a reader of the walked store
+        // carries all three, so copying what it read into an undeclared store
+        // is refused on every one of them.
+        const readBack = runtime.edit();
+        readBack.setCfcEnforcementMode("enforce-strict");
+        const storeInRead = runtime.getCell<{ copied?: string }>(
+          signer.did(),
+          "writer-fit-owned-walk-store",
+          undefined,
+          readBack,
+        );
+        const seen = storeInRead.getRaw() as { copied?: string };
+        const sink = runtime.getCell<{ copied?: string }>(
+          signer.did(),
+          "writer-fit-owned-walk-sink",
+          undefined,
+          readBack,
+        );
+        sink.set({ copied: `${seen.copied}?` });
+        readBack.prepareCfc();
+        const refused = await readBack.commit();
+        expect(refused.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        for (const clause of ["alpha", "beta", "gamma"]) {
+          expect(refused.error?.message).toContain(`"${clause}"`);
+        }
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("rejects a later write to a document beside a store it owns", async () => {
+      // Widening the route in TIME must not widen it in SCOPE. An enrollment
+      // names one store; a bystander written by a later transaction of the
+      // same piece keeps its own ceiling.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-owned-bystander-source");
+
+        const setup = runtime.edit();
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-bystander-result",
+          undefined,
+          setup,
+        );
+        const store = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-bystander-store",
+          undefined,
+          setup,
+        );
+        recordRuntimeOwnedStore(runtime, setup, result, store);
+        store.set({ copied: "public" });
+        expect((await setup.commit()).ok).toBeDefined();
+
+        const later = runtime.edit();
+        later.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-bystander-source",
+          undefined,
+          later,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const bystander = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-bystander",
+          undefined,
+          later,
+        );
+        bystander.set({ copied: `${raw.secret}!` });
+        const bystanderId = bystander.getAsNormalizedFullLink().id;
+        later.prepareCfc();
+        const committed = await later.commit();
+        expect(committed.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(committed.error?.message).toContain(`for ${bystanderId} at /`);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("enrolls nothing from a marker the runtime did not record", async () => {
+      // The across-transaction twin of the unauthorized-marker case: an
+      // unmarked marker names nothing in its own transaction, and leaves
+      // nothing behind for a later one either.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-owned-forged-source");
+
+        const forge = runtime.edit();
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-forged-result",
+          undefined,
+          forge,
+        );
+        const store = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-forged-store",
+          undefined,
+          forge,
+        );
+        recordRuntimeOwnedStore(runtime, forge, result, store, false);
+        store.set({ copied: "public" });
+        const storeId = store.getAsNormalizedFullLink().id;
+        expect((await forge.commit()).ok).toBeDefined();
+
+        const later = runtime.edit();
+        later.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-forged-source",
+          undefined,
+          later,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const storeLater = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-forged-store",
+          undefined,
+          later,
+        );
+        storeLater.set({ copied: `${raw.secret}!` });
+        later.prepareCfc();
+        const committed = await later.commit();
+        expect(committed.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(committed.error?.message).toContain(`for ${storeId} at /`);
+        expect(
+          replicaEntries(storageManager, storeId).some((entry) =>
+            entry.origin === "declared"
+          ),
+        ).toBe(false);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("adds a clause rather than an alternative to one already there", async () => {
+      // The line §8.12.7 draws, and safety invariant 1 with it. Adding a
+      // CLAUSE is tightening, which §8.12.1 admits and §8.12.5 sanctions as
+      // the upgrade. Adding an ALTERNATIVE to a clause already stored grows
+      // that clause's reader set, which is a widening `canUpdateStoreLabel`
+      // rejects and which §8.12.7 admits only through a grant record or an
+      // intent-gated declassification event — neither of which a write-side
+      // fit check is.
+      //
+      // So the route folds clause LISTS and never clause alternatives: a
+      // stored `anyOf` comes back exactly as it went in, beside the new
+      // clause rather than holding it.
+
+      const audience = {
+        anyOf: [
+          userPrincipal(signer.did()),
+          userPrincipal(OTHER_PRINCIPAL),
+        ],
+      };
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-owned-clause-first", [
+          audience,
+        ]);
+        await seedSecretSource(runtime, "writer-fit-owned-clause-second", [
+          userPrincipal(THIRD_PRINCIPAL),
+        ]);
+
+        const enrol = runtime.edit();
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-clause-result",
+          undefined,
+          enrol,
+        );
+        const store = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-clause-store",
+          undefined,
+          enrol,
+        );
+        recordRuntimeOwnedStore(runtime, enrol, result, store);
+        store.set({ copied: "public" });
+        const storeId = store.getAsNormalizedFullLink().id;
+        expect((await enrol.commit()).ok).toBeDefined();
+
+        expect(
+          (await writeSecretInto(
+            runtime,
+            "writer-fit-owned-clause-first",
+            "writer-fit-owned-clause-store",
+          )).error,
+        ).toBeUndefined();
+        expect(
+          (await writeSecretInto(
+            runtime,
+            "writer-fit-owned-clause-second",
+            "writer-fit-owned-clause-store",
+            "second",
+          )).error,
+        ).toBeUndefined();
+
+        const declared = replicaEntries(storageManager, storeId)
+          .filter((entry) => entry.origin === "declared");
+        expect(declared.length).toBe(1);
+        const clauses = declared[0].label.confidentiality ?? [];
+        // Two clauses. The `anyOf` carries the alternatives it arrived with
+        // and no more — canonical order, not membership, is what normalizing
+        // it changes — and the second clause stands beside it.
+        expect(clauses.length).toBe(2);
+        const orClause = clauses.find((clause) =>
+          typeof clause === "object" && clause !== null && "anyOf" in clause
+        ) as { anyOf: unknown[] } | undefined;
+        expect(orClause).toBeDefined();
+        expect(orClause!.anyOf.length).toBe(2);
+        expect(orClause!.anyOf).toContainEqual(userPrincipal(signer.did()));
+        expect(orClause!.anyOf).toContainEqual(userPrincipal(OTHER_PRINCIPAL));
+        expect(clauses).toContainEqual(userPrincipal(THIRD_PRINCIPAL));
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("names nothing where the owner is in another space", async () => {
+      // A store in another space belongs to whoever holds that space's
+      // replicas. Declaring a policy on it out of this piece's join would put
+      // those bytes behind a promise made here, so a marker naming one counts
+      // for nothing however it is authorized.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-owned-foreign-source");
+
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-foreign-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-foreign-result",
+          undefined,
+          tx,
+        );
+        const store = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-foreign-store",
+          undefined,
+          tx,
+        );
+        const storeLink = store.getAsNormalizedFullLink();
+        const resultLink = result.getAsNormalizedFullLink();
+        // The marker as the runtime records it, except that the source names
+        // another space — which is what the guard reads.
+        tx.recordCfcWritePolicyInput({
+          kind: "structural-provenance",
+          target: {
+            space: storeLink.space as `did:${string}:${string}`,
+            scope: storeLink.scope as "space",
+            id: storeLink.id,
+            path: [],
+          },
+          claim: CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
+          sources: [{
+            space: OTHER_SPACE,
+            scope: "space",
+            id: resultLink.id,
+            path: [],
+          }],
+        }, runtimeWritePolicyAuthorization);
+        store.set({ copied: `${raw.secret}!` });
+        tx.prepareCfc();
+        const committed = await tx.commit();
+        expect(committed.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(committed.error?.message).toContain(`for ${storeLink.id} at /`);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("forgets what a piece enrolled when the piece is released", async () => {
+      // The enrollment lasts as long as the piece's nodes do, which is what
+      // bounds it: a list operation mints one piece per element, so an
+      // enrollment that lived for the process would grow with every element a
+      // churning list ever held.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-owned-release-source");
+        // A clause per write. Each route-2 upgrade declares what it carried,
+        // so a later write reusing an earlier clause would fit the store's own
+        // declaration whatever the enrollment says.
+        await seedSecretSource(runtime, "writer-fit-owned-release-second", [
+          "second-clause",
+        ]);
+        await seedSecretSource(runtime, "writer-fit-owned-release-third", [
+          "third-clause",
+        ]);
+
+        const enrol = runtime.edit();
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-release-result",
+          undefined,
+          enrol,
+        );
+        const store = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-release-store",
+          undefined,
+          enrol,
+        );
+        recordRuntimeOwnedStore(runtime, enrol, result, store);
+        store.set({ copied: "public" });
+        const storeId = store.getAsNormalizedFullLink().id;
+        expect((await enrol.commit()).ok).toBeDefined();
+
+        // A write in a later transaction takes the route while the piece
+        // holds the enrollment.
+        const declared = await writeSecretInto(
+          runtime,
+          "writer-fit-owned-release-source",
+          "writer-fit-owned-release-store",
+        );
+        expect(declared.error).toBeUndefined();
+
+        // An unauthorized release changes nothing: pattern-authored code
+        // reaches the runtime through a cell, and a release it made would
+        // refuse another piece's writes.
+        runtime.releaseRuntimeOwnedStores(
+          result.getAsNormalizedFullLink(),
+          undefined,
+        );
+        expect(
+          (await writeSecretInto(
+            runtime,
+            "writer-fit-owned-release-second",
+            "writer-fit-owned-release-store",
+            "second",
+          )).error,
+        ).toBeUndefined();
+
+        runtime.releaseRuntimeOwnedStores(
+          result.getAsNormalizedFullLink(),
+          runtimeWritePolicyAuthorization,
+        );
+        const refused = await writeSecretInto(
+          runtime,
+          "writer-fit-owned-release-third",
+          "writer-fit-owned-release-store",
+          "third",
+        );
+        expect(refused.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(refused.error?.message).toContain(`for ${storeId} at /`);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("keeps a store a second owner still holds", async () => {
+      // Two scope instances of one causal piece are two registrations that
+      // start and stop separately, so they are two owners of the same store —
+      // the store key is scope-free, because the scoped instances of one
+      // causal id are instances of one cell. Releasing either owner must
+      // leave the other's writes admitted; dropping the store on the first
+      // release would refuse the survivor.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-owned-two-owners-source");
+        await seedSecretSource(runtime, "writer-fit-owned-two-owners-other", [
+          "other",
+        ]);
+
+        const store = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-two-owners-store",
+          undefined,
+        );
+        const storeLink = store.getAsNormalizedFullLink();
+        const first = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-two-owners-piece",
+          undefined,
+        );
+        const firstLink = first.getAsNormalizedFullLink();
+        // The same causal piece at a narrower scope: same id, different
+        // instance, so `runtimeOwnedStoreOwnerKey` gives a different owner.
+        const secondLink = { ...firstLink, scope: "user" } as typeof firstLink;
+
+        const tx = runtime.edit();
+        for (const owner of [firstLink, secondLink]) {
+          const ownerKey = runtimeOwnedStoreOwnerKey(
+            storeLink,
+            owner,
+            runtime.scopeKeyIdentity,
+          );
+          expect(ownerKey).toBeDefined();
+          tx.enrollRuntimeOwnedStore(
+            {
+              space: storeLink.space,
+              scope: storeLink.scope,
+              id: storeLink.id,
+              path: [],
+            },
+            ownerKey!,
+            runtimeWritePolicyAuthorization,
+          );
+        }
+        store.withTx(tx).set({ copied: "public" });
+        expect((await tx.commit()).ok).toBeDefined();
+
+        // The first owner goes; the second still holds the store.
+        runtime.releaseRuntimeOwnedStores(
+          firstLink,
+          runtimeWritePolicyAuthorization,
+        );
+        expect(
+          (await writeSecretInto(
+            runtime,
+            "writer-fit-owned-two-owners-source",
+            "writer-fit-owned-two-owners-store",
+          )).error,
+        ).toBeUndefined();
+
+        // The second goes too, and now nobody does.
+        runtime.releaseRuntimeOwnedStores(
+          secondLink,
+          runtimeWritePolicyAuthorization,
+        );
+        const refused = await writeSecretInto(
+          runtime,
+          "writer-fit-owned-two-owners-other",
+          "writer-fit-owned-two-owners-store",
+          "second",
+        );
+        expect(refused.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(refused.error?.message).toContain(`for ${storeLink.id} at /`);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("keeps the enrollment across a second instantiation", async () => {
+      // The enrollment is released once, with the PIECE, not with each node
+      // group. Every site that re-instantiates a piece — a pattern swap, a
+      // start repair, a withdrawn-contribution recovery — tears the previous
+      // node group down first and instantiates afterwards, so a release hung
+      // on that group would leave a running piece un-enrolled wherever those
+      // two steps were ever ordered the other way. Enrolling twice is what a
+      // re-instantiation does, and it is idempotent.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-owned-reinstate-source");
+
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-reinstate-result",
+          undefined,
+        );
+        const store = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-reinstate-store",
+          undefined,
+        );
+        const storeId = store.getAsNormalizedFullLink().id;
+
+        // Two instantiations, as a swap or a recovery makes them.
+        for (const _ of [0, 1]) {
+          const tx = runtime.edit();
+          recordRuntimeOwnedStore(runtime, tx, result, store);
+          expect((await tx.commit()).ok).toBeDefined();
+        }
+
+        const declared = await writeSecretInto(
+          runtime,
+          "writer-fit-owned-reinstate-source",
+          "writer-fit-owned-reinstate-store",
+        );
+        expect(declared.error).toBeUndefined();
+
+        // And one release still takes it out: the second enrollment did not
+        // leave a second entry the release would miss.
+        runtime.releaseRuntimeOwnedStores(
+          result.getAsNormalizedFullLink(),
+          runtimeWritePolicyAuthorization,
+        );
+        await seedSecretSource(runtime, "writer-fit-owned-reinstate-other", [
+          "other",
+        ]);
+        const refused = await writeSecretInto(
+          runtime,
+          "writer-fit-owned-reinstate-other",
+          "writer-fit-owned-reinstate-store",
+          "second",
+        );
+        expect(refused.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(refused.error?.message).toContain(`for ${storeId} at /`);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("declares on a document anchored inside a store it owns", async () => {
+      // Anchoring splits one value across two documents. The child's id is
+      // derived from the parent's rather than named by an author, and nothing
+      // but this write puts anything in it, so it is the runtime's store
+      // whenever the parent is.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-owned-anchor-source");
+
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-anchor-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-owned-anchor-result",
+          undefined,
+          tx,
+        );
+        const store = runtime.getCell<{ note: string }[]>(
+          signer.did(),
+          "writer-fit-owned-anchor-store",
+          anchoringList(),
+          tx,
+        );
+        recordRuntimeOwnedStore(runtime, tx, result, store);
+        store.set([{ note: `${raw.secret}!` }]);
+        const storeId = store.getAsNormalizedFullLink().id;
+        tx.prepareCfc();
+        expect((await tx.commit()).ok).toBeDefined();
+
+        // The parent's own write is all links, so it takes shape-only stamps
+        // and is never measured; the content — and the declaration — lands on
+        // the document the write anchored.
+        const declaredOn = writerFitDiagnostics(tx)
+          .filter((flag) =>
+            flag.includes("writer-fit(runtime-owned-store-declared)")
+          );
+        expect(declaredOn.length).toBe(1);
+        expect(declaredOn[0]).not.toContain(storeId);
+        expect(declaredOn[0]).toContain('"secret"');
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("rejects a document anchored inside an ordinary one", async () => {
+      // The negative twin: the same anchored write under a parent the runtime
+      // does not own. The parent's own write is all links, so it is never
+      // measured; the anchored child is, and it is refused, because the
+      // child's ownership comes from the parent's and there is none.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-plain-anchor-source");
+
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-plain-anchor-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const store = runtime.getCell<{ note: string }[]>(
+          signer.did(),
+          "writer-fit-plain-anchor-store",
+          anchoringList(),
+          tx,
+        );
+        store.set([{ note: `${raw.secret}!` }]);
+        const storeId = store.getAsNormalizedFullLink().id;
+        tx.prepareCfc();
+        const committed = await tx.commit();
+        expect(committed.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(committed.error?.message).toContain('"secret"');
+        expect(committed.error?.message).not.toContain(`for ${storeId} at /`);
       } finally {
         await runtime.dispose();
         await storageManager.close();
@@ -1684,7 +2599,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           },
           tx,
         );
-        recordPieceSubstrate(tx, result, substrate);
+        recordRuntimeOwnedStore(runtime, tx, result, substrate);
         substrate.key("copied").set(`${raw.secret}!`);
         tx.prepareCfc();
         const committed = await tx.commit();
@@ -1731,7 +2646,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           undefined,
           tx,
         );
-        recordPieceSubstrate(tx, result, substrate.key("copied"));
+        recordRuntimeOwnedStore(runtime, tx, result, substrate.key("copied"));
         substrate.set({ copied: `${raw.secret}!` });
         tx.prepareCfc();
         const committed = await tx.commit();
@@ -1779,7 +2694,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           undefined,
           tx,
         );
-        recordPieceSubstrate(tx, result, substrate);
+        recordRuntimeOwnedStore(runtime, tx, result, substrate);
         substrate.set({ copied: `${raw.secret}!` });
         const substrateId = substrate.getAsNormalizedFullLink().id;
         tx.prepareCfc();
@@ -1829,7 +2744,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           undefined,
           tx,
         );
-        recordPieceSubstrate(tx, result, substrate);
+        recordRuntimeOwnedStore(runtime, tx, result, substrate);
         substrate.set({ copied: `${raw.secret}!` });
         const substrateId = substrate.getAsNormalizedFullLink().id;
         tx.prepareCfc();
@@ -1882,7 +2797,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           undefined,
           tx,
         );
-        recordPieceSubstrate(tx, result, substrate);
+        recordRuntimeOwnedStore(runtime, tx, result, substrate);
         substrate.set({ copied: `${raw.secret}!` });
         const substrateId = substrate.getAsNormalizedFullLink().id;
         tx.prepareCfc();
@@ -1932,7 +2847,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           undefined,
           tx,
         );
-        recordPieceSubstrate(tx, result, bystander, false);
+        recordRuntimeOwnedStore(runtime, tx, result, bystander, false);
         bystander.set({ note: `${raw.secret}!` });
         const bystanderId = bystander.getAsNormalizedFullLink().id;
         tx.prepareCfc();
@@ -2036,7 +2951,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           undefined,
           tx,
         );
-        recordPieceSubstrate(tx, result, substrate);
+        recordRuntimeOwnedStore(runtime, tx, result, substrate);
         substrate.set({ copied: `${raw.secret}!` });
         const substrateId = substrate.getAsNormalizedFullLink().id;
         tx.prepareCfc();
@@ -2089,7 +3004,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
             undefined,
             tx,
           );
-          recordPieceSubstrate(tx, result, substrate);
+          recordRuntimeOwnedStore(runtime, tx, result, substrate);
           if (field === "") {
             substrate.set({ first: `${raw.secret}!` });
           } else {
@@ -2160,7 +3075,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           undefined,
           tx,
         );
-        recordPieceSubstrate(tx, result, substrate);
+        recordRuntimeOwnedStore(runtime, tx, result, substrate);
         substrate.set({ copied: `${raw.secret}!` });
         const substrateId = substrate.getAsNormalizedFullLink().id;
         tx.prepareCfc();
