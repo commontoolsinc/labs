@@ -69,9 +69,8 @@ describe("value-debug", () => {
 
       class RogueSpecial extends FabricSpecialObject {}
 
-      expect(toCompactDebugString(new RogueSpecial())).toBe(
-        '{"/RogueSpecial":"/..."}',
-      );
+      expect(toCompactDebugString(new RogueSpecial()))
+        .toBe("/RogueSpecial(...)");
     });
 
     it("renders a `FabricPrimitive` with no codec under its class name", () => {

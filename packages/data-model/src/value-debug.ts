@@ -295,6 +295,9 @@ class DebugConverter {
  * `FabricInstance`, which the conversion carries as its encoding under its
  * codec type tag, and a `FabricPrimitive`, which the conversion passes
  * through as itself, are both rendered in the elided form `/TypeName(...)`.
+ * Any other class instance, which the conversion carries under its class
+ * name, is rendered as `/ClassName(<props>)`, or `/ClassName(...)` when it
+ * has none to show.
  */
 class DebugStringifier {
   readonly #indent: string | undefined;
@@ -385,6 +388,35 @@ class DebugStringifier {
   }
 
   /**
+   * Renders a class instance which the conversion carried under its class
+   * name, as `/ClassName(<props>)` when its payload is its properties and as
+   * `/ClassName(...)` when the conversion had nothing to show for it. Any
+   * other payload -- a `toString()` form, or what `toJSON()` returned -- is
+   * rendered as it stands inside the parentheses.
+   */
+  #renderInstance(
+    className: string,
+    payload: FabricValue,
+    indent: string,
+  ): string {
+    const open = `/${className}(`;
+
+    if (payload === "/...") {
+      return `${open}...)`;
+    } else if (isPlainObject(payload)) {
+      const parts = this.#renderProperties(
+        payload as FabricPlainObject,
+        indent,
+      );
+      return this.#renderContainer(open, ")", parts, indent);
+    } else {
+      // The payload sits where the parenthesis opens, so it takes the
+      // indentation of the parenthesis itself.
+      return `${open}${this.#renderSubvalue(payload, indent)})`;
+    }
+  }
+
+  /**
    * Renders a plain object, whose closing brace (when the rendering is
    * multi-line) is indented by `indent`.
    */
@@ -392,40 +424,64 @@ class DebugStringifier {
     const keys = Object.keys(value);
     const onlyKey = (keys.length === 1) ? keys[0] : undefined;
 
-    if (onlyKey !== undefined) {
-      // The conversion's single-key marker forms. No key of the original value
+    if (
+      (onlyKey !== undefined) && (onlyKey[0] === "/") && (onlyKey[1] !== "/")
+    ) {
+      // The conversion's single-key tagged forms. No key of the original value
       // can arrive here in one of these forms, because the conversion escapes
-      // every key with a leading slash.
+      // every key with a leading slash, which is what the second character
+      // check rules out.
       const tag = onlyKey.slice(1);
-      if ((onlyKey[0] === "/") && isCodecTypeTag(tag)) {
+      const payload = value[onlyKey];
+
+      if (isCodecTypeTag(tag)) {
         // A `FabricInstance`, carried as its encoding under its codec type tag.
         return DebugStringifier.#renderElidedInstance(tag);
       }
 
-      switch (onlyKey) {
-        case "/circle": {
+      switch (tag) {
+        case "circle": {
           // A reference back to an enclosing object.
           return "<circle>";
         }
 
-        case "/uniqueSymbol": {
+        case "uniqueSymbol": {
           // A unique (uninterned) symbol, whose payload is its description.
-          const description = value["/uniqueSymbol"];
-          return (description === undefined)
+          return (payload === undefined)
             ? "Symbol()"
-            : `Symbol(${JSON.stringify(description)})`;
+            : `Symbol(${JSON.stringify(payload)})`;
+        }
+
+        case "...":
+        case "function":
+        case "unconvertible": {
+          // The remaining markers, rendered as the objects they are.
+          break;
+        }
+
+        default: {
+          // A class instance, carried under its class name.
+          return this.#renderInstance(tag, payload, indent);
         }
       }
     }
 
+    const parts = this.#renderProperties(value, indent);
+    return this.#renderContainer("{", "}", parts, indent);
+  }
+
+  /**
+   * Renders the properties of a plain object, one part per property, for a
+   * container whose closing bracket is indented by `indent`.
+   */
+  #renderProperties(value: FabricPlainObject, indent: string): string[] {
     const inner = this.#innerIndent(indent);
     const separator = (this.#indent === undefined) ? ":" : ": ";
-    const parts = keys.map((key) => {
+
+    return Object.keys(value).map((key) => {
       const rendered = this.#renderSubvalue(value[key], inner);
       return `${renderKey(key)}${separator}${rendered}`;
     });
-
-    return this.#renderContainer("{", "}", parts, indent);
   }
 
   /**
@@ -539,6 +595,8 @@ function renderDebugString(value: unknown, indent?: number): string {
  * * a hole in an array, as `<hole>`, and a run of them as `<N holes>`.
  * * `FabricInstance`s and `FabricPrimitive`s, in the elided form
  *   `/TypeName(...)`.
+ * * other class instances, as `/ClassName(<props>)`, or `/ClassName(...)`
+ *   when there are no properties to show.
  *
  * If the rendering could not be completed, this function returns the literal
  * string `"<unrenderable debug string>"`.
