@@ -701,6 +701,133 @@ describe("cf piece CFC labels", () => {
     expect(editCalled).toBe(false);
   });
 
+  /**
+   * The shape a labeled query result stores, built by hand: the row is its own
+   * entity doc and carries the per-column label, the query doc only LINKS to
+   * it, and the piece result links to the query doc. So `q/result/0/secret`
+   * crosses a link at `result/0` — the path `cf piece get-label` is asked
+   * about on a sqlite-backed panel, and the one the reader has to resolve.
+   */
+  const buildCrossingChain = async (prefix: string) => {
+    const row = runtime.getCell<{ secret: string; shouted: string }>(
+      signer.did(),
+      `${prefix}-row`,
+      {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          secret: { type: "string", ifc: { confidentiality: ["finance"] } },
+          shouted: {
+            type: "string",
+            ifc: { confidentiality: ["finance"], observes: "value" },
+          },
+        },
+      },
+    );
+    const t1 = runtime.edit();
+    row.withTx(t1).set({ secret: "top secret", shouted: "TOP SECRET" });
+    runtime.prepareTxForCommit(t1);
+    expect((await t1.commit()).error).toBeUndefined();
+
+    const query = runtime.getCell<never>(
+      signer.did(),
+      `${prefix}-query`,
+      undefined,
+    );
+    const t2 = runtime.edit();
+    query.withTx(t2).key("result").key(0).setRawUntyped(row.getAsLink());
+    runtime.prepareTxForCommit(t2);
+    expect((await t2.commit()).error).toBeUndefined();
+
+    const chainRoot = runtime.getCell<never>(
+      signer.did(),
+      `${prefix}-root`,
+      undefined,
+    );
+    const t3 = runtime.edit();
+    chainRoot.withTx(t3).key("q").setRawUntyped(query.getAsLink());
+    runtime.prepareTxForCommit(t3);
+    expect((await t3.commit()).error).toBeUndefined();
+
+    const chainPiece = {
+      input: { getCell: () => Promise.resolve(chainRoot) },
+      result: { getCell: () => Promise.resolve(chainRoot) },
+    };
+    const chainDeps = {
+      loadPieces: () =>
+        Promise.resolve({
+          runtime,
+          get: () => Promise.resolve(chainPiece),
+          synced: () => Promise.resolve(),
+        }),
+      resolvePieceAddress: (_pieces: unknown, token: string) =>
+        Promise.resolve(token),
+    };
+    return { row, query, chainRoot, chainDeps };
+  };
+
+  it("get-label reports a label behind a link the path CROSSES", async () => {
+    const { chainDeps } = await buildCrossingChain("cf-piece-label-crossing");
+
+    const atColumn = await getCellCfcLabel(
+      pieceConfig,
+      ["q", "result", 0, "secret"],
+      {},
+      chainDeps as never,
+    );
+    expect(atColumn?.entries).toEqual([
+      { path: [], label: { confidentiality: ["finance"] } },
+    ]);
+
+    // Selecting the ROW reports one entry per labeled column.
+    const atRow = await getCellCfcLabel(
+      pieceConfig,
+      ["q", "result", 0],
+      {},
+      chainDeps as never,
+    );
+    expect(
+      atRow?.entries.find((entry) => entry.path[0] === "secret")?.label
+        .confidentiality,
+    ).toEqual(["finance"]);
+  });
+
+  it("renders that same label through the get-label command", async () => {
+    const { chainDeps } = await buildCrossingChain("cf-piece-label-cmd");
+    const rendered: unknown[] = [];
+
+    await getCellCfcLabelFromCommand(
+      {
+        apiUrl: "https://example.com",
+        identity: "/identity.key",
+        space: signer.did(),
+        cell: "piece",
+        quiet: true,
+      },
+      "q/result/0/secret",
+      {
+        // The real reader, reaching this test's runtime through its deps —
+        // the command's own wiring, not a stub standing in for it.
+        getCellCfcLabel:
+          ((config: never, path: never, options: never) =>
+            getCellCfcLabel(
+              config,
+              path,
+              options,
+              chainDeps as never,
+            )) as never,
+        render: (value: unknown) => {
+          rendered.push(value);
+        },
+      },
+    );
+
+    expect(rendered).toEqual([{
+      version: 1,
+      entries: [{ path: [], label: { confidentiality: ["finance"] } }],
+    }]);
+  });
+
   it("documents JSON input and output on both commands", async () => {
     const getHelp = await cf("cell get-label --help");
     expect(getHelp.code).toBe(0);
