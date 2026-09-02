@@ -39,73 +39,6 @@ function classNameOf(value: object): string {
 }
 
 /**
- * Returns the tag and payload of the given plain object when it is one of the
- * conversion's single-key tagged forms, and `undefined` when it is not. No key
- * of an original value can arrive in such a form, because the conversion
- * escapes a key with a leading slash and an unsafe key alike, by prefixing a
- * slash; the second-character check rules out the one and the unsafe-key
- * check the other.
- */
-function taggedFormOf(
-  value: FabricPlainObject,
-): { tag: string; payload: FabricValue } | undefined {
-  const keys = Object.keys(value);
-  const onlyKey = (keys.length === 1) ? keys[0] : undefined;
-
-  if (
-    (onlyKey === undefined) || (onlyKey[0] !== "/") || (onlyKey[1] === "/") ||
-    isUnsafeObjectKey(onlyKey.slice(1))
-  ) {
-    return undefined;
-  }
-
-  return { tag: onlyKey.slice(1), payload: value[onlyKey] };
-}
-
-/**
- * Renders an `ArrayBuffer` as `buf [...]`, with its bytes in hexadecimal, a
- * space after every fourth byte.
- */
-function renderBuffer(buffer: ArrayBuffer): string {
-  const hex = [...new Uint8Array(buffer)]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
-    .replace(/.{8}(?=.)/g, "$& ");
-  return `buf [${hex}]`;
-}
-
-/**
- * Renders a key -- an object property name or a symbol's key -- bare when it
- * is a valid identifier, and as a quoted string otherwise. The identifier
- * check is the ASCII one.
- */
-function renderKey(key: string): string {
-  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? key : JSON.stringify(key);
-}
-
-/**
- * Produces the `/unconvertible` result form which stands in for a value whose
- * conversion threw, carrying the message of the error thrown.
- */
-function makeUnconvertibleResult(error: any): FabricValue {
-  const message = (() => {
-    try {
-      if (error instanceof Error) {
-        const msg = error.message;
-        if (typeof msg === "string") {
-          return msg;
-        }
-      }
-      return String(error);
-    } catch {
-      return "/unconvertibleError";
-    }
-  })();
-
-  return { "/unconvertible": message };
-}
-
-/**
  * Helper class for converting values to their valid `FabricValue` debug
  * representations.
  */
@@ -149,7 +82,7 @@ class DebugConverter {
       // close to where they're thrown. This `catch` is a prophylactic "just
       // in case" to help nail down the intention of really really trying not to
       // `throw` out of this method.
-      return makeUnconvertibleResult(e);
+      return DebugConverter.#makeUnconvertibleResult(e);
     }
     // deno-coverage-ignore-stop
   }
@@ -174,7 +107,7 @@ class DebugConverter {
       try {
         byName[key] = this.#convertSubvalue(value[key], depth + 1);
       } catch (e) {
-        byName[key] = makeUnconvertibleResult(e);
+        byName[key] = DebugConverter.#makeUnconvertibleResult(e);
       }
     }
 
@@ -225,7 +158,7 @@ class DebugConverter {
       try {
         result[resultKey] = this.#convertSubvalue(value[key], depth + 1);
       } catch (e) {
-        result[resultKey] = makeUnconvertibleResult(e);
+        result[resultKey] = DebugConverter.#makeUnconvertibleResult(e);
       }
     }
 
@@ -272,7 +205,7 @@ class DebugConverter {
           const content = (name != "") ? `${name}(...)` : "<anonymous>(...)";
           return { "/function": content };
         } catch (e) {
-          return { "/function": makeUnconvertibleResult(e) };
+          return { "/function": DebugConverter.#makeUnconvertibleResult(e) };
         }
       }
 
@@ -331,8 +264,34 @@ class DebugConverter {
         this.#nestingStack.delete(value);
       }
     } catch (e) {
-      return makeUnconvertibleResult(e);
+      return DebugConverter.#makeUnconvertibleResult(e);
     }
+  }
+
+  //
+  // Static members
+  //
+
+  /**
+   * Produces the `/unconvertible` result form which stands in for a value whose
+   * conversion threw, carrying the message of the error thrown.
+   */
+  static #makeUnconvertibleResult(error: any): FabricValue {
+    const message = (() => {
+      try {
+        if (error instanceof Error) {
+          const msg = error.message;
+          if (typeof msg === "string") {
+            return msg;
+          }
+        }
+        return String(error);
+      } catch {
+        return "/unconvertibleError";
+      }
+    })();
+
+    return { "/unconvertible": message };
   }
 }
 
@@ -447,9 +406,9 @@ class DebugStringifier {
         false,
       );
       return this.#renderContainer(open, ")", parts, indent);
+    } else {
+      return `${open}${this.#renderRealmState(state, indent)})`;
     }
-
-    return `${open}${this.#renderRealmState(state, indent)})`;
   }
 
   /**
@@ -462,7 +421,7 @@ class DebugStringifier {
     const realm = (v: unknown, i: string) => this.#renderRealmState(v, i);
 
     if (value instanceof ArrayBuffer) {
-      return renderBuffer(value);
+      return DebugStringifier.#renderBuffer(value);
     } else if (Array.isArray(value)) {
       const inner = this.#innerIndent(indent);
       const parts = value.map((element) => realm(element, inner));
@@ -501,7 +460,8 @@ class DebugStringifier {
       return `${open}...)`;
     } else if (
       isPlainObject(payload) &&
-      (taggedFormOf(payload as FabricPlainObject) === undefined)
+      (DebugStringifier.#taggedFormOf(payload as FabricPlainObject) ===
+        undefined)
     ) {
       const parts = this.#renderProperties(
         payload as FabricPlainObject,
@@ -520,7 +480,7 @@ class DebugStringifier {
    * multi-line) is indented by `indent`.
    */
   #renderPlainObject(value: FabricPlainObject, indent: string): string {
-    const tagged = taggedFormOf(value);
+    const tagged = DebugStringifier.#taggedFormOf(value);
 
     if (tagged !== undefined) {
       const { tag, payload } = tagged;
@@ -601,7 +561,7 @@ class DebugStringifier {
     return Object.keys(value).map((key) => {
       const original = (unescape && (key[0] === "/")) ? key.slice(1) : key;
       const rendered = render(value[key], inner);
-      return `${renderKey(original)}${separator}${rendered}`;
+      return `${DebugStringifier.#renderKey(original)}${separator}${rendered}`;
     });
   }
 
@@ -633,7 +593,7 @@ class DebugStringifier {
       case "symbol": {
         // The conversion represents a unique symbol as a tagged object, so
         // only an interned symbol arrives here.
-        return `@${renderKey(Symbol.keyFor(value) ?? "")}`;
+        return `@${DebugStringifier.#renderKey(Symbol.keyFor(value) ?? "")}`;
       }
 
       case "object": {
@@ -669,6 +629,18 @@ class DebugStringifier {
   //
 
   /**
+   * Renders an `ArrayBuffer` as `buf [...]`, with its bytes in hexadecimal, a
+   * space after every fourth byte.
+   */
+  static #renderBuffer(buffer: ArrayBuffer): string {
+    const hex = [...new Uint8Array(buffer)]
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+      .replace(/.{8}(?=.)/g, "$& ");
+    return `buf [${hex}]`;
+  }
+
+  /**
    * Renders the elided form of a `FabricInstance`, or of a `FabricPrimitive`
    * whose state cannot be had, given its codec type tag (or, failing that,
    * its class name). The slash suggests a known encodable type rather than an
@@ -676,6 +648,39 @@ class DebugStringifier {
    */
   static #renderElidedInstance(tag: string): string {
     return `/${tag.replace(/@.*$/, "")}(...)`;
+  }
+
+  /**
+   * Renders a key -- an object property name or a symbol's key -- bare when it
+   * is a valid identifier, and as a quoted string otherwise. The identifier
+   * check is the ASCII one.
+   */
+  static #renderKey(key: string): string {
+    return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? key : JSON.stringify(key);
+  }
+
+  /**
+   * Returns the tag and payload of the given plain object when it is one of the
+   * conversion's single-key tagged forms, and `undefined` when it is not. No key
+   * of an original value can arrive in such a form, because the conversion
+   * escapes a key with a leading slash and an unsafe key alike, by prefixing a
+   * slash; the second-character check rules out the one and the unsafe-key
+   * check the other.
+   */
+  static #taggedFormOf(
+    value: FabricPlainObject,
+  ): { tag: string; payload: FabricValue } | undefined {
+    const keys = Object.keys(value);
+    const onlyKey = (keys.length === 1) ? keys[0] : undefined;
+
+    if (
+      (onlyKey === undefined) || (onlyKey[0] !== "/") || (onlyKey[1] === "/") ||
+      isUnsafeObjectKey(onlyKey.slice(1))
+    ) {
+      return undefined;
+    }
+
+    return { tag: onlyKey.slice(1), payload: value[onlyKey] };
   }
 }
 
