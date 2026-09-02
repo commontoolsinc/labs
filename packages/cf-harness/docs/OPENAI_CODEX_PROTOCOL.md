@@ -79,8 +79,9 @@ expose token material, account identifiers, expiry, or raw responses.
   rate limiting, or a server fault — is issued again under the bounded backoff
   described in the package README under "Model attempts and transport retry".
   The provider's stated `type`, `code`, and `message` are recorded on the
-  attempt and carried in the failure the turn ends with. A stream that delivered
-  a tool call before failing is not issued again.
+  attempt and carried in the failure the turn ends with. Whatever a failed
+  attempt streamed is discarded with it; nothing reaches the harness until an
+  attempt completes.
 
 Provider-scoped model discovery uses only
 `https://chatgpt.com/backend-api/codex/models?client_version=0.0.0`. It sends

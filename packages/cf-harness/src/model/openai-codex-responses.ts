@@ -249,9 +249,6 @@ const readResponsesStream = async (
   return { streamedItems };
 };
 
-const isFunctionCallItem = (item: unknown): boolean =>
-  isObjectNotArray(item) && item.type === "function_call";
-
 /**
  * The exchange one turn issues, fixed before the first attempt so every
  * attempt sends the same request.
@@ -703,15 +700,10 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       ...httpAttempt,
       responseCompleteDurationMs: this.#elapsedMsSince(startedAtMs),
     };
-    // A stream that already delivered a tool call is not issued again, even
-    // for a transient failure: the retry that is safe is the one that
-    // replays nothing the model committed to.
-    const streamedToolCall = reading.streamedItems.some(isFunctionCallItem);
     const transientKind = (
       providerError: HarnessProviderError | undefined,
     ): HarnessTransientFailureKind | undefined =>
-      providerError !== undefined && !streamedToolCall &&
-        isTransientProviderError(providerError)
+      providerError !== undefined && isTransientProviderError(providerError)
         ? "provider_error"
         : undefined;
     if (reading.providerError !== undefined) {

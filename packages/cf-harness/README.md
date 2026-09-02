@@ -722,9 +722,10 @@ a protocol failure, not a transient one.
 Reissuing is safe because the harness dispatches nothing from an attempt that
 did not complete: a model exchange has no side effect until a tool call from its
 result is dispatched, and the client returns nothing until an attempt reaches a
-completed terminal response. The Codex client narrows this further: a stream
-that already delivered a tool call before it failed is not issued again, even
-for a transient reason, so nothing the model committed to is ever replayed.
+completed terminal response. Whatever a failed attempt streamed, tool calls
+included, is discarded with it. A `429` from the Codex provider is its usage
+limit, which the backoff does not clear; the retry there is bounded by the same
+schedule and costs seconds, not a turn.
 
 The bound is `transportRetries` attempts beyond the first — three unless a
 client is configured otherwise — with a backoff of `transportRetryDelayMs`

@@ -309,33 +309,6 @@ describe("transport-retry", () => {
       expect(attempts[0].providerError?.code).toBe("context_length_exceeded");
     });
 
-    it("does not issue the exchange again once the failed stream delivered a tool call", async () => {
-      const { delays, delay } = recordingDelay();
-      const { attempts, complete, calls } = codexClient(
-        () =>
-          sse({
-            type: "response.output_item.done",
-            item: {
-              type: "function_call",
-              id: "fc_1",
-              call_id: "call_1",
-              name: "read_file",
-              arguments: "{}",
-            },
-          }, OVERLOADED_EVENT),
-        { delay },
-      );
-
-      const error = await rejectionOf(complete());
-
-      expect((error as HarnessControlError).code).toBe("provider-unavailable");
-      expect((error as Error).message).toContain(OVERLOADED_DESCRIPTION);
-      expect(calls()).toBe(1);
-      expect(delays).toEqual([]);
-      expect(attempts[0].providerError).toEqual(OVERLOADED_EVENT.error);
-      expect(attempts[0].retry).toBeUndefined();
-    });
-
     it("records an error event that states no reason without inventing one", async () => {
       const { attempts, complete } = codexClient(
         () => sse({ type: "error" }),
