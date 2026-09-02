@@ -104,7 +104,7 @@ function settled(query: Cell<QueryState>, superseded?: unknown): Promise<void> {
 async function inheritedConfidentiality(
   runtime: Runtime,
   leaf: Cell<unknown>,
-): Promise<unknown[]> {
+): Promise<readonly unknown[]> {
   const dtx = runtime.edit();
   leaf.withTx(dtx).get();
   const conf = cfcConfidentialityForObservationNode({
