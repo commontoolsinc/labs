@@ -1,3 +1,19 @@
+/**
+ * Unit tests for the place value and the module that owns it. A place is a
+ * value and every move over it is a decision about one, so a case stands a
+ * `CurrentPlace` somewhere, hands `cd` a string, and reads back both what the
+ * move returned and where the instance ended up. No connection, no I/O and no
+ * clock stands behind any of it, which is what makes a case per move, per
+ * rendering and per refusal affordable.
+ *
+ * The returned outcome is the half to read first, because only two of the
+ * four arms a `Move` has are verdicts: the move landed, or it is refused. The
+ * other two report that the operand is one this module does not settle — a
+ * `#name` wish target, and a reference naming its space by name — since
+ * settling either needs a connection to resolve against. Their cases pin what
+ * gets handed on, and that the place did not move.
+ */
+
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
