@@ -1,9 +1,11 @@
 # @commonfabric/cf-harness
 
 **Start here:** [ONBOARDING.md](ONBOARDING.md) is the single path from local
-prerequisites through a web-API run with input cells to an openable piece, its
-artifacts, and the CFC audit; it also points to the experiment and measurement
-records without duplicating them here.
+prerequisites to a console attached to a toolshed you already run, a first task
+typed into its page, and the session, transcript, and run artifacts it leaves;
+it carries the labeled-input-cell flow through to the CFC audit as one worked
+example, and points to the experiment and measurement records without
+duplicating them here.
 
 `cf-harness` is an in-house agent harness package for Common Fabric. It is being
 built as a general Common Fabric agent runtime, with Loom as the first target
