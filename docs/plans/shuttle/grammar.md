@@ -57,6 +57,14 @@ prefix, overriding it with the embedded space when one is present. A
 rooted reference is therefore exactly as space-dependent as a relative
 one; it is the piece and path it fixes, not the space.
 
+Where a reading is decided says where it holds. `-`, `@scope`, `/`, and a
+lone leading `#` are read on the whole operand before it is split, so each
+governs the operand's head and is an ordinary data character in every later
+segment. `..` and an empty segment are read segment by segment, so they are
+reserved wherever they appear — which is why a key named `..` has no
+relative spelling at all, while a key named `-` has one in any position but
+the first.
+
 The `#` character has three readings, and they share nothing but the
 character. A lone `#name` token is a wish target, as above. `#argument` is
 a suffix on a reference and only that — it selects the piece's arguments
@@ -64,9 +72,8 @@ cell, the same selection `--input` spells as a flag
 (`normalizeLLMFriendlyRef` in `packages/cli/lib/llm-friendly-ref.ts`, which
 strips it before the runner grammar sees the string, and refuses every
 other fragment). And inside a piece it is an ordinary character of a data
-key — within a segment, and at the head of any segment after the first,
-because a lone leading `#` is read as a wish target before the operand is
-split at all.
+key, under the rule above: the wish reading is decided on the whole
+operand, so it governs the head and nothing else.
 
 A place is **result-rooted**, and holds exactly space, piece, path, and
 scope. `cd` refuses a reference carrying `#argument` rather than dropping

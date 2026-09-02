@@ -144,21 +144,22 @@ Still to come:
 - **Slug and name resolution**, riding the machinery `--cell` already uses
   (`resolveStoredPieceAddress`, `listSpaceSlugs`), so no CLI-surface arc
   step gates B1.
-- **The vocabulary a relative segment speaks.** A relative operand splits
-  on `/` and its segments are literal, so three characters are read
-  differently by the two doors, and each such key is reachable through the
-  door the other refuses. A key holding the separator, and one whose first
-  character is `@`, are reachable rooted and not relatively: `~1` escaping
-  reaches a reference and not a walk, and a leading `@` reads as a scope
-  word. A key holding `#` is the mirror, reachable relatively and not
-  rooted, since the reference grammar reserves `#` for `#argument`. One of
-  the three misleads and the rest refuse: a segment holding the separator,
-  lifted out of a rendering, reads as a different key without saying so.
-  `ls` settles all three: how such a key prints and how it is typed back
-  want deciding together. Segment validation is the same question — a
-  slug's vocabulary holds a reference and not a relative segment, and an
-  empty segment is refused at every door, which leaves the empty key with
-  no spelling rather than one that prints as its parent.
+- **The vocabulary a relative segment speaks.** The two doors read a
+  segment by different rules, so a handful of keys are spelled through one
+  and not the other. Which keys follows from where each reading is decided,
+  the rule [`grammar.md`](grammar.md) states: a relative operand reserves
+  `-`, `@scope`, `/` and a leading `#` at its head alone and `..` in every
+  segment, and takes every other segment literally, where a reference
+  unescapes `~1` and reserves `#` for `#argument` throughout. So a key
+  named `..`, and one holding the separator, are rooted-only, while a key
+  holding `#` is relative-only. What that costs a reader is the segment
+  lifted out of a rendering: `..`, `-`, and an escaped separator each move
+  somewhere else without saying so, where `@` refuses and `#` hands off.
+  `ls` settles it: how such a key prints and how it is typed back want
+  deciding together. Segment validation is the same question — a slug's
+  vocabulary holds a reference and not a relative segment — and an empty
+  segment is refused at every door, which leaves the empty key with no
+  spelling rather than one that prints as its parent.
 - **`where`**, the printing surface for the ambient record; later
   milestones add their dimensions to it as they add the dimensions
   themselves.

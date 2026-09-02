@@ -663,6 +663,61 @@ describe("place", () => {
             });
           });
 
+          describe("reserved readings", () => {
+            // Where a reading is decided says where it holds. `-`,
+            // `@scope`, `/` and a lone leading `#` are read on the whole
+            // operand before it is split, so each governs the head alone
+            // and is data everywhere after it; `..` is read segment by
+            // segment, so it is reserved wherever it appears. These four
+            // pin that rule rather than four instances of it, which is why
+            // each drives its character at the head of a later segment
+            // where the head-of-operand cases drive it first.
+
+            it("reads `-` as a data key in a later segment", () => {
+              const place = atReferencedPiece();
+              place.cd("a/-");
+              expect(place.place.position).toEqual({
+                kind: "piece",
+                space: SPACE,
+                piece: HANDLE,
+                path: ["a", "-"],
+              });
+            });
+
+            it("reads `@foo` as a data key in a later segment", () => {
+              const place = atReferencedPiece();
+              place.cd("a/@foo");
+              expect(place.place.position).toEqual({
+                kind: "piece",
+                space: SPACE,
+                piece: HANDLE,
+                path: ["a", "@foo"],
+              });
+            });
+
+            it("reads `#b` as a data key in a later segment", () => {
+              const place = atReferencedPiece();
+              place.cd("a/#b");
+              expect(place.place.position).toEqual({
+                kind: "piece",
+                space: SPACE,
+                piece: HANDLE,
+                path: ["a", "#b"],
+              });
+            });
+
+            it("reads `..` as a level to leave in a later segment", () => {
+              const place = atReferencedPiece();
+              place.cd("a/..");
+              expect(place.place.position).toEqual({
+                kind: "piece",
+                space: SPACE,
+                piece: HANDLE,
+                path: [],
+              });
+            });
+          });
+
           it("walks every level of a multi-segment operand", () => {
             const place = atSpaceRoot();
             place.cd("slugs/board/topics/3");
