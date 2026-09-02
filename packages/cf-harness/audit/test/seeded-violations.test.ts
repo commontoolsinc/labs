@@ -140,14 +140,23 @@ const CONFORMING_SESSION_POSTURE: HarnessFabricSessionCfcPosture = {
   }),
 };
 
+/**
+ * A recorded posture as a seeding step may edit it.
+ *
+ * The posture record's fields are `readonly` all the way down, which is right
+ * for the code that produces it and wrong here: what a violation is, is a
+ * record saying something its producer would not have written.
+ */
+type DeepMutable<T> = { -readonly [K in keyof T]: DeepMutable<T[K]> };
+
 /** The family with a conforming session posture installed on its root run. */
 const withSessionPosture = (
-  mutate: (posture: Mutable<HarnessFabricSessionCfcPosture>) => void,
+  mutate: (posture: DeepMutable<HarnessFabricSessionCfcPosture>) => void,
 ): RunFamily =>
   seeded((root) => {
     const posture = structuredClone(
       CONFORMING_SESSION_POSTURE,
-    ) as Mutable<HarnessFabricSessionCfcPosture>;
+    ) as DeepMutable<HarnessFabricSessionCfcPosture>;
     mutate(posture);
     stateOf(root).fabricSessionCfc = posture;
   });
@@ -162,7 +171,7 @@ const SESSION_CLEAN = verdicts(withSessionPosture(() => {}));
 const sessionTurnsOnly = (
   checkId: string,
   expected: CheckVerdict,
-  mutate: (posture: Mutable<HarnessFabricSessionCfcPosture>) => void,
+  mutate: (posture: DeepMutable<HarnessFabricSessionCfcPosture>) => void,
 ): void => {
   expect(verdicts(withSessionPosture(mutate))).toEqual({
     ...SESSION_CLEAN,

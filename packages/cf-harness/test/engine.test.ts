@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { normalize } from "@std/path/posix";
 import type { HarnessArtifactStore } from "../src/artifacts.ts";
+import { harnessFabricSessionPosture } from "../src/cfc-posture.ts";
 import { CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE } from "../src/contracts/cfc-invocation-context.ts";
 import { createHarnessCfcPolicySnapshot } from "../src/contracts/cfc-policy-snapshot.ts";
 import { createHarnessPolicyEvent } from "../src/contracts/policy.ts";
@@ -166,6 +167,16 @@ Deno.test("CfHarnessEngine constructs in enforce mode without CFC transports", (
   assertEquals(engine.getRunState().cfcEnforcementMode, "enforce-strict");
 });
 
+/**
+ * The posture record a session config resolves to. Built the way the engine
+ * builds it rather than written out here: the record's own shape is pinned in
+ * the runner's parity suite, and restating it in this file would make these
+ * cases assert the restatement.
+ */
+const recordFor = (
+  session: Parameters<typeof harnessFabricSessionPosture>[0],
+) => harnessFabricSessionPosture(session);
+
 Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in run state", () => {
   const configured = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
@@ -182,6 +193,13 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
     enforcementModeSource: "configured",
     flowLabels: "persist",
     flowLabelsSource: "configured",
+    record: recordFor({
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcEnforcementMode: "enforce-strict",
+      cfcFlowLabels: "persist",
+    }),
   });
 
   const pinned = new CfHarnessEngine({
@@ -197,6 +215,11 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
     enforcementModeSource: "preset-pin",
     flowLabels: "off",
     flowLabelsSource: "default",
+    record: recordFor({
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+    }),
   });
 
   // The named bundle supplies persist when the operator selects the posture
@@ -216,6 +239,12 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
     flowLabels: "persist",
     flowLabelsSource: "posture",
     posture: "max-enforcement",
+    record: recordFor({
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcPosture: "max-enforcement",
+    }),
   });
 
   const sessionless = new CfHarnessEngine({
@@ -265,6 +294,7 @@ Deno.test("CfHarnessEngine refuses to resume under a fabric-session posture that
     flowLabels: "persist",
     flowLabelsSource: "posture",
     posture: "max-enforcement",
+    record: recordFor(posturedSession),
   });
 
   // A resume with no session at all keeps the record as history: no runtime
