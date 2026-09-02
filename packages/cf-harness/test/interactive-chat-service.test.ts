@@ -2140,3 +2140,56 @@ Deno.test("an interactive turn scans a skills root carried on an injected engine
   const registry = engine.getRunState().skillRegistry;
   assertEquals(registry?.skillsRoot, fixture.skillsRoot);
 });
+
+Deno.test("a listener that throws does not turn a completed turn into a failed one", async () => {
+  const delivered: string[] = [];
+  const deliveryFailures: [number, unknown][] = [];
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),
+    }),
+    now: nextIsoNow(),
+    onEvent: (envelope) => {
+      if (envelope.event.kind === "turn_completed") {
+        throw new Error("the peer stopped reading");
+      }
+      delivered.push(envelope.event.kind);
+    },
+    onEventDeliveryError: (envelope, error) => {
+      deliveryFailures.push([envelope.sequence, error]);
+    },
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Hi" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+
+  // Failing to hand an event to a listener is a delivery failure. The turn it
+  // reports on already committed and stays committed.
+  const kinds = service.events("session-1").map((event) => event.event.kind);
+  assertEquals(kinds.filter((kind) => kind === "turn_failed").length, 0);
+  assertEquals(kinds[kinds.length - 1], "turn_completed");
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns[0].turn.status,
+    "completed",
+  );
+  assertEquals(
+    service.status("session-1").sessions[0].status,
+    "idle",
+  );
+  // And it is reported rather than swallowed.
+  assertEquals(deliveryFailures.length, 1);
+  assertEquals(
+    (deliveryFailures[0][1] as Error).message,
+    "the peer stopped reading",
+  );
+  // Later events still reach a listener that recovered.
+  assertEquals(delivered.includes("session_started"), true);
+});

@@ -71,6 +71,18 @@ export type HarnessInteractiveChatEventListener = (
   event: HarnessChatEventEnvelope,
 ) => void | Promise<void>;
 
+/**
+ * Told that a listener could not take an event that is already durable.
+ *
+ * Delivery is not part of committing, so a host that wants to act on a failed
+ * delivery — a transport whose peer has gone, say — reads it here rather than
+ * from the outcome of whatever turn produced the event.
+ */
+export type HarnessInteractiveChatEventDeliveryErrorHandler = (
+  event: HarnessChatEventEnvelope,
+  error: unknown,
+) => void;
+
 export interface CreateHarnessInteractiveChatServiceOptions {
   basePromptLoopOptions?: CreateHarnessPromptLoopOptions;
 
@@ -102,6 +114,7 @@ export interface CreateHarnessInteractiveChatServiceOptions {
   now?: () => string;
   randomUUID?: () => string;
   onEvent?: HarnessInteractiveChatEventListener;
+  onEventDeliveryError?: HarnessInteractiveChatEventDeliveryErrorHandler;
   sessionStore?: HarnessChatSessionStore;
   maxInMemoryEvents?: number;
 }
@@ -562,7 +575,7 @@ const chatTurnError = (error: unknown): HarnessChatError => {
 };
 
 const isTerminalTurnStatus = (
-  status: HarnessChatTurnStatus["status"],
+  status: HarnessChatTurnStatus["status"] | undefined,
 ): boolean =>
   status === "completed" || status === "failed" || status === "canceled";
 
@@ -674,6 +687,8 @@ export class HarnessInteractiveChatService {
   readonly #now: () => string;
   readonly #randomUUID: () => string;
   readonly #onEvent?: HarnessInteractiveChatEventListener;
+  readonly #onEventDeliveryError?:
+    HarnessInteractiveChatEventDeliveryErrorHandler;
   readonly #sessionStore?: HarnessChatSessionStore;
   readonly #maxInMemoryEvents?: number;
   readonly #systemPrompt?: string;
@@ -759,6 +774,7 @@ export class HarnessInteractiveChatService {
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#randomUUID = options.randomUUID ?? defaultRandomUUID;
     this.#onEvent = options.onEvent;
+    this.#onEventDeliveryError = options.onEventDeliveryError;
     this.#sessionStore = options.sessionStore;
     if (
       options.maxInMemoryEvents !== undefined &&
@@ -1559,6 +1575,14 @@ export class HarnessInteractiveChatService {
       if (record.canceledTurnIds.has(turnId)) {
         return;
       }
+      // A turn that already reached a terminal status committed its outcome
+      // before this threw, which leaves delivering the event as the only thing
+      // that can have failed. Recording the turn as failed on the strength of
+      // that would overwrite an outcome the store already holds, so the turn is
+      // left as it finished and the failure stays a delivery failure.
+      if (isTerminalTurnStatus(record.turns.get(turnId)?.turn.status)) {
+        return;
+      }
       // `record.transcript` still holds the transcript from before this turn.
       // Persisting it here is the rollback: the turn's partial history stays in
       // the event log and the run artifacts, and never becomes model history.
@@ -2007,7 +2031,34 @@ export class HarnessInteractiveChatService {
     if (record !== undefined && nextTurn !== undefined) {
       record.turns.set(nextTurn.turn.turnId, nextTurn);
     }
-    await this.#onEvent?.(envelope);
+    try {
+      await this.#onEvent?.(envelope);
+    } catch (error) {
+      // The event is committed by this point, and the record already carries
+      // the state it announced. Callers that asked for this emit still hear
+      // about the failure, so it is reported and rethrown rather than caught
+      // here — what must not happen is further up, where a turn's outcome is
+      // decided.
+      this.#reportEventDeliveryError(envelope, error);
+      throw error;
+    }
+  }
+
+  #reportEventDeliveryError(
+    envelope: HarnessChatEventEnvelope,
+    error: unknown,
+  ): void {
+    if (this.#onEventDeliveryError !== undefined) {
+      this.#onEventDeliveryError(envelope, error);
+      return;
+    }
+    // Without a handler the failure would be silent, which reads the same as a
+    // delivery that worked.
+    console.error(
+      `cf-harness chat event ${envelope.sequence} (${envelope.event.kind}) was not delivered: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 
   #pruneInMemoryEvents(): void {
