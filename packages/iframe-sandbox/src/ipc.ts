@@ -15,7 +15,9 @@ import type { FabricValue } from "@commonfabric/data-model";
 //         │                       ├────────srcdoc─────────►│
 //         │◄─────────LOAD─────────┤                        │
 //         │                       │                        │
+//         ├──────────────────ORDERED──────────────────────►│
 //         ├──────────────────PORT (transferred)───────────►│
+//         │◄──────FLUSH───────────┤◄───────(unread)────────┤
 //         │◄═════════════════════ port ═══════════════════►│
 //         │                       │                        │
 //         │◄──────ERROR───────────┤◄───────(unread)────────┤
@@ -28,6 +30,24 @@ import type { FabricValue } from "@commonfabric/data-model";
 // forwards without reading. A guest has a port for everything it means to say,
 // so a message arriving by that route is a guest reporting that it could not
 // use the port -- a way to raise an alarm, not a second way to talk.
+//
+// The relayed route and the port are separate channels, and nothing orders one
+// against the other. The `ORDERED`/`FLUSH` exchange is the rendezvous that
+// still puts what crossed before the port ahead of what crosses on it: the
+// host posts `ORDERED` ahead of the port to say it answers flush markers, and
+// a guest that heard it posts a `FLUSH` marker up the parent chain on taking
+// the port -- behind everything it posted there before -- and holds its port
+// traffic until the marker's acknowledgement comes back over the port. The
+// host acknowledges a marker only after handling everything the relay carried
+// ahead of it, so by the time any port request lands, every parent post the
+// guest made before taking its port has been handled.
+//
+// A guest that never heard `ORDERED` sends unordered rather than waiting,
+// which is what lets a guest and a host of different vintages pair up. What
+// answers a marker is the element's live set of sessions, so a guest whose
+// marker arrives after the element let go of its session holds its traffic
+// from then on. That guest is one the element has already stopped listening
+// to, on a port it has already closed.
 
 /**
  * Sent alongside the transferred port, so a guest recognizes the handoff by
@@ -35,6 +55,29 @@ import type { FabricValue } from "@commonfabric/data-model";
  * as a candidate.
  */
 export const GUEST_PORT_HANDOFF = "common-iframe-sandbox:port";
+
+/**
+ * Posted to the guest ahead of `GUEST_PORT_HANDOFF` to say the host answers
+ * flush markers. A guest that heard this before its handoff holds its port
+ * traffic behind the marker exchange; one that did not sends unordered, so
+ * neither side of a mixed pairing waits on an answer that cannot come.
+ */
+export const GUEST_PORT_ORDERED = "common-iframe-sandbox:ordered";
+
+/** Length in bytes of the random part of a flush marker's nonce. */
+const FLUSH_NONCE_BYTES = 8;
+
+/**
+ * Returns a nonce for a flush marker. It has to be unique among the markers
+ * one host element hears between teardowns, and `crypto.getRandomValues()` is
+ * available to a guest whether or not its document is a secure context.
+ */
+export function flushNonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(FLUSH_NONCE_BYTES));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+}
 
 export enum IPCHostMessageType {
   // Host instructing the outer frame to load a new document.
@@ -111,6 +154,9 @@ export const BRIDGE_PROTOCOL = "common-fabric-bridge";
  * Exact encoding revision. An additive operation stays within this revision
  * only when a current guest negotiates it through describe() before sending
  * it, so an older host can reject the unsupported capability without hanging.
+ * The flush exchange is negotiated the same way through `GUEST_PORT_ORDERED`:
+ * a guest waits on an acknowledgement only from a host that announced it
+ * sends one.
  */
 export const BRIDGE_VERSION = 2;
 
@@ -219,7 +265,19 @@ export type BridgeEvent = {
   value?: FabricValue;
 };
 
-export type BridgeHostMessage = BridgeResponse | BridgeEvent;
+/**
+ * Acknowledges a flush marker, echoing its nonce. Sent over the port once the
+ * host has handled everything the parent-chain relay carried ahead of the
+ * marker; the guest holding that nonce releases its port traffic on it.
+ */
+export type BridgeFlushAck = {
+  protocol: typeof BRIDGE_PROTOCOL;
+  version: typeof BRIDGE_VERSION;
+  type: "flush";
+  nonce: string;
+};
+
+export type BridgeHostMessage = BridgeResponse | BridgeEvent | BridgeFlushAck;
 
 const hasBridgeHeader = (
   message: unknown,
@@ -281,6 +339,9 @@ export function isBridgeHostMessage(
   if (message.type === "event") {
     return typeof message.subscription === "string";
   }
+  if (message.type === "flush") {
+    return typeof message.nonce === "string";
+  }
   if (
     message.type !== "response" || !Number.isSafeInteger(message.id) ||
     typeof message.ok !== "boolean"
@@ -299,4 +360,19 @@ export function isGuestAlarm(message: unknown): message is GuestAlarm {
   return typeof message === "object" && message !== null &&
     (message as { type?: unknown }).type === "error" &&
     "data" in message && isGuestError(message.data as object);
+}
+
+/**
+ * Flush marker a guest posts up the parent chain on taking its port, behind
+ * everything it posted there before. The nonce is the guest's own token: the
+ * acknowledgement echoes it, and only the guest that minted it acts on the
+ * echo, so an acknowledgement broadcast wider than one session -- or answering
+ * an earlier document's marker -- releases nobody else's traffic.
+ */
+export type GuestFlush = { type: "flush"; nonce: string };
+
+export function isGuestFlush(message: unknown): message is GuestFlush {
+  return typeof message === "object" && message !== null &&
+    (message as { type?: unknown }).type === "flush" &&
+    typeof (message as { nonce?: unknown }).nonce === "string";
 }

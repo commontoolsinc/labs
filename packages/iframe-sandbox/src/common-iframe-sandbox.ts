@@ -1,4 +1,4 @@
-import { css, html, LitElement } from "lit";
+import { css, html, LitElement, type PropertyValues } from "lit";
 import { property } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
 import { type FabricBridge, FabricBridgeHost } from "./bridge.ts";
@@ -23,9 +23,6 @@ export class CommonIframeSandboxElement extends LitElement {
     const previousValue = this.#src;
     this.#src = value;
     this.requestUpdate("src", previousValue);
-    if (this.readyWindow && value !== previousValue) {
-      this.#loadInnerDoc();
-    }
   }
 
   get bridge(): FabricBridge | undefined {
@@ -37,9 +34,6 @@ export class CommonIframeSandboxElement extends LitElement {
     const previousValue = this.#bridge;
     this.#bridge = value;
     this.requestUpdate("bridge", previousValue);
-    if (this.readyWindow && value !== previousValue && this.src) {
-      this.#loadInnerDoc();
-    }
   }
 
   @property({ attribute: "load-state", reflect: true })
@@ -58,8 +52,20 @@ export class CommonIframeSandboxElement extends LitElement {
   #src = "";
   #bridge: FabricBridge | undefined;
 
-  /** The capability session belonging to the currently loaded guest. */
-  #guestHost: FabricBridgeHost | undefined;
+  /**
+   * The capability sessions on offer to the loaded guest, in offer order. One
+   * is offered per load report, and a load report cannot be matched to a
+   * document -- the inner frame's initial `about:blank` navigation can
+   * complete after a document was asked for, so one asked-for document can
+   * yield two reports. Which offer the guest holds is settled by use: a
+   * session's first request retires every session offered before it.
+   *
+   * Two entries is the most this holds. The guest takes the first port to
+   * reach a document of its that has none, so the session it holds is the
+   * earliest one still here, and everything offered after that one was
+   * refused.
+   */
+  #guestSessions: FabricBridgeHost[] = [];
 
   /**
    * The frame this element renders, held so the guest can be reached through
@@ -111,13 +117,13 @@ export class CommonIframeSandboxElement extends LitElement {
   }
 
   /**
-   * Gives the newly loaded guest one end of a fresh channel and takes the
-   * other. Each document is its own realm, so each gets a port of its own, and
-   * no earlier one is left open behind it.
+   * Offers the loaded guest one end of a fresh channel and takes the other.
+   * Each document is its own realm, so each gets a port of its own. A session
+   * already on offer stays as it is: whether this offer reaches a new document
+   * or one already holding a port -- which refuses it -- is settled by which
+   * session the guest's requests arrive on, not here.
    */
   #openGuestPort() {
-    this.#closeGuestPort();
-
     // The guest is the inner frame, which is a frame of the outer one. A
     // cross-origin frame is unreachable for anything but this: indexed access
     // and `postMessage`, which is what a transfer rides.
@@ -127,22 +133,56 @@ export class CommonIframeSandboxElement extends LitElement {
       return;
     }
 
+    // A guest can renavigate its own frame, and each navigation reports a
+    // load, so what is kept here has to be bounded by something other than
+    // the guest's restraint. Two are kept: the first, which is the one a guest
+    // that has held a port since before any of this took, and the newest,
+    // which is the only other one still reachable. Dropping what was newest
+    // costs a guest that took that offer, has never spoken on it, and is still
+    // there after a further load report -- which is a document driving
+    // navigations while staying silent about the port it holds.
+    for (const superseded of this.#guestSessions.splice(1)) {
+      superseded.disconnect();
+    }
+
     const channel = new MessageChannel();
-    this.#guestHost = new FabricBridgeHost(
-      this.bridge ?? { resources: {} },
-      channel.port1,
+    this.#guestSessions.push(
+      new FabricBridgeHost(
+        this.bridge ?? { resources: {} },
+        channel.port1,
+        (session) => this.#retireSessionsBefore(session),
+      ),
     );
+    guestWindow.postMessage(IPC.GUEST_PORT_ORDERED, "*");
     guestWindow.postMessage(IPC.GUEST_PORT_HANDOFF, "*", [channel.port2]);
   }
 
   /**
-   * Closes the port to the current guest, if there is one. What the guest sends
-   * afterwards reaches nothing, which is the point: the guest on the other end
-   * of a closed port is one this element is done with.
+   * Retires every session offered before `session`, which has shown the first
+   * request of its port. The guest holds one port, so a request on this
+   * session says every earlier offer went to a document that is gone or was
+   * refused; either way those sessions serve nobody, and closing them is what
+   * cancels a gone document's subscriptions. Later offers are left alone: a
+   * session is never unseated by an earlier one.
+   */
+  #retireSessionsBefore(session: FabricBridgeHost) {
+    const index = this.#guestSessions.indexOf(session);
+    if (index <= 0) return;
+    for (const retired of this.#guestSessions.splice(0, index)) {
+      retired.disconnect();
+    }
+  }
+
+  /**
+   * Closes every session on offer. What the guest sends afterwards reaches
+   * nothing, which is the point: the guest on the other end of a closed port
+   * is one this element is done with.
    */
   #closeGuestPort() {
-    this.#guestHost?.disconnect();
-    this.#guestHost = undefined;
+    for (const session of this.#guestSessions) {
+      session.disconnect();
+    }
+    this.#guestSessions = [];
   }
 
   /** Handles a message from the outer frame. */
@@ -180,7 +220,16 @@ export class CommonIframeSandboxElement extends LitElement {
         // it along without reading it, so this is the first look anything has
         // had at it.
         const raised = outerMessage.data;
-        if (IPC.isGuestAlarm(raised)) {
+        if (IPC.isGuestFlush(raised)) {
+          // Everything the relay carried ahead of this marker has been
+          // handled, which is what the acknowledgement asserts. A marker
+          // cannot say which session its guest holds, so every session on
+          // offer carries the answer; the nonce sees to it that only the
+          // guest that posted this marker acts on one.
+          for (const session of this.#guestSessions) {
+            session.acknowledgeFlush(raised.nonce);
+          }
+        } else if (IPC.isGuestAlarm(raised)) {
           this.#dispatchGuestError(raised.data);
         } else {
           console.error(
@@ -269,6 +318,21 @@ export class CommonIframeSandboxElement extends LitElement {
     queueMicrotask(() => {
       if (!this.isConnected) this.#releaseGuest();
     });
+  }
+
+  /**
+   * Reloads on a change to `src` or `bridge`, once the frame is ready; until
+   * then `onOuterReady` does the first load. Reacting here rather than in the
+   * setters folds a batch of changes into one load: assigning both properties
+   * asks for one document, carrying both new values, rather than reloading
+   * the old document under the new bridge on the way.
+   */
+  protected override updated(changed: PropertyValues) {
+    super.updated(changed);
+    if (!this.readyWindow) return;
+    if (changed.has("src") || (changed.has("bridge") && this.src)) {
+      this.#loadInnerDoc();
+    }
   }
 
   /** @inheritDoc */

@@ -248,6 +248,26 @@ directly to each guest; the outer frame does not relay capability traffic.
 parent so a guest can report failure before it has a working port. The host
 emits a `common-iframe-error` event.
 
+The alarm route and the port are separate channels, so a flush exchange puts
+what crossed before the port ahead of what crosses on it. The host announces the
+exchange ahead of each handoff; a guest that heard the announcement posts a
+nonce-carrying flush marker up the parent chain on taking its port, behind
+everything it posted there before, and holds its port traffic until the host
+echoes the nonce back over the port -- which the host does only once it has
+handled everything the relay carried ahead of the marker. An alarm raised before
+the guest's first write is therefore dispatched before that write lands. A guest
+whose host predates the exchange is never told about it, and sends unordered
+rather than waiting.
+
+A load report cannot be matched to a document: a guest can renavigate its own
+frame, and the inner frame's initial `about:blank` navigation can complete after
+a document was asked for, so reports do not stand one to one with the documents
+the host asks for. The host offers a fresh port per report and lets use decide
+which offer matters. A session's first request retires every session offered
+before it, and a guest already holding a port refuses the new offer rather than
+losing the session it has. Two offers are kept at most, which is what stops a
+guest renavigating its own frame from accumulating them.
+
 ## Security considerations
 
 - The bridge is capability-based, but every resource supplied to a frame is

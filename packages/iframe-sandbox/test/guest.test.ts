@@ -3,6 +3,7 @@ import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
+import { defer } from "@commonfabric/utils/defer";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
@@ -18,6 +19,8 @@ import {
   type BridgeHostMessage,
   type BridgeRequest,
   GUEST_PORT_HANDOFF,
+  GUEST_PORT_ORDERED,
+  type GuestFlush,
 } from "../src/ipc.ts";
 
 function handOffPort(): MessagePort {
@@ -100,6 +103,121 @@ describe("guest", () => {
         });
       } finally {
         fabric.disconnect();
+      }
+    });
+
+    it("holds queued requests until the host answers the flush marker", async () => {
+      const posted: unknown[] = [];
+      const originalParent = Reflect.get(globalThis, "parent");
+      Reflect.set(globalThis, "parent", {
+        postMessage: (data: unknown) => posted.push(data),
+      });
+      const fabric = connectFabric();
+      try {
+        const pulling = fabric.cell<number>("count").pull();
+
+        // The collector is attached before the handoff, so a request sent at
+        // handoff is caught rather than missed.
+        const channel = new MessageChannel();
+        const arrived: unknown[] = [];
+        channel.port1.addEventListener(
+          "message",
+          (event) => arrived.push((event as MessageEvent).data),
+        );
+        channel.port1.start();
+        globalThis.dispatchEvent(
+          new MessageEvent("message", { data: GUEST_PORT_ORDERED }),
+        );
+        globalThis.dispatchEvent(
+          new MessageEvent("message", {
+            data: GUEST_PORT_HANDOFF,
+            ports: [channel.port2],
+          }),
+        );
+        expect(posted).toEqual([{ type: "flush", nonce: expect.any(String) }]);
+
+        // The sentinel goes the way the guest's requests go, and one port
+        // delivers in the order things were posted, so a request sent at
+        // handoff arrives ahead of it. The sentinel arriving alone is
+        // therefore the hold, rather than a request still in flight.
+        const sentinel = "sentinel";
+        const seen = defer();
+        channel.port1.addEventListener("message", (event) => {
+          if ((event as MessageEvent).data === sentinel) seen.resolve();
+        });
+        channel.port2.postMessage(sentinel);
+        await seen.promise;
+        expect(arrived).toEqual([sentinel]);
+
+        const marker = posted[0] as GuestFlush;
+        send(channel.port1, {
+          protocol: BRIDGE_PROTOCOL,
+          version: BRIDGE_VERSION,
+          type: "flush",
+          nonce: marker.nonce,
+        });
+        const request = await receive(channel.port1);
+        expect(request.operation).toBe("pull");
+        send(channel.port1, response(request.id, 7));
+        expect(await pulling).toBe(7);
+      } finally {
+        fabric.disconnect();
+        Reflect.set(globalThis, "parent", originalParent);
+      }
+    });
+
+    it("ignores a flush acknowledgement carrying another guest's nonce", async () => {
+      const posted: unknown[] = [];
+      const originalParent = Reflect.get(globalThis, "parent");
+      Reflect.set(globalThis, "parent", {
+        postMessage: (data: unknown) => posted.push(data),
+      });
+      const fabric = connectFabric();
+      let pulling: Promise<number> | undefined;
+      try {
+        pulling = fabric.cell<number>("count").pull();
+        globalThis.dispatchEvent(
+          new MessageEvent("message", { data: GUEST_PORT_ORDERED }),
+        );
+        const host = handOffPort();
+        expect(posted).toEqual([{ type: "flush", nonce: expect.any(String) }]);
+        send(host, {
+          protocol: BRIDGE_PROTOCOL,
+          version: BRIDGE_VERSION,
+          type: "flush",
+          nonce: "somebody-elses",
+        });
+        // disconnect() sends its request past the gate, so it fences the
+        // channel: the disconnect arriving first says the stray
+        // acknowledgement released nothing.
+        fabric.disconnect();
+        const request = await receive(host);
+        expect(request.operation).toBe("disconnect");
+        await expect(pulling).rejects.toMatchObject({ code: "disconnected" });
+      } finally {
+        fabric.disconnect();
+        await pulling?.catch(() => {});
+        Reflect.set(globalThis, "parent", originalParent);
+      }
+    });
+
+    it("sends queued requests at handoff when no parent can carry a marker", async () => {
+      const originalParent = Reflect.get(globalThis, "parent");
+      Reflect.set(globalThis, "parent", undefined);
+      const fabric = connectFabric();
+      try {
+        const pulling = fabric.cell<number>("count").pull();
+        globalThis.dispatchEvent(
+          new MessageEvent("message", { data: GUEST_PORT_ORDERED }),
+        );
+        const host = handOffPort();
+        const request = await receive(host);
+        expect(request.operation).toBe("pull");
+        send(host, response(request.id, 7));
+        expect(await pulling).toBe(7);
+      } finally {
+        fabric.disconnect();
+        Reflect.set(globalThis, "parent", originalParent);
       }
     });
 
