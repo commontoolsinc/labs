@@ -24,23 +24,31 @@
  * right and that read finds nothing.
  *
  * The second test is the same property in the units a person feels: three
- * voters recast every option at once, three rounds of it, and no write is
- * rolled back at all. Two things make that an equality rather than a bound.
- * Each voter's vote for an option is its own document, so a burst of recasts
- * holds no document two sessions both write. And the color schedule advances
- * every voter by one color a round, which leaves each option holding one of
- * every color throughout, so the tallies the poll derives never change and
- * never contend either. What the count answers is therefore the vote write
- * alone, which is the question this file asks.
+ * voters recast every option at once, three rounds of it, and the burst
+ * throws almost nothing away. Each voter's vote for an option is its own
+ * document, so a burst of recasts holds no document two sessions both write,
+ * and the color schedule advances every voter by one color a round, which
+ * leaves each option holding one of every color throughout, so the tallies
+ * the poll derives never change and never contend either.
  *
- * The schedule is what makes it answer that. Casting the color already held
- * clears the vote, and clearing one changes the shared list's membership,
- * which is what the sessions' concurrent commits then get refused over. That
- * cost is membership churn, and it is the same whether the vote itself is
- * keyed or not. A burst that repeats a color pays it and measures something
- * other than what it set out to. This burst costs 0 rolled-back writes with
- * the keyed write and around 60 with a whole-list write (2026-09-02, this
- * harness).
+ * The schedule is what makes the count answer the question this file asks.
+ * Casting the color already held clears the vote, and clearing one changes
+ * the shared list's membership, which is what the sessions' concurrent
+ * commits then get refused over. That cost is membership churn, and it is the
+ * same whether the vote itself is keyed or not. A burst that repeats a color
+ * pays it and measures something else. Each round therefore checks the vote
+ * count has not moved, which is the schedule failing in the terms that say
+ * why.
+ *
+ * The bound is one rolled-back write per vote, and it is a bound rather than
+ * an equality because the count is not specific to the vote write: it is
+ * every optimistic write this session had rolled back, whatever refused it.
+ * The keyed burst measured 0 across twenty-two runs here and 7 once on a
+ * loaded continuous-integration host under server execution, where a piece
+ * whose instantiation loses a race contributes refusals of its own. A
+ * whole-list write measured 67 and 68 (2026-09-02, this harness). So the
+ * bound sits some five times above what a keyed burst costs and well below
+ * what a whole-list one does, and neither margin rests on a single reading.
  *
  * The poll's identity is a shared `#profile` cell. The wish resolves in this
  * harness, and in a space holding no profile it resolves to the surface that
@@ -224,18 +232,30 @@ describe("lunch poll: a vote is a keyed, mergeable write", () => {
         ),
       );
       await harness.settle();
+      // The count moving is the schedule having gone wrong, and it is worth
+      // catching here rather than in the rollback total below. A cast in the
+      // color a vote already holds reads as the voter clicking their own
+      // color again, so `castVote` drops the vote — a membership write on the
+      // one document every session shares, and the only write in this burst
+      // another session's commit can go stale against. The rollback count
+      // would then be measuring that, and how much of it each session sees is
+      // a race.
+      expect(
+        await host.read(["voteCount"]),
+        `round ${round} left the poll holding a different number of votes ` +
+          "than it started with, so the burst is changing the shared list's " +
+          "membership rather than recasting votes in place",
+      ).toBe(cast);
     }
     const rolledBack = await reverts(everyone) - before;
 
-    // One vote per (voter, option) throughout: the burst recast them in place.
-    expect(await host.read(["voteCount"])).toBe(cast);
     expect(
       rolledBack,
       `${rolledBack} rolled-back writes for ${cast * rounds} concurrent ` +
         "recasts; a recast writes one voter's own vote document and adds a " +
         "membership already present, so it shares no document with another " +
-        "voter's recast and costs nothing to roll back. Anything here means " +
-        "the vote write is contending on the whole list again",
-    ).toBe(0);
+        "voter's recast and costs almost nothing. A count near this bound " +
+        "means the vote write is contending on the whole list again",
+    ).toBeLessThan(cast * rounds);
   });
 });
