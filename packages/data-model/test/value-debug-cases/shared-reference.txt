@@ -1,6 +1,6 @@
 (() => {
   const shared = { v: 1 };
-  return { a: shared, b: shared };
+  return { a: shared, b: shared, c: [shared, { d: shared }] };
 })()
 
 {
@@ -9,7 +9,17 @@
   },
   b: {
     v: 1
-  }
+  },
+  c: [
+    {
+      v: 1
+    },
+    {
+      d: {
+        v: 1
+      }
+    }
+  ]
 }
 
-{a:{v:1},b:{v:1}}
+{a:{v:1},b:{v:1},c:[{v:1},{d:{v:1}}]}
