@@ -1,6 +1,8 @@
 import { assertEquals } from "@std/assert";
+import { Server } from "@commonfabric/memory/v2/server";
 
 import env from "@/env.ts";
+import { stats as statsRoute } from "@/routes/health/health.routes.ts";
 import createApp from "@/lib/create-app.ts";
 import router from "@/routes/health/health.index.ts";
 
@@ -24,4 +26,39 @@ Deno.test("health routes", async (t) => {
     assertEquals(json.gitSha, null);
     assertEquals(response.headers.get("x-cf-git-sha"), null);
   });
+
+  await t.step(
+    "GET /api/health/stats reports the memory server's document caches",
+    async () => {
+      // The provider is registered by the Server constructor (newest live
+      // server reported), so a server constructed here stands in for the
+      // co-hosted one; it has opened no space yet.
+      const server = new Server({
+        store: new URL("memory://health-stats-document-caches"),
+        authorizeSessionOpen: () => "did:key:z6Mk-health-stats-principal",
+        sessionOpenAuth: { audience: "did:key:z6Mk-health-stats-audience" },
+      });
+      try {
+        const response = await app.request("/api/health/stats");
+        assertEquals(response.status, 200);
+        const json = await response.json();
+        assertEquals(json.documentCaches, server.documentCachesDiagnostics());
+        assertEquals(json.documentCaches, { spaces: {} });
+        // The declared response schema admits the live response.
+        const declared = (statsRoute.responses as Record<
+          number,
+          {
+            content: {
+              "application/json": {
+                schema: { safeParse(value: unknown): { success: boolean } };
+              };
+            };
+          }
+        >)[200].content["application/json"].schema;
+        assertEquals(declared.safeParse(json).success, true);
+      } finally {
+        await server.close();
+      }
+    },
+  );
 });

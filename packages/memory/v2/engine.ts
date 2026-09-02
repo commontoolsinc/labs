@@ -942,6 +942,32 @@ interface PreparedStatements {
   deleteOldSnapshots: PreparedStatement;
 }
 
+/** A decoded revision the engine keeps, with the encoded size it stands in
+ * for in the cache's byte budget. */
+export type DocumentCacheEntry = {
+  document: EntityDocument | null;
+
+  /** Encoded bytes of the stored row(s) the document was decoded from — the
+   * entry's weight against the budget, a proxy for the decoded graph it
+   * keeps alive. */
+  weight: number;
+};
+
+/** The document cache's lifetime counters. */
+export type DocumentCacheStats = {
+  hits: number;
+  misses: number;
+  evictions: number;
+};
+
+/** A peek at one engine's document cache. */
+export type DocumentCacheDiagnostics = DocumentCacheStats & {
+  entries: number;
+  bytes: number;
+  budgetBytes: number;
+  maxEntries: number;
+};
+
 export type Engine = {
   url: URL;
   database: Database;
@@ -968,15 +994,28 @@ export type Engine = {
    * time, and a runtime reads the same revision far more often than it writes
    * a new one. Reconstructed documents go in too, which is the larger saving:
    * a patched revision costs a base document plus every patch over it.
+   *
+   * Insertion order is the eviction order: a hit re-inserts, so the least
+   * recently read entry goes first, against the byte budget and entry cap
+   * below (see DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES for the sizing).
    */
-  documentCache: Map<string, EntityDocument | null>;
+  documentCache: Map<string, DocumentCacheEntry>;
+
+  /** Sum of the live entries' weights. */
+  documentCacheBytes: number;
+
+  /** The bounds the cache evicts against (open options). */
+  documentCacheBudgetBytes: number;
+  documentCacheMaxEntries: number;
+
+  documentCacheStats: DocumentCacheStats;
 
   /**
    * Where {@link cacheDocumentForRevision} puts entries while a commit is
    * open, so they reach {@link Engine.documentCache} only once its rows are
    * durable. Absent outside {@link applyCommit}.
    */
-  stagedDocumentCache?: Map<string, EntityDocument | null>;
+  stagedDocumentCache?: Map<string, DocumentCacheEntry>;
 };
 
 export class ConflictError extends Error {
@@ -1049,6 +1088,15 @@ export type OpenOptions = {
   snapshotRetention?: number;
   operationCheckpointInterval?: number;
   operationCodecs?: OperationCodecRegistry;
+
+  /** Byte budget for the decoded-document cache, in encoded bytes of the
+   * rows its entries were decoded from (default
+   * DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES). */
+  documentCacheBudgetBytes?: number;
+
+  /** Entry cap for the same cache (default
+   * DEFAULT_DOCUMENT_CACHE_MAX_ENTRIES). */
+  documentCacheMaxEntries?: number;
 };
 
 export type InvocationRecord = {
@@ -1302,6 +1350,27 @@ type BranchRow = {
 export const DEFAULT_SNAPSHOT_INTERVAL = 10;
 export const DEFAULT_SNAPSHOT_RETENTION = 2;
 export const DEFAULT_OPERATION_CHECKPOINT_INTERVAL = 100;
+
+/**
+ * Defaults for the decoded-document cache ({@link Engine.documentCache}).
+ *
+ * Sized to keep one active corpus's working set resident. The Topics board
+ * (129 topics, measured 2026-09-02 on a copy of the production space) reads
+ * about a thousand documents per load, the same thousand on every load and
+ * on every refresh. Under the earlier bound — 256 entries, cleared wholesale
+ * when full — no walk over that set ever found a document cached, and every
+ * walk paid decode plus deep-freeze for every document: about a second of
+ * server time per walk, most of it in the freeze. With the set resident the
+ * same walk is under 200 ms, and a board load's server time fell from 4.1 s
+ * to 0.8 s.
+ *
+ * The byte budget is the retention bound (encoded bytes, a proxy for the
+ * decoded graphs kept alive); the entry cap is the cardinality backstop.
+ * Eviction is least-recently-read, so superseded revisions — read once more
+ * at most — age out on their own, which is what the old bound existed for.
+ */
+export const DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES = 8 * 1024 * 1024;
+export const DEFAULT_DOCUMENT_CACHE_MAX_ENTRIES = 8192;
 
 const prepareStatements = (database: Database): PreparedStatements => ({
   insertAuthorization: database.prepare(INSERT_AUTHORIZATION),
@@ -1750,6 +1819,8 @@ export const open = async (
     snapshotRetention = DEFAULT_SNAPSHOT_RETENTION,
     operationCheckpointInterval = DEFAULT_OPERATION_CHECKPOINT_INTERVAL,
     operationCodecs = createDefaultOperationCodecRegistry(),
+    documentCacheBudgetBytes = DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES,
+    documentCacheMaxEntries = DEFAULT_DOCUMENT_CACHE_MAX_ENTRIES,
   }: OpenOptions,
 ): Promise<Engine> => {
   if (
@@ -1758,6 +1829,22 @@ export const open = async (
   ) {
     throw new TypeError(
       "operationCheckpointInterval must be a positive safe integer",
+    );
+  }
+  if (
+    !Number.isSafeInteger(documentCacheBudgetBytes) ||
+    documentCacheBudgetBytes <= 0
+  ) {
+    throw new TypeError(
+      "documentCacheBudgetBytes must be a positive safe integer",
+    );
+  }
+  if (
+    !Number.isSafeInteger(documentCacheMaxEntries) ||
+    documentCacheMaxEntries <= 0
+  ) {
+    throw new TypeError(
+      "documentCacheMaxEntries must be a positive safe integer",
     );
   }
   const database = await new Database(toDatabaseAddress(url), { create: true });
@@ -1784,8 +1871,23 @@ export const open = async (
     operationCodecs,
     statements: prepareStatements(database),
     documentCache: new Map(),
+    documentCacheBytes: 0,
+    documentCacheBudgetBytes,
+    documentCacheMaxEntries,
+    documentCacheStats: { hits: 0, misses: 0, evictions: 0 },
   };
 };
+
+/** A peek at the engine's document cache: counters and current occupancy. */
+export const documentCacheDiagnostics = (
+  engine: Engine,
+): DocumentCacheDiagnostics => ({
+  ...engine.documentCacheStats,
+  entries: engine.documentCache.size,
+  bytes: engine.documentCacheBytes,
+  budgetBytes: engine.documentCacheBudgetBytes,
+  maxEntries: engine.documentCacheMaxEntries,
+});
 
 export const close = (engine: Engine): void => {
   engine.database.close();
@@ -2178,8 +2280,15 @@ const readStateForScopeKey = (
   let document: EntityDocument | null;
   const cached = engine.documentCache.get(cacheKey);
   if (cached !== undefined) {
-    document = cached;
+    // Insertion order is the eviction order, so a hit re-inserts: the entry
+    // just read becomes the last to go.
+    engine.documentCache.delete(cacheKey);
+    engine.documentCache.set(cacheKey, cached);
+    engine.documentCacheStats.hits++;
+    document = cached.document;
   } else {
+    engine.documentCacheStats.misses++;
+    let weight = row.data?.length ?? 0;
     switch (row.op) {
       case "set":
         document = decodeStoredDocument(row.data);
@@ -2187,20 +2296,23 @@ const readStateForScopeKey = (
       case "delete":
         document = null;
         break;
-      case "patch":
-        document = reconstructPatchedDocument(engine, {
+      case "patch": {
+        const reconstructed = reconstructPatchedDocument(engine, {
           id,
           scopeKey,
           branch: resolvedBranch,
           seq: row.seq,
           opIndex: row.op_index,
         });
+        document = reconstructed.document;
+        weight = reconstructed.encodedBytes;
         break;
+      }
       default:
         // `sqlite` ops are never stored as revisions; unreachable.
         throw new Error(`unexpected stored revision op: ${row.op}`);
     }
-    cacheDocumentForRevision(engine, cacheKey, document);
+    cacheDocumentForRevision(engine, cacheKey, { document, weight });
   }
 
   return {
@@ -3337,15 +3449,15 @@ export const applyCommit = (
   // SQLite back, and an entry recorded from what it wrote would describe a
   // revision that never happened. A retry then writes its own revision at the
   // sequence and operation index the rolled-back one had.
-  const staged = new Map<string, EntityDocument | null>();
+  const staged = new Map<string, DocumentCacheEntry>();
   engine.stagedDocumentCache = staged;
   try {
     const applied = engine.database.transaction(applyCommitTransaction)
       .immediate(engine, options);
     // Durable now, so what was read from those rows can be remembered.
     engine.stagedDocumentCache = undefined;
-    for (const [key, document] of staged) {
-      cacheDocumentForRevision(engine, key, document);
+    for (const [key, entry] of staged) {
+      cacheDocumentForRevision(engine, key, entry);
     }
     return applied;
   } finally {
@@ -6338,7 +6450,7 @@ const validateStatefulEntityRevisions = (
         branch,
         seq: revision.seq,
         opIndex: revision.opIndex,
-      })
+      }).document
       : applyPatchToDocument(document, revision.patches ?? []);
     rejectStoredSyncSchemaRef(document);
   }
@@ -6492,7 +6604,7 @@ const reconstructPatchedDocument = (
     seq: number;
     opIndex: number;
   },
-): EntityDocument => {
+): { document: EntityDocument; encodedBytes: number } => {
   const { id, scopeKey, branch, seq, opIndex } = options;
   const baseRow = engine.statements.selectLatestBase.get({
     branch,
@@ -6511,15 +6623,20 @@ const reconstructPatchedDocument = (
   let baseSeq = 0;
   let baseOpIndex = -1;
   let document = emptyEntityDocument();
+  // The encoded bytes this reconstruction read — the base or snapshot plus
+  // every patch — which is what the document cache weighs the result by.
+  let encodedBytes = 0;
   if (snapshotRow && (!baseRow || snapshotRow.seq >= baseRow.seq)) {
     baseSeq = snapshotRow.seq;
     baseOpIndex = Number.MAX_SAFE_INTEGER;
     document = decodeStoredDocument(snapshotRow.value);
+    encodedBytes += snapshotRow.value?.length ?? 0;
   } else if (baseRow) {
     baseSeq = baseRow.seq;
     baseOpIndex = baseRow.op_index;
     if (baseRow.op === "set") {
       document = decodeStoredDocument(baseRow.data);
+      encodedBytes += baseRow.data?.length ?? 0;
     }
   }
 
@@ -6538,9 +6655,10 @@ const reconstructPatchedDocument = (
       document,
       decodeStoredPatchList(patch.data),
     );
+    encodedBytes += patch.data?.length ?? 0;
   }
 
-  return document;
+  return { document, encodedBytes };
 };
 
 const readRowForBranch = (
@@ -6638,24 +6756,6 @@ const ensureActiveBranch = (engine: Engine, branch: BranchName): void => {
 };
 
 /**
- * How many decoded revisions the cache keeps.
- *
- * A read reaches for the head revision of a document over and over while a
- * board is being worked on, so the entries that earn their place are few and
- * hot — but eviction here is wholesale, so a bound under the working set
- * clears just as the entries become worth keeping and buys nothing at all.
- * Seeding a fifty-topic board decodes 25,833 documents uncached; a bound of
- * 32 or 64 leaves that at 25,327 and 25,123, while 256 takes it to 12,361.
- * Above that the curve flattens: 1,024 reaches 10,708 for four times the
- * retained graphs, and measured no faster.
- *
- * The bound is what keeps the decoded graphs of superseded revisions from
- * accumulating for the life of the process. Peak memory across a seed is the
- * same with it as without.
- */
-const DOCUMENT_CACHE_MAX_ENTRIES = 256;
-
-/**
  * The revision a cached document belongs to. Every part of the address is
  * needed: the same entity has a different document per branch and per scope,
  * and a different one again at each point in its history.
@@ -6704,27 +6804,48 @@ const documentCacheKey = (
  * recorded from durable state, and a transaction that has written its own
  * revision resolves to that revision's own sequence — a different key.
  *
- * Eviction is wholesale rather than least-recently-used: the working set is
- * small and the bound is generous, so a run that reaches it is one whose
- * access pattern a cache of this size was not going to serve anyway, and
- * clearing costs nothing to get right.
+ * Eviction is least-recently-read, against a byte budget and an entry cap
+ * (see DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES): a working set that fits stays
+ * resident across every walk that reads it, and what ages out is what was
+ * not read again — superseded revisions foremost. An entry heavier than the
+ * whole budget is served but not retained.
  */
 const cacheDocumentForRevision = (
   engine: Engine,
   key: string,
-  document: EntityDocument | null,
+  entry: DocumentCacheEntry,
 ): void => {
   if (engine.stagedDocumentCache !== undefined) {
-    engine.stagedDocumentCache.set(key, document);
+    engine.stagedDocumentCache.set(key, entry);
     return;
   }
   if (engine.database.inTransaction) {
     return;
   }
-  if (engine.documentCache.size >= DOCUMENT_CACHE_MAX_ENTRIES) {
-    engine.documentCache.clear();
+  // A weight of at least one keeps the byte budget a real bound even for
+  // rows with no data (a delete).
+  const weight = Math.max(entry.weight, 1);
+  const previous = engine.documentCache.get(key);
+  if (previous !== undefined) {
+    engine.documentCache.delete(key);
+    engine.documentCacheBytes -= previous.weight;
   }
-  engine.documentCache.set(key, document);
+  if (weight > engine.documentCacheBudgetBytes) {
+    return;
+  }
+  while (
+    engine.documentCache.size > 0 &&
+    (engine.documentCache.size >= engine.documentCacheMaxEntries ||
+      engine.documentCacheBytes + weight > engine.documentCacheBudgetBytes)
+  ) {
+    const oldestKey = engine.documentCache.keys().next().value!;
+    const oldest = engine.documentCache.get(oldestKey)!;
+    engine.documentCache.delete(oldestKey);
+    engine.documentCacheBytes -= oldest.weight;
+    engine.documentCacheStats.evictions++;
+  }
+  engine.documentCache.set(key, { document: entry.document, weight });
+  engine.documentCacheBytes += weight;
 };
 
 const decodeStoredDocument = (data: string | null): EntityDocument =>

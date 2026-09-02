@@ -3,6 +3,7 @@ import { resolveGitSha } from "@/lib/build-info.ts";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type { DashRoute, IndexRoute, StatsRoute } from "./health.routes.ts";
 import {
+  getDocumentCachesDiagnostics,
   getPushPriorityStats,
   getSlowQueries,
 } from "@commonfabric/memory/v2/server";
@@ -52,12 +53,17 @@ export const stats: AppRouteHandler<StatsRoute> = (c) => {
   // very presence stays flag-gated so the OFF response never changes.
   const servingLoop = getServingLoopStats();
   const push = getPushPriorityStats();
+  // The memory server's decoded-document caches, one per open space:
+  // whether a corpus's working set stays resident between the walks that
+  // read it. Present whenever a memory server is co-hosted.
+  const documentCaches = getDocumentCachesDiagnostics();
   return c.json({
     timestamp: Date.now(),
     serverStart: serverStartTimestamp,
     logCounts: getLoggerCountsBreakdown(),
     timingStats: getTimingStatsBreakdown(),
     slowQueries: [...getSlowQueries()],
+    ...(documentCaches === undefined ? {} : { documentCaches }),
     ...(servingLoop === undefined ? {} : {
       servingLoop: { ...servingLoop, ...(push === undefined ? {} : { push }) },
     }),

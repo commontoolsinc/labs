@@ -388,6 +388,23 @@ let pushPriorityStatsProvider: (() => PushPriorityStats) | undefined;
 export const getPushPriorityStats = (): PushPriorityStats | undefined =>
   pushPriorityStatsProvider?.();
 
+/** Every open engine's decoded-document cache, keyed by space. */
+export type DocumentCachesDiagnostics = {
+  spaces: Record<string, Engine.DocumentCacheDiagnostics>;
+};
+
+/** Live servers' providers in construction order; a server removes its own
+ * on close(), so the newest LIVE server is always the one reported. */
+const documentCachesDiagnosticsProviders: (() => DocumentCachesDiagnostics)[] =
+  [];
+
+/** The co-hosted memory server's document-cache counters for the health
+ * route — the most recently constructed server still open; undefined when
+ * none is. */
+export const getDocumentCachesDiagnostics = ():
+  | DocumentCachesDiagnostics
+  | undefined => documentCachesDiagnosticsProviders.at(-1)?.();
+
 const randomHex = (bytes: number): string => {
   const data = crypto.getRandomValues(new Uint8Array(bytes));
   return [...data].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -1456,6 +1473,11 @@ export class Server {
        * retained at all. */
       queryEvaluationCacheBudget?: number;
 
+      /** Bounds for each space's decoded-document cache, handed to
+       * Engine.open (see DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES there). */
+      documentCacheBudgetBytes?: number;
+      documentCacheMaxEntries?: number;
+
       authorizeSessionOpen: (
         message: SessionOpenRequest,
         context: SessionOpenAuthContext,
@@ -1534,6 +1556,23 @@ export class Server {
     // health route, same last-registration-wins posture as the runner's
     // serving-loop stats registry (one co-hosted server per process).
     pushPriorityStatsProvider = () => this.pushPriorityStats();
+    documentCachesDiagnosticsProviders.push(
+      this.#documentCachesDiagnosticsProvider,
+    );
+  }
+
+  /** This server's health-route provider, kept so close() can withdraw
+   * exactly it and no other server's. */
+  #documentCachesDiagnosticsProvider = () => this.documentCachesDiagnostics();
+
+  /** Every open engine's document-cache counters, keyed by space. A peek:
+   * nothing is opened by asking. */
+  documentCachesDiagnostics(): DocumentCachesDiagnostics {
+    const spaces: Record<string, Engine.DocumentCacheDiagnostics> = {};
+    for (const [space, engine] of this.#resolvedEngines) {
+      spaces[space] = Engine.documentCacheDiagnostics(engine);
+    }
+    return { spaces };
   }
 
   memoryProtocolFlags(): MemoryProtocolFlags {
@@ -2025,6 +2064,15 @@ export class Server {
   }
 
   async close(): Promise<void> {
+    // Withdraw this server's health-route provider so a closed server is
+    // neither reported nor kept alive by the route; synchronous, ahead of
+    // the first await, so an un-awaited close still withdraws it at once.
+    const registered = documentCachesDiagnosticsProviders.indexOf(
+      this.#documentCachesDiagnosticsProvider,
+    );
+    if (registered >= 0) {
+      documentCachesDiagnosticsProviders.splice(registered, 1);
+    }
     this.#cancelScheduledRefresh();
     await this.#refreshing;
     await this.#drainSpacePublicationLocks();
@@ -6706,6 +6754,8 @@ export class Server {
         url,
         operationCodecs: this.#operationCodecs,
         operationCheckpointInterval: this.options.operationCheckpointInterval,
+        documentCacheBudgetBytes: this.options.documentCacheBudgetBytes,
+        documentCacheMaxEntries: this.options.documentCacheMaxEntries,
       });
     })();
     // The SYNC engine view (server-execution v2 Phase 5): the read-row
