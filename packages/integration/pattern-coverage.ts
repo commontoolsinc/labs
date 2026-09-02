@@ -4,9 +4,12 @@
  * The pattern's statements execute in the shell's runtime Web Worker, which has
  * no filesystem, so the hits have to come back across two boundaries before this
  * process can write LCOV: the worker's (a `GetPatternCoverage` request) and the
- * browser's (a `page.evaluate`). Both are crossed once per page at teardown —
- * the worker accumulates hits locally and hands over the whole report, rather
- * than reporting each hit as it happens.
+ * browser's (a `page.evaluate`). The worker accumulates hits locally and hands
+ * over the whole report, rather than reporting each hit as it happens, so both
+ * boundaries are crossed once per runtime, immediately before the shell drops
+ * that runtime and the collector inside it. A shell drops one whenever the page
+ * navigates and whenever an identity is set on it, so one suite has as many
+ * dumps to take as it has runtimes.
  *
  * See docs/development/COVERAGE.md.
  */
@@ -18,6 +21,7 @@ import {
   type PatternCoverageData,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
+import { describeThrown } from "./describe-thrown.ts";
 import type { Page } from "./page.ts";
 // Declares the `commonfabric` page global the dump below reads.
 import "../shell/src/globals.ts";
@@ -47,6 +51,10 @@ const PATTERNS_ROUTE_PREFIX = "/api/patterns/";
  * same instrumented bytes, which carry the file name and span id of whichever
  * realm compiled them — so a page that only warm-loaded bytes still reports hits
  * that land on another page's spans.
+ *
+ * One collector per test file, not per run: `deno test` gives each test file its
+ * own isolate, so each holds its own instance of this module. What merges here
+ * is what one test file's realms ran.
  */
 const collector = new PatternCoverageCollector();
 
@@ -74,9 +82,17 @@ export function patternCoverageCollector():
   return patternCoverageDir() === undefined ? undefined : collector;
 }
 
-/** One file per test process; `deno test` runs a shard's files in one process. */
+/**
+ * The file this collector writes, named apart from every other collector's in
+ * the same run: a shard runs several test files and each holds a collector of
+ * its own. The gate joins every `.lcov` an artifact carries, so a shard's report
+ * arriving in several files reads the same as one.
+ */
+const OUTPUT_FILE_NAME =
+  `pattern-integration-${Deno.pid}-${crypto.randomUUID()}.pattern-coverage.lcov`;
+
 function outputPath(dir: string): string {
-  return join(dir, `pattern-integration-${Deno.pid}.pattern-coverage.lcov`);
+  return join(dir, OUTPUT_FILE_NAME);
 }
 
 export function withRepositoryFileNames(
@@ -107,12 +123,22 @@ export async function enablePatternCoverage(page: Page): Promise<void> {
   });
 }
 
+/** What one page had to hand over when it was asked for its worker's hits. */
+type PatternCoverageDump =
+  | { noRuntime: true }
+  | { noCoverageRequest: true }
+  | { data: PatternCoverageData | null };
+
 /**
  * Pull one page's accumulated hits and rewrite the merged LCOV. Must run before
- * the page's runtime is disposed, which takes the worker's collector with it.
+ * the page's runtime is dropped, which takes the worker's collector with it.
  *
- * Best-effort: a page that never booted a runtime, or whose worker is already
- * gone, contributes nothing rather than failing the test it is tearing down.
+ * A page that cannot answer never fails the test it is collecting from. One
+ * empty-handed answer costs nothing: a page that never booted a runtime holds
+ * nothing, and says nothing. Every other one is a page whose worker ran authored
+ * statements this report will not carry, which the gate charges to whoever
+ * changes the tree next, so each of those names what was lost and why.
+ *
  * Rewriting the whole merged report on every dump keeps the file complete
  * without needing a process-exit hook.
  */
@@ -120,21 +146,37 @@ export async function collectPatternCoverage(page: Page): Promise<void> {
   const dir = patternCoverageDir();
   if (dir === undefined) return;
 
-  // `noRuntime` and a null report are different failures: the first is a page
-  // that never booted a runtime (nothing to collect, and normal), the second is
-  // a worker built without a collector — i.e. the flag above never reached it,
-  // which would otherwise look exactly like a pattern that ran no lines.
-  let result: { noRuntime: true } | { data: PatternCoverageData | null };
+  // Four answers, one of them normal. `noRuntime` is a page that never booted
+  // one, so there was nothing to collect. A runtime with no `getPatternCoverage`
+  // is a shell built against a runtime client from before the request existed. A
+  // null report is a worker built without a collector — the flag `localStorage`
+  // carries never reached its `InitializationData`. Anything thrown is a page
+  // that could not be reached at all, the worker having gone first.
+  let result: PatternCoverageDump;
   try {
     result = await page.evaluate(async () => {
       const rt = globalThis.commonfabric?.rt;
-      if (!rt?.getPatternCoverage) return { noRuntime: true as const };
+      if (!rt) return { noRuntime: true as const };
+      if (!rt.getPatternCoverage) return { noCoverageRequest: true as const };
       return { data: await rt.getPatternCoverage() };
-    }) as { noRuntime: true } | { data: PatternCoverageData | null };
-  } catch {
+    }) as PatternCoverageDump;
+  } catch (error) {
+    console.warn(
+      "[pattern-coverage] this page could not be asked for its worker's " +
+        "pattern coverage, so every hit the worker held is lost: " +
+        describeThrown(error),
+    );
     return;
   }
   if ("noRuntime" in result) return;
+  if ("noCoverageRequest" in result) {
+    console.warn(
+      "[pattern-coverage] this page's runtime client does not answer " +
+        "getPatternCoverage, so its worker's pattern coverage is lost. The " +
+        "shell it loaded was built against a runtime client without it.",
+    );
+    return;
+  }
 
   const data = result.data;
   if (data === null) {
@@ -145,7 +187,11 @@ export async function collectPatternCoverage(page: Page): Promise<void> {
     );
     return;
   }
-  if (data.spans.length === 0) return;
+  // Hits with no spans beside them are a realm that only warm-loaded
+  // already-instrumented bytes; they key against the spans the realm that
+  // compiled those bytes registered, so they are ingested like any others. A
+  // dump with neither ran no instrumented statement, so it has nothing to add.
+  if (data.spans.length === 0 && data.hits.length === 0) return;
 
   collector.ingest(data);
   await writeMergedPatternCoverage(dir);

@@ -2,6 +2,11 @@ import { fromFileUrl } from "@std/path";
 
 const DASHBOARD_DIRECTORY = fromFileUrl(new URL("../", import.meta.url));
 
+// The three commands the dashboard's tests run in, and what separates them.
+// The `*.browser.test.ts` name routes a file to the browser pass: the same
+// glob ignored here selects the files `test-browser` hands to deno-web-test.
+// The two favicon files are named one by one because what sets them apart is
+// the permissions they need rather than anything in their names.
 export const TEST_COMMANDS = [
   [
     "test",
@@ -9,10 +14,7 @@ export const TEST_COMMANDS = [
     "--allow-read",
     "--allow-write",
     `--allow-run=${Deno.execPath()},git`,
-    "--ignore=favicon-client.browser.test.ts",
-    "--ignore=dashboard-message-client.browser.test.ts",
-    "--ignore=render.browser.test.ts",
-    "--ignore=theme.browser.test.ts",
+    "--ignore=**/*.browser.test.ts",
     "--ignore=favicon-raster.test.ts",
     "--ignore=regenerate-favicons.test.ts",
   ],

@@ -28,6 +28,35 @@ selected suite's launch path. An Astral import alone is not proof that a test
 starts Chrome. Deno's `-A` does not escape the outer sandbox. The full rule is
 in `docs/development/TESTING.md#browser-tests-in-agent-sandboxes`.
 
+## A browser test routes itself by its name
+
+A test that needs a real browser but not a running product goes in a
+`*.browser.test.ts` file, and that name is the whole of the wiring. Every
+package that splits its tests this way matches the pattern twice: once as an
+`--ignore` that keeps the file out of plain `deno test` discovery, and once as
+the argument list handed to `deno-web-test`. Both are globs, so there is no list
+to add the file to. `packages/dashboard` spreads the pair across a runner script
+and the task that runner calls, which changes where they are written and not
+what they match.
+
+Two things break it, and the second is what makes the first hard to notice.
+
+A browser-only test under any other name lands in the plain Deno pass, where it
+fails on the first browser global it touches. So use the name whenever the test
+needs a browser, whatever its subject.
+`packages/ui/src/v2/components/cf-svg/sanitize-svg.browser.test.ts` is the case
+to keep in mind: it is not a component test at all, and needs a browser for
+`DOMParser` alone.
+
+A `typeof document === "undefined"` guard around the body turns that loud
+failure into a silent one. The file runs in Deno, returns before its first
+assertion, and reports "ok" having checked nothing. A file the glob routes
+always has a document, so the guard can only ever hide a mis-wiring. Write no
+guard.
+
+`docs/development/TESTING.md#focused-browser-regressions` states the rest,
+including when to use this route rather than the browser integration lane.
+
 ## Shape of a unit test file
 
 First check which kind of file you are in. A `*.test.tsx` under

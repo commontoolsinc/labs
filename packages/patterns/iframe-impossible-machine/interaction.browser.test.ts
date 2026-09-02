@@ -42,8 +42,6 @@ function NodeControlHarness(
 }
 
 Deno.test("embedded controls do not select their React Flow node", () => {
-  if (typeof document === "undefined") return;
-
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
