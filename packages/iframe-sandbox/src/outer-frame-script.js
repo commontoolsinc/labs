@@ -1,4 +1,4 @@
-// deno-coverage-ignore-file
+// deno-coverage-ignore-file -- runs only in a browser, as text inlined into a document.
 // @ts-check
 
 /**
