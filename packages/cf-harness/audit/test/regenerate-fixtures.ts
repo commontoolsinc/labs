@@ -226,8 +226,8 @@ const scriptedFetch = (payloads: readonly unknown[]): typeof fetch => {
 /**
  * The cell-labels snapshot a host holding no copy of the run's space writes.
  *
- * `snapshotCellLabels()` reads a space database, which a unit fixture has
- * none of. The `unavailable` snapshot is the same artifact that reader
+ * A run ending reads a space database, which a unit fixture has none of.
+ * The `unavailable` snapshot is the same artifact that reader
  * produces on such a host, written through the same store, so the tree
  * records that the labels were asked for and were not there — which is the
  * distinction AUD-9 turns on.

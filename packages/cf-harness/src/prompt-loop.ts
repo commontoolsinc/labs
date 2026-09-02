@@ -4185,6 +4185,12 @@ export class CfHarnessPromptLoop {
       workspaceHostPath: this.engine.workspaceHostPath,
       processRunner: this.engine.hostProcessRunner,
       artifactRoot: this.engine.artifactStore?.artifactRoot,
+      // The child ends in the same space the parent does, so its label
+      // snapshot reads the same store: on a host where that store is not
+      // where the discovery walk looks, the parent's path is the child's.
+      ...(this.engine.spaceDbPath !== undefined
+        ? { spaceDbPath: this.engine.spaceDbPath }
+        : {}),
       model: childModel.model,
       modelProvider,
       ...(modelProvider === "openai-codex"
