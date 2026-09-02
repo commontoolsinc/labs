@@ -56,13 +56,20 @@ interface StubController {
  * Helper for the cases below, which stands in for the controller a connection
  * carries. Nothing here reads a controller, so it reports one thing only —
  * how many times it was closed — which is what every ownership case turns on.
+ *
+ * A `closeError` makes its close fail, which is the second observable a case
+ * has of the closing: a failure only reaches a caller of `dispose()` through
+ * an `await`, so it separates a close that is awaited from one that is
+ * merely started, where the count alone cannot.
  */
-function stubController(): StubController {
+function stubController(closeError?: Error): StubController {
   let closed = 0;
   const pieces = {
     dispose: () => {
       closed += 1;
-      return Promise.resolve();
+      return closeError === undefined
+        ? Promise.resolve()
+        : Promise.reject(closeError);
     },
   } as unknown as PiecesController;
   return { pieces, closed: () => closed };
@@ -217,7 +224,7 @@ describe("connection", () => {
           expect(controller.closed()).toBe(0);
         });
 
-        it("closes the connection once, however many times it runs", async () => {
+        it("closes the connection once across repeated disposals", async () => {
           const controller = stubController();
           const connection = new HeldConnection(
             owning(() => Promise.resolve(controller.pieces)),
@@ -225,6 +232,63 @@ describe("connection", () => {
           await connection.pieces();
           await connection.dispose();
           await connection.dispose();
+          expect(controller.closed()).toBe(1);
+        });
+
+        it("returns the same disposal to a call made while the first is running", async () => {
+          const controller = stubController();
+          const opening = Promise.withResolvers<PiecesController>();
+          const connection = new HeldConnection(owning(() => opening.promise));
+          const asked = connection.pieces();
+          const first = connection.dispose();
+          const second = connection.dispose();
+          expect(second).toBe(first);
+          opening.resolve(controller.pieces);
+          expect(await asked).toBe(controller.pieces);
+          await second;
+          expect(controller.closed()).toBe(1);
+        });
+
+        it("returns the failure a close raises", async () => {
+          const controller = stubController(
+            new Error("socket teardown failed"),
+          );
+          const connection = new HeldConnection(
+            owning(() => Promise.resolve(controller.pieces)),
+          );
+          await connection.pieces();
+          await expect(connection.dispose()).rejects.toThrow(
+            "socket teardown failed",
+          );
+        });
+
+        it("returns the failure a close raises where the construction was still in flight", async () => {
+          const controller = stubController(
+            new Error("socket teardown failed"),
+          );
+          const opening = Promise.withResolvers<PiecesController>();
+          const connection = new HeldConnection(owning(() => opening.promise));
+          const asked = connection.pieces();
+          const disposing = connection.dispose();
+          opening.resolve(controller.pieces);
+          expect(await asked).toBe(controller.pieces);
+          await expect(disposing).rejects.toThrow("socket teardown failed");
+        });
+
+        it("returns the same failure to a disposal asked for again", async () => {
+          const controller = stubController(
+            new Error("socket teardown failed"),
+          );
+          const connection = new HeldConnection(
+            owning(() => Promise.resolve(controller.pieces)),
+          );
+          await connection.pieces();
+          await expect(connection.dispose()).rejects.toThrow(
+            "socket teardown failed",
+          );
+          await expect(connection.dispose()).rejects.toThrow(
+            "socket teardown failed",
+          );
           expect(controller.closed()).toBe(1);
         });
 

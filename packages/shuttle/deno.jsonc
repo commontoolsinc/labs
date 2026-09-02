@@ -4,7 +4,11 @@
     // --no-check: this package is type-checked by `deno task check`
     // (tasks/check.sh).
     // --allow-env: `@commonfabric/cli/lib/piece`, the entry `src/connection.ts`
-    // opens its connection through, reads the environment as it loads.
+    // opens its connection through, reads the environment as it loads. The
+    // reads come from its whole transitive graph rather than from that module,
+    // so the grant is broad: a named list of variables would be a hand-copied
+    // enumeration of another package's imports with nothing keeping it in
+    // step.
     "test": "deno test --no-check --allow-env"
   }
 }

@@ -79,14 +79,17 @@ function spaceConfigFor(record: ConnectionRecord): SpaceConfig {
  * ask, hands that same one to every ask after, and on disposal closes
  * whatever it opened.
  *
- * Per instance rather than per process, so that more than one connection
- * stays reachable.
+ * Per instance rather than per process, because a module-global holder would
+ * be module-global mutable state (`docs/development/DEVELOPMENT.md`, "Avoid
+ * Singletons"). How many connections one process may hold at a time is a
+ * different question, settled in `docs/plans/shuttle/runtime-integration.md`
+ * rather than here.
  */
 export class HeldConnection implements AsyncDisposable {
   #open: () => Promise<PiecesController>;
   #owned: boolean;
   #pieces: Promise<PiecesController> | undefined;
-  #disposed = false;
+  #disposal: Promise<void> | undefined;
 
   /**
    * Constructs an instance serving the connection `source` names. An owned
@@ -114,11 +117,14 @@ export class HeldConnection implements AsyncDisposable {
    * a terminal failure for the rest of the run. That covers the connection
    * that never opened, which is the whole of what it covers.
    *
-   * Throws once this instance is disposed: a disposed holder serves nothing,
-   * whether or not it closed anything.
+   * Throws once this instance is disposed, and throws where every other
+   * failure here rejects: asking a disposed holder is a mistake in the
+   * caller rather than a connection that would not open, and the two are
+   * worth telling apart at the call. A caller that wants them together
+   * catches around the call and not only on the promise.
    */
   pieces(): Promise<PiecesController> {
-    if (this.#disposed) {
+    if (this.#disposal !== undefined) {
       throw new Error("This connection is disposed.");
     }
     if (this.#pieces === undefined) {
@@ -139,7 +145,9 @@ export class HeldConnection implements AsyncDisposable {
 
   /**
    * Closes the connection this instance opened, and refuses to serve one
-   * afterwards. Closing again does nothing.
+   * afterwards. Every call returns the one disposal, so a second neither
+   * closes twice nor reports done while the first is still closing, and a
+   * close that failed reports the same failure to each of them.
    *
    * A construction still in flight is awaited and its connection closed, so
    * that a disposal crossing a connect strands nothing; the ask that started
@@ -153,17 +161,26 @@ export class HeldConnection implements AsyncDisposable {
    * handed this instance no controller either, so its rejection is neither
    * closed nor re-raised here.
    */
-  async dispose(): Promise<void> {
-    if (this.#disposed) return;
-    this.#disposed = true;
-    const held = this.#pieces;
-    if (!this.#owned || held === undefined) return;
-    const pieces = await held.catch(() => undefined);
-    await pieces?.dispose();
+  dispose(): Promise<void> {
+    this.#disposal ??= this.#disposeOnce();
+    return this.#disposal;
   }
 
   /** @inheritDoc */
   async [Symbol.asyncDispose](): Promise<void> {
     await this.dispose();
+  }
+
+  /**
+   * Helper for {@link HeldConnection.dispose}, which does the closing that
+   * every call to it shares. Nothing between here and its first `await`
+   * re-enters this instance, which is what lets `dispose()` hold the promise
+   * this returns rather than having to hold a flag before calling it.
+   */
+  async #disposeOnce(): Promise<void> {
+    const held = this.#pieces;
+    if (!this.#owned || held === undefined) return;
+    const pieces = await held.catch(() => undefined);
+    await pieces?.dispose();
   }
 }
