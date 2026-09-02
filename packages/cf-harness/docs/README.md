@@ -22,6 +22,10 @@ migration notes live under `docs/history/` at the repository root.
   against the pattern index is measured so two runs can be compared: the task
   wording rule the finding rests on, what a batch records, and what its counts
   do and do not establish.
+- [system-map/](system-map/README.md) — an interactive map of the harness and
+  the runtime around it, drawn by trust boundary: where every gate sits and its
+  status, where the threats lie and which are closed by planned work, guarded by
+  CFC, or held by people and process; with the procedure for keeping it true.
 
 ## Normative boundary
 
