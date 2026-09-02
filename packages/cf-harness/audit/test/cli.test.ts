@@ -240,23 +240,18 @@ describe("cli", () => {
       expect(idsOf(asked).has("AUD-19")).toBe(true);
     });
 
-    it("returns 1 when the corpus establishes nothing about release gating", async () => {
-      // `inconclusive` is the default threshold, and this is the case it was
-      // chosen for: the artifacts carry no reason code a release refusal
-      // could be written in, so a green exit would report that as compliance.
+    it("returns 1 when a corpus declared adversarial recorded no release refusal", async () => {
       const written: string[] = [];
 
       expect(
         await runAuditCli(
-          [FIXTURE_RUN_DIR, "--expect-refusals"],
+          [FIXTURE_RUN_DIR, "--expect-refusals", "--fail-on", "fail"],
           (text) => {
             written.push(text);
           },
         ),
       ).toBe(1);
-      expect(written.join("")).toContain(
-        "none of which could have been a release refusal",
-      );
+      expect(written.join("")).toContain("declared adversarial");
     });
 
     it("reads the expected-posture profile the repo ships", async () => {

@@ -151,10 +151,16 @@ export const MATRIX_RULES: readonly MatrixRule[] = [
   },
   {
     id: "MX-policy-observe",
-    citation: "MATRIX-policy-observe",
+    // The matrix calls `observe` the honest dial-up step and sound at any
+    // state, so it is NOT the clause that makes this a finding. What makes it
+    // one is the enforcement-mode section's rule about diagnostic rungs: the
+    // dial is loaded and decides nothing, and a posture reported without that
+    // said reads as enforcement. The warn is about how the rung is read, not
+    // about the deployment being wrong to sit at it.
+    citation: "AH-CFC-modes-observe",
     verdict: "warn",
     statement:
-      "`cfcPolicyEvaluation: observe` decides on the un-rewritten label; the rewrite is diagnosed, never applied to a decision",
+      "`cfcPolicyEvaluation: observe` diagnoses the rewrite and decides on the un-rewritten label, so this rung must not be read as enforcement",
     violatedBy: (tuple) => tuple.policyEvaluation === "observe",
   },
   {

@@ -1825,12 +1825,12 @@ them the audit stays what it is above — a per-run reading of an artifact tree 
 so an ordinary audit's exit code is not spent on a question nobody asked. A
 Group D finding is stamped `(corpus)` rather than with a run id.
 
-| Check  | Subject                                                                                                                                                                                                                                                                         | Turned on by                    |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| AUD-16 | how many label-driven refusals the corpus produced, beside the count of runs recording `not-attested` and `permissive-if-absent`. Zero refusals warns, and fails when the corpus is declared adversarial — but see below: today the check is structurally `inconclusive`        | `--corpus`, `--expect-refusals` |
-| AUD-17 | the posture a deployment publishes on `/api/meta`, against the expected-posture spec. A deployment publishing none fails: what it enforces is indistinguishable from the default. So does one publishing a `projected` record — a prediction where an attestation was asked for | `--toolshed-url`                |
-| AUD-18 | whether every surface in the corpus resolved the same posture. The harness's own surfaces diverge by default — the console opts sessions into the max-enforcement bundle, the CLI does not — so a mixed corpus surfaces that                                                    | `--corpus`                      |
-| AUD-19 | the shell's render ceiling, which nothing publishes: a permanent `inconclusive` line item, retiring when a publisher exists                                                                                                                                                     | any deployment flag             |
+| Check  | Subject                                                                                                                                                                                                                                                                                      | Turned on by                    |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| AUD-16 | how many release refusals the corpus recorded — `policyRefusal` on a tool output, naming the gate (`sink-ceiling`, `writer-fit`) that refused — beside the counts of runs recording `not-attested` and `permissive-if-absent`. Zero warns, and fails when the corpus is declared adversarial | `--corpus`, `--expect-refusals` |
+| AUD-17 | the posture a deployment publishes on `/api/meta`, against the expected-posture spec. A deployment publishing none fails: what it enforces is indistinguishable from the default. So does one publishing a `projected` record — a prediction where an attestation was asked for              | `--toolshed-url`                |
+| AUD-18 | whether every posture record in the corpus is the same one. A run carries no surface identity, so this reads uniformity across records, not a named comparison of two surfaces; the harness's console and CLI diverge by default, so a mixed corpus surfaces that                            | `--corpus`                      |
+| AUD-19 | the shell's render ceiling, which nothing publishes: a permanent `inconclusive` line item, retiring when a publisher exists                                                                                                                                                                  | any deployment flag             |
 
 `--expected-posture` names a JSON profile stating what a posture record is
 supposed to hold — dial rungs, which sinks must carry a ceiling, which may
@@ -1841,28 +1841,26 @@ nothing is refused rather than passing: a spec that checks nothing is
 indistinguishable, in every line the audit prints, from a deployment whose every
 field held.
 
-### What AUD-16 can and cannot see
+### What AUD-16 reads
 
-A **label-driven refusal** is a denial whose decision turned on a label on data
-— a confidentiality atom, a sink ceiling, a policy evaluation. AUD-16 counts
-membership in an explicit release-gating reason-code set, not a `cfc_` prefix:
-the prefix names which subsystem recorded the code, not what decided.
+A **release refusal** is a denial a label decided: the boundary records one as a
+structured `policyRefusal` on a tool output, naming the gate that refused
+(`sink-ceiling` — an egress whose confidentiality ceiling the flow exceeded;
+`writer-fit` — a write whose target does not admit what it carries), the sinks
+involved, and the offending atoms. That is the channel AUD-16 counts.
 
-That set is currently **empty**, and it is a finding rather than an oversight.
-Every `cfc_*` code the harness can record comes from one switch (the tool-policy
-gate in `src/prompt-loop.ts`), and that switch turns on the tool descriptor's
-static `effectClass` and on whether the invocation carries direct-command
-evidence. Neither is a label. `*_requires_direct_command` is the family's only
-denying arm and it denies for missing authority; `*_read` and `*_direct_command`
-are allow-side codes that can ride along a denial another gate produced. The
-mediation-absence denials fail closed on a missing substrate, and the
-`read_file` redactions on a file that was not there.
+The policy-decision reason codes are deliberately **not** that channel. Every
+`cfc_*` code comes from one switch in `src/prompt-loop.ts` that turns on the
+tool descriptor's static `effectClass` and on whether the invocation carries
+direct-command evidence — authority, not a label — and the loop records its
+allow-side decision _before_ the tool runs, so a refusal the boundary raises
+inside the tool cannot appear there as a denial at all. A check that counted
+`cfc_`-prefixed codes on denials would report capability denials as release
+refusals, including ones where the `cfc_` code present is the allow-side one
+that passed.
 
-So the harness has no reason code in which a release refusal could be written
-down, and AUD-16 reports `inconclusive` while that is true, naming how many
-denials the corpus did record. A `fail` there would report the absence of a
-vocabulary as a behavioral failure, and a `pass` would report it as compliance.
-The line retires when a release-gating code exists.
+AUD-16 reports `inconclusive` where a run's tool outputs could not be listed: an
+unreadable channel is not an empty one.
 
 ### What a recorded posture is
 

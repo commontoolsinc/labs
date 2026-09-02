@@ -151,12 +151,6 @@ export const SPEC_CITATIONS = {
     quote:
       "Multi-hop closure requires `cfcFlowLabels: persist` stamping the intermediate doc's derived label so the second hop's trigger read picks it up.",
   },
-  "MATRIX-policy-observe": {
-    doc: MATRIX_SPEC,
-    clause: "\u00a72 rule 5",
-    quote:
-      "So `observe` is the honest dial-up step (diagnose which labels the rewrite would have changed, decide on the un-rewritten label) before `enforce` lets the rewrite actually admit.",
-  },
   "AH-LIFE-6": {
     doc: RUNTIME_SPEC,
     clause: "AH-LIFE-6",

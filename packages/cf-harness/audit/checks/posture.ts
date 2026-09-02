@@ -136,7 +136,7 @@ const conformingPoint: AuditCheck = {
     "MATRIX-persist-pointless",
     "MATRIX-floor-credits-nothing",
     "MATRIX-trigger-one-hop",
-    "MATRIX-policy-observe",
+    "AH-CFC-modes-observe",
   ),
   falsifiedBy:
     "a recorded fabric-session dial tuple that advances a consuming enforcement ahead of the dial it consumes — `enforce-strict` without persisted flow labels fails; a write floor, trigger gating, or policy evaluation whose rung is sound but credits nothing at this flow setting warns, as does persisting labels under a disabled mode",

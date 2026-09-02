@@ -253,6 +253,60 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
   assertEquals(sessionless.getRunState().fabricSessionCfc, undefined);
 });
 
+Deno.test("CfHarnessEngine publishes no posture record when a session factory overrides the config", () => {
+  // The factory decides which runtime executes, and the config no longer
+  // describes it — so a record projected from the config would assert a
+  // posture nothing honors. The two itemized dials stand alone: they still
+  // truthfully say what was asked for.
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcPosture: "max-enforcement",
+    },
+    fabricSessionFactory: () =>
+      Promise.reject(new Error("never built in this test")),
+  });
+  assertEquals(engine.getRunState().fabricSessionCfc, {
+    enforcementMode: "enforce-explicit",
+    enforcementModeSource: "preset-pin",
+    flowLabels: "persist",
+    flowLabelsSource: "posture",
+    posture: "max-enforcement",
+  });
+});
+
+Deno.test("CfHarnessEngine refuses to resume a recorded record under an overriding session factory", () => {
+  // The recorded record describes a runtime this resume is not building, so
+  // carrying it forward would publish a posture the executing session may not
+  // be at — the mismatch this guard exists to refuse.
+  const posturedSession = {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    cfcPosture: "max-enforcement",
+  } as const;
+  const runState = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: posturedSession,
+  }).getRunState();
+
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        fabricSession: posturedSession,
+        fabricSessionFactory: () =>
+          Promise.reject(new Error("never built in this test")),
+        runState,
+      }),
+    Error,
+    "fabric session CFC posture mismatch on resume",
+  );
+});
+
 Deno.test("CfHarnessEngine refuses to resume under a fabric-session posture that contradicts the recorded one", () => {
   const posturedSession = {
     apiUrl: "https://toolshed.example/",

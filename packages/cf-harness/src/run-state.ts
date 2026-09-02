@@ -109,6 +109,11 @@ export interface HarnessFabricSessionCfcPosture {
    * Absent on a run recorded before the record existed. Such a run stays
    * frozen as history rather than being backfilled: the values would be this
    * checkout's resolution, not the run's.
+   *
+   * Absent too when a host supplied its own session factory. That factory
+   * overrides the configuration this record is projected from, so the
+   * configuration no longer describes the runtime that will execute, and a
+   * record from it would assert a posture nothing honors.
    */
   record?: CfcPostureReport;
 }

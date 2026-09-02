@@ -26,7 +26,15 @@
  * not run, and an artifact asserting a posture the path did not honor is
  * exactly what an audit of these records exists to catch, so the record must
  * not be able to pass one off as the other. The two entry points below are the
- * only ways to build one, and each stamps its own provenance.
+ * only ways this code builds one, and each stamps its own provenance from how
+ * it was called rather than from an argument.
+ *
+ * What that buys and what it does not: no production path can mislabel a
+ * record, and a reader of one built here can trust the stamp. It is NOT an
+ * authenticated claim — the record is a plain serializable object, so a record
+ * that arrived over a wire is only as trustworthy as the channel it came on.
+ * `/api/meta` is read over the deployment's own transport and trusted on those
+ * terms.
  */
 
 import type { CfcConfClause } from "./clause.ts";

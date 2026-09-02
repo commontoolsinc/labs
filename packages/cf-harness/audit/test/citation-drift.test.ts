@@ -93,27 +93,19 @@ describe("citation drift", () => {
   });
 
   describe("MATRIX_RULES", () => {
-    it("rests every rule on a clause of the matrix document", () => {
-      // The rules encode one document, and a rule citing a clause of another
-      // is a rule that has drifted out of the matrix into a neighbor's words.
-      expect(
-        MATRIX_RULES
-          .filter((rule) =>
-            SPEC_CITATIONS[rule.citation].doc !==
-              "docs/specs/cfc-enforcement-matrix.md"
-          )
-          .map((rule) => rule.id),
-      ).toEqual([]);
-    });
-
     it("leaves no matrix citation nothing rests on", () => {
-      const cited = new Set(MATRIX_RULES.map((rule) => rule.citation));
+      // A quote nothing cites is a quote nobody has to keep true, which is the
+      // drift this suite exists to catch one step earlier.
+      const cited = new Set<string>([
+        ...MATRIX_RULES.map((rule) => rule.citation),
+        // AUD-13 cites it directly, for the definition of a conforming state.
+        "MATRIX-conforming",
+      ]);
       expect(
         Object.entries(SPEC_CITATIONS)
           .filter(([key, citation]) =>
             citation.doc === "docs/specs/cfc-enforcement-matrix.md" &&
-            !cited.has(key as SpecCitationKey) &&
-            key !== "MATRIX-conforming"
+            !cited.has(key)
           )
           .map(([key]) => key),
       ).toEqual([]);

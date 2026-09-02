@@ -42,15 +42,6 @@ export interface DeploymentAudit {
 
   /** Whether the corpus was declared adversarial (`--expect-refusals`). */
   expectRefusals: boolean;
-
-  /**
-   * The reason codes to read as release decisions, defaulting to
-   * {@link RELEASE_GATING_REASON_CODES}. A caller overrides it only to
-   * exercise the world where one exists — the check is written for that
-   * world, and a suite that could not reach those arms would be pinning a
-   * single verdict rather than the check.
-   */
-  releaseGatingCodes?: ReadonlySet<string>;
 }
 
 /** What a `/api/meta` fetch established. */
@@ -117,62 +108,83 @@ const count = (total: number, singular: string, plural: string): string =>
 //
 
 /**
- * The reason codes whose decision turns on a LABEL ON DATA — a confidentiality
- * atom, a sink ceiling, a policy evaluation. A denial carrying one of these is
- * a release refusal: the run held something and the labels said it could not
- * go where it was going.
+ * A release refusal, as a run writes one down.
  *
- * The set is EMPTY, and that is a finding rather than an oversight. Every
- * `cfc_*` code the harness can record comes from one switch
- * (`prompt-loop.ts`, the tool-policy gate), and that switch turns on exactly
- * two things: the tool descriptor's static `effectClass`, and whether the
- * invocation carries direct-command evidence. Neither is a label on data.
- * Concretely:
+ * The boundary records these as structured `policyRefusal` objects on a tool
+ * output — `gates` naming what refused (`sink-ceiling` is an egress whose
+ * confidentiality ceiling the flow exceeded, `writer-fit` a write whose target
+ * does not admit what it carries), beside the offending atoms and the input
+ * keys that carried them in. That is the channel where a label deciding an
+ * outcome is legible.
  *
- * - `*_requires_direct_command` is the only denying arm in the family, and it
- *   denies for missing AUTHORITY — the human did not ask for this — not for
- *   anything the data is labelled;
- * - `*_read` and `*_direct_command` are ALLOW-side codes. They ride along a
- *   decision record whose denial came from somewhere else entirely (the
- *   subagent-profile gate), so matching them is how a capability denial gets
- *   miscounted as a release refusal;
- * - the mediation-absence denials (`not-observable`, "did not include trusted
- *   CFC mediation metadata") are fail-closed on a MISSING SUBSTRATE, and the
- *   `read_file` redactions are fail-closed on a file that was not there.
- *   Neither consulted a label either.
- *
- * So the harness's decision vocabulary today has no code in which a release
- * refusal could be written down. An entry appears here when one exists, and
- * {@link releaseGatingIsExpressible} is what stops the check reporting the
- * absence of the vocabulary as the absence of refusals.
+ * The policy-decision reason codes are NOT that channel, and reading them for
+ * this is the mistake to avoid. Every `cfc_*` code comes from one switch in
+ * `prompt-loop.ts` that turns on the tool descriptor's static `effectClass`
+ * and on whether the invocation carries direct-command evidence — authority,
+ * not a label — and the loop records its allow-side decision before the tool
+ * runs, so a refusal the boundary raises inside the tool cannot appear there
+ * as a denial at all.
  */
-const RELEASE_GATING_REASON_CODES: ReadonlySet<string> = new Set();
+interface ReleaseRefusal {
+  runId: string;
+  fileName: string;
+  gates: readonly string[];
+  sinks: readonly string[];
+}
 
-/** The codes this audit reads as release decisions. */
-const releaseGatingCodesOf = (audit: DeploymentAudit): ReadonlySet<string> =>
-  audit.releaseGatingCodes ?? RELEASE_GATING_REASON_CODES;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const stringsOf = (value: unknown): readonly string[] =>
+  Array.isArray(value) ? value.filter((one) => typeof one === "string") : [];
 
 /**
- * A refusal the labels drove: a denial whose reason is a release decision.
+ * Every `policyRefusal` a tool output carries, wherever it sits in it.
  *
- * Membership in {@link RELEASE_GATING_REASON_CODES} rather than a `cfc_`
- * prefix. The prefix names which subsystem recorded the code, not what
- * decided, and every denial in the September console corpus that carries a
- * `cfc_` code is capability-shaped — three for missing direct-command
- * authority, two for a subagent profile the run does not offer, where the
- * `cfc_` code present is the allow-side one that PASSED.
+ * A walk rather than a path: the refusal rides on the tool-output envelope
+ * whose shape has moved between generations, and a reader that knew only
+ * today's path would silently find none in an older tree — which is the
+ * failure this whole check exists to avoid.
  */
+const releaseRefusalsIn = (
+  runId: string,
+  fileName: string,
+  value: unknown,
+): readonly ReleaseRefusal[] => {
+  const found: ReleaseRefusal[] = [];
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const one of node) walk(one);
+      return;
+    }
+    if (!isRecord(node)) return;
+    const refusal = node.policyRefusal;
+    if (isRecord(refusal)) {
+      found.push({
+        runId,
+        fileName,
+        gates: stringsOf(refusal.gates),
+        sinks: stringsOf(refusal.sinks),
+      });
+    }
+    for (const one of Object.values(node)) walk(one);
+  };
+  walk(value);
+  return found;
+};
+
+/** Every release refusal the corpus recorded. */
 const labelDrivenRefusals = (
   audit: DeploymentAudit,
-): readonly { runId: string; code: string }[] =>
+): readonly ReleaseRefusal[] =>
   everyRun(audit).flatMap((run) =>
-    decisionsOf(run)
-      .filter((decision) => decision.decision === "denied")
-      .flatMap((decision) =>
-        (decision.reasonCodes ?? [])
-          .filter((code) => releaseGatingCodesOf(audit).has(code))
-          .map((code) => ({ runId: run.runId, code }))
+    run.toolOutputs.status === "present"
+      ? run.toolOutputs.entries.flatMap((entry) =>
+        entry.value === undefined
+          ? []
+          : releaseRefusalsIn(run.runId, entry.fileName, entry.value)
       )
+      : []
   );
 
 /** Every denial of the corpus, whatever decided it. */
@@ -185,22 +197,38 @@ const allDenials = (audit: DeploymentAudit): number =>
     0,
   );
 
+/** Runs whose tool outputs this host could not read. */
+const unreadableOutputs = (audit: DeploymentAudit): readonly RunEvidence[] =>
+  everyRun(audit).filter((run) => run.toolOutputs.status === "unparseable");
+
 const refusalLiveness = (audit: DeploymentAudit): CheckResult => {
   const refusals = labelDrivenRefusals(audit);
   const runs = everyRun(audit);
+  const unreadable = unreadableOutputs(audit);
   const notAttested = runs.filter((run) =>
     snapshotOf(run)?.cfc.substrateStatus === "not-attested"
   );
   const permissive = runs.filter((run) =>
     snapshotOf(run)?.cfc.absenceBehavior === "permissive-if-absent"
   );
+  const gates = [...new Set(refusals.flatMap((refusal) => refusal.gates))]
+    .sort();
+  const sinks = [...new Set(refusals.flatMap((refusal) => refusal.sinks))]
+    .sort();
   const evidence: CheckEvidence[] = [
     {
+      artifact: "tool-outputs/",
+      pointer: "policyRefusal",
       detail: `${
-        count(refusals.length, "label-driven refusal", "label-driven refusals")
-      } across ${count(runs.length, "run", "runs")}, out of ${
-        count(allDenials(audit), "denial", "denials")
-      } in total`,
+        count(refusals.length, "release refusal", "release refusals")
+      } across ${count(runs.length, "run", "runs")}${
+        gates.length === 0 ? "" : ` (gates: ${gates.join(", ")})`
+      }${sinks.length === 0 ? "" : ` (sinks: ${sinks.join(", ")})`}`,
+    },
+    {
+      detail: `${
+        count(allDenials(audit), "tool-policy denial", "tool-policy denials")
+      } beside them, which decide on authority rather than on a label`,
     },
     {
       artifact: "policy-snapshot.json",
@@ -217,23 +245,18 @@ const refusalLiveness = (audit: DeploymentAudit): CheckResult => {
       } recorded \`permissive-if-absent\``,
     },
   ];
-  if (releaseGatingCodesOf(audit).size === 0) {
-    // The honest verdict when the artifacts carry no code a release refusal
-    // could be written in: nothing was established either way. Reporting
-    // `fail` here would report the absence of a vocabulary as a behavioral
-    // failure, and `pass` would report it as compliance. The line retires
-    // when a release-gating reason code exists.
+  if (unreadable.length > 0) {
+    // The channel exists and this host could not read it here, which is not
+    // the same fact as an empty channel and must not report as one.
     return corpusResult(
       audit,
       "AUD-16",
       "refusal liveness",
       citationsFor("AH-CFC-11", "AH-CFC-15"),
       "inconclusive",
-      `this corpus recorded ${
-        count(allDenials(audit), "denial", "denials")
-      } across ${
-        count(runs.length, "run", "runs")
-      }, none of which could have been a release refusal: the harness records no reason code whose decision turns on a label, so whether release gating has ever fired is not established here`,
+      `the tool outputs of ${
+        count(unreadable.length, "run", "runs")
+      } could not be listed, so whether this corpus holds a release refusal is not established`,
       evidence,
     );
   }
@@ -247,8 +270,8 @@ const refusalLiveness = (audit: DeploymentAudit): CheckResult => {
       audit.expectRefusals
         ? `this corpus was declared adversarial and its ${
           count(runs.length, "run", "runs")
-        } produced no label-driven refusal at all, so nothing here shows the label machinery firing`
-        : `no run of this corpus produced a label-driven refusal, so the corpus shows the machinery loaded and never shows it deciding; ${
+        } recorded no release refusal at all, so nothing here shows a label deciding an outcome`
+        : `no run of this corpus recorded a release refusal, so the corpus shows the machinery loaded and never shows it deciding; ${
           count(notAttested.length, "run", "runs")
         } recorded \`not-attested\` and ${
           count(permissive.length, "run", "runs")
@@ -263,9 +286,9 @@ const refusalLiveness = (audit: DeploymentAudit): CheckResult => {
     "refusal liveness",
     citationsFor("AH-CFC-11", "AH-CFC-15"),
     weakened ? "warn" : "pass",
-    `${
-      count(refusals.length, "label-driven refusal", "label-driven refusals")
-    } across ${count(runs.length, "run", "runs")}${
+    `${count(refusals.length, "release refusal", "release refusals")} across ${
+      count(runs.length, "run", "runs")
+    }${gates.length === 0 ? "" : `, refused by ${gates.join(", ")}`}${
       weakened
         ? `, weakened by ${
           count(notAttested.length, "run", "runs")
@@ -375,7 +398,13 @@ const toolshedPosture = (audit: DeploymentAudit): CheckResult | undefined => {
 };
 
 //
-// AUD-18 surface parity
+// AUD-18 posture uniformity across the corpus
+//
+// Named for what it reads. A run artifact carries no surface identity, so
+// this compares the DISTINCT posture records a corpus holds and cannot say
+// which surface produced which. Comparing a deployment's published record
+// against a harness run's is a different check, and needs a surface tag the
+// artifacts do not yet carry.
 //
 
 /** The distinct posture records the corpus recorded, keyed by their JSON. */
@@ -397,17 +426,17 @@ const distinctRecords = (
   return byRecord;
 };
 
-const surfaceParity = (audit: DeploymentAudit): CheckResult => {
+const postureUniformity = (audit: DeploymentAudit): CheckResult => {
   const citations = citationsFor("AH-CFC-14", "AH-CFC-15");
   const records = distinctRecords(audit);
   if (records.size === 0) {
     return corpusResult(
       audit,
       "AUD-18",
-      "surface parity",
+      "posture uniformity",
       citations,
       "inconclusive",
-      "no run of this corpus recorded a posture record, so no two surfaces could be compared",
+      "no run of this corpus recorded a posture record, so there was nothing to compare",
     );
   }
   const evidence: CheckEvidence[] = [...records].map(([key, runIds]) => ({
@@ -425,7 +454,7 @@ const surfaceParity = (audit: DeploymentAudit): CheckResult => {
     return corpusResult(
       audit,
       "AUD-18",
-      "surface parity",
+      "posture uniformity",
       citations,
       "fail",
       `${
@@ -445,7 +474,7 @@ const surfaceParity = (audit: DeploymentAudit): CheckResult => {
     return corpusResult(
       audit,
       "AUD-18",
-      "surface parity",
+      "posture uniformity",
       citations,
       "warn",
       `this corpus holds ${
@@ -457,7 +486,7 @@ const surfaceParity = (audit: DeploymentAudit): CheckResult => {
   return corpusResult(
     audit,
     "AUD-18",
-    "surface parity",
+    "posture uniformity",
     citations,
     "pass",
     "every run of this corpus that recorded a posture recorded the same one",
@@ -498,6 +527,6 @@ export const auditDeployment = (
   if (toolshed !== undefined) {
     results.push(toolshed);
   }
-  results.push(surfaceParity(audit), renderCeiling(audit));
+  results.push(postureUniformity(audit), renderCeiling(audit));
   return results;
 };
