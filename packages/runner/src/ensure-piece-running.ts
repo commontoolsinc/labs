@@ -104,6 +104,14 @@ export type EnsurePieceVerdict = {
      * retries next cycle. */
     | "confirm-pull-failed";
 
+  /** Whether the started piece has a pattern graph installed AT THE
+   * MOMENT THIS IS CALLED. `started` reports what the start walk did,
+   * and the instantiation commit that walk fires settles after it
+   * returns: a refused commit retires the graph while the registration
+   * stands. A caller acting on `started` later asks this instead of
+   * assuming. Present whenever a start ran. */
+  graphIsInstalled?: () => boolean;
+
   /** The owning result doc's id (the chain terminus) where the chain
    * resolved — present for `started`, `no-pattern-meta`, and
    * `pattern-unloadable`. */
@@ -205,7 +213,13 @@ export async function ensurePieceRunningVerdict(
         `Piece started successfully`,
       ]);
 
-      return { started: true, rootId, observedDocIds };
+      return {
+        started: true,
+        graphIsInstalled: () =>
+          runtime.runner.pieceGraphIsInstalled(resultCell),
+        rootId,
+        observedDocIds,
+      };
     } catch (error) {
       // Make sure to commit/rollback the transaction on error
       try {

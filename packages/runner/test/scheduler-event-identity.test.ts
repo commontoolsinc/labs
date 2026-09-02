@@ -1,5 +1,6 @@
 import type { MemorySpace } from "@commonfabric/memory/interface";
 
+import type { EnsurePieceVerdict } from "../src/ensure-piece-running.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
 import type { Runtime } from "../src/runtime.ts";
 import {
@@ -30,6 +31,12 @@ const eventLink: NormalizedFullLink = {
 
 function eventKey(id: string): string {
   return id.split(":")[1];
+}
+
+// A piece-start outcome for the `loadPieceForEvent` seam, carrying only what
+// these cases turn on: a started piece has its pattern graph installed.
+function pieceLoadVerdict(started: boolean): EnsurePieceVerdict {
+  return { started, graphIsInstalled: () => started, observedDocIds: [] };
 }
 
 describe("scheduler event identity", () => {
@@ -185,8 +192,8 @@ describe("scheduler event identity", () => {
     };
     const env = createSchedulerTestRuntime(import.meta.url);
     const handled: string[] = [];
-    let finishPieceLoad!: (started: boolean) => void;
-    const pieceLoad = new Promise<boolean>((resolve) => {
+    let finishPieceLoad!: (verdict: EnsurePieceVerdict) => void;
+    const pieceLoad = new Promise<EnsurePieceVerdict>((resolve) => {
       finishPieceLoad = resolve;
     });
     try {
@@ -194,7 +201,7 @@ describe("scheduler event identity", () => {
       // dispatch, commits, and continuation all run through the real Scheduler.
       const schedulerInternals = env.runtime.scheduler as unknown as {
         eventQueueState: {
-          loadPieceForEvent?: () => Promise<boolean>;
+          loadPieceForEvent?: () => Promise<EnsurePieceVerdict>;
         };
       };
       schedulerInternals.eventQueueState.loadPieceForEvent = () => pieceLoad;
@@ -213,12 +220,12 @@ describe("scheduler event identity", () => {
       env.runtime.scheduler.addEventHandler((_tx, value) => {
         handled.push(String(value));
       }, loadingLink);
-      finishPieceLoad(true);
+      finishPieceLoad(pieceLoadVerdict(true));
       await env.runtime.idle();
 
       expect(handled).toEqual(["first", "second"]);
     } finally {
-      finishPieceLoad(true);
+      finishPieceLoad(pieceLoadVerdict(true));
       await disposeSchedulerTestRuntime(env);
     }
   });
@@ -262,7 +269,7 @@ describe("scheduler event identity", () => {
   it("does not resurrect an event dropped while its handler is loading", async () => {
     const eventQueue: QueuedEvent[] = [];
     const backgroundTasks = new Set<Promise<unknown>>();
-    const pieceLoad = Promise.withResolvers<boolean>();
+    const pieceLoad = Promise.withResolvers<EnsurePieceVerdict>();
     let callbackCount = 0;
     const droppedTx = {
       abort: () => {},
@@ -291,7 +298,7 @@ describe("scheduler event identity", () => {
 
     dropQueuedEvent(state, queued, "lineage failed while loading");
     dropQueuedEvent(state, queued, "duplicate terminal notification");
-    pieceLoad.resolve(true);
+    pieceLoad.resolve(pieceLoadVerdict(true));
     await Promise.all([...backgroundTasks]);
 
     expect(eventQueue).toEqual([]);
@@ -306,7 +313,7 @@ describe("scheduler event identity", () => {
     for (
       const loadFailure of [
         () => Promise.reject(new Error("start failed")),
-        () => Promise.resolve(false),
+        () => Promise.resolve(pieceLoadVerdict(false)),
       ]
     ) {
       const eventQueue: QueuedEvent[] = [];
