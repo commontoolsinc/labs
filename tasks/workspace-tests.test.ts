@@ -654,9 +654,56 @@ Deno.test("assertMemberTestTasksDefined accepts a test task defined by dependenc
   }
 });
 
+Deno.test("assertMemberTestTasksDefined reads the manifest Deno resolves", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-manifest-precedence-" });
+  try {
+    await makeWorkspace(dir, ["a"]);
+    // `makeWorkspace` gave the member a `deno.jsonc` with a `test` task.
+    // Deno takes the `deno.json` where a member carries both and ignores the
+    // other file whole, so the task in it is not one `deno task test` can
+    // find, and the member falls through to the root workspace all the same.
+    await Deno.writeTextFile(
+      `${dir}/packages/a/deno.json`,
+      JSON.stringify({ tasks: { bench: "deno bench" } }),
+    );
+
+    const members = await readWorkspaceMembers(`${dir}/deno.jsonc`);
+    await assertRejects(
+      () => assertMemberTestTasksDefined(members, dir),
+      Error,
+      "Missing from: `./packages/a`",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("runTests refuses a workspace whose member defines no test task", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-guarded-run-" });
+  try {
+    await makeWorkspace(dir, ["a", "b"]);
+    await Deno.writeTextFile(
+      `${dir}/packages/b/deno.jsonc`,
+      JSON.stringify({ tasks: { bench: "deno bench" } }),
+    );
+
+    await assertRejects(
+      () => runTests([], undefined, dir),
+      Error,
+      "Missing from: `./packages/b`",
+    );
+    // Each package's test task writes a marker when it runs, so an empty
+    // list is what says the refusal came ahead of the spawn loop rather than
+    // part way through it.
+    assertEquals(await ranPackages(dir, ["a", "b"]), []);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("every workspace member defines a test task of its own", async () => {
-  // The same assertion the runner makes before it spawns anything, made
-  // here so that a member missing one is named by a failing test as well.
+  // The same assertion the runner makes ahead of its spawn loop, made here
+  // so that a member missing one is named by a failing test as well.
   const rootUrl = new URL("../", import.meta.url);
   const members = await readWorkspaceMembers(new URL("deno.jsonc", rootUrl));
   await assertMemberTestTasksDefined(members, rootUrl);

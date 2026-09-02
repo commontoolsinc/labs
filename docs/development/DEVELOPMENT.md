@@ -642,9 +642,9 @@ suite will break.
    a package lacks a test task, Deno resolves the task name against the root
    workspace instead, which re-runs the entire test suite recursively and spawns
    processes exponentially. The runner reads every member's manifest before it
-   spawns anything and refuses to start when one has no `"test"` entry, naming
-   the member; that check is what keeps a missing entry to a message rather than
-   a CI timeout.
+   runs any of their test tasks, and refuses to start when one has no `"test"`
+   entry, naming the member; that check is what keeps a missing entry to a
+   message rather than a CI timeout.
 
    Use `"deno test"` for packages with tests, or `"echo 'No tests defined.'"` as
    a stub for packages that don't have tests yet. A `"test"` task defined by its
