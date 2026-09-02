@@ -1,21 +1,27 @@
+/**
+ * The outer frame's document: the Content Security Policy the guest
+ * inherits, the inner frame, and the script that loads guests into that frame
+ * and talks to the host. The script is a file of its own, imported as text and
+ * inlined here.
+ */
+
 import { CSP, HOST_ORIGIN } from "./csp.ts";
 import script from "./outer-frame-script.js" with { type: "text" };
 
-// The script is inlined into a `<script>` element, whose content ends at the
-// first `</script>` however it got there, so the one thing the script's text
-// cannot contain is checked here rather than trusted.
-if (/<\/script/i.test(script)) {
-  throw new Error("outer-frame-script.js must not contain `</script`.");
-}
-
 /**
- * The outer frame's document. It sets the Content Security Policy the guest
- * inherits, holds the inner frame, and runs the script, which is what loads
- * guests into that frame and talks to the host. The script reads the host's
- * origin off its own element; an origin is scheme, host and port, none of
- * which needs escaping in an attribute.
+ * Returns the outer frame's document with `script` inlined as its script. The
+ * script's text lands inside a `<script>` element, whose content ends at the
+ * first `</script>` however it got there, so a `script` carrying one is
+ * refused rather than trusted. The script reads the host's origin off its own
+ * element's `data-host-origin` attribute; an origin is scheme, host and port,
+ * none of which needs escaping in an attribute.
  */
-export default `
+export function outerFrameDocument(script: string): string {
+  if (/<\/script/i.test(script)) {
+    throw new Error("The outer frame's script must not contain `</script`.");
+  }
+
+  return `
 <!DOCTYPE html>
 <html>
 <head>
@@ -52,3 +58,7 @@ ${script}
 </body>
 </html>
 `;
+}
+
+/** The outer frame's document, with `outer-frame-script.js` as its script. */
+export default outerFrameDocument(script);
