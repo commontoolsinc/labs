@@ -21,6 +21,18 @@ The web service implements clauses 1–4 of the
 [weaver service contract](https://linear.app/common-tools/issue/CT-2155);
 local-auth simplification is still open under clause 5.
 
+### The three demos
+
+- [CT-2190](https://linear.app/common-tools/issue/CT-2190/demo-the-weaver-pill-cf-harness-session-openable-cfc-governed-piece)
+  demonstrates the Weaver pill → harness → openable, CFC-governed piece; this
+  document is its runbook.
+- [CT-2189](https://linear.app/common-tools/issue/CT-2189/demo-bills-dashboard-from-gmail-plaid-connectors-cfc-governed-alexs)
+  demonstrates the connector-fed bills dashboard over Gmail and Plaid; its
+  loom-side gaps are stated on the issue.
+- [CT-2091](https://linear.app/common-tools/issue/CT-2091/ct-2066-demo-the-hostile-skill-run-and-the-act-2-taint-renderer)
+  demonstrates the skills.sh hostile-skill flow and its CFC-governed
+  prompt-injection refusal.
+
 ## 2. Prerequisites
 
 1. Use the Deno version pinned by `mise.toml`:
@@ -485,8 +497,12 @@ and the offline audit are usable now.
 
 The boundaries that affect this onboarding are:
 
-- CT-2175: value disclosure from labeled results needs declassification by
-  policy; do not mistake a value refusal for loss of the piece or its handle.
+- CT-2175: a `run_pattern` call without `resultSchema` receives the result
+  handle without consulting the ceiling. If the ceiling refuses requested
+  values, the call still receives the handle, with `value` withheld, a
+  `valueError` that explains why and names the input carrying the label, and
+  `policyRefusal` as structured data. Declassification by policy — releasing a
+  value under one policy and refusing it under another — remains open.
 - CT-2155 clause 5: protected web routes still use the `GET /` cookie exchange;
   there is no shared bearer-token shortcut.
 - CT-2185: `cf piece render --cell /<slug>` crashes; resolve with `cf get` and
