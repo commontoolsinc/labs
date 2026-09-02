@@ -182,10 +182,10 @@ Deno.test("piece context: #argument reads the same on both spellings of a target
   // offered behind it come from the arguments cell for.
   await withEnv({ identity: "/env.key", apiUrl: "http://env:9999" }, () => {
     const rooted = resolvePieceContext(
-      lineFor("cf get -s demo --piece /thermostat#argument "),
+      lineFor("cf cell get -s demo --piece /thermostat#argument "),
     );
     const bare = resolvePieceContext(
-      lineFor("cf get -s demo --piece thermostat#argument "),
+      lineFor("cf cell get -s demo --piece thermostat#argument "),
     );
     assert(rooted);
     assert(bare);
@@ -198,20 +198,22 @@ Deno.test("piece context: #argument reads the same on both spellings of a target
     // A scope written in front of the suffix survives it.
     assertEquals(
       resolvePieceContext(
-        lineFor("cf get -s demo --piece thermostat@session#argument "),
+        lineFor("cf cell get -s demo --piece thermostat@session#argument "),
       )?.pieceScope,
       "session",
     );
     // Nothing but the suffix selects that cell, and a plain slug still
     // resolves — a context of `null` there is a slot offering nothing.
     const plain = resolvePieceContext(
-      lineFor("cf get -s demo --piece thermostat "),
+      lineFor("cf cell get -s demo --piece thermostat "),
     );
     assert(plain);
     assertFalse(plain.pieceInput);
     // A fragment the grammar refuses is a half-typed word, not a throw.
     assertEquals(
-      resolvePieceContext(lineFor("cf get -s demo --piece thermostat#res ")),
+      resolvePieceContext(
+        lineFor("cf cell get -s demo --piece thermostat#res "),
+      ),
       null,
     );
   });

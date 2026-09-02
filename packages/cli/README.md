@@ -304,8 +304,8 @@ standard error and continues searching that piece and the rest of the space.
 
 ## Piece CFC labels
 
-`cf cell get-label` returns the effective CFC label view for a result path.
-Pass `--input` to select the input cell — a `--cell` value ending in `#argument`
+`cf cell get-label` returns the effective CFC label view for a result path. Pass
+`--input` to select the input cell — a `--cell` value ending in `#argument`
 selects it too. The paths in the returned view are relative to the selected
 path, and the view includes declared, derived, and link-carried labels. An
 unlabeled value returns JSON `null`.

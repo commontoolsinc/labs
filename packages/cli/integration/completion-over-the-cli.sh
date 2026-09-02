@@ -310,7 +310,7 @@ check "1" "$(printf '%s' "$ARGUMENT_KEYS" | grep -c 'settings')" \
 check "1" "$(succeeds $CF get --quiet --piece "board#argument" $ARGS)" \
   "the suffix on a bare slug is a --piece value the command accepts too"
 check "$ARGUMENT_KEYS" \
-  "$(candidates_at "cf get $LINE_ARGS --piece board#argument ")" \
+  "$(candidates_at "cf cell get $LINE_ARGS --piece board#argument ")" \
   "and completes the same arguments-cell keys behind it"
 
 # A path embedded in the reference is where the walk starts, the way

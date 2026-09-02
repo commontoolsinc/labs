@@ -3046,57 +3046,11 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     "get-label",
     buildGetLabelCommand("piece get-label", "cell get-label").hidden(),
   )
-  .usage(`${pieceUsage} [path]`)
-  .example(
-    cliText(`cf cell get-label ${EX_ID} ${EX_COMP_PIECE} messages/0/body`),
-    "Get the effective label on a nested result value.",
-  )
-  .example(
-    cliText(`cf cell get-label ${EX_ID} ${EX_COMP_PIECE} secret --input`),
-    "Get the effective label on an input value.",
-  )
-  .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_PATH_HELP)
-  .option(
-    "--input",
-    "Read from the piece's input cell instead of result cell (the " +
-      '"#argument" suffix on the target spells the same selection)',
-  )
-  .option(
-    "--json",
-    "Select JSON output explicitly. This command always outputs JSON.",
-  )
-  .arguments("[path:string]")
-  .action(getCellCfcLabelFromCommand)
-  /* piece set-label */
+  /* piece set-label — moved to `cf cell set-label` */
   .command(
     "set-label",
     buildSetLabelCommand("piece set-label", "cell set-label").hidden(),
   )
-  .usage(`${pieceUsage} [path]`)
-  .example(
-    cliText(
-      `echo '{"confidentiality":["team"]}' | cf cell set-label ${EX_ID} ${EX_COMP_PIECE} notes`,
-    ),
-    "Add a confidentiality requirement to a result value.",
-  )
-  .example(
-    cliText(
-      `echo '{"integrity":[],"observes":"value"}' | cf cell set-label ${EX_ID} ${EX_COMP_PIECE} draft --input`,
-    ),
-    "Remove declared integrity claims from an input value.",
-  )
-  .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_PATH_HELP)
-  .option(
-    "--input",
-    "Write to the piece's input cell instead of result cell (the " +
-      '"#argument" suffix on the target spells the same selection)',
-  )
-  .option(
-    "--json",
-    "Select JSON output explicitly. This command always outputs JSON.",
-  )
-  .arguments("[path:string]")
-  .action(setCellCfcLabelFromCommand)
   /* piece map */
   .command("map", "Show registered pieces and the connections between them")
   .usage(spaceUsage)

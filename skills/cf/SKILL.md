@@ -153,15 +153,15 @@ answer composes into the next command.
   its own: the host becomes `--api-url` and the rest becomes a reference.
 - A target ending `#argument` selects the piece's arguments cell — the same
   selection `--input` makes, and it is accepted exactly where `--input` is:
-  `cf cell get`, `cf cell set`, and `cf cell get-label|set-label`. A reference, a bare id
-  and a slug all take it, since all three designate the same piece. A command
-  that takes no `--input` refuses the suffix rather than ignoring it, `cf piece call`
-  among them. A `--url` carries no fragment into the reference it decomposes to,
-  whatever the URL names, so a `#argument` written on one is dropped rather than
-  refused. A URL naming the piece admits no `--cell` or positional address
-  beside it, so `--input` is what reaches the arguments cell there; a URL naming
-  only the space leaves the target to arrive as it always does — a positional
-  address, or `--cell` — carrying the suffix like any other.
+  `cf cell get`, `cf cell set`, and `cf cell get-label|set-label`. A reference,
+  a bare id and a slug all take it, since all three designate the same piece. A
+  command that takes no `--input` refuses the suffix rather than ignoring it,
+  `cf piece call` among them. A `--url` carries no fragment into the reference
+  it decomposes to, whatever the URL names, so a `#argument` written on one is
+  dropped rather than refused. A URL naming the piece admits no `--cell` or
+  positional address beside it, so `--input` is what reaches the arguments cell
+  there; a URL naming only the space leaves the target to arrive as it always
+  does — a positional address, or `--cell` — carrying the suffix like any other.
 
 ## Where the read options go
 
