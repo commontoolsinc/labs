@@ -72,7 +72,7 @@ import {
 import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import type { EntityKind } from "./entity-kind.ts";
 import { refuseFabricInstance } from "./fabric-special-object.ts";
-import { resolveLink } from "./link-resolution.ts";
+import { MAX_PATH_RESOLUTION_LENGTH, resolveLink } from "./link-resolution.ts";
 import { FILTER_INPUT_SCHEMA } from "./builtins/filter.ts";
 import { FLATMAP_INPUT_SCHEMA } from "./builtins/flatmap.ts";
 import {
@@ -6099,22 +6099,34 @@ export class Runner {
    * Pull what the list coordinators' slot resolutions end on, to their
    * ends. Each round resolves every slot the way the plan does and syncs
    * the documents those resolutions end on; a round that ends where the
-   * previous one did is the fixpoint, and the bound is the chain depth. A
-   * list whose entity is not yet local is synced as such, so the next
-   * round can read its slots.
+   * previous one did is the fixpoint, which every finite chain reaches: a
+   * document is synced once, so each round either exposes a document no
+   * round has synced or is the last. A list whose entity is not yet local
+   * is synced as such, so the next round can read its slots.
+   *
+   * The resolver bounds a chain at `MAX_PATH_RESOLUTION_LENGTH` hops, and
+   * so does this walk: a chain still moving at that depth is one the
+   * coordinator's own resolution will refuse, and the nodes it belongs to
+   * are returned so no child is derived from an incomplete identity. The
+   * returned keys are the instance's result cell key and the node's index,
+   * joined by `#`.
    */
   async #syncListSlotResolutions(
     instances: readonly ResumePatternInstance[],
-  ): Promise<void> {
-    const RESOLUTION_ROUNDS = 4;
+  ): Promise<Set<string>> {
     const synced = new Set<string>();
-    for (let round = 0; round < RESOLUTION_ROUNDS; round++) {
+    for (let round = 0;; round++) {
       const fresh: Cell<any>[] = [];
+      const moving = new Set<string>();
       const planTx = this.runtime.edit();
       try {
         for (const { pattern, resultCell } of instances) {
           if (getMetaLink(resultCell, "argument") === undefined) continue;
-          for (const node of pattern.nodes) {
+          const instanceLink = resultCell.getAsNormalizedFullLink();
+          const instanceKey = `${instanceLink.space}\0${instanceLink.id}\0${
+            instanceLink.scope ?? "space"
+          }`;
+          for (const [nodeIndex, node] of pattern.nodes.entries()) {
             const module = node.module;
             if (!isModule(module) || module.type !== "ref") continue;
             const op = module.implementation;
@@ -6154,13 +6166,22 @@ export class Runner {
               if (synced.has(key)) continue;
               synced.add(key);
               fresh.push(this.runtime.getCellFromLink(link));
+              moving.add(`${instanceKey}#${nodeIndex}`);
             }
           }
         }
       } finally {
         planTx.abort("resume list slots: read-only resolution");
       }
-      if (fresh.length === 0) return;
+      if (fresh.length === 0) return new Set();
+      if (round >= MAX_PATH_RESOLUTION_LENGTH) {
+        logger.warn("resume-list-children", () => [
+          "list slot chains still unresolved at the resolver's bound; " +
+          "their coordinators' children are not derived",
+          { rounds: round, nodes: moving.size },
+        ]);
+        return moving;
+      }
       await Promise.all(fresh.map((cell) => {
         const syncStart = performance.now();
         return Promise.resolve(documentBoundedResumeCell(cell).sync())
@@ -6228,7 +6249,7 @@ export class Runner {
     }
     let frontier = [...instances];
     while (frontier.length > 0) {
-      await this.#syncListSlotResolutions(frontier);
+      const unsettled = await this.#syncListSlotResolutions(frontier);
       const next: ResumePatternInstance[] = [];
       const promises: Promise<unknown>[] = [];
       const planTx = this.runtime.edit();
@@ -6237,11 +6258,18 @@ export class Runner {
           // A fresh first run has no argument meta yet; nothing durable is
           // resumed under it.
           if (getMetaLink(resultCell, "argument") === undefined) continue;
-          for (const node of pattern.nodes) {
+          const instanceLink = resultCell.getAsNormalizedFullLink();
+          const instanceKey = `${instanceLink.space}\0${instanceLink.id}\0${
+            instanceLink.scope ?? "space"
+          }`;
+          for (const [nodeIndex, node] of pattern.nodes.entries()) {
             const module = node.module;
             if (!isModule(module) || module.type !== "ref") continue;
             const op = module.implementation;
             if (op !== "map" && op !== "filter" && op !== "flatMap") continue;
+            // A chain the resolver's bound cut short keys nothing: the
+            // coordinator's own derivation refuses it too.
+            if (unsettled.has(`${instanceKey}#${nodeIndex}`)) continue;
             let children: Cell<any>[];
             let opPattern: Pattern;
             try {
