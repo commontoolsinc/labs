@@ -125,20 +125,20 @@ built into the first list.
 Landed:
 
 - **B1a — the place value and its owner module**
-(`packages/shuttle/src/place.ts`). The whole pair, position *and* scope,
-because scope is half of what a place is (decision 20): `cd` over relative
-segments, `..`, `-`, `/`, a scope-only `@scope`, and rooted and complete
-references; the `slugs/` and `pieces/` facets a space root reserves, and
-nothing else there; the rendering `pwd` prints of both halves, the position
-line carrying the scope so that it denotes one cell wherever it is read; and
-the refusals — a reference carrying `#argument`, a `#` buried in a bare
-piece id, a part no rendering would name back, and a move into a space other
-than the connected one, which is the gate a home-anchored entry point meets
-once resolution hands it a space. Two operands come back for the connection
-rather than moving: a `#name` wish target, which B1b resolves, and a
-reference naming its space by name, which is a two-step protocol — the
-caller resolves the name and hands the move back with the space it resolved
-to, and the place is landed or refused there.
+  (`packages/shuttle/src/place.ts`). The whole pair, position *and* scope,
+  because scope is half of what a place is (decision 20): `cd` over relative
+  segments, `..`, `-`, `/`, a scope-only `@scope`, and rooted and complete
+  references; the `slugs/` and `pieces/` facets a space root reserves, and
+  nothing else there; the rendering `pwd` prints of both halves, the position
+  line carrying the scope so that it denotes one cell wherever it is read; and
+  the refusals — a reference carrying `#argument`, a `#` buried in a bare
+  piece id, a part no rendering would name back, and a move into a space other
+  than the connected one, which is the gate a home-anchored entry point meets
+  once resolution hands it a space. Two operands come back for the connection
+  rather than moving: a `#name` wish target, which B1b resolves, and a
+  reference naming its space by name, which is a two-step protocol — the
+  caller resolves the name and hands the move back with the space it resolved
+  to, and the place is landed or refused there.
 
 Still to come:
 
@@ -152,40 +152,45 @@ Still to come:
   uses
   (`resolveStoredPieceAddress`, `listSpaceSlugs`), so no CLI-surface arc
   step gates B1.
-- **The vocabulary a relative segment speaks.** The two doors read a
-  segment by different rules — the reserved readings
+- **The vocabulary a relative segment speaks.** The walk and a reference
+  read a segment by different rules — the reserved readings
   [`grammar.md`](grammar.md) states, against a reference's own unescaping
-  and fragment rule — so some keys are spelled through one door and not the
+  and fragment rule — so some keys are spelled through one and not the
   other, and a segment lifted out of a rendering is an operand in its own
   right rather than the key it was printed from. Which keys those are, and
   what each lifted segment does instead of naming its key, is pinned case
   by case in `packages/shuttle/test/place.test.ts`, each case under a
   mutation, so the record moves when the behavior does and not otherwise.
   `ls` settles it, in B1b: how such a key prints and how it is typed back
-  want deciding together. Segment validation is the same question, across three
-  doors rather than two — a slug's vocabulary holds a reference, and
-  neither a relative segment nor a resolved target is held to it. What is
-  settled is narrower, and in two parts. A path segment that is empty, ends
-  in whitespace, or holds a line break is refused at every door, because a
-  rendering of it would name a different cell. A piece is held to more than
-  that: one holding a line break is refused for the same reason, and one
-  that is empty, ends in whitespace, or holds an `@` is refused because no
-  slug or handle carries such a name — the parse would take it, since its
-  handle test is a length rule, and hand back a name nothing could have
-  produced.
+  want deciding together.
+
+  Whether a piece is held to the slug and handle vocabularies is the same
+  question, and its answer is a rule rather than a count: a piece is held
+  where it passes through the canonical parse, and nowhere else. A reference
+  is held that way, and a settled move inherits it, the arm being minted
+  from a parsed reference; every other way in admits a piece the fabric
+  would not name, an arm a caller assembles rather than receives included.
+  What is settled is narrower, and in two parts. A path segment that is
+  empty, ends in whitespace, or holds a line break is refused at every door,
+  because a rendering of it would name a different cell. A piece is held to
+  more than that: one holding a line break is refused for the same reason,
+  and one that is empty, ends in whitespace, or holds an `@` is refused
+  because no slug or handle carries such a name — the parse would take it,
+  since its handle test is a length rule, and hand back a name nothing could
+  have produced.
 - **`where`** (B1c), the printing surface for the ambient record; later
-milestones add their dimensions to it as they add the dimensions themselves.
-It prints the record `pwd` prints, so it chooses the format for both — a
-test helper reads that format back by slicing a label width, which is what a
-change to it has to move with. `pwd` is complete and has no short form, the
-prompt being the short surface, so a format that shortens has to stay
-pasteable — and decision 13's shortened-id fallback is a prefix spelled
-exactly like a whole handle, which is the part that does not. The format's
-own hazards belong with it: a newline in a part is refused before it reaches
-a place, because it would leave a shorter reference naming another cell,
-while a carriage return, a vertical tab, a form feed, a no-break space and
-the Unicode line and paragraph separators all read back whole and reach only
-a terminal.
+  milestones add their dimensions to it as they add the dimensions themselves.
+  It prints the record `pwd` prints, so it chooses the format for both — a
+  test helper reads that format back by slicing a label width, which is what a
+  change to it has to move with. `pwd` is complete and has no short form, the
+  prompt being the short surface, so a format that shortens has to stay
+  pasteable — and decision 13's shortened-id fallback is a prefix spelled
+  exactly like a whole handle, which is the part that does not. The format's
+  own hazards belong with it: a newline in a part is refused before it reaches
+  a place, because it would leave a shorter reference naming another cell,
+  while a carriage return, a vertical tab, a form feed, a no-break space and
+  the Unicode line and paragraph separators all read back whole and reach only
+  a terminal.
 - **Liveness, in two halves.** The held controller is memoized
   cf-harness-style, which covers the construction that never succeeds —
   the case that cache actually addresses. Recovery of an *established*
