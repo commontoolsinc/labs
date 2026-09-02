@@ -680,9 +680,15 @@ the per-epic implementation notes).
 - **Purpose.** Controls flow-label propagation at the commit boundary. Values
   are `off`, `observe`, and `persist`. `observe` computes the conservative label
   join and emits diagnostics but writes nothing; `persist` writes the derived
-  label components onto every value write target. Propagation runs only when the
-  enforcement mode is at least `observe`; it derives and stores labels but never
-  rejects on its own.
+  label components onto value write targets, except where the target's declared
+  store policy already carries every clause the join would state there and the
+  component adds no integrity of its own — such an entry changes no label a
+  reader resolves, so the persist seam drops it. A transaction the runtime
+  attributes to an implementation carries derivation provenance in its
+  integrity, which no store policy states, so its value entries are kept and a
+  labeled collection an attributed writer maintains still grows per element.
+  Propagation runs only when the enforcement mode is at least `observe`; it
+  derives and stores labels but never rejects on its own.
 - **Current default and planned end state.** `off` by default. The target is to
   move toward `persist` as the downstream egress gates (render ceiling, sink
   ceilings, and the LLM path) come online.
