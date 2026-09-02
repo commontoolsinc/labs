@@ -102,14 +102,16 @@ Waits split into two groups with different primitives.
   `packages/patterns/integration/cfc-browser-helpers.ts` compose the two
   primitives above for common waits and interactions. Each of them settles and
   marks the exact rendered target before acting on it; what differs between them
-  is only how they recognize that target. `clickCfButton` takes the first match
-  and reaches through a host's shadow root for its inner `[data-cf-button]`, and
+  is only how they recognize that target. `clickCfButton` takes the first match,
+  reaches through a host's shadow root for its inner `[data-cf-button]`, and
+  answers only while neither the host nor that control is disabled;
   `clickCfButtonsConcurrently` does the same for a group. `clickNthCfButton`
   takes the `index`-th match of a selector that already resolves to the buttons
   themselves. `clickTrustedAction` takes the first enabled match of a
-  `data-ui-action` value. The note-button helpers take a button by its text or
-  its title. `submitViaEnter` focuses a field and presses Enter rather than
-  clicking, and settles around resolving that field the same way.
+  `data-ui-action` value. The note-button helpers take the first enabled
+  button matching a text or a title. `submitViaEnter` focuses a field and
+  presses Enter rather than clicking, and settles around resolving that field
+  the same way.
 
 To click a control that appears asynchronously, follow the `clickCfButton`
 shape rather than a find-and-click retry loop: a `waitForCondition` predicate
@@ -119,6 +121,12 @@ target to be rendered — laid out, and not `display:none` or `visibility:hidden
 — so a control still inside a collapsed menu is skipped until it becomes
 clickable rather than tagged while it has no layout box and then failing to
 click.
+
+Require it to be enabled as well, in that same predicate. A disabled control
+has a layout box, so rendered-ness alone answers it, and it still takes no
+click. A pattern disables a control while the state behind it is arriving — a
+row's "This is me" is disabled until the acting identity resolves — so the
+wait holds until that state lands.
 
 Resolve the target before settling the view inside that predicate. Let the
 check pass only when the same rendered element remains after the settle. A
@@ -162,10 +170,28 @@ into its computed visibility. So the click target's own check covers the whole
 chain, and checking the host as well buys nothing.
 
 Being rendered is a question about whether a click can be delivered, which is
-why it belongs in the predicate that tags the control. Whether the control is
-`disabled` is a separate question — a disabled control still takes the click and
-declines it. A test that needs a control enabled before clicking says so with
-`waitForDisabled(page, selector, false)`.
+why it belongs in the predicate that tags the control. Being enabled is the same
+question, so it belongs there too. The browser raises no click on a disabled
+control, and `cf-button` additionally gives one `pointer-events: none`, which
+sends the press to the host that wraps it. Either way the control is not
+activated, and the interceptor stops an interaction that did not carry the mark,
+so the aim tries again where the control still stands until it repeats a pixel
+and reports.
+
+Ask that of the host as well as of the control it wraps. Here being enabled
+parts company with being rendered: hiding an ancestor reaches the control
+through layout and inheritance, but `disabled` does not inherit, so a host
+carrying `disabled` or `aria-disabled="true"` over a control carrying neither
+has to be asked in its own right.
+
+Asking inside the predicate is what makes the element that was checked the
+element that gets marked. `waitForDisabled(page, selector, false)` ahead of a
+click does not give that: the element it inspects and the element the click
+marks are resolved by separate round trips, and a re-render between them —
+which is what landing the state that enables a control looks like — leaves the
+mark on a replacement the check never saw. Such a call still earns its place
+as an assertion that the page enabled the control, which is a claim about the
+pattern rather than a guard on the click.
 
 A control has to be rendered when the predicate tags it, but that alone does
 not make the click that follows safe. The page keeps running between the tag and
@@ -226,8 +252,11 @@ because that is the event a control acts on. The press and the release cross the
 protocol one at a time, so the page can carry the control away between them, and
 the browser then raises the click on the nearest ancestor the two have in common
 rather than on the control. A click that does not carry the mark is stopped like
-any other miss. So is a control that declines the interaction outright: a
-disabled one takes the press and raises no click at all.
+any other miss. So is a control that declines the interaction outright, and a
+disabled one arrives here two ways: it takes the press and raises no click at
+all, or, where a stylesheet has given it `pointer-events: none`, the press
+reaches the host that wraps it and the click is raised there, without the
+mark.
 
 What the interceptor stops is the press, the release and the click — the events
 a control acts on. The pointer moves to the point before it presses, and the
