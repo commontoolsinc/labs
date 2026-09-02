@@ -1351,3 +1351,61 @@ Deno.test("resolveInteractiveProvisioning carries a turn budget without mounts",
     { maxModelTurns: 32 },
   );
 });
+
+Deno.test("interactive NDJSON transport reports a failed event write as a transport error", async () => {
+  const written: string[] = [];
+  const requests = [
+    JSON.stringify({
+      type: HARNESS_CHAT_REQUEST_TYPE,
+      protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+      requestId: "req-1",
+      method: "start_session",
+      params: { sessionId: "session-1", workspace: { hostPath: "/workspace" } },
+    }),
+    JSON.stringify({
+      type: HARNESS_CHAT_REQUEST_TYPE,
+      protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+      requestId: "req-2",
+      method: "start_turn",
+      params: {
+        sessionId: "session-1",
+        turnId: "turn-1",
+        input: { text: "Hi" },
+      },
+    }),
+  ];
+
+  await assertRejects(
+    () =>
+      runHarnessInteractiveChatNdjsonTransport({
+        lines: requests,
+        writeLine: (line: string) => {
+          // Stands in for a peer that has gone away mid-session.
+          if (line.includes("turn_completed")) {
+            throw new Error("broken pipe");
+          }
+          written.push(line);
+        },
+        createService: (onEvent, onEventDeliveryError) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: () => ({
+              runTranscript: (options) =>
+                Promise.resolve({
+                  model: "gpt-test",
+                  finalAssistantText: "Done.",
+                  transcript: [...options.transcript, {
+                    role: "assistant" as const,
+                    content: "Done.",
+                  }],
+                  modelTurns: 1,
+                  runState: {} as HarnessPromptLoopResult["runState"],
+                }),
+            }),
+            onEvent,
+            onEventDeliveryError,
+          }),
+      }),
+    Error,
+    "broken pipe",
+  );
+});
