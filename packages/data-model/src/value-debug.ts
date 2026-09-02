@@ -490,7 +490,7 @@ class DebugStringifier {
           } else if (name !== undefined) {
             return `function ${name}(...) {...}`;
           }
-          break;
+          return this.#renderInstance(tag, payload, indent);
         }
 
         case "unconvertible": {

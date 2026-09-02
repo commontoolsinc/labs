@@ -2,7 +2,7 @@ import { expect } from "@std/expect";
 import { fromFileUrl } from "@std/path/from-file-url";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { toCompactDebugString } from "@commonfabric/data-model";
+import { toStructuredDebugValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
@@ -39,6 +39,23 @@ import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("favorites-row-stored-shape");
 const space = signer.did();
+
+/**
+ * Whether any string anywhere in the debug form of `value` contains `text`.
+ * The structured form is walked rather than a rendered string searched, so
+ * that a match deep in a view tree is found rather than elided.
+ */
+function debugFormContains(value: unknown, text: string): boolean {
+  const walk = (node: unknown): boolean => {
+    if (typeof node === "string") {
+      return node.includes(text);
+    } else if ((typeof node === "object") && (node !== null)) {
+      return Object.values(node).some(walk);
+    }
+    return false;
+  };
+  return walk(toStructuredDebugValue(value, 100));
+}
 
 const FAVORITES_MANAGER_PATH = fromFileUrl(
   import.meta.resolve("../../patterns/system/favorites-manager.tsx"),
@@ -206,8 +223,10 @@ describe("a stored favorite row instantiates in favorites-manager", () => {
 
     // Sanity: the row is live before the swap, so a failure below is the swap's
     // re-stage and not a mis-seeded fixture.
-    expect(toCompactDebugString(managerCell.getAsQueryResult()))
-      .not.toContain("No favorites yet.");
+    expect(
+      debugFormContains(managerCell.getAsQueryResult(), "No favorites yet."),
+    )
+      .toBe(false);
 
     // The swap. Identity is content-addressed, so v2 has to differ in SOURCE —
     // a fresh transaction over identical bytes would compile to the same
@@ -244,7 +263,9 @@ describe("a stored favorite row instantiates in favorites-manager", () => {
     expect(
       (managerCell.getAsQueryResult() as Record<string, unknown>)["$NAME"],
     ).toBe("Favorites Manager v2");
-    expect(toCompactDebugString(managerCell.getAsQueryResult()))
-      .not.toContain("No favorites yet.");
+    expect(
+      debugFormContains(managerCell.getAsQueryResult(), "No favorites yet."),
+    )
+      .toBe(false);
   });
 });
