@@ -302,6 +302,14 @@ check "$ARGUMENT_KEYS" \
 check "1" "$(printf '%s' "$ARGUMENT_KEYS" | grep -c 'settings')" \
   "which is a key the arguments cell actually holds"
 
+# The suffix rides the bare slug the same way, because the slug names the
+# piece the reference names.
+check "1" "$(succeeds $CF get --quiet --piece "board#argument" $ARGS)" \
+  "the suffix on a bare slug is a --piece value the command accepts too"
+check "$ARGUMENT_KEYS" \
+  "$(candidates_at "cf get $LINE_ARGS --piece board#argument ")" \
+  "and completes the same arguments-cell keys behind it"
+
 # A path embedded in the reference is where the walk starts, the way
 # `mergePiecePath` puts it in front of the positional path.
 check "density,theme" \
