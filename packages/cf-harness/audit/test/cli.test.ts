@@ -97,6 +97,27 @@ describe("cli", () => {
       expect(report).toContain('"MUST hold."');
     });
 
+    it("prints each evidence pointer beside the artifact it is into", () => {
+      const report = renderAuditReport([
+        result({
+          verdict: "fail",
+          evidence: [
+            {
+              artifact: "policy-trace.json",
+              pointer: "decisions[1]",
+              detail: "the mode",
+            },
+            { detail: "a fact about the family rather than about one file" },
+          ],
+        }),
+      ], "fail");
+
+      expect(report).toContain("policy-trace.json decisions[1] — the mode");
+      expect(report).toContain(
+        "evidence: a fact about the family rather than about one file",
+      );
+    });
+
     it("prints no section for the verdicts that carry no finding", () => {
       const report = renderAuditReport([result()], "fail");
 

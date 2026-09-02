@@ -346,13 +346,10 @@ const modeBehaviorAttestation: AuditCheck = {
     if (run.runState.status !== "present") {
       return notReadable("run-state.json", run.runState);
     }
-    const found = decisionsOf(run);
-    if (found === undefined) {
-      return {
-        verdict: "inconclusive",
-        message: "no artifact of this run carries its policy decisions",
-      };
-    }
+    // `decisionsOf` reads the first of policy trace, run report, and run state
+    // that loaded, and the guard above established one of them, so it answers
+    // here rather than returning nothing.
+    const found = decisionsOf(run)!;
     const mode = runStateOf(run)!.cfcEnforcementMode;
     const evidence: CheckEvidence[] = [];
     for (const decision of found.decisions) {
@@ -484,13 +481,10 @@ const decisionCoverage: AuditCheck = {
       return notReadable("run-report.json", run.runReport);
     }
     const report = run.runReport.value;
-    const found = decisionsOf(run);
-    if (found === undefined) {
-      return {
-        verdict: "inconclusive",
-        message: "no artifact of this run carries its policy decisions",
-      };
-    }
+    // `decisionsOf` reads the first of policy trace, run report, and run state
+    // that loaded, and the guard above established one of them, so it answers
+    // here rather than returning nothing.
+    const found = decisionsOf(run)!;
     const evidence: CheckEvidence[] = [];
     const decided = new Set(
       found.decisions.map((decision) => decision.toolCallId),

@@ -127,6 +127,34 @@ describe("evidence", () => {
       });
     });
 
+    it("reports a path it could not read at all as unparseable", async () => {
+      // A directory where a file belongs is the readable stand-in for every
+      // read that fails for a reason other than the file being absent.
+
+      await withTree({ "run/run-state.json/inside.txt": "" }, async (root) => {
+        const state = (await loadRunEvidence(join(root, "run"))).runState;
+
+        expect(state.status).toBe("unparseable");
+        expect(
+          state.status === "unparseable" ? state.detail : "",
+        ).toContain("could not be read");
+      });
+    });
+
+    it("reports a `tool-outputs` that is not a directory as unparseable", async () => {
+      await withTree({
+        "run/run-state.json": runState("run"),
+        "run/tool-outputs": "not a directory",
+      }, async (root) => {
+        const outputs = (await loadRunEvidence(join(root, "run"))).toolOutputs;
+
+        expect(outputs.status).toBe("unparseable");
+        expect(
+          outputs.status === "unparseable" ? outputs.detail : "",
+        ).toContain("could not be listed");
+      });
+    });
+
     it("loads a run state a newer generation added fields to", async () => {
       await withTree({
         "run/run-state.json": runState("run", {
@@ -139,6 +167,18 @@ describe("evidence", () => {
   });
 
   describe("loadRunFamily()", () => {
+    it("returns a family of one when the parent directory cannot be listed", async () => {
+      // A run directory nested under a plain file has no listable parent, so
+      // no sibling is discoverable. The root is still the audit's subject.
+
+      await withTree({ "afile": "" }, async (root) => {
+        const family = await loadRunFamily(join(root, "afile", "run"));
+
+        expect(family.children).toEqual([]);
+        expect(family.root.runId).toBe("run");
+      });
+    });
+
     it("returns the children written beside the run, at any depth", async () => {
       await withTree({
         "runs/parent/run-state.json": runState("parent"),
@@ -163,6 +203,12 @@ describe("evidence", () => {
   });
 
   describe("discoverRunFamilies()", () => {
+    it("returns no family for a directory holding no run", async () => {
+      await withTree({ "empty/nothing/.keep": "" }, async (root) => {
+        expect(await discoverRunFamilies(join(root, "empty"))).toEqual([]);
+      });
+    });
+
     it("returns the one family for a run directory", async () => {
       await withTree({
         "runs/parent/run-state.json": runState("parent"),
