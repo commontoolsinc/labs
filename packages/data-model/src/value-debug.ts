@@ -477,10 +477,9 @@ class DebugStringifier {
         }
 
         case "...": {
-          // The depth-limit marker, rendered as the object it is, its key
-          // included.
-          const parts = this.#renderProperties(value, indent, false);
-          return this.#renderContainer("{", "}", parts, indent);
+          // The depth-limit marker. What kind of value was elided is left
+          // out of the rendering.
+          return "...";
         }
 
         default: {
@@ -496,21 +495,17 @@ class DebugStringifier {
 
   /**
    * Renders the properties of a plain object, one part per property, for a
-   * container whose closing bracket is indented by `indent`. When `unescape`
-   * is `true` (the default), a key is rendered as the original value's key:
-   * the conversion prefixes a slash to a key that starts with one and to an
-   * unsafe key, and that slash comes back off here.
+   * container whose closing bracket is indented by `indent`. A key is
+   * rendered as the original value's key: the conversion prefixes a slash to
+   * a key that starts with one and to an unsafe key, and that slash comes
+   * back off here.
    */
-  #renderProperties(
-    value: FabricPlainObject,
-    indent: string,
-    unescape = true,
-  ): string[] {
+  #renderProperties(value: FabricPlainObject, indent: string): string[] {
     const inner = this.#innerIndent(indent);
     const separator = (this.#indent === undefined) ? ":" : ": ";
 
     return Object.keys(value).map((key) => {
-      const original = (unescape && (key[0] === "/")) ? key.slice(1) : key;
+      const original = (key[0] === "/") ? key.slice(1) : key;
       const rendered = this.#renderSubvalue(value[key], inner);
       return `${renderKey(original)}${separator}${rendered}`;
     });
