@@ -93,6 +93,15 @@ describe("value-debug", () => {
         .toBe('{"count":100n,"missing":undefined,"items":[1n,2n,undefined]}');
     });
 
+    it("renders a hole in an array as `<hole>` and a run of holes as `<N holes>`", () => {
+      expect(toCompactDebugString([1, , 3])).toBe("[1,<hole>,3]");
+      expect(toCompactDebugString([, , 3])).toBe("[<2 holes>,3]");
+      expect(toCompactDebugString([1, , ,])).toBe("[1,<2 holes>]");
+      expect(toCompactDebugString([, , , ,])).toBe("[<4 holes>]");
+      expect(toCompactDebugString([, 2, , , 5, ,]))
+        .toBe("[<hole>,2,<2 holes>,5,<hole>]");
+    });
+
     it("renders a string that resembles a bare token as a quoted string", () => {
       expect(toCompactDebugString("undefined"))
         .toBe('"undefined"');

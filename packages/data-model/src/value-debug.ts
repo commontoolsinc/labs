@@ -280,7 +280,7 @@ class DebugConverter {
  * Helper class for rendering the result of `toStructuredDebugValue()` as a
  * debug string. The rendering is JSON syntax wherever JSON can express the
  * value, and a bare token -- `42n`, `undefined`, `NaN`, `-0`, `Infinity`,
- * `@name`, `Symbol("name")`, `<circle>` -- wherever it cannot. A
+ * `@name`, `Symbol("name")`, `<circle>`, `<hole>` -- wherever it cannot. A
  * `FabricPrimitive`, which the conversion passes through as itself, is
  * rendered under its codec tag with its JSON encoding, in the same shape the
  * conversion gives a `FabricInstance`.
@@ -313,10 +313,20 @@ class DebugStringifier {
     const inner = this.#innerIndent(indent);
     const parts: string[] = [];
 
-    // Iterated by index rather than by element, so that a hole renders as
-    // `undefined` and takes up its position.
+    // Iterated by index rather than by element, so that a hole is noticed. A
+    // run of holes renders as a single part which says how long the run is.
     for (let i = 0; i < value.length; i++) {
-      parts.push(this.#renderSubvalue(value[i], inner));
+      if (i in value) {
+        parts.push(this.#renderSubvalue(value[i], inner));
+        continue;
+      }
+
+      let holeCount = 1;
+      while (((i + 1) < value.length) && !((i + 1) in value)) {
+        holeCount++;
+        i++;
+      }
+      parts.push((holeCount === 1) ? "<hole>" : `<${holeCount} holes>`);
     }
 
     return this.#renderContainer("[", "]", parts, indent);
@@ -499,6 +509,7 @@ function renderDebugString(value: unknown, indent?: number): string {
  *   `@"the key"` otherwise.
  * * unique (uninterned) symbols, as `Symbol("name")`.
  * * a reference back to an enclosing object, as `<circle>`.
+ * * a hole in an array, as `<hole>`, and a run of them as `<N holes>`.
  * * `FabricPrimitive`s, under their codec tag with their JSON encoding, e.g.
  *   `{"/Bytes@1":"AQID"}`.
  *
