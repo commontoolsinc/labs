@@ -153,6 +153,7 @@ describe("stage D seal-into-wave", () => {
   const stoppedWitnessPiece = async (
     id: string,
     options: { throwOnInstantiation?: number } = {},
+    targetRuntime = runtime,
   ) => {
     let instantiations = 0;
     let lastRunInstantiation = 0;
@@ -191,17 +192,17 @@ describe("stage D seal-into-wave", () => {
         outputs: {},
       }],
     };
-    const tx = runtime.edit();
-    const cell = runtime.getCell<Record<string, unknown>>(
+    const tx = targetRuntime.edit();
+    const cell = targetRuntime.getCell<Record<string, unknown>>(
       space,
       id,
       undefined,
       tx,
     );
-    const running = runtime.runner.run(tx, pattern, {}, cell);
+    const running = targetRuntime.runner.run(tx, pattern, {}, cell);
     expect((await tx.commit()).error).toBeUndefined();
     await running.pull();
-    runtime.runner.stop(cell);
+    targetRuntime.runner.stop(cell);
     return {
       cell,
       instantiations: () => instantiations,
@@ -3870,6 +3871,7 @@ describe("stage D seal-into-wave", () => {
 
     expect(await runtime.start(witness.cell)).toBe(true);
     await runtime.runner.idlePieceInstantiationSettlements();
+    await runtime.idle();
     expect(rejections).toBe(1);
     expect(failures).toContain(rejection);
 
@@ -3880,6 +3882,102 @@ describe("stage D seal-into-wave", () => {
     await runtime.idle();
     await runtime.runner.idlePieceInstantiationSettlements();
     expect(witness.instantiations()).toBe(3);
+  });
+
+  it("reinstantiates once after a stale-read piece-instantiation commit conflict", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-stale-read",
+    );
+    const failures: unknown[] = [];
+    let seals = 0;
+    let readinessCalls = 0;
+    runtime.pieceStartCommitFailureObserver = ({ error }) => {
+      failures.push(error);
+    };
+    runtime.installSealDestination({
+      seal: (tx) => {
+        if (
+          waveRunContextOf(tx)?.actionId.startsWith("piece-instantiate/") &&
+          seals++ === 0
+        ) {
+          return Promise.resolve({
+            error: {
+              name: "ConflictError",
+              message:
+                "stale confirmed read: of:test at seq 1 conflicted with seq 2",
+              readyToRetry: () => {
+                readinessCalls += 1;
+                return Promise.resolve();
+              },
+            } as never,
+          });
+        }
+        return tx.tx.commit();
+      },
+    }, {
+      runStamper: (tx, info) =>
+        stampWaveRunContext(tx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        }),
+    });
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.runner.idlePieceInstantiationSettlements();
+
+    expect(seals).toBe(2);
+    expect(readinessCalls).toBe(1);
+    expect(failures).toHaveLength(1);
+    expect(witness.instantiations()).toBe(3);
+    expect(witness.lastRunInstantiation()).toBe(3);
+  });
+
+  it("keeps a stale-read piece-instantiation commit conflict terminal with server execution off", async () => {
+    const offManager = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const offRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: offManager,
+      experimental: { serverExecution: false },
+    });
+    const originalEdit = offRuntime.edit.bind(offRuntime);
+    try {
+      const witness = await stoppedWitnessPiece(
+        "off-piece-instantiate-stale-read",
+        {},
+        offRuntime,
+      );
+      let refused = false;
+      (offRuntime as unknown as { edit: typeof offRuntime.edit }).edit = ((
+        ...args: Parameters<typeof offRuntime.edit>
+      ) => {
+        const tx = originalEdit(...args);
+        if (refused) return tx;
+        refused = true;
+        (tx as unknown as { commit: typeof tx.commit }).commit = (() => {
+          const error = {
+            name: "ConflictError",
+            message:
+              "stale confirmed read: of:test at seq 1 conflicted with seq 2",
+            readyToRetry: () => Promise.resolve(),
+          };
+          tx.abort(error.message);
+          return Promise.resolve({ error });
+        }) as typeof tx.commit;
+        return tx;
+      }) as typeof offRuntime.edit;
+
+      expect(await offRuntime.start(witness.cell)).toBe(true);
+      await offRuntime.runner.idlePieceInstantiationSettlements();
+      expect(refused).toBe(true);
+      expect(witness.instantiations()).toBe(2);
+    } finally {
+      (offRuntime as unknown as { edit: typeof offRuntime.edit }).edit =
+        originalEdit;
+      await offRuntime.dispose();
+      await offManager.close();
+    }
   });
 
   it("aborts held retry readiness when the piece stops and does not revive it", async () => {

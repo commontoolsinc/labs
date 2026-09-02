@@ -143,6 +143,19 @@ describe("lunch poll: a vote is a keyed, mergeable write", () => {
     expect(await alice.read(["voteCount"])).toBe(0);
   });
 
+  it("makes a foreign cast visible after settling", async () => {
+    const [, bob] = everyone;
+    const option = options[1];
+
+    await bob.send("castVote", { optionId: option, voteType: "green" });
+    await harness.settle();
+    expect(await host.read(["voteCount"])).toBe(1);
+
+    await bob.send("clearMyVote", { optionId: option });
+    await harness.settle();
+    expect(await host.read(["voteCount"])).toBe(0);
+  });
+
   it("keeps a lunch-time burst from becoming a retry storm", async () => {
     // Everyone re-votes every option at once, repeatedly — the shape of a real
     // lunch decision, where a whole-list write makes each vote wait seconds.

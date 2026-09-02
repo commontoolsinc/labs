@@ -1791,12 +1791,13 @@ export class Runner {
   // cancelled ownership already tombstones the work. Tracked solely so tests
   // can synchronize deterministically.
   #pendingDeferredStartCatchUps = new Set<Promise<unknown>>();
-  // Self-minted piece instantiations seal asynchronously into the serving
-  // wave. Their local graph is speculative until that wave settles, so a
-  // contribution drop tears down that exact node group and re-instantiates it
-  // once against the rolled-back view. This set is a deterministic test seam:
-  // disposal relies on the registration and lifecycle guards rather than
-  // waiting for a wave that a closing serving loop may abandon.
+  // Self-minted piece instantiations commit asynchronously. Their local graph
+  // is speculative until that commit and any serving wave settle, so a stale
+  // setup basis or contribution drop tears down that exact node group and
+  // re-instantiates it once against the caught-up view. This set is a
+  // deterministic test seam: disposal relies on the registration and
+  // lifecycle guards rather than waiting for work a closing serving loop may
+  // abandon.
   #pendingPieceInstantiationSettlements = new Set<Promise<unknown>>();
   // Both maps record that this runner prepared or stopped a result, so a later
   // start of the same result can reuse the cells it already assembled instead
@@ -3331,8 +3332,8 @@ export class Runner {
 
     // Create cancel group early, before wiring pattern/node sinks.
     const [cancelGroup, addCancel] = useCancelGroup();
-    // A withdrawn instantiation may be waiting for its conflict/session gate
-    // and a named-document pull before it retries. That work belongs to the
+    // A failed instantiation may be waiting for its conflict/session gate and
+    // a named-document pull before it recovers. That work belongs to the
     // OUTER registration, not the retired node group: stopping the piece must
     // release the fire-and-forget settlement even when readiness never does.
     const retryReadinessTeardown = new AbortController();
@@ -3380,7 +3381,7 @@ export class Runner {
     const instantiatePattern = (
       pattern: Pattern,
       useTx?: IExtendedStorageTransaction,
-      recoverDroppedContribution = true,
+      allowRecovery = true,
     ) => {
       if (!active || startLifecycleEpoch !== this.#lifecycleEpoch) return;
       // Create new cancel group for nodes
@@ -3455,9 +3456,49 @@ export class Runner {
             active && startLifecycleEpoch === this.#lifecycleEpoch &&
             this.cancels.get(key) === cancel && cancelNodes === nodeCancel &&
             currentPatternKey === patternKeyAtInstantiation;
+          const recoverInstantiationOnce = async (error: unknown) => {
+            if (!exactNodesAreCurrent()) return;
+            if (!allowRecovery) {
+              teardownRegistrationIfCurrent();
+              return;
+            }
+
+            nodeCancel();
+            if (cancelNodes === nodeCancel) cancelNodes = undefined;
+            await this.runtime.awaitCommitRetryReadiness(
+              error,
+              retryReadinessTeardown.signal,
+            );
+
+            if (
+              retryReadinessTeardown.signal.aborted || !active ||
+              startLifecycleEpoch !== this.#lifecycleEpoch ||
+              this.cancels.get(key) !== cancel ||
+              currentPatternKey !== patternKeyAtInstantiation ||
+              cancelNodes !== undefined
+            ) {
+              return;
+            }
+            try {
+              instantiatePattern(pattern, undefined, false);
+            } catch (retryError) {
+              this.#reportPieceStartCommitFailure(
+                instantiateActionId,
+                retryError,
+              );
+              teardownRegistrationIfCurrent();
+            }
+          };
           const commitWork = actualTx.commit().then(async ({ error }) => {
             if (error !== undefined) {
               this.#reportPieceStartCommitFailure(instantiateActionId, error);
+              if (
+                this.runtime.experimental.serverExecution === true &&
+                isStaleReadConflict(error)
+              ) {
+                await recoverInstantiationOnce(error);
+                return;
+              }
               if (exactNodesAreCurrent()) teardownRegistrationIfCurrent();
               return;
             }
@@ -3489,10 +3530,6 @@ export class Runner {
               teardownRegistrationIfCurrent();
               return;
             }
-            if (!recoverDroppedContribution) {
-              teardownRegistrationIfCurrent();
-              return;
-            }
 
             // The graph reads its own pending setup and internal-cell writes
             // while it is installed. Once the wave withdraws those writes,
@@ -3500,35 +3537,7 @@ export class Runner {
             // never became durable. Retire only the nodes this transaction
             // installed; the outer registration remains in place so its
             // original parent/root owner keeps the same cancellation handle.
-            nodeCancel();
-            if (cancelNodes === nodeCancel) cancelNodes = undefined;
-            await this.runtime.awaitCommitRetryReadiness(
-              settled.error,
-              retryReadinessTeardown.signal,
-            );
-
-            // A stop aborts the readiness/pull work above; a runtime cycle,
-            // pointer change, or newer instantiation during the wait owns the
-            // key now. Otherwise retry exactly once; a second drop tears the
-            // registration down instead of spinning on a permanent conflict.
-            if (
-              retryReadinessTeardown.signal.aborted || !active ||
-              startLifecycleEpoch !== this.#lifecycleEpoch ||
-              this.cancels.get(key) !== cancel ||
-              currentPatternKey !== patternKeyAtInstantiation ||
-              cancelNodes !== undefined
-            ) {
-              return;
-            }
-            try {
-              instantiatePattern(pattern, undefined, false);
-            } catch (retryError) {
-              this.#reportPieceStartCommitFailure(
-                instantiateActionId,
-                retryError,
-              );
-              teardownRegistrationIfCurrent();
-            }
+            await recoverInstantiationOnce(settled.error);
           }).catch((error) => {
             this.#reportPieceStartCommitFailure(instantiateActionId, error);
             if (exactNodesAreCurrent()) teardownRegistrationIfCurrent();

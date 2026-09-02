@@ -1269,8 +1269,9 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   still possible, but its one-shot loss arms are bounded in the runner:
   a deferred client start that loses a stale-read race catches up from
   served state, while a serving `piece-instantiate` contribution that
-  is dropped cancels only its exact speculative node group and
-  re-instantiates once in the next wave. The grace still reduces the
+  is dropped, or whose immediate setup commit loses a stale-read race,
+  cancels only its exact speculative node group and re-instantiates once
+  from caught-up state. The grace still reduces the
   contention rate; correctness no longer depends on winning that first
   bookkeeping wave. Whole-wave aborts and abandons keep their existing
   lifecycle recovery instead of retrying in place.
@@ -2973,8 +2974,8 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   serving runtime supplies). The separate
   client-instantiate-vs-server-derive race at piece creation remains a
   source of contention, but not an unrecovered one-shot loss: deferred
-  client starts catch up and dropped serving-instantiation contributions
-  retry once under exact lifecycle guards (residual x).**
+  client starts catch up, and stale-read or dropped serving-instantiation
+  commits recover once under exact lifecycle guards (residual x).**
 - OW34 — a CFC-serving POLICY item: served handler runs carry NO
   renderer-trusted event mark, so a per-user served handler's write to a
   UI-contract-gated (owner-protected) cell is refused by CFC at prepare
@@ -6658,14 +6659,17 @@ supply; OW29/OW32/OW34 closed):
     cancellation signal; a runtime cycle, pointer change, or newer node
     group wins through exact guards. A second drop tears the exact
     registration down rather than spinning. A whole-wave abort or abandon
-    is not retried in place. An immediate self-minted instantiate commit
-    refusal/rejection also tears down the exact current registration in every
-    posture, including client/OFF: a graph whose setup writes never landed is
-    a zombie, not a viable self-healing registration. Explicit wave abandon
-    is classified separately and warned without incrementing the serving
-    runtime's structure-load-failure observer; other failures remain loud.
-    Pinned in `executor-wave.test.ts` by a deterministic whole-document
-    conflict plus a held-readiness teardown companion. And OW46's
+    is not retried in place. An immediate self-minted instantiate commit that
+    loses a stale-read race follows the same one-shot recovery. Other immediate
+    refusals and rejections tear down the exact current registration. The OFF
+    posture keeps every immediate refusal terminal, leaving its cross-tab race
+    to the cross-tab mutex. A graph whose setup writes never landed is a
+    zombie, not a viable self-healing registration. Explicit wave abandon is
+    classified separately and warned
+    without incrementing the serving runtime's structure-load-failure
+    observer; other failures remain loud. Pinned in
+    `executor-wave.test.ts` by deterministic contribution-drop and stale-read
+    conflicts plus a held-readiness teardown companion. And OW46's
     `structure-load-stuck` counter is BLIND here: it fires 6× per run
     in BOTH arms and in the reds names only the HOST's space, because
     it counts deferred structure loads of DEMANDED roots and this
