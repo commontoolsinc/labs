@@ -4771,8 +4771,8 @@ export function parsePieceOptions(
   }
   if (config.pieceInput && !parseOptions?.acceptsArgument) {
     throw new ValidationError(
-      `The piece reference selects the arguments cell ("#argument") but ` +
-        `this command does not take "--input".`,
+      `The target selects the arguments cell ("#argument") but this ` +
+        `command does not take "--input".`,
       { exitCode: 1 },
     );
   }

@@ -228,8 +228,9 @@ name should offer.
 `normalizeLLMFriendlyRef`, which is the function the command's own intake parses
 it with: the embedded space, the `@scope` suffix, a trailing path, and the
 `#argument` suffix that selects the arguments cell the way `--input` does. What
-that does not recognize falls through to the alias grammar
-(`parseScopedIdSegment`). Taking the word verbatim as a piece id — which this
+that does not recognize falls through to the alias grammar,
+`id[@scope][#argument]` (`splitArgumentSuffix` then `parseScopedIdSegment`).
+Taking the word verbatim as a piece id — which this
 did — meant every documented spelling but the bare id resolved to a listing
 call that could not succeed, and so to a slot that silently offered nothing.
 

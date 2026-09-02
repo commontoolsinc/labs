@@ -439,11 +439,15 @@ describe("cli piece parsing", () => {
     )
       .toThrow(/does not take "--input"/);
     // The command's own declaration is what decides, so the bare spelling of
-    // the same selection meets the same refusal.
+    // the same selection reaches the same refusal — and the refusal names the
+    // target rather than a reference, which is not what a slug is.
     expect(() => parsePieceOptions({ ...base, cell: `${PIECE}#argument` }))
       .toThrow(/does not take "--input"/);
     expect(() => parsePieceOptions({ ...base, cell: "thermostat#argument" }))
-      .toThrow(/does not take "--input"/);
+      .toThrow(
+        'The target selects the arguments cell ("#argument") but this ' +
+          'command does not take "--input".',
+      );
   });
 
   it('parseSpaceOptions() reads "#argument" off a bare id and off a slug', () => {
@@ -764,6 +768,7 @@ describe("cli piece parsing", () => {
       deps,
     );
 
+    expect(reads).toHaveLength(3);
     for (const read of reads) {
       expect(read[0]).toMatchObject({ piece: "thermostat" });
       expect(read.slice(1)).toEqual([
@@ -771,6 +776,27 @@ describe("cli piece parsing", () => {
         { input: true, step: undefined },
       ]);
     }
+  });
+
+  it('setCellValueFromCommand() writes through "#argument" on a bare target', async () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
+    const writes: unknown[][] = [];
+    await setCellValueFromCommand(
+      { ...base, cell: "thermostat#argument" },
+      "target",
+      undefined,
+      {
+        drainStdin: (() => Promise.resolve(30)) as never,
+        setCellValue: ((...args: unknown[]) => {
+          writes.push(args);
+          return Promise.resolve();
+        }) as never,
+        render: (() => {}) as never,
+      },
+    );
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.[0]).toMatchObject({ piece: "thermostat" });
+    expect(writes[0]?.slice(1)).toEqual([["target"], 30, { input: true }]);
   });
 
   it("getCellValueFromCommand() leaves an unresolved path on the caller's sinks rather than exiting", async () => {

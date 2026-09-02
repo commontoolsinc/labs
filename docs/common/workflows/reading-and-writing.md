@@ -70,10 +70,10 @@ reads.
 The suffix rides every spelling of the target — the reference form
 (`/of:fid1:…#argument`, `/thermostat#argument`), the bare id, and the slug
 (`--cell thermostat#argument`) — because all of them designate the same piece.
-The `--url` is the one that does not carry it: a URL fragment is not part of
-the path a URL's piece is read out of, so it is dropped without comment and the
-read goes to the result cell. With a `--url`, `--input` is the only spelling
-that reaches the arguments cell.
+A `--url` does not carry it: a URL fragment is not part of the path a URL's
+piece is read out of, so it is dropped without comment and the read goes to the
+result cell. With a `--url`, `--input` is the only spelling that reaches the
+arguments cell.
 
 ### Nothing here runs the program
 

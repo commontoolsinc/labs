@@ -345,8 +345,8 @@ async function cellPathCandidates(
   const { parentPath, prefix } = splitPathPrefix(line.word);
   const { listCellKeys } = await import("../cell-listing.ts");
   const keys = await listCellKeys(config, parentPath, {
-    // `#argument` on the reference and `--input` as a flag are two spellings
-    // of one selection, so both reach the arguments cell here.
+    // `#argument` on the target and `--input` as a flag are two spellings of
+    // one selection, so both reach the arguments cell here.
     input: line.flags.has("input") || config.pieceInput === true,
   });
   if (keys.length === 0) return NOTHING;

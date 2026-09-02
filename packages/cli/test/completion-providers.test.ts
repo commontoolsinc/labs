@@ -199,11 +199,13 @@ Deno.test("piece context: #argument reads the same on both spellings of a target
       )?.pieceScope,
       "session",
     );
-    // Nothing but the suffix selects that cell.
-    assertFalse(
-      resolvePieceContext(lineFor("cf get -s demo --piece thermostat "))
-        ?.pieceInput,
+    // Nothing but the suffix selects that cell, and a plain slug still
+    // resolves — a context of `null` there is a slot offering nothing.
+    const plain = resolvePieceContext(
+      lineFor("cf get -s demo --piece thermostat "),
     );
+    assert(plain);
+    assertFalse(plain.pieceInput);
     // A fragment the grammar refuses is a half-typed word, not a throw.
     assertEquals(
       resolvePieceContext(lineFor("cf get -s demo --piece thermostat#res ")),
