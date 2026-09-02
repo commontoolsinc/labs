@@ -2190,6 +2190,22 @@ Deno.test("a listener that throws does not turn a completed turn into a failed o
     (deliveryFailures[0][1] as Error).message,
     "the peer stopped reading",
   );
-  // Later events still reach a listener that recovered.
-  assertEquals(delivered.includes("session_started"), true);
+
+  // A failed delivery does not stop the service delivering to that listener,
+  // and the turn that follows it is decided the same way.
+  await service.startTurn("req-3", {
+    sessionId: "session-1",
+    turnId: "turn-2",
+    input: { text: "Again" },
+  });
+  await service.waitForTurn("session-1", "turn-2");
+
+  assertEquals(delivered.includes("turn_started"), true);
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns.map((entry) =>
+      entry.turn.status
+    ),
+    ["completed", "completed"],
+  );
+  assertEquals(deliveryFailures.length, 2);
 });
