@@ -117,8 +117,8 @@ What works today:
   - `edit_file`
   - `write_file`
   - `delegate_task`
-  - `describe_handle` (shape of a handle's referent, never its value; see
-    [Inspecting a handle's shape](#inspecting-a-handles-shape))
+  - `describe_handle` (shape and labels of a handle's referent, never its value;
+    see [Inspecting a handle's shape](#inspecting-a-handles-shape))
   - `run_pattern` (present only when the run configures a fabric session; see
     [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
   - `search_patterns` (present only when the run configures a pattern index with
@@ -799,8 +799,8 @@ resume, and reported in the operator summary as `inputCells:`.
 A token says nothing about what it refers to, and an agent handed one cannot
 write a line of code over it without knowing the shape of what is there.
 `describe_handle` closes that gap without opening the data: given a token, it
-reports the shape of the referent and the path segments — what field of what
-piece the token names — and never the value.
+reports the shape of the referent, the path segments — what field of what piece
+the token names — the CFC labels the referent carries, and never the value.
 
 ```json
 {
@@ -811,22 +811,38 @@ piece the token names — and never the value.
     "type": "object",
     "properties": { "doubled": { "type": "number" } }
   },
-  "path": ["doubled"]
+  "path": ["doubled"],
+  "labels": [
+    {
+      "confidentiality": [["https://commonfabric.org/cfc/atom/Space"]],
+      "integrity": ["https://commonfabric.org/cfc/atom/ExternalIngest"]
+    }
+  ]
 }
 ```
 
-Two sources can answer, in this order. The referent's own declared schema, read
-through the run's fabric session when it has one: a piece's document schema is
-the result schema of the pattern behind it, which is exactly what an agent
-holding a handle to that piece would be wiring into a pattern of its own — and
-it is where a cell's CFC labels live, which is why an input cell's shape always
-answers from its own declaration. Failing that, the schema the mint recorded out
-of the harness's own work — a `run_pattern` result reference carries the
-compiled pattern's result schema, which compilation produced anyway, and the
-entry is marked `schemaSource: "harness"`. A run with no session still answers
-from its own table, so shape stays inspectable in every run that has handles at
-all. A token the run's table does not hold comes back `known: false` rather than
-as an error, since a token from another run simply names nothing here.
+Labels answer from the same read as the shape, wherever the run has a session to
+read through, and they are a different fact from the schema: a cell's labels
+live in its own metadata rather than on its declaration, so a referent can carry
+a full label map and state no shape at all. Only atom TYPES cross — the URLs
+naming what a value requires and what it carries — and never an atom's other
+fields, which say what a label was computed FROM. `confidentiality` holds one
+entry per clause, each listing the atom types that satisfy it, because a clause
+of several types is satisfied by any one of them and flattening that would
+report a weaker requirement as a stronger one. An empty list says the space
+holds no label; no list at all says the run had no session to ask.
+
+Two sources can answer for the shape, in this order. The referent's own declared
+schema, read through the run's fabric session when it has one: a piece's
+document schema is the result schema of the pattern behind it, which is exactly
+what an agent holding a handle to that piece would be wiring into a pattern of
+its own. Failing that, the schema the mint recorded out of the harness's own
+work — a `run_pattern` result reference carries the compiled pattern's result
+schema, which compilation produced anyway, and the entry is marked
+`schemaSource: "harness"`. A run with no session still answers from its own
+table, so shape stays inspectable in every run that has handles at all. A token
+the run's table does not hold comes back `known: false` rather than as an error,
+since a token from another run simply names nothing here.
 
 **What is disclosed is structure and only structure**: property names, types,
 nesting, required-ness, array and object composition, a `type` from the schema
