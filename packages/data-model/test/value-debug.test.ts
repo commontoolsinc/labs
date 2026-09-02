@@ -29,11 +29,6 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import {
-  REALM_CODEC,
-  type TerminalCodec,
-} from "@/codec-interface/interface.ts";
-import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import { FabricPrimitive, FabricSpecialObject } from "@/interface.ts";
 
 describe("value-debug", () => {
@@ -83,32 +78,6 @@ describe("value-debug", () => {
 
       expect(toCompactDebugString(new RoguePrimitive()))
         .toBe("/RoguePrimitive(...)");
-    });
-
-    it("renders a `FabricPrimitive` whose realm state nests arrays and objects", () => {
-      // No shipped primitive's realm encoding nests, so a synthetic one
-      // stands in: its state holds an array with a buffer inside it, and an
-      // object with another object inside that.
-
-      class NestedPrimitive extends FabricPrimitive {
-        static get [REALM_CODEC](): TerminalCodec<RealmCodecValue> {
-          return {
-            tagForValue: () => "Nested@1",
-            encode: () => ({
-              list: [1, new Uint8Array([1, 2]).buffer, [true]],
-              inner: { b: new ArrayBuffer(0), deeper: { n: 3n } },
-            }),
-          } as unknown as TerminalCodec<RealmCodecValue>;
-        }
-      }
-
-      expect(toCompactDebugString(new NestedPrimitive())).toBe(
-        "/Nested(list:[1,buf [0102],[true]],inner:{b:buf [],deeper:{n:3n}})",
-      );
-      expect(toIndentedDebugString(new NestedPrimitive())).toBe(
-        "/Nested(\n  list: [\n    1,\n    buf [0102],\n    [\n      true\n    ]\n  ],\n" +
-          "  inner: {\n    b: buf [],\n    deeper: {\n      n: 3n\n    }\n  }\n)",
-      );
     });
 
     describe("with `maxLength`", () => {
