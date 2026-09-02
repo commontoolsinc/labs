@@ -139,6 +139,19 @@ Landed:
   reference naming its space by name, which is a two-step protocol — the
   caller resolves the name and hands the move back with the space it resolved
   to, and the place is landed or refused there.
+- **B1b (slice 1) — the held connection**
+  (`packages/shuttle/src/connection.ts`). One `PiecesController` for the
+  process, opened on the first ask and served to every ask after, where `cf`
+  builds one per invocation. The connection half of the ambient record maps
+  onto `SpaceConfig` and is handed to `loadPieces`, so shuttle reaches the
+  connect sequence and none of the flag parsing in front of it. The memo is
+  cf-harness's: a rejected construction is not held, so the next ask opens
+  again rather than replaying a terminal failure, which covers the connection
+  that never opened and says nothing about one that later drops. Ownership is
+  named by the source rather than inferred from an overridden collaborator —
+  a connection opened here is closed here, one handed over is left to whoever
+  opened it — so either can be driven with no socket behind it. No verb
+  reaches the connection yet, and the place is untouched.
 
 Still to come:
 
@@ -191,10 +204,8 @@ Still to come:
   while a carriage return, a vertical tab, a form feed, a no-break space and
   the Unicode line and paragraph separators all read back whole and reach only
   a terminal.
-- **Liveness, in two halves.** The held controller is memoized
-  cf-harness-style, which covers the construction that never succeeds —
-  the case that cache actually addresses. Recovery of an *established*
-  connection needs nothing from shuttle: the memory client reconnects and
+- **Liveness, in two halves.** Recovery of an *established* connection needs
+  nothing from shuttle: the memory client reconnects and
   re-arms its watches by itself
   ([`runtime-integration.md`](runtime-integration.md)), so B1 proves that
   rather than rebuilding it — a test that drops the transport under a
