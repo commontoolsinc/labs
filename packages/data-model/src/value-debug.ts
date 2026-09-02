@@ -419,12 +419,14 @@ class DebugStringifier {
     const onlyKey = (keys.length === 1) ? keys[0] : undefined;
 
     if (
-      (onlyKey !== undefined) && (onlyKey[0] === "/") && (onlyKey[1] !== "/")
+      (onlyKey !== undefined) && (onlyKey[0] === "/") && (onlyKey[1] !== "/") &&
+      !isUnsafeObjectKey(onlyKey.slice(1))
     ) {
       // The conversion's single-key tagged forms. No key of the original value
       // can arrive here in one of these forms, because the conversion escapes
-      // every key with a leading slash, which is what the second character
-      // check rules out.
+      // a key with a leading slash and an unsafe key alike, by prefixing a
+      // slash; the second-character check rules out the one and the
+      // unsafe-key check the other.
       const tag = onlyKey.slice(1);
       const payload = value[onlyKey];
 
@@ -462,8 +464,10 @@ class DebugStringifier {
 
         case "...":
         case "unconvertible": {
-          // The remaining markers, rendered as the objects they are.
-          break;
+          // The remaining markers, rendered as the objects they are, their
+          // keys included.
+          const parts = this.#renderProperties(value, indent, false);
+          return this.#renderContainer("{", "}", parts, indent);
         }
 
         default: {
@@ -479,15 +483,23 @@ class DebugStringifier {
 
   /**
    * Renders the properties of a plain object, one part per property, for a
-   * container whose closing bracket is indented by `indent`.
+   * container whose closing bracket is indented by `indent`. When `unescape`
+   * is `true` (the default), a key is rendered as the original value's key:
+   * the conversion prefixes a slash to a key that starts with one and to an
+   * unsafe key, and that slash comes back off here.
    */
-  #renderProperties(value: FabricPlainObject, indent: string): string[] {
+  #renderProperties(
+    value: FabricPlainObject,
+    indent: string,
+    unescape = true,
+  ): string[] {
     const inner = this.#innerIndent(indent);
     const separator = (this.#indent === undefined) ? ":" : ": ";
 
     return Object.keys(value).map((key) => {
+      const original = (unescape && (key[0] === "/")) ? key.slice(1) : key;
       const rendered = this.#renderSubvalue(value[key], inner);
-      return `${renderKey(key)}${separator}${rendered}`;
+      return `${renderKey(original)}${separator}${rendered}`;
     });
   }
 
