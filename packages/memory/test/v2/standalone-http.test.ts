@@ -17,6 +17,22 @@ describe("standalone memory HTTP", () => {
     }
   });
 
+  it("reports itself up even behind a handler that answers everything", async () => {
+    // Whether the host is up is the host's own business. A caller mounting a
+    // broad handler would otherwise decide it, and a client whose health
+    // probe fails never opens a connection at all.
+
+    const server = StandaloneMemoryServer.start({
+      serve: () => new Response("mounted", { status: 200 }),
+    });
+    try {
+      const response = await fetch(new URL("/_health", server.url));
+      expect(await response.json()).toMatchObject({ status: "OK" });
+    } finally {
+      await server.close();
+    }
+  });
+
   it("asks a route it does not serve to upgrade instead", async () => {
     // A bare storage host has no patterns route, and a body answered `200`
     // is one a client compiles as the source it asked for.
