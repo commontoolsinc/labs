@@ -17,6 +17,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import type { CellScope } from "@commonfabric/api";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 
 import {
@@ -97,7 +98,7 @@ describe("place", () => {
       place.cd("topics/3");
       place.cd("@session");
       expect(renderPlace(place.place)).toBe(
-        "position  /@did:key:z6MkConnectedSpace/board/topics/3\n" +
+        "position  /@did:key:z6MkConnectedSpace/board@session/topics/3\n" +
           "scope     @session",
       );
     });
@@ -126,7 +127,7 @@ describe("place", () => {
         place.cd(`/${HANDLE}/a~1b`);
         const printed = printedPosition(place);
         expect(printed).toBe(
-          "/@did:key:z6MkConnectedSpace/of:fid1:abcdefghijklmnop/a~1b",
+          "/@did:key:z6MkConnectedSpace/of:fid1:abcdefghijklmnop@space/a~1b",
         );
         const elsewhere = atSpaceRoot();
         elsewhere.cd(printed);
@@ -142,7 +143,7 @@ describe("place", () => {
       });
 
       describe("over a constructed set of awkward parts", () => {
-        // Four findings in this class arrived one at a time, each from
+        // Five findings in this class arrived one at a time, each from
         // driving a value nobody had listed. This drives a construction and
         // asserts the property rather than the outcomes: a rendering may be
         // refused, but it may never name a cell other than the one it was
@@ -158,10 +159,10 @@ describe("place", () => {
         // takes a string.
         //
         // Held fixed, and why: the space, which one connection settles and
-        // no operand supplies; the facet, which is one of two literals; and
-        // the scope, which is one of three words and which `toEqual`
-        // therefore compares vacuously here, both sides being the base. A
-        // format that renders the scope differently would want that varied.
+        // no operand supplies, and the facet, which is one of two literals.
+        // Everything else varies — both parts a position spells, the scope
+        // now that the rendering carries it and the comparison is no longer
+        // vacuous, and all four doors that admit a position.
 
         const MARKS = [
           " ",
@@ -218,42 +219,58 @@ describe("place", () => {
             expect(elsewhere.place).toEqual(place.place);
           }
 
+          const scopes: CellScope[] = ["space", "user", "session"];
           const pieces = candidates(HANDLE.slice(0, 10), HANDLE.slice(10));
           const segments = candidates("b", "");
-          for (const piece of pieces) {
-            for (const path of [[], ["tail"]]) {
-              const entered = atSpaceRoot();
-              check(
-                entered,
-                entered.enter({ space: SPACE, piece, path }, "#x"),
-              );
-              const settled = atSpaceRoot();
-              check(
-                settled,
-                settled.settle({
-                  kind: "space-by-name",
-                  name: "estuary",
-                  piece,
-                  path,
-                  scope: "space",
-                }, SPACE),
-              );
+          for (const scope of scopes) {
+            /** Helper for this case, which stands at `scope` to begin with. */
+            const standing = (): CurrentPlace => {
+              const place = atSpaceRoot();
+              place.cd(`@${scope}`);
+              return place;
+            };
+
+            for (const piece of pieces) {
+              for (const path of [[], ["tail"]]) {
+                const entered = standing();
+                check(
+                  entered,
+                  entered.enter({ space: SPACE, piece, path }, "#x"),
+                );
+                const settled = standing();
+                check(
+                  settled,
+                  settled.settle({
+                    kind: "space-by-name",
+                    name: "estuary",
+                    piece,
+                    path,
+                    scope,
+                  }, SPACE),
+                );
+              }
+              const walked = standing();
+              walked.cd("slugs");
+              check(walked, walked.cd(piece));
+              const referenced = standing();
+              check(referenced, referenced.cd(`/${piece}`));
             }
-            const walked = inSlugs();
-            check(walked, walked.cd(piece));
-          }
-          for (const segment of segments) {
-            for (
-              const path of [[segment], [segment, "tail"], ["head", segment]]
-            ) {
-              const entered = atSpaceRoot();
-              check(
-                entered,
-                entered.enter({ space: SPACE, piece: HANDLE, path }, "#x"),
-              );
+            for (const segment of segments) {
+              for (
+                const path of [[segment], [segment, "tail"], ["head", segment]]
+              ) {
+                const entered = standing();
+                check(
+                  entered,
+                  entered.enter({ space: SPACE, piece: HANDLE, path }, "#x"),
+                );
+              }
+              const walked = standing();
+              walked.cd(`/${HANDLE}`);
+              check(walked, walked.cd(segment));
+              const referenced = standing();
+              check(referenced, referenced.cd(`/${HANDLE}/${segment}`));
             }
-            const walked = atReferencedPiece();
-            check(walked, walked.cd(segment));
           }
 
           // Every outcome has to occur, or the property above holds for want
@@ -531,6 +548,17 @@ describe("place", () => {
             });
           });
 
+          it("keeps the scope the place was reading through", () => {
+            // A reference without a suffix says nothing about scope, so the
+            // ambient one fills it, the way the place fills the levels the
+            // reference omits.
+
+            const place = atSpaceRoot();
+            place.cd("@session");
+            place.cd(`/${HANDLE}/title`);
+            expect(place.place.scope).toBe("session");
+          });
+
           it("refuses a complete reference naming another space", () => {
             expect(atSpaceRoot().cd(`/@${OTHER_SPACE}/${HANDLE}`)).toEqual({
               kind: "refused",
@@ -797,18 +825,18 @@ describe("place", () => {
           it("refuses any other fragment for carrying no suffix at all", () => {
             expect(inSlugs().cd("board#result")).toEqual({
               kind: "refused",
-              reason: 'Unknown reference suffix "#result". The one ' +
-                'supported suffix is "#argument", which the reference form ' +
-                "carries and a bare piece id does not.",
+              reason: 'Unknown suffix "#result". The one supported suffix ' +
+                'is "#argument", which selects the piece\'s arguments cell ' +
+                'the way "--input" does.',
             });
           });
 
           it("names the whole fragment, not the part before a second `#`", () => {
             expect(inSlugs().cd("board#argument#x")).toEqual({
               kind: "refused",
-              reason: 'Unknown reference suffix "#argument#x". The one ' +
-                'supported suffix is "#argument", which the reference form ' +
-                "carries and a bare piece id does not.",
+              reason: 'Unknown suffix "#argument#x". The one supported ' +
+                'suffix is "#argument", which selects the piece\'s ' +
+                'arguments cell the way "--input" does.',
             });
           });
 
@@ -1298,6 +1326,27 @@ describe("place", () => {
           expect(place.place).toEqual(placeAtSpaceRoot(SPACE));
         });
 
+        it("refuses a move whose path holds a number no digits name back", () => {
+          // A number renders as its digits, and only a canonical array
+          // index reads back as the number it was. This door is the one
+          // documented as taking a caller's own move, so it is where such
+          // a path arrives.
+
+          const place = atSpaceRoot();
+          expect(place.settle({
+            kind: "space-by-name",
+            name: "estuary",
+            piece: HANDLE,
+            path: [1.5],
+            scope: "space",
+          }, SPACE)).toEqual({
+            kind: "refused",
+            reason: "The reference naming space `estuary` has a segment " +
+              "that is no canonical index, so a rendering of the place " +
+              "would name a different cell.",
+          });
+        });
+
         it("refuses a move whose path holds a segment no rendering names", () => {
           // The arm is exported, so a caller can build one. `cd` cannot
           // mint a bad path any more, which leaves a hand-built move as the
@@ -1337,7 +1386,7 @@ describe("place", () => {
           const place = atPiece();
           place.cd("topics/3");
           expect(place.render()).toBe(
-            "position  /@did:key:z6MkConnectedSpace/board/topics/3\n" +
+            "position  /@did:key:z6MkConnectedSpace/board@space/topics/3\n" +
               "scope     @space",
           );
         });

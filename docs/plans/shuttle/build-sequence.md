@@ -129,7 +129,8 @@ Landed:
   relative segments, `..`, `-`, `/`, a scope-only `@scope`, and rooted and
   complete references; the `slugs/` and `pieces/` facets a space root
   reserves, and nothing else there; the rendering `pwd` prints of both
-  halves; and the refusals — a reference carrying `#argument`, a `#`
+  halves, the position line carrying the scope so that it denotes one cell
+  wherever it is read; and the refusals — a reference carrying `#argument`, a `#`
   buried in a bare piece id, a part no rendering would name back, and a
   move into a space other than the connected one, which is the gate a
   home-anchored entry point meets once resolution hands it a space. Two
@@ -172,12 +173,24 @@ Still to come:
   milestones add their dimensions to it as they add the dimensions
   themselves. It prints the record `pwd` prints, so it chooses the format
   for both — a test helper reads that format back by slicing a label
-  width, which is what a change to it has to move with. The format's own
-  hazards belong with it: a newline in a part is refused before it reaches
+  width, which is what a change to it has to move with. `pwd` is complete
+  and has no short form, the prompt being the short surface, so a format
+  that shortens has to stay pasteable — and decision 13's shortened-id
+  fallback is a prefix spelled exactly like a whole handle, which is the
+  part that does not. The format's own hazards belong with it: a newline in a part is refused before it reaches
   a place, because it would leave a shorter reference naming another cell,
   while a carriage return, a vertical tab, a form feed, a no-break space
   and the Unicode line and paragraph separators all read back whole and
   reach only a terminal.
+- **A dormant grammar concern.** `@` carries two meanings in one form: the
+  space slot of a reference and the scope suffix on a piece. `@user` alone
+  is the scope word, `/@user/<handle>` is a space *named* user, and
+  `/@user/<handle>@session` is both at once — and space names are
+  unvalidated, so the collision is live rather than hypothetical. Shuttle
+  cannot resolve it: decision 13 forbids inventing a spelling, and a second
+  scope spelling would be worse than the ambiguity. In v1 a space named by
+  name is refused unless it resolves to the connected space, which is what
+  keeps it dormant; multi-space sessions are where it wakes.
 - **Liveness, in two halves.** The held controller is memoized
   cf-harness-style, which covers the construction that never succeeds —
   the case that cache actually addresses. Recovery of an *established*

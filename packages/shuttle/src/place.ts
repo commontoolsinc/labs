@@ -184,12 +184,21 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
  * rendering rather than reading it as some other cell. A piece or segment
  * holding a newline would split the position line, leaving a shorter
  * reference that names another cell — which is why one is refused before it
- * can reach a place rather than handled here. The scope renders here
- * rather than through the reference serializer, which emits no suffix for the
- * base scope.
+ * can reach a place rather than handled here.
+ *
+ * The scope is written on the piece even when it is the base, which is what
+ * makes "read from anywhere" true rather than nearly so. Scope is part of a
+ * cell's identity, and an omitted suffix is filled from wherever the reader
+ * stands, so a rendering without one denotes whatever cell the reader's own
+ * scope selects. Writing it absolutely and reading it ambiently is the
+ * asymmetry a shell has between what `pwd` prints and what a relative path
+ * means. The reference serializer omits a base scope for the opposite
+ * convention, that an omitted suffix means the base, so this writes the
+ * suffix itself; a piece holding an `@` is refused, which is what leaves the
+ * one this writes unambiguous to the split that reads it back.
  */
 export function renderPlace(place: Place): string {
-  return `position  ${renderPosition(place.position)}\n` +
+  return `position  ${renderPosition(place)}\n` +
     `scope     ${renderScope(place.scope)}`;
 }
 
@@ -534,9 +543,9 @@ function moveIntoPiece(
   if (hash !== -1) {
     const suffix = segment.slice(hash);
     return suffix === "#argument" ? refuseArgumentSuffix() : refuse(
-      `Unknown reference suffix "${suffix}". The one supported suffix ` +
-        `is "#argument", which the reference form carries and a bare ` +
-        `piece id does not.`,
+      `Unknown suffix "${suffix}". The one supported suffix is ` +
+        `"#argument", which selects the piece's arguments cell the way ` +
+        `"--input" does.`,
     );
   }
   if (segment.startsWith("@")) {
@@ -674,9 +683,14 @@ function unnameableText(text: string, noun: string): string | undefined {
  * does. A number renders as its digits and survives every step.
  */
 function unnameableSegment(segment: PathSegment): string | undefined {
-  return typeof segment === "number"
+  if (typeof segment !== "number") return unnameableText(segment, "segment");
+  // A number renders as its digits, and only a canonical array index reads
+  // back as the number it was: `1e21`, `-1` and `1.5` all print as something
+  // the conversion leaves a string. The canonical rule decides, rather than a
+  // second copy of it here.
+  return linkPathSegmentToCellPathSegment(String(segment)) === segment
     ? undefined
-    : unnameableText(segment, "segment");
+    : "a segment that is no canonical index";
 }
 
 /**
@@ -733,8 +747,14 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Helper for {@link renderPlace}, which writes the position half. */
-function renderPosition(position: Position): string {
+/**
+ * Helper for {@link renderPlace}, which writes the position half. A piece
+ * carries the scope, since only a piece is a cell for a scope to select
+ * within; a container renders its own name and leaves the scope to the line
+ * below.
+ */
+function renderPosition(place: Place): string {
+  const position = place.position;
   const space = `@${position.space}`;
   switch (position.kind) {
     case "root":
@@ -745,7 +765,7 @@ function renderPosition(position: Position): string {
       return encodeJsonPointer([
         "",
         space,
-        position.piece,
+        `${position.piece}@${place.scope}`,
         ...position.path.map(String),
       ]);
   }

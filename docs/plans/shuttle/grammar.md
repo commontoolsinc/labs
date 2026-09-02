@@ -89,21 +89,22 @@ these readings decide it rather than the key it was printed from.
 
 The `#` character has three readings, and they share nothing but the
 character. A lone `#name` token is a wish target, as above. `#argument` is
-a suffix on a reference and only that — it selects the piece's arguments
-cell, the same selection `--input` spells as a flag
-(`normalizeLLMFriendlyRef` in `packages/cli/lib/llm-friendly-ref.ts`, which
-strips it before the runner grammar sees the string, and refuses every
-other fragment). And inside a piece it is an ordinary character of a data
-key, under the rule above: the wish reading is decided on the whole
-operand, so it governs the head and nothing else.
+a suffix on a target, whichever way that target is written — a reference, a
+bare id, a slug — and it selects the piece's arguments cell, the same
+selection `--input` spells as a flag. `splitArgumentSuffix`
+(`packages/cli/lib/llm-friendly-ref.ts`) is that one reading: it takes the
+suffix off before anything parses what it followed, and refuses every other
+fragment. And inside a piece `#` is an ordinary character of a data key,
+under the rule above: the wish reading is decided on the whole operand, so
+it governs the head and nothing else.
 
 A container renders without the leading `/` that marks a reference, so a
 space root and a facet cannot be read back as a piece whose slug happens to
 match their name; `cd` refuses such a rendering rather than following it.
 
 A place is **result-rooted**, and holds exactly space, piece, path, and
-scope. `cd` refuses a reference carrying `#argument` rather than dropping
-the suffix silently: a place that could root at the arguments cell would
+scope. `cd` refuses a target carrying `#argument`, in every spelling that
+takes one, rather than dropping the suffix silently: a place that could root at the arguments cell would
 leave every later relative read ambiguous about which side of the piece it
 addressed, and the prompt would have to carry the distinction for as long
 as you stood there. Arguments are reached per operand instead —
@@ -251,6 +252,21 @@ fabric knows it by, a piece by its slug when the slug index confirms it, a
 shortened unique id otherwise, then the path. Shuttle uses the naming
 mechanisms the fabric supports and introduces none of its own; user-managed
 legible space names arrive when the fabric grows them.
+
+A shortened id is a prefix rather than an address, and it is spelled the
+way a whole handle is, so nothing in it says which it is. A prompt meant to
+be pasteable has to make that fallback visibly distinct, or leave it out.
+
+`pwd` is the complete address and has no short form. It writes the scope
+even when it is the base, so what it prints denotes one cell wherever it is
+read, where an omitted suffix would denote whatever the reader's own scope
+selects — shuttle writes absolutely and reads ambiently, the asymmetry a
+shell has between `pwd` and a relative path. Emitting the suffix only for a
+non-base scope would leave the common case contextual, since a suffix-less
+address read in a `@session` shuttle lands at session. The prompt is the
+short surface and is on screen continuously; what `pwd` is for is the thing
+you copy, so a form that cannot be pasted is the one output it should not
+produce.
 
 ## Writes
 
