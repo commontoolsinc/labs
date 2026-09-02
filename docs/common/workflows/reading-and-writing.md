@@ -28,7 +28,7 @@ The **result** cell is what the pattern produced: its declared outputs, its
 derived fields, and handles for its verbs. It is where a command goes by
 default. The **arguments** cell is what a caller supplied: exactly the fields
 the pattern declared as input, and nothing else. A command reaches it two
-ways, `--input` as a flag and an `#argument` suffix on the address, and the
+ways, `--input` as a flag and an `#argument` suffix on the target, and the
 two are one selection rather than two.
 
 The CLI's own help calls that second cell the *input* cell where the flag is
@@ -67,13 +67,13 @@ read out of that one declaration. Any other command is refused by name, `cf
 call` among them, so a call cannot quietly be aimed at a cell no handler
 reads.
 
-The suffix rides the reference form — `/of:fid1:…#argument`,
-`/thermostat#argument` — and nothing else. On a bare id or an unrooted slug it
-is refused, because there is no reference there for it to attach to. On a
-`--url` it is not refused: a URL fragment is not part of the path a URL's piece
-is read out of, so it is dropped without comment and the read goes to the
-result cell. With a `--url` or a bare id, `--input` is the only spelling that
-reaches the arguments cell.
+The suffix rides every spelling of the target — the reference form
+(`/of:fid1:…#argument`, `/thermostat#argument`), the bare id, and the slug
+(`--cell thermostat#argument`) — because all of them designate the same piece.
+The `--url` is the one that does not carry it: a URL fragment is not part of
+the path a URL's piece is read out of, so it is dropped without comment and the
+read goes to the result cell. With a `--url`, `--input` is the only spelling
+that reaches the arguments cell.
 
 ### Nothing here runs the program
 
@@ -256,19 +256,17 @@ echo '30' | cf set -s demo "$ADDRESS#argument" target
 cf get -s demo --piece thermostat target --input
 ```
 
-Two refusals bound it. Written bare — unrooted — a slug or an id is not a
-reference, so the suffix has nothing to attach to and is refused rather than
-folded into the id, which is the failure it is guarding against: an id with a
-fragment buried in it fails later as an unknown piece. Rooted, the same slug is
-a reference and takes the suffix.
+A slug and a bare id designate the piece a reference designates, so the
+selection written after one means what it means after the other. Here the slug
+reads back the cell the address just wrote to.
 
 ```bash
 cf get -s demo --piece 'thermostat#argument' target
 ```
 
-And a command that takes no `--input` takes no `#argument` either. The refusal
-names the flag rather than the suffix, because they are one selection with two
-spellings.
+One refusal bounds it: a command that takes no `--input` takes no `#argument`
+either. The refusal names the flag rather than the suffix, because they are one
+selection with two spellings.
 
 ```bash
 cf call -s demo "$ADDRESS#argument" setTarget '{"celsius":21}'
