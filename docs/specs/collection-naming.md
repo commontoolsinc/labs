@@ -145,6 +145,11 @@ A **derivation from the member's own content or identity** needs no allocation
 and is stable by construction, at the cost of being unmemorable and of needing
 expanding the derivation when two collide.
 
+An allocator's own placement is constrained: `Date.now()` and `Math.random()`
+may be called in an `action()` or `handler()` but not in a derivation
+(`docs/common/concepts/action.md`), so a mechanism reading a clock or randomness
+allocates on the write path, never in a computed view of the collection.
+
 **Allocating on first sight rather than at creation** is worth weighing
 whichever mechanism is chosen. A member receives its identity when it is
 created; if its name may arrive later, allocation never blocks creation and can
@@ -174,9 +179,16 @@ its own, and a name resolves by walking segments:
 
 Slugs generalize from space-scoped to collection-scoped. The grammar, the
 derivation, and the claim semantics are the same one level down; only the scope
-of the lookup changes. A collection needs no name registry and no new document
-type. A collection's name is a slug that points at it, and a member name is a
-name that collection resolves.
+of the lookup changes. The derivation matters to anything built here: a slug
+lives at an id derived from its name (`slugIdForSpace`,
+`packages/runner/src/slugs.ts`), so it is addressable without a registry and
+unenumerable without one. A space carries a separate index for that reason, and
+the index is worth copying twice over — it is written one key at a time, so two
+clients naming different things merge rather than racing, and it is honest that
+it is a lower bound, listing only what was assigned since it existed. Anything
+that checks what a name would collide with inherits that limit. A collection
+needs no name registry and no new document type. A collection's name is a slug
+that points at it, and a member name is a name that collection resolves.
 
 **The collection resolves its own members, not the piece containing it.** A
 piece holding three collections is not one namespace with internal routing; it
@@ -321,7 +333,12 @@ short.
 
 A leading `@` marks a space segment, matching what `asSpaceSegment`
 (`packages/runner/src/fabric-url.ts`) already recognizes, and it keeps a binding
-name and a space name from competing for the same slot.
+name and a space name from competing for the same slot. A space name is
+universal rather than personal: `createSession`
+(`packages/identity/src/session.ts`) derives a space's DID from a fixed public
+passphrase and the name, so the same name resolves to the same space for
+everyone, with no registry and no subscription. That is what makes the fully
+qualified form depend on nobody.
 
 `#` cannot appear in the URL form, where it delimits the fragment. The prose
 form and the URL form differ by construction, and the canonical URL carries the
@@ -515,14 +532,41 @@ letting a resolved collection resolve the next segment, and the same step covers
 an item's collections. The slug grammar in `packages/runner/src/slugs.ts` does
 not change.
 
+Where the walk lives has to be decided before it is written. `parseFabricUrl`
+states that it is deliberately pure and synchronous, and it names turning a
+space name into a DID as the kind of work that belongs outside it. Walking into
+a collection is that kind of work — it syncs and reads a cell — so the walk
+belongs beside the parse rather than inside it, or the function's contract
+changes deliberately. Reading the segments apart from resolving them is the
+split to preserve.
+
 **5. Add the prose layer.** Sigil parsing, canonicalize-on-write,
 context-computed rendering with round-trip verification, the two render modes,
 and the clipboard flavors.
 
+The editor already carries most of this shape and should be read before any of
+it is rebuilt:
+`packages/ui/src/v2/components/cf-code-editor/docs/mention-refs.md` describes a
+reference form that keeps a short local key in the text while the destination
+lives in a cell the host pattern owns, decides what is a reference by membership
+in that map rather than by the token's shape, and keeps a mention's visible
+label in step with a rename of its destination. `mintRefKey`
+(`packages/ui/src/v2/core/mention-refs.ts`) is a worked short-key allocator,
+widening on collision rather than lengthening by default. Two things that
+document settles are worth carrying over rather than re-deciding: a reference's
+visible label and its citation spelling are different, and a label that a person
+has edited stops tracking the destination's name.
+
 ## Deliberately open
 
 Recorded rather than settled, so that a later answer is a decision and not a
-discovery.
+discovery. Five of these block work rather than merely awaiting it, and a plan
+should sequence around them: the sigil question and the renderer's preference
+order both block step 5 outright, a machine-readable policy is what the
+consumer rules in Part 1 rest on, the collection-scope claim path is part of
+step 3, and sibling bindings decide the second rung of the resolver. Step 2
+names a sixth in its own text, the commit precondition it asks to be confirmed
+first.
 
 **A qualifier for revision, time, or branch.** No slot is reserved for naming a
 thing *as of* something, and this is not hypothetical: memory carries causal
