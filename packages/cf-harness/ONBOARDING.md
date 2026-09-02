@@ -185,10 +185,35 @@ it does not.
 
 ## 4. Seed a labeled input cell by hand
 
-Provide a `finance-data.tsx` pattern that passes an `account` input through to
-an `account` result. From the labs root, deploy the file, keep the printed piece
-ID, and attach the confidentiality label through the checked piece-data write
-path:
+Save this pattern as `finance-data.tsx` in the labs root. It passes the
+`account` input through to the `account` result and renders its balance:
+
+```tsx
+import { type Default, NAME, pattern, UI } from "commonfabric";
+
+interface Transaction {
+  date: Default<string, "">;
+  description: Default<string, "">;
+  category: Default<string, "">;
+  amount: Default<number, 0>;
+}
+
+interface FinanceData {
+  account: {
+    balance: Default<number, 0>;
+    transactions: Default<Transaction[], []>;
+  };
+}
+
+export default pattern<FinanceData, FinanceData>(({ account }) => ({
+  [NAME]: "Transaction data",
+  [UI]: <div>Balance: {account.balance}</div>,
+  account,
+}));
+```
+
+From the labs root, deploy the file, keep the printed piece ID, and attach the
+confidentiality label through the checked piece-data write path:
 
 ```sh
 cd <labs>
@@ -196,7 +221,7 @@ export CF_API_URL=http://127.0.0.1:8063
 export CF_IDENTITY=<absolute-path-to-identity-keyfile>
 export CF_SPACE=weaver-demo
 
-cf piece new --slug transaction-data <path-to-finance-data.tsx>
+cf piece new --slug transaction-data finance-data.tsx
 export INPUT_PIECE_ID=<the-printed-fid1-id>
 echo '{"balance":2417.55,"transactions":[{"date":"2026-09-01","description":"Donuts","category":"Food","amount":24.50}]}' | \
   cf set --cell "$INPUT_PIECE_ID" --input account
