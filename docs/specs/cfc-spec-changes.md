@@ -357,11 +357,13 @@ later write of what it read misfits on the original clause. What the
 exemption gives up is a refusal that was doing an egress gate's work by
 accident: a value derived from labeled data now lands, and whether it may
 LEAVE is the sink's question. Where the host is the one releasing — a tool
-answering a model with what a piece computed — there is no sink request to
-record and no commit to gate, so the release is measured directly: read what
-is about to be released through a transaction, and fit that transaction's
-consumed join to the destination's ceiling, which for a model's context is
-the empty one. `describeSinkReleaseRefusal` (runner `cfc/prepare.ts`) is that
+answering a model with the values a piece computed — there is no sink request
+to record and no commit to gate, so the release is measured directly: read
+what is about to be released through a transaction, and fit that
+transaction's consumed join to the destination's ceiling, which for a model's
+context is the empty one. What is released is a value. A reference the tool
+hands back names the result without carrying it, so it is not measured, and a
+refusal withholds the values while the reference goes out. `describeSinkReleaseRefusal` (runner `cfc/prepare.ts`) is that
 measurement, and it shares `atomsOutsideCeiling` and the refusal-detail
 construction with the in-commit sink gate, so a clause outside a ceiling on
 one route is outside it on the other. Two differences are worth recording:

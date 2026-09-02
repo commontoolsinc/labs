@@ -316,17 +316,21 @@ The strict-only delta is:
   What the skip does NOT do is release the value. A derivation's result
   leaves the fabric only through a sink, and a sink measures the join it is
   handed. Where the host is the one releasing — the `run_pattern` tool
-  answering a model with what a piece computed — there is no request to
-  record and no commit to gate, so that tool measures the release itself,
+  answering a model with the values a piece computed — there is no request
+  to record and no commit to gate, so that tool measures the release itself,
   against a public ceiling, through `describeSinkReleaseRefusal`
   ([run-pattern.ts](../../packages/cf-harness/src/tools/run-pattern.ts)).
-  The two routes fit their joins with one membership predicate, so a clause
-  outside a ceiling on one is outside it on the other. They differ in what
-  reaches the join: the host route measures what releasing the answer
-  resolved, and applies no exchange-rule rewriting to it, so a clause a
-  policy evaluation would have discharged is refused there. The ladder
-  governs it like any other gate — at `disabled` and `observe` it records
-  nothing that rejects.
+  What it measures is the values a `resultSchema` asks for. The result
+  reference it returns names the result without carrying it, so a call that
+  asks for no values is not measured, and a refusal withholds the values
+  while the reference goes out with them: a handle is not a release. The two
+  routes fit their joins with one membership predicate, so a clause outside
+  a ceiling on one is outside it on the other. They differ in what reaches
+  the join: the host route measures what releasing the values resolved, and
+  applies no exchange-rule rewriting to it, so a clause a policy evaluation
+  would have discharged is withheld there. The ladder governs it like any
+  other gate — at `disabled` and `observe` it records nothing that
+  withholds.
 
   The exemption is not a hole. A path counts as meta only while no payload
   write landed on it too, so a transaction writing both leaves the path

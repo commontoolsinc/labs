@@ -1285,6 +1285,36 @@ carries no handle code. The persisted tool-output artifact keeps the raw
 reference, the raw result value, and the `pieceId` — a bare fabric identifier
 the handle boundary never swaps, so it stays out of the model-facing rendering.
 
+What the answer's values may carry is measured against the ceiling a model's
+context has, which admits nothing: a model's context is outside every space, so
+no confidentiality clause names an audience it belongs to. The reference is not
+measured, because it is not a disclosure. `resultRef` names the result without
+carrying it, and an agent holding one can wire it into a later run, hand it to a
+child, or publish it under a slug without ever reading it — the
+[CFC integration profile](../../docs/specs/agent-harness/02-cfc-integration.md)
+states this as AH-CFC-18. So a run that asks for no `resultSchema` gets
+`resultRef` whatever labels its result carries, and the ceiling is consulted
+only when a `resultSchema` asks for values. The measurement reads the result
+through a transaction — the result document and every computed cell it links to
+— and fits that transaction's consumed join to the ceiling. Under an enforcing
+mode a clause outside it withholds `value`, and the answer is still
+`{ status: "ok", resultRef }`: `valueError` states the refusal as an
+instruction, and `policyRefusal` carries it as data — the gates and sinks that
+refused, the offending atoms (a structured atom is counted rather than named,
+since it can carry the principal that introduced it), the keys of this call's
+own `inputs` whose values carried those atoms in, and whether dropping those
+keys is the whole remedy (`complete`), narrows the flow (`partial`), or reaches
+none of it (`none`). An input is attributed by the label-map entry the refused
+read consumed, so a link addressing a labeled field of a document is named for
+that entry whether the read landed on the field or on the document root. The
+refusal's reason names labels and documents, so it stays in the artifact's
+`rawCauseMessage` and out of the model-facing text. At `disabled` and `observe`
+nothing withholds: the values go out, and the same measurement is recorded on
+the artifact as `releaseObservation`, so an operator staging the ladder can size
+what raising it would withhold. The measurement applies no exchange-rule
+rewriting, so a clause a policy evaluation would have discharged is withheld
+here.
+
 A result that settles to nothing names its cause when one was observed: when the
 settled result fails the declared `resultSchema` or holds no fields of its own
 beyond the framework keys, the tool consults what the session's runtime reported
