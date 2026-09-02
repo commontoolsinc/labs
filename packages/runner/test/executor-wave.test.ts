@@ -3772,7 +3772,10 @@ describe("stage D seal-into-wave", () => {
       "readiness must also pull the conflicted document, so the retry's " +
         "write carries its true version instead of re-asserting seq 0",
     ).toContain(conflicted);
-    expect(failures).toContain(staleRead);
+    expect(
+      failures,
+      "a refusal the retry repaired is not a structure-load failure",
+    ).toEqual([]);
     expect(witness.instantiations()).toBe(3);
     expect(witness.lastRunInstantiation()).toBe(3);
   });
@@ -4076,10 +4079,11 @@ describe("stage D seal-into-wave", () => {
     expect(recoveryOutcome.aborted).toBeUndefined();
     expect(route.recoverySeals()).toBe(1);
     expect(
-      failures.some((failure) =>
+      failures.filter((failure) =>
         failure.actionId.startsWith("piece-instantiate/")
       ),
-    ).toBe(true);
+      "a withdrawal the retry repaired is not a structure-load failure",
+    ).toEqual([]);
 
     // The retry kept the original outer registration alive, and the action
     // belonging to its third raw-module instantiation ran.
@@ -4218,13 +4222,21 @@ describe("stage D seal-into-wave", () => {
     const route = routePieceInstantiationWaves(firstWave, recoveryWave);
     const readinessEntered = Promise.withResolvers<void>();
     const heldReadiness = Promise.withResolvers<void>();
-    runtime.pieceStartCommitFailureObserver = ({ actionId, error }) => {
-      if (!actionId.startsWith("piece-instantiate/")) return;
+    // Park the recovery inside the readiness gate. The withdrawal error the
+    // wave mints carries no `readyToRetry`, so one is threaded onto it here
+    // and the real gate still races it against the teardown signal — which
+    // is the behavior under test.
+    const originalReadiness = runtime.awaitCommitRetryReadiness.bind(runtime);
+    runtime.awaitCommitRetryReadiness = ((
+      error: unknown,
+      signal?: AbortSignal,
+    ) => {
       (error as { readyToRetry?: () => Promise<void> }).readyToRetry = () => {
         readinessEntered.resolve();
         return heldReadiness.promise;
       };
-    };
+      return originalReadiness(error, signal);
+    }) as typeof runtime.awaitCommitRetryReadiness;
 
     expect(await runtime.start(cell)).toBe(true);
     await route.firstSeal;

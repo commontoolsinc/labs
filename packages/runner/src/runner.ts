@@ -3456,12 +3456,39 @@ export class Runner {
             active && startLifecycleEpoch === this.#lifecycleEpoch &&
             this.cancels.get(key) === cancel && cancelNodes === nodeCancel &&
             currentPatternKey === patternKeyAtInstantiation;
-          const recoverInstantiationOnce = async (error: unknown) => {
-            if (!exactNodesAreCurrent()) return;
-            if (!recoverOnce) {
+          const recoverInstantiationOnce = async (
+            error: unknown,
+            recoverable = true,
+          ) => {
+            if (!exactNodesAreCurrent()) {
+              // A stop, a runtime cycle, or a newer instantiation retired
+              // these nodes while the commit was in flight. Whoever holds
+              // the key now has their own graph; nothing was lost.
+              logger.warn("piece-start-commit-superseded", () => [
+                `piece-start commit ${instantiateActionId} was refused after ` +
+                "its nodes were retired; the current owner is unaffected",
+                error,
+              ]);
+              return;
+            }
+            if (!recoverOnce || !recoverable) {
+              // Either the one retry lost the same way, or this failure was
+              // never the recoverable class. The graph's setup does not
+              // become durable and the load has genuinely failed.
+              this.#reportPieceStartCommitFailure(instantiateActionId, error);
               teardownRegistrationIfCurrent();
               return;
             }
+
+            // Recoverable, and about to be recovered: the setup writes have
+            // not landed YET. Counting this as a structure-load failure
+            // would report a loss that the retry below goes on to repair,
+            // and a routine race would read as a health regression.
+            logger.warn("piece-start-commit-recovering", () => [
+              `piece-start commit ${instantiateActionId} lost its basis to ` +
+              "the serving side; re-instantiating once from the caught-up view",
+              error,
+            ]);
 
             // The graph reads its own pending setup and internal-cell writes
             // while it is installed. A stale-read refusal or a later wave
@@ -3501,15 +3528,15 @@ export class Runner {
           };
           const commitWork = actualTx.commit().then(async ({ error }) => {
             if (error !== undefined) {
-              this.#reportPieceStartCommitFailure(instantiateActionId, error);
               if (
                 this.runtime.experimental.serverExecution === true &&
                 isStaleReadConflict(error)
               ) {
                 await recoverInstantiationOnce(error);
-              } else if (exactNodesAreCurrent()) {
-                teardownRegistrationIfCurrent();
+                return;
               }
+              this.#reportPieceStartCommitFailure(instantiateActionId, error);
+              if (exactNodesAreCurrent()) teardownRegistrationIfCurrent();
               return;
             }
             const settlement = waveSettlementOf(actualTx);
@@ -3529,18 +3556,19 @@ export class Runner {
                 "wave abandon; the enclosing lifecycle owns any restart",
                 settled.error,
               ]);
-            } else {
-              this.#reportPieceStartCommitFailure(
-                instantiateActionId,
-                settled.error,
-              );
-            }
-            if (!exactNodesAreCurrent()) return;
-            if (waveWithdrawalCause !== "contribution-dropped") {
-              teardownRegistrationIfCurrent();
+              if (exactNodesAreCurrent()) teardownRegistrationIfCurrent();
               return;
             }
-            await recoverInstantiationOnce(settled.error);
+            // A WHOLE contribution drop is recoverable in the same sense the
+            // stale-read refusal is, and the helper reports only if its one
+            // retry also loses. A partial drop is not: part of the
+            // contribution stands, so there is no rolled-back view to
+            // re-instantiate against, and it takes the same terminal arm a
+            // second failure takes.
+            await recoverInstantiationOnce(
+              settled.error,
+              waveWithdrawalCause === "contribution-dropped",
+            );
           }).catch((error) => {
             this.#reportPieceStartCommitFailure(instantiateActionId, error);
             if (exactNodesAreCurrent()) teardownRegistrationIfCurrent();
