@@ -102,12 +102,6 @@ export const SPEC_CITATIONS = {
     quote:
       "The artifact boundary MUST retain prompt-slot evidence, invocation-context references, mediation dispositions, policy events, model-context influence state, and side-effect decisions sufficient to explain why a tool result was exposed or denied.",
   },
-  "AH-CFC-17": {
-    doc: CFC_SPEC,
-    clause: "AH-CFC-17",
-    quote:
-      "Its access and retention boundary MUST be at least as strict as the transcript and raw tool artifacts it explains.",
-  },
   "AH-CFC-18": {
     doc: CFC_SPEC,
     clause: "AH-CFC-18",

@@ -153,6 +153,21 @@ describe("cli", () => {
       ).toBe(true);
     });
 
+    it("returns 2 for a path holding no run, rather than a green exit over nothing", async () => {
+      const root = await Deno.makeTempDir({ prefix: "cfc-audit-cli-" });
+      const written: string[] = [];
+      try {
+        expect(
+          await runAuditCli([root], (text) => {
+            written.push(text);
+          }),
+        ).toBe(2);
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+      expect(written.join("")).toContain("nothing was audited");
+    });
+
     it("returns 2 and prints the usage given an unreadable command line", async () => {
       const written: string[] = [];
 

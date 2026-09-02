@@ -14,6 +14,7 @@ import { expect } from "@std/expect";
 
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 
+import type { HarnessCfcInvocationContext } from "../../src/contracts/cfc-invocation-context.ts";
 import type { HarnessHandleTable } from "../../src/contracts/handle-table.ts";
 import type { HarnessPolicyEvent } from "../../src/contracts/policy.ts";
 import type {
@@ -224,6 +225,25 @@ const handleTable = (
   })),
 });
 
+const invocationContext = (
+  mode: CfcEnforcementMode,
+  toolId = "bash",
+  outputId = `${RUN_ID}:bash:1`,
+): HarnessCfcInvocationContext => ({
+  type: "cf-harness.cfc-invocation-context",
+  version: 1,
+  sequence: 1,
+  runId: RUN_ID,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  toolId,
+  toolOutputId: outputId as never,
+  operation: "shell",
+  cfcEnforcementMode: mode,
+  cwd: "/workspace",
+  runManifest: { present: false },
+  inputs: {},
+});
+
 const deniedEvent = (toolCallId: string): HarnessPolicyEvent => ({
   type: "cf-harness.policy-event",
   severity: "denied",
@@ -236,11 +256,39 @@ const deniedEvent = (toolCallId: string): HarnessPolicyEvent => ({
 
 describe("structural", () => {
   describe("AUD-1 posture consistency", () => {
-    it("returns `inconclusive` when no artifact states a mode", () => {
-      const outcome = inspect("AUD-1", {});
+    it("returns `inconclusive` when the run report did not load", () => {
+      // The clause names two places the mode must be in, so one of them
+      // missing leaves the check with nothing to establish rather than with
+      // the other one to pass on.
+
+      const outcome = inspect("AUD-1", { runState: runState() });
 
       expect(outcome.verdict).toBe("inconclusive");
-      expect(outcome.message).toContain("its posture is unknown");
+      expect(outcome.message).toContain("run-report.json");
+    });
+
+    it("fails a run report that states no mode", () => {
+      const outcome = inspect("AUD-1", {
+        runState: runState(),
+        runReport: runReport({
+          cfcEnforcementMode: undefined as never,
+        }),
+      });
+
+      expect(outcome.verdict).toBe("fail");
+      expect(outcome.message).toContain("states no enforcement mode");
+    });
+
+    it("fails an invocation context whose mode differs from the run's", () => {
+      const outcome = inspect("AUD-1", {
+        runState: runState({
+          cfcInvocationContexts: [invocationContext("enforce-strict")],
+        }),
+        runReport: runReport(),
+      });
+
+      expect(outcome.verdict).toBe("fail");
+      expect(pointersOf(outcome)).toContain("cfcInvocationContexts[1]");
     });
 
     it("names the fabric session as the mode's source when the run had one", () => {
@@ -253,6 +301,7 @@ describe("structural", () => {
             flowLabelsSource: "posture",
           },
         }),
+        runReport: runReport(),
       });
 
       expect(outcome.verdict).toBe("pass");
@@ -303,6 +352,7 @@ describe("structural", () => {
       const outcome = inspect("AUD-2", {
         runState: runState(),
         policyTrace: policyTrace(decisions),
+        runReport: runReport({ policyDecisions: decisions }),
       });
 
       expect(outcome.verdict).toBe("fail");
@@ -323,26 +373,54 @@ describe("structural", () => {
       });
       const outcome = inspect("AUD-2", {
         runState: runState({
-          cfcInvocationContexts: [{
-            type: "cf-harness.cfc-invocation-context",
-            version: 1,
-            sequence: 1,
-            runId: RUN_ID,
-            createdAt: "2026-01-01T00:00:00.000Z",
-            toolId: "bash",
-            toolOutputId: `${RUN_ID}:bash:1` as never,
-            operation: "shell",
-            cfcEnforcementMode: "enforce-explicit",
-            cwd: "/workspace",
-            runManifest: { present: false },
-            inputs: {},
-          }],
+          cfcInvocationContexts: [invocationContext("enforce-explicit")],
         }),
         runReport: runReport({ toolActivity: [attested, unattested] }),
       });
 
       expect(outcome.verdict).toBe("fail");
       expect(outcome.message).toContain("transports CFC evidence for");
+    });
+
+    it("fails when only another tool's context carries the activity's output id", () => {
+      // An output id is unique within a run, so a context some other tool
+      // recorded must not read as covering this one's invocation.
+
+      const covered = activity({
+        toolCallId: "call-1",
+        resultRef: {
+          type: "cf-harness.tool-result-ref",
+          outputId: `${RUN_ID}:bash:1` as never,
+          toolId: "bash",
+          runId: RUN_ID,
+        },
+      });
+      const outcome = inspect("AUD-2", {
+        runState: runState({
+          cfcInvocationContexts: [
+            invocationContext("enforce-explicit", "bash", `${RUN_ID}:bash:9`),
+            invocationContext(
+              "enforce-explicit",
+              "some_other_tool",
+              `${RUN_ID}:bash:1`,
+            ),
+          ],
+        }),
+        runReport: runReport({ toolActivity: [covered] }),
+      });
+
+      expect(outcome.verdict).toBe("fail");
+      expect(detailsOf(outcome)).toContain("no invocation context");
+    });
+
+    it("returns `inconclusive` for an enforcing run whose report did not load", () => {
+      const outcome = inspect("AUD-2", {
+        runState: runState(),
+        policyTrace: policyTrace([decision({ toolCallId: "call-1" })]),
+      });
+
+      expect(outcome.verdict).toBe("inconclusive");
+      expect(outcome.message).toContain("run-report.json");
     });
 
     it("warns that an enforcing run with no transport evidence never exercised its claim", () => {
@@ -396,6 +474,10 @@ describe("structural", () => {
           const outcome = inspect("AUD-2", {
             runState: runState({ cfcEnforcementMode: mode }),
             policyTrace: policyTrace(decisions, { cfcEnforcementMode: mode }),
+            runReport: runReport({
+              cfcEnforcementMode: mode,
+              policyDecisions: decisions,
+            }),
           });
 
           expect(outcome.verdict).toBe("pass");
@@ -519,6 +601,7 @@ describe("structural", () => {
     it("reads a denial the run state recorded when no report or trace loaded", () => {
       const outcome = inspect("AUD-4", {
         runState: runState({
+          policyEvents: [deniedEvent("call-1")],
           policyDecisions: [
             decision({ toolCallId: "call-1", decision: "denied" }),
           ],
@@ -535,6 +618,64 @@ describe("structural", () => {
       });
 
       expect(outcome.verdict).toBe("pass");
+    });
+
+    it("fails a denial the run recorded no policy event for", () => {
+      const outcome = inspect("AUD-4", {
+        runState: runState({
+          policyDecisions: [
+            decision({ toolCallId: "call-1", decision: "denied" }),
+          ],
+        }),
+        transcript: [{
+          role: "tool",
+          toolCallId: "call-1",
+          toolName: "bash",
+          content: JSON.stringify({
+            type: "cf-harness.observation-denied",
+            reason: "not-observable",
+          }),
+        }],
+      });
+
+      expect(outcome.verdict).toBe("fail");
+      expect(detailsOf(outcome)).toContain("recorded no policy event for");
+    });
+
+    it("passes a denial a tool answered with its own typed error contract", () => {
+      const outcome = inspect("AUD-4", {
+        runState: runState({ policyEvents: [deniedEvent("call-1")] }),
+        transcript: [{
+          role: "tool",
+          toolCallId: "call-1",
+          toolName: "read_file",
+          content: JSON.stringify({
+            outputId: `${RUN_ID}:read_file:1`,
+            ok: false,
+            error: {
+              type: "cf-harness.structured-file-tool-error",
+              code: "unknown",
+            },
+          }),
+        }],
+      });
+
+      expect(outcome.verdict).toBe("pass");
+    });
+
+    it("fails a denial answered with an error object naming no contract", () => {
+      const outcome = inspect("AUD-4", {
+        runState: runState({ policyEvents: [deniedEvent("call-1")] }),
+        transcript: [{
+          role: "tool",
+          toolCallId: "call-1",
+          toolName: "bash",
+          content: JSON.stringify({ status: "error", error: {} }),
+        }],
+      });
+
+      expect(outcome.verdict).toBe("fail");
+      expect(detailsOf(outcome)).toContain("rather than a typed denial");
     });
 
     it("fails a denial the transcript answers with free text", () => {
@@ -670,14 +811,18 @@ describe("structural", () => {
   });
 
   describe("AUD-7 observe disclosure", () => {
-    it("fails a run recorded as `observe` in one artifact and as enforcing in another", () => {
-      const outcome = inspect("AUD-7", {
-        runState: runState({ cfcEnforcementMode: "observe" }),
-        runReport: runReport({ cfcEnforcementMode: "enforce-explicit" }),
-      });
+    it("warns rather than fails a run whose artifacts disagree about the mode", () => {
+      // Disagreement is AUD-1's finding. What AUD-7 owes such a run is the
+      // reading it owns: a dial at `observe` means the evidence attests no
+      // enforcement, whatever else the tree also says.
 
-      expect(outcome.verdict).toBe("fail");
-      expect(outcome.message).toContain("enforcement it never performed");
+      const built = {
+        runState: runState({ cfcEnforcementMode: "observe" as const }),
+        runReport: runReport({ cfcEnforcementMode: "enforce-explicit" }),
+      };
+
+      expect(inspect("AUD-7", built).verdict).toBe("warn");
+      expect(inspect("AUD-1", built).verdict).toBe("fail");
     });
 
     it("warns a run whose fabric session held flow labels at `observe`", () => {

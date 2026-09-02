@@ -173,6 +173,18 @@ export const runAuditCli = async (
     return 2;
   }
   const results = await auditPaths(options.paths);
+  if (results.length === 0) {
+    // Nothing was audited, so no threshold applies: a green exit here would
+    // report the absence of a run as the absence of findings. This is the same
+    // answer as an unreadable command line, because it is the same fact — the
+    // audit did not run.
+    write(
+      `no run directory found under ${
+        options.paths.map((path) => `\`${path}\``).join(", ")
+      }; nothing was audited`,
+    );
+    return 2;
+  }
   write(
     options.json
       ? JSON.stringify(results, null, 2)

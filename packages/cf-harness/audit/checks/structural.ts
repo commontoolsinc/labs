@@ -62,12 +62,14 @@ export interface AuditCheck {
   citations: readonly SpecCitation[];
 
   /**
-   * What in an artifact tree makes this check report `fail`.
+   * What in an artifact tree turns this check away from `pass`.
    *
-   * A registration is where a reader learns whether the check can fail at
-   * all, so this names the evidence rather than restating the rule: "a
-   * decision record whose mode differs from the run's", not "the mode is
-   * consistent".
+   * A registration is where a reader learns whether the check can report
+   * anything at all, so this names the evidence rather than restating the
+   * rule: "a decision record whose mode differs from the run's", not "the mode
+   * is consistent". Most checks name what makes them `fail`; a check whose
+   * finding is a `warn` — a posture that weakens its own assurance rather than
+   * contradicting a clause — names that instead.
    */
   falsifiedBy: string;
 
@@ -192,53 +194,97 @@ interface ModeClaim {
   mode: CfcEnforcementMode;
 }
 
+/**
+ * Every place in the tree that states which mode the run was under.
+ *
+ * A run state carries the mode in more places than its own header: the policy
+ * trace it embeds, the decisions inside that, and every invocation context it
+ * recorded all name one. A reader that compared only the headers would call a
+ * run consistent while a decision inside it said otherwise, so each is
+ * collected and named by where it sits.
+ */
 const modeClaims = (run: RunEvidence): readonly ModeClaim[] => {
   const claims: ModeClaim[] = [];
+  const collect = (
+    artifact: string,
+    prefix: string,
+    source: {
+      cfcEnforcementMode?: CfcEnforcementMode;
+      decisions?: readonly HarnessPolicyDecisionRecord[];
+      policyDecisions?: readonly HarnessPolicyDecisionRecord[];
+      policyTrace?: { cfcEnforcementMode?: CfcEnforcementMode };
+      cfcInvocationContexts?: readonly HarnessCfcInvocationContext[];
+    },
+  ): void => {
+    if (source.cfcEnforcementMode !== undefined) {
+      claims.push({
+        artifact,
+        where: `${prefix}cfcEnforcementMode`,
+        mode: source.cfcEnforcementMode,
+      });
+    }
+    if (source.policyTrace?.cfcEnforcementMode !== undefined) {
+      claims.push({
+        artifact,
+        where: `${prefix}policyTrace.cfcEnforcementMode`,
+        mode: source.policyTrace.cfcEnforcementMode,
+      });
+    }
+    for (
+      const [field, decisions] of [
+        ["decisions", source.decisions],
+        ["policyDecisions", source.policyDecisions],
+        [
+          "policyTrace.decisions",
+          source.policyTrace === undefined
+            ? undefined
+            : (source.policyTrace as {
+              decisions?: readonly HarnessPolicyDecisionRecord[];
+            })
+              .decisions,
+        ],
+      ] as const
+    ) {
+      for (const decision of decisions ?? []) {
+        if (decision.cfcEnforcementMode !== undefined) {
+          claims.push({
+            artifact,
+            where: `${prefix}${field}[${decision.sequence}].cfcEnforcementMode`,
+            mode: decision.cfcEnforcementMode,
+          });
+        }
+      }
+    }
+    for (const context of source.cfcInvocationContexts ?? []) {
+      if (context.cfcEnforcementMode !== undefined) {
+        claims.push({
+          artifact,
+          where:
+            `${prefix}cfcInvocationContexts[${context.sequence}].cfcEnforcementMode`,
+          mode: context.cfcEnforcementMode,
+        });
+      }
+    }
+  };
+
   const state = runStateOf(run);
-  if (state?.cfcEnforcementMode !== undefined) {
-    claims.push({
-      artifact: "run-state.json",
-      where: "cfcEnforcementMode",
-      mode: state.cfcEnforcementMode,
-    });
+  if (state !== undefined) {
+    collect("run-state.json", "", state);
   }
   if (run.policyTrace.status === "present") {
     const trace = run.policyTrace.value;
-    if (trace.cfcEnforcementMode !== undefined) {
-      claims.push({
-        artifact: "policy-trace.json",
-        where: "cfcEnforcementMode",
-        mode: trace.cfcEnforcementMode,
-      });
-    }
-    for (const decision of trace.decisions ?? []) {
-      if (decision.cfcEnforcementMode !== undefined) {
-        claims.push({
-          artifact: "policy-trace.json",
-          where: `decisions[${decision.sequence}].cfcEnforcementMode`,
-          mode: decision.cfcEnforcementMode,
-        });
-      }
-    }
+    collect("policy-trace.json", "", {
+      ...(trace.cfcEnforcementMode !== undefined
+        ? { cfcEnforcementMode: trace.cfcEnforcementMode }
+        : {}),
+      decisions: trace.decisions,
+      ...(trace.cfcInvocationContexts !== undefined
+        ? { cfcInvocationContexts: trace.cfcInvocationContexts }
+        : {}),
+    });
   }
   if (run.runReport.status === "present") {
-    const report = run.runReport.value;
-    if (report.cfcEnforcementMode !== undefined) {
-      claims.push({
-        artifact: "run-report.json",
-        where: "cfcEnforcementMode",
-        mode: report.cfcEnforcementMode,
-      });
-    }
-    for (const decision of report.policyDecisions ?? []) {
-      if (decision.cfcEnforcementMode !== undefined) {
-        claims.push({
-          artifact: "run-report.json",
-          where: `policyDecisions[${decision.sequence}].cfcEnforcementMode`,
-          mode: decision.cfcEnforcementMode,
-        });
-      }
-    }
+    collect("run-report.json", "", run.runReport.value);
   }
   return claims;
 };
@@ -256,15 +302,32 @@ const postureConsistency: AuditCheck = {
   title: "posture consistency",
   citations: citationsFor("AH-CFC-14"),
   falsifiedBy:
-    "two artifacts of one run naming different enforcement modes — a run state, policy-trace header, run report, or any policy decision record disagreeing with the rest",
+    "two claims of one run naming different enforcement modes — a run state, policy-trace header, run report, or any decision record or invocation context disagreeing with the rest — or a run state or run report that states no mode at all",
   inspect(run) {
+    // The clause puts the mode in two named places, so a tree missing either
+    // one establishes nothing about it rather than passing on the other.
+    if (run.runState.status !== "present") {
+      return notReadable("run-state.json", run.runState);
+    }
+    if (run.runReport.status !== "present") {
+      return notReadable("run-report.json", run.runReport);
+    }
     const claims = modeClaims(run);
-    if (claims.length === 0) {
+    const silent = ([
+      ["run-state.json", run.runState.value.cfcEnforcementMode],
+      ["run-report.json", run.runReport.value.cfcEnforcementMode],
+    ] as const).filter(([, mode]) => mode === undefined);
+    if (silent.length > 0) {
       return {
-        verdict: "inconclusive",
-        message:
-          "no artifact of this run states an enforcement mode, so its posture is unknown",
-        evidence: [{ artifact: "run-state.json", detail: run.runState.status }],
+        verdict: "fail",
+        message: `${
+          silent.map(([artifact]) => `\`${artifact}\``).join(" and ")
+        } states no enforcement mode, which the clause requires of both`,
+        evidence: silent.map(([artifact]) => ({
+          artifact,
+          pointer: "cfcEnforcementMode",
+          detail: "absent",
+        })),
       };
     }
     const modes = new Set(claims.map((claim) => claim.mode));
@@ -378,30 +441,41 @@ const modeBehaviorAttestation: AuditCheck = {
         evidence,
       };
     }
-    const contexts = invocationContextsOf(run);
-    const effects = executedSideEffects(run);
     if (!isEnforcing(mode)) {
       return {
         verdict: "pass",
         message: `every decision reason code belongs to \`${mode}\``,
       };
     }
+    // An enforcing claim is attested by what the run's side effects carried,
+    // and the run report is where the side effects are. Without it the tool
+    // activity reads as empty, which would attest the claim by knowing
+    // nothing about it.
+    if (run.runReport.status !== "present") {
+      return notReadable("run-report.json", run.runReport);
+    }
+    const contexts = invocationContextsOf(run);
+    const effects = executedSideEffects(run);
     // Which tools reach the substrate is not something an artifact tree
     // states, so it is read off the run itself: a tool the run recorded a
     // context for is a tool whose invocations carry CFC evidence, and a later
     // call to it that carries none is evidence gone missing rather than a
     // tool that never had any.
     const transporting = new Set(contexts.map((context) => context.toolId));
+    // Keyed by the tool as well as the output: an output id is unique within a
+    // run, so a context another tool recorded would otherwise read as covering
+    // this activity.
     const covered = new Set(
       contexts
-        .map((context) => context.toolOutputId)
-        .filter((outputId) => outputId !== undefined)
-        .map(String),
+        .filter((context) => context.toolOutputId !== undefined)
+        .map((context) => `${context.toolId}:${String(context.toolOutputId)}`),
     );
     const uncovered = effects.filter((activity) =>
       transporting.has(activity.toolId) &&
       activity.resultRef !== undefined &&
-      !covered.has(String(activity.resultRef.outputId))
+      !covered.has(
+        `${activity.toolId}:${String(activity.resultRef.outputId)}`,
+      )
     );
     if (uncovered.length > 0) {
       return {
@@ -646,6 +720,18 @@ const denialsOf = (run: RunEvidence): readonly DenialRecord[] => {
 const OBSERVATION_DENIED_TYPE = "cf-harness.observation-denied";
 
 /**
+ * The prefix of every contract type the harness publishes.
+ *
+ * A tool that refuses in its own typed way — `read_file` returning a
+ * `cf-harness.structured-file-tool-error` — is on the profile's channel as
+ * much as an `observation-denied` is. A bare `{ status: "error" }` with no
+ * contract behind it is not: nothing about it says which contract the model is
+ * reading, which is the whole of what "the profile's typed deny/recovery
+ * channel" asks for.
+ */
+const HARNESS_CONTRACT_TYPE_PREFIX = "cf-harness.";
+
+/**
  * The fields that carry an observation's own bytes.
  *
  * A typed denial names a reason, a detail, and an opaque handle standing in
@@ -668,8 +754,10 @@ const deniedMessageDefect = (
   if (!isRecord(parsed)) {
     return "carries free text rather than a typed denial";
   }
+  const errorType = isRecord(parsed.error) ? parsed.error.type : undefined;
   const typed = parsed.type === OBSERVATION_DENIED_TYPE ||
-    parsed.status === "error" || isRecord(parsed.error);
+    (typeof errorType === "string" &&
+      errorType.startsWith(HARNESS_CONTRACT_TYPE_PREFIX));
   if (!typed) {
     return `carries \`${
       typeof parsed.type === "string" ? parsed.type : "an untyped object"
@@ -689,7 +777,7 @@ const denialChannel: AuditCheck = {
   title: "denial channel",
   citations: citationsFor("AH-CFC-6", "AH-CFC-11"),
   falsifiedBy:
-    "a denied `toolCallId` whose tool message is untyped free text, carries the withheld observation's payload beside the denial, or is absent from the transcript altogether",
+    "a denial the run recorded no policy event for, or a denied `toolCallId` whose tool message is untyped free text, carries the withheld observation's payload beside the denial, or is absent from the transcript altogether",
   inspect(run) {
     if (run.transcript.status !== "present") {
       return notReadable("transcript.json", run.transcript);
@@ -704,8 +792,24 @@ const denialChannel: AuditCheck = {
         answered.set(message.toolCallId, [index, message]);
       }
     }
+    // The clause asks two things of a denial, and a run can hold one without
+    // the other: that it was recorded as a policy event, and that it reached
+    // the model only through the typed channel. Both are read here.
+    const evented = new Set(
+      policyEventsOf(run)
+        .filter((event) => event.severity === "denied")
+        .map((event) => event.toolCallId),
+    );
     const evidence: CheckEvidence[] = [];
     for (const denial of denials) {
+      if (!evented.has(denial.toolCallId)) {
+        evidence.push({
+          artifact: denial.artifact,
+          pointer: denial.pointer,
+          detail:
+            `denied \`${denial.toolCallId}\`, which this run recorded no policy event for`,
+        });
+      }
       const paired = answered.get(denial.toolCallId);
       if (paired === undefined) {
         evidence.push({
@@ -972,7 +1076,7 @@ const observeDisclosure: AuditCheck = {
   title: "observe disclosure",
   citations: citationsFor("AH-CFC-modes-observe", "AH-CFC-15"),
   falsifiedBy:
-    "a run one artifact records as `observe` while another records it as enforcing — the shape that lets a diagnostic run be reported as enforcement",
+    "a dial this run recorded at `observe`, which turns the verdict to `warn` and keeps it off `pass`. A run whose artifacts disagree about the mode is AUD-1's finding, not this one's: two checks failing on one shape would say the same thing twice and leave neither able to fail alone",
   inspect(run) {
     const claims = modeClaims(run);
     if (claims.length === 0) {
@@ -983,19 +1087,6 @@ const observeDisclosure: AuditCheck = {
       };
     }
     const observing = claims.filter((claim) => claim.mode === "observe");
-    const enforcing = claims.filter((claim) => isEnforcing(claim.mode));
-    if (observing.length > 0 && enforcing.length > 0) {
-      return {
-        verdict: "fail",
-        message:
-          "this run is recorded as `observe` in one artifact and as enforcing in another, so its evidence can be read as enforcement it never performed",
-        evidence: [...observing, ...enforcing].map((claim) => ({
-          artifact: claim.artifact,
-          pointer: claim.where,
-          detail: claim.mode,
-        })),
-      };
-    }
     if (observing.length > 0) {
       return {
         verdict: "warn",
@@ -1154,9 +1245,9 @@ interface RetentionRequirement {
 const evidenceRetention: AuditCheck = {
   id: "AUD-9",
   title: "evidence retention",
-  citations: citationsFor("AH-CFC-16", "AH-CFC-17"),
+  citations: citationsFor("AH-CFC-16"),
   falsifiedBy:
-    "an enforcing run missing one of the artifacts that explain why a result was exposed or denied: its policy trace, its policy snapshot or that snapshot's digest, an invocation context for a side effect it executed, or any recorded attempt to read its space's cell labels",
+    "an enforcing run missing one of the artifacts that would explain why a result was exposed or denied: its policy trace, its policy snapshot or that snapshot's digest, an invocation context for a side effect it executed, or any recorded attempt to read its space's cell labels",
   inspect(run) {
     if (run.runState.status !== "present") {
       return notReadable("run-state.json", run.runState);
@@ -1202,7 +1293,7 @@ const evidenceRetention: AuditCheck = {
       return {
         verdict: "pass",
         message:
-          "this run retained every artifact needed to explain why a result was exposed or denied",
+          "every artifact that would explain why a result was exposed or denied is present; what each holds is not read here",
       };
     }
     return {

@@ -19,6 +19,7 @@ import { join } from "@std/path";
 import type { HarnessHandleEntry } from "../../src/contracts/handle-table.ts";
 import type {
   HarnessPolicyDecisionReasonCode,
+  HarnessPolicyDecisionRecord,
   HarnessPolicyTrace,
 } from "../../src/contracts/policy-trace.ts";
 import type { HarnessRunReport } from "../../src/contracts/run-report.ts";
@@ -78,7 +79,8 @@ const turnsOnly = (
  * tree that says something the contract's producer would not have written.
  */
 type Mutable<T> = {
-  -readonly [K in keyof T]: T[K] extends readonly (infer E)[] ? Mutable<E>[]
+  -readonly [K in keyof T]: T[K] extends readonly (infer E)[]
+    ? (E extends object ? Mutable<E> : E)[]
     : T[K];
 };
 
@@ -235,13 +237,12 @@ describe("seeded violations", () => {
 
   describe("AUD-7 observe disclosure", () => {
     it("warns rather than passes a run whose every dial stands at observe", () => {
-      // The whole run moves to `observe`, reason codes included, so nothing
-      // else has a disagreement to report. What is left is the reading AUD-7
-      // exists for: a diagnostic run whose evidence must not be taken for
-      // enforcement.
+      // Every claim the run owns moves together, reason codes included, so
+      // nothing else has a disagreement to report — that shape is AUD-1's
+      // finding. What is left is the reading AUD-7 owns: a diagnostic run
+      // whose evidence must not be taken for enforcement.
 
       turnsOnly("AUD-7", "warn", (root) => {
-        stateOf(root).cfcEnforcementMode = "observe";
         // Every enforcing reason code has an observe-family counterpart of
         // the same name, so the substitution lands inside the closed union.
         const observing = (
@@ -251,18 +252,35 @@ describe("seeded violations", () => {
             /enforce_(explicit|strict)/,
             "observe",
           ) as HarnessPolicyDecisionReasonCode;
-        for (const trace of [traceOf(root), reportOf(root).policyTrace!]) {
-          trace.cfcEnforcementMode = "observe";
-          for (const decision of trace.decisions ?? []) {
+        const moveDecisions = (
+          decisions: readonly HarnessPolicyDecisionRecord[] | undefined,
+        ): void => {
+          for (
+            const decision of (decisions ??
+              []) as Mutable<HarnessPolicyDecisionRecord>[]
+          ) {
             decision.cfcEnforcementMode = "observe";
             decision.reasonCodes = decision.reasonCodes.map(observing);
           }
-        }
+        };
+        const state = stateOf(root);
         const report = reportOf(root);
+        state.cfcEnforcementMode = "observe";
         report.cfcEnforcementMode = "observe";
-        for (const decision of report.policyDecisions) {
-          decision.cfcEnforcementMode = "observe";
-          decision.reasonCodes = decision.reasonCodes.map(observing);
+        moveDecisions(state.policyDecisions);
+        moveDecisions(report.policyDecisions);
+        for (const context of state.cfcInvocationContexts ?? []) {
+          context.cfcEnforcementMode = "observe";
+        }
+        for (
+          const trace of [traceOf(root), state.policyTrace, report.policyTrace]
+        ) {
+          if (trace === undefined) continue;
+          trace.cfcEnforcementMode = "observe";
+          moveDecisions(trace.decisions);
+          for (const context of trace.cfcInvocationContexts ?? []) {
+            context.cfcEnforcementMode = "observe";
+          }
         }
       });
     });
