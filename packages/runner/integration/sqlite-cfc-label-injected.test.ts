@@ -42,16 +42,26 @@ import { cfcConfidentialityForObservationNode } from "../src/cfc/observation.ts"
 import { type Cell, entityIdFrom, parseLink, Runtime } from "../src/index.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
-/** The contract an operator seeds for the on-disk file. `records.body` is
- *  confidential; `meta` declares nothing, so it also proves an unlabeled table
- *  does not dilute the null-origin union. */
+/**
+ * The contract an operator seeds for the on-disk file. TWO tables carry a
+ * label, and the queries touch only `records` — which is what makes the two
+ * label arms tell each other apart. An origin-attributed column carries its
+ * OWN column's atom and nothing else; a null-origin column carries the union
+ * of every labeled column in the db, `meta.k` included, because an expression
+ * could have derived from anywhere. A fixture with one labeled atom cannot
+ * distinguish them: both arms would yield the same answer.
+ */
 const TABLES = {
   records: {
     properties: {
       body: { type: "string", ifc: { confidentiality: ["secret-body"] } },
     },
   },
-  meta: { properties: { k: { type: "string" } } },
+  meta: {
+    properties: {
+      k: { type: "string", ifc: { confidentiality: ["meta-atom"] } },
+    },
+  },
 };
 
 type QueryState = {
@@ -267,8 +277,33 @@ async function runTest(base: URL, contractArrivesLate: boolean) {
         }
         return entry;
       };
-      storedEntry(direct, "secret");
+      // The ORIGIN arm: `secret` reads one column, so it carries that column's
+      // atom and NOT `meta.k`'s, and it declares no observation class. Both
+      // halves matter — a column that picked up the whole-db union, or gained
+      // `observes`, went through the null-origin arm instead.
+      const secretEntry = storedEntry(direct, "secret");
+      const secretAtoms = [...(secretEntry.label.confidentiality ?? [])].sort();
+      if (
+        secretAtoms.length !== 1 || secretAtoms[0] !== "secret-body" ||
+        secretEntry.observes !== undefined
+      ) {
+        throw new Error(
+          `the aliased column did not take the origin arm; got ${
+            JSON.stringify(secretEntry)
+          }`,
+        );
+      }
+      // The NULL-ORIGIN arm: `upper(body)` names no single source, so it takes
+      // the union of every labeled column in the db — including `meta.k`,
+      // which its query never touches — and is value-class.
       const derivedEntry = storedEntry(derived, "shouted");
+      if (!derivedEntry.label.confidentiality?.some((a) => a === "meta-atom")) {
+        throw new Error(
+          `the null-origin column did not take the whole-db union; got ${
+            JSON.stringify(derivedEntry)
+          }`,
+        );
+      }
       if (derivedEntry.observes !== "value") {
         throw new Error(
           `the null-origin column's stored label is not value-class; got ${
