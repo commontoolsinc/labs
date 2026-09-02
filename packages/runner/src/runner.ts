@@ -1289,7 +1289,11 @@ function defersInitialRunUntilSynced(
 type RunnerRunOptions = {
   doNotUpdateOnPatternChange?: boolean;
   // Resumed-from-synced-state: hold each action's initial rehydration/run until
-  // the space has finished syncing, so consumers don't race the data.
+  // the space has finished syncing, so consumers don't race the data. For a
+  // piece that carries setup evidence already, the same intent fences
+  // INSTANTIATION: the start is commit-gated behind the resume pre-sync,
+  // because instantiating reads the piece's execution family, which the
+  // action-level hold begins too late to protect.
   awaitSyncBeforeInitialRun?: boolean;
   // The piece root that INSTANTIATED this piece (a nested pattern node's
   // parent, a result-as-pattern child's producing piece). Its actions'
@@ -4349,6 +4353,7 @@ export class Runner {
     options: RunnerRunOptions = {},
     pullOnceAfterStart: boolean = false,
     speculativeConsequence?: { eventId: string },
+    preSyncResumedStart: boolean = false,
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const startLifecycleEpoch = this.#lifecycleEpoch;
@@ -4364,97 +4369,129 @@ export class Runner {
       }
       if (ownership.isCancelled()) return;
 
-      const startTx = this.runtime.edit();
-      // Minted inside a commit callback — by definition outside any
-      // scheduler run; the deferred start's node wiring is piece
-      // machinery, stamped bookkeeping per serving-loop.md §3d. A
-      // flag-ON CLIENT's navigate-deferred start carries §3d's RULED
-      // speculative-consequence stamp (2026-08-13): it is a handler
-      // CONSEQUENCE (the receipt + result wrapper of a speculative
-      // echo), so it stamps event-handler-kind and the overlay
-      // diverts it — committing it authored would race the SERVING
-      // side's own deferred start for the create-only receipt, and a
-      // client win would suppress the served navigateTo (no intent
-      // would ever be computed). §3d's bookkeeping-only rule governs
-      // internal writes at the wave seal destination, which this
-      // client-side start tx never reaches. The serving side and the
-      // OFF arm keep bookkeeping.
-      this.runtime.stampServerRun(startTx, {
-        actionId: `piece-start/${resultLink.id}`,
-        ...(speculativeConsequence !== undefined
-          ? {
-            kind: "event-handler" as const,
-            eventId: speculativeConsequence.eventId,
-          }
-          : { kind: "bookkeeping" as const }),
-      });
-      // Phase 4 (builtins.md §4): a deferred start minted from an
-      // EVENT-HANDLER run carries that run's event context across to
-      // the start tx, so a navigateTo instantiated under it can address
-      // the firing session (navigate-context.ts's capture point 1).
-      const navigateContext = navigateEventContextFromRunInfo(
-        waveRunContextOf(tx) ?? speculationRunContextOf(tx),
-      );
-      if (navigateContext !== undefined) {
-        setNavigateEventContext(startTx, navigateContext);
-      }
-      const committedResultCell = this.runtime.getCellFromLink<T>(
-        resultLink,
-        undefined,
-        startTx,
-      );
-      try {
-        const installedRegistration = this.startWithTx(
-          startTx,
-          committedResultCell,
-          givenPattern,
-          options,
+      const startNow = () => {
+        const startTx = this.runtime.edit();
+        // Minted inside a commit callback — by definition outside any
+        // scheduler run; the deferred start's node wiring is piece
+        // machinery, stamped bookkeeping per serving-loop.md §3d. A
+        // flag-ON CLIENT's navigate-deferred start carries §3d's RULED
+        // speculative-consequence stamp (2026-08-13): it is a handler
+        // CONSEQUENCE (the receipt + result wrapper of a speculative
+        // echo), so it stamps event-handler-kind and the overlay
+        // diverts it — committing it authored would race the SERVING
+        // side's own deferred start for the create-only receipt, and a
+        // client win would suppress the served navigateTo (no intent
+        // would ever be computed). §3d's bookkeeping-only rule governs
+        // internal writes at the wave seal destination, which this
+        // client-side start tx never reaches. The serving side and the
+        // OFF arm keep bookkeeping.
+        this.runtime.stampServerRun(startTx, {
+          actionId: `piece-start/${resultLink.id}`,
+          ...(speculativeConsequence !== undefined
+            ? {
+              kind: "event-handler" as const,
+              eventId: speculativeConsequence.eventId,
+            }
+            : { kind: "bookkeeping" as const }),
+        });
+        // Phase 4 (builtins.md §4): a deferred start minted from an
+        // EVENT-HANDLER run carries that run's event context across to
+        // the start tx, so a navigateTo instantiated under it can address
+        // the firing session (navigate-context.ts's capture point 1).
+        const navigateContext = navigateEventContextFromRunInfo(
+          waveRunContextOf(tx) ?? speculationRunContextOf(tx),
         );
-        if (ownership.markInstalled(installedRegistration)) {
-          startTx.abort("Deferred runner start was cancelled");
-          return;
+        if (navigateContext !== undefined) {
+          setNavigateEventContext(startTx, navigateContext);
         }
-        this.runtime.prepareTxForCommit(startTx);
-        startTx.commit().then(({ error }) => {
-          if (error) {
-            if (
-              this.catchUpAndStartOnStaleRead(
+        const committedResultCell = this.runtime.getCellFromLink<T>(
+          resultLink,
+          undefined,
+          startTx,
+        );
+        try {
+          const installedRegistration = this.startWithTx(
+            startTx,
+            committedResultCell,
+            givenPattern,
+            options,
+          );
+          if (ownership.markInstalled(installedRegistration)) {
+            startTx.abort("Deferred runner start was cancelled");
+            return;
+          }
+          this.runtime.prepareTxForCommit(startTx);
+          startTx.commit().then(({ error }) => {
+            if (error) {
+              if (
+                this.catchUpAndStartOnStaleRead(
+                  error,
+                  resultCell,
+                  "start",
+                  startLifecycleEpoch,
+                  pullOnceAfterStart,
+                  ownership,
+                  installedRegistration,
+                )
+              ) {
+                return;
+              }
+              ownership.cancel();
+              logger.error(
+                "tx-commit-error",
+                "Error committing deferred start transaction",
                 error,
-                resultCell,
-                "start",
-                startLifecycleEpoch,
-                pullOnceAfterStart,
-                ownership,
-                installedRegistration,
-              )
-            ) {
+              );
               return;
             }
+            if (pullOnceAfterStart && !ownership.isCancelled()) {
+              this.#pullCellOnceInPullMode(committedResultCell);
+            }
+          }).catch((error) => {
             ownership.cancel();
             logger.error(
               "tx-commit-error",
-              "Error committing deferred start transaction",
+              "Deferred start transaction commit rejected",
               error,
             );
-            return;
-          }
-          if (pullOnceAfterStart && !ownership.isCancelled()) {
-            this.#pullCellOnceInPullMode(committedResultCell);
-          }
-        }).catch((error) => {
+          });
+        } catch (error) {
+          startTx.abort(error);
           ownership.cancel();
-          logger.error(
-            "tx-commit-error",
-            "Deferred start transaction commit rejected",
-            error,
-          );
-        });
-      } catch (error) {
-        startTx.abort(error);
-        ownership.cancel();
-        logger.error("runner-start", "Deferred start failed", error);
-        throw error;
+          logger.error("runner-start", "Deferred start failed", error);
+          throw error;
+        }
+      };
+      if (!preSyncResumedStart || givenPattern === undefined) {
+        startNow();
+        return;
       }
+      // The resume-batch instantiation fence: instantiating reads the
+      // piece's execution family — the argument document, the derived
+      // internal cells, a handler's `$event` stream marker among them —
+      // and a crossing-delivered piece arrives without that family, so
+      // the same dependency pre-sync the ordinary resume path awaits
+      // runs first. Tracked so `synced()` covers the window between this
+      // commit and the fenced start.
+      const syncCell = this.runtime.getCellFromLink<T>(resultLink);
+      this.runtime.storageManager.trackUntilSettled(
+        this.syncCellsForRunningPattern(syncCell, givenPattern)
+          .catch((error) => {
+            logger.warn(
+              "runner-start",
+              "resume pre-sync before a deferred start failed; starting anyway",
+              error,
+            );
+          })
+          .then(() => {
+            if (ownership.isCancelled()) return;
+            startNow();
+          })
+          .catch(() => {
+            // startNow's own catch has already cancelled the ownership
+            // and logged; this chain has no further caller to inform.
+          }),
+      );
     });
     return ownership.cancel;
   }
@@ -4983,6 +5020,16 @@ export class Runner {
     // piece whose pattern moved underneath it is an ordinary in-place swap.
     const creatingPiece = options.sourceOrigin !== undefined &&
       getPatternIdentityRef(resultCell.withTx(tx)) === undefined;
+    // Read before setup stages anything: a resume-batch run
+    // (`awaitSyncBeforeInitialRun`) fences instantiation only for a piece
+    // that carries setup evidence already — the argument meta link every
+    // completed setup writes, which covers keyless in-session patterns
+    // exactly as compiled ones — and setup below writes it for a fresh
+    // piece, after which the two are indistinguishable. A fresh element
+    // created mid-resume has its whole state locally and keeps the
+    // synchronous start.
+    const resumesDurablePiece = options.awaitSyncBeforeInitialRun === true &&
+      getMetaLink(resultCell.withTx(tx), "argument") !== undefined;
     const { needsStart, pattern } = this.setupInternal(
       tx,
       patternOrModule,
@@ -5000,17 +5047,26 @@ export class Runner {
     let cancelDeferredStart: Cancel | undefined;
     if (needsStart) {
       const pullOnceAfterStart = this.#patternNeedsOneShotPull(pattern);
-      if (
-        tx.tx.immediate === true &&
+      const deferUntilCommit = tx.tx.immediate === true &&
         (tx.tx as { deferRunnerStartUntilCommit?: boolean })
-            .deferRunnerStartUntilCommit === true
-      ) {
+            .deferRunnerStartUntilCommit === true;
+      if (deferUntilCommit || resumesDurablePiece) {
+        // The `resumesDurablePiece` arm is the resume-batch instantiation
+        // fence: a coordinator resuming durable children (map/filter/
+        // flatMap under `awaitSyncBeforeInitialRun`) starts them only
+        // after this commit lands AND the resume pre-sync has delivered
+        // the child's execution family — the order Runner.start's resume
+        // path keeps — because instantiation itself reads that family
+        // (a handler's `$event` stream marker among it), before any
+        // scheduler-level sync hold can apply.
         cancelDeferredStart = this.#startAfterSuccessfulCommit(
           tx,
           resultCell,
           pattern,
           options,
           pullOnceAfterStart,
+          undefined,
+          resumesDurablePiece,
         );
       } else {
         installedCancel = this.startWithTx(
@@ -5683,6 +5739,7 @@ export class Runner {
     // transaction (resolveLink reads link metadata). The walk only reads, so the
     // transaction is discarded afterward.
     const resolveTx = this.runtime.edit();
+    const ownedCellsStart = cells.length;
     this.#collectResumeOwnedCells(
       pattern,
       resultCell,
@@ -5690,6 +5747,11 @@ export class Runner {
       new Set(),
       resolveTx,
     );
+    // The owned internals feed a second scan of their own (below): a
+    // sub-piece a pattern starts dynamically is reachable only through the
+    // write redirects their ARRIVED values carry, which the static
+    // collector above cannot see.
+    const ownedInternalCells = cells.slice(ownedCellsStart);
     resolveTx.abort("collectResumeOwnedCells: read-only resolution");
 
     // Sync all the previously computed results.
@@ -5731,10 +5793,16 @@ export class Runner {
     // pass subscribed such targets in aborted transactions before any
     // commit). Each root's declared schema bounds its scan — see the method
     // for the exact rules and the fallback where a declaration runs out.
-    await this.syncArgumentLinkTargets(
-      argumentRoots,
-      "resumeArgumentLinkTargetSync",
-    );
+    await Promise.all([
+      this.syncArgumentLinkTargets(
+        argumentRoots,
+        "resumeArgumentLinkTargetSync",
+      ),
+      // Owned-internal redirect targets are a second-wave scan of their
+      // own: the values the first wave delivered are what carry the
+      // redirects, so this cannot run any earlier.
+      this.#syncResumeInternalRedirectTargets(ownedInternalCells),
+    ]);
 
     return true;
   }
@@ -5925,6 +5993,72 @@ export class Runner {
       await Promise.all(targetPromises);
       frontier = targets;
       wave++;
+    }
+  }
+
+  /**
+   * Second-wave companion for the owned internals synced in the first
+   * wave: follow the WRITE-REDIRECT links their arrived values carry and
+   * sync each target by name.
+   *
+   * A sub-piece a pattern starts dynamically is reachable only this way —
+   * its manifest sits behind a redirect in an owned computed's VALUE, not
+   * in the static node structure the owned-cell collector walks — and the
+   * first post-resume run reads through that manifest into documents its
+   * stored argument among them. Naming the manifest is what delivers that
+   * family; left cold, those reads enter the first commit's basis at
+   * seq 0 and conflict against the durable server state.
+   *
+   * Write redirects only: they are the tree's own structure — the wiring
+   * a node's outputs and derived cells carry — while a plain data link is
+   * a reference to something this tree merely sees (a board's rows can
+   * name hundreds of foreign pieces), and naming those would pull each
+   * one's whole family into every resume. Two passes bound the reach the
+   * way the argument walk's two hops do: a chain the first pass found
+   * truncated by an absent mid-chain document resumes once that pass's
+   * syncs land, and a pass that discovers nothing new ends the scan.
+   */
+  async #syncResumeInternalRedirectTargets(
+    ownedCells: readonly Cell<any>[],
+  ): Promise<void> {
+    const synced = new Set<string>();
+    for (let pass = 0; pass < 2; pass++) {
+      const promises: Promise<unknown>[] = [];
+      for (const owned of ownedCells) {
+        let redirects: NormalizedFullLink[];
+        try {
+          redirects = findAllWriteRedirectCells(owned.getRawUntyped(), owned);
+        } catch (error) {
+          // A value the raw read cannot resolve contributes nothing rather
+          // than breaking the resume; log so a skipped root is diagnosable.
+          logger.warn("resume-internal-redirect-targets", () => [
+            "skipping an owned internal whose raw value did not resolve",
+            error,
+          ]);
+          continue;
+        }
+        for (const link of redirects) {
+          const docKey = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
+          if (synced.has(docKey)) continue;
+          synced.add(docKey);
+          const target = this.runtime.getCellFromLink(link);
+          const syncStart = performance.now();
+          promises.push(
+            Promise.resolve(target.sync())
+              .catch((error) => {
+                logger.warn("resume-internal-redirect-targets", () => [
+                  "redirect target sync failed; resuming without it",
+                  error,
+                ]);
+              })
+              .finally(() =>
+                logger.time(syncStart, "start", "resumeInternalRedirectSync")
+              ),
+          );
+        }
+      }
+      if (promises.length === 0) break;
+      await Promise.all(promises);
     }
   }
 
