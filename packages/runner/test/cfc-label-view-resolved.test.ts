@@ -20,8 +20,10 @@ const signer = await Identity.fromPassphrase("runner-cfc-label-view-resolved");
  * needs the runtime's own resolution to reach the doc holding the label.
  */
 describe("cfcLabelViewForResolvedCellWithStatus", () => {
+  const space = signer.did();
+
   const withRuntime = async (
-    body: (runtime: Runtime, space: string) => Promise<void>,
+    body: (runtime: Runtime) => Promise<void>,
   ) => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
@@ -31,7 +33,7 @@ describe("cfcLabelViewForResolvedCellWithStatus", () => {
       cfcDeclaredMonotonicity: "enforce",
     });
     try {
-      await body(runtime, signer.did());
+      await body(runtime);
     } finally {
       await runtime.dispose();
     }
@@ -45,7 +47,7 @@ describe("cfcLabelViewForResolvedCellWithStatus", () => {
   };
 
   it("reaches a label two docs away, behind a link the path CROSSES", async () => {
-    await withRuntime(async (runtime, space) => {
+    await withRuntime(async (runtime) => {
       // The shape a labeled query result stores: the row is its own doc and
       // carries the per-column label; the query doc only links to it.
       const row = runtime.getCell<{ secret: string }>(space, "resolved-row", {
@@ -59,7 +61,10 @@ describe("cfcLabelViewForResolvedCellWithStatus", () => {
         row.withTx(tx).set({ secret: "top secret" });
       });
 
-      const query = runtime.getCell<never>(space, "resolved-query", undefined);
+      const query = runtime.getCell<Record<string, unknown>>(
+        space,
+        "resolved-query",
+      );
       await commit(runtime, (tx) => {
         query.withTx(tx).key("result").key(0).setRawUntyped(row.getAsLink());
       });
@@ -85,7 +90,7 @@ describe("cfcLabelViewForResolvedCellWithStatus", () => {
   });
 
   it("keeps the SLOT's own label beside the target's — strictly additive", async () => {
-    await withRuntime(async (runtime, space) => {
+    await withRuntime(async (runtime) => {
       // Two labels at one selection: one declared on the slot the path names,
       // one stored on the doc its value links to. Both belong in the answer;
       // reading only the resolved doc would drop the slot's.
@@ -130,12 +135,15 @@ describe("cfcLabelViewForResolvedCellWithStatus", () => {
   });
 
   it("fails CLOSED when the resolution itself throws", async () => {
-    await withRuntime(async (runtime, space) => {
+    await withRuntime(async (runtime) => {
       // A link that points at itself: the runtime's resolution runs out of
       // hops and throws. That is a FAILED read, not an absent label — a
       // reader that swallowed it would report unlabeled for a doc it never
       // managed to look at.
-      const loop = runtime.getCell<never>(space, "resolved-loop", undefined);
+      const loop = runtime.getCell<Record<string, unknown>>(
+        space,
+        "resolved-loop",
+      );
       await commit(runtime, (tx) => {
         loop.withTx(tx).key("self").set("placeholder");
       });
