@@ -272,9 +272,10 @@ space that name resolved to, which is refused when that is not the
 connected space. A space name as an operand of its own joins when
 multi-space sessions do. Every
 reference a command takes resolves against the cwd, and how much of the
-cwd it needs varies: a rooted `/of:…` fixes the piece and path but still
-draws its space from the place, so only a complete
-`/@did:key:…/of:…` names its cell from anywhere
+cwd it needs varies: a rooted `/of:…` fixes the piece and path but draws
+its space and its scope from the place, a complete `/@did:key:…/of:…`
+carries the space and still draws the scope, and only a fully qualified
+`/@did:key:…/of:…@scope` names its cell from anywhere
 ([`grammar.md`](grammar.md)). The place is result-rooted — `cd` refuses a
 reference carrying `#argument`, and arguments are reached per operand. The
 prompt renders position and scope compactly (an elided alias is checked

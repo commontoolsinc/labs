@@ -651,6 +651,38 @@ describe("place", () => {
             expect(place.place.scope).toBe("session");
           });
 
+          it("names two cells for one suffix-less string read at two scopes", () => {
+            // The observable the always-emit ruling rests on, and the one
+            // the taxonomy turns on: a complete reference carries its space
+            // and not its scope, so the reader supplies the level it does
+            // not carry. Nothing else here reads a suffix-less reference —
+            // every rendering the property case reads back carries a
+            // suffix, because that is what `pwd` writes.
+
+            const reference = `/@${SPACE}/${HANDLE}/title`;
+            const reader = (scope: CellScope): CurrentPlace => {
+              const place = atSpaceRoot();
+              place.cd(`@${scope}`);
+              place.cd(reference);
+              return place;
+            };
+            expect(reader("user").place.scope).toBe("user");
+            expect(reader("session").place.scope).toBe("session");
+            expect(reader("user").place).not.toEqual(reader("session").place);
+          });
+
+          it("names one cell for a fully qualified string read at two scopes", () => {
+            const reference = `/@${SPACE}/${HANDLE}@user/title`;
+            const reader = (scope: CellScope): CurrentPlace => {
+              const place = atSpaceRoot();
+              place.cd(`@${scope}`);
+              place.cd(reference);
+              return place;
+            };
+            expect(reader("space").place).toEqual(reader("session").place);
+            expect(reader("space").place.scope).toBe("user");
+          });
+
           it("refuses a complete reference naming another space", () => {
             // Relayed: the canonical layer's sentence, not shuttle's
             // to choose. See the file header.

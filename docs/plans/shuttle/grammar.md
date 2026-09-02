@@ -28,16 +28,27 @@ as the canonical grammar's context rule already works:
 
 - `/of:…` — a **rooted** reference: it names the piece and path from the
   root, so no part of the position is read from the place — but it omits
-  the space, which the place still supplies. Rooted is not
+  the space and the scope, and the place supplies both. Rooted is not
   place-independent.
-- `/@did:key:…/of:…` — a **complete** reference: it carries its own space,
-  so it denotes the same cell read from anywhere. Only this form is
-  place-independent, and it is what a printed address or a shared link
-  should be. Denoting is not reaching, though: a connection serves one
-  space, so a complete reference naming a different space than the place's
-  is refused rather than followed — `validateEmbeddedSpaces`
-  (`packages/cli/lib/llm-friendly-ref.ts`) already holds `cf` to that, and
-  shuttle v1 holds one connection.
+- `/@did:key:…/of:…` — a **complete** reference: piece, path and space are
+  its own, and the scope is still the place's. It is place-independent in
+  one dimension and not in the other, so the same string read at `@user`
+  and at `@session` names two different cells. Denoting is not reaching,
+  either: a connection serves one space, so a reference naming a different
+  space than the place's is refused rather than followed —
+  `validateEmbeddedSpaces` (`packages/cli/lib/llm-friendly-ref.ts`) already
+  holds `cf` to that, and shuttle v1 holds one connection.
+- `/@did:key:…/of:…@scope` — a **fully qualified** reference: every level
+  is its own and nothing is read from the place, so it denotes the same
+  cell read from anywhere. This is the form a printed address or a shared
+  link should be, and it is what `pwd` prints, for that reason.
+
+The scope a complete reference omits is not a hole in it. Canonically an
+absent suffix *means* the base, which is why the serializer writes none for
+a base-scoped link. The two layers read the same absence differently —
+canonical says base, shuttle fills it from the place, the way a shell reads
+a relative path — and that difference is why `pwd` writes the suffix rather
+than trusting it to be inferred.
 - `#…` — a wish target (entry point), resolvable from anywhere within
   the connected space. A target anchored elsewhere — profile and
   favorites resolve against the reading identity's home space regardless
