@@ -211,15 +211,11 @@ scores every item-level identity, estimates every item's cost, packs the
 result into five lanes, and writes one manifest object into the store. It
 writes nothing into git.
 
-**The manifest selector** is a trusted reusable workflow referenced from
-the default branch. Before pull-request lanes start, it creates or recovers
-one create-only pin object for the workflow run. The pin embeds the selected
-manifest or records an explicit unselected result.
-
 **The lane runner** is `tasks/ci-lane.ts`. The five pull-request jobs all
-run it, passing their lane number. It fetches the pinned manifest, reads
-the working tree through the topology, adjusts the plan for what this
-particular pull request changed, works out which batches belong to its own
+run it, passing their lane number. It resolves the manifest from the date
+on the commit it has checked out, reads the working tree through the
+topology, adjusts the plan for what this particular pull request changed,
+works out which batches belong to its own
 lane, sets up the capabilities those batches need, runs them, and records
 the results the same way every other job in this repository does.
 
@@ -1988,7 +1984,6 @@ never overwritten — under a new dataset area beside the records:
 ```text
 labs/test-selection/v1/manifest-<ISO 8601 timestamp>-<ULID>.json.gz
 labs/test-selection/v1/state/<yyyy-mm-dd>-<ULID>.json.gz
-labs/test-selection/v1/pins/<workflow-run-id>.json.gz
 ```
 
 Write-once naming is not a stylistic choice: the store's writer
@@ -1996,13 +1991,15 @@ credentials hold `objectCreator` and nothing else, cannot overwrite, and
 that is the property that makes the whole store trustworthy. So there is
 no `current.json`. The leading timestamp keeps object names
 chronologically useful, but it does not decide publication order. When a
-workflow has no manifest pin, its selector lists object metadata once,
-takes the object with the newest server-assigned `timeCreated`, using the
-object name to break a tie, and writes a create-only pin containing that
-object's name, generation, and validated manifest contents. This listing is
-allowed only on attempt one; a later missing pin records unselected. Lanes
-and later attempts fetch the pin rather than resolving "newest" or
-depending on the source manifest's retention.
+lane resolves a manifest, it lists object metadata once and takes the
+newest object generated at or before the commit under test, using the
+object name to break a tie. A manifest published while the run is going
+is generated after that date, so it cannot change the answer, and every
+lane and every later attempt reads the same commit and reaches the same
+object. What the answer does depend on is retention: the manifests a
+commit can resolve have to outlive the window in which that run may be
+re-run, which is a retention setting on the bucket rather than anything
+this reads.
 
 The object carries:
 
@@ -2181,9 +2178,8 @@ The publisher needs a writer credential for its own prefix. That is a new
 service account with `objectCreator` on `labs/test-selection/`, reached
 through a Workload Identity provider pinned to exactly this workflow file
 on `main` — the same pattern, and the same security argument, as the relay
-already uses. The trusted selector workflow also needs create-only access,
-restricted to `labs/test-selection/v1/pins/`. These are infra-repository
-changes under `tofu/test-records`, and they must land and be applied before
+already uses. Nothing else needs a credential: a lane reads the manifest
+it resolves and writes nothing. These are infra-repository changes under `tofu/test-records`, and they must land and be applied before
 these workflows can write. They are the prerequisites [the work](#the-work)
 has that are not ours.
 
@@ -2194,11 +2190,9 @@ direction for a system nothing should gate on.
 
 ## The lane job
 
-The preceding `select-manifest` job checks out no repository code. It
-recovers or creates the public run-scoped manifest pin through the trusted
-reusable workflow. It completes successfully only after that create-only
-object exists and validates. The lane derives its fixed pin path from the
-workflow run id:
+Nothing runs before the lanes. Each one resolves the manifest from the
+commit it has checked out, so five lanes reach the same answer without a
+job to tell them what it is:
 
 ```yaml
 pr-tests:
@@ -2208,7 +2202,6 @@ pr-tests:
     !contains(github.event.pull_request.labels.*.name, 'ci: full')
   runs-on: ubuntu-latest
   timeout-minutes: *lane-job-timeout
-  needs: select-manifest
   env:
     CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
   permissions:
@@ -2293,9 +2286,9 @@ alternate execution of one test.
 
 What the runner does, in order:
 
-1. Fetch the run-scoped pin and its embedded manifest, then fetch the
-   attribution map that manifest names. An explicit unselected pin or a
-   lane-side fetch failure takes the fallback (see [Failure
+1. Resolve the manifest from the commit's date and fetch it, then fetch
+   the attribution map that manifest names. No manifest at or before that
+   date, or a fetch failure, takes the fallback (see [Failure
    modes](#failure-modes)).
 2. Enumerate every suite against the working tree.
 3. Compute the diff against the merge base, and resolve the changed source
@@ -2895,7 +2888,6 @@ is pinned to the commit's date. And if none of that settles it,
 | What goes wrong | What happens |
 | --- | --- |
 | The store is unreachable from a lane | The lane runs the mandatory set plus a deterministic slice of the corpus sized to its budget, prints that it is running unselected, and passes or fails on that. Pull requests keep flowing. |
-| The selector cannot read or create the run's storage pin | The selector fails and dependent lanes do not start. Pull-request jobs have no credential for the pin prefix. Re-running the selector recovers or creates the pin before lanes start. |
 | The publisher has not run for a day | Lanes use the last manifest. Selection quality decays slowly; nothing fails. |
 | The manifest is malformed or a newer schema | Rejected whole, treated as absent, same path as unreachable. |
 | A selected item no longer exists in the tree | Dropped with a line in the summary. A renamed test is simultaneously an unknown item, so it runs anyway. |
@@ -2936,16 +2928,6 @@ Write access to the manifest prefix is one service account reachable only
 through a Workload Identity provider pinned to one workflow file on
 `main`, exactly as the relay is. Nothing else in the organization can
 write there, and the account cannot read, list, overwrite, or delete.
-
-The pin prefix has a separate create-only principal restricted to the
-trusted default-branch reusable selector workflow and the Labs repository's
-immutable GitHub `repository_id`. The workflow derives the repository and
-workflow run id from GitHub's trusted context rather than caller inputs.
-Pull-request jobs and callers from another repository cannot obtain that
-credential. The pin reader validates the envelope whole, including the
-workflow run id, selected source name under the trusted manifest prefix,
-source generation as a canonical digits-only decimal string, and embedded
-manifest, before using it.
 
 The lane runner treats the manifest as untrusted input and validates it
 whole. The only field that reaches a shell is a suite identifier, which is
@@ -3178,12 +3160,12 @@ three reasons that look like they force one turn out not to.
 The publisher needs a writer credential: a `test-selection` service
 account with `objectCreator` on the manifest and state prefixes and a
 Workload Identity provider pinned to `.github/workflows/test-selection.yml`
-on `main`. The selector needs a separate principal with `objectCreator`
-restricted to the pin prefix and pinned to its trusted reusable workflow
-and the Labs repository's immutable GitHub `repository_id`. Manifest and
-state objects expire after 30 days. Pin objects have a separate lifecycle
-rule that retains them beyond GitHub's workflow rerun period. The same
-infra change provisions the compactor principal. These are
+on `main`. Manifest and state objects expire after 30 days, and that
+lifecycle rule is what a lane's resolution rests on: a commit resolves the
+newest manifest at or before its own date, so the manifests a run may need
+have to outlive the window in which GitHub still permits that run to be
+re-run. Where the rerun window is the longer of the two, the retention is
+what to raise. The same infra change provisions the compactor principal. These are
 infra-repository changes under `tofu/test-records`, and they must land and
 be applied before anything here can publish. They are predecessors rather
 than a reason to split this work, and they are the only hard ordering
@@ -3263,18 +3245,13 @@ answers somewhere people can see them.
       that artifact's context and object name. A later relay of an earlier
       attempt must collide with its first shipment even when a rerun
       crossed a date boundary.
-- [ ] Add a `select-manifest` job that calls a trusted reusable workflow by
-      its default-branch ref and checks out no pull-request code. Give its
-      Workload Identity principal create-only access restricted to the pin
-      prefix. Recover the public run-id pin or, on attempt one only, list
-      manifests once and create a compressed envelope containing the source
-      name, generation, and complete validated manifest. Create an explicit
-      unselected envelope when listing fails or finds nothing. On a later
-      attempt with no pin, create unselected rather than selecting again.
-- [ ] Retain pin objects beyond GitHub's full workflow rerun period. Fail
-      the selector and do not start lanes when a pin cannot be read or
-      created. Pull-request jobs receive no write credential for the pin
-      prefix and derive the public pin path only from their workflow run id.
+- [ ] Hold manifest retention above the window in which GitHub still
+      permits a run to be re-run. A lane resolves the newest manifest at or
+      before the commit's date, so the answer is the same for every lane
+      and every later attempt as long as the object it names still exists.
+      A manifest that expires between an attempt and its re-run is the one
+      way the two can disagree, and the lifecycle rule is where that is
+      settled rather than in anything a lane reads.
 - [ ] Provision the storage-generated arrival journal. Assign contiguous
       positions and deduplicate object and generation and logical
       submission identity atomically before acknowledging notifications.
