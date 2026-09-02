@@ -24,7 +24,11 @@ import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
-import { runtimePresets } from "../src/runtime-presets.ts";
+import {
+  MAX_ENFORCEMENT_SINK_GOVERNANCE,
+  runtimePresets,
+} from "../src/runtime-presets.ts";
+import { KNOWN_SINKS } from "../src/cfc/sink-inventory.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
 import type { JSONSchema, JSONValue } from "../src/builder/types.ts";
@@ -193,6 +197,37 @@ describe("max-enforcement CFC posture as one system (CT-2075)", () => {
   });
 
   describe("the llm sinks are ungoverned by the posture", () => {
+    it("decides every known sink, ceiling or explicitly ungated", () => {
+      // Totality is the property, not the contents: a sink the registry does
+      // not decide about is a sink that releases ungated without anyone
+      // having chosen that, and its absence from the ceilings map reads
+      // exactly like a sink nobody has reached yet.
+      expect(Object.keys(MAX_ENFORCEMENT_SINK_GOVERNANCE).sort())
+        .toEqual([...KNOWN_SINKS].sort());
+      const ungated = Object.entries(MAX_ENFORCEMENT_SINK_GOVERNANCE)
+        .filter(([, governance]) => "ungated" in governance)
+        .map(([sink]) => sink);
+      expect(ungated.sort()).toEqual(
+        ["generateObject", "generateText", "llm", "llmDialog"],
+      );
+    });
+
+    it("carries an owner and a retirement condition for every ungated sink", () => {
+      // What makes an ungated sink a published deviation rather than a gap:
+      // AH-CFC-15 asks who carries it and what would close it, and a reason
+      // alone answers neither.
+      for (
+        const [sink, governance] of Object.entries(
+          MAX_ENFORCEMENT_SINK_GOVERNANCE,
+        )
+      ) {
+        if (!("ungated" in governance)) continue;
+        expect(governance.ungated.reason.length, sink).toBeGreaterThan(0);
+        expect(governance.ungated.owner.length, sink).toBeGreaterThan(0);
+        expect(governance.ungated.retirement.length, sink).toBeGreaterThan(0);
+      }
+    });
+
     it("lets a secret-labeled value reach the llm sink with no gate at all", async () => {
       // Pins the DOCUMENTED gap, not a desired end state: a sink with no
       // ceiling gets no gate, so under this posture any confidentiality — a

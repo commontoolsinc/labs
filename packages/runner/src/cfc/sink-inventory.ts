@@ -11,7 +11,19 @@ export type InitialSinkName =
   | "generateText"
   | "generateObject";
 
-const INITIAL_SINK_NAMES: readonly InitialSinkName[] = [
+/**
+ * Every sink a deployment has to decide about, by hand.
+ *
+ * The `satisfies` clause rejects entries that are not sink names, and
+ * {@link _unregisteredSinks} below rejects sink names missing from here.
+ * Together they force a new sink through this registry — and through the
+ * total governance record a posture declares over it
+ * (`MAX_ENFORCEMENT_SINK_GOVERNANCE` in `runtime-presets.ts`) — before it can
+ * ship. The point is not the list: it is that a sink cannot reach a
+ * deployment without someone deciding whether it carries a confidentiality
+ * ceiling or releases ungated, and saying why.
+ */
+export const KNOWN_SINKS = [
   "fetchBinary",
   "fetchText",
   "fetchJson",
@@ -22,10 +34,126 @@ const INITIAL_SINK_NAMES: readonly InitialSinkName[] = [
   "llmDialog",
   "generateText",
   "generateObject",
-] as const;
+] as const satisfies readonly InitialSinkName[];
+
+/** A sink the registry classifies. */
+export type KnownSinkName = (typeof KNOWN_SINKS)[number];
+
+type UnregisteredSink = Exclude<InitialSinkName, KnownSinkName>;
+// If the next line errors, a sink name exists that the registry has not
+// classified: add it to KNOWN_SINKS and give it a row in every posture's
+// governance record. The type error names the missing sink(s).
+const _unregisteredSinks: never[] = [] as UnregisteredSink[];
+
+/**
+ * Why a sink releases without a confidentiality ceiling, with the two things
+ * that make an ungated sink a published deviation rather than an oversight:
+ * who carries it, and what would retire it (AH-CFC-15).
+ */
+export interface SinkUngatedRationale {
+  /** Why no ceiling governs this sink, in one sentence. */
+  readonly reason: string;
+
+  /** Who owns the gap. */
+  readonly owner: string;
+
+  /** The condition under which the sink stops being ungated. */
+  readonly retirement: string;
+}
+
+/**
+ * How one posture governs one sink: a confidentiality ceiling its requests
+ * must fit, or an explicit ungated release carrying its rationale.
+ *
+ * The two arms are not symmetric in what they cost to state. A ceiling is a
+ * value the gate reads; an ungated sink is a hole in the gate, so it costs a
+ * reason, an owner, and a retirement condition — the same three things
+ * AH-CFC-15 asks of any deviation from an enforcing posture.
+ */
+export type SinkGovernance =
+  | { readonly ceiling: readonly CfcConfClause[] }
+  | { readonly ungated: SinkUngatedRationale };
+
+/**
+ * The gap the llm-class sinks (`llm`, `llmDialog`, `generateText`,
+ * `generateObject`) carry: they release with no ceiling, so any
+ * confidentiality — a secret as much as a risk caveat — reaches them without
+ * a policy evaluation running for them.
+ *
+ * Ungated rather than public-only because ceiling membership is exact clause
+ * subsumption (`atomsOutsideCeiling`) — a ceiling entry cannot admit "any
+ * material-risk caveat regardless of `source`" — while risk-caveated ingested
+ * content is exactly what an llm sink exists to process, so a public-only
+ * ceiling would refuse the flows the sink is for.
+ */
+const LLM_SINK_UNGATED: SinkUngatedRationale = {
+  reason:
+    "ceiling membership is exact clause subsumption, so a public-only ceiling would refuse the risk-caveated ingested content an llm sink exists to process",
+  owner: "CFC runtime (Epic B, sink governance)",
+  retirement:
+    "a boundary-scoped admission mechanism exists — a public-only ceiling paired with an exchange rule admitting the material-risk family at llm-class boundaries",
+};
+
+/** One posture's decision about every known sink. */
+export type SinkGovernanceRegistry = Readonly<
+  Record<KnownSinkName, SinkGovernance>
+>;
+
+/**
+ * The ceilings a governance registry declares, in the open-map shape
+ * `Runtime` takes: an ungated sink is ABSENT from the result, which is what
+ * "no ceiling, therefore no gate" is in `SinkMaxConfidentiality`.
+ */
+export const sinkCeilingsOf = (
+  registry: SinkGovernanceRegistry,
+): SinkMaxConfidentiality =>
+  Object.freeze(
+    Object.fromEntries(
+      Object.entries(registry)
+        .filter((
+          entry,
+        ): entry is [string, { ceiling: readonly CfcConfClause[] }] =>
+          "ceiling" in entry[1]
+        )
+        .map((
+          [sink, governance],
+        ) => [sink, Object.freeze([...governance.ceiling])]),
+    ),
+  );
+
+/**
+ * Why each sink that knowingly releases without a ceiling does so.
+ *
+ * A sink absent from here and absent from a deployment's ceilings is simply
+ * unconfigured — a deployment that has not reached it yet. A sink named here
+ * is a decision: the gap is understood, someone carries it, and something
+ * would close it. That is the difference between an oversight and a published
+ * deviation (AH-CFC-15), and it is why the rationale sits beside the sink
+ * inventory rather than inside any one posture — the reason is a fact about
+ * the sink, not about which bundle a deployment opted into.
+ */
+export const SINK_UNGATED_RATIONALES: Readonly<
+  Partial<Record<KnownSinkName, SinkUngatedRationale>>
+> = Object.freeze({
+  llm: Object.freeze(LLM_SINK_UNGATED),
+  llmDialog: Object.freeze(LLM_SINK_UNGATED),
+  generateText: Object.freeze(LLM_SINK_UNGATED),
+  generateObject: Object.freeze(LLM_SINK_UNGATED),
+});
+
+/** The rationale for `sink`, as a governance entry a posture can declare. */
+export const ungatedSink = (sink: KnownSinkName): SinkGovernance => {
+  const rationale = SINK_UNGATED_RATIONALES[sink];
+  if (rationale === undefined) {
+    throw new Error(
+      `sink \`${sink}\` has no ungated rationale; declare one in SINK_UNGATED_RATIONALES or give the sink a ceiling`,
+    );
+  }
+  return { ungated: rationale };
+};
 
 export const INITIAL_SINK_INVENTORY: readonly InitialSinkName[] = Object.freeze(
-  [...INITIAL_SINK_NAMES],
+  [...KNOWN_SINKS],
 );
 
 export const isInitialSinkInventoryName = (

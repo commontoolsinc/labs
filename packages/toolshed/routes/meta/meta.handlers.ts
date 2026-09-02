@@ -10,6 +10,17 @@ import type { IndexRoute } from "./meta.routes.ts";
 const SERVER_DID = identity.did();
 const GIT_SHA = resolveGitSha();
 
+/**
+ * One dial's resolved rung. `diagnosticOnly` rides beside the value because a
+ * bare `observe` invites being read as enforcement, and a client reading the
+ * posture has no reason to know which rung of which ladder decides anything.
+ */
+const CfcDialSchema = z.object({
+  rung: z.string(),
+  diagnosticOnly: z.boolean(),
+  decidesOn: z.string(),
+});
+
 export const MetaResponseSchema = z.object({
   did: z.string(),
   gitSha: z.string().nullable(),
@@ -27,22 +38,33 @@ export const MetaResponseSchema = z.object({
   // An omitted flag means this server said nothing about it, and `null` means
   // it has no Runtime yet; a client keeps its built-in default for either.
   experimental: z.record(z.string(), z.boolean()).nullable(),
-  // The CFC posture this server's Runtime resolved — the enforcement dials,
-  // the policy-snapshot digest, and which sinks carry a confidentiality
-  // ceiling — so a deployment's enforcement is readable rather than
-  // indistinguishable from the default (lib/cfc-posture.ts). `null` means no
-  // Runtime yet.
+  // The CFC posture this server's Runtime resolved — every enforcement dial
+  // with what its rung decides on, the policy-snapshot digest, and EVERY
+  // known sink with its ceiling or the reason it releases ungated — so a
+  // deployment's enforcement is readable rather than indistinguishable from
+  // the default, and a sink's absence from a ceiling list cannot read as
+  // coverage. The shared record (`@commonfabric/runner/cfc`
+  // `cfcPostureReport`), published identically by every surface that
+  // publishes one. `null` means no Runtime yet.
   cfc: z.object({
-    enforcementMode: z.string(),
-    flowLabels: z.string(),
-    writeFloor: z.string(),
+    enforcementMode: CfcDialSchema,
+    flowLabels: CfcDialSchema,
+    writeFloor: CfcDialSchema,
     triggerReadGating: z.boolean(),
     decomposedEnvelopes: z.boolean(),
-    policyEvaluation: z.string(),
-    labelMetadataProtection: z.string(),
-    declaredMonotonicity: z.string(),
+    policyEvaluation: CfcDialSchema,
+    labelMetadataProtection: CfcDialSchema,
+    declaredMonotonicity: CfcDialSchema,
     policyDigest: z.string().nullable(),
-    sinkCeilings: z.array(z.string()),
+    sinks: z.array(z.union([
+      z.object({ sink: z.string(), ceiling: z.array(z.unknown()).readonly() }),
+      z.object({ sink: z.string(), ungated: z.string() }),
+    ])).readonly(),
+    deviations: z.array(z.object({
+      what: z.string(),
+      owner: z.string(),
+      retirement: z.string(),
+    })).readonly(),
   }).nullable(),
 });
 export type MetaResponse = z.infer<typeof MetaResponseSchema>;

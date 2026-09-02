@@ -18,6 +18,7 @@ import {
   resolveHarnessConfig,
   type ResolveHarnessConfigOptions,
 } from "./config.ts";
+import { harnessFabricSessionPosture } from "./cfc-posture.ts";
 import {
   createHarnessCfcInvocationContext,
   type HarnessCfcInvocationContext,
@@ -714,6 +715,7 @@ export class CfHarnessEngine {
         ...(this.config.fabricSession.cfcPosture !== undefined
           ? { posture: this.config.fabricSession.cfcPosture }
           : {}),
+        record: harnessFabricSessionPosture(this.config.fabricSession),
       }
       : undefined;
     // A resumed run keeps its recorded fabric-session posture, so a session

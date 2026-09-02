@@ -113,6 +113,7 @@ import {
   gatedSinkRequestExists,
   linkCfcLabelView,
   type PolicySnapshot,
+  resolveCfcDials,
   type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
@@ -1479,16 +1480,18 @@ export class Runtime {
       this.sourceReconciler = new SourceReconciler(this);
       this.runner = new Runner(this);
       this.onPatternInstantiated = options.onPatternInstantiated;
-      this.cfcEnforcementMode = options.cfcEnforcementMode ??
-        "enforce-explicit";
-      this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
-      this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
-      this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
-      this.cfcDecomposedEnvelopes = options.cfcDecomposedEnvelopes ?? false;
-      this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ?? "off";
-      this.cfcLabelMetadataProtection = options.cfcLabelMetadataProtection ??
-        "off";
-      this.cfcDeclaredMonotonicity = options.cfcDeclaredMonotonicity ?? "off";
+      // Resolved through the shared dial table (`cfc/posture-report.ts`), so
+      // a host that publishes the posture of a runtime it has not built yet
+      // reads the same defaults these fields do.
+      const dials = resolveCfcDials(options);
+      this.cfcEnforcementMode = dials.cfcEnforcementMode;
+      this.cfcFlowLabels = dials.cfcFlowLabels;
+      this.cfcWriteFloor = dials.cfcWriteFloor;
+      this.cfcTriggerReadGating = dials.cfcTriggerReadGating;
+      this.cfcDecomposedEnvelopes = dials.cfcDecomposedEnvelopes;
+      this.cfcPolicyEvaluation = dials.cfcPolicyEvaluation;
+      this.cfcLabelMetadataProtection = dials.cfcLabelMetadataProtection;
+      this.cfcDeclaredMonotonicity = dials.cfcDeclaredMonotonicity;
       this.cfcPrefixProvenanceStats = options.cfcPrefixProvenanceStats ?? false;
       // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
       // be able to mutate it (per-sink array or the map) after construction to

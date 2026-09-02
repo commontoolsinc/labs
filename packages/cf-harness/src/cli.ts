@@ -62,6 +62,7 @@ import type {
   HarnessTranscriptEvent,
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
+import { renderCfcPostureReport } from "./cfc-posture.ts";
 import { CfHarnessEngine } from "./engine.ts";
 import type { HarnessFabricSessionFactory } from "./fabric-session.ts";
 import {
@@ -2564,6 +2565,9 @@ export const formatCfHarnessCliResult = (
         posture.posture !== undefined ? `, posture ${posture.posture}` : ""
       }`,
     );
+    if (posture.record !== undefined) {
+      lines.push(...renderCfcPostureReport(posture.record));
+    }
   }
   if (
     result.runState.wellKnownGrants !== undefined &&

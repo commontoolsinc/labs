@@ -61,6 +61,10 @@ import type {
   HarnessFabricSessionConfig,
   HarnessModelProviderId,
 } from "../src/config.ts";
+import {
+  harnessFabricSessionPosture,
+  renderCfcPostureReport,
+} from "../src/cfc-posture.ts";
 import type { CfcPosture } from "@commonfabric/runner";
 import {
   type HarnessChatError,
@@ -1649,13 +1653,15 @@ export const startConsoleServer = async (
       console.log(
         `  cfc:        ${
           config.fabricSession.cfcPosture ?? "first-party default"
-        }, flow labels ${
-          config.fabricSession.cfcFlowLabels ??
-            (config.fabricSession.cfcPosture === "max-enforcement"
-              ? "persist"
-              : "off")
-        }, ${config.fabricSession.cfcEnforcementMode ?? "enforce-explicit"}`,
+        }`,
       );
+      for (
+        const line of renderCfcPostureReport(
+          harnessFabricSessionPosture(config.fabricSession),
+        )
+      ) {
+        console.log(line);
+      }
       // The two sidecar transports a run's mediation moves over. The engine's
       // guard asks only that they are named, so a console pointed at
       // directories no sandbox sidecar writes starts cleanly and then denies

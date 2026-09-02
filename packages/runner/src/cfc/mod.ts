@@ -268,11 +268,35 @@ export {
   stampExternalIngest,
 } from "./external-ingest.ts";
 export {
+  cfcPostureReport,
+  resolveCfcDials,
+  RUNTIME_CFC_DIAL_DEFAULTS,
+} from "./posture-report.ts";
+export type {
+  CfcDialOptions,
+  CfcDialReport,
+  CfcPostureDeviation,
+  CfcPostureReport,
+  CfcPostureSource,
+  CfcSinkReport,
+  ResolvedCfcDials,
+} from "./posture-report.ts";
+export {
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
   INITIAL_SINK_INVENTORY,
   isInitialSinkInventoryName,
+  KNOWN_SINKS,
+  SINK_UNGATED_RATIONALES,
+  sinkCeilingsOf,
+  ungatedSink,
 } from "./sink-inventory.ts";
-export type { SinkMaxConfidentiality } from "./sink-inventory.ts";
+export type {
+  KnownSinkName,
+  SinkGovernance,
+  SinkGovernanceRegistry,
+  SinkMaxConfidentiality,
+  SinkUngatedRationale,
+} from "./sink-inventory.ts";
 export { markRendererTrustedEvent } from "./ui-contract.ts";
 export {
   cfcObjectSchemaIsClosed,
