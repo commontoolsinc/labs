@@ -19,6 +19,7 @@ import {
   resolveHandleToken,
 } from "../src/handle-table.ts";
 import {
+  checkInputCellSpec,
   inputCellsContextMessage,
   mintInputCellHandles,
   parseInputCellArgument,
@@ -62,6 +63,32 @@ describe("input-cells", () => {
     it("throws for any option after the reference", () => {
       expect(() => parseInputCellArgument(`cities=${CELL_REF};schema=x.json`))
         .toThrow("the flag takes none");
+    });
+
+    it("throws for a reference that names no entity URI", () => {
+      expect(() =>
+        parseInputCellArgument(`account=/fid1:${"A".repeat(43)}/account`)
+      ).toThrow("does not parse");
+    });
+  });
+
+  describe("checkInputCellSpec()", () => {
+    it("accepts a bare entity URI with no session space to check against", () => {
+      expect(() => checkInputCellSpec({ name: "account", ref: CELL_ID }))
+        .not.toThrow();
+    });
+
+    it("throws for a reference into another space when the session space is known", () => {
+      expect(() =>
+        checkInputCellSpec({ name: "foreign", ref: FOREIGN_REF }, SPACE_DID)
+      ).toThrow("targets another space");
+    });
+
+    it("accepts a reference into another space when no session space is given", () => {
+      // The grammar alone cannot see the session's space; that half of the
+      // rule waits for the mint, where the live session names it.
+      expect(() => checkInputCellSpec({ name: "foreign", ref: FOREIGN_REF }))
+        .not.toThrow();
     });
   });
 

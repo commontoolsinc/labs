@@ -2134,7 +2134,7 @@ Deno.test("installCfHarnessSignalHandlers terminalizes the active run before exi
       return () => timestamps.shift() ?? "2026-04-16T20:00:02.000Z";
     })(),
   });
-  engine.setRunStatus("running");
+  engine.startRun();
   let handler: CfHarnessCliSignalHandler | undefined;
   let disposed = false;
   let exitCode: number | undefined;

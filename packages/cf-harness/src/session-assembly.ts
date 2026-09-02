@@ -276,8 +276,34 @@ export interface EstablishHarnessSessionContextOptions {
  * entitlement the run did not ask for. Input cells are explicit operator
  * configuration, so one that cannot be minted fails the run rather than
  * starting it without what the operator attached.
+ *
+ * This is the first thing the run's driver does, so it takes the run
+ * (`running`) before anything else and, when a step throws, fails it as
+ * `setup_error` before rethrowing: a run that dies here is as terminal on
+ * disk as one that dies in its loop.
+ *
+ * @throws Error from the step that failed, after the run is recorded failed.
  */
 export const establishHarnessSessionContext = async (
+  options: EstablishHarnessSessionContextOptions,
+): Promise<string[]> => {
+  const { engine } = options;
+  engine.startRun();
+  try {
+    return await establishContextMessages(options);
+  } catch (error) {
+    try {
+      await engine.failRun("setup_error", error);
+    } catch {
+      // The setup failure is the outcome to report; a failure to record it
+      // does not replace it.
+    }
+    throw error;
+  }
+};
+
+/** Helper for `establishHarnessSessionContext()`, which does its steps. */
+const establishContextMessages = async (
   options: EstablishHarnessSessionContextOptions,
 ): Promise<string[]> => {
   const { engine, config } = options;

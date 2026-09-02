@@ -1122,7 +1122,13 @@ export class ConsoleServer {
     return undefined;
   }
 
-  /** Returns one completed turn's durable external result. */
+  /**
+   * One turn's durable external result, or where the turn stands instead.
+   * The answer follows the turn's status: a turn still running is 409, and a
+   * poller asks again; a completed turn is its result, or 404 when the
+   * artifacts cannot supply one; a failed or canceled turn is 410, because
+   * its result will never exist. A poller stops on anything but 409.
+   */
   async #turnResult(url: URL): Promise<Response> {
     const match = /^\/api\/turns\/([^/]+)\/result$/.exec(url.pathname);
     if (match === null) {
@@ -1142,11 +1148,29 @@ export class ConsoleServer {
         error: `turn ${turnId} was not found`,
       }, { status: 404 });
     }
-    if (turn.turn.status !== "completed") {
-      return Response.json({
-        code: "turn_not_completed",
-        error: `turn ${turnId} has not completed`,
-      }, { status: 409 });
+    switch (turn.turn.status) {
+      case "running":
+      case "canceling":
+        return Response.json({
+          code: "turn_not_completed",
+          error: `turn ${turnId} has not completed`,
+        }, { status: 409 });
+      case "failed":
+        return Response.json({
+          code: "turn_failed",
+          error: `turn ${turnId} failed`,
+          ...(turn.turn.error !== undefined ? { detail: turn.turn.error } : {}),
+        }, { status: 410 });
+      case "canceled":
+        return Response.json({
+          code: "turn_canceled",
+          error: `turn ${turnId} was canceled`,
+          ...(turn.turn.cancelReason !== undefined
+            ? { detail: turn.turn.cancelReason }
+            : {}),
+        }, { status: 410 });
+      case "completed":
+        break;
     }
     const result = await this.#readTurnResult(turn.sessionId, turnId);
     return result === undefined

@@ -994,6 +994,108 @@ describe("console/server", () => {
         );
       }
     });
+
+    it("answers 410 `turn_failed` with the turn's error for a turn that failed", async () => {
+      // A failed turn will never have a result, so a poller is told to stop
+      // rather than to ask again.
+      const failingServer = new ConsoleServer(
+        await config(),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: () => ({
+              runTranscript: () =>
+                Promise.reject(new Error("model stream returned an error")),
+            }),
+            now: advancingClock(),
+            onEvent,
+          }),
+        undefined,
+        () => Promise.resolve(),
+      );
+      const page = await failingServer.handle(getRequest("/"));
+      await page.body?.cancel();
+      const failingCookie = page.headers.get("set-cookie")!.split(";")[0];
+      const startedResponse = await failingServer.handle(
+        jsonRequest("/api/task", { text: "build it" }, {
+          cookie: failingCookie,
+        }),
+      );
+      const started = await startedResponse.json();
+      await failingServer.service.waitForTurn(
+        started.sessionId,
+        started.turnId,
+      );
+
+      const response = await failingServer.handle(getRequest(
+        `/api/turns/${started.turnId}/result`,
+        { cookie: failingCookie },
+      ));
+
+      expect(response.status).toBe(410);
+      expect(await response.json()).toEqual({
+        code: "turn_failed",
+        error: `turn ${started.turnId} failed`,
+        detail: {
+          code: "internal_error",
+          message: "model stream returned an error",
+        },
+      });
+    });
+
+    it("answers 410 `turn_canceled` for a turn that was canceled", async () => {
+      let finish: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const waitingServer = new ConsoleServer(
+        await config(),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: () => ({
+              runTranscript: async (options) => {
+                await gate;
+                return await answeringLoop({} as never).runTranscript(options);
+              },
+            }),
+            now: advancingClock(),
+            onEvent,
+          }),
+        undefined,
+        () => Promise.resolve(),
+      );
+      const page = await waitingServer.handle(getRequest("/"));
+      await page.body?.cancel();
+      const waitingCookie = page.headers.get("set-cookie")!.split(";")[0];
+      const startedResponse = await waitingServer.handle(
+        jsonRequest("/api/task", { text: "keep working" }, {
+          cookie: waitingCookie,
+        }),
+      );
+      const started = await startedResponse.json();
+      const canceled = await waitingServer.handle(
+        jsonRequest("/api/cancel", { sessionId: started.sessionId }, {
+          cookie: waitingCookie,
+        }),
+      );
+      expect(canceled.status).toBe(200);
+      finish!();
+      await waitingServer.service.waitForTurn(
+        started.sessionId,
+        started.turnId,
+      );
+
+      const response = await waitingServer.handle(getRequest(
+        `/api/turns/${started.turnId}/result`,
+        { cookie: waitingCookie },
+      ));
+
+      expect(response.status).toBe(410);
+      expect(await response.json()).toEqual({
+        code: "turn_canceled",
+        error: `turn ${started.turnId} was canceled`,
+        detail: "canceled from the console page",
+      });
+    });
   });
 
   describe("POST /api/task", () => {
@@ -1075,6 +1177,23 @@ describe("console/server", () => {
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toContain("--input-cell name");
+    });
+
+    it("answers 400 for an input-cell ref that names no entity, before any turn starts", async () => {
+      // The mint would refuse this ref; refusing it here costs no turn.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "make a budget dashboard",
+        inputCells: [{
+          name: "transactions",
+          ref: `/fid1:${"A".repeat(43)}/account`,
+        }],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain(
+        "reference does not parse",
+      );
+      expect((await listSessions()).sessions).toHaveLength(0);
     });
 
     it("answers 400 for input cells that are not a list of name and ref", async () => {

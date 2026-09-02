@@ -72,10 +72,14 @@ const HANDLE_REF_CONTEXT_SPACE =
  * deterministically, and `createLLMFriendlyLink()` omits the DID), which is
  * what the cast relies on.
  *
+ * This is the rule minting holds a ref to, exported so a surface taking a
+ * ref from an operator can refuse it under the same rule before a run
+ * exists to spend on it.
+ *
  * @throws Error when the text does not parse, or names an id outside the
  * entity URI schemes (a bare hash, an `opaque:` handle, a human name).
  */
-const normalizeHandleRef = (refText: string): NormalizedFullLink => {
+export const parseHandleRef = (refText: string): NormalizedFullLink => {
   const trimmed = refText.trim();
   const parsed = parseLLMFriendlyLink(
     trimmed.startsWith("/") ? trimmed : `/${trimmed}`,
@@ -207,7 +211,7 @@ export const mintAddressHandle = async (
   options: MintAddressHandleOptions = {},
 ): Promise<{ table: HarnessHandleTable; token: string }> => {
   const hasher = options.hasher ?? sha256Hasher;
-  const link = normalizeHandleRef(refText);
+  const link = parseHandleRef(refText);
   const key = addressKey(link);
   const schema = options.schema;
   const capability = options.capability;
@@ -289,7 +293,7 @@ export const resolveHandleToken = (
  */
 export const handleRefAddressKey = (refText: string): string | undefined => {
   try {
-    return addressKey(normalizeHandleRef(refText));
+    return addressKey(parseHandleRef(refText));
   } catch {
     return undefined;
   }

@@ -234,11 +234,9 @@ Deno.test({
       );
       assertEquals(persistedState, {
         runId: "run-artifacts",
-        status: "completed",
+        status: "pending",
         createdAt: "2026-04-15T21:00:00.000Z",
         updatedAt: "2026-04-15T21:00:05.000Z",
-        endedAt: "2026-04-15T21:00:05.000Z",
-        terminalReason: "tool_completed",
         cfcEnforcementMode: "observe",
         modelProvider: "openai-compatible-gateway",
         modelAuthSource: "api-key",
@@ -247,7 +245,7 @@ Deno.test({
           version: 1,
           sequence: 1,
           runId: "run-artifacts",
-          createdAt: "2026-04-15T21:00:04.000Z",
+          createdAt: "2026-04-15T21:00:03.000Z",
           toolId: "bash",
           toolOutputId: createToolOutputId("run-artifacts", "bash", 1),
           operation: "shell",

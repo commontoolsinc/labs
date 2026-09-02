@@ -133,6 +133,7 @@ import { OpenAICompatibleGatewayModelClient } from "./model/openai-compatible-ga
 import { sumHarnessModelUsage } from "./model/usage.ts";
 import { collapseSupersededRunPatternDiagnostics } from "./run-pattern-diagnostic-collapse.ts";
 import { collapseSupersededRunPatternSources } from "./run-pattern-source-collapse.ts";
+import { isTerminalHarnessRunStatus } from "./run-state.ts";
 import {
   loadHarnessSkillContext,
   loadHarnessSkillContextFromText,
@@ -2855,7 +2856,7 @@ export class CfHarnessPromptLoop {
       });
     };
     await this.engine.ensureDiagnosticsInitialized();
-    this.engine.setRunStatus("running");
+    this.engine.startRun();
     if (options.promptSlotBinding !== undefined) {
       this.engine.setPromptSlotBinding(options.promptSlotBinding);
     }
@@ -2876,6 +2877,9 @@ export class CfHarnessPromptLoop {
     for (const message of transcript) {
       await options.onTranscriptEvent?.({ message, transcript });
     }
+    // Set by the model turn that answers without a tool call, which is the
+    // one way the loop ends in success.
+    let finalAssistantText: string | undefined;
     try {
       while (modelTurns < maxModelTurns) {
         modelTurns += 1;
@@ -2941,34 +2945,8 @@ export class CfHarnessPromptLoop {
         });
         const toolCalls = assistantMessage.toolCalls ?? [];
         if (toolCalls.length === 0) {
-          this.engine.setRunStatus("completed", "assistant_completed");
-          await this.engine.persistRunState();
-          await persistRunReport(assistantMessage.content);
-          return {
-            model,
-            finalAssistantText: assistantMessage.content,
-            transcript,
-            modelTurns,
-            ...(modelUsage.length > 0
-              ? {
-                modelUsage,
-                usage: sumHarnessModelUsage(
-                  modelUsage.map((entry) => entry.usage),
-                ),
-              }
-              : {}),
-            ...(
-              modelUsage.length > 0 || descendantUsage.length > 0
-                ? {
-                  totalUsage: sumHarnessModelUsage([
-                    ...modelUsage.map((entry) => entry.usage),
-                    ...descendantUsage,
-                  ]),
-                }
-                : {}
-            ),
-            runState: this.engine.getRunState(),
-          };
+          finalAssistantText = assistantMessage.content;
+          break;
         }
         const followupMessages: HarnessTranscriptMessage[] = [];
         const pendingCfcModelContextObservations:
@@ -3040,27 +3018,53 @@ export class CfHarnessPromptLoop {
       }
     } catch (error) {
       annotatePromptLoopError(error, modelTurns);
-      this.engine.appendFailureFromError(error);
-      this.engine.setRunStatus("failed", "prompt_loop_error");
       try {
-        await this.engine.persistRunState();
+        await this.engine.failRun("prompt_loop_error", error);
         await this.engine.persistTranscript(transcript);
         await persistRunReport();
       } catch {
-        // Preserve the original model/tool failure when cleanup persistence also fails.
+        // The model or tool failure is the outcome to report; a failure to
+        // record it does not replace it.
       }
       throw error;
     }
-    const turnLimitError = new Error(
-      `prompt loop exceeded max model turns (${maxModelTurns}) without a final assistant response`,
-    );
-    annotatePromptLoopError(turnLimitError, modelTurns);
-    this.engine.appendFailureFromError(turnLimitError);
-    this.engine.setRunStatus("failed", "max_model_turns");
-    await this.engine.persistRunState();
-    await this.engine.persistTranscript(transcript);
-    await persistRunReport();
-    throw turnLimitError;
+    if (finalAssistantText === undefined) {
+      const turnLimitError = new Error(
+        `prompt loop exceeded max model turns (${maxModelTurns}) without a final assistant response`,
+      );
+      annotatePromptLoopError(turnLimitError, modelTurns);
+      await this.engine.failRun("max_model_turns", turnLimitError);
+      await this.engine.persistTranscript(transcript);
+      await persistRunReport();
+      throw turnLimitError;
+    }
+    await this.engine.completeRun("assistant_completed");
+    await persistRunReport(finalAssistantText);
+    return {
+      model,
+      finalAssistantText,
+      transcript,
+      modelTurns,
+      ...(modelUsage.length > 0
+        ? {
+          modelUsage,
+          usage: sumHarnessModelUsage(
+            modelUsage.map((entry) => entry.usage),
+          ),
+        }
+        : {}),
+      ...(
+        modelUsage.length > 0 || descendantUsage.length > 0
+          ? {
+            totalUsage: sumHarnessModelUsage([
+              ...modelUsage.map((entry) => entry.usage),
+              ...descendantUsage,
+            ]),
+          }
+          : {}
+      ),
+      runState: this.engine.getRunState(),
+    };
   }
 
   /**
@@ -4518,11 +4522,13 @@ export class CfHarnessPromptLoop {
       subagentStatus = "failed";
       childModelTurns = promptLoopModelTurnsFromError(error) ?? childModelTurns;
       summary = `Subagent failed: ${toErrorDetail(error)}`;
-      const childState = childEngine.getRunState();
-      if (childState.status !== "failed") {
-        childEngine.appendFailureFromError(error, { source: "run_error" });
-        childEngine.setRunStatus("failed", "prompt_loop_error");
-        await childEngine.persistRunState();
+      // The child's loop writes the child's own outcome. A child that never
+      // reached its loop — its model was unavailable, or its skill context
+      // would not persist — has none yet, and gets one here.
+      if (!isTerminalHarnessRunStatus(childEngine.getRunState().status)) {
+        await childEngine.failRun("setup_error", error, {
+          source: "run_error",
+        });
       }
     }
     const childRunState = childEngine.getRunState();
