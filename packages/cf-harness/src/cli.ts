@@ -859,9 +859,9 @@ const parseHandleValueOrigins = (
  * The input cells `--input-cell` names. Grammar defects are refused at
  * parse: an input cell is explicit operator configuration, and a run must
  * not start without what it asked for. No shape is stated here — a cell's
- * schema and labels live on its declaration in the fabric. The references
- * themselves are validated against the session space later, at mint time,
- * where the space is known.
+ * schema and labels live on its declaration in the fabric. A reference is
+ * held to the handle-table grammar here; whether it names the session's own
+ * space is checked at mint time, where the space is known.
  */
 const parseInputCells = (
   raw: string | readonly string[] | undefined,

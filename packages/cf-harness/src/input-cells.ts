@@ -18,8 +18,11 @@
  */
 
 import type { MemorySpace } from "@commonfabric/runner";
-import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
-import { createHarnessHandleTable, mintAddressHandle } from "./handle-table.ts";
+import {
+  createHarnessHandleTable,
+  mintAddressHandle,
+  parseHandleRef,
+} from "./handle-table.ts";
 import type { HarnessHandleTable } from "./contracts/handle-table.ts";
 import type {
   HarnessInputCell,
@@ -44,10 +47,48 @@ export interface ParsedInputCellArgument {
 }
 
 /**
- * Parses one `--input-cell` argument of the form `<name>=<link>`. Neither a
- * cell's shape nor its labels are stated here: both live on the cell in the
- * fabric, and `describe_handle` answers from there — one source of truth, on
- * the cell, rather than an operator's account of it.
+ * Holds one input cell to the rule its handle is minted under: the name is
+ * model-facing text of a fixed shape, and the reference is a link naming an
+ * entity (`of:` or `computed:`) — and, when the session's `space` is known,
+ * not one in another space. The grammar and the mint both run this, so a
+ * reference the mint would refuse is refused wherever it first arrives,
+ * before a run exists to spend on it. The space is known only at the mint,
+ * from the live session; a surface parsing operator input passes none.
+ *
+ * @throws Error naming the input cell and the defect.
+ */
+export const checkInputCellSpec = (
+  spec: HarnessInputCellSpec,
+  space?: MemorySpace,
+): void => {
+  if (!INPUT_CELL_NAME_PATTERN.test(spec.name)) {
+    throw new Error(
+      `--input-cell name must match ${INPUT_CELL_NAME_PATTERN}, got \`${spec.name}\``,
+    );
+  }
+  let link;
+  try {
+    link = parseHandleRef(spec.ref);
+  } catch (error) {
+    throw new Error(
+      `--input-cell \`${spec.name}\` reference does not parse: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (space !== undefined && link.space !== undefined && link.space !== space) {
+    throw new Error(
+      `--input-cell \`${spec.name}\` reference targets another space; only references into the session space are allowed`,
+    );
+  }
+};
+
+/**
+ * Parses one `--input-cell` argument of the form `<name>=<link>`, holding
+ * the pair to {@link checkInputCellSpec}. Neither a cell's shape nor its
+ * labels are stated here: both live on the cell in the fabric, and
+ * `describe_handle` answers from there — one source of truth, on the cell,
+ * rather than an operator's account of it.
  *
  * @throws Error naming the defect when the argument does not fit the
  * grammar; the caller surfaces it as a usage error before any run starts.
@@ -62,11 +103,6 @@ export const parseInputCellArgument = (
     );
   }
   const name = raw.slice(0, eq).trim();
-  if (!INPUT_CELL_NAME_PATTERN.test(name)) {
-    throw new Error(
-      `--input-cell name must match ${INPUT_CELL_NAME_PATTERN}, got \`${name}\``,
-    );
-  }
   const ref = raw.slice(eq + 1).trim();
   if (ref.length === 0) {
     throw new Error(`--input-cell \`${name}\` names no reference`);
@@ -77,15 +113,17 @@ export const parseInputCellArgument = (
       `--input-cell \`${name}\` carries an option \`${option}\`; the flag takes none — a cell's shape and labels live on the cell in the fabric`,
     );
   }
-  return { name, ref };
+  const spec = { name, ref };
+  checkInputCellSpec(spec);
+  return spec;
 };
 
 /**
  * Mints a handle for each input cell into `table` (or a fresh table salted
  * with `runId`), returning the extended table and the records for run state.
- * Every reference must parse and target `space` — the session's authority
- * ends at its own space, and an input cell pointing elsewhere is refused
- * before anything is recorded.
+ * Every cell is held to {@link checkInputCellSpec} against `space` — the
+ * session's authority ends at its own space, and an input cell pointing
+ * elsewhere is refused before anything is recorded.
  *
  * @throws Error naming the failing input cell on a duplicate name, an
  * unparseable reference, or a reference into another space.
@@ -100,32 +138,13 @@ export const mintInputCellHandles = async (
   const inputCells: HarnessInputCell[] = [];
   const names = new Set<string>();
   for (const spec of specs) {
-    // Re-checked here, not only at CLI parse: the name is model-facing text,
-    // and a library caller reaches this mint without the CLI grammar.
-    if (!INPUT_CELL_NAME_PATTERN.test(spec.name)) {
-      throw new Error(
-        `--input-cell name must match ${INPUT_CELL_NAME_PATTERN}, got \`${spec.name}\``,
-      );
-    }
+    // Checked here, not only at parse: a library caller reaches this mint
+    // without the CLI grammar, and only the live session knows the space.
+    checkInputCellSpec(spec, space);
     if (names.has(spec.name)) {
       throw new Error(`--input-cell names \`${spec.name}\` twice`);
     }
     names.add(spec.name);
-    let link;
-    try {
-      link = parseLLMFriendlyLink(spec.ref, space);
-    } catch (error) {
-      throw new Error(
-        `--input-cell \`${spec.name}\` reference does not parse: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-    if (link.space !== space) {
-      throw new Error(
-        `--input-cell \`${spec.name}\` reference targets another space; only references into the session space are allowed`,
-      );
-    }
     const minted = await mintAddressHandle(current, spec.ref);
     current = minted.table;
     // The record carries the entry's canonical spelling, not the operator's

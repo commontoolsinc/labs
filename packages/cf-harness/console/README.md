@@ -173,8 +173,11 @@ own run with its own handle table: the tokens the model is given are the ones
 that turn's run minted. What the model receives is a token and the caller's own
 name for it — never the reference, and never what the cell holds. The reference
 grammar is `--input-cell`'s, so a spelling the CLI refuses is refused here with
-a 400, and a cell that cannot be minted fails the turn rather than starting it
-without what the caller attached.
+a 400 before any turn starts: a `ref` has to be a link naming an entity
+(`/of:fid1:…/path`, or `computed:`), not a bare hash. A cell that passes the
+grammar and still cannot be minted — one in another space, say — fails the turn
+rather than starting it without what the caller attached, and that turn is
+terminal like any other failed one.
 
 The completed-turn result is:
 
@@ -195,8 +198,31 @@ The completed-turn result is:
 Each entry copies only `slug` and `url` from the model-facing `assign_slug`
 output recorded in the run transcript; the console neither reconstructs the URL
 nor derives pattern metadata. `spaceName` identifies the space this console is
-configured against. A turn that is still running returns the named
-`turn_not_completed` error rather than holding the request open.
+configured against.
+
+The route never holds a request open; it answers with where the turn stands, and
+the status code says whether asking again can change the answer:
+
+| Turn                    | Status | Body                                            |
+| ----------------------- | ------ | ----------------------------------------------- |
+| running, or canceling   | 409    | `{ code: "turn_not_completed" }` — ask again    |
+| completed               | 200    | the result above                                |
+| completed, no artifacts | 404    | `{ code: "turn_result_unavailable" }`           |
+| failed                  | 410    | `{ code: "turn_failed", detail: <chat error> }` |
+| canceled                | 410    | `{ code: "turn_canceled", detail: <reason> }`   |
+| unknown                 | 404    | `{ code: "turn_not_found" }`                    |
+
+Every body carries an `error` string beside `code`. A poller's whole rule is:
+409 keep polling, 200 read the result, anything else stop. 410 is what a turn
+that died before its first model turn answers too — a turn is terminal after
+every way it can fail, not only after the model has been asked.
+
+The same holds for the run behind the turn. Its `run-state.json` under the
+artifact root reads `status: "running"` from the moment the turn takes it,
+through every tool call, until the turn ends; `completed` or `failed`, with
+`endedAt` and `terminalReason`, appear once and only when it is over. A `failed`
+run carries the failure under `failureRecords` and `primaryFailure`, and
+`terminalReason: "setup_error"` names the run that never reached a model turn.
 
 ## What you'll see
 

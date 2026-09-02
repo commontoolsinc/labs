@@ -47,13 +47,23 @@ export type HarnessRunStatus =
   | "completed"
   | "failed";
 
+/**
+ * How a run ended. `assistant_completed` is the one success: the model
+ * answered without calling a tool. `setup_error` is a run that died before
+ * its first model turn, while what it holds — skill registry, grants, input
+ * cells — was being established; the others end the loop itself.
+ */
 export type HarnessRunTerminalReason =
   | "assistant_completed"
-  | "tool_completed"
-  | "tool_error"
   | "max_model_turns"
   | "prompt_loop_error"
+  | "setup_error"
   | "process_interrupted";
+
+/** Whether `status` is one a run leaves only by being resumed. */
+export const isTerminalHarnessRunStatus = (
+  status: HarnessRunStatus,
+): boolean => status === "completed" || status === "failed";
 
 /**
  * The resolved CFC posture of the run's fabric session — the Runtime that
@@ -364,13 +374,27 @@ export const appendToHarnessRunState = <K extends HarnessRunStateListField>(
     now,
   );
 
+/**
+ * Moves a run to `status`. A terminal status stamps `endedAt` and
+ * `terminalReason`; `running` clears both, which is how a resumed run
+ * re-enters its loop. A run's outcome is written once, by its driver, so a
+ * terminal status on a run that is already terminal is an invariant
+ * violation and throws rather than overwriting the outcome on record.
+ *
+ * @throws Error when `status` is terminal and `state` already is.
+ */
 export const setHarnessRunStatus = (
   state: HarnessRunState,
   status: HarnessRunStatus,
   now = new Date().toISOString(),
   terminalReason?: HarnessRunTerminalReason,
 ): HarnessRunState => {
-  if (status === "completed" || status === "failed") {
+  if (isTerminalHarnessRunStatus(status)) {
+    if (isTerminalHarnessRunStatus(state.status)) {
+      throw new Error(
+        `run ${state.runId} is already ${state.status}; its outcome is written once`,
+      );
+    }
     return patchHarnessRunState(
       state,
       { status, endedAt: now, terminalReason },

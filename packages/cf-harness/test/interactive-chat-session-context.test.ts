@@ -38,6 +38,8 @@ const stubEngine = (
   ({
     config: { fabricSession: { space: "context-space" } },
     fabricSessionAvailable: true,
+    startRun: () => undefined,
+    failRun: () => Promise.resolve(),
     establishWellKnownGrants: () =>
       Promise.resolve([{ name: "piece-registry", token: "cfh:a:grant" }]),
     establishInputCells: () =>
