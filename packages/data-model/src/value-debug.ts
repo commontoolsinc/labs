@@ -63,19 +63,15 @@ function taggedFormOf(
 }
 
 /**
- * Replacer for the conversion of a realm-crossing encoding, which represents
- * the one terminal that encoding uses and no `FabricValue` can hold: an
- * `ArrayBuffer`, rendered as a `0x`-prefixed hexadecimal string of its bytes.
- * Everything else is returned as it stands.
+ * Renders an `ArrayBuffer` as `buf [...]`, with its bytes in hexadecimal, a
+ * space after every fourth byte.
  */
-function replaceRealmTerminal(value: unknown): unknown {
-  if (value instanceof ArrayBuffer) {
-    const hex = [...new Uint8Array(value)]
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-    return `0x${hex}`;
-  }
-  return value;
+function renderBuffer(buffer: ArrayBuffer): string {
+  const hex = [...new Uint8Array(buffer)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .replace(/.{8}(?=.)/g, "$& ");
+  return `buf [${hex}]`;
 }
 
 /**
@@ -422,8 +418,8 @@ class DebugStringifier {
    * state is elided.
    */
   #renderFabricPrimitive(value: FabricPrimitive, indent: string): string {
-    let tag;
-    let state: FabricValue;
+    let tag: string;
+    let state: unknown;
 
     try {
       // A `FabricPrimitive` binds no `[CODEC]`, so its realm codec supplies
@@ -433,18 +429,58 @@ class DebugStringifier {
       // with `DEBUG_CODEC` once the latter exists.
       const codec = codecOf(value, REALM_CODEC);
       tag = codec.tagForValue(value);
-      state = toStructuredDebugValue(
-        codec.encode(value, NULL_LIVE_ENVIRONMENT),
-        DEBUG_STRING_MAX_DEPTH,
-        replaceRealmTerminal,
-      );
+      state = codec.encode(value, NULL_LIVE_ENVIRONMENT);
     } catch {
       // Never let the debug renderer throw; fall back to the class name, with
       // the state elided.
       return DebugStringifier.#renderElidedInstance(classNameOf(value));
     }
 
-    return this.#renderInstance(tag.replace(/@.*$/, ""), state, indent);
+    const open = `/${tag.replace(/@.*$/, "")}(`;
+    const realm = (v: unknown, i: string) => this.#renderRealmState(v, i);
+
+    if (isPlainObject(state)) {
+      const parts = this.#renderProperties(
+        state as Record<string, unknown>,
+        indent,
+        realm,
+        false,
+      );
+      return this.#renderContainer(open, ")", parts, indent);
+    }
+
+    return `${open}${this.#renderRealmState(state, indent)})`;
+  }
+
+  /**
+   * Renders a realm-crossing encoding, or a piece of one. The encoding's own
+   * terminal, an `ArrayBuffer`, is rendered as `buf [...]`; its containers are
+   * walked as they stand; and anything else takes the ordinary path through
+   * the conversion.
+   */
+  #renderRealmState(value: unknown, indent: string): string {
+    const realm = (v: unknown, i: string) => this.#renderRealmState(v, i);
+
+    if (value instanceof ArrayBuffer) {
+      return renderBuffer(value);
+    } else if (Array.isArray(value)) {
+      const inner = this.#innerIndent(indent);
+      const parts = value.map((element) => realm(element, inner));
+      return this.#renderContainer("[", "]", parts, indent);
+    } else if (isPlainObject(value)) {
+      const parts = this.#renderProperties(
+        value as Record<string, unknown>,
+        indent,
+        realm,
+        false,
+      );
+      return this.#renderContainer("{", "}", parts, indent);
+    }
+
+    return this.#renderSubvalue(
+      toStructuredDebugValue(value, DEBUG_STRING_MAX_DEPTH),
+      indent,
+    );
   }
 
   /**
@@ -546,18 +582,25 @@ class DebugStringifier {
 
   /**
    * Renders the properties of a plain object, one part per property, for a
-   * container whose closing bracket is indented by `indent`. A key is
-   * rendered as the original value's key: the conversion prefixes a slash to
-   * a key that starts with one and to an unsafe key, and that slash comes
-   * back off here.
+   * container whose closing bracket is indented by `indent`, each value
+   * rendered by `render` (by default, as a converted value). When `unescape`
+   * is `true` (the default), a key is rendered as the original value's key:
+   * the conversion prefixes a slash to a key that starts with one and to an
+   * unsafe key, and that slash comes back off here.
    */
-  #renderProperties(value: FabricPlainObject, indent: string): string[] {
+  #renderProperties(
+    value: Readonly<Record<string, unknown>>,
+    indent: string,
+    render: (value: unknown, indent: string) => string = (v, i) =>
+      this.#renderSubvalue(v as FabricValue, i),
+    unescape = true,
+  ): string[] {
     const inner = this.#innerIndent(indent);
     const separator = (this.#indent === undefined) ? ":" : ": ";
 
     return Object.keys(value).map((key) => {
-      const original = (key[0] === "/") ? key.slice(1) : key;
-      const rendered = this.#renderSubvalue(value[key], inner);
+      const original = (unescape && (key[0] === "/")) ? key.slice(1) : key;
+      const rendered = render(value[key], inner);
       return `${renderKey(original)}${separator}${rendered}`;
     });
   }

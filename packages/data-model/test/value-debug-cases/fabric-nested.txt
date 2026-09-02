@@ -8,11 +8,11 @@
   when: /EpochNsec(1n),
   list: [
     /EpochNsec(2n),
-    /Bytes("0x01")
+    /Bytes(buf [01])
   ],
   deeper: {
     link: /Link(...)
   }
 }
 
-{when:/EpochNsec(1n),list:[/EpochNsec(2n),/Bytes("0x01")],deeper:{link:/Link(...)}}
+{when:/EpochNsec(1n),list:[/EpochNsec(2n),/Bytes(buf [01])],deeper:{link:/Link(...)}}

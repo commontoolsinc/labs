@@ -12,8 +12,8 @@
   "epoch nsec": /EpochNsec(123456789n),
   "epoch nsec, negative": /EpochNsec(-1n),
   "epoch day": /EpochDay(19000),
-  bytes: /Bytes("0x000102feff"),
-  "bytes, empty": /Bytes("0x"),
+  bytes: /Bytes(buf [000102fe ff]),
+  "bytes, empty": /Bytes(buf []),
   regexp: /RegExp(
     source: "ab+c",
     flags: "gi",
@@ -21,7 +21,7 @@
   ),
   hash: /Hash(
     tag: "fid1",
-    hash: "0xd1c04643837606808cda3212bb7b6d73fd1186ee698604439d6caf95759e06ae"
+    hash: buf [d1c04643 83760680 8cda3212 bb7b6d73 fd1186ee 69860443 9d6caf95 759e06ae]
   )
 }
 
