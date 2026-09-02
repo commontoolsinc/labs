@@ -623,11 +623,12 @@ export async function runLane(
         lane.lane === options.lane
       );
       batches = batchesOf(suites, manifest.manifest, mine?.selections ?? []);
-      // An identity costing more than a lane's hard bound runs nowhere,
-      // and a mandatory one that cannot run is a hole in what the pull
-      // request was told it tested. Naming it is what turns that into
-      // something somebody can act on; the sixty-second rule is where
-      // such a test gets split.
+      // A discretionary identity costing more than a lane's hard bound
+      // runs nowhere, because a lane holding it would be killed before it
+      // reported anything. Naming it is what turns that into something
+      // somebody can act on; the sixty-second rule is where such a test
+      // gets split. A mandatory one is placed however much it costs, and
+      // the over-budget line below is where a lane says it ran long.
       unschedulable = laid.unschedulable.map((entry) =>
         `${entry.suite}: ${testIdentityKey(entry.test)} costs ` +
         `${entry.cost.toFixed(0)}s, more than a lane can hold`
