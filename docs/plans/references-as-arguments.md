@@ -60,10 +60,10 @@ second-class:
 | Consumer | Can pass a reference? |
 | --- | --- |
 | LLM tool call (`llm-dialog`) | **yes** — `@link`, resolved before dispatch |
-| `cf call` | **yes** — the link envelope, and the emitted address converted against the declared contract at the dispatch gate |
+| `cf piece call` | **yes** — the link envelope, and the emitted address converted against the declared contract at the dispatch gate |
 | Webhook POST (`sendToStream`, `packages/toolshed/routes/webhooks/`) | no — the raw payload is sent unresolved |
 | [Ingest channels](ingest-channels-journal-sink.md) | no — builds on the same dispatch |
-| `cf exec` and the FUSE projection | **yes** — JSON in, the same gate as `cf call` |
+| `cf exec` and the FUSE projection | **yes** — JSON in, the same gate as `cf piece call` |
 
 The same handler, reached two ways, accepts a reference from one and not the
 other. Nothing about the verb differs; only the door the caller came through.
@@ -125,7 +125,7 @@ the class of operation that must name something that already exists. The
 sharpest is the root pattern's, since every space has one:
 
 ```bash
-$ cf call --piece <root> addPiece '{"piece":"/of:fid1:…"}'
+$ cf piece call --piece <root> addPiece '{"piece":"/of:fid1:…"}'
 ```
 
 `pieces.add` sends to that exact stream from inside the runtime. An LLM can

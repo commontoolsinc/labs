@@ -166,10 +166,10 @@ Deno.test("help colors follow the Cliffy help option", () => {
   try {
     main.reset().help({ colors: false });
     assertFalse(main.getHelp().includes("\x1b["));
-    const pieceGet = main.getCommand("get");
-    assert(pieceGet, "cf get command exists");
+    const cell = main.getCommand("cell");
+    assert(cell, "cf cell command exists");
     assertFalse(
-      pieceGet.getHelp().includes("\x1b["),
+      cell.getHelp().includes("\x1b["),
       "subcommands inherit the root help colors",
     );
     main.reset().help({ colors: true });

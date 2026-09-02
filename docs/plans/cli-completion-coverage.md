@@ -103,7 +103,7 @@ them fills is settled and neither is waiting on anything. Items 8 and 11 hold
 decisions; item 5's `wish` half is declined, because resolving a wish writes.
 
 One defect this list does not enumerate is open and unranked: the cell-path slot
-offers a piece's callables, which `cf get` refuses and redirects to `cf call`.
+offers a piece's callables, which `cf cell get` refuses and redirects to `cf piece call`.
 It is asserted in `completion-over-the-cli.sh` as what happens today. Telling a
 callable from a value at a path needs the verbs listing, which that provider
 does not fetch — so it is a round trip rather than a filter, and that is the
@@ -162,7 +162,7 @@ and so should you. It takes the line and the cursor offset, and prints what the
 shell would have offered:
 
 ```bash
-cf completion complete --shell zsh --line "cf call --piece x " --point 18
+cf completion complete --shell zsh --line "cf piece call --piece x " --point 24
 ```
 
 The shell functions themselves are a separate surface and are exercised by
@@ -210,7 +210,7 @@ so bash globs that fragment and zsh `compset -P`s the flag into `IPREFIX`.
 ### 2. Flags offered past a `stopEarly()` boundary
 
 `resolveCompletionLine` in `lib/completion/line.ts` reads Cliffy's `_stopEarly`
-field, so past the callable name on `cf call` and past the mounted file on
+field, so past the callable name on `cf piece call` and past the mounted file on
 `cf exec` no option slot is reachable and a flag-shaped word does not shift the
 positional index. That keeps the property where the command declares it: a
 third command becoming `stopEarly()` needs no edit in the completion layer.
@@ -252,7 +252,7 @@ arguments from an ordinary string.
 
 This is the half of the list that pays for itself. Every slot in this section
 names something a deployed pattern owns, so the alternative to completing it is
-a call to `cf piece verbs` or `cf get` and a read of what comes back.
+a call to `cf piece verbs` or `cf cell get` and a read of what comes back.
 
 ### 4. Verb flags do not complete
 
@@ -265,7 +265,7 @@ its fields are written directly after the verb, with `--` closing that section
 and opening the read step's.
 
 ```text
-cf call --piece <piece> addItem --ti<TAB>
+cf piece call --piece <piece> addItem --ti<TAB>
 ```
 
 **The candidates and their slot are separable, and only the wiring is left.**
@@ -294,7 +294,7 @@ completing it from the verb's declared result is item 6.
 ### 5. Result field paths for `get`, and why not for `wish`
 
 `--select` takes comma-separated, dot-separated field paths into the value a
-read returns, and `--schema` accepts the same spelling. On `cf get` both
+read returns, and `--schema` accepts the same spelling. On `cf cell get` both
 complete, in the projection's own grammar rather than the
 cell-path one: a list splits on `,` and a path on `.`, where `cellPathCandidates`
 walks `/`. A segment ending in `@` asks for that position's address rather than
@@ -340,7 +340,7 @@ projection past the `--` that closes the callable's section, and therefore
 always after the verb it shapes:
 
 ```text
-cf call --piece <piece> addItem --title x -- --select it<TAB>
+cf piece call --piece <piece> addItem --title x -- --select it<TAB>
 ```
 
 The verb is on the line ahead of the cursor, so the candidates come from the
@@ -609,7 +609,7 @@ here.
 The three questions no table walk can reach are settled there:
 
 - `cellPathCandidates` **follows** a `$link` boundary rather than stopping at
-  it, and the path that crosses one is a path `cf get` reads.
+  it, and the path that crosses one is a path `cf cell get` reads.
 - Every id the `--piece` listing offers is one the same command reads back. The
   converse does not hold and is not a defect: the listing enumerates registered
   pieces, while a child piece is reached by the address its parent's result
@@ -619,7 +619,7 @@ The three questions no table walk can reach are settled there:
   states.
 
 One defect the script found that this list did not enumerate: the cell-path slot
-offers a piece's callables, which `cf get` refuses and redirects to `cf call`.
+offers a piece's callables, which `cf cell get` refuses and redirects to `cf piece call`.
 It is asserted there as what happens today.
 
 ### 19. A gate that fails when a new slot has no decision

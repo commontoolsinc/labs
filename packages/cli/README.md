@@ -86,6 +86,9 @@ generate-bytes | cf view --language binary
 
 ## Cell references
 
+`cf cell` holds the commands that act on a cell: `get` and `set` for its value,
+`get-label` and `set-label` for the CFC label on it. Each takes a reference.
+
 A reference names a cell, and one grammar covers every part of the name:
 
 ```
@@ -120,14 +123,14 @@ the alias does not grow a capability the reference lacks.
 
 ### Writing the target
 
-On `cf get`, `cf set`, and `cf call`, the reference goes in the first
-positional, which is the spelling to reach for: a reference begins with `/` and
-a relative path never does, so the two positions cannot collide.
+On `cf cell get`, `cf cell set`, and `cf piece call`, the reference goes in the
+first positional, which is the spelling to reach for: a reference begins with
+`/` and a relative path never does, so the two positions cannot collide.
 
 ```
-cf get /tracker items/0/title
-cf get /@my-space/tracker/items/0 title
-cf call /tracker addItem '{"title":"Milk"}'
+cf cell get /tracker items/0/title
+cf cell get /@my-space/tracker/items/0 title
+cf piece call /tracker addItem '{"title":"Milk"}'
 ```
 
 `--cell` takes the same word where a flag suits better, and is where the bare
@@ -144,10 +147,10 @@ reference, and both are read on exactly as if they had been written, so
 `--url https://cf.dev/my-space/tracker/items` means
 `--api-url https://cf.dev /@my-space/tracker/items`.
 
-Those three are top-level commands: reading and writing cells is not a
-piece-management concern, and the spelling says so. They were once mounted under
-`cf piece` as well; those spellings are removed
-(docs/plans/cli-surface-shape.md, step 6b).
+Those three each sit under the noun they act on: `get` and `set` name a cell, so
+they are `cf cell` subcommands, while `call` invokes a verb on a piece and is a
+`cf piece` one. The bare `cf get`, `cf set` and `cf call` still answer, hidden
+and superseded — see [Superseded spellings](#superseded-spellings).
 
 A target may also end in `#argument`, which selects the piece's arguments cell
 the way `--input` does — on a reference, on a bare id, and on a slug alike,
@@ -163,10 +166,10 @@ does — a positional address, or `--cell` — carrying the suffix like any othe
 `cf piece apply` replaces a piece's whole input rather than one path within it.
 It validates the document against the pattern's `argumentSchema` and re-executes
 the pattern with it, so a field the schema requires and the document omits is
-refused before anything is written. `cf set` writes at one path and validates
-only that path, which makes the two different operations on the same cell: reach
-for `apply` when the new input is a whole document, and for `set` when it is one
-value in a document that is otherwise correct.
+refused before anything is written. `cf cell set` writes at one path and
+validates only that path, which makes the two different operations on the same
+cell: reach for `apply` when the new input is a whole document, and for `set`
+when it is one value in a document that is otherwise correct.
 
 ## Piece discovery
 
@@ -301,27 +304,27 @@ standard error and continues searching that piece and the rest of the space.
 
 ## Piece CFC labels
 
-`cf piece get-label` returns the effective CFC label view for a result path.
-Pass `--input` to select the input cell — a `--cell` value ending in `#argument`
+`cf cell get-label` returns the effective CFC label view for a result path. Pass
+`--input` to select the input cell — a `--cell` value ending in `#argument`
 selects it too. The paths in the returned view are relative to the selected
 path, and the view includes declared, derived, and link-carried labels. An
 unlabeled value returns JSON `null`.
 
 ```bash
-cf piece get-label --cell ID messages/0/body
-cf piece get-label --cell ID credentials --input
+cf cell get-label --cell ID messages/0/body
+cf cell get-label --cell ID credentials --input
 ```
 
-`cf piece set-label` reads a declared label update from standard input and
+`cf cell set-label` reads a declared label update from standard input and
 returns the updated effective view. The input is an object with a
 `confidentiality` array, an `integrity` array, or both. An optional `observes`
 field selects `value`, `shape`, `enumerate`, or `followRef` consumption.
 
 ```bash
 echo '{"confidentiality":["team"]}' \
-  | cf piece set-label --cell ID notes
+  | cf cell set-label --cell ID notes
 echo '{"integrity":[],"observes":"value"}' \
-  | cf piece set-label --cell ID draft --input
+  | cf cell set-label --cell ID draft --input
 ```
 
 The command updates the label through the same checked write path used by
@@ -346,12 +349,12 @@ export CF_INVOCATION_SESSION=$(cf invocation-session new)
 
 `new` prints one id on stdout and nothing else, so a command substitution
 captures exactly it. Mint one per agent run and carry it in the environment
-rather than in `--invocation-session <id>`, which every `cf call` also accepts:
-an environment variable stays out of the process listing an argument shows up
-in. A call naming an invocation id with no session in scope is refused: an id is
-replayable only within the session it was chosen in, and a session minted on the
-spot would make the replay name a different invocation. A call naming neither
-gets both, minted for that one call.
+rather than in `--invocation-session <id>`, which every `cf piece call` also
+accepts: an environment variable stays out of the process listing an argument
+shows up in. A call naming an invocation id with no session in scope is refused:
+an id is replayable only within the session it was chosen in, and a session
+minted on the spot would make the replay name a different invocation. A call
+naming neither gets both, minted for that one call.
 
 ## One deployment per process
 
@@ -381,7 +384,7 @@ memo, which names a space once for the life of the process.
 ## Output Conventions
 
 - stdout carries command output only; hints and diagnostics go to stderr.
-  `cf get` prints JSON and represents an absent value as `null`.
+  `cf cell get` prints JSON and represents an absent value as `null`.
 - ANSI colors are emitted only when stdout is a TTY. `--no-color` or
   `NO_COLOR=1` disables them everywhere (including Cliffy help/usage output);
   `FORCE_COLOR=1`/`CLICOLOR_FORCE=1` forces them when piped. The policy is
@@ -393,11 +396,11 @@ memo, which names a space once for the life of the process.
   parse `--quiet` runs' stderr for runtime warnings (Loom's stale-root heal
   greps for `load-pattern-by-identity-source-miss`). Use `--log-level error` to
   drop warnings; the two compose.
-- `cf call` accepts its payload as an inline JSON argument, `-` for stdin, an
-  implicit pipe (no payload argument), or schema-derived flags in the callable's
-  section — directly after the verb, before any `--`.
-- A `cf get` path that doesn't resolve prints a one-line error on stderr and
-  exits 1 — it is a data error, not a usage error. A `piece link` that fails
+- `cf piece call` accepts its payload as an inline JSON argument, `-` for stdin,
+  an implicit pipe (no payload argument), or schema-derived flags in the
+  callable's section — directly after the verb, before any `--`.
+- A `cf cell get` path that doesn't resolve prints a one-line error on stderr
+  and exits 1 — it is a data error, not a usage error. A `piece link` that fails
   validation (a source/target piece or path that doesn't exist) reports the same
   way.
 - The launcher spawns the child CLI with `deno run --quiet` so Deno's own
@@ -405,9 +408,9 @@ memo, which names a space once for the life of the process.
 
 ### What a call refuses before it dispatches
 
-`cf call` judges the payload against the verb's declared event schema before
-anything is sent, so a refusal costs nothing: the invocation id was never spent
-and the corrected retry can reuse it.
+`cf piece call` judges the payload against the verb's declared event schema
+before anything is sent, so a refusal costs nothing: the invocation id was never
+spent and the corrected retry can reuse it.
 
 A field the verb does not declare is one of the things it refuses. The runtime
 hands a handler the fields its event schema names and drops the rest, so a
@@ -417,7 +420,7 @@ at, the vocabulary that position takes, and the declared name it is one edit
 from:
 
 ```console
-$ cf call --cell ID addItem '{"titel":"Milk","done":false}'
+$ cf piece call --cell ID addItem '{"titel":"Milk","done":false}'
 Invalid input for "addItem": "titel" at <event> is not a field this verb
 declares. Did you mean "title"? <event> takes "title", "done"
 ```
@@ -450,9 +453,9 @@ passed over — a payload need satisfy only one branch — and so is a position
 marked as a cell or a stream, which may hold a link rather than a value. A call
 reaching either goes out rather than being refused on a guess.
 
-The declared vocabulary is what `cf call --cell ID <verb> --help` prints, which
-is the list to check when a field comes back refused. It names the fields the
-verb's handler READS, which can be fewer than its TypeScript event type
+The declared vocabulary is what `cf piece call --cell ID <verb> --help` prints,
+which is the list to check when a field comes back refused. It names the fields
+the verb's handler READS, which can be fewer than its TypeScript event type
 declares: a field the body never touches is one the runtime would have dropped,
 and the refusal says so rather than accepting it and losing it.
 
@@ -469,23 +472,24 @@ them takes the same three flags — `--filter`, `--select` and `--schema` — wi
 the same grammar, the same conflict rule and the same error messages. The
 vocabulary is learned once and written wherever you arrived from.
 
-`cf get` filters an array before it reaches stdout and projects the result to a
-smaller shape:
+`cf cell get` filters an array before it reaches stdout and projects the result
+to a smaller shape:
 
 ```bash
-cf get --cell ID items --filter '.status == "open"'
-cf get --cell ID items \
+cf cell get --cell ID items --filter '.status == "open"'
+cf cell get --cell ID items \
   --filter '.status == "open" and .score >= 10' \
   --select id,title,author.name
 ```
 
-`cf call` writes them **past the `--` that closes the callable's section**. The
-callable name opens that section, so everything between the two belongs to the
-verb, and a projection reaches the read step by stepping past the marker:
+`cf piece call` writes them **past the `--` that closes the callable's
+section**. The callable name opens that section, so everything between the two
+belongs to the verb, and a projection reaches the read step by stepping past the
+marker:
 
 ```bash
-cf call --cell ID addTopic '{"title":"Ship it"}' -- --select topic.title
-cf call --cell ID listTopics -- --filter '.status == "open"'
+cf piece call --cell ID addTopic '{"title":"Ship it"}' -- --select topic.title
+cf piece call --cell ID listTopics -- --filter '.status == "open"'
 ```
 
 `wish` writes them beside the target it resolves:
@@ -508,9 +512,9 @@ shape on every command that has them, and the marker appears exactly where
 something else owns flags in between:
 
 ```text
-cf get  <addr> [path]           --select …
+cf cell get  <addr> [path]           --select …
 cf wish <target>                --select …
-cf call <target> <verb> <input> -- --select …
+cf piece call <target> <verb> <input> -- --select …
 cf exec <mountedFile> <input>   -- --select …
 ```
 
@@ -527,12 +531,12 @@ for the `cf exec` spelling when you want to shape what comes back.
 Everything below describes all four. What differs is only what the selection is
 about:
 
-| Command   | What the selection shapes                                                                                |
-| --------- | -------------------------------------------------------------------------------------------------------- |
-| `cf get`  | the value at the cell its address and path name                                                          |
-| `cf call` | the **result of the call** — a handler's `result` inside the Invocation JSON, or a tool's JSON on stdout |
-| `wish`    | the cell the query resolved to, before the walk that strips handles                                      |
-| `exec`    | the same result `cf call` shapes, for the verb the mounted file names                                    |
+| Command         | What the selection shapes                                                                                |
+| --------------- | -------------------------------------------------------------------------------------------------------- |
+| `cf cell get`   | the value at the cell its address and path name                                                          |
+| `cf piece call` | the **result of the call** — a handler's `result` inside the Invocation JSON, or a tool's JSON on stdout |
+| `wish`          | the cell the query resolved to, before the walk that strips handles                                      |
+| `exec`          | the same result `cf piece call` shapes, for the verb the mounted file names                              |
 
 See [what a selection means for a call](#what-a-selection-means-for-a-call) for
 the cases where the call's difference shows. `exec` is the same invocation
@@ -682,7 +686,7 @@ A projection marks a position to get that position's address rather than what is
 behind it. A JSON `--schema` marks with `"$link": true`:
 
 ```bash
-cf get --cell ID notes --schema '{"type":"array","items":{"$link":true}}'
+cf cell get --cell ID notes --schema '{"type":"array","items":{"$link":true}}'
 ```
 
 ```json
@@ -690,13 +694,13 @@ cf get --cell ID notes --schema '{"type":"array","items":{"$link":true}}'
 ```
 
 The address is one string in the fabric's reference syntax —
-`/[@space/]<piece>[@scope][/path]` — which is exactly what `cf call` and
-`cf get` take in the positional they read a target from, scheme included, so an
-address emitted by one command composes into the next unchanged, without being
-reassembled. The space rides in front as `@did:key:…` only when it differs from
-the space the command targeted, the scope follows the id as `@user`/`@session`
-only when it is not the default, and the path follows as ordinary segments. No
-schema is inlined and no write-redirect flag rides along.
+`/[@space/]<piece>[@scope][/path]` — which is exactly what `cf piece call` and
+`cf cell get` take in the positional they read a target from, scheme included,
+so an address emitted by one command composes into the next unchanged, without
+being reassembled. The space rides in front as `@did:key:…` only when it differs
+from the space the command targeted, the scope follows the id as
+`@user`/`@session` only when it is not the default, and the path follows as
+ordinary segments. No schema is inlined and no write-redirect flag rides along.
 
 **Every address this CLI publishes is that one string** — a `$link` marker's
 value, a `--select` suffix's, a `--show-links` entry's, and the Invocation
@@ -727,7 +731,7 @@ A field list marks with a trailing `@`, which is that same marker at the
 position the segment names:
 
 ```bash
-cf get --cell ID --select 'topic@,topic.title'
+cf cell get --cell ID --select 'topic@,topic.title'
 ```
 
 ```json
@@ -746,7 +750,7 @@ array the answer is one address per element, so `notes@` is the concise spelling
 of `{"type":"array","items":{"$link":true}}`:
 
 ```bash
-cf get --cell ID --select 'notes@'
+cf cell get --cell ID --select 'notes@'
 ```
 
 ```json
@@ -764,7 +768,7 @@ A path that is only `@` names the position the read is already at, which no
 field path reaches because it sits above every field:
 
 ```bash
-cf get --cell ID topic --select '@,title'
+cf cell get --cell ID topic --select '@,title'
 ```
 
 ```json
@@ -795,13 +799,13 @@ result is read off the cell the tool wrote. Use a selection to control what
 reaches stdout, not to control what travels.
 
 A selection also couples the call to graph quiescence. The shaped readback runs
-through the same shared read step as `cf get`, and that step awaits the CLI
+through the same shared read step as `cf cell get`, and that step awaits the CLI
 runtime's global idle plus storage sync before answering — while the plain call
 acknowledges at its own handling's commit. On a piece with heavy derived state,
 a shaped call can therefore wait on unrelated recomputation the handler
 triggered elsewhere in the graph. When that wait matters, shape the collect
 instead: call plain (or `--no-wait`), then
-`cf get --cell <receipt id> --select …`.
+`cf cell get --cell <receipt id> --select …`.
 
 Three cases follow from that:
 
@@ -816,7 +820,7 @@ Three cases follow from that:
   The refusal names the flags that need the readback, alongside `--show-links`
   for the same reason. What it still returns is the envelope's `receipt` — the
   address of the cell holding the outcome, known at commit — so the shaping
-  flags apply to the `cf get` that collects it.
+  flags apply to the `cf cell get` that collects it.
 - **`--show-links` composes with a projection, not with `--filter`.** Links are
   collected after the selection, over exactly the value the caller is holding: a
   projection leaves every surviving path where it was, so each address still
@@ -981,7 +985,7 @@ errors go to stderr. If a command does not support `--json`, it rejects the
 option without printing command help to stdout. Static `--help` and `--json`
 cannot be combined. Callable schema help is the exception because it is JSON:
 use `cf exec <mounted-file> --help --json` or
-`cf call ... <callable> --help --json`.
+`cf piece call ... <callable> --help --json`.
 
 The supported output switches are:
 
@@ -1008,7 +1012,7 @@ The supported output switches are:
   `piece render --watch --json` writes only JSON render records to stdout; watch
   status goes to stderr. Rendering a piece without a UI fails instead of
   returning an empty successful JSON stream.
-- `cf get` and `cf wish` always return JSON. Their `--json` options are
+- `cf cell get` and `cf wish` always return JSON. Their `--json` options are
   accepted, documented no-ops for callers that select JSON explicitly.
 - `cf check --json` compiles without evaluating and prints one object with a
   `files` array. Each entry has the input `path` and the compiled module bodies
@@ -1019,48 +1023,79 @@ exclusive stdout modes. The command buffers all three modes until every input
 succeeds. A failure therefore leaves stdout empty instead of mixing successful
 output with later errors.
 
-For `cf exec`, `--json` belongs after the mounted callable path. For `cf call`,
-it belongs after the callable name. In both commands, it selects complete JSON
-input — and in both, that is the opposite side of the callable from where the
-read options go, which shape what comes back rather than what goes in:
+For `cf exec`, `--json` belongs after the mounted callable path. For
+`cf piece call`, it belongs after the callable name. In both commands, it
+selects complete JSON input — and in both, that is the opposite side of the
+callable from where the read options go, which shape what comes back rather than
+what goes in:
 
 ```bash
 cf exec /tmp/cf/home/pieces/notes/result/search.tool --json '{"query":"milk"}'
 printf '%s' '{"query":"milk"}' |
   cf exec /tmp/cf/home/pieces/notes/result/search.tool --json
 
-cf call ... search --json '{"query":"milk"}'
-printf '%s' '{"query":"milk"}' | cf call ... search --json
+cf piece call ... search --json '{"query":"milk"}'
+printf '%s' '{"query":"milk"}' | cf piece call ... search --json
 ```
 
 Bare `--json` reads stdin. An inline value immediately after it is parsed as the
-complete input. `cf call` also accepts a single positional JSON value.
+complete input. `cf piece call` also accepts a single positional JSON value.
 Schema-derived piece-call flags are written in the section the callable name
-opened, for example `cf call ... search --query milk`, and `--json-file <path>`
-stands in the same place. These rules keep the options before the callable name
-for `cf call` itself and the arguments after the name for the invoked callable.
+opened, for example `cf piece call ... search --query milk`, and
+`--json-file <path>` stands in the same place. These rules keep the options
+before the callable name for `cf piece call` itself and the arguments after the
+name for the invoked callable.
 
-`--` belongs to the commands that have a callable section to close. On `cf call`
-and `cf exec` it closes the section the callable name opened and opens the read
-step's, so the only words that follow it are `--select`, `--schema` and
-`--filter`; anything else there is refused with the line that puts it back in
-the section. `--help` is the exception, and deliberately: written past the
-marker it still reaches the callable and prints that verb's own page, since a
-caller wanting this command's page writes it with no verb at all.
+`--` belongs to the commands that have a callable section to close. On
+`cf piece call` and `cf exec` it closes the section the callable name opened and
+opens the read step's, so the only words that follow it are `--select`,
+`--schema` and `--filter`; anything else there is refused with the line that
+puts it back in the section. `--help` is the exception, and deliberately:
+written past the marker it still reaches the callable and prints that verb's own
+page, since a caller wanting this command's page writes it with no verb at all.
 
-`cf get`, `cf set` and `cf wish` have no callable section, so a `--` written on
-one of those is refused rather than read: the parser sets every word after it
-aside, and the command would otherwise return a value the caller did not ask for
-and exit zero. The refusal names the words that were set aside and the line that
-works.
+`cf cell get`, `cf cell set` and `cf wish` have no callable section, so a `--`
+written on one of those is refused rather than read: the parser sets every word
+after it aside, and the command would otherwise return a value the caller did
+not ask for and exit zero. The refusal names the words that were set aside and
+the line that works.
 
 ## Command visibility
 
-Every registered top-level command appears in `cf --help`. The direct
-`fuse-daemon` and `fuse-supervisor` entry points are visible because packaged
-launchers use them. Shell completion is the exception: it drops commands whose
+A registered command appears in `cf --help` unless it is one of the two kinds
+below. The direct `fuse-daemon` and `fuse-supervisor` entry points are visible
+because packaged launchers use them. Shell completion drops commands whose
 description opens with `Internal:`, because those are spawned by `cf fuse` and
 never typed at a prompt.
+
+### Superseded spellings
+
+Each command sits under the noun it acts on. Where that moved a command, the
+spelling it had is still accepted and still completes its own flags and
+arguments, so a script written against it keeps working; it is hidden from
+`cf --help` and never offered as a completion, and a run that reaches it says on
+stderr what to write instead — its help page included, whether `--help` asked
+for that page or a refusal printed it, since the page is otherwise a screen of
+examples in the spelling that is going away. A line refused during argument
+parsing never reaches the command, and carries the notice only where the refusal
+prints a help page with it — the reads that reserve stdout for machine-readable
+output print none, so `cf get --bogus` says nothing. **These spellings are not
+guaranteed to work after 2026-09-11**, so migrate before then: a later change
+removes them, and nothing holds them open past that date.
+
+| Write this               | Instead of               |
+| ------------------------ | ------------------------ |
+| `cf cell get`            | `cf get`                 |
+| `cf cell set`            | `cf set`                 |
+| `cf cell get-label`      | `cf piece get-label`     |
+| `cf cell set-label`      | `cf piece set-label`     |
+| `cf piece call`          | `cf call`                |
+| `cf space recreate-root` | `cf piece recreate-root` |
+| `cf space set-home`      | `cf piece set-home`      |
+
+This is a migration aid rather than a second surface: nothing here teaches the
+right column as an alternative spelling to keep using. `--piece` is a different
+case — a deprecated name for `--cell` that carries no end date and no notice.
 
 ## Evaluating patterns from another tool
 
@@ -1218,9 +1253,9 @@ such as `--log-level` — plus live values read from the fabric:
 | Slot                                                         | Completes to                                                  |
 | ------------------------------------------------------------ | ------------------------------------------------------------- |
 | `--cell`                                                     | the space's slugs, then its piece ids                         |
-| `cf call <callable>`                                         | the piece's callables, annotated with the doc comment on each |
-| `cf get`/`cf set <path>`                                     | cell keys, one path segment at a time                         |
-| `cf get --select`/`--schema`                                 | field paths into the value, and their `@` form                |
+| `cf piece call <callable>`                                   | the piece's callables, annotated with the doc comment on each |
+| `cf cell get`/`cf cell set <path>`                           | cell keys, one path segment at a time                         |
+| `cf cell get --select`/`--schema`                            | field paths into the value, and their `@` form                |
 | `piece set-slug <slug>`                                      | the space's slugs                                             |
 | `piece link <source>/<target>`                               | `pieceId/path/to/field` endpoints                             |
 | `--space`, a positional space                                | space DIDs of local memory-v2 stores                          |
@@ -1251,10 +1286,10 @@ wherever it is not the whole argument: written alone it is a boolean JSON Schema
 to `--schema` and refused by `--select`, and written as `revision,true` it is an
 ordinary name to both. Completion restates none of that — it puts each
 prospective candidate back through the flag's own parser and offers what comes
-back as a field list, so the two sets cannot drift. `cf call`'s and `cf exec`'s
-projections shape a verb's result rather than the piece's root, and are not
-completed from it; `cf wish`'s resolution writes to the space, and a Tab must
-not.
+back as a field list, so the two sets cannot drift. `cf piece call`'s and
+`cf exec`'s projections shape a verb's result rather than the piece's root, and
+are not completed from it; `cf wish`'s resolution writes to the space, and a Tab
+must not.
 
 An option name can mean two things on two commands, so the ones that do are
 completed per command rather than by name. `--root` is a source directory on the
@@ -1286,19 +1321,19 @@ bare id, the slug, the reference (space-qualified or not, with an embedded
 path), and a reference written positionally in place of the flag — each of them
 carrying the `@scope` and `#argument` suffixes.
 
-Past a `stopEarly()` boundary — after `cf call`'s callable name, after
+Past a `stopEarly()` boundary — after `cf piece call`'s callable name, after
 `cf exec`'s mounted file — nothing is offered. The CLI's own flags are refused
 there, so offering them would name something the command rejects; the words that
 do belong there are the callable's, and completing those is not yet built.
 
 Live values need an identity and an api-url. Both are read from the line being
 typed (`-i`, `-a`, `-u`) before falling back to `CF_IDENTITY`/`CF_API_URL`, so
-`cf call -s other-space --cell <TAB>` lists that space's pieces rather than the
-environment's. A space DID embedded in a reference supplies one the line did not
-name. When nothing is resolvable, or the server is unreachable, completion
-yields nothing — it never prints an error into the command line. Each request
-costs one CLI invocation plus one round trip, so value completion is as fast as
-the fabric it queries.
+`cf piece call -s other-space --cell <TAB>` lists that space's pieces rather
+than the environment's. A space DID embedded in a reference supplies one the
+line did not name. When nothing is resolvable, or the server is unreachable,
+completion yields nothing — it never prints an error into the command line. Each
+request costs one CLI invocation plus one round trip, so value completion is as
+fast as the fabric it queries.
 
 A path-shaped slot — a cell path, a link endpoint, a projection path — completes
 one segment at a time and holds the cursor for the next separator. bash gets

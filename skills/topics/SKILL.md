@@ -54,7 +54,7 @@ The running piece is authoritative. Orient before mutating it:
 ```bash
 cf piece describe --cell "$TOPICS_BOARD"
 cf piece verbs --cell "$TOPICS_BOARD" --json
-cf call --cell "$TOPICS_BOARD" addTopic --help --json
+cf piece call --cell "$TOPICS_BOARD" addTopic --help --json
 ```
 
 The deployment can be well behind the checkout the CLI runs from, and that gap
@@ -99,8 +99,7 @@ retained deliberately.
 
 `editComment` and `removeComment` name their target by REFERENCE, and a comment
 is not a piece: it has no fid to write into an inline JSON event, so these are
-reachable from a reader that holds the row, not from a bare `cf
-call`.
+reachable from a reader that holds the row, not from a bare `cf piece call`.
 `removeLink` is the exception and takes `url` for exactly that reason,
 retracting the most recently added link still present with that URL — so
 retracting twice retracts two rather than re-stamping one.
@@ -111,7 +110,7 @@ Survey through the compact `index`. Its rows are Topics, and `@` asks for each
 row's canonical address without expanding its body, thread, or verbs:
 
 ```bash
-cf get "$TOPICS_BOARD" index --step \
+cf cell get "$TOPICS_BOARD" index --step \
   --select @,title,createdAt,lastActivityAt,commentCount,createdBy.kind,createdBy.name
 ```
 
@@ -137,11 +136,11 @@ evidence the edge is wrong.
 Read one Topic's durable input before changing it:
 
 ```bash
-cf get --cell "$TOPIC" title --input
-cf get --cell "$TOPIC" body --input
-cf get --cell "$TOPIC" comments --input \
+cf cell get --cell "$TOPIC" title --input
+cf cell get --cell "$TOPIC" body --input
+cf cell get --cell "$TOPIC" comments --input \
   --select sentAt,author.kind,author.name,body
-cf get --cell "$TOPIC" links --input \
+cf cell get --cell "$TOPIC" links --input \
   --select kind,url,label,addedAt,addedBy.kind,addedBy.name
 ```
 
@@ -162,7 +161,7 @@ project the returned Topic to its address:
 
 ```bash
 export CF_INVOCATION_SESSION="$(cf invocation-session new)"
-CREATE="$(cf call --cell "$TOPICS_BOARD" \
+CREATE="$(cf piece call --cell "$TOPICS_BOARD" \
   --invocation '<unique-topic-create-id>' \
   addTopic \
   '{"title":"<title>","body":"<initial living document>","agentName":"Sol"}' \
@@ -190,8 +189,8 @@ creating another Topic. Retrying on the strength of a timeout is how one Topic
 becomes two.
 
 ```bash
-cf get "$TOPICS_BOARD" index --step --select @,title
-cf get --cell "$TOPIC" title --input
+cf cell get "$TOPICS_BOARD" index --step --select @,title
+cf cell get --cell "$TOPIC" title --input
 ```
 
 Use one invocation session per agent run and an explicit invocation id per
@@ -202,13 +201,13 @@ pair. The full retry and receipt model is in `skills/cf/SKILL.md` and
 ## Update through Topic verbs
 
 ```bash
-cf call --cell "$TOPIC" --invocation '<unique-set-title-id>' setTitle \
+cf piece call --cell "$TOPIC" --invocation '<unique-set-title-id>' setTitle \
   '{"title":"<complete new title>","agentName":"Sol"}'
-cf call --cell "$TOPIC" --invocation '<unique-set-body-id>' setBody \
+cf piece call --cell "$TOPIC" --invocation '<unique-set-body-id>' setBody \
   '{"body":"<complete revised body>","agentName":"Sol"}'
-cf call --cell "$TOPIC" --invocation '<unique-add-comment-id>' addComment \
+cf piece call --cell "$TOPIC" --invocation '<unique-add-comment-id>' addComment \
   '{"body":"<point-in-time update>","agentName":"Sol"}'
-cf call --cell "$TOPIC" --invocation '<unique-add-link-id>' addLink \
+cf piece call --cell "$TOPIC" --invocation '<unique-add-link-id>' addLink \
   '{"url":"<PR URL>","kind":"pr","label":"<label>","agentName":"Sol"}'
 ```
 
@@ -227,9 +226,9 @@ the index row for the Topic being referenced:
 
 ```bash
 export OTHER_TOPIC='<canonical /of:... address from another index row>'
-cf call --cell "$TOPIC" --invocation '<unique-mention-id>' mention \
+cf piece call --cell "$TOPIC" --invocation '<unique-mention-id>' mention \
   "{\"topic\":\"$OTHER_TOPIC\"}"
-cf call --cell "$TOPIC" --invocation '<unique-unmention-id>' unmention \
+cf piece call --cell "$TOPIC" --invocation '<unique-unmention-id>' unmention \
   "{\"topic\":\"$OTHER_TOPIC\"}"
 ```
 

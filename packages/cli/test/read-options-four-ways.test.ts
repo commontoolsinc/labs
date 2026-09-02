@@ -2,8 +2,8 @@
  * The exit criterion of the read options: **the same cell, reached four ways,
  * renders identically under the same selection.**
  *
- * One cell is seeded once. Each of the four arrivals — `cf get`,
- * `cf call`, `cf wish`, `cf exec` — is driven at its own outermost
+ * One cell is seeded once. Each of the four arrivals — `cf cell get`,
+ * `cf piece call`, `cf wish`, `cf exec` — is driven at its own outermost
  * in-process seam against that cell, under one selection, and the four
  * SELECTED VALUES are compared byte for byte. A vocabulary that answers from
  * two starting points and silently does nothing from the other two teaches a
@@ -170,7 +170,7 @@ describe("read options, four ways", () => {
     return { pieces, piece };
   }
 
-  /** `cf get <piece>` — the read that arrives by address. */
+  /** `cf cell get <piece>` — the read that arrives by address. */
   async function viaPieceGet(
     profile: Cell<unknown>,
     selection: CellSelection,
@@ -193,7 +193,7 @@ describe("read options, four ways", () => {
     );
   }
 
-  /** `cf call <verb>` — the read that arrives through a verb's receipt. */
+  /** `cf piece call <verb>` — the read that arrives through a verb's receipt. */
   async function viaPieceCall(
     profile: Cell<unknown>,
     selection: CellSelection,

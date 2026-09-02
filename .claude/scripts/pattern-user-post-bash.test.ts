@@ -69,7 +69,7 @@ describe("pattern-user-post-bash", () => {
     it("warns when a custom home pattern omits attached tests", () => {
       expect(
         suggestionForPatternUserCommand(
-          "cf piece set-home --identity key main.tsx",
+          "cf space set-home --identity key main.tsx",
         ),
       ).toContain("No tests were attached");
     });
@@ -77,7 +77,7 @@ describe("pattern-user-post-bash", () => {
     it("does not require tests when resetting the home pattern", () => {
       expect(
         suggestionForPatternUserCommand(
-          "cf piece set-home --identity key --reset",
+          "cf space set-home --identity key --reset",
         ),
       ).toBe("");
     });
@@ -308,7 +308,7 @@ describe("pattern-user-post-bash", () => {
     it("does not let a reset exempt another custom home deployment", () => {
       expect(
         suggestionForPatternUserCommand(
-          "cf piece set-home --reset; cf piece set-home main.tsx",
+          "cf space set-home --reset; cf space set-home main.tsx",
         ),
       ).toContain("No tests were attached");
     });
@@ -342,8 +342,39 @@ describe("pattern-user-post-bash", () => {
 
     it("keeps the recomputation guidance for state writes", () => {
       expect(
-        suggestionForPatternUserCommand("cf set --piece ID title"),
+        suggestionForPatternUserCommand("cf cell set --piece ID title"),
       ).toContain("Run 'cf piece step'");
+    });
+
+    it("says nothing for a verb under a noun that does not carry it", () => {
+      // The nouns and the verbs are matched as pairs, not as two independent
+      // sets. Matched separately, every guided verb answers under every noun,
+      // and the hook advises on lines the CLI refuses: `cf space set` gets the
+      // recomputation note and `cf cell new` the deployment one.
+      for (
+        const command of [
+          "cf space set x",
+          "cf space new main.tsx",
+          "cf space inspect --piece ID",
+          "cf cell new main.tsx",
+          "cf cell setsrc main.tsx",
+          "cf piece set --piece ID title",
+        ]
+      ) {
+        expect(suggestionForPatternUserCommand(command), command).toBe("");
+      }
+    });
+
+    it("advises on both spellings of a command that moved", () => {
+      // `set-home` moved to `cf space` and answers under `cf piece` until its
+      // removal date, so the guidance follows the command rather than the
+      // spelling a caller reached it by.
+      for (const noun of ["space", "piece"]) {
+        expect(
+          suggestionForPatternUserCommand(`cf ${noun} set-home main.tsx`),
+          noun,
+        ).toContain("verify the custom home pattern");
+      }
     });
 
     it("still ignores a bare cf whose next word carries no guidance", () => {
@@ -351,7 +382,7 @@ describe("pattern-user-post-bash", () => {
       // claim a verb this hook has nothing to say about.
       expect(suggestionForPatternUserCommand("cf test")).toBe("");
       expect(suggestionForPatternUserCommand("cf wish '#topic'")).toBe("");
-      expect(suggestionForPatternUserCommand("cf get --piece ID title")).toBe("");
+      expect(suggestionForPatternUserCommand("cf cell get --piece ID title")).toBe("");
     });
 
     it("returns no suggestion for unrelated commands", () => {

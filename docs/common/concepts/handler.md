@@ -6,7 +6,7 @@ Use `handler()` when you need to define event-handling logic once and bind it to
 
 1. **Same logic, different state** - You want to reuse identical handler logic with different state
 2. **Exported streams** - Other patterns need to call your handler via linking
-3. **CLI testing** - You want to test handlers via `cf call` before building UI
+3. **CLI testing** - You want to test handlers via `cf piece call` before building UI
 
 ## Basic Structure
 
@@ -182,7 +182,7 @@ Export handlers to test them via CLI during development:
 
 ```bash
 # Call a handler with JSON payload (flags go before the callable name)
-deno task cf call --cell <ID> addItem '{"title": "Test"}'
+deno task cf piece call --cell <ID> addItem '{"title": "Test"}'
 
 # Step to process
 deno task cf piece step --cell <ID>

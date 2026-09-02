@@ -470,7 +470,7 @@ describe("parseExecArgs", () => {
         parseExecArgs(
           spec,
           ["--select", "topic.title", "--title", "Ship it"],
-          "cf call ... addTopic",
+          "cf piece call ... addTopic",
         );
       } catch (error) {
         return (error as Error).message;
@@ -479,10 +479,10 @@ describe("parseExecArgs", () => {
     })();
     expect(message).toContain('"--select" is a `cf` read option');
     expect(message).toContain(
-      "written:  cf call ... addTopic --select topic.title --title 'Ship it'",
+      "written:  cf piece call ... addTopic --select topic.title --title 'Ship it'",
     );
     expect(message).toContain(
-      "write:    cf call ... addTopic --title 'Ship it' -- --select topic.title",
+      "write:    cf piece call ... addTopic --title 'Ship it' -- --select topic.title",
     );
   });
 
@@ -519,7 +519,7 @@ describe("parseExecArgs", () => {
         parseExecArgs(
           spec,
           ["--filter", "mine", "--select", "title"],
-          "cf call ... findItems",
+          "cf piece call ... findItems",
         );
       } catch (error) {
         return (error as Error).message;
@@ -527,7 +527,7 @@ describe("parseExecArgs", () => {
       return "";
     })();
     expect(message).toContain(
-      "write:    cf call ... findItems --filter mine -- --select title",
+      "write:    cf piece call ... findItems --filter mine -- --select title",
     );
   });
 
@@ -559,7 +559,7 @@ describe("parseExecArgs", () => {
           parseExecArgs(
             spec,
             ["--value", "Ship", "--select", "topic.title"],
-            "cf call ... setTitle",
+            "cf piece call ... setTitle",
           );
         } catch (error) {
           return (error as Error).message;
@@ -568,7 +568,7 @@ describe("parseExecArgs", () => {
       })();
       expect(message).toContain('"--select" is a `cf` read option');
       expect(message).toContain(
-        "write:    cf call ... setTitle --value Ship -- --select topic.title",
+        "write:    cf piece call ... setTitle --value Ship -- --select topic.title",
       );
     }
 
@@ -578,9 +578,9 @@ describe("parseExecArgs", () => {
       refusalFrom(
         makeSpec("handler", { type: "string" }),
         ["invoke", "--filter", "open"],
-        "cf call ... setTitle",
+        "cf piece call ... setTitle",
       ),
-    ).toContain("write:    cf call ... setTitle invoke -- --filter open");
+    ).toContain("write:    cf piece call ... setTitle invoke -- --filter open");
   });
 
   it("takes a flag-shaped word after `--value` as the value it is", () => {
@@ -615,10 +615,12 @@ describe("parseExecArgs", () => {
       refusalFrom(
         spec,
         ["--json", "--select", "topic.title"],
-        "cf call ... scalar",
+        "cf piece call ... scalar",
       ),
     )
-      .toContain("write:    cf call ... scalar --json -- --select topic.title");
+      .toContain(
+        "write:    cf piece call ... scalar --json -- --select topic.title",
+      );
     // And still spends a payload that is not flag-shaped.
     expect(parseExecArgs(spec, ["--json", '"hi"']).input).toBe("hi");
   });
@@ -637,10 +639,10 @@ describe("parseExecArgs", () => {
       refusalFrom(
         spec,
         ["--title", "--select", "--schema", "topic"],
-        "cf call ... addItem",
+        "cf piece call ... addItem",
       ),
     ).toContain(
-      "write:    cf call ... addItem --title --select -- --schema topic",
+      "write:    cf piece call ... addItem --title --select -- --schema topic",
     );
   });
 
@@ -655,20 +657,20 @@ describe("parseExecArgs", () => {
       refusalFrom(
         spec,
         ["--draft", "--select", "topic.title"],
-        "cf call ... addItem",
+        "cf piece call ... addItem",
       ),
     ).toContain(
-      "write:    cf call ... addItem --draft -- --select topic.title",
+      "write:    cf piece call ... addItem --draft -- --select topic.title",
     );
     // A negation says which value it means, so it spends no word either.
     expect(
       refusalFrom(
         spec,
         ["--no-draft", "--select", "topic.title"],
-        "cf call ... addItem",
+        "cf piece call ... addItem",
       ),
     ).toContain(
-      "write:    cf call ... addItem --no-draft -- --select topic.title",
+      "write:    cf piece call ... addItem --no-draft -- --select topic.title",
     );
   });
 
@@ -683,10 +685,10 @@ describe("parseExecArgs", () => {
       refusalFrom(
         spec,
         ["--select", "a", "--json", "--filter", "b"],
-        "cf call ... addItem",
+        "cf piece call ... addItem",
       ),
     ).toContain(
-      "write:    cf call ... addItem --json -- --select a --filter b",
+      "write:    cf piece call ... addItem --json -- --select a --filter b",
     );
   });
 });
@@ -1775,7 +1777,7 @@ describe("renderExecHelpJson", () => {
 describe("renderPieceCallHelp", () => {
   it("renders piece-call help with top-level help lines and JSON input", () => {
     const help = renderPieceCallHelp(
-      "cf call ... search",
+      "cf piece call ... search",
       makeSpec(
         "tool",
         {
@@ -1795,17 +1797,17 @@ describe("renderPieceCallHelp", () => {
       ),
     );
 
-    expect(help).toContain("cf call ... search --help");
-    expect(help).toContain("cf call ... search --help --json");
-    expect(help).toContain("cf call ... search <json>");
-    expect(help).toContain("cf call ... search --json [<json>]");
+    expect(help).toContain("cf piece call ... search --help");
+    expect(help).toContain("cf piece call ... search --help --json");
+    expect(help).toContain("cf piece call ... search <json>");
+    expect(help).toContain("cf piece call ... search --json [<json>]");
     // The verb opens the section, so its own flags follow the name with
     // nothing between; the marker appears once, on the read-option line.
     expect(help).toContain(
-      "cf call ... search [run] --query <string>",
+      "cf piece call ... search [run] --query <string>",
     );
-    expect(help).toContain("cf call ... search ... -- --select <fields>");
-    expect(help).not.toContain("cf call ... search -- ");
+    expect(help).toContain("cf piece call ... search ... -- --select <fields>");
+    expect(help).not.toContain("cf piece call ... search -- ");
     expect(help).toContain("JSON input:");
     expect(help).toContain(
       "Pass inline JSON as one positional argument or after `--json`",
@@ -1814,17 +1816,17 @@ describe("renderPieceCallHelp", () => {
     expect(help).toContain("help?: string");
     expect(help).toContain("Flags:");
     expect(help).not.toContain("Read the full input object from stdin.");
-    expect(help).not.toContain("cf call ... search [run] --help");
+    expect(help).not.toContain("cf piece call ... search [run] --help");
   });
 
   it("renders bare usage for schema-less handler piece-call help", () => {
     const help = renderPieceCallHelp(
-      "cf call ... onAddContact",
+      "cf piece call ... onAddContact",
       makeSpec("handler", { asCell: ["stream"] } as JSONSchema),
     );
 
-    expect(help).toContain("cf call ... onAddContact");
-    expect(help).toContain("cf call ... onAddContact invoke");
+    expect(help).toContain("cf piece call ... onAddContact");
+    expect(help).toContain("cf piece call ... onAddContact invoke");
     expect(help).toContain(
       "Invoke alone will call the handler without any inputs.",
     );
@@ -1832,7 +1834,7 @@ describe("renderPieceCallHelp", () => {
 
   it("enumerates a handler's declared result under Output", () => {
     const help = renderPieceCallHelp(
-      "cf call ... addItem",
+      "cf piece call ... addItem",
       makeSpec(
         "handler",
         {
@@ -1867,7 +1869,7 @@ describe("renderPieceCallHelp", () => {
 
   it("names the type of a handler result that is not an object", () => {
     const help = renderPieceCallHelp(
-      "cf call ... rename",
+      "cf piece call ... rename",
       makeSpec(
         "handler",
         { type: "object", properties: { title: { type: "string" } } },
@@ -1892,7 +1894,7 @@ describe("renderPieceCallHelp", () => {
     // the wire and the page. Aligned as the flags are, and a multi-line
     // comment continues under its own first line.
     const help = renderPieceCallHelp(
-      "cf call ... addItem",
+      "cf piece call ... addItem",
       makeSpec(
         "handler",
         { type: "object", properties: { title: { type: "string" } } },
@@ -1927,12 +1929,12 @@ describe("renderPieceCallHelp", () => {
 
   it("mentions no file to write JSON to, there being none in this context", () => {
     const help = renderPieceCallHelp(
-      "cf call ... onAddContact",
+      "cf piece call ... onAddContact",
       makeSpec("handler", { asCell: ["stream"] } as JSONSchema),
     );
 
     // The write-through note belongs to the mounted-file page, which this
-    // renderer shares its body with. `cf call` takes its payload as an
+    // renderer shares its body with. `cf piece call` takes its payload as an
     // argument and mounts nothing, so the sentence would name a file the
     // caller has no way to reach — and it is the last line of the page.
     expect(help).not.toContain("write JSON to this file");
@@ -1945,7 +1947,7 @@ describe("renderPieceCallHelp", () => {
 
   it("carries no Output section for a handler that declares no result", () => {
     const help = renderPieceCallHelp(
-      "cf call ... archive",
+      "cf piece call ... archive",
       makeSpec("handler", { type: "object", properties: {} }),
     );
 

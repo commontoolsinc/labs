@@ -498,7 +498,7 @@ describe("check-command-docs", () => {
       expect(err).toContain("NO_PROSE");
       // The offending commands by name, not a count an operator cannot act
       // on, and the remedy beside them.
-      expect(err).toContain("cf get");
+      expect(err).toContain("cf cell get");
       expect(err).toContain("cf piece survey");
       expect(err).toContain("Either describe the command in a live document");
       expect(err).toContain("tasks/check-command-docs.ts");
@@ -513,7 +513,7 @@ describe("check-command-docs", () => {
         captured = await captureConsole(() => main(["--list"], root));
       });
       expect(captured.code).toBe(0);
-      expect(captured.out).toContain("cf get");
+      expect(captured.out).toContain("cf cell get");
       expect(captured.out).toContain("cf piece survey");
       // The list is the whole of what it prints: no verdict line, because
       // the run passed and the list is not a failure report.

@@ -2,10 +2,10 @@
 
 **Symptom:** A pattern captures photos with `<cf-image-input>` and stores the
 resulting `ImageData` in a persisted cell (e.g. a `PerSpace` array of records).
-The data appears to save (CLI `cf get …/0/someField` works), but in the
+The data appears to save (CLI `cf cell get …/0/someField` works), but in the
 browser the list **renders intermittently or not at all** — the same cell reads
 as a populated array in one `computed()` and as `undefined`/`nil` in another
-during the same render, with no console error. A full `cf get <cell>` may
+during the same render, with no console error. A full `cf cell get <cell>` may
 return nothing (the payload is enormous).
 
 **Cause:** `ImageData.data` is the full image as an inline base64 **data-URL**
@@ -58,6 +58,6 @@ sightings.set([...sightings.get(), { image: light, /* … */ }]);
   into the durable record.
 
 **Verify with:** after saving, reload the piece and confirm the list still
-renders. Reading a tiny field via `cf get <cell>/0/<field>` confirms the
+renders. Reading a tiny field via `cf cell get <cell>/0/<field>` confirms the
 record persisted; an enormous/empty full-cell read is the tell that you inlined
 a blob.

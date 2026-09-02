@@ -1,5 +1,5 @@
 /**
- * Integration tests for `cf get` against a live toolshed. The suite
+ * Integration tests for `cf cell get` against a live toolshed. The suite
  * runs when API_URL names a running toolshed (as in the CI cli-integration
  * jobs) and is skipped otherwise. A throwaway identity keyfile and space are
  * created per run. Run locally with:
@@ -80,7 +80,7 @@ async function waitForContent(
   }
 }
 
-describe("cf get (integration)", { ignore: !API_URL }, () => {
+describe("cf cell get (integration)", { ignore: !API_URL }, () => {
   beforeAll(async () => {
     const { identity, path } = await writeTempIdentity();
     identityPath = path;
@@ -127,20 +127,20 @@ describe("cf get (integration)", { ignore: !API_URL }, () => {
 
   it("bad path exits 1 with Available keys: in output", async () => {
     const { code, stderr } = await integrationCf(
-      `get ${flags} nonexistent`,
+      `cell get ${flags} nonexistent`,
     );
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("Available keys:");
   });
 
   it("good path exits 0 with valid output", async () => {
-    const { code, stdout } = await integrationCf(`get ${flags} content`);
+    const { code, stdout } = await integrationCf(`cell get ${flags} content`);
     expect(code).toBe(0);
     expect(stdout.length).toBeGreaterThan(0);
   });
 
   it("no path returns full result JSON", async () => {
-    const { code, stdout } = await integrationCf(`get ${flags}`);
+    const { code, stdout } = await integrationCf(`cell get ${flags}`);
     expect(code).toBe(0);
     const json = JSON.parse(stdout.join(""));
     expect(typeof json).toBe("object");
@@ -152,7 +152,7 @@ describe("cf get (integration)", { ignore: !API_URL }, () => {
     const sessionFlags =
       `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${sessionResultPieceId}`;
     const { code, stderr } = await integrationCf(
-      `get ${sessionFlags}`,
+      `cell get ${sessionFlags}`,
     );
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("stored data is present");
@@ -167,7 +167,7 @@ describe("cf get (integration)", { ignore: !API_URL }, () => {
     const scopedFlags =
       `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${sessionScopedPieceId}`;
     const { code, stdout, stderr } = await integrationCf(
-      `get ${scopedFlags}`,
+      `cell get ${scopedFlags}`,
     );
     expect(code, stderr.join("\n")).toBe(0);
     const json = JSON.parse(stdout.join(""));
@@ -179,7 +179,7 @@ describe("cf get (integration)", { ignore: !API_URL }, () => {
     const sessionFlags =
       `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${sessionResultPieceId}`;
     const { code, stdout, stderr } = await integrationCf(
-      `get ${sessionFlags} --step`,
+      `cell get ${sessionFlags} --step`,
     );
     expect(code, stderr.join("\n")).toBe(0);
     expect(JSON.parse(stdout.join(""))).toEqual({ value: "session-ready" });

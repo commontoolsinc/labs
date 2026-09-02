@@ -20,10 +20,11 @@ have landed.
 
 | step | state |
 | --- | --- |
-| 1–5 — the shared read step, the read options on every arrival, `--piece` taking the `of:` form, positional addresses with the `#argument` suffix, and `cf get`/`set`/`call` | on main |
+| 1–5 — the shared read step, the read options on every arrival, `--piece` taking the `of:` form, positional addresses with the `#argument` suffix, and the data commands, spelled `cf cell get`/`set` and `cf piece call` since step 7 | on main |
 | 6a — the old spellings warn, each naming its end date | on main |
 | 6b — the old spellings are removed | on main |
-| 7 — the duplicated nouns are merged | not started; it is last because each pair is two working commands |
+| 7 — each command sits under the noun it acts on | on main |
+| 7b — the superseded spellings are removed | not started; they are guaranteed only through 2026-09-11 |
 
 **Arc two — how a caller writes what a command acts on.**
 
@@ -44,8 +45,8 @@ itself part of the problem.
 | --- | --- |
 | **Authoring** — work on source files, never touching a live space | `check`, `test`, `view` (pager), `init`, `deps update` |
 | **Identity and access** — who you are, and who may do what | `id` (new/did/derive/from-mnemonic), `acl` (ls/set/remove) |
-| **Live data** — reading and writing running state | `get`/`set`/`call`, `piece apply`/`link`/`step`/`verbs`/`inspect`/`get-label`/`set-label`, `wish` |
-| **Piece lifecycle** — deploying and managing running programs | `piece new`/`setsrc`/`getsrc`/`rm`/`ls`/`search`/`map`/`set-slug`/`recreate-root`/`set-home` |
+| **Live data** — reading and writing running state | `cell get`/`set`/`get-label`/`set-label`, `piece call`/`apply`/`link`/`step`/`verbs`/`inspect`, `wish` |
+| **Piece and space lifecycle** — deploying and managing running programs, and rebuilding a space's own patterns | `piece new`/`setsrc`/`getsrc`/`rm`/`ls`/`search`/`map`/`set-slug`, `space recreate-root`/`set-home` |
 | **Rendering** — turning things into something to look at | `piece view` (terminal), `piece render` (HTML), `view` (source pager) |
 | **Storage forensics** — reading the database directly, mostly offline (`inspect pull` fetches from a remote) | `inspect` (22 subcommands), `space` (clone/verify/reset/fingerprint) |
 | **Filesystem projection** — exposing cells as files | `fuse` (mount/unmount/status), `exec` |
@@ -82,7 +83,7 @@ of entities and their connections — one live, one offline.
 
 **Two commands, overlapping but not equivalent.** `piece apply` validates a
 whole input against `argumentSchema` and re-executes the pattern with it;
-`cf set` writes at one path. Both target the arguments cell, and the overlap
+`cf cell set` writes at one path. Both target the arguments cell, and the overlap
 invites merging them, but they are not the same operation — which is why any
 merge belongs in the last step rather than among the renames.
 
@@ -131,8 +132,8 @@ with the address suffix (`--select 'topic@,topic.title'`), and leaves "shape"
 free as the word for what a caller asks for — covering both spellings rather
 than competing with one of them.
 
-Both spellings are carried on every command that reads — `get`, `call`,
-`wish` and `exec` — and a command naming both is refused rather
+Both spellings are carried on every command that reads — `cell get`,
+`piece call`, `wish` and `exec` — and a command naming both is refused rather
 than resolved, because it has not said which shape it wants.
 
 **What a reader may not supply, in either syntax.** `asCell`, `default`,
@@ -152,23 +153,32 @@ instead; see
 
 ## What it should look like
 
+**The noun is what the verb acts on, not what it ranges over.** `ls` lists
+pieces, so it sits under `piece`; the space it ranges over is context the
+command reads rather than the thing it acts on. The same test taken from the
+other end: if a command's target wants to be spelled `--cell`, it is a cell
+command. That rule is what decides where a command goes, and it is worth more
+than the individual placements below, which are only its output.
+
 Reading is one operation reached from several starting points, so the surface
 wants one read command and distinct commands for the distinct ways of arriving:
 
 ```
 # <read opts> = [--select S | --schema S] [--filter P] — identical everywhere
 
-cf get   <addr> [path]           <read opts>
-cf call  <addr> <verb> <payload> <read opts>
-cf wish  <query>                 <read opts>   # a query, not an address
-cf exec  <mountedFile> [args]    <read opts>   # reached through a filesystem mount
+cf cell get  <addr> [path]            <read opts>
+cf cell set  <addr> [path]                       # writes; nothing to shape
+cf cell get-label|set-label <addr>
 
-cf set   <addr> [path]                         # writes; nothing to shape
+cf piece call <addr> <verb> <payload> <read opts>
+cf wish  <query>                      <read opts>  # a query, not an address
+cf exec  <mountedFile> [args]         <read opts>  # through a filesystem mount
 
-cf piece new|setsrc|getsrc|rm|ls|search|verbs|set-slug   # deploying and listing
-cf space … | cf id … | cf acl … | cf fuse …
-cf inspect …                                          # offline forensics
-cf check | test | view | init | deps                  # working on source
+cf piece new|setsrc|getsrc|rm|ls|search|verbs|set-slug|step|link|inspect|…
+cf space recreate-root|set-home|clone|verify|reset|fingerprint
+cf id … | cf acl … | cf fuse …
+cf inspect …                                     # offline forensics
+cf check | test | view | init | deps             # working on source
 ```
 
 Three properties earn their place.
@@ -178,23 +188,55 @@ with a suffix for navigating within it — `<addr>#argument` in place of the
 `--input` flag. An address printed by one command is accepted by the next
 without reshaping, which is not true today.
 
-**Arrivals stay separate; the tail is shared.** `get`, `call`, `wish`, and
-`exec` are genuinely different operations and none should absorb another.
-But all of them finish by turning a cell into structured output, so they take
-the same read options and an address renders the same way however you arrived at
-it. A command that returns data gets the whole tail, not a subset — a result
-worth shaping is a result worth filtering. `set` is the exception, because it
-writes rather than returns. Today each command grew its own output handling and
-they have drifted.
+**Arrivals stay separate; the tail is shared.** `cell get`, `piece call`,
+`wish`, and `exec` are genuinely different operations and none should absorb
+another. But all of them finish by turning a cell into structured output, so
+they take the same read options and an address renders the same way however you
+arrived at it. A command that returns data gets the whole tail, not a subset — a
+result worth shaping is a result worth filtering. `cell set` is the exception,
+because it writes rather than returns.
 
-**`piece` keeps only what is genuinely about pieces.** Deploying, updating,
-removing, listing, searching, slugs, and listing a piece's verbs. Reading and
-writing cells are not piece operations and stop presenting themselves as ones.
-`recreate-root` and `set-home` are space-level operations sitting under `piece`;
-they belong under `space`, and moving them is part of step 7 rather than
-something this shape decides. `get-label` and `set-label` (#5673) postdate this
-accounting: whether CFC labels stay a piece subcommand or become a surface of
-their own is a step-7-class decision this document leaves open.
+**Each noun keeps only what acts on it.** `piece` deploys, updates, removes,
+lists, searches, and inspects a piece. `cell` reads and writes a cell, which is
+what `get` and `set` were always doing. `space` rebuilds a space's root and home
+patterns and manages rehearsal clones of its store.
+
+### The exceptions, and why they are exceptions
+
+**`inspect` and `space` both act on a store, and the rule cannot separate
+them.** They stay apart on a contract instead: `inspect` is read-only — it
+explains, it never reproduces or replays — and that is what makes it
+trustworthy, while `space` exists to write. One object, two nouns, divided by
+what each promises rather than by what each addresses. Anything read-only over
+stored state belongs under `inspect`; anything that writes a store belongs under
+`space`.
+
+**`space verify` and `space reset` take a clone directory, not a space.** A
+rehearsal copy is identified by where it was written, so their argument names
+the copy rather than the space it is a copy of. The noun does not resolve that,
+and naming it here is cheaper than leaving a reader to wonder whether it was
+noticed.
+
+**`acl` stays a noun of its own.** The rule would fold it under `space`, since
+an access-control list is a property of one. It is left alone because nothing is
+confusing about `cf acl` today and the fold buys a reader nothing.
+
+**`set-slug` stays under `piece`.** A slug names a piece within a space, so the
+rule reads it either way. It acts on the piece — the space is where the name has
+to be unique, which is range, not target.
+
+**The authoring commands stay at top level.** `check`, `test`, `view`, `init`
+and `deps` act on source files, and the rule would gather them under a `source`
+noun. That is deliberately deferred rather than rejected: they are the commands
+with the most prose written about them, so the move is by far the most expensive
+in the surface, and no one has been confused about where `cf check` lives. A
+future reader who wants the noun can have it; this records that it was
+considered and priced, so it need not be re-derived.
+
+**`cell` costs some callers a second migration.** `get` and `set` reached top
+level recently and move again under `cell`. That cost was measured and accepted:
+the cell/piece distinction is the entire content of the rule, and a rule that
+cannot tell a cell from a piece has nothing left to say.
 
 `--select` and `--schema` everywhere, split per the reasons above.
 
@@ -225,7 +267,7 @@ Read the target layout against it and every element sits in dependency order,
 `<read opts>` last because the result shape is knowable only once the verb is:
 
 ```text
-cf call <addr> <verb> <payload> <read opts>
+cf piece call <addr> <verb> <payload> <read opts>
 ```
 
 Two things follow, and they are the reason this section exists.
@@ -243,7 +285,7 @@ above is prescriptive on this point: `<read opts>` is a position, not an
 illustration, and a projection written before the verb is refused rather than
 accepted quietly.
 
-`cf call` reads them past the `--` that closes the callable's section, which
+`cf piece call` reads them past the `--` that closes the callable's section, which
 is the position the layout names: everything between the verb and the marker
 belongs to the callable's own schema-derived parser, and the read options
 follow. A projection written before the verb is refused rather than accepted
@@ -368,10 +410,10 @@ a marker is needed for is the boundary the conventional shape does not have: the
 one where the callable's section ends and the read step's begins.
 
 ```text
-cf call <target> <verb> <verb input>
-cf call <target> <verb> <verb input> -- <read opts>
-cf call <target> <verb> -- <read opts>             # a verb that takes none
-cf call <target> <verb> -- --help                  # the verb's own page
+cf piece call <target> <verb> <verb input>
+cf piece call <target> <verb> <verb input> -- <read opts>
+cf piece call <target> <verb> -- <read opts>             # a verb that takes none
+cf piece call <target> <verb> -- --help                  # the verb's own page
 cf exec <mountedFile> <verb input> -- <read opts>
 ```
 
@@ -393,9 +435,9 @@ options from the rest of the line. `call` and `exec` have one, so a marker
 closes it:
 
 ```text
-cf get  <addr> [path]           --select …
+cf cell get  <addr> [path]           --select …
 cf wish <target>                --select …
-cf call <target> <verb> <input> -- --select …
+cf piece call <target> <verb> <input> -- --select …
 cf exec <mountedFile> <input>   -- --select …
 ```
 
@@ -582,15 +624,17 @@ than taking anything away.
 
 1. **Factor out the shared read step** so a single implementation turns a cell
    and a shape into structured output.
-2. **Give every arrival access to it** — `cf call` gains `--select`,
+2. **Give every arrival access to it** — `cf piece call` gains `--select`,
    `--schema` and `--filter`, `wish` gains them, and an address renders identically from each.
 3. **`--piece` accepts the `of:` address form**, so an emitted address composes
    into the next command. This is where addressing stops being piece-flavored
    in practice.
 4. **Add positional addresses and the `#argument` suffix** beside the existing
    flags, keeping both.
-5. **Add `cf get`/`set`/`call`** as aliases of the existing
-   implementations. Same code, honest names, both spellings working.
+5. **Give the data commands top-level names** — `cf get`, `cf set`, `cf call`
+   — as aliases of the existing implementations. Same code, honest names,
+   both spellings working. Step 7 moves them again, under the noun each acts
+   on.
 6a. **Warn on the old spellings**, each warning naming the date its spelling
    stops working — two weeks after this step reaches main. The date is a
    literal, fixed when this step merges, not a window recomputed per run: a
@@ -600,8 +644,20 @@ than taking anything away.
    piece-mounted `get`, `set` and `call`, the 6a notice and its dated
    constant, and the parity coverage that existed only while both spellings
    did, are gone.
-7. **Merge the duplicated nouns** — the two `inspect`s, the two `view`s, `piece
-   map` against `inspect graph`, and `apply` against `set`.
+7. **Put each command under the noun it acts on.** `cf cell` gains `get`,
+   `set`, `get-label` and `set-label`; `piece` gains `call`; `space` gains
+   `recreate-root` and `set-home`. Each moved command stays answerable at the
+   spelling it had, hidden and dated, so a script keeps working while it is
+   migrated. The date bounds a guarantee rather than schedules an execution:
+   removing those mounts is 7b, a separate change, the way 6b was separate
+   from 6a.
+
+   The duplicated nouns this step was named for resolve rather than merge.
+   `piece inspect` reports on a live piece and `cf inspect` reads a stored
+   one; `piece map` draws live pieces and `inspect graph` a stored graph;
+   `cf view` pages a source file and `piece view` renders a running piece.
+   Different objects, so the fix was naming. `piece apply` and `cf cell set`
+   stay separate for the reason recorded above.
 
 Steps 1–5 are mechanical. Step 7 needs real decisions and belongs last, because
 each pair is two working commands whose merge changes behavior rather than
@@ -699,19 +755,19 @@ commands and never compose them, so a command that changes changes in the
 script and in both documents together, in one commit.
 
 **Each step carries its own documentation.** `--input`, `--piece`, and
-`cf get` appear across the tutorial, `packages/cli/README.md`, and the
+`cf cell get` appear across the tutorial, `packages/cli/README.md`, and the
 pattern documentation, so a single sweep at the end would leave every
 intermediate state wrong. What each step owes:
 
 | Step | Documentation owed |
 | --- | --- |
-| 2 | The read options gain a second host — `cf call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../common/verbs/over-the-cli.md) |
+| 2 | The read options gain a second host — `cf piece call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../common/verbs/over-the-cli.md) |
 | 3 | Address forms wherever `--piece` is taught: the CLI README and the tutorial's workflow chapter |
 | 4 | `#argument` beside every `--input` example, in the same places |
 | 5 | The new spellings alongside the old ones everywhere both work |
 | 6a | The old spellings marked deprecated wherever they are taught, each carrying the removal date |
 | 6b | Removal of the old spellings, and of the deprecation notes 6a added |
-| 7 | Whatever the merges decide |
+| 7 | The rule and the mapping here, `packages/cli/README.md`'s superseded-spellings table, and every example moved to the new spelling |
 
 **Old spellings stay as redirects, not errors, until the date 6a names.** A
 deprecated spelling that still works costs a line of aliasing; one that fails

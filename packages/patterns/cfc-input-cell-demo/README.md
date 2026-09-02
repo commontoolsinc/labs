@@ -25,7 +25,7 @@ Deploy the seed and read the address of each cell it exposes:
 deno task cf piece new packages/patterns/cfc-input-cell-demo/seed.tsx \
   --root . -i "$CF_KEY" -a http://localhost:8000 -s "$CF_SPACE"
 
-deno task cf get --piece "$SEED_PIECE" --select 'secret@,city@' \
+deno task cf cell get --piece "$SEED_PIECE" --select 'secret@,city@' \
   -i "$CF_KEY" -a http://localhost:8000 -s "$CF_SPACE"
 ```
 

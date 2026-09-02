@@ -44,7 +44,7 @@ deno task cf piece new -i "$CF_IDENTITY" --api-url URL --space SPACE \
 
 # Set test data
 echo '{"title": "Test", "done": false}' | \
-  deno task cf set -i "$CF_IDENTITY" --api-url URL --space SPACE --cell ID testItem
+  deno task cf cell set -i "$CF_IDENTITY" --api-url URL --space SPACE --cell ID testItem
 ```
 
 Write automated tests for new or changed pattern behavior and run every entry
@@ -67,19 +67,19 @@ packages and type-checks attached tests but does not run them.
 - Visual/styling problems
 - Event handling doesn't trigger (click handlers, etc.)
 
-## Stale Computed Values After `cf set`
+## Stale Computed Values After `cf cell set`
 
-**Gotcha:** `cf set` updates data but does NOT trigger computed re-evaluation. You must run `piece step` after `set` to get fresh computed values.
+**Gotcha:** `cf cell set` updates data but does NOT trigger computed re-evaluation. You must run `piece step` after `set` to get fresh computed values.
 
 ```bash
 # WRONG: Returns stale computed values
-echo '[...]' | deno task cf set --cell ID expenses ...
-deno task cf get --cell ID totalSpent ...  # May return old value!
+echo '[...]' | deno task cf cell set --cell ID expenses ...
+deno task cf cell get --cell ID totalSpent ...  # May return old value!
 
 # CORRECT: Run piece step to trigger recompute
-echo '[...]' | deno task cf set --cell ID expenses ...
+echo '[...]' | deno task cf cell set --cell ID expenses ...
 deno task cf piece step --cell ID ...  # Runs scheduling step, triggers recompute
-deno task cf get --cell ID totalSpent ...  # Now correct
+deno task cf cell get --cell ID totalSpent ...  # Now correct
 ```
 
 `piece inspect` says which values those are. Its `--- Cached Result Fields ---`
@@ -124,17 +124,17 @@ deno task cf piece inspect --cell <piece-id> -i "$CF_IDENTITY" -a URL -s space
 
 # 2. What are the inputs? (--input selects the arguments cell; a positional
 # /input would read a result field of that name)
-deno task cf get --cell <piece-id> --input -i "$CF_IDENTITY" -a URL -s space
+deno task cf cell get --cell <piece-id> --input -i "$CF_IDENTITY" -a URL -s space
 
 # 3. What's a specific computed value?
-deno task cf get --cell <piece-id> myComputedField -i "$CF_IDENTITY" -a URL -s space
+deno task cf cell get --cell <piece-id> myComputedField -i "$CF_IDENTITY" -a URL -s space
 
 # 4. Set known input, trigger recompute, verify output ("" writes the whole
 # input cell; --input selects it)
 echo '{"items":[{"title":"test","done":false}]}' | \
-  deno task cf set --cell <piece-id> "" --input -i "$CF_IDENTITY" -a URL -s space
+  deno task cf cell set --cell <piece-id> "" --input -i "$CF_IDENTITY" -a URL -s space
 deno task cf piece step --cell <piece-id> -i "$CF_IDENTITY" -a URL -s space
-deno task cf get --cell <piece-id> itemCount -i "$CF_IDENTITY" -a URL -s space
+deno task cf cell get --cell <piece-id> itemCount -i "$CF_IDENTITY" -a URL -s space
 ```
 
 ## Common CLI Debugging Patterns
@@ -173,7 +173,7 @@ deno task cf piece setsrc --cell <piece-id> pattern.tsx \
   --test pattern.test.tsx -i "$CF_IDENTITY" -a URL -s space
 
 # Test again
-deno task cf get --cell <piece-id> brokenField -i "$CF_IDENTITY" -a URL -s space
+deno task cf cell get --cell <piece-id> brokenField -i "$CF_IDENTITY" -a URL -s space
 ```
 
 This keeps you working with the same piece instance, preserving any test data you've set up.

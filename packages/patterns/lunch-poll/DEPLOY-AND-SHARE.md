@@ -98,17 +98,17 @@ with `Could not load pattern <identity>#default`, and `cf piece new` with:
 ```
 Could not initialize the space's default pattern: ...
 The new piece cannot be registered in the space's piece list without it.
-If this space's root pattern predates a runtime format change, repair it with: cf piece recreate-root
+If this space's root pattern predates a runtime format change, repair it with: cf space recreate-root
 ```
 
 Commands that address a piece by id and never read the registry still work
-there: `cf get` and `cf piece getsrc` both do. The poll piece that used to serve
-this space does not start either — a nested `participant-identity-card` argument
-is missing a required field, so setup refuses it (see "A piece that saved its
-source and will not start"). Re-establishing a poll on this host means repairing
-the space root first, with `cf piece recreate-root`, and then `cf piece new`.
-`recreate-root` rewrites the space's root pattern for everyone in it, so agree
-on it before running it against a shared space.
+there: `cf cell get` and `cf piece getsrc` both do. The poll piece that used to
+serve this space does not start either — a nested `participant-identity-card`
+argument is missing a required field, so setup refuses it (see "A piece that
+saved its source and will not start"). Re-establishing a poll on this host means
+repairing the space root first, with `cf space recreate-root`, and then
+`cf piece new`. `recreate-root` rewrites the space's root pattern for everyone
+in it, so agree on it before running it against a shared space.
 
 ## Environment setup
 
@@ -176,9 +176,11 @@ which is why both the test commands and the flags are required.
   whoever should be able to update the piece. Whoever deployed owns it; the
   **host** is a separate, in-poll role (first joiner — see Identity below).
 
-**Command spellings:** the data commands are `cf get`, `cf set` and `cf call`.
-The piece-lifecycle commands keep the `cf piece` prefix: `new`, `setsrc`,
-`getsrc`, `step`, `inspect`, `render`, `ls`, `rm`, `verbs`, `recreate-root`.
+**Command spellings:** the data commands are `cf cell get`, `cf cell set` and
+`cf piece call`. The piece-lifecycle commands keep the `cf piece` prefix: `new`,
+`setsrc`, `getsrc`, `step`, `inspect`, `render`, `ls`, `rm`, `verbs`.
+`recreate-root` rebuilds a space rather than a piece, so it is
+`cf space recreate-root`.
 
 ## Option A — ordinary compatible source updates
 
@@ -275,19 +277,19 @@ MINE="$PIECE"
 #     -s "$SPACE" | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
 
 # 2. Resolve your piece's argument document. This is the cell the copy writes
-#    into; `cf set --input` cannot do it (see the note below).
-ARG=$(deno task cf get --piece "$MINE" -s "$SPACE" --input --select '@' -q \
+#    into; `cf cell set --input` cannot do it (see the note below).
+ARG=$(deno task cf cell get --piece "$MINE" -s "$SPACE" --input --select '@' -q \
   | grep -oE '/of:fid1:[A-Za-z0-9_-]+')
 
 # 3. Copy each PerSpace field except the votes, the visit log and the host seat.
 #    Votes are deliberately not copied — see below.
 for field in question users options; do
-  deno task cf get --piece "$LEGACY_PIECE" -s "$SPACE" "$field" --input -q \
-    | deno task cf set -s "$SPACE" "$ARG/$field" -q
+  deno task cf cell get --piece "$LEGACY_PIECE" -s "$SPACE" "$field" --input -q \
+    | deno task cf cell set -s "$SPACE" "$ARG/$field" -q
 done
 
 # 4. Copy the visit log, deleting the predecessor's roster links (see below).
-deno task cf get --piece "$LEGACY_PIECE" -s "$SPACE" visits --input -q \
+deno task cf cell get --piece "$LEGACY_PIECE" -s "$SPACE" visits --input -q \
   | deno eval '
       const v = JSON.parse(await new Response(Deno.stdin.readable).text());
       for (const e of v) {
@@ -296,7 +298,7 @@ deno task cf get --piece "$LEGACY_PIECE" -s "$SPACE" visits --input -q \
       }
       console.log(JSON.stringify(v));
     ' \
-  | deno task cf set -s "$SPACE" "$ARG/visits" -q
+  | deno task cf cell set -s "$SPACE" "$ARG/visits" -q
 
 # 5. Recompute so derived values (counts, ranking) refresh.
 deno task cf piece step --piece "$MINE" -s "$SPACE"
@@ -315,14 +317,14 @@ only ever shows the current day's votes. The visit log is a different matter and
 does come across, at step 4: its vote snapshots are frozen records rather than
 live votes, and nothing addresses them by key.
 
-> **Why the copy writes to `$ARG` and not `cf set --input`.** A `cf set --input`
-> write validates the piece's whole input object, and this pattern's `viewer`
-> slot is a per-user allocation site rather than a plain value. Every field
-> fails on that slot rather than on the field being written, which bites any
-> lunch-poll piece, including one created seconds ago, and a nested path
-> (`users/0/name`) fails alongside a top-level one. A write addressed to the
-> argument document itself is not validated that way, which is what step 2
-> resolves and what the loop above uses.
+> **Why the copy writes to `$ARG` and not `cf cell set --input`.** A
+> `cf cell set --input` write validates the piece's whole input object, and this
+> pattern's `viewer` slot is a per-user allocation site rather than a plain
+> value. Every field fails on that slot rather than on the field being written,
+> which bites any lunch-poll piece, including one created seconds ago, and a
+> nested path (`users/0/name`) fails alongside a top-level one. A write
+> addressed to the argument document itself is not validated that way, which is
+> what step 2 resolves and what the loop above uses.
 
 > **Why the host seat is left behind.** The name-keyed predecessor has no
 > profile-cell host identity worth carrying. Leave the new seat empty: the first
@@ -367,10 +369,10 @@ stored value, and pass `--step` when you want a result:
 
 ```bash
 # The stored visit log — what a write actually landed.
-deno task cf get --piece "$PIECE" -s "$SPACE" visits --input -q
+deno task cf cell get --piece "$PIECE" -s "$SPACE" visits --input -q
 
 # A derived output, recomputed in the same CLI session before it is read.
-deno task cf get --piece "$PIECE" -s "$SPACE" recentVisits --step -q
+deno task cf cell get --piece "$PIECE" -s "$SPACE" recentVisits --step -q
 ```
 
 `--step` starts and recomputes the piece before reading, so it also writes; a
@@ -383,10 +385,10 @@ path ANSWERS rather than silently doing nothing:
 
 ```bash
 # joinAs takes no arguments: it joins as the calling identity's own profile.
-deno task cf call --piece "$PIECE" -s "$SPACE" joinAs '{}'
+deno task cf piece call --piece "$PIECE" -s "$SPACE" joinAs '{}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
 # Read the verdict — do NOT assume the join landed:
-deno task cf get --piece "$PIECE" -s "$SPACE" joinMessage
+deno task cf cell get --piece "$PIECE" -s "$SPACE" joinMessage
 ```
 
 - **`""` (empty)** — the join landed: this identity's `#profile` resolved.
@@ -400,15 +402,15 @@ deno task cf get --piece "$PIECE" -s "$SPACE" joinMessage
 With a joined identity, exercise the host-gated flow end to end:
 
 ```bash
-deno task cf call --piece "$PIECE" -s "$SPACE" addOption '{"title":"Test Cafe"}'
+deno task cf piece call --piece "$PIECE" -s "$SPACE" addOption '{"title":"Test Cafe"}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
-deno task cf call --piece "$PIECE" -s "$SPACE" logVisit '{"title":"Test Cafe"}'
+deno task cf piece call --piece "$PIECE" -s "$SPACE" logVisit '{"title":"Test Cafe"}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
 # Confirm the entry landed (no browser needed):
-deno task cf get --piece "$PIECE" -s "$SPACE" visits --input -q
+deno task cf cell get --piece "$PIECE" -s "$SPACE" visits --input -q
 ```
 
-Put the inline JSON argument last: a flag after it makes `cf call` report
+Put the inline JSON argument last: a flag after it makes `cf piece call` report
 `Use a single inline JSON argument or "--" before schema-derived flags.`
 
 `cf piece render` renders the same tree a browser would show, so it is the
@@ -455,17 +457,17 @@ and they are the only path the browser also takes:
 - **History:** use the **`clearHistory` handler** (host-gated) — it empties the
   `visits` log and its embedded vote snapshots:
   ```bash
-  deno task cf call --piece "$PIECE" -s "$SPACE" clearHistory '{}'
+  deno task cf piece call --piece "$PIECE" -s "$SPACE" clearHistory '{}'
   deno task cf piece step --piece "$PIECE" -s "$SPACE"
   ```
   Or, since `visits` is an ordinary `PerSpace` cell, write it directly (below).
 - **PerSpace cells:** write the input cells directly:
   ```bash
-  echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" users     --input -q
-  echo '{}' | deno task cf set --piece "$PIECE" -s "$SPACE" host      --input -q
-  echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" options   --input -q
-  echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" votes     --input -q
-  echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" visits    --input -q
+  echo '[]' | deno task cf cell set --piece "$PIECE" -s "$SPACE" users     --input -q
+  echo '{}' | deno task cf cell set --piece "$PIECE" -s "$SPACE" host      --input -q
+  echo '[]' | deno task cf cell set --piece "$PIECE" -s "$SPACE" options   --input -q
+  echo '[]' | deno task cf cell set --piece "$PIECE" -s "$SPACE" votes     --input -q
+  echo '[]' | deno task cf cell set --piece "$PIECE" -s "$SPACE" visits    --input -q
   deno task cf piece step --piece "$PIECE" -s "$SPACE"
   ```
   After this, the first person to join in the browser becomes host as their own
@@ -488,10 +490,10 @@ for what it says when that fails.
 
 ### A piece that saved its source and will not start
 
-The piece answers `cf get`, but anything that starts it — `cf piece render`,
-`cf piece step`, `cf get --step` — refuses with a stored-argument complaint
-naming a field of a nested pattern. For example, a piece saved from the
-name-keyed predecessor can report:
+The piece answers `cf cell get`, but anything that starts it —
+`cf piece render`, `cf piece step`, `cf cell get --step` — refuses with a
+stored-argument complaint naming a field of a nested pattern. For example, a
+piece saved from the name-keyed predecessor can report:
 
 ```
 updated arguments do not match the candidate schema: myName: value does not match type string

@@ -359,7 +359,7 @@ principal, with **no `uiContract`**. Creating a profile, by contrast,
 *is* gesture-gated: `profile-create.tsx` carries the only `uiContract`
 (the `ProfileCreateSurface` trusted pattern).
 
-**Consequence.** Headless pinning (`cf call` into the `addPiece`
+**Consequence.** Headless pinning (`cf piece call` into the `addPiece`
 stream) and cross-pattern pin flows are **sanctioned** use cases.
 Future guards must keep supporting them — do not "harden" pinning with
 a `uiContract`; that conflates the create seam (correctly

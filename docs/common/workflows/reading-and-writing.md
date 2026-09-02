@@ -53,19 +53,19 @@ worth understanding rather than memorizing.
 
 ### The default is the result cell, and the flag says so
 
-`cf set` writes the **result** cell unless told otherwise. That is the piece's
+`cf cell set` writes the **result** cell unless told otherwise. That is the piece's
 output — the answer half, not the question half. `--input` is what redirects
 the write to the arguments cell, and the flag's own help is the plainest
 statement of the default there is: *Write to the piece's input cell instead of
 result cell.*
 
-Four commands take `--input` — `cf get`, `cf set`, `cf piece get-label` and
-`cf piece set-label` — and those same four are the ones that accept the
+Four commands take `--input` — `cf cell get`, `cf cell set`, `cf cell get-label` and
+`cf cell set-label` — and those same four are the ones that accept the
 `#argument` suffix. That is not two lists that happen to agree: a command
 declares it accepts an arguments-cell selection once, and both spellings are
-read out of that one declaration. Any other command is refused by name, `cf
-call` among them, so a call cannot quietly be aimed at a cell no handler
-reads.
+read out of that one declaration. Any other command is refused by name,
+`cf piece call` among them, so a call cannot quietly be aimed at a cell no
+handler reads.
 
 The suffix rides every spelling of the target — the reference form
 (`/of:fid1:…#argument`, `/thermostat#argument`), the bare id, and the slug
@@ -90,7 +90,7 @@ not recompute anything downstream. A pattern's derived fields hold whatever
 they were last computed to, so a computed field read straight after a write
 reports an answer to the state before it.
 
-`cf set` says so itself, on every write:
+`cf cell set` says so itself, on every write:
 
 ```text
 TIP: Computed values may be stale. Run 'cf piece step --piece … ' to trigger
@@ -112,7 +112,7 @@ moved.
 else is: start the piece, let the graph settle, sync what it wrote, stop. It
 is the act this tour exists for, and it is the answer to every "why is this
 number wrong" the rest of the tour produces. A read can carry the same step
-inline with `cf get --step`, which recomputes, commits, and answers in one
+inline with `cf cell get --step`, which recomputes, commits, and answers in one
 session.
 
 ## The session, act by act
@@ -152,7 +152,7 @@ The arguments cell holds only what the pattern declared as input, so reading
 it whole is a short answer — `target` and `zones`, each a link.
 
 ```bash
-cf get -s demo --piece thermostat --input
+cf cell get -s demo --piece thermostat --input
 ```
 
 And a derived field has no position there at all. The refusal names the keys
@@ -160,7 +160,7 @@ that do exist, which is the fastest way to find out which cell you are
 addressing.
 
 ```bash
-cf get -s demo --piece thermostat targetFahrenheit --input
+cf cell get -s demo --piece thermostat targetFahrenheit --input
 ```
 
 #### Act 3 · A read is a query: name the shape you want
@@ -171,10 +171,10 @@ and `--select` and `--schema` are refused together rather than resolved,
 because a command naming both has not said what shape it wants.
 
 ```bash
-cf get -s demo --piece thermostat
-cf get -s demo --piece thermostat --select target,targetFahrenheit,belowTarget
-cf get -s demo --piece thermostat zones --filter '.celsius < 20'
-cf get -s demo --piece thermostat zones \
+cf cell get -s demo --piece thermostat
+cf cell get -s demo --piece thermostat --select target,targetFahrenheit,belowTarget
+cf cell get -s demo --piece thermostat zones --filter '.celsius < 20'
+cf cell get -s demo --piece thermostat zones \
   --schema '{"type":"array","items":{"type":"object","properties":{"name":true}}}'
 ```
 
@@ -193,12 +193,12 @@ get this piece's own — is in
 
 #### Act 4 · A write lands on the result cell unless you say otherwise
 
-`cf set` reads its value from stdin, so the value arrives on the pipe and the
+`cf cell set` reads its value from stdin, so the value arrives on the pipe and the
 path is the argument. No flag here means the result cell.
 
 ```bash
-echo '25' | cf set -s demo --piece thermostat target
-cf get -s demo --piece thermostat --select target,targetFahrenheit,belowTarget
+echo '25' | cf cell set -s demo --piece thermostat target
+cf cell get -s demo --piece thermostat --select target,targetFahrenheit,belowTarget
 ```
 
 The target moved to 25. The two figures derived from it did not: 68°F is 20°C,
@@ -213,7 +213,7 @@ that writes and exits never does.
 
 ```bash
 cf piece step -s demo --piece thermostat
-cf get -s demo --piece thermostat --select target,targetFahrenheit,belowTarget
+cf cell get -s demo --piece thermostat --select target,targetFahrenheit,belowTarget
 ```
 
 Same read as before the step; now both figures answer to 25. Nothing about the
@@ -226,10 +226,10 @@ result cell like any other, and the write is accepted and reads back exactly
 as written.
 
 ```bash
-echo '100' | cf set -s demo --piece thermostat targetFahrenheit
-cf get -s demo --piece thermostat --select targetFahrenheit
+echo '100' | cf cell set -s demo --piece thermostat targetFahrenheit
+cf cell get -s demo --piece thermostat --select targetFahrenheit
 cf piece step -s demo --piece thermostat
-cf get -s demo --piece thermostat --select targetFahrenheit
+cf cell get -s demo --piece thermostat --select targetFahrenheit
 ```
 
 It survives until something recomputes it. The pattern owns that position, so
@@ -244,24 +244,24 @@ input and step, or call the verb — do not write the output.
 `--input` sends the same write to the arguments cell.
 
 ```bash
-echo '15' | cf set -s demo --piece thermostat target --input
-cf get -s demo --piece thermostat target --input
+echo '15' | cf cell set -s demo --piece thermostat target --input
+cf cell get -s demo --piece thermostat target --input
 ```
 
 The other spelling of that choice rides the address. `@` alone answers with
 the address of what is being read, so the piece can hand over its own:
 
 ```bash
-cf get -s demo --piece thermostat --select @
+cf cell get -s demo --piece thermostat --select @
 ```
 
 A trailing `#argument` on that address selects the same cell `--input` does,
 on the read and on the write alike:
 
 ```bash
-cf get -s demo "$ADDRESS#argument" target
-echo '30' | cf set -s demo "$ADDRESS#argument" target
-cf get -s demo --piece thermostat target --input
+cf cell get -s demo "$ADDRESS#argument" target
+echo '30' | cf cell set -s demo "$ADDRESS#argument" target
+cf cell get -s demo --piece thermostat target --input
 ```
 
 A slug and a bare id designate the piece a reference designates, so the
@@ -269,7 +269,7 @@ selection written after one means what it means after the other. Here the slug
 reads back the cell the address just wrote to.
 
 ```bash
-cf get -s demo --piece 'thermostat#argument' target
+cf cell get -s demo --piece 'thermostat#argument' target
 ```
 
 What bounds it is the flag it is a spelling of: a command that takes no
@@ -277,7 +277,7 @@ What bounds it is the flag it is a spelling of: a command that takes no
 the suffix, because they are one selection with two spellings.
 
 ```bash
-cf call -s demo "$ADDRESS#argument" setTarget '{"celsius":21}'
+cf piece call -s demo "$ADDRESS#argument" setTarget '{"celsius":21}'
 ```
 
 ### Acts 8–9 · The two things that look like exceptions
@@ -289,8 +289,8 @@ piece, with capabilities a caller does not have, and what it returns was
 computed there. The result of this call is right.
 
 ```bash
-cf call -s demo --piece thermostat setTarget --celsius 10
-cf get -s demo --piece thermostat --select target,targetFahrenheit,belowTarget
+cf piece call -s demo --piece thermostat setTarget --celsius 10
+cf cell get -s demo --piece thermostat --select target,targetFahrenheit,belowTarget
 ```
 
 Then read the piece, and the target is the verb's while the derived fields
@@ -299,7 +299,7 @@ than a set is.
 
 ```bash
 cf piece step -s demo --piece thermostat
-cf get -s demo --piece thermostat --select target,targetFahrenheit,belowTarget
+cf cell get -s demo --piece thermostat --select target,targetFahrenheit,belowTarget
 ```
 
 One step, and the whole piece agrees with itself again.
@@ -314,7 +314,7 @@ you arrive with no id and leave with one.
 
 ```bash
 cf wish -s demo '#pieceRegistry' --select @
-cf get -s demo "$FOUND" --select target,belowTarget
+cf cell get -s demo "$FOUND" --select target,belowTarget
 ```
 
 **Resolving a wish is a write.** It builds a one-node pattern holding the
@@ -342,7 +342,7 @@ line here either quotes a command the demo runs or carries a
 in this document — every line above ran.
 
 What the demo cannot check is the prose, and two claims here are properties of
-the implementation rather than of a transcript: that `cf set`'s default lands
+the implementation rather than of a transcript: that `cf cell set`'s default lands
 on the result cell (`setCellValue` in
 [`packages/cli/lib/piece.ts`](../../../packages/cli/lib/piece.ts) branches on
 `options.input` and reaches `piece.result` without it), and that resolving a

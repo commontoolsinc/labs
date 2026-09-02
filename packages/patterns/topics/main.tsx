@@ -106,7 +106,7 @@ export interface AddTopicEvent {
 
 export interface AddTopicResult {
   /** The topic this call created — the piece itself, not a manufactured
-   * identifier. `cf call` can project the child link with a `$link` marker;
+   * identifier. `cf piece call` can project the child link with a `$link` marker;
    * the returned canonical reference composes directly into the next command.
    *
    * Declared through the index's row schema rather than the full `TopicPiece`,

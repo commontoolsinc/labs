@@ -518,7 +518,7 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
   });
 
   it("a fresh session replays a keyless piece's setup without restaging its stored argument", async () => {
-    // The cross-session `cf get` transform shape: session A sets up a
+    // The cross-session `cf cell get` transform shape: session A sets up a
     // keyless piece over a deterministic doc; session B (fresh runtime, no
     // durable pointer, no setup marker — the keyless piece's designed
     // durable verdict) re-runs the structurally same pattern on the same
@@ -727,7 +727,7 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
 
   it("an evicted session pointer does not masquerade as the zero-evidence state", async () => {
     // The session pointer map is BOUNDED: past its capacity a long-lived
-    // session (a server streaming keyless `cf get` transforms) evicts its
+    // session (a server streaming keyless `cf cell get` transforms) evicts its
     // oldest entries. An evicted piece then reads pointer-absent AND
     // marker-absent — byte-identical to the DESIGNED zero-evidence state (a
     // fresh session replaying a keyless piece) — so a DIFFERENT keyless

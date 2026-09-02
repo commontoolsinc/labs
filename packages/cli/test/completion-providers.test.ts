@@ -154,7 +154,7 @@ Deno.test("space context: an embedded space supplies one the line did not name",
   // line can name a space with and never write `--space`.
   await withEnv({ identity: "/env.key", apiUrl: "http://env:9999" }, () => {
     const config = resolveSpaceContext(
-      lineFor("cf get --piece /@did:key:zEmbedded/of:fid1:abc "),
+      lineFor("cf cell get --piece /@did:key:zEmbedded/of:fid1:abc "),
       "did:key:zEmbedded",
     );
     assert(config);
@@ -168,7 +168,7 @@ Deno.test("space context: the line's own --space wins over an embedded one", asy
   await withEnv({ identity: "/env.key", apiUrl: "http://env:9999" }, () => {
     assertEquals(
       resolveSpaceContext(
-        lineFor("cf get -s team --piece /@did:key:zEmbedded/of:fid1:abc "),
+        lineFor("cf cell get -s team --piece /@did:key:zEmbedded/of:fid1:abc "),
         "did:key:zEmbedded",
       )?.space,
       "team",
@@ -182,10 +182,10 @@ Deno.test("piece context: #argument reads the same on both spellings of a target
   // offered behind it come from the arguments cell for.
   await withEnv({ identity: "/env.key", apiUrl: "http://env:9999" }, () => {
     const rooted = resolvePieceContext(
-      lineFor("cf get -s demo --piece /thermostat#argument "),
+      lineFor("cf cell get -s demo --piece /thermostat#argument "),
     );
     const bare = resolvePieceContext(
-      lineFor("cf get -s demo --piece thermostat#argument "),
+      lineFor("cf cell get -s demo --piece thermostat#argument "),
     );
     assert(rooted);
     assert(bare);
@@ -198,20 +198,22 @@ Deno.test("piece context: #argument reads the same on both spellings of a target
     // A scope written in front of the suffix survives it.
     assertEquals(
       resolvePieceContext(
-        lineFor("cf get -s demo --piece thermostat@session#argument "),
+        lineFor("cf cell get -s demo --piece thermostat@session#argument "),
       )?.pieceScope,
       "session",
     );
     // Nothing but the suffix selects that cell, and a plain slug still
     // resolves — a context of `null` there is a slot offering nothing.
     const plain = resolvePieceContext(
-      lineFor("cf get -s demo --piece thermostat "),
+      lineFor("cf cell get -s demo --piece thermostat "),
     );
     assert(plain);
     assertFalse(plain.pieceInput);
     // A fragment the grammar refuses is a half-typed word, not a throw.
     assertEquals(
-      resolvePieceContext(lineFor("cf get -s demo --piece thermostat#res ")),
+      resolvePieceContext(
+        lineFor("cf cell get -s demo --piece thermostat#res "),
+      ),
       null,
     );
   });
@@ -227,7 +229,7 @@ Deno.test("live candidates: a listing that raises completes to nothing", async (
   // read is the failure under test rather than whatever the surrounding
   // environment holds.
 
-  const text = "cf get --identity /nonexistent/missing.key " +
+  const text = "cf cell get --identity /nonexistent/missing.key " +
     "--api-url http://127.0.0.1:1 --space test --piece fid1:abc items/";
   const line = lineFor(text);
   const config = resolveSpaceContext(line);
@@ -269,6 +271,7 @@ const DIRECTIVE_CASES: Array<[string, string, string | undefined]> = [
   ["cf piece new --root ", "dirs", undefined],
   ["cf piece setsrc --root ", "dirs", undefined],
   ["cf piece survey --root ", "dirs", undefined],
+  ["cf space set-home --root ", "dirs", undefined],
   ["cf piece set-home --root ", "dirs", undefined],
   ["cf check --root ", "dirs", undefined],
   ["cf test --root ", "dirs", undefined],
@@ -287,6 +290,7 @@ const DIRECTIVE_CASES: Array<[string, string, string | undefined]> = [
   ["cf inspect spaces --dir ", "dirs", undefined],
   ["cf inspect html x --out ", "files", undefined],
   ["cf check --output ", "files", undefined],
+  ["cf space set-home ", "files", "*.tsx"],
   ["cf piece set-home ", "files", "*.tsx"],
   ["cf piece getsrc ", "files", undefined],
   ["cf deps update ", "files", undefined],
@@ -425,12 +429,14 @@ Deno.test("provider keys report which commands each option provider answers on",
   // name positions in a verb's result, and the piece's root is a different
   // value — so offering its fields there would offer plausible names for
   // something else, which is worse than offering none.
-  assertEquals(options.get("select"), ["get"]);
-  assertEquals(options.get("schema"), ["get"]);
+  // Both mounts: the superseded spelling still completes its own projection.
+  assertEquals(options.get("select"), ["cell get", "get"]);
+  assertEquals(options.get("schema"), ["cell get", "get"]);
   assertEquals(options.get("root"), [
     "check",
     "piece new",
     "piece set-home",
+    "space set-home",
     "piece setsrc",
     "piece survey",
     "test",
@@ -765,12 +771,12 @@ Deno.test("live candidates: a fabric slot without context degrades to empty", as
         // slot belongs to the read step, and nothing is consulted at all.
         // Which commands the provider answers on is pinned by the
         // provider-key test above.
-        "cf call --piece x --select ",
+        "cf piece call --piece x --select ",
         "cf exec --select ",
-        "cf get --piece x --schema @",
-        "cf get --piece x --schema {",
-        "cf piece get-label --piece x ",
-        "cf piece set-label --piece x ",
+        "cf cell get --piece x --schema @",
+        "cf cell get --piece x --schema {",
+        "cf cell get-label --piece x ",
+        "cf cell set-label --piece x ",
         "cf piece link ",
         "cf piece ls --piece ",
       ]

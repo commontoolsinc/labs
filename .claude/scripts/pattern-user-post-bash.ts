@@ -615,28 +615,62 @@ function pieceNewMain(commandWords: string[]): string | undefined {
   return positional.length === 1 ? positional[0] : undefined;
 }
 
+/**
+ * The commands this hook answers, each written as the noun it acts on and the
+ * verb under it.
+ *
+ * A pair rather than a verb, because a verb alone does not name a command:
+ * `set` acts on a cell and `set-home` on a space, so a hook matching a verb
+ * under whichever noun precedes it advises on `cf space set` and `cf cell
+ * new`, neither of which the CLI accepts. A pair joins this set when it gains
+ * a branch below.
+ *
+ * The bare `set` and `piece set-home` are superseded spellings that still
+ * answer, and the guidance is the same one their blessed spellings get. `get`
+ * and `call` are spelled two ways too but carry no guidance, so listing them
+ * would widen what the hook accepts without changing what it answers.
+ */
+const GUIDED_COMMANDS = new Set([
+  "piece new",
+  "piece setsrc",
+  "piece inspect",
+  "piece set-home",
+  "space set-home",
+  "cell set",
+  "set",
+]);
+
+/** The nouns those pairs sit under, which is what a `cf` is recognized by. */
+const GUIDED_NOUNS = new Set(
+  [...GUIDED_COMMANDS]
+    .filter((command) => command.includes(" "))
+    .map((command) => command.slice(0, command.indexOf(" "))),
+);
+
 function suggestionForCommandSegment(words: string[]): string {
   const normalizedWords = words.map((word) =>
     word.replace(/^\(+/, "").replace(/\)+$/, "")
   );
-  // Verbs this hook advises on that are also reachable without `piece`. `get`
-  // and `call` are spelled both ways too, but carry no guidance here, so
-  // matching them would widen what the hook accepts without changing what it
-  // answers. A verb joins this set when it gains a branch below.
-  const GUIDED_TOP_LEVEL_COMMANDS = new Set(["set"]);
-  const cfIndex = normalizedWords.findIndex((word, index) =>
-    word === "cf" &&
-    (normalizedWords[index + 1] === "piece" ||
-      GUIDED_TOP_LEVEL_COMMANDS.has(normalizedWords[index + 1] ?? ""))
-  );
+  const cfIndex = normalizedWords.findIndex((word, index) => {
+    if (word !== "cf") return false;
+    const next = normalizedWords[index + 1] ?? "";
+    return GUIDED_NOUNS.has(next) || GUIDED_COMMANDS.has(next);
+  });
   if (cfIndex < 0) return "";
 
   const commandWords = normalizedWords.slice(cfIndex);
-  // An optional `piece` segment shifts the verb one word along, so the verb is
-  // located by what precedes it rather than by a fixed index.
-  const pieceCommand = commandWords[1] === "piece"
-    ? commandWords[2]
-    : commandWords[1];
+  // A noun segment shifts the verb one word along, so the command is read as
+  // the pair it forms rather than found at a fixed index.
+  const command = GUIDED_NOUNS.has(commandWords[1] ?? "")
+    ? `${commandWords[1]} ${commandWords[2] ?? ""}`
+    : commandWords[1] ?? "";
+  if (!GUIDED_COMMANDS.has(command)) return "";
+  // Past that gate the noun has done its work, so the branches below key on
+  // the verb alone. They are reachable only for a pair this hook answers,
+  // which is what keeps `cf space set` out of the `set` branch.
+  const verb = command.includes(" ")
+    ? command.slice(command.indexOf(" ") + 1)
+    : command;
   const testOptions = commandWords.flatMap((word, index) => {
     if (word === "--test") {
       return [{ value: commandWords[index + 1], inline: false }];
@@ -655,24 +689,24 @@ function suggestionForCommandSegment(words: string[]): string {
     ? "The command attaches tests for packaging, but does not run them. Confirm every entry passed with 'cf test'."
     : "No tests were attached. For new or changed source, write and run pattern tests, then deploy with repeatable '--test'.";
 
-  if (pieceCommand === "new") {
+  if (verb === "new") {
     const main = pieceNewMain(commandWords);
     if (!hasTestOption && main && /\.test\.[cm]?[jt]sx?$/.test(main)) {
       return "Test pattern deployed as the executable diagnostic entry. Next, inspect its action and assertion cells.";
     }
-    return `${testSuggestion} Next, use 'cf piece inspect' to view state or 'cf call' to test handlers.`;
+    return `${testSuggestion} Next, use 'cf piece inspect' to view state or 'cf piece call' to test handlers.`;
   }
-  if (pieceCommand === "setsrc") {
+  if (verb === "setsrc") {
     return `${testSuggestion} Next, use 'cf piece step' to trigger re-evaluation, then 'cf piece inspect' to verify.`;
   }
-  if (pieceCommand === "set-home" && !commandWords.includes("--reset")) {
+  if (verb === "set-home" && !commandWords.includes("--reset")) {
     return `${testSuggestion} Next, open the home space and verify the custom home pattern.`;
   }
-  if (pieceCommand === "set") {
+  if (verb === "set") {
     return "State set. Run 'cf piece step' to trigger re-evaluation before reading computed values.";
   }
-  if (pieceCommand === "inspect") {
-    return "State inspected. Use 'cf call handlerName' to test handlers or 'cf set' to modify state.";
+  if (verb === "inspect") {
+    return "State inspected. Use 'cf piece call handlerName' to test handlers or 'cf cell set' to modify state.";
   }
   return "";
 }

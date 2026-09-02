@@ -201,7 +201,7 @@ deno task cf piece new packages/patterns/my-pattern/main.tsx \
   --test packages/patterns/my-pattern/main.test.tsx -s dev-space
 # 5. Mount
 deno task cf fuse mount /tmp/cf
-# 6. Set input via filesystem (faster than cf set for complex data)
+# 6. Set input via filesystem (faster than cf cell set for complex data)
 cat test-data.json > /tmp/cf/dev-space/pieces/my-pattern/input.json
 # 7. Read result
 cat /tmp/cf/dev-space/pieces/my-pattern/result.json | jq '.'
@@ -225,8 +225,8 @@ ls /tmp/cf/2026-03-09-ben/pieces/   # connects on demand
 
 ### No `step` Needed via FUSE
 
-Unlike `cf set` which requires `cf piece step` to trigger recomputation, FUSE
-writes go through `cell.set()` directly, which triggers reactive updates
+Unlike `cf cell set` which requires `cf piece step` to trigger recomputation,
+FUSE writes go through `cell.set()` directly, which triggers reactive updates
 automatically.
 
 ### Writes Are Fire-and-Forget

@@ -1964,7 +1964,7 @@ form does.
 For each `pattern(cb, argumentSchema, resultSchema)` call it marks
 result-schema stream properties `tier: "wrapper"` — the verb-listing mark
 `cf piece verbs` hides by default (verb contract WS-F; everything stays
-callable, `cf call` never consults marks). A property is marked when its
+callable, `cf piece call` never consults marks). A property is marked when its
 returned value resolves (identifier → nearest const initializer, callback body
 first then module scope) to an applied handler factory that:
 

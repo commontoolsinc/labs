@@ -13,7 +13,7 @@ first — this one uses its vocabulary. The third concern, the command surface, 
 Ask a piece for one of its fields and you get back the data at that path:
 
 ```bash
-cf get --piece <board> label
+cf cell get --piece <board> label
 → "My board"
 ```
 
@@ -83,7 +83,7 @@ elements. The two do not collapse into one, because **filtering runs before
 projection** — a predicate can inspect a field the result omits:
 
 ```bash
-cf get ... topics --filter '.status == "open"' --select 'title,id'
+cf cell get ... topics --filter '.status == "open"' --select 'title,id'
 ```
 
 `status` decides membership and never appears in the output. A single mechanism
@@ -375,7 +375,7 @@ A receipt is an ordinary cell, and like any other it says what it holds — for
 a plain result. `handleJavaScriptHandlerResult`
 (`packages/runner/src/runner.ts`) derives a structural description from the
 value it has just written and stores it in the durable schema metadata —
-`setMetaRaw("schema", …)`, the field `cf get` reads back through
+`setMetaRaw("schema", …)`, the field `cf cell get` reads back through
 `asSchema`, not the schema argument to `getCell`, which seeds the link scope
 and the in-memory cell only. The receipt is minted before the handler runs,
 so there is no shape at that moment; the schema is written at result-write
@@ -411,7 +411,7 @@ remains prose in the verb's description.
 
 ### What dissolves, and what survives
 
-`cf get` already reads a receipt — its target is a cell, a receipt is a
+`cf cell get` already reads a receipt — its target is a cell, a receipt is a
 cell, and `--schema` projects it correctly. Once `--piece` accepts the `of:`
 address form, reading a receipt directly is an ordinary read and needs no
 command of its own.
@@ -434,7 +434,7 @@ unless noted.
   piece-specific. Its counterpart `getArgument` follows a link stored in the
   document and throws when absent, making it the only piece-shaped operation of
   the pair.
-- `cf get` against a receipt address returns its value, and
+- `cf cell get` against a receipt address returns its value, and
   `--schema note.title` projects it to `{"note": {"title": …}}`.
 
 **Documents and links**

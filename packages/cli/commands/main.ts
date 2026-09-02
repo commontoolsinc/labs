@@ -18,6 +18,7 @@ import { ingest } from "./ingest.ts";
 import { init } from "./init.ts";
 import { inspect } from "./inspect.ts";
 import { invocationSession } from "./invocation-session.ts";
+import { cell } from "./cell.ts";
 import { piece, pieceDataCommand } from "./piece.ts";
 import { space } from "./space.ts";
 import { createTestCommand } from "./test-command.ts";
@@ -40,9 +41,17 @@ function envStatus(): string {
     // Named rather than promised generally: `ingest`, `fuse` and `check` take
     // a space and do not read this, so a blanket "no need to pass --space"
     // would be wrong exactly where a caller is most surprised to be asked.
+    //
+    // `space` is named by subcommand for the same reason, and by the one
+    // subcommand rather than by two: `recreate-root` resolves the target space
+    // and refuses without one, while `clone`, `verify`, `reset` and
+    // `fingerprint` each name their target themselves, and `set-home` acts on
+    // the identity's own home space — it declares the option through the
+    // shared target flags and never reads it. Declaring is not consuming,
+    // which is the way an entry here goes wrong without going missing.
     lines.push(
-      `  CF_SPACE    = ${space} (set, no need to pass --space on piece, ` +
-        `get/set/call, wish, acl, deps)`,
+      `  CF_SPACE    = ${space} (set, no need to pass --space on cell, ` +
+        `piece, wish, acl, deps, space recreate-root)`,
     );
   }
   return lines.join("\n");
@@ -59,8 +68,9 @@ FIRST TIME SETUP:
   cf id new > claude.key            # Create identity key
   export CF_IDENTITY=./claude.key   # Set default identity
   export CF_API_URL=http://localhost:${ports.toolshed}  # Set default API URL
-  export CF_SPACE=my-space          # Default space for piece/get/set/call,
-                                    # wish, acl and deps (--space overrides)
+  export CF_SPACE=my-space          # Default space for cell, piece, wish, acl,
+                                    # deps and space recreate-root
+                                    # (--space overrides)
 
 SHELL COMPLETION:
   source <(cf completion zsh)      # add to ~/.zshrc  (bash: completion bash)
@@ -112,6 +122,8 @@ export const main = new Command()
   .command("ingest", ingest)
   // @ts-ignore for the above type issue
   .command("piece", piece)
+  // @ts-ignore for the above type issue
+  .command("cell", cell)
   .command("check", check)
   .command("deps", deps)
   // @ts-ignore for the above type issue
@@ -195,11 +207,22 @@ export const main = new Command()
   .command("invocation-session", invocationSession)
   .command("test", createTestCommand({ recordResults: true }))
   .command("wish", wish)
-  // The piece data commands. `pieceDataCommand` holds the one definition
-  // of each, and this is the only place they are mounted.
+  // The superseded top-level spellings of the data commands. Each is the one
+  // definition its blessed mount uses, reached under the noun it acts on --
+  // `cf cell get`, `cf cell set`, `cf piece call` -- and kept here, hidden,
+  // so a caller who learned the top-level spelling still works.
   // @ts-ignore for the above type issue
-  .command("get", pieceDataCommand("get"))
+  .command(
+    "get",
+    pieceDataCommand("get", { replacedBy: "cell get" }).hidden(),
+  )
   // @ts-ignore for the above type issue
-  .command("set", pieceDataCommand("set"))
+  .command(
+    "set",
+    pieceDataCommand("set", { replacedBy: "cell set" }).hidden(),
+  )
   // @ts-ignore for the above type issue
-  .command("call", pieceDataCommand("call"));
+  .command(
+    "call",
+    pieceDataCommand("call", { replacedBy: "piece call" }).hidden(),
+  );

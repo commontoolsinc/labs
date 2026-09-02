@@ -373,13 +373,13 @@ deno task cf piece new ./main.test.tsx
 deno task cf piece inspect --cell <PIECE_ID>
 
 # Get specific values
-deno task cf get subject/items --cell <PIECE_ID>
+deno task cf cell get subject/items --cell <PIECE_ID>
 
 # Step through manually (the reserved key is the literal `$TESTS`, quoted so
 # the shell does not expand it)
-deno task cf call --cell <PIECE_ID> '$TESTS/0/action'
+deno task cf piece call --cell <PIECE_ID> '$TESTS/0/action'
 deno task cf piece step --cell <PIECE_ID>
-deno task cf get '$TESTS/1/assertion' --cell <PIECE_ID>
+deno task cf cell get '$TESTS/1/assertion' --cell <PIECE_ID>
 ```
 
 This diagnostic command deliberately deploys the test pattern as the executable

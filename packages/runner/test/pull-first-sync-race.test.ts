@@ -8,7 +8,7 @@
  * the cross-space load pool. The root doc's own round-trip was in neither, so
  * pull resolved whenever the scheduler quiesced — which over a low-latency
  * link is AFTER the doc arrives, and over a real network is BEFORE. Measured
- * in production shape: a same-id retry's receipt readback (`cf call
+ * in production shape: a same-id retry's receipt readback (`cf piece call
  * --invocation`, the WS-D collision path reading the winner's receipt via
  * getCellFromLink → pull) returned the original result against a local
  * toolshed and `undefined` against a remote host, every time. sync()'s own

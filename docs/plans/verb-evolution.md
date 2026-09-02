@@ -14,7 +14,7 @@ that pattern that holds real data — a specific notebook, a specific board.
 A **verb** is a named action a pattern offers to the outside world: `addItem`,
 `setLabel`, `archive`. Verbs are not the only way in — a caller with write
 permission can also set a piece's fields directly, as the UI's editing
-controls, `cf set`, and the filesystem mount all do. A piece's
+controls, `cf cell set`, and the filesystem mount all do. A piece's
 interface is its fields and its verbs together, the way an object's interface
 is its public fields and its methods. This document is about the verb half,
 where the design questions are; fields go through the same update gate, and
@@ -89,7 +89,7 @@ travels on `module.resultSchema`, a module field that enters no durable
 schema and that no baseline under `packages/patterns/baselines/` records,
 which is what made that road passable while the durable one was not; and it
 is resolvable per deployed piece, because `cf piece verbs` publishes it as a
-row's `outputSchema` and `cf call <verb> --help` publishes it for a
+row's `outputSchema` and `cf piece call <verb> --help` publishes it for a
 single verb (`listPieceCallables`, `declaredVerbResults` and
 `withDeclaredResult`, `packages/cli/lib/piece.ts`). What is still deferred is
 the durable record and the comparison it would feed: nothing holds one

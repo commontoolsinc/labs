@@ -28,36 +28,68 @@ export function hasJsonArgument(args: readonly string[]): boolean {
   );
 }
 
-const pieceGlobalValueOptions = new Set([
-  "-u",
+/** The shared target options that take a value, by long name. */
+const TARGET_VALUE_OPTIONS = new Set([
   "--url",
-  "-a",
   "--api-url",
-  "-i",
   "--identity",
-  "-s",
   "--space",
 ]);
 
-function pieceSubcommand(args: readonly string[]): string | undefined {
-  if (args[0] !== "piece") return undefined;
+/** The same options as the single letters a short bundle spells them with. */
+const TARGET_VALUE_SHORT_FLAGS = new Set(["u", "a", "i", "s"]);
+
+/**
+ * The nouns whose subcommands carry the shared target options, and so share
+ * this argument shape.
+ */
+const TARGET_NOUNS = new Set(["piece", "cell"]);
+
+/**
+ * Whether a short-option token takes the token after it as its value.
+ *
+ * Cliffy reads a short token as a bundle of letters, so arity belongs to the
+ * run rather than to the token: `-qs team` is `-q` and `-s team`. The value is
+ * the next token only when the last value-taking letter ends the bundle —
+ * anything after it is more letters, which is what `-qsteam` is refused for.
+ */
+function shortBundleTakesNextToken(token: string): boolean {
+  let lastValueTaking = -1;
+  for (let index = 1; index < token.length; index++) {
+    if (TARGET_VALUE_SHORT_FLAGS.has(token[index])) lastValueTaking = index;
+  }
+  return lastValueTaking === token.length - 1;
+}
+
+/**
+ * The subcommand a target noun's line names, or `undefined` when it names
+ * none.
+ *
+ * Read off argv rather than asked of the parser, because what this decides is
+ * where a refusal may be written and a refusal is what happens when parsing
+ * failed. So the walk carries each option's arity itself: miss one, and the
+ * option's value is read as the subcommand — `cf piece -qs team call` reads as
+ * `piece team`, which reserves nothing, and the usage page lands on the stream
+ * the caller is parsing.
+ */
+function nounSubcommand(args: readonly string[]): string | undefined {
+  if (!TARGET_NOUNS.has(args[0] ?? "")) return undefined;
 
   for (let index = 1; index < args.length; index++) {
     const argument = args[index];
-    if (argument === "-q" || argument === "--quiet") continue;
+    if (argument === "--") return undefined;
+    // A lone `-` is the stdin sentinel, which is a value rather than a name.
+    if (argument === "-") continue;
+    if (!argument.startsWith("-")) return argument;
 
     const equalsIndex = argument.indexOf("=");
-    const option = equalsIndex === -1
-      ? argument
-      : argument.slice(0, equalsIndex);
-    if (pieceGlobalValueOptions.has(option)) {
-      if (equalsIndex === -1) index++;
+    if (equalsIndex !== -1) continue;
+
+    if (argument.startsWith("--")) {
+      if (TARGET_VALUE_OPTIONS.has(argument)) index++;
       continue;
     }
-    if (/^-[uais].+/.test(argument)) continue;
-    if (argument === "--") return undefined;
-    if (argument.startsWith("-")) continue;
-    return argument;
+    if (shortBundleTakesNextToken(argument)) index++;
   }
 
   return undefined;
@@ -78,10 +110,17 @@ export function reservesStdoutForCommandOutput(
   if (args[0] === "exec") return true;
   if (args[0] === "wish") return true;
   // `set` is absent for the same reason it is absent below: it writes prose,
-  // not a machine surface.
+  // not a machine surface. The superseded top-level spellings of `get` and
+  // `call` answer for as long as they are mounted, so they reserve stdout on
+  // the same terms as the nouns that replaced them.
   if (args[0] === "get" || args[0] === "call") return true;
-  const subcommand = pieceSubcommand(args);
-  return subcommand === "get-label" ||
+  const subcommand = nounSubcommand(args);
+  if (subcommand === undefined) return false;
+  // Keyed by the whole path where the noun decides the answer, and by the
+  // subcommand alone where both nouns agree.
+  const path = `${args[0]} ${subcommand}`;
+  return path === "cell get" || path === "piece call" ||
+    subcommand === "get-label" ||
     subcommand === "set-label" ||
     subcommand === "survey" || subcommand === "repair" ||
     subcommand === "retarget" || subcommand === "rollback" ||

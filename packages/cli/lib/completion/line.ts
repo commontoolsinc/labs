@@ -48,7 +48,7 @@ export type CompletionSlot =
     readonly index: number;
   }
   /**
-   * A word after `--`, which on `cf call` and `cf exec` is the read step's
+   * A word after `--`, which on `cf piece call` and `cf exec` is the read step's
    * section: `--select`, `--schema` and `--filter`, and `--help` reaching the
    * callable. Item 6 of
    * [CLI completion coverage](../../../../docs/plans/cli-completion-coverage.md)
@@ -186,7 +186,7 @@ function expandBundle(
  * Subcommands that represent real commands.
  *
  * `main` registers `help` with `.global()`, so Cliffy propagates it to every
- * descendant and `hasCommands()` is true even on leaves like `cf call`.
+ * descendant and `hasCommands()` is true even on leaves like `cf piece call`.
  * Taking that at face value would resolve every leaf's positional to a
  * subcommand slot and silently disable all dynamic value completion.
  */
@@ -199,7 +199,7 @@ function realSubcommands(command: AnyCommand): AnyCommand[] {
 /**
  * Whether the command ends its own option parsing at the first positional.
  *
- * `cf call` and `cf exec` are `stopEarly()`, so every word after the
+ * `cf piece call` and `cf exec` are `stopEarly()`, so every word after the
  * callable name belongs to the callable's schema-derived parser and the CLI's
  * own flags are refused there. Cliffy stores the property with no accessor, so
  * it is read off the field: keeping the question where the command declares it
@@ -220,6 +220,11 @@ function stopsEarly(command: AnyCommand): boolean {
  * reason `PRE_PARSE_GLOBALS` is.
  */
 const POSITIONAL_ADDRESS_COMMANDS: ReadonlySet<string> = new Set([
+  "cell get",
+  "cell set",
+  "piece call",
+  // The superseded spellings, which accept the same positional for as long as
+  // they answer at all.
   "get",
   "set",
   "call",
@@ -239,12 +244,27 @@ function isPositionalAddress(
     isReference(token);
 }
 
+/**
+ * Subcommands a caller can reach, hidden ones included.
+ *
+ * A superseded spelling is hidden so that nothing offers it, and stays mounted
+ * so that a caller who already types it still works. Completion follows that
+ * split: suggestion lists only what {@link realSubcommands} returns, while
+ * resolving a typed name and walking the tree for slots see everything
+ * reachable — otherwise the old spelling would complete none of its own flags.
+ */
+function reachableSubcommands(command: AnyCommand): AnyCommand[] {
+  return command.getCommands(true).filter((child) =>
+    child.getName() !== "help"
+  );
+}
+
 /** Resolve a subcommand by name or alias, skipping Cliffy's own `help`. */
 function findSubcommand(
   command: AnyCommand,
   name: string,
 ): AnyCommand | undefined {
-  return command.getCommands(false).find((child) =>
+  return reachableSubcommands(command).find((child) =>
     child.getName() === name || child.getAliases().includes(name)
   );
 }
@@ -592,8 +612,14 @@ export interface DeclaredSlots {
 
 /**
  * Every slot the tree offers a value at, walked the way `resolveCompletionLine`
- * walks it: `realSubcommands` decides which children are commands, and
- * `takesValue` decides which options have a value to complete.
+ * walks it: {@link reachableSubcommands} decides which children are commands,
+ * and `takesValue` decides which options have a value to complete.
+ *
+ * Reachable rather than suggestible, which is the same split resolving a typed
+ * name follows: a superseded spelling is hidden from {@link realSubcommands},
+ * so nothing offers it, and it still owns every slot below it — a caller who
+ * types it completes its flags, and a slot reached only through it is one the
+ * provider tables have to answer for.
  *
  * Both keys the provider tables use fall out of this walk, which is what lets
  * a check subtract the tables from the tree — in either direction — rather
@@ -621,7 +647,7 @@ export function declaredSlots(root: AnyCommand): DeclaredSlots {
         index,
       });
     });
-    for (const child of realSubcommands(command)) {
+    for (const child of reachableSubcommands(command)) {
       walk(child, [...path, child.getName()]);
     }
   };

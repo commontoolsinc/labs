@@ -44,7 +44,7 @@ standalone value.
 **A3 — extract `callFromCommand`.** Done (#6682). `call` carries the
 named-export shape its siblings have: the mount's spelling and the two
 arrays Cliffy splits the argv into — this command's own arguments, the
-line past `cf call`, which a grammar refusal reprints, and the words past
+line past `cf piece call`, which a grammar refusal reprints, and the words past
 `--`, which the read step parses — are parameters beside the options and
 the positionals, so nothing under the action line needs the binding. The
 dispatch and the `render`/`hint` sinks ride a deps bag, which holds
@@ -71,7 +71,7 @@ that rejection's throw lands in the action's own catch;
 describing the shell's exit as a second failure of the call.
 `describePieceFromCommand` takes `render`/`hint` beside them, so its page
 and next steps land where the caller puts them, and the confirmation
-`cf call` puts on stderr for a JSON payload — so that stdout stays the
+`cf piece call` puts on stderr for a JSON payload — so that stdout stays the
 machine surface — rides the caller's `printError` rather than the
 process's. `announce` beside those carries what a call publishes in
 flight — the invocation pair, and the spans under `--verbose` — which

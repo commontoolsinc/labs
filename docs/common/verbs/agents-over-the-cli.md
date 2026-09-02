@@ -26,7 +26,7 @@ Five ways to reach a piece, each bounded by something different:
 | a name someone assigned | `cf piece slugs` | the slug index |
 | text you expect to be in the data | `cf piece search <query>` | registered pieces, matched client-side |
 | a convention a pattern publishes | `cf wish <target>` | the collection that target names |
-| an address you were handed | `cf get <reference>` | nothing — this is not discovery |
+| an address you were handed | `cf cell get <reference>` | nothing — this is not discovery |
 
 All but the last are partial views, and they are partial in different
 directions, so an empty result from one says nothing about the others.
@@ -56,7 +56,7 @@ and that unlisted item reads on its own address regardless.
 registry: `#pieceRegistry` resolves the registry itself, while `#mentionable`
 and `#favorites` resolve the collections of those names. The `#profile` family
 resolves against the identity's home space. It takes the same projection flags
-as `cf get`, so a survey can be narrowed on the way out.
+as `cf cell get`, so a survey can be narrowed on the way out.
 
 ## Orienting on one piece
 
@@ -97,7 +97,7 @@ it does not:
 | `cf piece describe` | the whole piece in prose — purpose, state, inputs, one summary line per verb |
 | `cf piece verbs --json` | each shown verb's input schema, and its result schema where it declares one |
 | `cf piece verbs --json --all` | the same, plus the wrapper-tier and deprecated verbs the default view withholds |
-| `cf call <verb> --help --json` | one verb, in full |
+| `cf piece call <verb> --help --json` | one verb, in full |
 
 `describe` is where to start and rarely where to stop: it summarizes each verb
 in a line and does not carry the schema a payload has to satisfy. Build a
@@ -134,7 +134,7 @@ run:
 
 ```bash
 export CF_INVOCATION_SESSION=$(cf invocation-session new)
-cf call --cell <piece> --invocation add-glaze-1 addGlaze '{"name":"maple"}'
+cf piece call --cell <piece> --invocation add-glaze-1 addGlaze '{"name":"maple"}'
 ```
 
 Replaying that id within that session returns the original result and writes

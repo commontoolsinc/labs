@@ -42,6 +42,7 @@ import {
   setsrcSuccessLine,
 } from "../commands/piece.ts";
 import { normalizeApiUrl } from "../lib/api-url.ts";
+import { space } from "../commands/space.ts";
 import {
   CellSelectionError,
   parseCellSelectionOptions,
@@ -995,7 +996,7 @@ describe("cli piece parsing", () => {
   });
 
   it("shows recreate-root as a space-scoped command", async () => {
-    const { code, stdout, stderr } = await cf("piece recreate-root --help");
+    const { code, stdout, stderr } = await cf("space recreate-root --help");
     checkStderr(stderr);
     const output = stripAnsi(stdout.join("\n"));
     expect(output).toContain(
@@ -1229,9 +1230,13 @@ describe("cli piece parsing", () => {
   });
 
   it("shows source-location options for every local deployment command", () => {
-    const optionFlags = (command: string) =>
-      piece.getCommand(command)!.getOptions().flatMap((option) => option.flags);
-    const newFlags = optionFlags("new");
+    // `set-home` is reached through `cf space` now; the hidden `cf piece`
+    // mount is the same definition and is pinned against it below.
+    const pieceFlags = (command: string) =>
+      piece.getCommand(command, true)!.getOptions().flatMap((o) => o.flags);
+    const spaceFlags = (command: string) =>
+      space.getCommand(command)!.getOptions().flatMap((o) => o.flags);
+    const newFlags = pieceFlags("new");
     expect(newFlags).toContain("--slug");
     expect(newFlags).toContain("--root");
     expect(newFlags).toContain("--repository");
@@ -1239,16 +1244,70 @@ describe("cli piece parsing", () => {
     expect(newFlags).toContain("--datafile");
     expect(newFlags).toContain("--dangerously-allow-incompatible-schema");
 
-    for (const command of ["setsrc", "set-home"]) {
-      const flags = optionFlags(command);
+    for (const flags of [pieceFlags("setsrc"), spaceFlags("set-home")]) {
       expect(flags).toContain("--root");
       expect(flags).toContain("--repository");
       expect(flags).toContain("--test");
       expect(flags).toContain("--datafile");
     }
-    expect(optionFlags("setsrc")).toContain(
+    expect(pieceFlags("setsrc")).toContain(
       "--dangerously-allow-incompatible-schema",
     );
+  });
+
+  it("declares the same options on both mounts of a moved command", () => {
+    // One builder, two mount points: a caller who has not migrated yet meets
+    // the surface the new spelling has, not a copy that can drift from it.
+    // Compared on each command's own declarations, because the two nouns
+    // contribute different globals -- see the `--json` case below.
+    const own = (command: { getBaseOptions(): { flags: string[] }[] }) =>
+      command.getBaseOptions().flatMap((o) => o.flags).sort();
+    for (const moved of ["set-home", "recreate-root"]) {
+      expect(own(piece.getCommand(moved, true)!)).toEqual(
+        own(space.getCommand(moved)!),
+      );
+    }
+  });
+
+  it("refuses `--json` on a moved command rather than ignoring it", async () => {
+    const { code, stdout, stderr } = await cf(
+      "space recreate-root --json -i ./k.key -s s -a http://localhost:8000",
+    );
+    expect(code).not.toBe(0);
+    expect(stdout).toEqual([]);
+    expect(stripAnsi(stderr.join("\n"))).toContain(
+      "has no machine-readable output",
+    );
+  });
+
+  it("inherits `--json` on the `cf space` mount and refuses it", () => {
+    // `cf space` declares --json globally for the store commands, so the two
+    // target-scoped ones inherit an option they have no output to answer
+    // with. Pinned rather than left implicit: the refusal is what keeps it
+    // from silently printing human text to a caller who asked to parse it.
+    const all = (command: { getOptions(): { flags: string[] }[] }) =>
+      command.getOptions().flatMap((o) => o.flags);
+    expect(all(space.getCommand("set-home")!)).toContain("--json");
+    expect(all(piece.getCommand("set-home", true)!)).not.toContain("--json");
+  });
+
+  it("hides the superseded `cf piece` mounts from help", () => {
+    // Hidden is what keeps the old spelling working without teaching it: it
+    // stays reachable for a caller who already wrote it, and is offered to
+    // nobody new.
+    const names = (
+      // deno-lint-ignore no-explicit-any
+      command: any,
+      includeHidden: boolean,
+    ): string[] =>
+      command.getCommands(includeHidden).map((c: { getName(): string }) =>
+        c.getName()
+      );
+    for (const moved of ["set-home", "recreate-root"]) {
+      expect(names(piece, true)).toContain(moved);
+      expect(names(piece, false)).not.toContain(moved);
+      expect(names(space, false)).toContain(moved);
+    }
   });
 
   it("offers computed transforms for piece reads", () => {
@@ -1422,7 +1481,7 @@ describe("cli piece parsing", () => {
   it("prefers the verb refusal over a selection error on a stream path", async () => {
     // A --filter against a handler fails inside the selector with a shape
     // error ("--filter can only be applied to an array") that sends the
-    // caller to their schema, when the answer is `cf call`. The stored
+    // caller to their schema, when the answer is `cf piece call`. The stored
     // {$stream: true} sentinel is a definite signal, so the verb refusal
     // wins over whatever the selector threw.
     // What a real cell answers for a verb: the parent stores a LINK at the
@@ -1941,13 +2000,13 @@ describe("cli piece parsing", () => {
       piece: PIECE,
     };
 
-    it("refuses a root verb path, pointing at cf call", async () => {
+    it("refuses a root verb path, pointing at cf piece call", async () => {
       const deps = guardDeps(guardPiece(RESULT_VALUE));
       const error = await getCellValue(config, ["addItem"], {}, deps)
         .catch((error) => error);
       expect(error).toBeInstanceOf(PieceVerbReadError);
       expect((error as Error).message).toBe(
-        `Path resolves to a verb; use 'cf call --cell ${PIECE} addItem' instead.`,
+        `Path resolves to a verb; use 'cf piece call --cell ${PIECE} addItem' instead.`,
       );
 
       // A root verb on the input cell redirects the same way: the dispatcher
@@ -1957,7 +2016,7 @@ describe("cli piece parsing", () => {
       );
       await expect(
         getCellValue(config, ["setup"], { input: true }, inputDeps),
-      ).rejects.toThrow(/use 'cf call/);
+      ).rejects.toThrow(/use 'cf piece call/);
     });
 
     it("classifies a verb path without projecting the whole parent", async () => {
@@ -2001,7 +2060,7 @@ describe("cli piece parsing", () => {
           guardDeps(pieceWithChild(child)),
         ).catch((error) => error);
         expect(error).toBeInstanceOf(PieceVerbReadError);
-        expect((error as Error).message).toContain("cf call");
+        expect((error as Error).message).toContain("cf piece call");
       }
 
       // And a data field under the same parent still reads: refusing on
@@ -2041,11 +2100,11 @@ describe("cli piece parsing", () => {
         },
       };
       await expect(getCellValue(config, ["notify"], {}, guardDeps(piece)))
-        .rejects.toThrow(/use 'cf call/);
+        .rejects.toThrow(/use 'cf piece call/);
     });
 
     it("refuses a nested verb path without suggesting an uncallable command", async () => {
-      // `cf call` resolves root-level names only, so `cf call
+      // `cf piece call` resolves root-level names only, so `cf piece call
       // removeItem` would fail — the refusal must not suggest it. It says
       // why the read refused and where to go instead.
       const deps = guardDeps(guardPiece(RESULT_VALUE));
@@ -2062,7 +2121,7 @@ describe("cli piece parsing", () => {
           "instead, or list the callable verbs with " +
           `'cf piece verbs --cell ${PIECE}'.`,
       );
-      expect((error as Error).message).not.toContain("cf call");
+      expect((error as Error).message).not.toContain("cf piece call");
     });
 
     it("reads a probe-classifiable but marker-less output (fails open)", async () => {
@@ -2125,7 +2184,7 @@ describe("cli piece parsing", () => {
       )
         .catch((error) => error);
       expect(error).toBeInstanceOf(PieceVerbReadError);
-      expect((error as Error).message).toContain("cf call");
+      expect((error as Error).message).toContain("cf piece call");
       expect((error as Error).message).not.toContain("--step");
     });
 
@@ -2171,7 +2230,7 @@ describe("cli piece parsing", () => {
           ),
       }).catch((error) => error);
       expect(thrown).toBeInstanceOf(PieceVerbReadError);
-      expect((thrown as Error).message).toContain("cf call");
+      expect((thrown as Error).message).toContain("cf piece call");
 
       // And the same when the selection simply yields nothing.
       const empty = await getCellValue(config, ["addTopic"], options, {

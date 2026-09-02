@@ -3205,7 +3205,7 @@ export async function deriveSelectedValue(
 
   const { commonfabric } = createBuilder({
     unsafeHostTrust: runtime.createUnsafeHostTrust({
-      reason: "cf get filter/schema computed projection",
+      reason: "cf cell get filter/schema computed projection",
     }),
   });
   const { lift, pattern } = commonfabric;
@@ -3396,8 +3396,8 @@ export async function deriveSelectedValue(
     }
     // This wait is GLOBAL: idle() drains the whole reactive graph and
     // synced() the whole storage manager, not just this transform. On a
-    // plain `cf get` that is benign — nothing else runs in the CLI's
-    // runtime — but a shaped `cf call` readback arrives here right after
+    // plain `cf cell get` that is benign — nothing else runs in the CLI's
+    // runtime — but a shaped `cf piece call` readback arrives here right after
     // its handler ran, so the selection waits on whatever derived
     // recomputation that handler triggered elsewhere, a coupling the plain
     // call's transaction-local acknowledgment deliberately avoids.

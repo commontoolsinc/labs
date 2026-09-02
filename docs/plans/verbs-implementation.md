@@ -106,7 +106,7 @@ compiled graph rather than sitting in reach the way a tool's pattern does — an
 it cost one structural match and no change to `callableCommandSpec`'s
 signature. The command surface followed: #5680 stopped the help page's false
 no-output claim, and #5717 serves the declared result at
-`cf call <verb> --help` — text and `--json` alike — through the
+`cf piece call <verb> --help` — text and `--json` alike — through the
 resolution's `declaredResult` thunk, so the pattern load is priced onto
 exactly the callers that ask (help, and a readback bounding a cycle), never
 onto an ordinary dispatch.
@@ -249,7 +249,7 @@ including under `--no-wait`, which returns none today and is therefore a dead
 end for collecting work later.
 
 This is also what gives items 8 and 9 a consumer: a receipt's schema is read by
-`cf get` against the address this publishes, not by the call path.
+`cf cell get` against the address this publishes, not by the call path.
 
 *Exit:* a detached call returns an address that reads back the outcome it
 names.
@@ -269,7 +269,7 @@ named no invocation, so the handling filed under no receipt and the command
 printed nothing at all — a read option there could only ever have answered
 nothing, which is the silence this item exists to remove. `cf exec` now mints
 an invocation per call, the same pair `resolveInvocationIdentity` mints for a
-`cf call` that names neither, and prints the Invocation JSON that call
+`cf piece call` that names neither, and prints the Invocation JSON that call
 declares. A tool's stdout is unchanged; its result cell's address moves to the
 address-argument spelling, which is what removes the third spelling rather than
 adding a fourth.
@@ -361,7 +361,7 @@ includes the shape a read emits.
 *CFC gets a notification, not a ruling* — an existing capability widening from
 the user's own model session to external principals.
 
-*Exit, met by #5880:* `cf call --piece <root> addPiece
+*Exit, met by #5880:* `cf piece call --piece <root> addPiece
 '{"piece": <address>}'` registers the piece. That verb was reachable by
 `pieces.add` from inside the runtime and by a model through the dialog builtin,
 and by no other caller; a CLI caller now reaches it too, and the edge that comes
@@ -538,7 +538,7 @@ stops paying, since `cf` exits before convergence on purpose rather than hold a
 committed write hostage to every recomputation it triggered.
 
 Keep `--show-links` meanwhile; retire it when a replacement exists or the need
-is confirmed dead. Note that `cf get` has never had an equivalent, so
+is confirmed dead. Note that `cf cell get` has never had an equivalent, so
 bulk resolution on a *read* is a gap that predates all of this.
 
 **Running beside all of the above.** A caller naming a reference (item 11,
@@ -682,12 +682,12 @@ it, and naming their triggers here is what keeps them from being dropped when
 this document stops being read.
 
 **The command surface** —
-[The CLI surface](cli-surface-implementation.md), already sequenced. Its first
-two stages add positional addresses and the top-level names, and they can start
-as soon as the read layer has merged; they touch the same commands, so starting
-earlier means resolving the same files twice. Its deprecation stage is now
-dated rather than conditional: each warning names the day its spelling stops
-working, two weeks after the warnings land.
+[The CLI surface shape](cli-surface-shape.md), already sequenced. Positional
+addresses and the top-level names land first, and can start as soon as the read
+layer has merged; they touch the same commands, so starting earlier means
+resolving the same files twice. Every spelling it retires is dated rather than
+conditional: each notice names the day after which the spelling it replaces is
+no longer guaranteed.
 
 **Retention and CFC execution provenance** —
 [its own plan](retention-and-provenance.md). Gated on a CFC review that has not
@@ -709,10 +709,10 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | #5698 | `cf piece verbs` returns nothing for a piece whose declared result type omits its verbs, though they are callable | the other direction of the same surface, and **fixed** by #5794: the listing enumerates candidates from the compiled graph as well as the result cell, and classifies each one on the stored signal that closed the first direction |
 | #5706 | a shaped read permanently writes to the user's space — per-element sub-patterns land at space scope | runner-owned, beside #5633 |
 | #5722 | a verb's help shows its usage twice, and shows no way to copy it | found by driving the surface by hand, which no test does |
-| #5558 | `cf call --help` claims every handler returns nothing, including one that declares a result | **fixed** by #5680 (the false claim) and #5717 (the enumerated fields) |
+| #5558 | `cf piece call --help` claims every handler returns nothing, including one that declares a result | **fixed** by #5680 (the false claim) and #5717 (the enumerated fields) |
 | #5637 | an author's prose does not reach a caller: on a verb, on an event field, and on the event interface | step 5a — it absorbed #5559, which described one symptom and had its cause backwards |
 | #5577 | a verb returning a child piece in a doubly-linked tree crashes readback on a cycle | **fixed** by #5740 |
-| #5523 | two identical `cf get` projections in one runtime collide on the transform result cell | **fixed** by #5757 |
+| #5523 | two identical `cf cell get` projections in one runtime collide on the transform result cell | **fixed** by #5757 |
 | #5632 | `--show-links` and a `$link` read return different entity ids for the same piece | step 11 — **working as designed**; closes once #5754 lands the documentation |
 | #5498 | `getEntityId()` strips the entity URI scheme, collapsing two kinds to one identity | unscheduled. It rode ordering step 11 while that step was a question about identity; the answer there was that the two routes are aliases by design, which says nothing about a scheme the id itself drops. Independent, and still open |
 | #5589 | a click's `detail` and a `cf-select`'s `target.value` reach a handler as types no pattern declares | carried alongside — it belongs to whoever next touches `packages/html`. The ruling that closed item 9b also removed the only thing that ever compared the renderer's output against an author's declared type, so this has no detector left |
@@ -720,8 +720,8 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | #5534 | a capability probe passes while covering nothing: a dispatch rejection is not a synchronous throw | carried alongside |
 | #5685 | no CI job runs any verb integration script, and one of them says it does | **fixed** — `integration.sh`'s `piece-call` section runs both scripts (`verbs-over-the-cli.sh` since #5289, `verb-session-gaps.sh` since #5793), and CI's `cli-integration-test` matrix runs that section on every pull request. The arc's honesty checks gate |
 | #5663 | the compat checker admits a newly required verb event field, breaking every existing caller | **fixed** — the refusal lives in the `verbEvent` context in `packages/piece/src/schema-compatibility.ts`, which is the set item 2 derives its tolerated tier from; the rule reads `required`, not that set, so the tier is unchanged |
-| #5689 | `cf call` accepts any name into dispatch; a non-verb fails with no diagnostic | unscheduled. The listing now refuses to offer a non-verb (#5683, #5794); the dispatcher still accepts one |
-| #5684 | `cf get --select` returns `{}` for a field path that cannot match | unscheduled. Item 2's shape on the concise path, which item 2 puts out of scope — a projection that answers nothing rather than refusing |
+| #5689 | `cf piece call` accepts any name into dispatch; a non-verb fails with no diagnostic | unscheduled. The listing now refuses to offer a non-verb (#5683, #5794); the dispatcher still accepts one |
+| #5684 | `cf cell get --select` returns `{}` for a field path that cannot match | unscheduled. Item 2's shape on the concise path, which item 2 puts out of scope — a projection that answers nothing rather than refusing |
 | #5686 | design rule 1 says input schemas are closed-world; after the #5589 ruling the runtime does the opposite | unscheduled and unowned. Not settled by [designing verbs so they can change](verb-evolution.md), which says nothing about closed-world inputs — searched, not assumed |
 | #5756 | `ensureKeylessPatternIdentity`'s doc comment claims a structural-dedup property the code does not have | runner-owned. Measured: two structurally identical patterns get different keyless identities |
 | #5758 | a call's readback traverses the reference graph with no work budget | memory-owned. `maxDepth` and `maxEntities` are in `docs/specs/memory-v2/05-queries.md` and not on the wire |
@@ -744,10 +744,10 @@ filed under one. It is sequenced in
 [its own plan](retention-and-provenance.md).
 
 **The command surface** —
-[The CLI surface](cli-surface-implementation.md) sequences positional addresses,
-the top-level names, deprecation, and the merges. Kept apart because it renames
-rather than adds, so every step of it can break a caller who learned the current
-spelling.
+[The CLI surface shape](cli-surface-shape.md) sequences positional addresses,
+the top-level names, deprecation, and the move of each command under the noun
+it acts on. Kept apart because it renames rather than adds, so every step of it
+can break a caller who learned the current spelling.
 
 **The designs.** Nothing here amends
 [the pattern verb contract](pattern-verb-contract.md) or

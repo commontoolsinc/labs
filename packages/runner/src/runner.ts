@@ -3106,7 +3106,7 @@ export class Runner {
       // re-encountering one reads exactly this), and the pre-marker legacy
       // root. The absent-marker exemption's own rationale applies in full:
       // re-staging would validate — and rewrite defaults over — a stored
-      // argument no update touched (the cross-session `cf get` transform
+      // argument no update touched (the cross-session `cf cell get` transform
       // replay failed exactly there). A marker naming ANOTHER identity still
       // restages, and any surviving pointer keeps the ordinary rule. An
       // EVICTED session pointer is NOT zero evidence — this session had the

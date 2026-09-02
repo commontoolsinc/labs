@@ -60,10 +60,13 @@ describe("check-verb-session-sync", () => {
   describe("tokenize", () => {
     it("keeps a quoted span as one token without its quotes", () => {
       expect(
-        tokenize(`cf call addItem --title "Login rewrite" -- --select 'item@'`),
+        tokenize(
+          `cf piece call addItem --title "Login rewrite" -- --select 'item@'`,
+        ),
       )
         .toEqual([
           "cf",
+          "piece",
           "call",
           "addItem",
           "--title",
@@ -87,8 +90,8 @@ describe("check-verb-session-sync", () => {
 
   describe("demoCommands", () => {
     it("extracts a command out of an assignment's substitution", () => {
-      expect(demoCommands(`X=$(cf get --piece a title | jq -r .)`))
-        .toEqual([["cf", "get", "--piece", "a", "title"]]);
+      expect(demoCommands(`X=$(cf cell get --piece a title | jq -r .)`))
+        .toEqual([["cf", "cell", "get", "--piece", "a", "title"]]);
     });
 
     it("reads past a helper's own leading arguments", () => {
@@ -97,30 +100,52 @@ describe("check-verb-session-sync", () => {
       // report every write in a tour as invented. The payload comes back in
       // the document's own spelling for it, which is what holds the two to
       // each other.
-      expect(demoCommands(`run_stdin '25' cf set --piece a target`))
-        .toEqual([["echo", "25", "|", "cf", "set", "--piece", "a", "target"]]);
+      expect(demoCommands(`run_stdin '25' cf cell set --piece a target`))
+        .toEqual([[
+          "echo",
+          "25",
+          "|",
+          "cf",
+          "cell",
+          "set",
+          "--piece",
+          "a",
+          "target",
+        ]]);
     });
 
     it("does not mistake a payload spelled `cf` for the command", () => {
       // Searching for the `cf` token found the payload first and read the
-      // rest as the argv, recording `cf cf set …` — a command no demo runs,
+      // rest as the argv, recording `cf cf cell set …` — a command no demo runs,
       // against which the honest quote of the write reads as invented. The
       // helper's shape says where the command starts; nothing is searched.
-      expect(demoCommands(`run_stdin 'cf' cf set --piece a target`))
-        .toEqual([["echo", "cf", "|", "cf", "set", "--piece", "a", "target"]]);
+      expect(demoCommands(`run_stdin 'cf' cf cell set --piece a target`))
+        .toEqual([[
+          "echo",
+          "cf",
+          "|",
+          "cf",
+          "cell",
+          "set",
+          "--piece",
+          "a",
+          "target",
+        ]]);
     });
 
     it("reads a refusal's own claim and signature past, not through", () => {
       // The same hazard on the helper carrying two arguments: either can be
       // spelled `cf`, and only the table knows the command is the third.
-      expect(demoCommands(`refused 'why' 'cf' cf get --piece a x`))
-        .toEqual([["cf", "get", "--piece", "a", "x"]]);
+      expect(demoCommands(`refused 'why' 'cf' cf cell get --piece a x`))
+        .toEqual([["cf", "cell", "get", "--piece", "a", "x"]]);
     });
 
     it("ignores a helper it does not know", () => {
       // The head list is the whole of what makes a line a command the demo
       // ran; a new helper that executes one has to be added to it.
-      expect(demoCommands(`frobnicate cf set --piece a target`)).toEqual([]);
+      expect(demoCommands(`frobnicate cf cell set --piece a target`)).toEqual(
+        [],
+      );
     });
   });
 
@@ -131,9 +156,19 @@ describe("check-verb-session-sync", () => {
       // The document's spelling of a demo's `run_stdin`, asserted here as
       // tokens rather than only through the violations it produces.
       expect(
-        walkthroughCommands(block("echo '25' | cf set --piece a target"))
+        walkthroughCommands(block("echo '25' | cf cell set --piece a target"))
           .map((command) => command.tokens),
-      ).toEqual([["echo", "25", "|", "cf", "set", "--piece", "a", "target"]]);
+      ).toEqual([[
+        "echo",
+        "25",
+        "|",
+        "cf",
+        "cell",
+        "set",
+        "--piece",
+        "a",
+        "target",
+      ]]);
     });
 
     it("finds no command in a line piping into anything but cf", () => {
@@ -151,22 +186,22 @@ describe("check-verb-session-sync", () => {
   describe("commandMatches", () => {
     it("returns true across variable and placeholder tokens", () => {
       expect(commandMatches(
-        tokenize(`cf call "$EPIC" blockOn --on "$OTHER"`),
-        tokenize(`cf call <cookies-address> blockOn --on <csrf-address>`),
+        tokenize(`cf piece call "$EPIC" blockOn --on "$OTHER"`),
+        tokenize(`cf piece call <cookies-address> blockOn --on <csrf-address>`),
       )).toBe(true);
     });
 
     it("returns false for a differing literal token", () => {
       expect(commandMatches(
-        tokenize("cf get --piece board items"),
-        tokenize("cf get --piece board title"),
+        tokenize("cf cell get --piece board items"),
+        tokenize("cf cell get --piece board title"),
       )).toBe(false);
     });
 
     it("returns false when the token counts differ", () => {
       expect(commandMatches(
-        tokenize("cf get --piece board"),
-        tokenize("cf get --piece board items"),
+        tokenize("cf cell get --piece board"),
+        tokenize("cf cell get --piece board items"),
       )).toBe(false);
     });
   });
@@ -203,8 +238,8 @@ describe("check-verb-session-sync", () => {
       // verb, where a projection names positions in a result nothing has
       // identified and the command stops working.
       const broken = md.replace(
-        'cf call --piece board addItem --title "Login rewrite" \\',
-        "cf call --piece board --select 'item@' addItem " +
+        'cf piece call --piece board addItem --title "Login rewrite" \\',
+        "cf piece call --piece board --select 'item@' addItem " +
           '--title "Login rewrite" \\',
       );
       expect(broken).not.toEqual(md);
@@ -247,7 +282,7 @@ describe("check-verb-session-sync", () => {
       // in a transcript would ever match.
       const block = [
         "```console",
-        "$ cf get -s demo $EPIC children --select @,title",
+        "$ cf cell get -s demo $EPIC children --select @,title",
         "```",
       ].join("\n");
       expect(findViolations(sh, block)).toEqual([]);
@@ -368,18 +403,18 @@ describe("check-verb-session-sync", () => {
       // that dropped the payload missed: a tour ABOUT writing can narrate
       // setting 250 beside the answer the session got for 25, and every
       // claim around it still reads as verified.
-      const demo = `run_stdin '25' cf set --piece a target\n`;
-      const quoted = "```bash\necho '25' | cf set --piece a target\n```";
-      const drifted = "```bash\necho '250' | cf set --piece a target\n```";
+      const demo = `run_stdin '25' cf cell set --piece a target\n`;
+      const quoted = "```bash\necho '25' | cf cell set --piece a target\n```";
+      const drifted = "```bash\necho '250' | cf cell set --piece a target\n```";
       expect(findViolations(demo, quoted)).toEqual([]);
       expect(findViolations(demo, drifted).length).toBe(1);
     });
 
     it("catches a write the document quotes without its value", () => {
       // The other half: a document that quotes only the command half leaves
-      // a reader with a `cf set` that hangs waiting on stdin.
-      const demo = `run_stdin '25' cf set --piece a target\n`;
-      const halved = "```bash\ncf set --piece a target\n```";
+      // a reader with a `cf cell set` that hangs waiting on stdin.
+      const demo = `run_stdin '25' cf cell set --piece a target\n`;
+      const halved = "```bash\ncf cell set --piece a target\n```";
       expect(findViolations(demo, halved).length).toBe(1);
     });
 
@@ -387,10 +422,10 @@ describe("check-verb-session-sync", () => {
       // Splitting the raw line at its first bar split INSIDE the quotes, so
       // a document showing `a|b` matched a demo piping `a`: the separator is
       // the bar that stands alone as a token, never the first bar character.
-      const pipesA = `run_stdin 'a' cf set --piece a target\n`;
-      const showsAB = "```bash\necho 'a|b' | cf set --piece a target\n```";
+      const pipesA = `run_stdin 'a' cf cell set --piece a target\n`;
+      const showsAB = "```bash\necho 'a|b' | cf cell set --piece a target\n```";
       expect(findViolations(pipesA, showsAB).length).toBe(1);
-      const pipesAB = `run_stdin 'a|b' cf set --piece a target\n`;
+      const pipesAB = `run_stdin 'a|b' cf cell set --piece a target\n`;
       expect(findViolations(pipesAB, showsAB)).toEqual([]);
     });
 
@@ -398,10 +433,12 @@ describe("check-verb-session-sync", () => {
       // The document side reads its command positionally for the same
       // reason the demo side does: found in the raw text, the first `cf `
       // a value spells is taken for the start of the command.
-      const demo = `run_stdin 'x cf y' cf set --piece a target\n`;
-      const quoted = "```bash\necho 'x cf y' | cf set --piece a target\n```";
+      const demo = `run_stdin 'x cf y' cf cell set --piece a target\n`;
+      const quoted =
+        "```bash\necho 'x cf y' | cf cell set --piece a target\n```";
       expect(findViolations(demo, quoted)).toEqual([]);
-      const drifted = "```bash\necho 'x cf y' | cf set --piece a label\n```";
+      const drifted =
+        "```bash\necho 'x cf y' | cf cell set --piece a label\n```";
       expect(findViolations(demo, drifted).length).toBe(1);
     });
 

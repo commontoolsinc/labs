@@ -58,6 +58,11 @@ import {
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
 import { cliCommand, cliText } from "../lib/cli-name.ts";
+import {
+  type CommandSpellingNotice,
+  commandSpellingNotice,
+  noCommandSpellingNotice,
+} from "../lib/deprecated-spelling.ts";
 import type { FabricValue } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model";
 import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
@@ -688,11 +693,11 @@ export function localPatternEntry(
 }
 
 /**
- * A `cf get` failure caused by a data condition rather than bad arguments:
+ * A `cf cell get` failure caused by a data condition rather than bad arguments:
  * a path that doesn't resolve, a result schema that can't project stored data
  * (PieceResultProjectionError), a filter/projection that doesn't fit the
  * selected value (CellSelectionError), or a path that lands on a verb
- * (PieceVerbReadError — the read-path guard's redirect at `cf call`).
+ * (PieceVerbReadError — the read-path guard's redirect at `cf piece call`).
  * Reported as a plain error on stderr with exit 1, never as a Cliffy
  * ValidationError (which would dump the usage screen and read as an arg-parse
  * failure).
@@ -706,11 +711,11 @@ export function isPieceGetDataError(error: unknown): error is Error {
 }
 
 /**
- * Build the stderr report for a `cf get` failure. Returns null when the
+ * Build the stderr report for a `cf cell get` failure. Returns null when the
  * error is not a data error (the caller should rethrow). `message` is the
  * one-line error; `hint` is an optional next-step tip. A projection error
  * already carries its own `--step` guidance, selection errors stand alone,
- * a verb refusal already carries its `cf call` redirect, and an
+ * a verb refusal already carries its `cf piece call` redirect, and an
  * input-mode read has nothing more to suggest — only a result-mode
  * unresolved path gets the `--input` tip.
  */
@@ -739,7 +744,7 @@ export function pieceGetDataErrorReport(
  * Build the stderr report for a `piece link` validation failure. Returns null
  * when the error is not a LinkValidationError (the caller should rethrow).
  * Link validation fails on data conditions — a source/target piece or path
- * that doesn't exist, read over the network — so it reports like `cf get`'s
+ * that doesn't exist, read over the network — so it reports like `cf cell get`'s
  * unresolved-path data error rather than as a Cliffy usage error.
  */
 export function pieceLinkDataErrorReport(
@@ -756,7 +761,7 @@ export function pieceLinkDataErrorReport(
 }
 
 /**
- * Build the stderr report for a `cf call` payload rejection. Returns null
+ * Build the stderr report for a `cf piece call` payload rejection. Returns null
  * when the error is not a VerbInputValidationError (the caller should
  * rethrow). The flags parsed fine and the piece resolved — the values simply
  * do not fit the verb — so it reports like the other data errors rather than
@@ -777,7 +782,7 @@ export function verbInputErrorReport(
 
 /**
  * Print a data-error report — message plus optional hint — to stderr and exit
- * 1. The single exit path for the `cf get` / `piece link` data errors
+ * 1. The single exit path for the `cf cell get` / `piece link` data errors
  * above. The `deps` seam puts both sinks and the exit itself in the caller's
  * hands: a one-shot verb takes the defaults and ends the process, while a
  * caller that has to survive the report supplies an `exit` that throws and
@@ -801,7 +806,7 @@ export function exitWithDataError(
 }
 
 /**
- * Turn a failed `cf call` into its stderr report, or re-throw.
+ * Turn a failed `cf piece call` into its stderr report, or re-throw.
  *
  * A named function rather than an inline `.catch` in the command action:
  * which of the two it does is decided by the error alone, so a test states
@@ -831,7 +836,7 @@ export function reportVerbInputErrorOrRethrow(
 }
 
 /**
- * The failure exit for `cf call`: closes the verbose in-flight span as
+ * The failure exit for `cf piece call`: closes the verbose in-flight span as
  * `failed` (idempotent — a span already closed elsewhere stays closed),
  * rethrows Cliffy validation errors so usage failures still render the usage
  * screen — with their span closed first — and reports everything else as the
@@ -1034,7 +1039,7 @@ export function invocationPhaseReporter(
 }
 
 /**
- * Phase observer for `cf call`: always advances the furthest-phase
+ * Phase observer for `cf piece call`: always advances the furthest-phase
  * tracker the failure report prints; under --verbose it also streams one
  * wall-clock span per observed phase transition (verb contract WS-D, phase
  * timings). Spans are bounded by the phases the `onPhase` callback already
@@ -1083,7 +1088,7 @@ export function pieceCallPhaseObserver(
 }
 
 /**
- * The success tail of `cf call`: a settled invocation's JSON, a tool's
+ * The success tail of `cf piece call`: a settled invocation's JSON, a tool's
  * output, or a help page, through the `render`/`hint` sinks a caller
  * supplies. Standing apart from the action is what lets a test drive each
  * outcome shape directly rather than through argv and a dispatch; the action
@@ -1132,14 +1137,14 @@ export function renderPieceCallOutcome(
       const ref = addressArgument(result.resultRef);
       hintOut(
         `Tool result cell: ${ref} (read it back with ` +
-          `\`cf get --cell ${ref}\`)`,
+          `\`cf cell get --cell ${ref}\`)`,
         false,
       );
     }
     return;
   }
   const nextSteps = cliText(`NEXT STEPS:
-  → Verify state:  cf get --cell ${piece} <path> ...
+  → Verify state:  cf cell get --cell ${piece} <path> ...
   → Full inspect:  cf piece inspect --cell ${piece} ...`);
   if (result.invocation) {
     // The machine surface for a handler invocation: stdout carries the
@@ -1164,20 +1169,20 @@ export function renderPieceCallOutcome(
             // the replay as a recovery would be offering a duplicate.
             ? `NEXT STEPS:
   → Nothing to collect: this handling wrote no receipt, so the outcome has no address and a call naming the same pair executes and commits AGAIN rather than deduplicating.
-  → Verify state:     cf get --cell ${piece} <path> ...`
+  → Verify state:     cf cell get --cell ${piece} <path> ...`
             // The replay names its session through the environment rather
             // than `--invocation-session`, because a session is what keeps an
             // outcome's address out of reach of anyone who can guess a piece,
             // a verb and an id — and an argument is readable in a process
             // listing where an environment variable is not.
             : `NEXT STEPS:
-  → Read the outcome: cf get --cell ${receiptId} (this call's receipt, an ordinary read — the handler does not run again)
+  → Read the outcome: cf cell get --cell ${receiptId} (this call's receipt, an ordinary read — the handler does not run again)
   → Or replay it:     CF_INVOCATION_SESSION=${
               opts.invocation?.session ?? "<session>"
-            } cf call --cell ${piece} --invocation ${
+            } cf piece call --cell ${piece} --invocation ${
               opts.invocation?.id ?? "<id>"
             } ${callableName} ... (the commit is durable and the replay loses the race for the receipt, so nothing commits twice — but the handler body RUNS AGAIN, repeating effects outside its transaction, and any write it made into another space)
-  → Verify state:     cf get --cell ${piece} <path> ...`,
+  → Verify state:     cf cell get --cell ${piece} <path> ...`,
         )
         : nextSteps,
     );
@@ -1221,7 +1226,7 @@ export function invocationJson(
   };
 }
 
-/** How long `cf call` waits for a handler invocation (verb contract
+/** How long `cf piece call` waits for a handler invocation (verb contract
  * WS-F, F3). `settle` is the default: await this handling's commit
  * acknowledgment plus receipt readback, optionally bounded by the caller's
  * patience (`--wait <seconds>`). `commit` (`--no-wait`) awaits the
@@ -1236,7 +1241,7 @@ export interface PieceCallWaitControl {
   boundSeconds?: number;
 }
 
-/** The `cf call` flags whose answer needs the receipt readback. */
+/** The `cf piece call` flags whose answer needs the receipt readback. */
 export interface PieceCallReadbackFlags {
   showLinks?: boolean;
   filter?: string;
@@ -1305,8 +1310,8 @@ export function resolveWaitControl(
 }
 
 /**
- * Parse `cf call`'s selection flags into the shape the result should
- * arrive in, through the same parser `cf get` uses — one grammar, one
+ * Parse `cf piece call`'s selection flags into the shape the result should
+ * arrive in, through the same parser `cf cell get` uses — one grammar, one
  * set of error messages, whichever command a caller reaches for.
  *
  * The one combination refused here is `--filter` with `--show-links`. A link
@@ -1482,20 +1487,20 @@ const pieceDescription = cliText(`Interact with pieces running on a server.
 COMMON WORKFLOWS:
   Deploy:    cf piece new ./pattern.tsx -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
   Update:    cf piece setsrc --cell <ID> ./pattern.tsx -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
-  Test:      cf call --cell <ID> -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space callableName
+  Test:      cf piece call --cell <ID> -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space callableName
   Inspect:   cf piece inspect --cell <ID> -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
 ${pieceEnvStatus()}
 TIPS:
   • Use 'setsrc' for iteration, not repeated 'new' (avoids clutter)
-  • After 'cf set', run 'cf piece step' to update computed values
+  • After 'cf cell set', run 'cf piece step' to update computed values
   • Path format: forward slashes only (items/0/name, not items[0].name)
-  • JSON values: strings need quotes: echo '"hello"' | cf set ...`);
+  • JSON values: strings need quotes: echo '"hello"' | cf cell set ...`);
 
 /**
  * The target-selection surface every piece data command carries: quiet, the
  * combined URL, the API URL and identity with their environment fallbacks,
  * and the space. `piece` declares them as globals its subcommands inherit;
- * `cf get`, `cf set` and `cf call` have no parent globals, so each carries
+ * `cf cell get`, `cf cell set` and `cf piece call` have no parent globals, so each carries
  * them as its own.
  */
 export function targetOptions(
@@ -1545,12 +1550,37 @@ export function withNoSectionMarker<
 }
 
 /**
- * The definition of `get`, mounted at top level as `cf get`. `spelling` is
- * only how the command names itself in its own help.
+ * The step-7 notice this mount carries, which is none when the mount is the
+ * blessed one.
+ *
+ * `replacedBy` is what distinguishes the two mounts of one builder: the
+ * blessed spelling passes nothing and stays silent. Each builder takes the
+ * notice through both halves — around its action, and around the command it
+ * returns — so a caller is told whether they ran the command or only asked
+ * what it is.
+ */
+function mountNotice(
+  spelling: string,
+  replacedBy: string | undefined,
+): CommandSpellingNotice {
+  return replacedBy === undefined
+    ? noCommandSpellingNotice
+    : commandSpellingNotice(spelling, replacedBy);
+}
+
+/**
+ * The definition of `get`, blessed as `cf cell get` and mounted a second time
+ * at the superseded `cf get`. `spelling` is only how the command names itself
+ * in its own help; `replacedBy` is what makes a mount carry the step-7 notice.
  */
 // deno-lint-ignore no-explicit-any
-function buildGetCommand(spelling: string): Command<any> {
-  return new Command()
+function buildGetCommand(
+  spelling: string,
+  replacedBy?: string,
+): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
     .description(
       `Get a value from a piece at a specific path. Omit path to return the full result.
 
@@ -1664,15 +1694,26 @@ arguments cell the way --input does, on any of them.`,
       { conflicts: ["select"] },
     )
     .arguments("[addressOrPath:string] [path:string]")
-    .action(withNoSectionMarker(spelling, getCellValueFromCommand));
+    // The notice is outermost, so a line that is refused before the action
+    // runs is told too: the refusal quotes the spelling the caller wrote,
+    // which is the one thing on screen that must not stand unqualified.
+    .action(
+      notice.action(withNoSectionMarker(spelling, getCellValueFromCommand)),
+    );
+  return notice.helpPage(command);
 }
 
 /**
  * The one definition of `set`; see {@link buildGetCommand} for the shape.
  */
 // deno-lint-ignore no-explicit-any
-function buildSetCommand(spelling: string): Command<any> {
-  return new Command()
+function buildSetCommand(
+  spelling: string,
+  replacedBy?: string,
+): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
     .description(
       cliText(
         `Set a value in a piece at a specific path. Reads JSON from stdin.
@@ -1717,7 +1758,13 @@ does, on any of them.`,
         '"#argument" suffix on the target spells the same selection)',
     )
     .arguments("[addressOrPath:string] [path:string]")
-    .action(withNoSectionMarker(spelling, setCellValueFromCommand));
+    // The notice is outermost, so a line that is refused before the action
+    // runs is told too: the refusal quotes the spelling the caller wrote,
+    // which is the one thing on screen that must not stand unqualified.
+    .action(
+      notice.action(withNoSectionMarker(spelling, setCellValueFromCommand)),
+    );
+  return notice.helpPage(command);
 }
 
 /**
@@ -1725,8 +1772,13 @@ does, on any of them.`,
  * shape.
  */
 // deno-lint-ignore no-explicit-any
-function buildCallCommand(spelling: string): Command<any> {
-  return new Command()
+function buildCallCommand(
+  spelling: string,
+  replacedBy?: string,
+): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
     .description(
       `Invoke a callable within a piece.
 
@@ -1847,7 +1899,7 @@ reference names the piece by handle or by slug, and may carry the space
       "--no-wait",
       "Exit once this handling's commit is acknowledged (before the callable " +
         "name), skipping only the receipt readback: stdout reports status " +
-        '"committed" plus the receipt address, so `cf get --cell <that ' +
+        '"committed" plus the receipt address, so `cf cell get --cell <that ' +
         "address>` collects the outcome later without re-running the handler; " +
         "a call naming the same session and --invocation recovers it too, but " +
         "runs the handler body again. The handler still executes here and its " +
@@ -1888,11 +1940,15 @@ reference names the piece by handle or by slug, and may carry the space
     )
     .stopEarly()
     .arguments("<callable:string> [tail...:string]")
-    .action(function (
+    .action(notice.action(function (
       options: PieceCallCLIOptions,
       callableArg: string,
       ...tailArgs: string[]
     ) {
+      // Wrapped here rather than around `callFromCommand`, so the notice
+      // fires when the command runs and never when a test drives the tail
+      // directly.
+      //
       // Both argv-derived arrays are returned by methods on the command
       // Cliffy binds as this action's `this`, so they are read here and
       // handed on as values: the raw arguments a grammar refusal quotes
@@ -1906,23 +1962,335 @@ reference names the piece by handle or by slug, and may carry the space
         this.getRawArgs(),
         this.getLiteralArgs(),
       );
-    });
+    }));
+  return notice.helpPage(command);
 }
 
 /**
- * A piece data command, mounted at top level: `cf get`, `cf set`, and
- * `cf call` — one definition per command, and one spelling for it. `name`
- * reaches the builder because a command's own help quotes the spelling a
- * caller types.
+ * One of the three data commands, built for one of its mounts.
+ *
+ * There is one definition per command and two mounts of it: blessed under the
+ * noun it acts on — `cf cell get`, `cf cell set`, `cf piece call` — and hidden
+ * at the top-level spelling it had, which warns and is dated.
+ *
+ * `name` picks the definition. `spelling` is how that mount names itself in
+ * its own help and examples, because a caller reads back the line they typed
+ * rather than the key it is registered under; it defaults to `name`, which is
+ * the spelling the top-level mounts answer at. `replacedBy` names the spelling
+ * that supersedes this mount, and is what makes it carry the step-7 notice.
  */
 // deno-lint-ignore no-explicit-any
-export function pieceDataCommand(name: "get" | "set" | "call"): Command<any> {
+export function pieceDataCommand(
+  name: "get" | "set" | "call",
+  mount: { spelling?: string; replacedBy?: string } = {},
+): Command<any> {
   const builders = {
     get: buildGetCommand,
     set: buildSetCommand,
     call: buildCallCommand,
   };
-  return targetOptions(builders[name](name), { global: false });
+  const spelling = mount.spelling ?? name;
+  return targetOptions(
+    builders[name](spelling, mount.replacedBy),
+    { global: false },
+  );
+}
+
+/**
+ * Refuse `--json` on a command that has no machine-readable output.
+ *
+ * `cf space` declares `--json` globally, so its two target-scoped subcommands
+ * inherit an option they have nothing to answer with. Accepting it silently
+ * would hand a caller human text where they asked for something to parse.
+ */
+function refuseJsonOutput(spelling: string, options: { json?: boolean }): void {
+  if (!options.json) return;
+  throw new ValidationError(
+    `'cf ${spelling}' has no machine-readable output, so '--json' does ` +
+      `nothing here. Drop it, and read the printed result.`,
+    { exitCode: 1 },
+  );
+}
+
+/**
+ * The shared target options, plus the flags the two space-level commands add.
+ *
+ * `quiet` and `reset` reach an action from Cliffy's parse rather than from
+ * {@link PieceCLIOptions}, which describes only what a target is named with.
+ */
+interface SpaceCommandCLIOptions extends PieceCLIOptions {
+  quiet?: boolean;
+  reset?: boolean;
+}
+
+/**
+ * `recreate-root`, which rebuilds a space's root pattern.
+ *
+ * `spelling` is how the command names itself in its own help and examples.
+ * `replacedBy`, when given, names the spelling that supersedes this mount and
+ * makes it carry the step-7 notice.
+ *
+ * The target options are attached per command rather than globally, because
+ * `cf space` is not a target-scoped noun the way `cf piece` is: its other
+ * subcommands read a store on disk and take no server, identity or space.
+ */
+// deno-lint-ignore no-explicit-any
+export function buildRecreateRootCommand(
+  spelling: string,
+  replacedBy?: string,
+): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
+  const act = async (options: SpaceCommandCLIOptions) => {
+    refuseJsonOutput(spelling, options);
+    setQuietMode(!!options.quiet);
+    const spaceConfig = parseSpaceOptions(options);
+    const pieceId = await recreateSpaceRootPattern(spaceConfig);
+    render(pieceId);
+    hint(cliText(`NEXT STEPS:
+  → Open space in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${pieceId}
+  → Inspect state:         cf piece inspect --cell ${pieceId} ...`));
+  };
+  // The options arrive from targetOptions() below, after this chain is built,
+  // so the chain is named as `Command<any>` rather than letting Cliffy infer
+  // an empty option set for the action from what it can see here.
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
+    .description(
+      "Recreate the root pattern for the explicitly targeted space.",
+    )
+    .usage(spaceUsage)
+    .example(
+      cliText(`cf ${spelling} ${EX_ID} ${EX_COMP}`),
+      `Recreate the root pattern for "${EX_SPACE}".`,
+    )
+    .example(
+      cliText(`cf ${spelling} ${EX_ID} ${EX_URL}`),
+      `Recreate the root pattern for "${EX_SPACE}".`,
+    );
+  return notice.helpPage(
+    targetOptions(command.action(notice.action(act)), { global: false }),
+  );
+}
+
+/**
+ * `set-home`, which deploys a custom home-space pattern or resets the
+ * identity's home space to the system default.
+ *
+ * `spelling` and `replacedBy` carry the meanings they have in
+ * {@link buildRecreateRootCommand}.
+ */
+// deno-lint-ignore no-explicit-any
+export function buildSetHomeCommand(
+  spelling: string,
+  replacedBy?: string,
+): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
+  const act = async (options: SpaceCommandCLIOptions, main?: string) => {
+    refuseJsonOutput(spelling, options);
+    setQuietMode(!!options.quiet);
+
+    if (!options.reset && !main) {
+      throw new ValidationError(
+        "Provide a pattern file path or use --reset.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && main) {
+      throw new ValidationError(
+        "Cannot use --reset with a pattern file path.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && options.repository !== undefined) {
+      throw new ValidationError(
+        "Cannot use --repository with --reset.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && options.test !== undefined) {
+      throw new ValidationError(
+        "Cannot use --test with --reset.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && options.datafile !== undefined) {
+      throw new ValidationError(
+        "Cannot use --datafile with --reset.",
+        { exitCode: 1 },
+      );
+    }
+
+    const baseConfig = parseSetHomeOptions(options);
+
+    if (options.reset) {
+      await resetHomePattern(baseConfig);
+      render("Reset home pattern to system default.");
+    } else {
+      await setHomePattern(baseConfig, localPatternEntry(main!, options));
+      render("Deployed custom home pattern.");
+    }
+
+    // The hint names the spelling to write next, which is the blessed one
+    // even when this run arrived through the superseded mount: a next step
+    // that teaches the spelling the notice just told the caller to stop
+    // writing is the notice arguing with itself.
+    hint(cliText(`NEXT STEPS:
+  → Open home in browser: ${baseConfig.apiUrl}
+  → Reset to default:     cf ${replacedBy ?? spelling} --reset ...`));
+  };
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
+    .description(
+      "Deploy a custom home-space pattern or reset the identity's home space to system default.",
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} -a http://localhost:${ports.toolshed} ./my-home.tsx`,
+      ),
+      `Deploy a custom pattern to the identity's home space.`,
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} -a http://localhost:${ports.toolshed} --reset`,
+      ),
+      `Reset the identity's home space to the system default pattern.`,
+    )
+    .option("--reset", "Reset to the system default home pattern")
+    .option(
+      "--main-export <export:string>",
+      'Named export from entry for pattern definition. Defaults to "default".',
+    )
+    .option(
+      "--root <path:string>",
+      "Root directory for imports and authored source paths. Use a repository root to preserve repository-relative paths.",
+    )
+    .option(
+      "--repository <repository:string>",
+      "Repository locator associated with the authored source (stored exactly as supplied).",
+    )
+    .option(
+      "--test <path:string>",
+      "Attach a test pattern source file to the deployed source package. Repeatable.",
+      { collect: true },
+    )
+    .option(
+      "--datafile <path:string>",
+      "Attach a data file to the deployed source package. Repeatable.",
+      { collect: true },
+    )
+    .arguments("[main:string]");
+  return notice.helpPage(
+    targetOptions(command.action(notice.action(act)), { global: false }),
+  );
+}
+
+/**
+ * `get-label`, which reports the effective CFC label view at a cell path.
+ *
+ * `spelling` and `replacedBy` carry the meanings they have in
+ * {@link buildRecreateRootCommand}.
+ */
+// deno-lint-ignore no-explicit-any
+export function buildGetLabelCommand(
+  spelling: string,
+  replacedBy?: string,
+): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
+    .description(
+      `Get the effective CFC label view for a piece data path.
+
+The returned paths are relative to the selected path. The view includes
+declared, derived, and link-carried labels. Omit path to inspect the root.`,
+    )
+    .usage(`${pieceUsage} [path]`)
+    .example(
+      cliText(`cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} messages/0/body`),
+      "Get the effective label on a nested result value.",
+    )
+    .example(
+      cliText(`cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} secret --input`),
+      "Get the effective label on an input value.",
+    )
+    .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_PATH_HELP)
+    .option(
+      "--input",
+      "Read from the piece's input cell instead of result cell (the " +
+        '"#argument" reference suffix spells the same selection)',
+    )
+    .option(
+      "--json",
+      "Select JSON output explicitly. This command always outputs JSON.",
+    )
+    .arguments("[path:string]");
+  return notice.helpPage(
+    targetOptions(
+      command.action(notice.action(getCellCfcLabelFromCommand)),
+      { global: false },
+    ),
+  );
+}
+
+/**
+ * `set-label`, which records a declared CFC label at a cell path.
+ *
+ * `spelling` and `replacedBy` carry the meanings they have in
+ * {@link buildRecreateRootCommand}.
+ */
+// deno-lint-ignore no-explicit-any
+export function buildSetLabelCommand(
+  spelling: string,
+  replacedBy?: string,
+): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
+    .description(
+      cliText(
+        `Set the declared CFC label at a piece data path from JSON on stdin.
+
+INPUT: An object with confidentiality and/or integrity arrays, plus an optional
+observes value: value, shape, enumerate, or followRef.
+
+The command records the label through the same checked write operation used for
+piece data. It never changes raw CFC metadata. Confidentiality may only become
+more restrictive. An integrity update may keep or remove existing claims, but
+cannot add trust. Conflicting observation classes are rejected. If observes is
+omitted, an existing unambiguous class is preserved. The command returns the
+updated effective label view.`,
+      ),
+    )
+    .usage(`${pieceUsage} [path]`)
+    .example(
+      cliText(
+        `echo '{"confidentiality":["team"]}' | cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} notes`,
+      ),
+      "Add a confidentiality requirement to a result value.",
+    )
+    .example(
+      cliText(
+        `echo '{"integrity":[],"observes":"value"}' | cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} draft --input`,
+      ),
+      "Remove declared integrity claims from an input value.",
+    )
+    .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_PATH_HELP)
+    .option(
+      "--input",
+      "Write to the piece's input cell instead of result cell (the " +
+        '"#argument" reference suffix spells the same selection)',
+    )
+    .option(
+      "--json",
+      "Select JSON output explicitly. This command always outputs JSON.",
+    )
+    .arguments("[path:string]");
+  return notice.helpPage(
+    targetOptions(
+      command.action(notice.action(setCellCfcLabelFromCommand)),
+      { global: false },
+    ),
+  );
 }
 
 export const piece = targetOptions(
@@ -2041,7 +2409,7 @@ export const piece = targetOptions(
     hint(cliText(`NEXT STEPS:
   → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${browserPieceRef}
   → Update code:     cf piece setsrc --cell ${pieceId} ${main} ...
-  → Test a callable: cf call --cell ${pieceId} <callableName> ...
+  → Test a callable: cf piece call --cell ${pieceId} <callableName> ...
   → Inspect state:   cf piece inspect --cell ${pieceId} ...`));
   })
   /* piece set-slug */
@@ -2112,6 +2480,8 @@ export const piece = targetOptions(
   .action(async (options) =>
     applyPieceInput(parsePieceOptions(options), await drainStdin())
   )
+  /* piece call */
+  .command("call", pieceDataCommand("call", { spelling: "piece call" }))
   /* piece getsrc */
   .command("getsrc", "Retrieve the pattern source for the given piece.")
   .usage(`${pieceUsage} <outpath>`)
@@ -2656,7 +3026,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     } catch (error) {
       // A link that fails validation is a data error (the pieces/paths read
       // over the network don't support the link), not a usage error — report
-      // it like `cf get` does instead of letting Cliffy dump the help
+      // it like `cf cell get` does instead of letting Cliffy dump the help
       // screen over it.
       const report = pieceLinkDataErrorReport(error, {
         sourcePieceId: source.pieceId,
@@ -2671,75 +3041,16 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   → Visualize connections: cf piece map -i ... -a ... -s ...
   → Inspect target piece:  cf piece inspect --cell ${target.pieceId} ...`));
   })
-  /* piece get-label */
+  /* piece get-label — moved to `cf cell get-label` */
   .command(
     "get-label",
-    `Get the effective CFC label view for a piece data path.
-
-The returned paths are relative to the selected path. The view includes
-declared, derived, and link-carried labels. Omit path to inspect the root.`,
+    buildGetLabelCommand("piece get-label", "cell get-label").hidden(),
   )
-  .usage(`${pieceUsage} [path]`)
-  .example(
-    cliText(`cf piece get-label ${EX_ID} ${EX_COMP_PIECE} messages/0/body`),
-    "Get the effective label on a nested result value.",
-  )
-  .example(
-    cliText(`cf piece get-label ${EX_ID} ${EX_COMP_PIECE} secret --input`),
-    "Get the effective label on an input value.",
-  )
-  .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_PATH_HELP)
-  .option(
-    "--input",
-    "Read from the piece's input cell instead of result cell (the " +
-      '"#argument" suffix on the target spells the same selection)',
-  )
-  .option(
-    "--json",
-    "Select JSON output explicitly. This command always outputs JSON.",
-  )
-  .arguments("[path:string]")
-  .action(getCellCfcLabelFromCommand)
-  /* piece set-label */
+  /* piece set-label — moved to `cf cell set-label` */
   .command(
     "set-label",
-    cliText(`Set the declared CFC label at a piece data path from JSON on stdin.
-
-INPUT: An object with confidentiality and/or integrity arrays, plus an optional
-observes value: value, shape, enumerate, or followRef.
-
-The command records the label through the same checked write operation used for
-piece data. It never changes raw CFC metadata. Confidentiality may only become
-more restrictive. An integrity update may keep or remove existing claims, but
-cannot add trust. Conflicting observation classes are rejected. If observes is
-omitted, an existing unambiguous class is preserved. The command returns the
-updated effective label view.`),
+    buildSetLabelCommand("piece set-label", "cell set-label").hidden(),
   )
-  .usage(`${pieceUsage} [path]`)
-  .example(
-    cliText(
-      `echo '{"confidentiality":["team"]}' | cf piece set-label ${EX_ID} ${EX_COMP_PIECE} notes`,
-    ),
-    "Add a confidentiality requirement to a result value.",
-  )
-  .example(
-    cliText(
-      `echo '{"integrity":[],"observes":"value"}' | cf piece set-label ${EX_ID} ${EX_COMP_PIECE} draft --input`,
-    ),
-    "Remove declared integrity claims from an input value.",
-  )
-  .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_PATH_HELP)
-  .option(
-    "--input",
-    "Write to the piece's input cell instead of result cell (the " +
-      '"#argument" suffix on the target spells the same selection)',
-  )
-  .option(
-    "--json",
-    "Select JSON output explicitly. This command always outputs JSON.",
-  )
-  .arguments("[path:string]")
-  .action(setCellCfcLabelFromCommand)
   /* piece map */
   .command("map", "Show registered pieces and the connections between them")
   .usage(spaceUsage)
@@ -2791,7 +3102,7 @@ updated effective label view.`),
     // Default view: wrapper-tier (session-UI affordances) and deprecated
     // verbs are omitted, LOUDLY — the hidden counts always print, so nothing
     // is silently invisible. Rows carry their marks in both views, and
-    // `cf call` never consults them. The same rule covers the other way
+    // `cf piece call` never consults them. The same rule covers the other way
     // this listing can be short, which `verbListingNotes` prints beside them.
     if (options.json) {
       render(verbListingJson(listing, !!options.all), { json: true });
@@ -2805,7 +3116,7 @@ updated effective label view.`),
     if (shown.length === 0) return;
     hint(
       cliText(
-        `TIP: --json includes each verb's input schema; 'cf call --cell ${pieceConfig.piece} <verb> --help --json' has the full command spec.`,
+        `TIP: --json includes each verb's input schema; 'cf piece call --cell ${pieceConfig.piece} <verb> --help --json' has the full command spec.`,
       ),
     );
   })
@@ -2849,118 +3160,17 @@ updated effective label view.`),
     await removePiece(pieceConfig);
     render(`Removed piece ${pieceConfig.piece}`);
   })
-  /* piece recreate-root */
+  /* piece recreate-root — moved to `cf space recreate-root` */
   .command(
     "recreate-root",
-    "Recreate the root pattern for the explicitly targeted space.",
+    buildRecreateRootCommand("piece recreate-root", "space recreate-root")
+      .hidden(),
   )
-  .usage(spaceUsage)
-  .example(
-    cliText(`cf piece recreate-root ${EX_ID} ${EX_COMP}`),
-    `Recreate the root pattern for "${EX_SPACE}".`,
-  )
-  .example(
-    cliText(`cf piece recreate-root ${EX_ID} ${EX_URL}`),
-    `Recreate the root pattern for "${EX_SPACE}".`,
-  )
-  .action(async (options) => {
-    setQuietMode(!!options.quiet);
-    const spaceConfig = parseSpaceOptions(options);
-    const pieceId = await recreateSpaceRootPattern(spaceConfig);
-    render(pieceId);
-    hint(cliText(`NEXT STEPS:
-  → Open space in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${pieceId}
-  → Inspect state:         cf piece inspect --cell ${pieceId} ...`));
-  })
-  /* piece set-home */
+  /* piece set-home — moved to `cf space set-home` */
   .command(
     "set-home",
-    "Deploy a custom home-space pattern or reset the identity's home space to system default.",
-  )
-  .example(
-    cliText(
-      `cf piece set-home ${EX_ID} -a http://localhost:${ports.toolshed} ./my-home.tsx`,
-    ),
-    `Deploy a custom pattern to the identity's home space.`,
-  )
-  .example(
-    cliText(
-      `cf piece set-home ${EX_ID} -a http://localhost:${ports.toolshed} --reset`,
-    ),
-    `Reset the identity's home space to the system default pattern.`,
-  )
-  .option("--reset", "Reset to the system default home pattern")
-  .option(
-    "--main-export <export:string>",
-    'Named export from entry for pattern definition. Defaults to "default".',
-  )
-  .option(
-    "--root <path:string>",
-    "Root directory for imports and authored source paths. Use a repository root to preserve repository-relative paths.",
-  )
-  .option(
-    "--repository <repository:string>",
-    "Repository locator associated with the authored source (stored exactly as supplied).",
-  )
-  .option(
-    "--test <path:string>",
-    "Attach a test pattern source file to the deployed source package. Repeatable.",
-    { collect: true },
-  )
-  .option(
-    "--datafile <path:string>",
-    "Attach a data file to the deployed source package. Repeatable.",
-    { collect: true },
-  )
-  .arguments("[main:string]")
-  .action(async (options, main?: string) => {
-    setQuietMode(!!options.quiet);
-
-    if (!options.reset && !main) {
-      throw new ValidationError(
-        "Provide a pattern file path or use --reset.",
-        { exitCode: 1 },
-      );
-    }
-    if (options.reset && main) {
-      throw new ValidationError(
-        "Cannot use --reset with a pattern file path.",
-        { exitCode: 1 },
-      );
-    }
-    if (options.reset && options.repository !== undefined) {
-      throw new ValidationError(
-        "Cannot use --repository with --reset.",
-        { exitCode: 1 },
-      );
-    }
-    if (options.reset && options.test !== undefined) {
-      throw new ValidationError(
-        "Cannot use --test with --reset.",
-        { exitCode: 1 },
-      );
-    }
-    if (options.reset && options.datafile !== undefined) {
-      throw new ValidationError(
-        "Cannot use --datafile with --reset.",
-        { exitCode: 1 },
-      );
-    }
-
-    const baseConfig = parseSetHomeOptions(options);
-
-    if (options.reset) {
-      await resetHomePattern(baseConfig);
-      render("Reset home pattern to system default.");
-    } else {
-      await setHomePattern(baseConfig, localPatternEntry(main!, options));
-      render("Deployed custom home pattern.");
-    }
-
-    hint(cliText(`NEXT STEPS:
-  → Open home in browser: ${baseConfig.apiUrl}
-  → Reset to default:     cf piece set-home --reset ...`));
-  });
+    buildSetHomeCommand("piece set-home", "space set-home").hidden(),
+  );
 
 /** Shared flags accepted by piece commands that resolve a target or source. */
 export interface PieceCLIOptions {
@@ -3051,7 +3261,7 @@ export interface PieceCellCommandDependencies {
 }
 
 /**
- * The `cf get` action: the target may ride `--cell` or sit in the
+ * The `cf cell get` action: the target may ride `--cell` or sit in the
  * first positional as a canonical address ({@link readTargetPositionals}
  * decides which the positionals name), and either spelling may end in
  * `#argument`, which reads the arguments cell the way `--input` does.
@@ -3112,7 +3322,7 @@ export async function getCellValueFromCommand(
 }
 
 /**
- * The `cf set` action, with the same positional-address intake as
+ * The `cf cell set` action, with the same positional-address intake as
  * {@link getCellValueFromCommand}. The write needs a path spelled somewhere
  * — embedded in the address, positionally, or both — and an explicit empty
  * positional (`""`) is a spelling: it has always named the root, and the
@@ -3153,7 +3363,7 @@ export async function setCellValueFromCommand(
 }
 
 /**
- * The flags `cf call` reads. Spelled out rather than read off the command
+ * The flags `cf piece call` reads. Spelled out rather than read off the command
  * chain because `targetOptions` attaches the target options after the builder
  * returns, so what the builder declares on its own is not the whole surface
  * the action receives.
@@ -3223,7 +3433,7 @@ export interface PieceCallCommandDependencies {
 }
 
 /**
- * The `cf call` action: settle the grammar against the argv, resolve the
+ * The `cf piece call` action: settle the grammar against the argv, resolve the
  * target, dispatch the named callable, and report what came back.
  *
  * `spelling` is how the mount names itself, the word a caller writes after
@@ -3315,7 +3525,7 @@ export async function callFromCommand(
   };
   // Read outside the invocation's failure wrapper below. Nothing is
   // dispatched here — no callable resolved, no id spent — so a malformed
-  // selection is a data error about the flags, the same one `cf get` reports.
+  // selection is a data error about the flags, the same one `cf cell get` reports.
   // Inside the wrapper it would name an id and a phase to retry from for a
   // call that was never made; a selection that fails against a RESULT does sit
   // inside it, and does name one.
@@ -4581,7 +4791,7 @@ export async function describePieceFromCommand(
   }
   (deps.hint ?? hint)(
     cliText(
-      `TIP: 'cf piece verbs --cell ${pieceConfig.piece} --json' has each verb's schemas; 'cf call --cell ${pieceConfig.piece} <verb> --help' documents one verb.`,
+      `TIP: 'cf piece verbs --cell ${pieceConfig.piece} --json' has each verb's schemas; 'cf piece call --cell ${pieceConfig.piece} <verb> --help' documents one verb.`,
     ),
   );
 }
@@ -4652,7 +4862,7 @@ export async function checkPieceSourceFromCommand(
   if (!report.compatible) {
     // A refusal is a data condition — this source and this piece's stored
     // state don't fit — not an arg-parse failure, so it reports like the
-    // `cf get` / `piece link` data errors above: plain stderr and exit 1,
+    // `cf cell get` / `piece link` data errors above: plain stderr and exit 1,
     // never a Cliffy ValidationError, which would dump the usage screen over
     // the verdict.
     exitWithDataError({
@@ -4710,8 +4920,8 @@ export async function applyPieceSourceCommandAction(
   }
   (deps.hint ?? hint)(cliText(`NEXT STEPS:
   → Test in browser: ${config.apiUrl}/${config.space}/${config.piece}
-  → Test a callable: cf call --cell ${config.piece} <callableName> ...
-  → Verify state:    cf get --cell ${config.piece} <path> ...
+  → Test a callable: cf piece call --cell ${config.piece} <callableName> ...
+  → Verify state:    cf cell get --cell ${config.piece} <path> ...
   → Full inspect:    cf piece inspect --cell ${config.piece} ...`));
 }
 
@@ -4825,7 +5035,7 @@ export function readTargetPositionals(
 }
 
 /**
- * `cf call`'s positional intake: when the first positional is a reference it
+ * `cf piece call`'s positional intake: when the first positional is a reference it
  * replaces the flag, and the callable name follows it.
  *
  * The `/`-leading grammar decides, as in {@link readTargetPositionals}, but

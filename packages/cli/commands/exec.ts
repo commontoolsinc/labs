@@ -24,7 +24,7 @@ import {
 
 /**
  * `cf exec` runs no verbose in-flight span, so the failure exit it shares with
- * `cf call` is handed a span that closes to nothing. The exit's own
+ * `cf piece call` is handed a span that closes to nothing. The exit's own
  * contract is what is being reused here — the message, the id and the phase —
  * and that part is span-independent.
  */
@@ -45,9 +45,9 @@ export interface ExecCommandOptions {
  * What `cf exec` writes, and where.
  *
  * **stdout carries the machine surface, and only it.** A tool's is its result
- * — the same bytes `cf call` prints for the same tool, now shaped by
+ * — the same bytes `cf piece call` prints for the same tool, now shaped by
  * whatever the caller selected. A handler's is the Invocation JSON its
- * handling settled to, which is the envelope `cf call` already declares:
+ * handling settled to, which is the envelope `cf piece call` already declares:
  * `cf exec` reaches a verb through a filesystem mount rather than through a
  * piece address, and that is the whole of the difference between them.
  *
@@ -57,7 +57,7 @@ export interface ExecCommandOptions {
  * reference is written positionally, so the address is printed into the
  * position the next command reads it from rather than behind a flag. Naming
  * the space is not decoration — `cf exec` takes
- * its space from the mount, while `cf get` falls back to whatever space
+ * its space from the mount, while `cf cell get` falls back to whatever space
  * the caller has configured, so a token that omitted it would suggest a
  * command that reads a different cell.
  *
@@ -86,7 +86,7 @@ export function renderExecOutcome(
       const address = canonicalAddress(result.resultRef);
       writeError(
         `Tool result cell: ${address} (read it back with ` +
-          `\`cf get ${address}\`)`,
+          `\`cf cell get ${address}\`)`,
       );
     }
     return;
@@ -100,7 +100,7 @@ export function renderExecOutcome(
  * The caller's read options, read before anything is resolved or dispatched.
  *
  * A malformed selection is a fact about the flags: it costs no mount lookup and
- * runs no verb, so it is reported as the data error `cf get` reports for
+ * runs no verb, so it is reported as the data error `cf cell get` reports for
  * the same mistake. Routing it through {@link exitExecFailure} instead would
  * name an invocation and a phase to retry from for a call that was never made.
  * A selection that fails against a RESULT is the other case, and that one does
@@ -134,7 +134,7 @@ export async function parseExecSelection(
  * same one a missing mount or an unreadable callable has always printed.
  *
  * From `dispatched` onward the handling may have committed, and the report
- * becomes the one `cf call` makes: the message, then the id beside the
+ * becomes the one `cf piece call` makes: the message, then the id beside the
  * furthest phase reached. That phase is the difference between a retry that
  * deduplicates and one that commits a second time — and `cf exec` accepts no
  * `--invocation`, so a retry can only be a fresh pair. Saying so is what lets

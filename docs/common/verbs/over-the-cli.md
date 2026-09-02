@@ -1,7 +1,7 @@
 # Verbs over the CLI
 
 A **verb** is a pattern's callable surface: a `Stream` property a caller invokes
-with `cf call`. This document is about what a caller gets *back*.
+with `cf piece call`. This document is about what a caller gets *back*.
 
 A verb can declare a result, and the caller reads it off the call. That turns a
 sequence of "mutate, then go looking for what happened" into a single
@@ -113,9 +113,9 @@ data field is never offered as callable, whatever the pattern hangs at that
 name.
 
 Every row is real, and says where it lives: a name in the listing is a name
-`cf call` resolves, and the row's `on` names the cell the dispatcher
+`cf piece call` resolves, and the row's `on` names the cell the dispatcher
 will reach it on. Result shadows input there exactly as it does in
-`cf call`, so a verb stored on both cells is listed — and called — on
+`cf piece call`, so a verb stored on both cells is listed — and called — on
 the result cell, carrying that cell's schema. Build a payload from the row and
 it is the payload the verb you reach expects.
 
@@ -126,7 +126,7 @@ an answer:
   listed**. Nothing stored distinguishes it from a data field, and the one
   probe that finds it accepts every name it is given, so listing on that probe
   would offer the whole piece as callable. Given such a verb's name,
-  `cf call` still reaches it.
+  `cf piece call` still reaches it.
 - When the compiled pattern cannot be read, a verb the declared result type
   omits has no other source of its name and is missing. The listing says so
   rather than passing the short list off as the surface: `incomplete` carries
@@ -141,7 +141,7 @@ One verb at a time, `--help` answers the same question from the callable
 itself:
 
 ```bash
-cf call --cell <piece> <verb> --help
+cf piece call --cell <piece> <verb> --help
 ```
 
 ```text
@@ -159,10 +159,10 @@ all, for a client that wants the schema rather than the summary.
 
 ### Call a verb and read its result
 
-`cf call` prints one settled **Invocation JSON** object on stdout:
+`cf piece call` prints one settled **Invocation JSON** object on stdout:
 
 ```bash
-cf call --cell <board> addTopic \
+cf piece call --cell <board> addTopic \
   '{"title":"Ship the thing","body":"the initial document","agentName":"Sol"}'
 ```
 
@@ -190,7 +190,7 @@ handling wrote it to, written as one string in the reference syntax
 again —
 
 ```bash
-cf get --cell "$(echo "$RESULT" | jq -r .receipt)"
+cf cell get --cell "$(echo "$RESULT" | jq -r .receipt)"
 ```
 
 — which is an ordinary read, so the verb's body does not run a second time.
@@ -201,19 +201,19 @@ receipt to name.
 ### Asking for a smaller result
 
 A verb decides what it returns; the caller decides how much of it to look at.
-`--filter`, `--select`, and `--schema` — the same three flags `cf get`,
+`--filter`, `--select`, and `--schema` — the same three flags `cf cell get`,
 `cf wish` and `cf exec` take, with the same grammar — shape the `result` before
 it reaches stdout, and come after the thing they shape.
 
 One rule covers all four commands, and it turns on whether a callable's own
-vocabulary stands between the command and the read options. `cf get` and
+vocabulary stands between the command and the read options. `cf cell get` and
 `cf wish` have none, so nothing separates their read options from the rest of
-the line. `cf call` and `cf exec` have one, so a marker closes it:
+the line. `cf piece call` and `cf exec` have one, so a marker closes it:
 
 ```text
-cf get  <addr> [path]           --select …
+cf cell get  <addr> [path]           --select …
 cf wish <target>                --select …
-cf call <target> <verb> <input> -- --select …
+cf piece call <target> <verb> <input> -- --select …
 cf exec <mountedFile> <input>   -- --select …
 ```
 
@@ -232,11 +232,11 @@ it still reaches the callable and prints that verb's page, since a caller
 wanting the command's own page writes it with no verb at all.
 
 Where a command has no callable section at all, `--` closes nothing: it is
-refused on `cf get`, `cf set` and `cf wish` rather than silently setting aside
+refused on `cf cell get`, `cf cell set` and `cf wish` rather than silently setting aside
 words that nothing reads.
 
 ```bash
-cf call --cell <topic> addComment '{"body":"first","agentName":"Sol"}' \
+cf piece call --cell <topic> addComment '{"body":"first","agentName":"Sol"}' \
   -- --select comment.writtenAt
 ```
 
@@ -305,7 +305,7 @@ the circle, so that position renders its address and the rest reads as it
 always did:
 
 ```bash
-cf call --cell "$EPIC" addChild --title "Session cookie handling"
+cf piece call --cell "$EPIC" addChild --title "Session cookie handling"
 ```
 
 ```json
@@ -339,7 +339,7 @@ declaration leaves open — an index signature beside its named members — stil
 reads every key stored at it, because those keys are declared too.
 
 ```bash
-cf call --cell "$BOARD" addTopic --title "Session cookie handling" \
+cf piece call --cell "$BOARD" addTopic --title "Session cookie handling" \
   --agent-name b7
 ```
 
@@ -405,12 +405,12 @@ that chose it** hands back the **original** result, and nothing is written a
 second time:
 
 ```bash
-cf call --cell <topic> --invocation add-comment-1 \
+cf piece call --cell <topic> --invocation add-comment-1 \
   addComment '{"body":"first","agentName":"Sol"}'
 
 # Same id, same session, different payload: the original result comes back,
 # and no second comment is recorded.
-cf call --cell <topic> --invocation add-comment-1 \
+cf piece call --cell <topic> --invocation add-comment-1 \
   addComment '{"body":"different","agentName":"Sol"}'
 ```
 
@@ -445,12 +445,12 @@ a verb refuses the payload, correct it and retry under the same id.
 ```bash
 # Refused: nonzero exit, nothing written — and `add-1` is NOT spent, because
 # the payload never became an event.
-cf call --cell <board> --invocation add-1 \
+cf piece call --cell <board> --invocation add-1 \
   addTopic '{"title":"","agentName":"Sol"}'
 
 # The same id, corrected. This one executes; a settled id would have replayed
 # instead.
-cf call --cell <board> --invocation add-1 \
+cf piece call --cell <board> --invocation add-1 \
   addTopic '{"title":"Corrected","agentName":"Sol"}'
 ```
 
@@ -467,7 +467,7 @@ settled. The refusal names the field, the position it sat at, the vocabulary
 that position takes, and the declared name it is one edit from:
 
 ```bash
-cf call --cell <board> addTopic '{"titel":"Ship it","agentName":"Sol"}'
+cf piece call --cell <board> addTopic '{"titel":"Ship it","agentName":"Sol"}'
 ```
 
 ```
@@ -491,7 +491,7 @@ payload need satisfy only one branch, so a field missing from one branch may be
 named by another. And a position marked as a cell or a stream may hold a link
 rather than a value, whose `"/"` is nothing anybody declared.
 
-The declared vocabulary is what `cf call --cell <id> <verb> --help`
+The declared vocabulary is what `cf piece call --cell <id> <verb> --help`
 prints, and it names the fields the verb's handler **reads**. That can be fewer
 than the TypeScript event type declares: a field the body never touches is one
 the runtime would have dropped, so the call is refused rather than accepted and
@@ -503,8 +503,8 @@ never spent, and the corrected retry can reuse it.
 
 ### Reading is not calling
 
-`cf get` reads data. A path that lands on a verb is refused and redirected
-to `cf call` — the spelling the diagnostic literally prints — because
+`cf cell get` reads data. A path that lands on a verb is refused and redirected
+to `cf piece call` — the spelling the diagnostic literally prints — because
 reading a verb would return the stream's serialization — never what a
 caller wanted.
 
@@ -537,7 +537,7 @@ durable, and only the readback is skipped. The envelope still carries the
 }
 ```
 
-— and collecting the outcome later is `cf get --cell <that string>`.
+— and collecting the outcome later is `cf cell get --cell <that string>`.
 Replaying the same id and session recovers it too, but that re-runs the handler
 body: a verb that sends mail or spends a model call does it again. Reading the
 address does not.
@@ -604,7 +604,7 @@ Each step demonstrates one use case:
 | 8 | A piece result survives `plainResultReceipts=false`; a plain record does not — and the write lands either way |
 | 9 | A value-less verb settles with the empty witness |
 | 10 | A refused call does not spend its invocation id |
-| 11 | Reading a verb redirects to `cf call` |
+| 11 | Reading a verb redirects to `cf piece call` |
 | 12 | Timings on stderr, Invocation JSON still clean on stdout |
 | 13 | An invocation id without a session is refused, and the refusal says how to mint one |
 | 14 | A detached (`--no-wait`) call's `receipt` address reads back the outcome, and a settled call's receipt reads back exactly its `result` |
@@ -616,7 +616,7 @@ that piece needs its address, and `--show-links` supplies it: a dictionary of
 RFC 6901 pointers into the result, each naming the document behind that path.
 
 ```bash
-cf call --show-links --cell <board> createNote '{"title":"Notes"}'
+cf piece call --show-links --cell <board> createNote '{"title":"Notes"}'
 ```
 
 ```json
@@ -635,7 +635,7 @@ reference syntax the target positional reads — taken exactly as emitted, `of:`
 prefix included — so it addresses directly:
 
 ```bash
-cf call "$(echo "$RESULT" | jq -r '.links["/note"]')" \
+cf piece call "$(echo "$RESULT" | jq -r '.links["/note"]')" \
   append '{"text":"second line"}'
 ```
 
@@ -672,7 +672,7 @@ its contents. A field list marks with a trailing `@`, and a JSON Schema marks
 with `{"$link": true}`.
 
 ```bash
-cf get --cell <board> notes \
+cf cell get --cell <board> notes \
   --schema '{"type":"array","items":{"$link":true}}'
 ```
 
@@ -699,7 +699,7 @@ collection is reordered.
 identity.** Addresses are many-to-one over cells: a holder of one cannot tell a
 canonical id from an alias, and normal use does not require it. Two positions
 holding one piece can render two different addresses, and a marker and
-`cf call --show-links` can disagree about the same piece, because a piece
+`cf piece call --show-links` can disagree about the same piece, because a piece
 created inside a handler and pushed into a collection is held through a link
 that redirects to it and the two stop at different points along that redirect.
 
@@ -713,7 +713,7 @@ The marker sits beside a projection when both are wanted, and the answer
 carries both:
 
 ```bash
-cf get --cell <board> notes --schema \
+cf cell get --cell <board> notes --schema \
   '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}'
 ```
 
@@ -725,7 +725,7 @@ A field list unions the same way, and its two paths meet at the one position.
 `noteCount` is computed, so the read steps the piece to bring it up to date:
 
 ```bash
-cf get --cell <board> --step --select 'notes@,noteCount'
+cf cell get --cell <board> --step --select 'notes@,noteCount'
 ```
 
 ```json
@@ -754,5 +754,5 @@ or below it: a position that asks for nothing but addresses is not read either,
 so `notes.title@` reads what holds the collection and none of the notes. Where
 the marker is the whole selection, nothing behind it is read at all.
 
-The address a marked read returns is one `cf call` accepts exactly as
+The address a marked read returns is one `cf piece call` accepts exactly as
 emitted, `of:` prefix included — which is the reason to ask for it.

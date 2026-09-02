@@ -351,13 +351,13 @@ From the command line, the same piece resolves by slug:
 export CF_API_URL=<toolshed-api-url>
 export CF_IDENTITY=<absolute-path-to-identity-keyfile>
 export CF_SPACE=<space-name>
-cf get /<slug>
-export PIECE_ID=$(cf get "/<slug>" --select '@' | \
+cf cell get /<slug>
+export PIECE_ID=$(cf cell get "/<slug>" --select '@' | \
   jq -r '."$link" | sub("^/of:"; "")')
 cf piece render --cell "$PIECE_ID"
 ```
 
-`cf get /<slug>` returns the piece's live result. The `--select '@'` form
+`cf cell get /<slug>` returns the piece's live result. The `--select '@'` form
 returns `{"$link":"/of:fid1:…"}`; stripping `/of:` gives the ID that
 `cf piece render` accepts, and success there is rendered HTML. Render by ID
 because render-by-slug currently crashes (CT-2185).
@@ -496,16 +496,16 @@ export CF_SPACE=<space-name>
 cf piece new --slug transaction-data finance-data.tsx
 export INPUT_PIECE_ID=<the-printed-fid1-id>
 echo '{"balance":2417.55,"transactions":[{"date":"2026-09-01","description":"Donuts","category":"Food","amount":24.50}]}' | \
-  cf set --cell "$INPUT_PIECE_ID" --input account
+  cf cell set --cell "$INPUT_PIECE_ID" --input account
 cf piece step --cell "$INPUT_PIECE_ID"
 echo '{"confidentiality":["finance"]}' | \
-  cf piece set-label --cell "$INPUT_PIECE_ID" account
-cf piece get-label --cell "$INPUT_PIECE_ID" account
+  cf cell set-label --cell "$INPUT_PIECE_ID" account
+cf cell get-label --cell "$INPUT_PIECE_ID" account
 ```
 
 `cf piece new` prints a `fid1:…` piece ID and the `transaction-data` slug;
-`cf set` writes the sample account into the piece's input; `cf piece step` makes
-the pass-through result current. The readback succeeds with:
+`cf cell set` writes the sample account into the piece's input; `cf piece step`
+makes the pass-through result current. The readback succeeds with:
 
 ```json
 {
@@ -548,8 +548,8 @@ starts. Wait as in section 6, then resolve the piece as in section 5 to set
 Live from the store:
 
 ```sh
-cf piece get-label --cell "$INPUT_PIECE_ID" account
-cf piece get-label --cell "$PIECE_ID" <derived-result-path>
+cf cell get-label --cell "$INPUT_PIECE_ID" account
+cf cell get-label --cell "$PIECE_ID" <derived-result-path>
 ```
 
 The derived path carries the `finance` atom, with the space's own account of
@@ -657,8 +657,8 @@ The boundaries that affect this onboarding are:
 - CT-2187 and CT-2191: the audit's known findings in section 7.
 - CT-2155 clause 5: protected web routes use the `GET /` cookie exchange; there
   is no shared bearer-token shortcut.
-- CT-2185: `cf piece render --cell /<slug>` crashes; resolve with `cf get` and
-  render by `fid1:` ID.
+- CT-2185: `cf piece render --cell /<slug>` crashes; resolve with `cf cell get`
+  and render by `fid1:` ID.
 - CT-2156: two consoles on one `CF_HARNESS_CONSOLE_DIR` interleave records.
 
 ## 11. Troubleshooting
@@ -685,7 +685,7 @@ name. The turn continues without well-known grants.
 
 **Healthy console, dead Fabric.** `/api/health` returning HTTP `200` with
 `fabricSession: "unverified"` says nothing about Fabric. Probe toolshed
-`/api/meta` and perform a real `cf get` before spending a model turn.
+`/api/meta` and perform a real `cf cell get` before spending a model turn.
 
 **Wrong store.** `cell-labels.json` with `unavailableReason:
 "space-not-found"`,

@@ -187,8 +187,8 @@ function extractCf(line: string): string | null {
 /**
  * The value a command reads from stdin, folded into its token list.
  *
- * A demo spells it `run_stdin '25' cf set …` and a document spells it
- * `echo '25' | cf set …`; both normalize to the document's form, so
+ * A demo spells it `run_stdin '25' cf cell set …` and a document spells it
+ * `echo '25' | cf cell set …`; both normalize to the document's form, so
  * {@link commandMatches} compares the value like any other word and a
  * `$variable` payload still wildcards. Dropping it instead would leave the
  * value a write act is ABOUT unchecked — a tour could narrate setting 250

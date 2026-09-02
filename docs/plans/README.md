@@ -156,12 +156,6 @@ a record: archive it to `docs/history/plans/` following the procedure in
   work on verbs across both arcs that produced it: what a verb declares, what a
   caller may ask for, and what comes back. Read it for order; read the designs
   it points at for reasoning.
-- [The CLI surface — implementation plan](cli-surface-implementation.md) builds
-  the rest of the command surface: positional addresses, the honest top-level
-  names, deprecating the spellings they replace, and merging the commands that
-  do one job under two names. Separate from the read-layer plan because it
-  renames rather than adds, so its risk is what breaks for a caller who already
-  learned the current spelling.
 - [Shuttle — a place-aware fabric shell](shuttle/README.md) is the working design
   state for an interactive terminal tool: a REPL whose prompt carries a
   mutable current place — the context that fills in the omitted levels of the
