@@ -422,9 +422,10 @@ const modeBehaviorAttestation: AuditCheck = {
     if (contexts.length === 0 && effects.length > 0) {
       return {
         verdict: "warn",
-        message: `reduced assurance: this run claims \`${mode}\` and executed ${
-          count(effects.length, "side effect", "side effects")
-        }, none of which carried CFC evidence through the transport`,
+        message:
+          `reduced assurance: this run claims \`${mode}\` and never exercised it — none of its ${
+            count(effects.length, "side effect", "side effects")
+          } reached the substrate that carries CFC evidence, so nothing here tested the claim`,
         evidence: effects.map((activity) => ({
           artifact: "run-report.json",
           pointer: `toolActivity[${activity.sequence}]`,

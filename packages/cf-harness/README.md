@@ -1737,17 +1737,17 @@ every run under it.
 The checks are in [audit/checks/structural.ts](audit/checks/structural.ts), one
 per clause family:
 
-| Check | Subject                                                                                                               | Clauses                                    |
-| ----- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| AUD-1 | one enforcement mode across every artifact of a run                                                                   | AH-CFC-14                                  |
-| AUD-2 | decision reason codes belong to the claimed mode, and its side effects carry invocation contexts                      | AH-CFC-14, AH-CFC-15                       |
-| AUD-3 | every side effect joins to a policy decision, and the counts reconcile                                                | AH-CFC-9, AH-CFC-11, AH-TOOL-3             |
-| AUD-4 | every denial reached the model as a typed denial carrying no payload                                                  | AH-CFC-6, AH-CFC-11                        |
-| AUD-5 | the handle table is well formed, no token precedes its disclosure, no parent token crosses into a child untransferred | AH-CFC-12, AH-CFC-13, AH-CFC-18, AH-CFC-19 |
-| AUD-6 | tool calls and tool results pair                                                                                      | AH-CFC-16, AH-LIFE-6                       |
-| AUD-7 | a run at `observe` is reported as diagnostic rather than as enforcement                                               | AH-CFC-15, §6                              |
-| AUD-8 | labeled observations the model read are accumulated as influence, and denied ones are not                             | AH-CFC-7, AH-CFC-8                         |
-| AUD-9 | the artifacts that explain why a result was exposed or denied were retained                                           | AH-CFC-16, AH-CFC-17                       |
+| Check | Subject                                                                                                                                                                                   | Clauses                                    |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| AUD-1 | one enforcement mode across every artifact of a run                                                                                                                                       | AH-CFC-14                                  |
+| AUD-2 | decision reason codes belong to the claimed mode, and its side effects carry invocation contexts. A run whose side effects all took paths that record none warns: the claim went untested | AH-CFC-14, AH-CFC-15                       |
+| AUD-3 | every side effect joins to a policy decision, and the counts reconcile                                                                                                                    | AH-CFC-9, AH-CFC-11, AH-TOOL-3             |
+| AUD-4 | every denial reached the model as a typed denial carrying no payload                                                                                                                      | AH-CFC-6, AH-CFC-11                        |
+| AUD-5 | the handle table is well formed, no token precedes its disclosure, no parent token crosses into a child untransferred                                                                     | AH-CFC-12, AH-CFC-13, AH-CFC-18, AH-CFC-19 |
+| AUD-6 | tool calls and tool results pair                                                                                                                                                          | AH-CFC-16, AH-LIFE-6                       |
+| AUD-7 | a run at `observe` is reported as diagnostic rather than as enforcement                                                                                                                   | AH-CFC-15, §6                              |
+| AUD-8 | labeled observations the model read are accumulated as influence, and denied ones are not                                                                                                 | AH-CFC-7, AH-CFC-8                         |
+| AUD-9 | the artifacts that explain why a result was exposed or denied were retained                                                                                                               | AH-CFC-16, AH-CFC-17                       |
 
 Five verdicts, and the distinctions between them are the point. `inconclusive`
 is a check whose evidence was absent or unreadable — it is never `pass`, and
