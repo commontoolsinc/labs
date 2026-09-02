@@ -48,6 +48,13 @@ function printedPosition(place: CurrentPlace): string {
   return position.slice("position  ".length);
 }
 
+/** Helper for the cases below, which stands an instance at a named piece. */
+function atReferencedPiece(): CurrentPlace {
+  const place = atSpaceRoot();
+  place.cd(`/${HANDLE}`);
+  return place;
+}
+
 /** Helper for the cases below, which stands an instance at a piece. */
 function atPiece(): CurrentPlace {
   const place = inSlugs();
@@ -95,13 +102,16 @@ describe("place", () => {
     });
 
     describe("round-tripping", () => {
-      // What a reader copies has to name the place it was printed for, or
-      // name nothing. A piece is a cell, so its rendering is a reference and
-      // `cd` takes it back; a container is not a cell, so its rendering is
-      // not a reference and `cd` refuses it rather than resolving it to a
-      // piece whose slug happens to match the container's name.
+      // What a reader copies whole has to name the place it was printed
+      // for, or name nothing. A piece is a cell, so its rendering is a
+      // reference and `cd` takes it back; a container is not a cell, so its
+      // rendering is not a reference and `cd` refuses it rather than
+      // resolving it to a piece whose slug happens to match the container's
+      // name. A segment lifted out of a rendering is outside that: the
+      // rendering escapes a `/` in a key and a relative operand reads no
+      // escape, which the walk's own cases pin.
 
-      it("returns a piece rendering `cd` takes back to the same place", () => {
+      it("returns a piece rendering `cd` takes back to the same place, pasted whole", () => {
         const place = atPiece();
         place.cd("topics/3");
         const elsewhere = atSpaceRoot();
@@ -556,6 +566,39 @@ describe("place", () => {
               space: SPACE,
               piece: "board",
               path: ["mail@example"],
+            });
+          });
+
+          it("reads `~1` in a segment as two characters of a data key", () => {
+            // A relative operand is not a reference, so the reference
+            // grammar's `~1` escaping does not reach it: `~1` is literal
+            // here where a reference reads it as the separator. The case
+            // below is the consequence — a key holding a `/` has no
+            // relative spelling at all, since neither candidate reaches it
+            // — and both are pinned so that teaching the walk to unescape
+            // reds a case rather than arriving unremarked. Which vocabulary
+            // a relative segment speaks is settled where `ls` decides how
+            // such a key prints, the render and the read wanting to be
+            // decided together.
+
+            const place = atReferencedPiece();
+            place.cd("a~1b");
+            expect(place.place.position).toEqual({
+              kind: "piece",
+              space: SPACE,
+              piece: HANDLE,
+              path: ["a~1b"],
+            });
+          });
+
+          it("splits at every `/`, giving two keys rather than one holding it", () => {
+            const place = atReferencedPiece();
+            place.cd("a/b");
+            expect(place.place.position).toEqual({
+              kind: "piece",
+              space: SPACE,
+              piece: HANDLE,
+              path: ["a", "b"],
             });
           });
 

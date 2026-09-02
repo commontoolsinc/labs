@@ -143,6 +143,13 @@ Still to come:
 - **Slug and name resolution**, riding the machinery `--cell` already uses
   (`resolveStoredPieceAddress`, `listSpaceSlugs`), so no CLI-surface arc
   step gates B1.
+- **The vocabulary a relative segment speaks.** A relative operand splits
+  on `/` and its segments are literal, so a key holding the separator has
+  no relative spelling, and the reference grammar's `~1` escaping reaches
+  a reference and not a walk. `ls` settles it: how such a key prints and
+  how it is typed back want deciding together. Segment validation is the
+  same question — a slug's vocabulary holds a reference and not a relative
+  segment.
 - **`where`**, the printing surface for the ambient record; later
   milestones add their dimensions to it as they add the dimensions
   themselves.

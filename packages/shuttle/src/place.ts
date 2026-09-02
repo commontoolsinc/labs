@@ -358,6 +358,11 @@ function moveByReference(
  * Where a relative operand moves `from` to, one segment at a time. Each
  * segment is read against the level the one before it landed on, so `..` and a
  * descent compose in one operand.
+ *
+ * Segments split on `/` and are taken literally. The reference grammar's `~1`
+ * escaping belongs to a reference, which a relative operand is not, so `~1`
+ * here is two characters of a key and a key holding the separator has no
+ * relative spelling at all.
  */
 function moveBySegments(from: Standing, operand: string): Step {
   const segments = operand.split("/");
