@@ -175,9 +175,9 @@ Still to come:
   because a rendering of it would name a different cell. A piece is held to
   more than that: one holding a line break is refused for the same reason,
   and one that is empty, ends in whitespace, or holds an `@` is refused
-  because no slug or handle carries such a name — the parse would take it,
-  since its handle test is a length rule, and hand back a name nothing could
-  have produced.
+  because no slug or handle carries such a name.
+  [`grammar.md`](grammar.md) carries why that reason holds, and which of
+  those the canonical parse would take anyway.
 - **`where`** (B1c), the printing surface for the ambient record; later
   milestones add their dimensions to it as they add the dimensions themselves.
   It prints the record `pwd` prints, so it chooses the format for both — a
