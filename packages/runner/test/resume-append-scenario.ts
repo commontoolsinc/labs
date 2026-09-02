@@ -15,26 +15,26 @@ import {
   testPrincipalSessionOpenAuthFactory,
 } from "./memory-v2-test-utils.ts";
 
-// Shared, edge-triggered harness for the "append during the resume-await window"
-// regression tests (filter/map/flatMap).
+// Shared, edge-triggered harness for the "update during the resume-await window"
+// regression tests (filter/flatMap).
 //
-// The bug reproduces only when an element is appended while the per-element
-// result documents of the resumed list builtin are still streaming in. A
-// wall-clock delay on those documents cannot guarantee that ordering: on a slow
-// or loaded CI host the documents can arrive before the append, the window never
-// opens, and the test passes even with the fix reverted — a regression would
-// then land on main. Instead this harness HOLDS the per-element documents in the
-// transport until the test explicitly releases them, so the append lands inside
-// the window on every run, and asserts the window was genuinely open.
+// A resumed list builtin's per-element result documents are named by the
+// resume pre-sync, so they stream in while `start()` is still pending. The
+// window under test is an input update that lands during that stream: the
+// first reconcile after the start then runs over warm results and must fold
+// the update in. A wall-clock delay on those documents cannot guarantee the
+// ordering: on a slow or loaded CI host they can arrive before the update, the
+// window never opens, and the test passes vacuously. Instead this harness HOLDS
+// the per-element documents in the transport until the test explicitly
+// releases them, so the update lands inside the window on every run, and
+// asserts the window was genuinely open.
 
 // The per-element run documents are matched specifically: each element's op is a
 // projection of `element.<field>`, so its result document carries a link whose
 // path starts `["element", ...]`. The container/input sync (which carries the
-// input array and the aggregate schema) does not, so the gate holds only the
-// sibling result documents the coordinator reads while startup and resume still
-// complete. A broader schema matcher (for example `"type":"boolean"`) would also
-// catch the start-critical container sync and deadlock startup once the gate
-// holds rather than delays those documents.
+// input array and the aggregate schema) does not, so it lands while the start is
+// pending and the input update can be written and read through the result cell
+// inside the window.
 export const PER_ELEMENT_RESULT_DOC = /"path":\["element"/;
 
 // A transport gate that holds inbound messages matching a pattern until the test
@@ -47,8 +47,8 @@ class Gate {
 
   /**
    * Resolves the first time a matching document is held back — the edge that the
-   * coordinator has reconciled the resume batch (it has read, and so requested,
-   * the per-element result documents). The test awaits this instead of polling.
+   * resume pre-sync has requested the per-element result documents, so the
+   * start is pending on them. The test awaits this instead of polling.
    */
   readonly firstHeld: Promise<void>;
 
@@ -201,11 +201,14 @@ async function build(scenario: AppendScenario): Promise<void> {
 
 /**
  * Build the aggregate in a first runtime, then resume in a second runtime behind
- * a gate that holds the per-element result documents. Append an element while
- * they are held (so its reconcile reads the still-stale sibling results and is
- * reverted), release the documents, and let the aggregate converge. Returns the
- * final aggregate and how many documents were held when the append landed — the
- * caller asserts both, so a run that never opened the window fails loudly rather
+ * a gate that holds the per-element result documents the resume pre-sync names.
+ * Update the input list while they are held — the start is pending, so nothing
+ * has reconciled yet and the durable aggregate stands untouched — then release
+ * the documents, let the start complete, and let the aggregate converge over
+ * warm results. Returns the final aggregate, the aggregate as read inside the
+ * window before the update, and how many documents were held when the update
+ * landed — the caller
+ * asserts on those, so a run that never opened the window fails loudly rather
  * than passing vacuously.
  */
 export async function runResumeAppendScenario(
@@ -236,55 +239,57 @@ export async function runResumeAppendScenario(
     );
     await tx.commit();
 
-    const started = await rt2.start(rc2);
-    expect(started).toBe(true);
+    // Not awaited yet: the resume pre-sync names the per-element result
+    // documents and the gate holds them, so the start stays pending for the
+    // whole window. The result and input documents are already local (the
+    // pre-sync's first wave), which is what lets the update below be written
+    // and read through the result cell while the start waits.
+    const starting = rt2.start(rc2);
 
-    // Standing effect so `idle()` drives the coordinator without `pull()`. While
-    // the gate holds the per-element documents, `pull()` would block on those
-    // documents, but `idle()` does not.
-    // A standing effect keeps the coordinator pulled, so the scheduler drives it
-    // to reconcile on its own as inputs load — the test awaits real edges rather
-    // than pumping idle() in a loop.
+    // A standing effect keeps the coordinator pulled once it exists, so the
+    // scheduler drives it to reconcile on its own as inputs load — the test
+    // awaits real edges rather than pumping idle() in a loop.
     const cancel = rc2.key(scenario.resultKey).sink(() => {});
     let heldCount = 0;
     let outputWhileHeld: unknown[] = [];
     try {
-      // Wait for the edge that the coordinator has reconciled the resume batch:
-      // its first read of the per-element result cells causes their documents to
-      // be requested, and the gate holds the first one. Only after that reconcile
-      // is the resume-await flag cleared, so an element appended now follows the
-      // steady-state path — appending earlier would fold it into the resume
-      // batch instead.
+      // Wait for the edge that the pre-sync has requested the per-element
+      // result documents: the gate holds the first one, and the start is now
+      // pending on the release.
       await gate.firstHeld;
       expect(gate.heldCount).toBeGreaterThan(0);
+      // The aggregate as read inside the window, before the update lands:
+      // nothing has reconciled yet, so this is the durable aggregate as
+      // built. (Read before the update — an update that removes items leaves
+      // the container's rows naming them until the first reconcile.)
+      outputWhileHeld = scenario.read(rc2);
 
-      // Update the input list while the per-element results are held. The
-      // coordinator's reconcile reads the still-stale sibling result cells, so
-      // its commit is rejected as stale and its inline writes are reverted.
+      // Update the input list while the per-element results are held; the
+      // first reconcile after the release folds this update in over warm
+      // results.
       const tx1 = rt2.edit();
       const cur = (rc2.key("items").get() ?? []) as unknown[];
       const nextItems = scenario.updateItems?.(cur) ??
         [...cur, scenario.appended];
       rc2.withTx(tx1).key("items").set(nextItems);
       await tx1.commit();
-      // Let the coordinator reconcile the input update against the still-held
-      // results. idle() drives the scheduler to quiescence without blocking on
-      // the held documents the way pull() would.
+      // idle() drives whatever the scheduler holds to quiescence without
+      // blocking on the held documents the way pull() would.
       await rt2.idle();
-      outputWhileHeld = scenario.read(rc2);
 
       // The window was genuinely open: per-element documents were held while the
-      // input update reconciled.
+      // input update landed.
       heldCount = gate.heldCount;
 
-      // Release the held documents. The space catches up and the stale write is
-      // dropped. The element run is marked as needing its setup again, so the
-      // next reconcile issues it against state that has caught up.
+      // Release the held documents. The pre-sync completes, the start
+      // instantiates the coordinator, and its first reconcile runs over warm
+      // results with the updated input.
       gate.release();
+      expect(await starting).toBe(true);
 
-      // Converge: pull() awaits the scheduler work that is now unblocked and
-      // re-reads to quiescence; settled() then flushes the reconcile that the
-      // re-issued setup triggers. Both converge internally, so no loop here.
+      // Converge: pull() re-reads to quiescence; settled() then flushes the
+      // reconciles the update triggers. Both converge internally, so no loop
+      // here.
       await rc2.pull();
       await rt2.settled();
     } finally {

@@ -16,6 +16,7 @@ import {
   type SchemaPathSelector,
   schemaTrackerCoversSelector,
   schemaTrackerKey,
+  sinkMetaLinkedDocKeys,
 } from "@commonfabric/runner/graph-query";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
@@ -83,6 +84,42 @@ export type TrackedGraphState = {
   entities: Map<QueryDocKey, EntitySnapshot>;
   memo: SchemaMemo;
   manager: EngineObjectManager;
+
+  /** Every doc key a query has NAMED as a root, absent roots included —
+   * the persistent role record. A refresh re-walk consults it: a named
+   * document is owed its full family on every visit (and a healed absent
+   * root its first), while a merely tracked document keeps the crossing
+   * shape it was reached with, so delivery does not depend on update
+   * history. */
+  roots: Set<string>;
+
+  /** Doc keys registered for delivery-on-next-commit: the internal-rail
+   * documents of crossing-reached pieces, keyed but never loaded at
+   * registration. A commit leaving one with a live, deliverable snapshot
+   * promotes it — delivered whole, moved into the tracker, its own
+   * internal links registered here in turn — so a subscriber stays
+   * reactive to every derived cell of every piece it can see while
+   * receiving only the ones that change. A deletion is not a promotion:
+   * the registration stays, and the recreation promotes it. */
+  lazy: Set<string>;
+
+  /** lazyKey → the REFERRER keys whose manifests registered it, and the
+   * reverse index — the same lifecycle the miss attribution runs: a
+   * referrer about to be re-walked releases its registrations first, the
+   * re-walk re-records the entries its manifest still carries, and a
+   * registration whose last referrer lets go retires with it, so a
+   * dropped manifest entry stops waking the session and is never
+   * delivered as an unreachable document. */
+  lazyBy: Map<string, Set<string>>;
+  lazyOf: Map<string, Set<string>>;
+
+  /** Root doc keys whose FULL metadata family this state has chased —
+   * recorded when a query NAMES a document and its walk visits it. A
+   * crossing records reach in the tracker but only the crossing rails of
+   * the family, so coverage of a later query that names the document
+   * requires this record too: reach without family is not coverage for a
+   * root (see isGraphQueryCoveredByState). */
+  rootFamilies: Set<string>;
 };
 
 /**
@@ -672,6 +709,14 @@ export const classifyStateScope = (
       return { kind: "tainted" };
     }
   }
+  for (const key of state.lazy) {
+    // A scoped lazy registration binds this state to one identity's
+    // instance exactly as a scoped tracker entry would — its promotion
+    // would read and deliver that instance.
+    if (fromDocKey(key as QueryDocKey).scopeKey !== "space") {
+      return { kind: "tainted" };
+    }
+  }
   const residue: { key: QueryDocKey; id: string; scope: CellScope }[] = [];
   for (const [key] of state.missed) {
     // The scope-key vocabulary is closed (isScopeKey), so a key that is
@@ -843,6 +888,17 @@ export const cloneTrackedGraphState = (
     entities: new Map(state.entities),
     memo: new Map(state.memo),
     manager,
+    roots: new Set(state.roots),
+    lazy: new Set(state.lazy),
+    lazyBy: new Map(
+      [...state.lazyBy].map(([key, refs]) => [key, new Set(refs)] as const),
+    ),
+    lazyOf: new Map(
+      [...state.lazyOf].map(([key, registered]) =>
+        [key, new Set(registered)] as const
+      ),
+    ),
+    rootFamilies: new Set(state.rootFamilies),
   };
 };
 
@@ -1246,6 +1302,66 @@ const retireMiss = (
   }
 };
 
+/** Record one lazy registration with its referrer, both directions. */
+const recordLazy = (
+  state: Pick<TrackedGraphState, "lazy" | "lazyBy" | "lazyOf">,
+  lazyKey: string,
+  referrerKey: string,
+): void => {
+  state.lazy.add(lazyKey);
+  let refs = state.lazyBy.get(lazyKey);
+  if (refs === undefined) {
+    refs = new Set();
+    state.lazyBy.set(lazyKey, refs);
+  }
+  refs.add(referrerKey);
+  let registered = state.lazyOf.get(referrerKey);
+  if (registered === undefined) {
+    registered = new Set();
+    state.lazyOf.set(referrerKey, registered);
+  }
+  registered.add(lazyKey);
+};
+
+/** Drop one lazy key outright — promoted, or its last referrer let go. */
+const retireLazyKey = (
+  state: Pick<TrackedGraphState, "lazy" | "lazyBy" | "lazyOf">,
+  lazyKey: string,
+): void => {
+  state.lazy.delete(lazyKey);
+  const refs = state.lazyBy.get(lazyKey);
+  if (refs !== undefined) {
+    for (const referrerKey of refs) {
+      const registered = state.lazyOf.get(referrerKey);
+      if (registered === undefined) continue;
+      registered.delete(lazyKey);
+      if (registered.size === 0) state.lazyOf.delete(referrerKey);
+    }
+    state.lazyBy.delete(lazyKey);
+  }
+};
+
+/** A referrer is about to be re-walked: its lazy registrations no longer
+ * stand (the walk re-records the ones its manifest still carries). A
+ * registration whose last referrer lets go retires with it. */
+const releaseReferrerLazy = (
+  state: Pick<TrackedGraphState, "lazy" | "lazyBy" | "lazyOf">,
+  referrerKey: string,
+): void => {
+  const registered = state.lazyOf.get(referrerKey);
+  if (registered === undefined) return;
+  state.lazyOf.delete(referrerKey);
+  for (const lazyKey of registered) {
+    const refs = state.lazyBy.get(lazyKey);
+    if (refs === undefined) continue;
+    refs.delete(referrerKey);
+    if (refs.size === 0) {
+      state.lazyBy.delete(lazyKey);
+      state.lazy.delete(lazyKey);
+    }
+  }
+};
+
 /** A referrer is about to be re-walked: its previous attributions no
  * longer stand (the walk re-records the ones that still dead-end). A
  * miss whose last attribution goes retires with it. */
@@ -1385,12 +1501,21 @@ export const trackGraph = (
   };
   const sharedMemo = createSchemaMemo();
   const stats = createQueryTraversalStats();
+  const roots = new Set<string>();
+  const rootFamilies = new Set<string>();
+  const lazyState = {
+    lazy: new Set<string>(),
+    lazyBy: new Map<string, Set<string>>(),
+    lazyOf: new Map<string, Set<string>>(),
+  };
   const readCountBefore = manager.readCount;
   const walk = new GraphQueryWalk({
     manager,
     space: space as MemorySpace,
     schemaTracker,
     onMissedDoc: missRecorderFor(missState),
+    lazyInternalSink: (key, referrerKey) =>
+      recordLazy(lazyState, key, referrerKey),
     identity: identityOf(manager),
     memo: sharedMemo,
     stats,
@@ -1415,17 +1540,16 @@ export const trackGraph = (
           : { scopeKey: root.entityScopeKey }),
         type: "application/json",
       });
+      const rootKey = rootDocKey(space, root, identityOf(manager));
+      roots.add(rootKey);
       if (loaded !== null) {
-        walk.visit(
-          loaded,
-          selector,
-          rootDocKey(space, root, identityOf(manager)),
-        );
+        walk.visit(loaded, selector, rootKey);
+        // The visit chased the named document's full family; an absent
+        // root is still a ROOT (recorded above) but records no family —
+        // its later creation owes it one.
+        rootFamilies.add(rootKey);
       } else {
-        schemaTracker.add(
-          rootDocKey(space, root, identityOf(manager)),
-          selector,
-        );
+        schemaTracker.add(rootKey, selector);
       }
     });
   }
@@ -1456,6 +1580,9 @@ export const trackGraph = (
     entities,
     memo: sharedMemo,
     manager,
+    roots,
+    ...lazyState,
+    rootFamilies,
   };
   if (
     cache !== undefined && cacheKeys !== undefined &&
@@ -1508,8 +1635,9 @@ export const extendTrackedGraph = (
       const selector = toDocumentSelector(root.selector);
       const rootScope = root.scope ?? DEFAULT_SCOPE;
       const rootKey = rootDocKey(space, root, identityOf(manager));
+      state.roots.add(rootKey);
       touched.add(rootKey);
-      evaluateTrackedDocument(
+      const visited = evaluateTrackedDocument(
         space,
         manager,
         {
@@ -1524,7 +1652,12 @@ export const extendTrackedGraph = (
         missRecorderFor(state),
         state.memo,
         stats,
+        undefined,
+        (key, referrerKey) => recordLazy(state, key, referrerKey),
       );
+      // The visit chased the named document's full family; an absent
+      // root records nothing, so its later creation re-evaluates it.
+      if (visited) state.rootFamilies.add(rootKey);
     });
   }
 
@@ -1591,7 +1724,13 @@ export const isGraphQueryCoveredByState = (
   query.roots.every((root) => {
     const selector = toDocumentSelector(root.selector);
     const rootKey = rootDocKey(space, root, identityOf(state.manager));
-    return schemaTrackerCoversSelector(state.tracker, rootKey, selector);
+    // Reach without family is not coverage for a NAMED root: a crossing
+    // may have recorded the selector while chasing only the crossing
+    // rails, and naming the document entitles the caller to its full
+    // family (extendTrackedGraph's visit supplies it, cheaply, when the
+    // selector itself is already covered).
+    return schemaTrackerCoversSelector(state.tracker, rootKey, selector) &&
+      state.rootFamilies.has(rootKey);
   });
 
 export const queryGraph = (
@@ -1642,6 +1781,8 @@ export const refreshTrackedGraph = (
   // their re-evaluation routes a still-absent outcome back into the miss
   // set (never the tracker, whose entries reach the wire).
   const affectedMisses = new Map<QueryDocKey, Set<SchemaPathSelector>>();
+  const lazyHits = new Set<QueryDocKey>();
+  const promotedLazy = new Set<QueryDocKey>();
   const invalidations = new Map<CellScope, Set<string>>();
   const identity = identityOf(state.manager);
   for (const dirtyId of dirtyIds) {
@@ -1666,6 +1807,7 @@ export const refreshTrackedGraph = (
       scopedIds.add(id);
     }
     const key: QueryDocKey = `${space}/${scopeKey}/${id}`;
+    if (state.lazy.has(key)) lazyHits.add(key);
     const selectors = state.tracker.get(key);
     if (selectors !== undefined && selectors.size > 0) {
       affectedDocs.set(key, new Set(selectors));
@@ -1681,7 +1823,10 @@ export const refreshTrackedGraph = (
       affectedMisses.set(key, new Set(missedSelectors));
     }
   }
-  if (affectedDocs.size === 0 && affectedMisses.size === 0) {
+  if (
+    affectedDocs.size === 0 && affectedMisses.size === 0 &&
+    lazyHits.size === 0
+  ) {
     return null;
   }
 
@@ -1698,16 +1843,19 @@ export const refreshTrackedGraph = (
   const recorder = missRecorderFor(state);
   for (const key of affectedDocs.keys()) {
     state.tracker.delete(key);
-    // The re-walk below re-records this referrer's still-live misses;
-    // attributions from its PREVIOUS walk no longer stand, so a link
-    // edited away retires its miss instead of leaving a stale wake.
+    // The re-walk below re-records this referrer's still-live misses and
+    // lazy registrations; attributions from its PREVIOUS walk no longer
+    // stand, so a link or manifest entry edited away retires its miss or
+    // registration instead of leaving a stale wake.
     releaseReferrerMisses(state, key);
+    releaseReferrerLazy(state, key);
   }
 
   for (const [key, selectors] of affectedDocs) {
     const { id, scope, scopeKey } = fromDocKey(key);
+    const role = state.roots.has(key) ? "root" as const : "crossing" as const;
     for (const selector of selectors) {
-      evaluateTrackedDocument(
+      const visited = evaluateTrackedDocument(
         space,
         manager,
         { id, scope, scopeKey },
@@ -1716,7 +1864,13 @@ export const refreshTrackedGraph = (
         recorder,
         sharedMemo,
         stats,
+        undefined,
+        (lazyKey, referrerKey) => recordLazy(state, lazyKey, referrerKey),
+        role,
       );
+      // A named root that was absent when first tracked earns its family
+      // on the visit that finds it born.
+      if (visited && role === "root") state.rootFamilies.add(key);
     }
   }
   // Re-evaluate the dirtied misses. A BORN target is visited — it enters
@@ -1728,8 +1882,9 @@ export const refreshTrackedGraph = (
   const stillAbsent = new MapSetStringToPathSelectors(true);
   for (const [key, selectors] of affectedMisses) {
     const { id, scope, scopeKey } = fromDocKey(key);
+    const role = state.roots.has(key) ? "root" as const : "crossing" as const;
     for (const selector of selectors) {
-      evaluateTrackedDocument(
+      const visited = evaluateTrackedDocument(
         space,
         manager,
         { id, scope, scopeKey },
@@ -1739,7 +1894,10 @@ export const refreshTrackedGraph = (
         sharedMemo,
         stats,
         stillAbsent,
+        (lazyKey, referrerKey) => recordLazy(state, lazyKey, referrerKey),
+        role,
       );
+      if (visited && role === "root") state.rootFamilies.add(key);
     }
     // Retirement is decided by THIS evaluation's own outcome — the
     // throwaway sink received the key iff the doc was still absent. The
@@ -1752,8 +1910,36 @@ export const refreshTrackedGraph = (
     }
   }
 
+  // Promote lazily registered documents this batch touched — including
+  // ones the re-walks above JUST registered (a piece created together
+  // with its computed cells in one batch: healing the piece's miss
+  // registers its cells, and the same batch's dirtiness delivers them).
+  // Promotion requires a deliverable snapshot: a registration whose
+  // document this batch DELETED stays lazy — still dirty interest — so
+  // the recreation that follows promotes it then. A key both tracked and
+  // lazily registered is already live; the stale lazy entry just
+  // retires.
+  for (const dirtyId of dirtyIds) {
+    const { id, scopeKey } = fromDirtyKey(dirtyId);
+    const key: QueryDocKey = `${space}/${scopeKey}/${id}`;
+    if (!state.lazy.has(key)) continue;
+    if (state.tracker.has(key)) {
+      // Tracked delivery supersedes the lazy lifecycle: retire the
+      // registration and BOTH attribution directions, not just the flat
+      // membership, or the reverse edges outlive it through clones.
+      retireLazyKey(state, key);
+      continue;
+    }
+    const snapshot = snapshotForDocKey(space, manager, state.branch, key);
+    if (snapshot === null || snapshot.document === null) continue;
+    retireLazyKey(state, key);
+    state.tracker.add(key, REJECTING_SELECTOR);
+    promotedLazy.add(key);
+  }
+
   const touched = new Set<QueryDocKey>(affectedDocs.keys());
   for (const key of affectedMisses.keys()) touched.add(key);
+  for (const key of promotedLazy) touched.add(key);
   for (const address of manager.loadedAddresses()) {
     const key: QueryDocKey = `${space}/${address.scopeKey}/${address.id}`;
     const previous = state.entities.get(key);
@@ -1807,6 +1993,32 @@ export const refreshTrackedGraph = (
     updates.set(key, snapshot);
   }
 
+  // A promoted document's own derived cells register lazily in turn, so
+  // the subscription's reach grows exactly as far as commits take it.
+  for (const key of promotedLazy) {
+    const snapshot = updates.get(key);
+    if (snapshot === undefined) continue;
+    const { id, scope } = fromDocKey(key);
+    sinkMetaLinkedDocKeys(
+      {
+        address: {
+          space: space as MemorySpace,
+          id: id as URI,
+          scope,
+          path: [],
+        },
+        value: snapshot.document,
+      } as Parameters<typeof sinkMetaLinkedDocKeys>[0],
+      "internal",
+      identity,
+      (lazyKey: string, referrerKey: string) => {
+        if (!state.tracker.has(lazyKey)) {
+          recordLazy(state, lazyKey, referrerKey);
+        }
+      },
+    );
+  }
+
   for (const [key, snapshot] of updates) {
     state.entities.set(key, snapshot);
   }
@@ -1844,7 +2056,9 @@ const evaluateTrackedDocument = (
   // into one batch, say) keeps waiting for a real arrival, so its
   // caller passes a sink the wire never sees.
   absentSink: MapSetStringToPathSelectors = schemaTracker,
-) => {
+  lazyInternalSink?: (key: string, referrerKey: string) => void,
+  role: "root" | "crossing" = "root",
+): boolean => {
   const docKey: QueryDocKey = address.scopeKey !== undefined
     ? `${space}/${address.scopeKey}/${address.id}`
     : toDocKey(
@@ -1856,7 +2070,7 @@ const evaluateTrackedDocument = (
   const loaded = manager.load(address);
   if (loaded === null || loaded.value === undefined) {
     absentSink.add(docKey, internPathSelector(selector));
-    return;
+    return false;
   }
   // A fresh walk per document, so each starts with an empty pointer-cycle
   // tracker while sharing the query's reach and its memoized schema results.
@@ -1865,10 +2079,12 @@ const evaluateTrackedDocument = (
     space: space as MemorySpace,
     schemaTracker,
     onMissedDoc,
+    lazyInternalSink,
     identity: identityOf(manager),
     memo: sharedMemo,
     stats,
-  }).visit(loaded, selector, docKey);
+  }).visit(loaded, selector, docKey, role);
+  return true;
 };
 
 export const toDocKey = (

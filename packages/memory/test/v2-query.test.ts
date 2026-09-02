@@ -2326,3 +2326,855 @@ Deno.test("memory v2 extendTrackedGraph attributes the roots it adds", async () 
     await Deno.remove(path);
   }
 });
+
+Deno.test("memory v2 query chases metadata for named roots, not crossings", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-meta-roots";
+  const link = (id: string) => ({ "/": { "link@1": { id, path: [], space } } });
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:root-family",
+          value: { value: { kind: "root pattern" } },
+        }, {
+          op: "set",
+          id: "of:target-family",
+          value: { value: { kind: "target pattern" } },
+        }, {
+          op: "set",
+          id: "of:target-result",
+          value: { value: { computed: "target result" } },
+        }, {
+          op: "set",
+          id: "of:target-cell",
+          value: { value: { derived: "target cell" } },
+        }, {
+          op: "set",
+          id: "of:crossing-target",
+          value: {
+            value: { name: "target" },
+            pattern: link("of:target-family"),
+            result: link("of:target-result"),
+            internal: [{ link: link("of:target-cell") }, {
+              link: {
+                "/": {
+                  "link@1": {
+                    id: "of:foreign-cell",
+                    path: [],
+                    space: "did:key:z6Mk-memory-v2-query-meta-other",
+                  },
+                },
+              },
+            }],
+          },
+        }, {
+          op: "set",
+          id: "of:meta-root",
+          value: {
+            value: { child: link("of:crossing-target") },
+            pattern: link("of:root-family"),
+            internal: [{
+              link: {
+                "/": {
+                  "link@1": {
+                    id: "of:foreign-root-cell",
+                    path: [],
+                    space: "did:key:z6Mk-memory-v2-query-meta-other",
+                  },
+                },
+              },
+            }],
+          },
+        }],
+      },
+    });
+
+    const identity = { principal: "did:key:alice", sessionId: "session:alice" };
+    const rooted = queryGraph(
+      space,
+      engine,
+      {
+        roots: [{
+          id: "of:meta-root",
+          selector: {
+            path: [],
+            schema: {
+              type: "object",
+              properties: {
+                child: {
+                  type: "object",
+                  properties: { name: { type: "string" } },
+                },
+              },
+            },
+          },
+        }],
+      },
+      undefined,
+      identity,
+    );
+
+    const ids = new Set(rooted.entities.map((entity) => entity.id));
+    // The named root arrives with its full metadata family; the document
+    // the walk reaches through the `child` crossing arrives with the rails
+    // computed values ride — its result — and without the rails that
+    // serve loading it: its pattern.
+    assert(ids.has("of:meta-root"));
+    assert(ids.has("of:crossing-target"));
+    assert(ids.has("of:root-family"));
+    assert(ids.has("of:target-result"));
+    assert(!ids.has("of:target-family"));
+    // The crossed piece's derived cell is registered, not delivered: its
+    // bytes ride its next commit rather than every subscription that can
+    // see the piece.
+    assert(!ids.has("of:target-cell"));
+
+    const targetRooted = queryGraph(
+      space,
+      engine,
+      {
+        roots: [{
+          id: "of:crossing-target",
+          selector: {
+            path: [],
+            schema: {
+              type: "object",
+              properties: { name: { type: "string" } },
+            },
+          },
+        }],
+      },
+      undefined,
+      identity,
+    );
+    const targetIds = new Set(
+      targetRooted.entities.map((entity) => entity.id),
+    );
+    // The same document, NAMED as a root, chases its family: intent to
+    // load rides the naming, not the reachability — the internal cell
+    // included, eagerly.
+    assert(targetIds.has("of:crossing-target"));
+    assert(targetIds.has("of:target-family"));
+    assert(targetIds.has("of:target-cell"));
+
+    const bothRooted = queryGraph(
+      space,
+      engine,
+      {
+        roots: [{
+          id: "of:meta-root",
+          selector: {
+            path: [],
+            schema: {
+              type: "object",
+              properties: {
+                child: {
+                  type: "object",
+                  properties: { name: { type: "string" } },
+                },
+              },
+            },
+          },
+        }, {
+          id: "of:crossing-target",
+          selector: {
+            path: [],
+            schema: {
+              type: "object",
+              properties: { name: { type: "string" } },
+            },
+          },
+        }],
+      },
+      undefined,
+      identity,
+    );
+    const bothIds = new Set(bothRooted.entities.map((entity) => entity.id));
+    // Naming beats ordering: the first root's crossing may cover the second
+    // root's document before it is visited, and coverage skips the second
+    // root's traversal — but a named root's family arrives regardless.
+    assert(bothIds.has("of:target-family"));
+
+    // The same guarantee across INCREMENTAL adds: a first query's crossing
+    // covers the target's selector, and a later query naming the target is
+    // not covered until its family has been chased — the extension supplies
+    // it, and only then does coverage hold.
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:meta-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              child: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    const laterQuery: Parameters<typeof extendTrackedGraph>[3] = {
+      roots: [{
+        id: "of:crossing-target",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: { name: { type: "string" } },
+          },
+        },
+      }],
+    };
+    assert(!isGraphQueryCoveredByState(space, tracked.state, laterQuery));
+    const familyExtended = extendTrackedGraph(
+      space,
+      engine,
+      tracked.state,
+      laterQuery,
+    );
+    assert(
+      [...familyExtended.updates.values()].some((entity) =>
+        entity.id === "of:target-family"
+      ),
+    );
+    assert(isGraphQueryCoveredByState(space, tracked.state, laterQuery));
+
+    // Delivery-on-commit: a fresh crossing-only state registers the
+    // derived cell lazily; the cell's next commit promotes it — delivered
+    // with that refresh's updates, tracked from then on.
+    const lazyTracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:meta-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              child: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    assert(!lazyTracked.state.entities.has(`${space}/space/of:target-cell`));
+    assert(lazyTracked.state.lazy.has(`${space}/space/of:target-cell`));
+    // Asserted HERE, while the crossing's manifest still carries the
+    // foreign entry — later commits rewrite the manifest and release
+    // registrations, so a later assertion could not catch an incorrect
+    // initial foreign-space registration.
+    assert(
+      ![...lazyTracked.state.lazy].some((key) => key.includes("foreign-cell")),
+    );
+    assert(
+      ![...lazyTracked.state.tracker].some(([key]) =>
+        key.includes("foreign-cell")
+      ),
+    );
+    assert(
+      ![...lazyTracked.state.tracker].some(([key]) =>
+        key.includes("foreign-root-cell")
+      ),
+    );
+    assert(
+      ![...lazyTracked.state.lazy].some((key) =>
+        key.includes("foreign-root-cell")
+      ),
+    );
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:target-cell",
+          value: { value: { derived: "target cell, recomputed" } },
+        }],
+      },
+    });
+    const refreshed = refreshTrackedGraph(
+      space,
+      engine,
+      lazyTracked.state,
+      new Set([toDirtyKey("of:target-cell")]),
+    );
+    assertExists(refreshed);
+    const delivered = refreshed.updates.get(
+      `${space}/space/of:target-cell`,
+    );
+    assertExists(delivered);
+    assert(!lazyTracked.state.lazy.has(`${space}/space/of:target-cell`));
+    assert(lazyTracked.state.tracker.has(`${space}/space/of:target-cell`));
+
+    // A dirty crossing keeps its crossing shape: updating the crossed
+    // document re-walks it WITHOUT promoting it to a named root's
+    // family, so what a subscriber holds does not depend on update
+    // history.
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(3),
+      authorization,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:crossing-target",
+          value: {
+            value: { name: "target, renamed" },
+            pattern: link("of:target-family"),
+            result: link("of:target-result"),
+            internal: [{ link: link("of:target-cell") }],
+          },
+        }],
+      },
+    });
+    const crossingRefreshed = refreshTrackedGraph(
+      space,
+      engine,
+      lazyTracked.state,
+      new Set([toDirtyKey("of:crossing-target")]),
+    );
+    assertExists(crossingRefreshed);
+    assert(
+      !lazyTracked.state.tracker.has(`${space}/space/of:target-family`),
+    );
+    assert(!lazyTracked.state.entities.has(`${space}/space/of:target-family`));
+
+    // An absent NAMED root heals with its family: naming records the
+    // role, creation delivers the family, and coverage then holds.
+    const absentRootQuery: Parameters<typeof extendTrackedGraph>[3] = {
+      roots: [{
+        id: "of:late-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: { name: { type: "string" } },
+          },
+        },
+      }],
+    };
+    const lateTracked = trackGraph(space, engine, absentRootQuery);
+    assert(!lateTracked.state.rootFamilies.has(`${space}/space/of:late-root`));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(4),
+      authorization,
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:late-family",
+          value: { value: { kind: "late pattern" } },
+        }, {
+          op: "set",
+          id: "of:late-root",
+          value: {
+            value: { name: "born late" },
+            pattern: link("of:late-family"),
+          },
+        }],
+      },
+    });
+    const lateRefreshed = refreshTrackedGraph(
+      space,
+      engine,
+      lateTracked.state,
+      new Set([toDirtyKey("of:late-root"), toDirtyKey("of:late-family")]),
+    );
+    assertExists(lateRefreshed);
+    assert(lateTracked.state.rootFamilies.has(`${space}/space/of:late-root`));
+    assert(lateTracked.state.tracker.has(`${space}/space/of:late-family`));
+    assert(
+      isGraphQueryCoveredByState(space, lateTracked.state, absentRootQuery),
+    );
+
+    // A foreign-space manifest target is never registered lazily — the
+    // registering space's refresh could not promote it — and its presence
+    // does not disturb the walk.
+    // The eager paths hold the same-space rule too: a NAMED root's foreign
+    // manifest entry selects nothing and creates no tracker entry.
+    assert(
+      ![...lazyTracked.state.tracker].some(([key]) =>
+        key.includes("foreign-root-cell")
+      ),
+    );
+    assert(
+      ![...lazyTracked.state.lazy].some((key) =>
+        key.includes("foreign-root-cell")
+      ),
+    );
+
+    // A registration whose document is DELETED before promotion stays
+    // registered: the deletion's refresh delivers nothing, and the
+    // recreation promotes it.
+    const cTracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:meta-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              child: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    const cellKey = `${space}/space/of:target-cell`;
+    assert(cTracked.state.lazy.has(cellKey));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(5),
+      authorization,
+      commit: {
+        localSeq: 5,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "delete", id: "of:target-cell" }],
+      },
+    });
+    const deletedRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      cTracked.state,
+      new Set([toDirtyKey("of:target-cell")]),
+    );
+    if (deletedRefresh !== null) {
+      assert(!deletedRefresh.updates.has(cellKey));
+    }
+    assert(cTracked.state.lazy.has(cellKey));
+    assert(!cTracked.state.tracker.has(cellKey));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(6),
+      authorization,
+      commit: {
+        localSeq: 6,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:target-cell",
+          value: { value: { derived: "target cell, reborn" } },
+        }],
+      },
+    });
+    const rebornRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      cTracked.state,
+      new Set([toDirtyKey("of:target-cell")]),
+    );
+    assertExists(rebornRefresh);
+    assertExists(rebornRefresh.updates.get(cellKey));
+    assert(cTracked.state.tracker.has(cellKey));
+
+    // A manifest entry edited away retires its registration: the
+    // crossing's re-walk releases what its previous walk recorded, and
+    // the dropped document's later commits neither wake nor deliver.
+    const dropTracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:meta-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              child: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    assert(dropTracked.state.lazy.has(cellKey));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(7),
+      authorization,
+      commit: {
+        localSeq: 7,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:crossing-target",
+          value: {
+            value: { name: "target, unhooked" },
+            pattern: link("of:target-family"),
+            result: link("of:target-result"),
+            internal: [],
+          },
+        }],
+      },
+    });
+    const droppedRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      dropTracked.state,
+      new Set([toDirtyKey("of:crossing-target")]),
+    );
+    assertExists(droppedRefresh);
+    assert(!dropTracked.state.lazy.has(cellKey));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(8),
+      authorization,
+      commit: {
+        localSeq: 8,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:target-cell",
+          value: { value: { derived: "target cell, orphaned" } },
+        }],
+      },
+    });
+    const orphanRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      dropTracked.state,
+      new Set([toDirtyKey("of:target-cell")]),
+    );
+    if (orphanRefresh !== null) {
+      assert(!orphanRefresh.updates.has(cellKey));
+    }
+    assert(!dropTracked.state.tracker.has(cellKey));
+
+    // Two referrers, one lets go: the registration lives while ANY
+    // manifest still carries it, and the surviving attribution delivers.
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(9),
+      authorization,
+      commit: {
+        localSeq: 9,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:crossing-target2",
+          value: {
+            value: { name: "second referrer" },
+            internal: [{ link: link("of:target-cell") }],
+          },
+        }, {
+          op: "set",
+          id: "of:crossing-target",
+          value: {
+            value: { name: "target, rehooked" },
+            pattern: link("of:target-family"),
+            result: link("of:target-result"),
+            internal: [{ link: link("of:target-cell") }],
+          },
+        }, {
+          op: "set",
+          id: "of:meta-root",
+          value: {
+            value: {
+              child: link("of:crossing-target"),
+              child2: link("of:crossing-target2"),
+            },
+            pattern: link("of:root-family"),
+          },
+        }],
+      },
+    });
+    const twoRefTracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:meta-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              child: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+              child2: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    assert(twoRefTracked.state.lazy.has(cellKey));
+    assertEquals(twoRefTracked.state.lazyBy.get(cellKey)?.size, 2);
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(10),
+      authorization,
+      commit: {
+        localSeq: 10,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:crossing-target",
+          value: {
+            value: { name: "target, unhooked again" },
+            pattern: link("of:target-family"),
+            result: link("of:target-result"),
+            internal: [],
+          },
+        }],
+      },
+    });
+    const oneRefRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      twoRefTracked.state,
+      new Set([toDirtyKey("of:crossing-target")]),
+    );
+    assertExists(oneRefRefresh);
+    assert(twoRefTracked.state.lazy.has(cellKey));
+    assertEquals(twoRefTracked.state.lazyBy.get(cellKey)?.size, 1);
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(11),
+      authorization,
+      commit: {
+        localSeq: 11,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:target-cell",
+          value: { value: { derived: "target cell, still wanted" } },
+        }],
+      },
+    });
+    const survivorRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      twoRefTracked.state,
+      new Set([toDirtyKey("of:target-cell")]),
+    );
+    assertExists(survivorRefresh);
+    assertExists(survivorRefresh.updates.get(cellKey));
+    assert(twoRefTracked.state.tracker.has(cellKey));
+
+    // A registration made through INCREMENTAL extension carries the same
+    // attribution as one made at initial tracking: extend into a crossing,
+    // drop its manifest entry, and the registration retires — a later
+    // commit to the target delivers nothing.
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(12),
+      authorization,
+      commit: {
+        localSeq: 12,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:ext-cell",
+          value: { value: { derived: "extension cell" } },
+        }, {
+          op: "set",
+          id: "of:ext-crossing",
+          value: {
+            value: { name: "extension crossing" },
+            internal: [{ link: link("of:ext-cell") }],
+          },
+        }, {
+          op: "set",
+          id: "of:ext-root",
+          value: { value: { child: link("of:ext-crossing") } },
+        }],
+      },
+    });
+    const extBase = trackGraph(space, engine, {
+      roots: [{
+        id: "of:target-result",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: { computed: { type: "string" } },
+          },
+        },
+      }],
+    });
+    extendTrackedGraph(space, engine, extBase.state, {
+      roots: [{
+        id: "of:ext-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              child: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    const extCellKey = `${space}/space/of:ext-cell`;
+    assert(extBase.state.lazy.has(extCellKey));
+    assertExists(extBase.state.lazyBy.get(extCellKey));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(13),
+      authorization,
+      commit: {
+        localSeq: 13,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:ext-crossing",
+          value: {
+            value: { name: "extension crossing, unhooked" },
+            internal: [],
+          },
+        }],
+      },
+    });
+    const extDropRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      extBase.state,
+      new Set([toDirtyKey("of:ext-crossing")]),
+    );
+    assertExists(extDropRefresh);
+    assert(!extBase.state.lazy.has(extCellKey));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(14),
+      authorization,
+      commit: {
+        localSeq: 14,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:ext-cell",
+          value: { value: { derived: "extension cell, orphaned" } },
+        }],
+      },
+    });
+    const extOrphanRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      extBase.state,
+      new Set([toDirtyKey("of:ext-cell")]),
+    );
+    if (extOrphanRefresh !== null) {
+      assert(!extOrphanRefresh.updates.has(extCellKey));
+    }
+    assert(!extBase.state.tracker.has(extCellKey));
+
+    // A target both walked by the query schema AND registered by a
+    // crossing manifest retires its registration atomically when its
+    // commit arrives: tracked delivery supersedes the lazy lifecycle in
+    // all three structures.
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(15),
+      authorization,
+      commit: {
+        localSeq: 15,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:shared-cell",
+          value: { value: { derived: "walked and registered" } },
+        }, {
+          op: "set",
+          id: "of:shared-crossing",
+          value: {
+            value: { name: "manifest holder" },
+            internal: [{ link: link("of:shared-cell") }],
+          },
+        }, {
+          op: "set",
+          id: "of:shared-root",
+          value: {
+            value: {
+              kid: link("of:shared-cell"),
+              cross: link("of:shared-crossing"),
+            },
+          },
+        }],
+      },
+    });
+    const sharedTracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:shared-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              kid: {
+                type: "object",
+                properties: { derived: { type: "string" } },
+              },
+              cross: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    const sharedKey = `${space}/space/of:shared-cell`;
+    assert(sharedTracked.state.tracker.has(sharedKey));
+    assert(sharedTracked.state.lazy.has(sharedKey));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(16),
+      authorization,
+      commit: {
+        localSeq: 16,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:shared-cell",
+          value: { value: { derived: "walked and registered, changed" } },
+        }],
+      },
+    });
+    const sharedRefresh = refreshTrackedGraph(
+      space,
+      engine,
+      sharedTracked.state,
+      new Set([toDirtyKey("of:shared-cell")]),
+    );
+    assertExists(sharedRefresh);
+    assert(!sharedTracked.state.lazy.has(sharedKey));
+    assertEquals(sharedTracked.state.lazyBy.get(sharedKey), undefined);
+    assert(
+      ![...sharedTracked.state.lazyOf.values()].some((registered) =>
+        registered.has(sharedKey)
+      ),
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});

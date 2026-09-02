@@ -72,7 +72,15 @@ import {
 import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import type { EntityKind } from "./entity-kind.ts";
 import { refuseFabricInstance } from "./fabric-special-object.ts";
-import { resolveLink } from "./link-resolution.ts";
+import { MAX_PATH_RESOLUTION_LENGTH, resolveLink } from "./link-resolution.ts";
+import { FILTER_INPUT_SCHEMA } from "./builtins/filter.ts";
+import { FLATMAP_INPUT_SCHEMA } from "./builtins/flatmap.ts";
+import {
+  listCoordinatorPlan,
+  listElementResultCell,
+  listSlotResolutions,
+} from "./builtins/list-coordinator-plan.ts";
+import { MAP_INPUT_SCHEMA } from "./builtins/map.ts";
 import {
   areNormalizedLinksSame,
   type CellLink,
@@ -1285,6 +1293,16 @@ function defersInitialRunUntilSynced(
 ): boolean {
   return !!options.awaitSyncBeforeInitialRun;
 }
+
+/** One pattern instance the resume pre-sync visits: the pattern and the
+ * result cell it runs under. */
+type ResumePatternInstance = { pattern: Pattern; resultCell: Cell<any> };
+
+const LIST_OP_INPUT_SCHEMAS = {
+  map: MAP_INPUT_SCHEMA,
+  filter: FILTER_INPUT_SCHEMA,
+  flatMap: FLATMAP_INPUT_SCHEMA,
+} as const;
 
 // Options shared by run()/startWithTx()/startAfterSuccessfulCommit().
 type RunnerRunOptions = {
@@ -5824,12 +5842,14 @@ export class Runner {
     // transaction (resolveLink reads link metadata). The walk only reads, so the
     // transaction is discarded afterward.
     const resolveTx = this.runtime.edit();
+    const instances: ResumePatternInstance[] = [];
     this.#collectResumeOwnedCells(
       pattern,
       resultCell,
       cells,
       new Set(),
       resolveTx,
+      instances,
     );
     resolveTx.abort("collectResumeOwnedCells: read-only resolution");
 
@@ -5872,10 +5892,16 @@ export class Runner {
     // pass subscribed such targets in aborted transactions before any
     // commit). Each root's declared schema bounds its scan — see the method
     // for the exact rules and the fallback where a declaration runs out.
-    await this.syncArgumentLinkTargets(
-      argumentRoots,
-      "resumeArgumentLinkTargetSync",
-    );
+    await Promise.all([
+      this.syncArgumentLinkTargets(
+        argumentRoots,
+        "resumeArgumentLinkTargetSync",
+      ),
+      // The list coordinators' children: the inputs their identities derive
+      // from arrived with the first wave, so this cannot run any earlier,
+      // and it must finish before instantiation runs those children.
+      this.#syncResumeListChildren(instances),
+    ]);
 
     return true;
   }
@@ -6069,6 +6095,289 @@ export class Runner {
     }
   }
 
+  /**
+   * Pull what the list coordinators' slot resolutions end on, to their
+   * ends. Each round resolves every slot the way the plan does and syncs
+   * the documents those resolutions end on; a round that ends where the
+   * previous one did is the fixpoint, which every finite chain reaches: a
+   * document is synced once, so each round either exposes a document no
+   * round has synced or is the last. A list whose entity is not yet local
+   * is synced as such, so the next round can read its slots.
+   *
+   * The resolver bounds a chain at `MAX_PATH_RESOLUTION_LENGTH` hops, and
+   * so does this walk: a chain still moving at that depth is one the
+   * coordinator's own resolution will refuse, and the nodes it belongs to
+   * are returned so no child is derived from an incomplete identity. The
+   * returned keys are the instance's result cell key and the node's index,
+   * joined by `#`.
+   */
+  async #syncListSlotResolutions(
+    instances: readonly ResumePatternInstance[],
+  ): Promise<Set<string>> {
+    const synced = new Set<string>();
+    for (let round = 0;; round++) {
+      const fresh: Cell<any>[] = [];
+      const moving = new Set<string>();
+      const planTx = this.runtime.edit();
+      try {
+        for (const { pattern, resultCell } of instances) {
+          if (getMetaLink(resultCell, "argument") === undefined) continue;
+          const instanceLink = resultCell.getAsNormalizedFullLink();
+          const instanceKey = `${instanceLink.space}\0${instanceLink.id}\0${
+            instanceLink.scope ?? "space"
+          }`;
+          for (const [nodeIndex, node] of pattern.nodes.entries()) {
+            const module = node.module;
+            if (!isModule(module) || module.type !== "ref") continue;
+            const op = module.implementation;
+            if (op !== "map" && op !== "filter" && op !== "flatMap") continue;
+            let links: NormalizedFullLink[];
+            try {
+              const resolved = this.runtime.moduleRegistry.getModule(
+                op,
+                module.defaultScope,
+              );
+              const { inputsCell } = this.#buildRawNodeInputs(
+                planTx,
+                resolved,
+                node.inputs,
+                node.outputs,
+                resultCell,
+                pattern,
+                op,
+              );
+              const { listCell, rawList, slots } = listSlotResolutions(
+                this.runtime,
+                planTx,
+                inputsCell,
+              );
+              links = rawList === undefined
+                ? [listCell.getAsNormalizedFullLink()]
+                : slots;
+            } catch (error) {
+              logger.debug("resume-list-children", () => [
+                "skipping a list node whose slots could not be resolved",
+                error,
+              ]);
+              continue;
+            }
+            for (const link of links) {
+              const key = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
+              if (synced.has(key)) continue;
+              synced.add(key);
+              fresh.push(this.runtime.getCellFromLink(link));
+              moving.add(`${instanceKey}#${nodeIndex}`);
+            }
+          }
+        }
+      } finally {
+        planTx.abort("resume list slots: read-only resolution");
+      }
+      if (fresh.length === 0) return new Set();
+      if (round >= MAX_PATH_RESOLUTION_LENGTH) {
+        logger.warn("resume-list-children", () => [
+          "list slot chains still unresolved at the resolver's bound; " +
+          "their coordinators' children are not derived",
+          { rounds: round, nodes: moving.size },
+        ]);
+        return moving;
+      }
+      await Promise.all(fresh.map((cell) => {
+        const syncStart = performance.now();
+        return Promise.resolve(documentBoundedResumeCell(cell).sync())
+          .catch((error) => {
+            logger.warn("resume-list-children", () => [
+              "list slot resolution sync failed; resuming without it",
+              error,
+            ]);
+          })
+          .finally(() =>
+            logger.time(syncStart, "start", "resumeListChildSync")
+          );
+      }));
+    }
+  }
+
+  /**
+   * Name the children the pattern tree's list coordinators (map/filter/
+   * flatMap) will run, before anything instantiates.
+   *
+   * A coordinator resumes its durable children from inside its own
+   * scheduler run, synchronously: `run()` instantiates the child in the
+   * coordinator's transaction, and instantiation reads the child's
+   * execution family — its argument document, its derived internal cells,
+   * a handler's `$event` stream marker among them. A child a subscription
+   * merely reached arrives without that family, so the family is named
+   * here, where every other resume dependency is: naming a child's result
+   * document delivers the family, and the coordinator's synchronous start
+   * — inside its scheduler transaction, under that transaction's retry
+   * envelope — then reads what it needs.
+   *
+   * Which children a coordinator will run is derived exactly as the
+   * coordinator derives it (`listCoordinatorPlan`, shared with its
+   * reconcile) — from inputs that are LOCAL to the same depth the
+   * coordinator's own derivation will read them. An element's key is the
+   * value resolution of its slot (`listSlotResolutions`), and that chase
+   * ends wherever the replica goes cold: a slot holding a cell whose stored
+   * value redirects to a piece keys the element on the piece when warm and
+   * on the cell when cold, and a child keyed on the cold chase is one the
+   * warm coordinator never mints. So each round first pulls what every
+   * coordinator's slot resolutions end on, until a round ends where the
+   * last one did — the cells the coordinator's reconcile reads as well, so
+   * it reads them warm rather than at seq 0. Each child is then
+   * a resumed instance like any other: the cells it owns — its derived
+   * internal cells, and those of the sub-patterns nested in it — are
+   * collected the way the owned-cell walk collects them for the root, so
+   * a child's first run reads them warm rather than entering the commit
+   * basis at seq 0 (the one cold read a populated home's reload otherwise
+   * makes per element). A child's own coordinators are handled in turn
+   * once its family has landed, so the reach is the tree's depth. A node
+   * whose plan cannot be derived — inputs not yet readable, an unresolvable
+   * op — contributes nothing rather than failing the resume; the
+   * coordinator's own reconcile holds for such inputs.
+   */
+  async #syncResumeListChildren(
+    instances: readonly ResumePatternInstance[],
+  ): Promise<void> {
+    const named = new Set<string>();
+    // The owned-cell walk's own dedup: an instance the root walk already
+    // visited is not collected again here.
+    const walked = new Set<string>();
+    for (const { resultCell } of instances) {
+      const link = resultCell.getAsNormalizedFullLink();
+      walked.add(`${link.space}\0${link.id}\0${link.scope ?? "space"}`);
+    }
+    let frontier = [...instances];
+    while (frontier.length > 0) {
+      const unsettled = await this.#syncListSlotResolutions(frontier);
+      const next: ResumePatternInstance[] = [];
+      const promises: Promise<unknown>[] = [];
+      const planTx = this.runtime.edit();
+      try {
+        for (const { pattern, resultCell } of frontier) {
+          // A fresh first run has no argument meta yet; nothing durable is
+          // resumed under it.
+          if (getMetaLink(resultCell, "argument") === undefined) continue;
+          const instanceLink = resultCell.getAsNormalizedFullLink();
+          const instanceKey = `${instanceLink.space}\0${instanceLink.id}\0${
+            instanceLink.scope ?? "space"
+          }`;
+          for (const [nodeIndex, node] of pattern.nodes.entries()) {
+            const module = node.module;
+            if (!isModule(module) || module.type !== "ref") continue;
+            const op = module.implementation;
+            if (op !== "map" && op !== "filter" && op !== "flatMap") continue;
+            // A chain the resolver's bound cut short keys nothing: the
+            // coordinator's own derivation refuses it too.
+            if (unsettled.has(`${instanceKey}#${nodeIndex}`)) continue;
+            let children: Cell<any>[];
+            let opPattern: Pattern;
+            try {
+              const resolved = this.runtime.moduleRegistry.getModule(
+                op,
+                module.defaultScope,
+              );
+              const { inputsCell, outputBinding } = this.#buildRawNodeInputs(
+                planTx,
+                resolved,
+                node.inputs,
+                node.outputs,
+                resultCell,
+                pattern,
+                op,
+              );
+              const plan = listCoordinatorPlan(
+                this.runtime,
+                planTx,
+                op,
+                inputsCell,
+                LIST_OP_INPUT_SCHEMAS[op],
+                resultCell,
+                outputBinding,
+              );
+              opPattern = plan.opPattern;
+              children = [...plan.elementKeys.values()].map((elementKey) =>
+                listElementResultCell(
+                  this.runtime,
+                  planTx,
+                  op,
+                  plan.container,
+                  elementKey,
+                )
+              );
+            } catch (error) {
+              logger.debug("resume-list-children", () => [
+                "skipping a list node whose children could not be derived",
+                error,
+              ]);
+              continue;
+            }
+            for (const child of children) {
+              const link = child.getAsNormalizedFullLink();
+              const key = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
+              if (named.has(key)) continue;
+              named.add(key);
+              // Unbound from the derivation transaction: the sync and the
+              // next round outlive it.
+              const unbound = this.runtime.getCellFromLink(link);
+              const syncStart = performance.now();
+              promises.push(
+                Promise.resolve(documentBoundedResumeCell(unbound).sync())
+                  .catch((error) => {
+                    logger.warn("resume-list-children", () => [
+                      "list child sync failed; resuming without it",
+                      error,
+                    ]);
+                  })
+                  .finally(() =>
+                    logger.time(syncStart, "start", "resumeListChildSync")
+                  ),
+              );
+              // The child's owned cells, and the instances nested in it —
+              // those join the next round for the coordinators they hold.
+              const owned: Cell<any>[] = [];
+              const nested: ResumePatternInstance[] = [];
+              this.#collectResumeOwnedCells(
+                opPattern,
+                unbound,
+                owned,
+                walked,
+                planTx,
+                nested,
+              );
+              for (const cell of owned) {
+                const ownedLink = cell.getAsNormalizedFullLink();
+                const ownedKey = `${ownedLink.space}\0${ownedLink.id}\0${
+                  ownedLink.scope ?? "space"
+                }`;
+                if (named.has(ownedKey)) continue;
+                named.add(ownedKey);
+                const ownedStart = performance.now();
+                promises.push(
+                  Promise.resolve(documentBoundedResumeCell(cell).sync())
+                    .catch((error) => {
+                      logger.warn("resume-list-children", () => [
+                        "list child owned-cell sync failed; resuming without it",
+                        error,
+                      ]);
+                    })
+                    .finally(() =>
+                      logger.time(ownedStart, "start", "resumeListChildSync")
+                    ),
+                );
+              }
+              next.push(...nested);
+            }
+          }
+        }
+      } finally {
+        planTx.abort("resume list children: read-only derivation");
+      }
+      await Promise.all(promises);
+      frontier = next;
+    }
+  }
+
   // Walk the pattern tree — this pattern and every nested sub-pattern — and
   // collect each one's owned (derived internal) cells into `out`, so the resume
   // pre-sync pulls them before instantiation reads them. A sub-pattern node's
@@ -6084,11 +6393,15 @@ export class Runner {
     out: Cell<any>[],
     seen: Set<string>,
     tx: IExtendedStorageTransaction,
+    // Every (pattern, result cell) the walk visits, for the pre-sync's
+    // second pass over the list coordinators those patterns hold.
+    visited?: ResumePatternInstance[],
   ): void {
     const link = resultCell.getAsNormalizedFullLink();
     const key = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
     if (seen.has(key)) return;
     seen.add(key);
+    visited?.push({ pattern, resultCell });
 
     for (const descriptor of pattern.derivedInternalCells ?? []) {
       out.push(getDerivedInternalCell(resultCell, descriptor));
@@ -6110,8 +6423,6 @@ export class Runner {
       }
       const childPattern = module.implementation;
       const targetSpace = module.targetSpace ?? resultCell.space;
-      const childScope = patternDefaultScope(childPattern) ??
-        module.defaultScope;
       // Resolve the node's reserved output spot the way instantiatePatternNode
       // does: unwrap one level (so a deferred-alias output is decremented and
       // followed) and follow the write-redirect chain to its resolved end (a
@@ -6121,11 +6432,31 @@ export class Runner {
       // mints; the unresolved head of a multi-hop binding would be a different
       // cell, pre-syncing the wrong owned-cell subtree.
       let spotLink: NormalizedFullLink | undefined;
+      let boundChildPattern: Pattern;
       try {
+        // The identity bind, manifest-blind exactly as `#instantiatePatternNode`
+        // performs it: a partialCause output renders as its derived cell's
+        // kind-free id, which `causeOnlySpotIds` below has the scan take as
+        // it stands. Binding with the manifest instead would render the
+        // KINDED cell and resolve through it to a different spot — a child
+        // identity the instantiation never mints.
         const unwrappedOutputs = unwrapOneLevelAndBindToDoc(
           node.outputs,
           argumentLink,
           resultCell,
+        );
+        // The child's nodes are walked as the child's own start sees them:
+        // `#instantiatePatternNode` binds the implementation once at this
+        // level before the child instantiates it, and that bind is what
+        // crosses one `defer` boundary of every alias inside it. Walking the
+        // raw implementation instead leaves each nested level one decrement
+        // behind, so its deferred outputs never resolve and every such child
+        // stays invisible to the resume.
+        boundChildPattern = unwrapOneLevelAndBindToDoc(
+          childPattern,
+          argumentLink,
+          resultCell,
+          { derivedInternalCells: pattern.derivedInternalCells },
         );
         // The same cause-only skip instantiatePatternNode's spot
         // derivation applies, so the two derive identical coordinates.
@@ -6153,17 +6484,17 @@ export class Runner {
         // pre-sync AND the recursion that would reach the child's own
         // `derivedInternalCells` manifest — reached without an error: the
         // outputs bound, but held no write redirect the scan could resolve
-        // (e.g. they consist only of deferred partialCause aliases, which
-        // denote a deeper level's derived internal cells rather than this
-        // node's reserved result spot).
+        // (outputs consisting only of partialCause aliases still deferred to
+        // a deeper level, say). Instantiation refuses the same node, since
+        // it has nothing to anchor the child's identity on, so a healthy run
+        // never takes this exit; a pattern that does reach it fails at its
+        // own start.
         //
-        // DEBUG, not warn: this is the BY-DESIGN outcome for such outputs, not
-        // a failure. #5143 deliberately moved that case off the throwing path,
-        // and ordinary healthy runs of the home pattern take this exit several
-        // times per resume — warning here would be noise, not signal. It still
-        // hides a skipped subtree, so it carries the same key and the same
-        // identity payload as its sibling, and turning this logger up to debug
-        // brings it back for someone tracing a stranded piece:
+        // DEBUG, not warn: the start that follows reports the refusal itself.
+        // The exit still hides a skipped subtree, so it carries the same key
+        // and the same identity payload as its sibling, and turning this
+        // logger up to debug brings it back for someone tracing a stranded
+        // piece:
         // `commonfabric.logger["runner"].level = "debug"` on the main thread,
         // `commonfabric.rt.setLoggerLevel("debug", "runner")` for the worker
         // the runner actually lives in. (`CF_LOG_LEVEL` will NOT do it: it is a
@@ -6177,6 +6508,8 @@ export class Runner {
         ]);
         continue;
       }
+      const childScope = patternDefaultScope(boundChildPattern) ??
+        module.defaultScope;
       let childResultCell = this.runtime.getCell(
         targetSpace,
         {
@@ -6186,7 +6519,7 @@ export class Runner {
             path: [...spotLink.path],
           },
         },
-        childPattern.resultSchema,
+        boundChildPattern.resultSchema,
       );
       if (childScope !== undefined && childScope !== "space") {
         const childLink = childResultCell.getAsNormalizedFullLink();
@@ -6196,11 +6529,12 @@ export class Runner {
         });
       }
       this.#collectResumeOwnedCells(
-        childPattern,
+        boundChildPattern,
         childResultCell,
         out,
         seen,
         tx,
+        visited,
       );
     }
   }
@@ -8771,27 +9105,29 @@ export class Runner {
     return undefined;
   }
 
-  #instantiateRawNode(
+  /**
+   * A raw builtin node's bound inputs and output binding: what
+   * `#instantiateRawNode` hands the builtin, derived from the node alone
+   * so the resume pre-sync can derive the same for a list coordinator it
+   * has not instantiated yet (`#syncResumeListChildren`).
+   */
+  #buildRawNodeInputs(
     tx: IExtendedStorageTransaction,
     module: Module,
     inputBindings: FabricExecValue,
     outputBindings: FabricExecValue,
     resultCell: Cell<any>,
-    addCancel: AddCancel,
     pattern: Pattern,
-    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
-    moduleRefName?: string,
-  ) {
-    if (typeof module.implementation !== "function") {
-      throw new Error(
-        `Raw module is not a function, got: ${module.implementation}`,
-      );
-    }
-
-    const builtinIdentity = resolveBuiltinImplementationIdentity(module);
-    if (builtinIdentity) {
-      tx.setCfcImplementationIdentity(builtinIdentity);
-    }
+    moduleRefName: string | undefined,
+  ): {
+    argumentCellLink: NormalizedFullLink;
+    mappedOutputBindings: FabricExecValue;
+    inputCells: NormalizedFullLink[];
+    outputCells: NormalizedFullLink[];
+    inputsCell: Cell<any>;
+    resolvedOutputSpot: NormalizedFullLink | undefined;
+    outputBinding: NormalizedFullLink | undefined;
+  } {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const mappedInputBindings = unwrapOneLevelAndBindToDoc(
       inputBindings,
@@ -8893,6 +9229,55 @@ export class Runner {
           module.defaultScope ?? resolvedOutputSpot.scope,
       }
       : undefined;
+    return {
+      argumentCellLink,
+      mappedOutputBindings,
+      inputCells,
+      outputCells,
+      inputsCell,
+      resolvedOutputSpot,
+      outputBinding,
+    };
+  }
+
+  #instantiateRawNode(
+    tx: IExtendedStorageTransaction,
+    module: Module,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
+    resultCell: Cell<any>,
+    addCancel: AddCancel,
+    pattern: Pattern,
+    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
+    moduleRefName?: string,
+  ) {
+    if (typeof module.implementation !== "function") {
+      throw new Error(
+        `Raw module is not a function, got: ${module.implementation}`,
+      );
+    }
+
+    const builtinIdentity = resolveBuiltinImplementationIdentity(module);
+    if (builtinIdentity) {
+      tx.setCfcImplementationIdentity(builtinIdentity);
+    }
+    const {
+      argumentCellLink,
+      mappedOutputBindings,
+      inputCells,
+      outputCells,
+      inputsCell,
+      resolvedOutputSpot,
+      outputBinding,
+    } = this.#buildRawNodeInputs(
+      tx,
+      module,
+      inputBindings,
+      outputBindings,
+      resultCell,
+      pattern,
+      moduleRefName,
+    );
 
     const builtinFrame = builtinIdentity
       ? pushFrameFromCause(undefined, {

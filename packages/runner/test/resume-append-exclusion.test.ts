@@ -86,7 +86,10 @@ describe("append to filter input during the resume await window", () => {
       });
 
     expect(heldCount).toBeGreaterThan(0);
-    expect(outputWhileHeld).toEqual([]);
+    // Nothing reconciles while the pre-sync still holds the predicate results,
+    // so the durable aggregate stands intact inside the window; the removal
+    // lands with the first reconcile after the release.
+    expect(outputWhileHeld).toEqual(["a", "b", "c", "d"]);
     expect(output).toEqual([]);
   });
 });
