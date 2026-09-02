@@ -1,14 +1,21 @@
 # cf-harness Implementation Profile
 
 Status: draft conformance statement\
-Profile date: 2026-08-18\
-Implementation revision: Labs `83671e20d677730739f29d7d53134c60e374a6c8`
+Profile date: 2026-09-03\
+Implementation revision: Labs `889e34c55a`
 
 This document describes `@commonfabric/cf-harness` against the draft Common
 Fabric
 [Agent Harness specifications](../../../docs/specs/agent-harness/README.md). It
 is deliberately more conservative than the feature list: protocol presence does
 not imply full conformance or external dependency health.
+
+The classes below are the labs `AH-*` conformance classes defined in
+[03-conformance.md](../../../docs/specs/agent-harness/03-conformance.md). They
+are not CFC implementation profiles, and claiming one is not claiming the other.
+What this package claims against the CFC specification's own profiles is stated
+separately, under
+[Relationship to the CFC implementation profiles](#relationship-to-the-cfc-implementation-profiles).
 
 ## Claimed classes
 
@@ -18,6 +25,115 @@ not imply full conformance or external dependency health.
 | Delegation    | implemented; experimental                                  | Unit tests cover profiles, fresh child context, retained child artifacts, and sanitized/structured return handling. Only serial single-child orchestration is supported.                                                                                                                                                  |
 | Interactive   | implemented; experimental                                  | NDJSON v1 and SQLite-backed sessions/turns/events/replay are covered by package and Loom adapter tests, including crash-restart regressions that reconstruct a service from the same SQLite store at each mid-tool fault point and assert the transcript the next turn is given. The protocol is not yet declared stable. |
 | CFC transport | partial; reduced assurance in current product integrations | Prompt-slot, invocation-context, model-influence, mediation, and deny/recovery behavior are tested. Loom and Pattern Factory still select `observe` because trusted mediation is not wired end to end.                                                                                                                    |
+
+## Relationship to the CFC implementation profiles
+
+The CFC specification defines three implementation profiles in
+`cfc/18-runtime-implementation-profiles.md`. This package's position on each:
+
+| Profile                   | Position                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CfcAgentHarnessProfile`  | **Not claimed.** Three of §18.3.3's nine obligations have no implementation behind them and four are partly met. The list is below.                                                                                                                                                                                                                                                 |
+| `CfcGVisorSandboxProfile` | **Not claimed, and not this package's to claim.** cf-harness runs tools under the sibling gVisor runtime `runsc-cfc`, so the profile is in scope for a deployment; the mediation it requires belongs to that runtime, the Common Fabric FUSE daemon, and the runner's label store. Four of §18.2.7's nineteen documentation obligations are this package's, and are answered below. |
+| `CfcTrustedRenderProfile` | **Not applicable.** cf-harness has no user-visible render surface. Its outputs are model context, operator terminal lines, and artifact files, none of which is a certified authorship boundary.                                                                                                                                                                                    |
+
+`CfcAgentHarnessProfile` is not claimed for these reasons, one per §18.3.3
+obligation:
+
+1. **Which surfaces may mint `PromptSlotBound`, and which roles.** Two surfaces
+   mint, both through `createCliPromptSlotBinding`: the batch CLI and the
+   console web server. Roles are a closed union and validated on the way in.
+   Nothing restricts which role which surface may mint, which is what the
+   obligation asks to be documented.
+2. **How input-capture records bind subject, surface, value digest, role, and
+   kernel name.** `kernelName`, `surface`, and `role` are bound. No mint site
+   populates a `valueDigest`, and the CLI's `subject` is a resume-run id or a
+   workspace path rather than an authenticated subject. §18.3.1 requires a
+   non-UI surface minting without a render reference to supply an equivalent
+   trusted input-capture record; neither surface does. **Not met.**
+3. **How direct-command evidence is kept unforgeable.** Met, and mechanically:
+   the binding is never a field of a tool input schema, a skill's prompt role is
+   pinned to `context` at the type level, what crosses into the sandbox is a
+   `PromptSlotInfluence` atom rather than a `PromptSlotBound` one, and the
+   runner strips a pattern-authored `PromptSlotBound` from a declared label.
+4. **How tool descriptor and measured-contract registry snapshots are issued,
+   accepted, expired, revoked, and bound to invocations.** There are no
+   snapshots. The tool registry is a compile-time map and a descriptor carries
+   no digest. There is no measured-contract registry, so sandboxed output is
+   handled under §18.2.4.1's conservative default. `acquire_skill` is the one
+   dynamic acquisition path and does record issuance-grade provenance — a
+   registry id, a full commit SHA, a pinned source URL, and a host-computed
+   digest over the fetched bytes — which is binding without acceptance, expiry,
+   or revocation. **Not met.**
+5. **Which descriptor fields are low-observable by default.** Descriptor fields
+   carry no observation labels and there is no low-safe descriptor view. Tool
+   _availability_ is narrowed — a tool the run cannot back is absent rather than
+   present-and-failing — so a model cannot probe for hidden availability, but
+   that is an ergonomic property rather than a labeling decision. **Not met.**
+6. **How free-form tool documentation is kept separate from structured
+   capability metadata.** Separated for skills: a skill's text is a labeled
+   document read under the `context` prompt role with a registry digest, an
+   observed digest, and a match flag recorded beside it. Not separated for
+   tools: a descriptor's `description` is a plain string inside the same record
+   as its effect class and schema, with no `docRef` and no opaque-handle path.
+   **Partly met.**
+7. **How opaque handles are passed to tools and subagents without revealing
+   payload bytes.** The address form is built and disciplined: deterministic
+   per-run tokens for positively identified cell addresses, swapped in both
+   directions around policy evaluation, seeded into a child table only for the
+   handles a delegation names, and inspectable for shape but never for value.
+   §18.2.4.2's opaque handle over _bytes_ is not built — the contract shape
+   exists and nothing stores a payload behind one, so the blocked-value recovery
+   flow through a sanitizer subagent cannot be run. **Partly met**; see
+   deviation 4.
+8. **How subagent ceilings and observation policies are applied before inherited
+   handles are resolved.** A child profile binds tools, host tools, a model
+   override, native model tools, skills, allowed scripts, a script target, a
+   turn budget, and a return contract. It binds no confidentiality ceiling and
+   attenuates no principal, so §18.2.4.3's upper bound on what a callee may
+   observe has no representation. What is built is capability attenuation, which
+   is a different property and does not substitute for it. **Not met.**
+9. **How side-effecting tool calls bottom out in the same sink-specific intent
+   and commit-point checks used outside the agent harness.** `run_pattern` does:
+   it measures its release against a named sink and an explicit ceiling and
+   returns the commit boundary's refusal as structured evidence. No other
+   side-effecting tool does. The gate the rest pass through turns on the
+   descriptor's static effect class and on whether the run carries a
+   direct-command binding, records its decision before the tool runs, and
+   consults no sink, no ceiling, and no label. **Partly met**; see deviation 6.
+
+The four §18.2.7 obligations that are this package's:
+
+- **Which mounts are CFC-mediated, rootfs, scratch, or out of scope.** Mounts
+  are classified as `workspace`, `fabric-fuse`, or `host-bind` and recorded per
+  run with host path, sandbox path, read-only flag, and mode. That inventory is
+  published and does not carry §18.2.7's classification; no mount carries a
+  measured image or rootfs digest.
+- **Where the opaque-handle store and label store live.** The handle table is
+  session-local, persisted with the run's artifacts, reconstructed across batch
+  resume, and never visible to the sandbox, which sees only tokens. The label
+  store is the runner's; sandbox labels arrive through the `runsc-cfc` CFC
+  result sidecar.
+- **Which handle scopes, TTLs, revocation behavior, and metadata labels are
+  implemented.** Scopes are `invocation`, `run`, and `session` — the spec's
+  third scope is named `plan` and is the same idea — and a handle carries an
+  optional expiry. No revocation or tombstoning exists and handle metadata is
+  unlabeled.
+- **How stdout/stderr are prevented from bypassing the trusted runtime.** Raw
+  streams return through the `runsc-cfc` result sidecar and are withheld from
+  model context when the sidecar reports tainted output. An enforcing run whose
+  invocation-context or result transport is unwired fails at startup rather than
+  degrading silently, and the registered Docker runtime is separately checked
+  for an absolute directory on each flag. The two directory spellings are
+  deliberately not compared, because comparing two path strings cannot establish
+  that they name one directory, so two absolute paths that disagree pass both
+  checks.
+
+The obligation-by-obligation working, with the code each answer rests on, is in
+[`docs/history/packages/cf-harness/cfc-profile-conformance-gap-2026-09-03.md`](../../../docs/history/packages/cf-harness/cfc-profile-conformance-gap-2026-09-03.md).
+How the `AH-CFC-*` clauses relate to the CFC sections above — including the two
+that are narrower than their counterpart — is in
+[`docs/specs/agent-harness/04-cfc-spec-correspondence.md`](../../../docs/specs/agent-harness/04-cfc-spec-correspondence.md).
 
 ## Capability discovery
 
@@ -81,14 +197,20 @@ readiness.
 
 Current selectable parent tools are `bash`, `read_file`, `view_image`,
 `web_fetch`, `read_skill_resource`, `run_skill_script`, `edit_file`,
-`write_file`, `delegate_task`, `describe_handle`, and `run_pattern`. Individual
-runs receive only their configured subset; `web_fetch` and `run_skill_script`
-are not in the ordinary default surface, and `run_pattern` additionally requires
-the three `--fabric-*` session flags. `browser` exists only as a built-in used
-by the authorized browser child profile and cannot be selected as a parent CLI
-tool; it drives the host `agent-browser` CLI through a typed action vocabulary,
-with the Browser Access CDP endpoint attached by the harness rather than written
-by the model.
+`write_file`, `delegate_task`, `describe_handle`, `run_pattern`, `assign_slug`,
+`search_patterns`, `record_feedback`, `search_skills`, and `acquire_skill`.
+Individual runs receive only their configured subset; `web_fetch` and
+`run_skill_script` are not in the ordinary default surface. The last five are
+gated on the backing a run can supply — a fabric session for `run_pattern`,
+`assign_slug`, and `acquire_skill`, the pattern index for `search_patterns` and
+`record_feedback`, and configured skills.sh discovery for `search_skills` — and
+a tool the run cannot back is absent from the surface rather than present and
+failing, so an explicit allowlist naming it does not conjure it. `run_pattern`
+additionally requires the three `--fabric-*` session flags. `browser` exists
+only as a built-in used by the authorized browser child profile and cannot be
+selected as a parent CLI tool; it drives the host `agent-browser` CLI through a
+typed action vocabulary, with the Browser Access CDP endpoint attached by the
+harness rather than written by the model.
 
 `describe_handle` reports the referent's structural schema and path segments,
 never its value. It prefers the session Fabric's declared shape when available
@@ -167,10 +289,13 @@ in-flight external side effect.
    before the first model turn.
 2. **Product `observe` bridges.** Loom and Pattern Factory select `observe` for
    workflows whose sandbox output does not yet carry trusted mediation metadata
-   end to end. Owners: the respective product adapters plus the cf-harness/CFC
-   integration. Retirement: real sidecar evidence is present for every exposed
-   observation and enforcing-mode adapter suites pass without opaque-output
-   regressions.
+   end to end. Which mode each adapter selects is a fact about adapters that
+   live outside this repository, so it is stated here on their behalf and is not
+   established by anything in this tree; each adapter's own conformance
+   statement is the authority for it. Owners: the respective product adapters
+   plus the cf-harness/CFC integration. Retirement: real sidecar evidence is
+   present for every exposed observation and enforcing-mode adapter suites pass
+   without opaque-output regressions.
 3. **Provisional network policy.** Package-default bridge networking and the
    shell `curl` guard are integration mechanisms, not a complete destination
    capability system. Owner: `cf-harness`. Retirement: network authority is
@@ -194,6 +319,31 @@ in-flight external side effect.
    Owner: `cf-harness` and Fabric runtime tooling. Retirement: callers can
    bound, enumerate, retain, and delete tool-created resources, and cancellation
    fully settles both registry membership and assigned names.
+6. **Side effects gated on authority rather than on flow.** Every side-effecting
+   tool except `run_pattern` is admitted by a check on the descriptor's static
+   effect class and on whether the run carries a direct-command binding. The
+   decision is recorded before the tool runs, so it is not a commit point, and
+   it consults no sink and no label. `run_pattern` is the exception and shows
+   the shape the rest want: a named sink, an explicit ceiling, and the runner's
+   commit boundary deciding. Owner: `cf-harness` and the CFC runtime.
+   Retirement: each side-effecting tool's effect is declared as a named sink
+   whose ceiling the runner's boundary commit evaluates, so that a refusal comes
+   back as structured evidence rather than as an allow recorded in advance.
+7. **Direct-command bindings not bound to a subject or a submitted value.** Both
+   minting surfaces produce a binding from constants: the console's is a
+   module-level value reused for every turn of every session, and the CLI's
+   carries a resume-run id or a workspace path in the `subject` field. Neither
+   populates a `valueDigest`, and neither supplies the trusted input-capture
+   record a non-render surface needs. The transport contract already types
+   `subject`, `eventId`, `valueDigest`, `slotDigest`, `snapshotDigest`, and
+   `targetPath`. Owner: `cf-harness`. Retirement: each surface mints per
+   submission, over the submitted value's digest and an authenticated subject.
+8. **No confidentiality ceiling on a delegation.** A child profile attenuates
+   capabilities and not observation, so a child can read anything the
+   capabilities it was given can reach. Owner: `cf-harness` and the CFC runtime.
+   Retirement: a delegation carries an observation ceiling the runner's access
+   check consumes, and handle resolution into a child input is rejected when it
+   exceeds that ceiling.
 
 ## Test evidence
 
