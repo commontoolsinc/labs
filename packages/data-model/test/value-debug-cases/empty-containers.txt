@@ -1,0 +1,22 @@
+{
+  object: {},
+  array: [],
+  nested: [{}, [], { deeper: [[], {}] }],
+}
+
+{
+  object: {},
+  array: [],
+  nested: [
+    {},
+    [],
+    {
+      deeper: [
+        [],
+        {}
+      ]
+    }
+  ]
+}
+
+{object:{},array:[],nested:[{},[],{deeper:[[],{}]}]}

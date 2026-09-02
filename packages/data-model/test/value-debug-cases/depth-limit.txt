@@ -1,0 +1,213 @@
+(() => {
+  // The conversion stops descending at its depth limit, and whatever lies
+  // below is represented by a marker naming its kind.
+  let value = "bottom";
+  for (let i = 0; i < 105; i++) {
+    value = { d: value };
+  }
+  return value;
+})()
+
+{
+  d: {
+    d: {
+      d: {
+        d: {
+          d: {
+            d: {
+              d: {
+                d: {
+                  d: {
+                    d: {
+                      d: {
+                        d: {
+                          d: {
+                            d: {
+                              d: {
+                                d: {
+                                  d: {
+                                    d: {
+                                      d: {
+                                        d: {
+                                          d: {
+                                            d: {
+                                              d: {
+                                                d: {
+                                                  d: {
+                                                    d: {
+                                                      d: {
+                                                        d: {
+                                                          d: {
+                                                            d: {
+                                                              d: {
+                                                                d: {
+                                                                  d: {
+                                                                    d: {
+                                                                      d: {
+                                                                        d: {
+                                                                          d: {
+                                                                            d: {
+                                                                              d: {
+                                                                                d: {
+                                                                                  d: {
+                                                                                    d: {
+                                                                                      d: {
+                                                                                        d: {
+                                                                                          d: {
+                                                                                            d: {
+                                                                                              d: {
+                                                                                                d: {
+                                                                                                  d: {
+                                                                                                    d: {
+                                                                                                      d: {
+                                                                                                        d: {
+                                                                                                          d: {
+                                                                                                            d: {
+                                                                                                              d: {
+                                                                                                                d: {
+                                                                                                                  d: {
+                                                                                                                    d: {
+                                                                                                                      d: {
+                                                                                                                        d: {
+                                                                                                                          d: {
+                                                                                                                            d: {
+                                                                                                                              d: {
+                                                                                                                                d: {
+                                                                                                                                  d: {
+                                                                                                                                    d: {
+                                                                                                                                      d: {
+                                                                                                                                        d: {
+                                                                                                                                          d: {
+                                                                                                                                            d: {
+                                                                                                                                              d: {
+                                                                                                                                                d: {
+                                                                                                                                                  d: {
+                                                                                                                                                    d: {
+                                                                                                                                                      d: {
+                                                                                                                                                        d: {
+                                                                                                                                                          d: {
+                                                                                                                                                            d: {
+                                                                                                                                                              d: {
+                                                                                                                                                                d: {
+                                                                                                                                                                  d: {
+                                                                                                                                                                    d: {
+                                                                                                                                                                      d: {
+                                                                                                                                                                        d: {
+                                                                                                                                                                          d: {
+                                                                                                                                                                            d: {
+                                                                                                                                                                              d: {
+                                                                                                                                                                                d: {
+                                                                                                                                                                                  d: {
+                                                                                                                                                                                    d: {
+                                                                                                                                                                                      d: {
+                                                                                                                                                                                        d: {
+                                                                                                                                                                                          d: {
+                                                                                                                                                                                            d: {
+                                                                                                                                                                                              d: {
+                                                                                                                                                                                                d: {
+                                                                                                                                                                                                  d: {
+                                                                                                                                                                                                    d: {
+                                                                                                                                                                                                      d: {
+                                                                                                                                                                                                        "/...": "object"
+                                                                                                                                                                                                      }
+                                                                                                                                                                                                    }
+                                                                                                                                                                                                  }
+                                                                                                                                                                                                }
+                                                                                                                                                                                              }
+                                                                                                                                                                                            }
+                                                                                                                                                                                          }
+                                                                                                                                                                                        }
+                                                                                                                                                                                      }
+                                                                                                                                                                                    }
+                                                                                                                                                                                  }
+                                                                                                                                                                                }
+                                                                                                                                                                              }
+                                                                                                                                                                            }
+                                                                                                                                                                          }
+                                                                                                                                                                        }
+                                                                                                                                                                      }
+                                                                                                                                                                    }
+                                                                                                                                                                  }
+                                                                                                                                                                }
+                                                                                                                                                              }
+                                                                                                                                                            }
+                                                                                                                                                          }
+                                                                                                                                                        }
+                                                                                                                                                      }
+                                                                                                                                                    }
+                                                                                                                                                  }
+                                                                                                                                                }
+                                                                                                                                              }
+                                                                                                                                            }
+                                                                                                                                          }
+                                                                                                                                        }
+                                                                                                                                      }
+                                                                                                                                    }
+                                                                                                                                  }
+                                                                                                                                }
+                                                                                                                              }
+                                                                                                                            }
+                                                                                                                          }
+                                                                                                                        }
+                                                                                                                      }
+                                                                                                                    }
+                                                                                                                  }
+                                                                                                                }
+                                                                                                              }
+                                                                                                            }
+                                                                                                          }
+                                                                                                        }
+                                                                                                      }
+                                                                                                    }
+                                                                                                  }
+                                                                                                }
+                                                                                              }
+                                                                                            }
+                                                                                          }
+                                                                                        }
+                                                                                      }
+                                                                                    }
+                                                                                  }
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{...

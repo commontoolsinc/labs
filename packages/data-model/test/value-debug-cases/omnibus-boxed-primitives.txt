@@ -1,0 +1,21 @@
+{
+  number: new Number(3),
+  "negative zero": new Number(-0),
+  string: new String("x"),
+  "empty string": new String(""),
+  boolean: new Boolean(true),
+  bigint: Object(42n),
+  symbol: Object(Symbol("s")),
+}
+
+{
+  number: /Number("3"),
+  "negative zero": /Number("0"),
+  string: /String("x"),
+  "empty string": /String(""),
+  boolean: /Boolean("true"),
+  bigint: /BigInt("42"),
+  symbol: /Symbol("Symbol(s)")
+}
+
+{number:/Number("3"),"negative zero":/Number("0"),string:/String("x"),"empty string":/String(""),...
