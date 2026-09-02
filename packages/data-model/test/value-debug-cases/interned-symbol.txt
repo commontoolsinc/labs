@@ -1,9 +1,0 @@
-{ plain: Symbol.for("k"), dashed: Symbol.for("my-key"), empty: Symbol.for("") }
-
-{
-  "plain": @k,
-  "dashed": @"my-key",
-  "empty": @""
-}
-
-{"plain":@k,"dashed":@"my-key","empty":@""}

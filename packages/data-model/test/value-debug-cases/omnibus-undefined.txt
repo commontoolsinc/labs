@@ -1,0 +1,11 @@
+{
+  "plain": undefined,
+  "via void": void 0,
+}
+
+{
+  "plain": undefined,
+  "via void": undefined
+}
+
+{"plain":undefined,"via void":undefined}

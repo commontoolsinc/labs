@@ -1,0 +1,27 @@
+{
+  "empty": "",
+  "plain": "hello",
+  "with quotes": "say \"hi\"",
+  "with newline": "a\nb",
+  "with backslash": "a\\b",
+  "non-ASCII": "héllo ☃",
+  "control character": "\u0001",
+  "reads like a token": "undefined",
+  "reads like a bigint": "42n",
+  "reads like a symbol": "@k",
+}
+
+{
+  "empty": "",
+  "plain": "hello",
+  "with quotes": "say \"hi\"",
+  "with newline": "a\nb",
+  "with backslash": "a\\b",
+  "non-ASCII": "héllo ☃",
+  "control character": "\u0001",
+  "reads like a token": "undefined",
+  "reads like a bigint": "42n",
+  "reads like a symbol": "@k"
+}
+
+{"empty":"","plain":"hello","with quotes":"say \"hi\"","with newline":"a\nb","with backslash":"a\...

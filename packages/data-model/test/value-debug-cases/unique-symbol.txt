@@ -1,9 +1,0 @@
-{ described: Symbol("d"), bare: Symbol(), empty: Symbol("") }
-
-{
-  "described": Symbol("d"),
-  "bare": Symbol(),
-  "empty": Symbol("")
-}
-
-{"described":Symbol("d"),"bare":Symbol(),"empty":Symbol("")}

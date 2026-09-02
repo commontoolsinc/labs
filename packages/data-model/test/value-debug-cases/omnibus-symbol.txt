@@ -1,0 +1,19 @@
+{
+  "interned, identifier key": Symbol.for("k"),
+  "interned, other key": Symbol.for("my-key"),
+  "interned, empty key": Symbol.for(""),
+  "unique": Symbol("d"),
+  "unique, no description": Symbol(),
+  "unique, empty description": Symbol(""),
+}
+
+{
+  "interned, identifier key": @k,
+  "interned, other key": @"my-key",
+  "interned, empty key": @"",
+  "unique": Symbol("d"),
+  "unique, no description": Symbol(),
+  "unique, empty description": Symbol("")
+}
+
+{"interned, identifier key":@k,"interned, other key":@"my-key","interned, empty key":@"","unique"...
