@@ -115,12 +115,12 @@ describe("value-debug", () => {
         "str",
         Symbol.for("k"),
         Symbol("d"),
+        foo,
         new FabricEpochNsec(123n),
       ];
       for (const value of values) {
         expect(toIndentedDebugString(value)).toBe(toCompactDebugString(value));
       }
-      expect(toIndentedDebugString(foo)).not.toBe(toCompactDebugString(foo));
     });
   });
 

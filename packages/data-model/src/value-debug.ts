@@ -446,8 +446,21 @@ class DebugStringifier {
             : `Symbol(${JSON.stringify(payload)})`;
         }
 
+        case "function": {
+          // A function, whose payload names it, or is `/unconvertible` when
+          // even that failed; the latter falls through to render as it is.
+          const name = (typeof payload === "string")
+            ? payload.match(/^(?<name>.*)\(\.\.\.\)$/)?.groups?.name
+            : undefined;
+          if (name === "<anonymous>") {
+            return "(...) => {...}";
+          } else if (name !== undefined) {
+            return `function ${name}(...) {...}`;
+          }
+          break;
+        }
+
         case "...":
-        case "function":
         case "unconvertible": {
           // The remaining markers, rendered as the objects they are.
           break;

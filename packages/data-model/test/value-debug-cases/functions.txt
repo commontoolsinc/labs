@@ -11,21 +11,11 @@
 }
 
 {
-  named: {
-    "/function": "foo(...)"
-  },
-  arrow: {
-    "/function": "arrow(...)"
-  },
-  method: {
-    "/function": "method(...)"
-  },
-  anonymous: {
-    "/function": "<anonymous>(...)"
-  },
-  "empty name": {
-    "/function": "<anonymous>(...)"
-  }
+  named: function foo(...) {...},
+  arrow: function arrow(...) {...},
+  method: function method(...) {...},
+  anonymous: (...) => {...},
+  "empty name": (...) => {...}
 }
 
-{named:{"/function":"foo(...)"},arrow:{"/function":"arrow(...)"},method:{"/function":"method(...)...
+{named:function foo(...) {...},arrow:function arrow(...) {...},method:function method(...) {...},...
