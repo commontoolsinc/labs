@@ -1,5 +1,5 @@
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { isDeepFrozen } from "@commonfabric/data-model";
 import {
   hashSchema,
   internSchema,

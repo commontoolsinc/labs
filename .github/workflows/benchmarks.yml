@@ -94,6 +94,7 @@ jobs:
             packages/dashboard/machine-calibration.bench.ts \
             packages/patterns/integration/topic-board-navigation.bench.ts \
             packages/patterns/integration/topic-board-scale.bench.ts \
+            packages/patterns/integration/lunch-poll-vote-burst.bench.ts \
             > bench-results/results.json \
             2> >(tee bench-results/diagnostics.log >&2)
 

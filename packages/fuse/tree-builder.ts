@@ -98,7 +98,7 @@ export const MAX_DEPTH_MARKER = "[Max depth exceeded]";
  * and a `FabricSpecialObject` among them (a `FabricBytes`, a `FabricError`)
  * serializes as `{}` in the mounted `.json` file contents, silently. Wants a
  * `FabricSpecialObject` arm in the replacer — its codec's encoded form, or
- * `toCompactDebugString()` from `@commonfabric/data-model/value-debug`.
+ * `toCompactDebugString()` from `@commonfabric/data-model`.
  */
 export function safeStringify(value: unknown, indent = 2): string {
   const ancestors: object[] = [];

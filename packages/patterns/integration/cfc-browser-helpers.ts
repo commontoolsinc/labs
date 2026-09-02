@@ -6,7 +6,7 @@ import {
   type ProbeApi,
   waitForCondition,
 } from "@commonfabric/integration";
-import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
+import { toIndentedDebugString } from "@commonfabric/data-model";
 
 /**
  * Attribute a mark predicate stamps on the element it resolved, so the test can
@@ -406,21 +406,33 @@ export const settleAndMarkTargets = async (
   return true;
 };
 
-// The first element matching each selector, reached through a host's shadow
-// root when the host wraps the control that takes the click.
+// The first enabled element matching each selector, reached through a host's
+// shadow root when the host wraps the control that takes the click.
+//
+// A disabled control is passed over, and a selector all of whose matches are
+// disabled is not answered at all, so the wait holds until the page enables
+// one. Such a control takes no click: the browser raises none on it, and
+// `cf-button` additionally gives it `pointer-events: none`, which sends the
+// press to the host that wraps it. Either way the control is not activated, and
+// the aim keeps missing until it repeats a pixel and reports. Disabled-ness is
+// asked of both the host and the control it wraps, because `disabled` does not
+// inherit and a host can carry an `aria-disabled` its inner control does not.
 const findSelectorClickTargets = (
   probe: ProbeApi,
   selectors: readonly string[],
 ): readonly HTMLElement[] | undefined => {
+  const clickTarget = (element: Element): HTMLElement =>
+    (element.shadowRoot?.querySelector("[data-cf-button]") as
+      | HTMLElement
+      | null) ?? element as HTMLElement;
+
   const targets: HTMLElement[] = [];
   for (const selector of selectors) {
-    const host = probe.collect(selector)[0] as HTMLElement | undefined;
-    if (!host) return undefined;
-    targets.push(
-      (host.shadowRoot?.querySelector("[data-cf-button]") as
-        | HTMLElement
-        | null) ?? host,
+    const host = probe.collect(selector).find((match) =>
+      !probe.isDisabled(match) && !probe.isDisabled(clickTarget(match))
     );
+    if (!host) return undefined;
+    targets.push(clickTarget(host));
   }
   return targets;
 };
@@ -464,20 +476,19 @@ const findTrustedActionTarget = (
   probe: ProbeApi,
   action: string,
 ): readonly HTMLElement[] | undefined => {
-  const isDisabled = (element: HTMLElement): boolean =>
-    element.hasAttribute("disabled") ||
-    element.getAttribute("aria-disabled") === "true";
+  const clickTarget = (element: Element): HTMLElement =>
+    (element.shadowRoot?.querySelector("[data-cf-button]") as
+      | HTMLElement
+      | null) ?? element as HTMLElement;
 
   for (const element of probe.collect(`[data-ui-action="${action}"]`)) {
     const target = element as HTMLElement;
-    const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
-      | HTMLElement
-      | null) ?? target;
+    const inner = clickTarget(target);
     if (
-      probe.isRendered(clickTarget) &&
-      !isDisabled(target) && !isDisabled(clickTarget)
+      probe.isRendered(inner) &&
+      !probe.isDisabled(target) && !probe.isDisabled(inner)
     ) {
-      return [clickTarget];
+      return [inner];
     }
   }
   return undefined;
@@ -883,10 +894,11 @@ async function settleWithClickTargets(
       tokens.map((token) => clearClickMark(page, token).catch(() => {})),
     );
     // Matches per selector, so the failure names which of a grouped dispatch's
-    // targets never rendered. Each match's `rect` and `visible` report whether
-    // the control was absent or present without a layout box. Every probe reads
-    // the same page, so the body text is reported once rather than once per
-    // selector.
+    // targets never came within reach of a click. Each match's `rect`,
+    // `visible` and `disabled` report which of the three it was: absent,
+    // present without a layout box, or present and declining the click. Every
+    // probe reads the same page, so the body text is reported once rather than
+    // once per selector.
     const probes = await Promise.all(
       selectors.map((selector) =>
         readTextProbe(page, selector).catch(() => undefined)
@@ -894,7 +906,9 @@ async function settleWithClickTargets(
     );
     // Indented for readable test-log output
     throw new Error(
-      `Timed out waiting for ${selectors.join(", ")} to render. Last probe: ${
+      `Timed out waiting for ${
+        selectors.join(", ")
+      } to be clickable. Last probe: ${
         toIndentedDebugString({
           matches: Object.fromEntries(
             selectors.map((selector, index) => [
@@ -1045,9 +1059,14 @@ type ClickAim =
  * What became of the trusted click the aim armed for.
  *
  * `hit` means the click reached the marked control. `missed` means it reached
- * something else. `pending` means no click event was raised at all, which is
- * what a control that declines the interaction leaves behind — a disabled one
- * takes the press and produces no click.
+ * something else. `pending` means no click event was raised at all.
+ *
+ * A control that declines the interaction leaves either one, depending on how
+ * it declines. A disabled control takes the press and produces no click, which
+ * is `pending`. One a stylesheet has additionally given `pointer-events: none`,
+ * as `cf-button` gives a disabled control, does not take the press either: it
+ * reaches the host that wraps the control, which raises a click the mark is
+ * absent from, and that is `missed`.
  *
  * Neither `missed` nor `pending` activated the control, so the click can be
  * aimed again.
@@ -2805,6 +2824,9 @@ type TextProbe = {
     text: string;
     rect: { width: number; height: number; top: number; left: number };
     visible: boolean;
+
+    /** Whether the match, or the control it wraps, declines a click. */
+    disabled: boolean;
   }>;
   bodyText: string;
 };
@@ -3275,6 +3297,20 @@ async function readTextProbe(
         style.display !== "none";
     }
 
+    // Resolved the way a click helper's finder resolves it, so a match a wait
+    // is holding for reports the state that wait is testing. A control that is
+    // rendered and visible and still not clicked is what this answers for.
+    // Spelled out rather than taken from `probe`, which a plain page evaluate
+    // is not handed.
+    function isDisabled(element: HTMLElement): boolean {
+      const declines = (candidate: Element): boolean =>
+        candidate.hasAttribute("disabled") ||
+        candidate.getAttribute("aria-disabled") === "true";
+      const inner = element.shadowRoot?.querySelector("[data-cf-button]") ??
+        element;
+      return declines(element) || declines(inner);
+    }
+
     function deepText(root: ParentNode): string {
       const parts: string[] = [];
       if (root instanceof HTMLElement) {
@@ -3333,6 +3369,7 @@ async function readTextProbe(
             left: rect.left,
           },
           visible: isVisible(target),
+          disabled: isDisabled(target),
         };
       }),
       bodyText: document.body === null

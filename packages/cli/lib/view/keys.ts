@@ -13,10 +13,11 @@
 export interface Key {
   /**
    * Normalized name: an arrow/nav name ("up", "down", "left", "right",
-   * "pageup", "pagedown", "home", "end"), a function key ("f1".."f12"), an
-   * editing name ("enter", "escape", "backspace", "delete", "tab", "space"), a
-   * control combo ("ctrl-c", "ctrl-d", …), or the literal character for a
-   * printable key ("a", "/", "?").
+   * "pageup", "pagedown", "home", "end"), a mouse-wheel name ("wheel-up",
+   * "wheel-down"), a function key ("f1".."f12"), an editing name ("enter",
+   * "escape", "backspace", "delete", "tab", "space"), a control combo
+   * ("ctrl-c", "ctrl-d", …), or the literal character for a printable key
+   * ("a", "/", "?").
    */
   readonly name: string;
 
@@ -57,6 +58,14 @@ export function decodeKeys(buf: Uint8Array): DecodeResult {
         continue;
       }
       if (n === 0x5b) { // CSI: ESC [ <params> <final>
+        // X10 mouse reports put the three encoded mouse bytes after the `M`
+        // final instead of inside the CSI parameters.
+        if (i + 2 < buf.length && buf[i + 2] === 0x4d) {
+          if (i + 5 >= buf.length) break;
+          keys.push(mouseToKey(buf[i + 3] - 32));
+          i += 6;
+          continue;
+        }
         let j = i + 2;
         let params = "";
         while (j < buf.length && buf[j] >= 0x30 && buf[j] <= 0x3f) {
@@ -200,6 +209,10 @@ function csiToKey(final: number, params: string): Key {
       return { name: "f3" };
     case 0x53:
       return { name: "f4" };
+    case 0x4d:
+      return params.startsWith("<")
+        ? mouseToKey(parseInt(params.slice(1).split(";", 1)[0], 10))
+        : { name: "unknown" };
     case 0x7e:
       return tildeKey(params);
     default:
@@ -250,6 +263,14 @@ function tildeKey(params: string): Key {
     default:
       return { name: "unknown" };
   }
+}
+
+/** Maps a terminal mouse button code to the wheel event it represents. */
+function mouseToKey(button: number): Key {
+  const baseButton = button & ~(4 | 8 | 16 | 32);
+  if (baseButton === 64) return { name: "wheel-up" };
+  if (baseButton === 65) return { name: "wheel-down" };
+  return { name: "unknown" };
 }
 
 function ss3ToKey(final: number): Key {

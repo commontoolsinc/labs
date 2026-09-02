@@ -5,8 +5,8 @@
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 
+import { hashOf } from "@commonfabric/data-model";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import { SchemaAndHash } from "./SchemaAndHash.ts";
 import { toDeepFrozenSchema } from "./schema-copy.ts";
 

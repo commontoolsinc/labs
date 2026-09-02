@@ -9,9 +9,11 @@ import {
   FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
+  hashStringOf,
+  isDeepFrozen,
+  toIndentedDebugString,
 } from "@commonfabric/data-model";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   DEFAULT_SELECTOR,
   hashSchema,
@@ -24,8 +26,6 @@ import {
   schemaTypeOfFabricPrimitive,
   schemaWithProperties,
 } from "@commonfabric/data-model-schema";
-import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
 import {
   resolveScopeKey,

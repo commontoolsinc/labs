@@ -1,4 +1,4 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model";
 import { stableFabricValue } from "./stable-fabric-value.ts";
 
 function sortJson(value: unknown): unknown {

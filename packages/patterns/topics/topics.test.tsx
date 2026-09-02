@@ -794,6 +794,121 @@ export default pattern(() => {
   // `integration/topic-board-child-contract.test.ts` — but these verbs do not:
   // each one writes the topic's OWN `mentioned` list, and the set semantics
   // that make them mergeable are the part worth pinning here.
+  // --- Stamped removals (Stage C item 1) ---
+  //
+  // A retraction stamps the record and leaves it in place. Driven on a
+  // directly held topic that owns its own cells, for the reason the mention
+  // cases below are: these verbs write the topic's OWN lists, and the caller
+  // has to hand each one a REFERENCE to a stored element, which a projected
+  // array read back off a board cannot supply.
+  const retractionComments = new Writable<TopicComment[]>([]);
+  const retractionLinks = new Writable<TopicLink[]>([]);
+  const retractionSubject = Topic({
+    title: "Retraction subject",
+    comments: retractionComments,
+    links: retractionLinks,
+  });
+
+  const action_retraction_setup = action(() => {
+    retractionSubject.addComment.send({
+      body: "first thought",
+      agentName: "Sol",
+    });
+    // A second comment, so the thread's sort comparator actually compares.
+    // One comment sorts without ever calling it, which leaves the ordering
+    // rule — the thing that decides what a reader sees first — unexercised.
+    retractionSubject.addComment.send({
+      body: "second thought",
+      agentName: "Sol",
+    });
+    retractionSubject.addLink.send({
+      url: "https://example.com/a-page",
+      agentName: "Sol",
+    });
+  });
+
+  const action_edit_comment = action(() => {
+    retractionSubject.editComment.send({
+      comment: retractionComments.key(0),
+      body: "first thought, revised",
+      agentName: "Sol",
+    });
+  });
+
+  // An edit revises the body and stamps `editedAt`, leaving `author` and
+  // `sentAt` alone: an edit changes what was said, not who said it.
+  const assert_comment_edited = assert(() =>
+    retractionSubject.commentCount === 2 &&
+    retractionSubject.comments?.[0]?.body === "first thought, revised" &&
+    retractionSubject.comments?.[0]?.author?.name === "Sol" &&
+    (retractionSubject.comments?.[0]?.editedAt ?? 0) > 0 &&
+    retractionSubject.comments?.[0]?.removedAt === undefined
+  );
+
+  // What the view projection actually carries, which reading the stored
+  // records cannot tell you. `commentsView` filters inside `computed()` and
+  // its lambda touches only `removedAt`, so if this family's demand is
+  // usage-lowered all the way down, the rendered rows would come back with
+  // their bodies absent and every assertion above would still pass. Asserting
+  // through the render is the only place that shows.
+  const assert_rendered_thread_carries_bodies = assert(() => {
+    const serialized = JSON.stringify(retractionSubject[UI]);
+    return serialized.includes("first thought, revised") &&
+      serialized.includes("Sol");
+  });
+
+  const action_remove_comment = action(() => {
+    retractionSubject.removeComment.send({
+      comment: retractionComments.key(0),
+      agentName: "Sol",
+    });
+  });
+
+  // Stamped, not deleted: the record is still stored and still carries what it
+  // said, while the count stops counting it.
+  const assert_comment_retracted = assert(() =>
+    retractionSubject.commentCount === 1 &&
+    (retractionSubject.comments ?? []).length === 2 &&
+    retractionSubject.comments?.[0]?.body === "first thought, revised" &&
+    (retractionSubject.comments?.[0]?.removedAt ?? 0) > 0 &&
+    retractionSubject.comments?.[0]?.removedBy?.name === "Sol"
+  );
+
+  // The reason the design is stamped rather than deleted, stated as the
+  // invariant rather than as a before-and-after. `lastActivityAt` is a max
+  // over what the arrays HOLD, so the retracted comment's own stamps are
+  // still in it — and the retraction, being the newest thing that happened,
+  // is what the max now equals. Skip retracted records in `lastActivityOf`
+  // and this reads the link's older `addedAt` instead, which is exactly the
+  // backwards move that would reorder the board under a reader.
+  const assert_retraction_moved_activity_forward = assert(() =>
+    (retractionSubject.comments?.[0]?.removedAt ?? 0) > 0 &&
+    retractionSubject.lastActivityAt ===
+      retractionSubject.comments?.[0]?.removedAt
+  );
+
+  // And the other direction: a retracted comment leaves the rendered thread,
+  // so the filter that `commentCount` applies is the same one the reader sees.
+  const assert_retracted_comment_leaves_the_render = assert(() => {
+    const serialized = JSON.stringify(retractionSubject[UI]);
+    return !serialized.includes("first thought, revised");
+  });
+
+  const action_remove_link_by_url = action(() => {
+    retractionSubject.removeLink.send({
+      url: "https://example.com/a-page",
+      agentName: "Sol",
+    });
+  });
+
+  // The url spelling reaches a stored record — the spelling that exists
+  // because a link carries no fid for a CLI caller to name.
+  const assert_link_retracted = assert(() =>
+    (retractionSubject.links ?? []).length === 1 &&
+    (retractionSubject.links?.[0]?.removedAt ?? 0) > 0 &&
+    retractionSubject.links?.[0]?.removedBy?.name === "Sol"
+  );
+
   const mentionSubject = Topic({ title: "Mention subject" });
   // Plain cells, because `MentionEvent.topic` declares `Writable<{ title }>`
   // rather than a piece: the verb matches by cell identity, and a piece built
@@ -1010,6 +1125,18 @@ export default pattern(() => {
       { assertion: assert_body_set },
       { action: action_link_valid_unlabeled },
       { assertion: assert_link_added },
+      { action: action_retraction_setup },
+      { action: action_edit_comment },
+      { assertion: assert_comment_edited },
+      { render: retractionSubject[UI] },
+      { assertion: assert_rendered_thread_carries_bodies },
+      { action: action_remove_comment },
+      { assertion: assert_comment_retracted },
+      { assertion: assert_retraction_moved_activity_forward },
+      { render: retractionSubject[UI] },
+      { assertion: assert_retracted_comment_leaves_the_render },
+      { action: action_remove_link_by_url },
+      { assertion: assert_link_retracted },
       { action: action_add_second_topic },
       { assertion: assert_second_topic },
       { render: board[UI] },

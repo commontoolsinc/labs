@@ -642,4 +642,17 @@ export class MultiRuntimeHarness {
     }
     await this.#server?.close();
   }
+
+  /**
+   * Drop every worker without asking it to shut down first, for a caller that
+   * has no `await` to spend — a process-exit listener, which Deno runs
+   * synchronously. `dispose()` is the ordinary path and says goodbye properly;
+   * this one exists so a harness held for the life of a process is still
+   * released deterministically rather than left to process teardown. The
+   * in-process server is not closed, because closing it is asynchronous and it
+   * has nothing outside this process to release.
+   */
+  terminate(): void {
+    for (const session of this.sessions) session.client().terminate();
+  }
 }

@@ -178,6 +178,8 @@ cf call --piece <topic> addLink \
   '{"url":"https://github.com/org/repo/pull/123","kind":"pr","label":"PR #123","agentName":"Sol"}'
 cf call --piece <topic> mention '{"topic":"/of:fid1:other-topic"}'
 cf call --piece <topic> unmention '{"topic":"/of:fid1:other-topic"}'
+cf call --piece <topic> removeLink \
+  '{"url":"https://github.com/org/repo/pull/123","agentName":"Sol"}'
 ```
 
 `addLink` requires `url` and `agentName`; `kind` defaults to `"web"`, and a
@@ -188,6 +190,27 @@ It lives on the topic's direct interface rather than the shared `TopicPiece`
 projection: a holder's required demands are write-once, so a verb added to the
 projection every board embeds would refuse those boards' updates. Address the
 topic itself and the verb is there.
+
+**A retraction stamps the record; nothing is deleted.** `removeComment` and
+`removeLink` write `removedAt` and `removedBy` onto the stored record and leave
+it where it is, and `editComment` revises a body while stamping `editedAt` and
+leaving `author` and `sentAt` alone. A reader hides a retracted record,
+`commentCount` stops counting it, and a retracted link stops resolving into
+`mentions` — the reference goes with the link that made it.
+
+`lastActivityAt` is the one reader that does not filter them, and that is the
+reason the design stamps rather than deletes: it is a max over what the arrays
+hold, so removing the newest comment outright would move a topic _backwards_ in
+the board's most-recent ordering. A stamped record keeps its `sentAt` in that
+max, and the retraction's own stamp moves the clock forward.
+
+All three live on the topic's direct interface for the same reason `setTitle`
+does. `removeComment` and `editComment` name their target by reference, which is
+what the no-minted-id rule prepared for — a caller passes the stored element,
+and the UI hands one over from the row it is rendering. `removeLink`
+additionally accepts `url`, because a link record is not a piece and carries no
+fid for a CLI caller to name; it retracts the most recently added link still
+present with that URL, so retracting twice retracts two.
 
 `mention` and `unmention` take a canonical piece reference in the inline JSON
 event. The CLI recognizes the declared reference position and turns `/of:...`

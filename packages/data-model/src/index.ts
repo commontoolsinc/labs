@@ -3,10 +3,12 @@
  * surface for the `FabricValue` types: the type declarations, the
  * `FabricInstance` base class, and the functions that operate on them. Those
  * are spread across several modules, not all of which the package exports on
- * their own, and a caller should not have to know which is which. The rest of
- * the package -- the codec system, the concrete value classes, the hash and
- * debug utilities -- is reached through the exported subpaths named in
- * `deno.jsonc`, not through here.
+ * their own, and a caller should not have to know which is which. Alongside
+ * them are the operations every `FabricValue` is subject to whatever its
+ * class: the deep freeze, the hash, the debug rendering, and the tag vocabulary
+ * that names a value's type. The rest of the package -- the codec system and
+ * the concrete value classes -- is reached through the exported subpaths named
+ * in `deno.jsonc`, not through here.
  */
 
 // Re-export everything from `interface.ts`, which declares the types and the
@@ -65,3 +67,22 @@ export {
 } from "./native-conversion.ts";
 
 export { valueEqual } from "./valueEqual.ts";
+
+export {
+  deepFreeze,
+  isDeepFrozen,
+  isValidDeepFrozenFabricValue,
+} from "./deep-freeze.ts";
+
+export { tagFromNativeClass, tagFromNativeValue } from "./native-type-tags.ts";
+
+export {
+  toCompactDebugString,
+  toDebugKindString,
+  toIndentedDebugString,
+  toStructuredDebugValue,
+} from "./value-debug.ts";
+
+export { hashOf, hashStringOf, taggedHashStringOf } from "./value-hash.ts";
+
+export { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";

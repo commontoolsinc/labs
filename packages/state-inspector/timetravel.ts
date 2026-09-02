@@ -10,7 +10,7 @@
 // Values are normalized with `annotate` first, so links/streams compare as
 // stable shapes instead of exploding into nested objects.
 
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import { applyPatch } from "@commonfabric/memory/v2/patch";
 import type { PatchOp } from "@commonfabric/memory/v2";
 import type { FabricValue } from "@commonfabric/api";

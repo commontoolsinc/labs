@@ -256,6 +256,14 @@ control after even that last measurement is caught as well: the helper stops an
 interaction that misses before the page sees it, and aims again.
 `docs/development/waiting-in-tests.md` describes how.
 
+It also holds until the control is enabled. A disabled control has a layout box
+and passes every rendered-ness check, and it still takes no click: the browser
+raises none on it, and a `cf-button` additionally gives it
+`pointer-events: none`, which sends the press to the host that wraps it.
+Where the state that enables a control is also the state that drops a surface
+above it, waiting covers the move as well as the enable, because the aim is
+taken once the page has settled into the layout it keeps.
+
 **Use `awaitViewSettled(page)`** from `@commonfabric/integration` as the
 lower-level wait after navigation or a state change. When the next step
 clicks a control, use `clickCfButton` instead. It resolves, settles, and marks

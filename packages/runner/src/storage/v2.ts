@@ -1,10 +1,9 @@
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
-import { cloneIfNecessary } from "@commonfabric/data-model";
+import { cloneIfNecessary, hashStringOf } from "@commonfabric/data-model";
 import {
   hasDataUriScheme,
   valueFromDataUri,
 } from "@commonfabric/data-model/data-uri-codec";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { aclDocId } from "@commonfabric/memory/acl";
 import type { Entity } from "@commonfabric/memory/interface";
 import {
@@ -4614,11 +4613,23 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
             identity,
           );
         }
+        const withdrawalCause = "cause" in v.withdrawn
+          ? v.withdrawn.cause
+          : undefined;
+        // Settlement consumers need the wave's structured distinction: a
+        // dropped contribution may retry in place, while an abort/abandon
+        // belongs to the enclosing lifecycle. Do not make them parse prose.
+        const rejection = {
+          ...this.#makeLocalRejection(commit, v.withdrawn.message),
+          ...(withdrawalCause !== undefined
+            ? { waveWithdrawalCause: withdrawalCause }
+            : {}),
+        };
         return await this.#finalizeRejection(
           localSeq,
           operations,
           source,
-          this.#makeLocalRejection(commit, v.withdrawn.message),
+          rejection,
           identity,
         );
       }

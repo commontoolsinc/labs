@@ -27,6 +27,7 @@ import {
 } from "@commonfabric/runner/shared";
 import { decode } from "@commonfabric/utils/encoding";
 
+import { normalizeApiUrl } from "../lib/api-url.ts";
 import {
   type PhaseRetarget,
   readSourcePin,
@@ -58,8 +59,8 @@ import {
 } from "../lib/cell-selection.ts";
 import { cliCommand, cliText } from "../lib/cli-name.ts";
 import type { FabricValue } from "@commonfabric/api";
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
 import {
@@ -127,9 +128,14 @@ import {
 import { absPath } from "../lib/utils.ts";
 import { noteWroteTo } from "../lib/write-receipt.ts";
 
-// Hint system: print helpful next-step suggestions after operations
+// Hint system: print helpful next-step suggestions after operations. The
+// posture is the process's rather than one call's, so it stands as the last
+// caller left it until the next caller sets it. That is sound while one
+// command is in flight at a time, which is what
+// `docs/plans/shuttle/runtime-integration.md` holds a long-lived caller to.
 let quietMode = false;
 
+/** Sets whether hints print, for every caller in this process. */
 export function setQuietMode(quiet: boolean) {
   quietMode = quiet;
 }
@@ -149,17 +155,6 @@ function hint(message: string, showQuietTip = true) {
  */
 function note(message: string) {
   console.error(message);
-}
-
-export function normalizeApiUrl(apiUrl: string): string {
-  const parsed = new URL(apiUrl);
-  const normalized = new URL(parsed);
-  const basePath = parsed.pathname.split("/").filter(Boolean).join("/");
-  normalized.pathname = basePath ? `/${basePath}` : "/";
-  normalized.search = "";
-  normalized.hash = "";
-  const href = normalized.toString();
-  return basePath ? href : href.slice(0, -1);
 }
 
 function summarizeForDisplay(value: unknown): unknown {

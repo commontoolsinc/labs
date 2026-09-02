@@ -17,7 +17,11 @@ import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { normalize } from "@std/path/posix";
 import { CfHarnessEngine } from "../src/engine.ts";
-import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
+import {
+  CfHarnessPromptLoop,
+  outstandingSkillCustody,
+} from "../src/prompt-loop.ts";
+import type { HarnessSubagentRunRef } from "../src/contracts/subagent.ts";
 import {
   createHarnessHandleTable,
   mintAddressHandle,
@@ -694,6 +698,76 @@ describe("prompt-loop delegate_task skillHandle", () => {
       expect(childText).toContain(
         `<skill_context source="handle:${minted.token}">`,
       );
+    });
+  });
+
+  describe("outstandingSkillCustody()", () => {
+    const runRef = (
+      skillHandle: string | undefined,
+      status: "running" | "completed" | "failed",
+      withoutSkillHandle = false,
+    ) =>
+      ({
+        type: "cf-harness.subagent-run-ref",
+        parentToolCallId: `call-${status}`,
+        childRunId: `child-${status}`,
+        manifest: {},
+        status,
+        ...(skillHandle !== undefined ? { skillHandle } : {}),
+        ...(withoutSkillHandle ? { withoutSkillHandle: true } : {}),
+      }) as unknown as HarnessSubagentRunRef;
+
+    it("holds a token whose latest delegation failed", () => {
+      expect(outstandingSkillCustody([runRef("cfh:a:aaaaa", "failed")]))
+        .toEqual(["cfh:a:aaaaa"]);
+    });
+
+    it("releases a token once a later delegation carrying it completed", () => {
+      expect(outstandingSkillCustody([
+        runRef("cfh:a:aaaaa", "failed"),
+        runRef("cfh:a:aaaaa", "completed"),
+      ])).toEqual([]);
+    });
+
+    it("holds a token again when a delegation after a completed one failed", () => {
+      expect(outstandingSkillCustody([
+        runRef("cfh:a:aaaaa", "completed"),
+        runRef("cfh:a:aaaaa", "failed"),
+      ])).toEqual(["cfh:a:aaaaa"]);
+    });
+
+    it("holds a token left in flight, which is all a crash leaves behind", () => {
+      // No terminal ref was ever recorded: the process died mid-delegation and
+      // the run resumed. The running ref is the only trace, and reading it as
+      // settled would drop custody exactly where it is least safe to.
+      expect(outstandingSkillCustody([runRef("cfh:a:aaaaa", "running")]))
+        .toEqual(["cfh:a:aaaaa"]);
+    });
+
+    it("discharges custody once a delegation declared it carries no skill", () => {
+      // The refusal exists to make the parent answer once. Having answered,
+      // the run is not asked again on every later delegation.
+      expect(outstandingSkillCustody([
+        runRef("cfh:a:aaaaa", "failed"),
+        runRef(undefined, "completed", true),
+      ])).toEqual([]);
+    });
+
+    it("holds a token a delegation after the declaration failed on", () => {
+      // The declaration answers what was outstanding when it was made, not
+      // custody a later delegation goes on to incur.
+      expect(outstandingSkillCustody([
+        runRef("cfh:a:aaaaa", "failed"),
+        runRef(undefined, "completed", true),
+        runRef("cfh:a:bbbbb", "failed"),
+      ])).toEqual(["cfh:a:bbbbb"]);
+    });
+
+    it("ignores delegations that carried no handle", () => {
+      expect(outstandingSkillCustody([
+        runRef(undefined, "failed"),
+        runRef(undefined, "running"),
+      ])).toEqual([]);
     });
   });
 });

@@ -1,5 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { schemaToTypeString } from "@commonfabric/runner";
 import {
   isObjectNotArray,

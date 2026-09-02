@@ -15,11 +15,11 @@
 // Estuary Topics store: all 20 write-storm cells (192,381 revisions, 90.3% of
 // every revision) are `$generated`, and NONE of them is authored content.
 //
-// Hashing goes through `@commonfabric/data-model/value-hash` — the same
+// Hashing goes through `@commonfabric/data-model` — the same
 // canonicalizing hash the runtime derives entity ids with, so this cannot drift
 // from the engine's notion of value identity.
 
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import type { SpaceDb } from "./db.ts";
 import { type EntityModel, listEntityModels } from "./model.ts";

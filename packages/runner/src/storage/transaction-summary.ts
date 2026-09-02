@@ -5,7 +5,7 @@
  * into concise summaries suitable for LLMs to help humans debug software behavior.
  */
 
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { toCompactDebugString } from "@commonfabric/data-model";
 
 import { entityUriSchemePrefix } from "../entity-kind.ts";
 import type { MemorySpace } from "../runtime.ts";

@@ -1,5 +1,4 @@
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { deepFreeze, hashStringOf } from "@commonfabric/data-model";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { type AtomPattern, isAtomVarPlaceholder } from "./atom-pattern.ts";
 

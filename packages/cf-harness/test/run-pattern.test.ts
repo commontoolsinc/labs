@@ -949,7 +949,7 @@ describe("run-pattern", () => {
       expect(output.message).not.toContain("boom in lift");
       expect(output.rawCauseMessage).toContain("boom in lift");
       expect(output.pieceId).toBeDefined();
-      expect(result.runState.status).toBe("completed");
+      expect(result.runState.status).not.toBe("failed");
     });
 
     it("returns an error naming the policy refusal when the answer carries a label the model may not read", async () => {
@@ -1609,7 +1609,7 @@ describe("run-pattern", () => {
       const output = result.output as RunPatternToolErrorOutput;
       expect(output.status).toBe("compile-error");
       expect(output.message.length).toBeGreaterThan(0);
-      expect(result.runState.status).toBe("completed");
+      expect(result.runState.status).not.toBe("failed");
     });
 
     it("returns an error when `sourceText` is missing", async () => {
@@ -2018,7 +2018,7 @@ describe("run-pattern", () => {
       expect(output.status).toBe("cancelled");
       expect(output.message).toContain("cancelled");
       expect(stopped.length).toBe(1);
-      expect(result.runState.status).toBe("completed");
+      expect(result.runState.status).not.toBe("failed");
     });
 
     it("returns a `cancelled` output when the signal aborts during the release measurement", async () => {

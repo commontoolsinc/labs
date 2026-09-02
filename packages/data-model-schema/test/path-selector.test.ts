@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 
 import type { JSONSchemaObj, SchemaPathSelector } from "@commonfabric/api";
 
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { isDeepFrozen } from "@commonfabric/data-model";
 import {
   DEFAULT_SELECTOR,
   internPathSelector,

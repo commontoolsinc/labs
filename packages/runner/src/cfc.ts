@@ -1,5 +1,5 @@
 import { JSONSchemaObj, type JSONValue } from "@commonfabric/api";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { isDeepFrozen } from "@commonfabric/data-model";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";

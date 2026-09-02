@@ -10,7 +10,7 @@ import {
   type ParticipantPresence,
   type PresenceCursor,
 } from "./codemirror-presence.ts";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 
 const protocolVersion = 1;
 const roomPattern = /^[A-Za-z0-9_-]{22,128}$/;

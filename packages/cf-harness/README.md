@@ -117,8 +117,8 @@ What works today:
   - `edit_file`
   - `write_file`
   - `delegate_task`
-  - `describe_handle` (shape of a handle's referent, never its value; see
-    [Inspecting a handle's shape](#inspecting-a-handles-shape))
+  - `describe_handle` (shape and labels of a handle's referent, never its value;
+    see [Inspecting a handle's shape](#inspecting-a-handles-shape))
   - `run_pattern` (present only when the run configures a fabric session; see
     [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
   - `search_patterns` (present only when the run configures a pattern index with
@@ -169,7 +169,10 @@ What works today:
 - provider-neutral run-report model-attempt diagnostics, one record per attempt,
   naming the provider and the API operation that served it, and timing it twice
   — `durationMs` to the response headers, `responseCompleteDurationMs` to the
-  end of the body or stream, which is the model's own working time
+  end of the body or stream, which is the model's own working time — with the
+  provider's stated reason for a failed attempt and, when the client issued the
+  exchange again, why; see
+  [Model attempts and transport retry](#model-attempts-and-transport-retry)
 - provider-reported per-turn token usage in run reports, with aggregate input,
   cached-input, cache-write, output, reasoning, and total tokens surfaced in
   operator and batch results
@@ -276,6 +279,10 @@ What is not done yet:
 - [src/contracts/](src/contracts/)
   - prompt-slot, run-manifest, observation, policy, run-report, subagent, skill,
     transcript, tool-result, and handle-table contracts
+- [audit/](audit/)
+  - the CFC audit: a read-only checker that reads a run family's artifacts and
+    reports, per clause of the agent-harness CFC profile, what they establish.
+    See [The CFC audit](#the-cfc-audit)
 - [console/](console/)
   - the console: a localhost page that starts a session, watches it live, and
     reads any run back as a map of its cells, calls and CFC verdicts. See
@@ -296,6 +303,12 @@ From [packages/cf-harness](.):
 - `deno task run -- ...`
 - `deno task test`
 - `deno task test:integration`
+- `deno task cfc-audit <runDir | artifactRoot> [more paths...] [--json]
+  [--fail-on fail|warn|inconclusive]`
+  — audit session artifacts against the CFC integration profile. See
+  [The CFC audit](#the-cfc-audit)
+- `deno task cfc-audit-fixtures` — rewrite the committed artifact tree the audit
+  suites read
 - `deno task console` — build the console page and serve it on `127.0.0.1:8100`
 - `deno task console:build`, `deno task console:watch` — the build on its own,
   and a rebuild on save while changing the page
@@ -689,6 +702,51 @@ export CF_HARNESS_CFC_ENFORCEMENT_MODE=observe
 Tool outputs are then exposed raw with policy warnings recorded in the run
 report instead of being denied for missing trusted mediation metadata.
 
+### Model attempts and transport retry
+
+Every request a model client issues is one `cf-harness.model-attempt` record in
+the run report's `modelAttempts`, whether it got a response or not. A record
+names the provider and operation, numbers the attempt against
+`maxTransportAttempts`, times it, summarizes the request, and says how it ended:
+`outcome` is `transport_error` when no response arrived and `http_response`
+otherwise, with the status and selected headers.
+
+A failed attempt carries the provider's own reason wherever the provider stated
+one. `providerError` holds the provider's `type`, `code`, and `message` as the
+provider sent them — from the body of a non-2xx response, from an in-stream
+`error` event, or from a failed terminal response — and the same three fields
+are in the message of the error the turn fails with, so a turn failure record, a
+console `turn_failed` event, and the CLI's control failure all say what the
+provider said. A provider that returns a bare `503` states no reason, and the
+record carries none rather than a guess.
+
+A transient failure is issued again before anything reaches the harness. Three
+kinds qualify, and only these: a transport error, where no response arrived; a
+`429` or `5xx` status; and a provider-stated error whose type or code names
+capacity, rate limiting, or a server-side fault — `server_is_overloaded` and
+`service_unavailable_error` among them. Anything else ends the exchange on its
+first attempt: a `4xx` refuses the request itself, a provider error naming the
+request cannot be cleared by waiting, and a body that is not SSE-framed JSON is
+a protocol failure, not a transient one.
+
+Reissuing is safe because the harness dispatches nothing from an attempt that
+did not complete: a model exchange has no side effect until a tool call from its
+result is dispatched, and the client returns nothing until an attempt reaches a
+completed terminal response. Whatever a failed attempt streamed, tool calls
+included, is discarded with it. A `429` from the Codex provider is its usage
+limit, which the backoff does not clear; the retry there is bounded by the same
+schedule and costs seconds, not a turn.
+
+The bound is `transportRetries` attempts beyond the first — three unless a
+client is configured otherwise — with a backoff of `transportRetryDelayMs`
+before the second attempt, doubling before each attempt after it. An attempt
+that is followed by another says so: its record carries `retry`, naming the
+`kind` of transient failure (`transport_error`, `http_status`, or
+`provider_error`) and the `delayMs` waited before the next attempt. The last
+attempt of an exchange never carries one, however it ended. The backoff is
+waited out through an injected `transportRetryDelay`, which is how a test drives
+a retry sequence without a timer.
+
 ### Session-local address handles
 
 This is the mechanism behind the first half of
@@ -760,7 +818,7 @@ registry's shape like any other reference.
 What the model receives is a token and fixed prose, never data. Reading anything
 behind the token means running a pattern over it, where the CFC boundary rules
 as it does for every other flow — in particular, a piece's `$NAME` is a value,
-and a name computed from labelled data taints a name-listing pattern's result,
+and a name computed from labeled data taints a name-listing pattern's result,
 which strict enforcement refuses whole. The announcement says so and names the
 fallback: a pattern that returns the entry references without reading any
 values, which cannot taint and whose addresses come back as tokens through the
@@ -799,8 +857,8 @@ resume, and reported in the operator summary as `inputCells:`.
 A token says nothing about what it refers to, and an agent handed one cannot
 write a line of code over it without knowing the shape of what is there.
 `describe_handle` closes that gap without opening the data: given a token, it
-reports the shape of the referent and the path segments — what field of what
-piece the token names — and never the value.
+reports the shape of the referent, the path segments — what field of what piece
+the token names — the CFC labels the referent carries, and never the value.
 
 ```json
 {
@@ -811,22 +869,38 @@ piece the token names — and never the value.
     "type": "object",
     "properties": { "doubled": { "type": "number" } }
   },
-  "path": ["doubled"]
+  "path": ["doubled"],
+  "labels": [
+    {
+      "confidentiality": [["https://commonfabric.org/cfc/atom/Space"]],
+      "integrity": ["https://commonfabric.org/cfc/atom/ExternalIngest"]
+    }
+  ]
 }
 ```
 
-Two sources can answer, in this order. The referent's own declared schema, read
-through the run's fabric session when it has one: a piece's document schema is
-the result schema of the pattern behind it, which is exactly what an agent
-holding a handle to that piece would be wiring into a pattern of its own — and
-it is where a cell's CFC labels live, which is why an input cell's shape always
-answers from its own declaration. Failing that, the schema the mint recorded out
-of the harness's own work — a `run_pattern` result reference carries the
-compiled pattern's result schema, which compilation produced anyway, and the
-entry is marked `schemaSource: "harness"`. A run with no session still answers
-from its own table, so shape stays inspectable in every run that has handles at
-all. A token the run's table does not hold comes back `known: false` rather than
-as an error, since a token from another run simply names nothing here.
+Labels answer from the same read as the shape, wherever the run has a session to
+read through, and they are a different fact from the schema: a cell's labels
+live in its own metadata rather than on its declaration, so a referent can carry
+a full label map and state no shape at all. Only atom TYPES cross — the URLs
+naming what a value requires and what it carries — and never an atom's other
+fields, which say what a label was computed FROM. `confidentiality` holds one
+entry per clause, each listing the atom types that satisfy it, because a clause
+of several types is satisfied by any one of them and flattening that would
+report a weaker requirement as a stronger one. An empty list says the space
+holds no label; no list at all says the run had no session to ask.
+
+Two sources can answer for the shape, in this order. The referent's own declared
+schema, read through the run's fabric session when it has one: a piece's
+document schema is the result schema of the pattern behind it, which is exactly
+what an agent holding a handle to that piece would be wiring into a pattern of
+its own. Failing that, the schema the mint recorded out of the harness's own
+work — a `run_pattern` result reference carries the compiled pattern's result
+schema, which compilation produced anyway, and the entry is marked
+`schemaSource: "harness"`. A run with no session still answers from its own
+table, so shape stays inspectable in every run that has handles at all. A token
+the run's table does not hold comes back `known: false` rather than as an error,
+since a token from another run simply names nothing here.
 
 **What is disclosed is structure and only structure**: property names, types,
 nesting, required-ness, array and object composition, a `type` from the schema
@@ -1072,7 +1146,7 @@ three session flags present. `--fabric-cfc-enforcement-mode`
 confidentiality its target's declared policy does not admit has its commit
 refused. `--fabric-cfc-flow-labels` (`CF_HARNESS_FABRIC_CFC_FLOW_LABELS`)
 accepts `off`, `observe`, or `persist`; `persist` stamps the derived flow labels
-onto everything a pattern's transaction writes, which is what makes a labelled
+onto everything a pattern's transaction writes, which is what makes a labeled
 read visible to that refusal. `--fabric-cfc-posture`
 (`CF_HARNESS_FABRIC_CFC_POSTURE`) accepts `max-enforcement` and opts the
 session's runtime into the named CFC posture bundle
@@ -1690,6 +1764,54 @@ Current caveat:
   - `--skill` requires `--skills-root`
   - skill preload is not supported with `--resume-run`
   - dynamic `load_skill` activation is still planned
+
+## The CFC audit
+
+`deno task cfc-audit` reads a run's artifacts and reports what they establish
+about the CFC clauses the harness answers to. It reads only: no live runtime, no
+space database, no network, and it writes nothing into an artifact tree.
+
+```bash
+cd packages/cf-harness
+deno task cfc-audit .cf-harness-console/runs
+deno task cfc-audit .cf-harness-console/runs/<runId> --json
+deno task cfc-audit .cf-harness-console/runs --fail-on fail
+```
+
+A run directory audits that run together with the `delegate_task` children
+written beside it; an artifact root, or a directory of run directories, audits
+every run under it.
+
+The checks are in [audit/checks/structural.ts](audit/checks/structural.ts), one
+per clause family:
+
+| Check | Subject                                                                                                                                                                                   | Clauses                                    |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| AUD-1 | one enforcement mode, present in both the run state and the run report and agreeing across every decision record and invocation context                                                   | AH-CFC-14                                  |
+| AUD-2 | decision reason codes belong to the claimed mode, and its side effects carry invocation contexts. A run whose side effects all took paths that record none warns: the claim went untested | AH-CFC-14, AH-CFC-15                       |
+| AUD-3 | every side effect joins to a policy decision, and the counts reconcile                                                                                                                    | AH-CFC-9, AH-CFC-11, AH-TOOL-3             |
+| AUD-4 | every denial was recorded as a policy event and reached the model only as a typed denial carrying no payload                                                                              | AH-CFC-6, AH-CFC-11                        |
+| AUD-5 | the handle table is well formed, no token precedes its disclosure, no parent token crosses into a child untransferred                                                                     | AH-CFC-12, AH-CFC-13, AH-CFC-18, AH-CFC-19 |
+| AUD-6 | tool calls and tool results pair                                                                                                                                                          | AH-CFC-16, AH-LIFE-6                       |
+| AUD-7 | a run with a dial at `observe` warns rather than passes, so its evidence is never read as enforcement. Disagreement about the mode is AUD-1's finding                                     | AH-CFC-15, §6                              |
+| AUD-8 | labeled observations the model read are accumulated as influence, and denied ones are not                                                                                                 | AH-CFC-7, AH-CFC-8                         |
+| AUD-9 | the artifacts that would explain why a result was exposed or denied are present; what each holds is not read here                                                                         | AH-CFC-16                                  |
+
+Five verdicts, and the distinctions between them are the point. `inconclusive`
+is a check whose evidence was absent or unreadable — it is never `pass`, and
+`--fail-on` treats it as failure unless told otherwise, so an audit over a tree
+missing its artifacts cannot exit green. A path naming no run at all exits `2`
+whatever the threshold: nothing was audited, so no threshold applies.
+`not-applicable` is stronger: the evidence was there and said the check's
+subject does not arise. `warn` is a run whose posture makes its own assurance
+weaker than an enforcing run's.
+
+Every check carries the clauses it rests on and an exact quote from each, both
+printed with the finding and included in `--json`.
+[audit/citations.ts](audit/citations.ts) holds that table and
+`audit/test/citation-drift.test.ts` reads every cited document and requires each
+quote to still be in it, so a specification edit that invalidates a check breaks
+the suite rather than leaving the check quietly wrong.
 
 ## Testing
 

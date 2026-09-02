@@ -4,9 +4,64 @@ import {
   createHarnessHandleTable,
   mintAddressHandle,
 } from "../src/handle-table.ts";
-import { createHarnessRunState } from "../src/run-state.ts";
+import {
+  createHarnessRunState,
+  setHarnessRunStatus,
+} from "../src/run-state.ts";
 
 describe("run-state", () => {
+  describe("setHarnessRunStatus()", () => {
+    const completed = () =>
+      createHarnessRunState({
+        runId: "run-done",
+        status: "completed",
+        endedAt: "2026-09-02T00:00:01.000Z",
+        terminalReason: "assistant_completed",
+        cfcEnforcementMode: "disabled",
+        currentDir: "/workspace",
+        now: "2026-09-02T00:00:00.000Z",
+      });
+
+    it("stamps `endedAt` and `terminalReason` with a terminal status", () => {
+      const state = setHarnessRunStatus(
+        createHarnessRunState({
+          cfcEnforcementMode: "disabled",
+          currentDir: "/workspace",
+        }),
+        "failed",
+        "2026-09-02T00:00:02.000Z",
+        "prompt_loop_error",
+      );
+
+      expect(state.status).toBe("failed");
+      expect(state.endedAt).toBe("2026-09-02T00:00:02.000Z");
+      expect(state.terminalReason).toBe("prompt_loop_error");
+    });
+
+    it("throws when a run that has its outcome is given another", () => {
+      expect(() =>
+        setHarnessRunStatus(
+          completed(),
+          "failed",
+          "2026-09-02T00:00:02.000Z",
+          "prompt_loop_error",
+        )
+      ).toThrow("run run-done is already completed");
+    });
+
+    it("clears `endedAt` and `terminalReason` when a resumed run goes back to `running`", () => {
+      const state = setHarnessRunStatus(
+        completed(),
+        "running",
+        "2026-09-02T00:00:02.000Z",
+      );
+
+      expect(state.status).toBe("running");
+      expect(state.endedAt).toBeUndefined();
+      expect(state.terminalReason).toBeUndefined();
+    });
+  });
+
   describe("createHarnessRunState()", () => {
     it("carries a defensive copy of a given handle table", async () => {
       const { table } = await mintAddressHandle(

@@ -1,5 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
 import type { Cell } from "@commonfabric/runner";
+import { cfcLabelViewForCellFailClosed } from "@commonfabric/runner/cfc";
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
@@ -38,6 +39,30 @@ export interface DescribeHandleToolOutput {
    * it costs nothing and reveals no value.
    */
   path?: string[];
+
+  /**
+   * The CFC labels the referent carries, one per labelled path within it.
+   * Absent when the run has no session to read them through; an empty list
+   * says the space holds none, which is a different answer.
+   */
+  labels?: DescribeHandleLabel[];
+}
+
+/** The label at one path inside a referent, as atom types and nothing else. */
+export interface DescribeHandleLabel {
+  /** Path within the referent, absent for the referent itself. */
+  path?: string[];
+
+  /**
+   * Confidentiality requirements: one entry per clause, each clause listing
+   * the atom types that satisfy it. A clause of several types is satisfied by
+   * any one of them, so the nesting is the requirement rather than a
+   * formatting choice.
+   */
+  confidentiality: string[][];
+
+  /** Integrity atom types, all of which the value carries. */
+  integrity: string[];
 }
 
 /**
@@ -60,11 +85,10 @@ export interface DescribeHandleToolOutput {
  * 1. The schema the referent DECLARES in the fabric, read through the run's
  *    session when it has one. A piece's document schema is the result schema
  *    of the pattern behind it, which is the shape an agent holding a handle to
- *    that piece would be wiring into a pattern of its own — and it is where a
- *    cell's CFC labels live, so an input cell's shape always answers from its
- *    own declaration. The read is of the document's declared schema and of
- *    nothing else; the referent's value is not read, and a reference outside
- *    the session's own space is not followed.
+ *    that piece would be wiring into a pattern of its own. The read is of the
+ *    document's declared schema and of nothing else; the referent's value is
+ *    not read, and a reference outside the session's own space is not
+ *    followed.
  * 2. The schema the mint recorded out of the harness's OWN work — the result
  *    schema of a pattern this harness compiled and ran, marked
  *    `schemaSource: "harness"` on the entry.
@@ -83,12 +107,23 @@ export interface DescribeHandleToolOutput {
  *
  * A run with no fabric session still answers from its own table, so shape
  * stays inspectable in every run that has handles at all.
+ *
+ * Labels answer beside the shape, from the same synced document, and only
+ * where a session read it: a cell's CFC labels live in its own metadata
+ * rather than on its schema, so shape and labels are two reads of one
+ * document and a run can hold one without the other. What crosses is atom
+ * TYPES — the URLs naming what a value requires and what it carries — and not
+ * an atom's other fields, which say what a label was computed FROM. That is
+ * the same line the shape disclosure draws: a run may know what it is holding
+ * and what handling that demands, and may not read what is behind it. A read
+ * that fails is reported as a label rather than as no label, so a cell whose
+ * metadata could not be interpreted does not read as public.
  */
 export const describeHandleToolDescriptor: HarnessToolDescriptor = {
   toolId: "describe_handle",
   title: "Describe Handle",
   description:
-    "Report the shape of a general handle's referent: its recorded schema and path, never its value. A capability-restricted handle returns a named refusal. Use it to check that a reference is the kind of thing a step expects before passing it on.",
+    "Report the shape of a general handle's referent and the CFC labels it carries: its recorded schema, path and label atom types, never its value. A capability-restricted handle returns a named refusal. Use it to check that a reference is the kind of thing a step expects, and what handling it demands, before passing it on.",
   effectClass: "read",
   inputSchema: {
     type: "object",
@@ -110,6 +145,22 @@ export const describeHandleToolDescriptor: HarnessToolDescriptor = {
       hasSchema: { type: "boolean" },
       schema: {},
       path: { type: "array", items: { type: "string" } },
+      labels: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            path: { type: "array", items: { type: "string" } },
+            confidentiality: {
+              type: "array",
+              items: { type: "array", items: { type: "string" } },
+            },
+            integrity: { type: "array", items: { type: "string" } },
+          },
+          required: ["confidentiality", "integrity"],
+          additionalProperties: false,
+        },
+      },
       error: { type: "string" },
     },
     required: ["outputId", "token", "known", "hasSchema"],
@@ -134,34 +185,80 @@ const pathSegmentsOf = (ref: string): string[] | undefined => {
   }
 };
 
+/** The type an atom names: its `type` field, or the whole of a string atom. */
+const atomType = (atom: unknown): string | undefined => {
+  if (typeof atom === "string") {
+    return atom;
+  }
+  const type = (atom as { type?: unknown } | null)?.type;
+  return typeof type === "string" ? type : undefined;
+};
+
 /**
- * The schema `ref` DECLARES in the session's fabric, or `undefined` when the
- * session cannot state one. A document's declared schema lives in its
- * metadata — for a piece it is the result schema of the pattern behind it —
- * and a reference into the document narrows that schema by its path, which is
- * a walk over the schema rather than a read of the data.
+ * One confidentiality clause's alternatives, as atom types. A bare atom is
+ * its own single alternative, and a clause whose atoms this cannot name is
+ * dropped rather than reported as an empty — that is, unconditional —
+ * requirement.
+ */
+const clauseTypes = (clause: unknown): string[] => {
+  const alternatives = (clause as { anyOf?: unknown } | null)?.anyOf;
+  return (Array.isArray(alternatives) ? alternatives : [clause])
+    .map(atomType)
+    .filter((type): type is string => type !== undefined);
+};
+
+/**
+ * The labels the referent carries, read live through the session. Only atom
+ * TYPES cross: an atom's other fields are whatever minted it wrote, and a
+ * label is disclosed here so a run can tell what it is holding, not so it can
+ * read what a label was computed from.
+ */
+const describedLabels = (cell: Cell<unknown>): DescribeHandleLabel[] =>
+  (cfcLabelViewForCellFailClosed(cell)?.entries ?? []).map((entry) => ({
+    ...(entry.path.length > 0 ? { path: [...entry.path] } : {}),
+    confidentiality: (entry.label.confidentiality ?? [])
+      .map(clauseTypes)
+      .filter((clause) => clause.length > 0),
+    integrity: (entry.label.integrity ?? [])
+      .map(atomType)
+      .filter((type): type is string => type !== undefined),
+  }));
+
+/** What the session can state about `ref`: its declared shape, and its labels. */
+interface DescribedReferent {
+  schema?: JSONSchema;
+  labels?: DescribeHandleLabel[];
+}
+
+/**
+ * What `ref` DECLARES in the session's fabric, or nothing when the session
+ * cannot state it. A document's declared schema lives in its metadata — for a
+ * piece it is the result schema of the pattern behind it — and a reference
+ * into the document narrows that schema by its path, which is a walk over the
+ * schema rather than a read of the data. The labels come off the same synced
+ * document, rebased onto the referent's own path, so one read answers both.
  *
  * A reference outside the session's own space is not followed: the session's
  * authority ends at its space, the same boundary `run_pattern` draws over its
  * inputs. Anything that goes wrong — an unparseable reference, a document
- * that does not exist, a path the schema does not describe — answers
- * `undefined`, since a shape the session cannot state is reported as absent
- * rather than as a failed call.
+ * that does not exist, a path the schema does not describe — answers nothing,
+ * since what the session cannot state is reported as absent rather than as a
+ * failed call.
  */
-const declaredSchemaOf = async (
+const describeInFabric = async (
   session: HarnessFabricSession,
   ref: string,
-): Promise<JSONSchema | undefined> => {
+): Promise<DescribedReferent> => {
   const { pieces } = session;
   const space = pieces.getSpace();
   let link;
   try {
     link = parseLLMFriendlyLink(ref.startsWith("/") ? ref : `/${ref}`, space);
   } catch {
-    return undefined;
+    return {};
   }
   if (link.space !== space) {
-    return undefined;
+    return {};
   }
   try {
     const root = pieces.runtime.getCellFromLink({
@@ -170,23 +267,32 @@ const declaredSchemaOf = async (
       schema: undefined,
     });
     await root.sync();
+    // The labels are the synced document's own metadata, narrowed to the
+    // referent's path by the view, so they cost no read beyond the one the
+    // shape already needed.
+    const referent =
+      (link.path.length === 0 ? root : root.key(...link.path)) as Cell<unknown>;
+    const labels = describedLabels(referent);
     const documentSchema = root.getMetaRaw("schema") as JSONSchema | undefined;
     if (link.path.length === 0) {
-      return documentSchema ?? root.schema;
+      const schema = documentSchema ?? root.schema;
+      return { labels, ...(schema !== undefined ? { schema } : {}) };
     }
     if (documentSchema !== undefined) {
       // Narrowing a declared schema by a path is a walk over the schema, so
       // the referent's shape is in hand without going near its value.
-      const described = root.asSchema(documentSchema) as Cell<unknown>;
-      return (described.key(...link.path) as Cell<unknown>).schema;
+      const schema = ((root.asSchema(documentSchema) as Cell<unknown>).key(
+        ...link.path,
+      ) as Cell<unknown>).schema;
+      return { labels, ...(schema !== undefined ? { schema } : {}) };
     }
     // With no declared schema there is nothing to walk, and only the referent
     // itself can state a shape.
-    const referent = root.key(...link.path) as Cell<unknown>;
     await referent.sync();
-    return referent.schema;
+    const schema = referent.schema;
+    return { labels, ...(schema !== undefined ? { schema } : {}) };
   } catch {
-    return undefined;
+    return {};
   }
 };
 
@@ -227,10 +333,10 @@ export const describeHandleTool: HarnessToolDefinition<
     // that. A recorded schema is second-best — it is what whichever step
     // minted the handle happened to know — and it answers when the run has no
     // session, or when the session can state no shape for the address.
-    let schema: JSONSchema | undefined;
+    let described: DescribedReferent = {};
     if (context.getFabricSession !== undefined) {
       try {
-        schema = await declaredSchemaOf(
+        described = await describeInFabric(
           await context.getFabricSession(),
           entry.ref,
         );
@@ -239,9 +345,8 @@ export const describeHandleTool: HarnessToolDefinition<
         // which is what a run without one does anyway.
       }
     }
-    if (schema === undefined && entry.schemaSource === "harness") {
-      schema = entry.schema;
-    }
+    const schema = described.schema ??
+      (entry.schemaSource === "harness" ? entry.schema : undefined);
     // Structure only: whatever the source, the reported schema is rebuilt
     // from structural keywords, so no value and no prose rides out on it.
     const disclosed = schema === undefined
@@ -254,6 +359,7 @@ export const describeHandleTool: HarnessToolDefinition<
       hasSchema: disclosed !== undefined,
       ...(disclosed !== undefined ? { schema: disclosed } : {}),
       ...(path !== undefined ? { path } : {}),
+      ...(described.labels !== undefined ? { labels: described.labels } : {}),
     };
   },
 };

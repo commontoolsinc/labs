@@ -824,11 +824,13 @@ Deno.test("CfHarnessEngine records tool outputs into run state on success", asyn
     runId: "run-1",
   });
   assertEquals(engine.getRunState().runId, "run-1");
-  assertEquals(engine.getRunState().status, "completed");
+  // A tool call is a step of the run, not its outcome: the status is the
+  // driver's to write, and nothing here has ended the run.
+  assertEquals(engine.getRunState().status, "pending");
   assertEquals(engine.getRunState().createdAt, "2026-04-15T19:00:00.000Z");
   assertEquals(engine.getRunState().updatedAt, "2026-04-15T19:00:05.000Z");
-  assertEquals(engine.getRunState().endedAt, "2026-04-15T19:00:05.000Z");
-  assertEquals(engine.getRunState().terminalReason, "tool_completed");
+  assertEquals(engine.getRunState().endedAt, undefined);
+  assertEquals(engine.getRunState().terminalReason, undefined);
   assertEquals(engine.getRunState().cfcEnforcementMode, "observe");
   assertEquals(engine.getRunState().currentDir, "/workspace");
   assertEquals(engine.getRunState().policyEvents, []);
@@ -1181,15 +1183,15 @@ Deno.test("CfHarnessEngine timestamps CFC invocation contexts with mutation time
     state.cfcInvocationContexts?.length === 1 &&
     state.toolOutputs.length === 0
   );
-  assertEquals(invocationState?.updatedAt, "2026-04-17T21:00:04.000Z");
+  assertEquals(invocationState?.updatedAt, "2026-04-17T21:00:03.000Z");
   assertEquals(
     invocationState?.cfcInvocationContexts?.[0]?.createdAt,
-    "2026-04-17T21:00:04.000Z",
+    "2026-04-17T21:00:03.000Z",
   );
-  assertEquals(engine.getRunState().updatedAt, "2026-04-17T21:00:05.000Z");
+  assertEquals(engine.getRunState().updatedAt, "2026-04-17T21:00:04.000Z");
 });
 
-Deno.test("CfHarnessEngine marks the run as failed when a tool invocation errors", async () => {
+Deno.test("CfHarnessEngine records a tool invocation error without ending the run", async () => {
   const engine = new CfHarnessEngine({
     sandboxRuntime: new FakeSandboxRuntime([], new Error("sandbox boom")),
     runId: "run-fail",
@@ -1210,11 +1212,13 @@ Deno.test("CfHarnessEngine marks the run as failed when a tool invocation errors
   );
 
   assertEquals(engine.getRunState().runId, "run-fail");
-  assertEquals(engine.getRunState().status, "failed");
+  // The failure is on record for the driver to end the run on; the tool
+  // call itself does not decide the run's outcome.
+  assertEquals(engine.getRunState().status, "pending");
   assertEquals(engine.getRunState().createdAt, "2026-04-15T19:10:00.000Z");
   assertEquals(engine.getRunState().updatedAt, "2026-04-15T19:10:02.000Z");
-  assertEquals(engine.getRunState().endedAt, "2026-04-15T19:10:02.000Z");
-  assertEquals(engine.getRunState().terminalReason, "tool_error");
+  assertEquals(engine.getRunState().endedAt, undefined);
+  assertEquals(engine.getRunState().terminalReason, undefined);
   assertEquals(engine.getRunState().cfcEnforcementMode, "observe");
   assertEquals(engine.getRunState().currentDir, "/workspace");
   assertEquals(engine.getRunState().policyEvents, []);
@@ -1261,8 +1265,8 @@ Deno.test("CfHarnessEngine records recoverable file-tool failures without failin
       exitCode: 10,
     },
   });
-  assertEquals(engine.getRunState().status, "completed");
-  assertEquals(engine.getRunState().terminalReason, "tool_completed");
+  assertEquals(engine.getRunState().status, "pending");
+  assertEquals(engine.getRunState().terminalReason, undefined);
   assertEquals(engine.getRunState().toolOutputs, [result.resultRef]);
   assertEquals(engine.getRunState().failureRecords?.length, 1);
   assertEquals(
@@ -1278,7 +1282,7 @@ Deno.test("CfHarnessEngine records recoverable file-tool failures without failin
   assertEquals(engine.getRunState().primaryFailure?.kind, "file_not_found");
 });
 
-Deno.test("CfHarnessEngine terminalizes interrupted runs even after an intermediate tool completion", async () => {
+Deno.test("CfHarnessEngine fails an interrupted run that has recorded a tool output", async () => {
   const engine = new CfHarnessEngine({
     sandboxRuntime: new FakeSandboxRuntime([
       { stdout: "done\n", stderr: "", exitCode: 0 },
@@ -1297,8 +1301,8 @@ Deno.test("CfHarnessEngine terminalizes interrupted runs even after an intermedi
   });
 
   await engine.invokeBuiltinTool("bash", { command: "echo done" });
-  assertEquals(engine.getRunState().status, "completed");
-  assertEquals(engine.getRunState().terminalReason, "tool_completed");
+  assertEquals(engine.getRunState().status, "pending");
+  assertEquals(engine.getRunState().terminalReason, undefined);
 
   await engine.terminalizeInterruptedRun("SIGTERM");
 
@@ -1325,7 +1329,7 @@ Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
       createdAt: "2026-04-17T20:10:00.000Z",
       updatedAt: "2026-04-17T20:10:01.000Z",
       endedAt: "2026-04-17T20:10:01.000Z",
-      terminalReason: "tool_completed",
+      terminalReason: "assistant_completed",
       cfcEnforcementMode: "observe",
       currentDir: "/workspace",
       policyEvents: [createHarnessPolicyEvent({
@@ -1356,7 +1360,7 @@ Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
     createdAt: "2026-04-17T20:10:00.000Z",
     updatedAt: "2026-04-17T20:10:01.000Z",
     endedAt: "2026-04-17T20:10:01.000Z",
-    terminalReason: "tool_completed",
+    terminalReason: "assistant_completed",
     cfcEnforcementMode: "observe",
     currentDir: "/workspace",
     policyEvents: [createHarnessPolicyEvent({

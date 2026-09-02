@@ -41,21 +41,15 @@
   "exports": {
     ".": "./src/index.ts",
     "./api": "./src/api.ts",
-    "./VALUE_TAGS": "./src/VALUE_TAGS.ts",
     "./cell-rep": "./src/cell-rep.ts",
     "./codec-common": "./src/codec-common/index.ts",
     "./codec-json": "./src/codec-json/index.ts",
     "./codec-realm": "./src/codec-realm/index.ts",
     "./codecs": "./src/codecs.ts",
     "./data-uri-codec": "./src/data-uri-codec.ts",
-    "./deep-freeze": "./src/deep-freeze.ts",
     "./fabric-bases": "./src/fabric-bases/index.ts",
     "./fabric-instances": "./src/fabric-instances/index.ts",
     "./fabric-primitives": "./src/fabric-primitives/index.ts",
-    "./frozen-builtins": "./src/frozen-builtins.ts",
-    "./native-type-tags": "./src/native-type-tags.ts",
-    "./value-clone": "./src/value-clone.ts",
-    "./value-debug": "./src/value-debug.ts",
-    "./value-hash": "./src/value-hash.ts"
+    "./frozen-builtins": "./src/frozen-builtins.ts"
   }
 }

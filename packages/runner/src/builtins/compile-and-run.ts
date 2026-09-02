@@ -1,4 +1,4 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model";
 import type { RuntimeProgram } from "../harness/types.ts";
 import { CompilerError } from "@commonfabric/js-compiler/errors";
 import { type BuiltInCompileAndRunParams } from "commonfabric";

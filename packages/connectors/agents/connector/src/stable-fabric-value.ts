@@ -1,20 +1,20 @@
 import {
+  deepFreeze,
   fabricFromNativeValue,
   FabricInstance,
   type FabricPlainObject,
   type FabricValue,
+  tagFromNativeValue,
+  VALUE_TAGS,
 } from "@commonfabric/data-model";
 import {
   ProblematicValue,
   UnknownValue,
 } from "@commonfabric/data-model/codec-common";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   FabricError,
   FabricLink,
 } from "@commonfabric/data-model/fabric-instances";
-import { VALUE_TAGS } from "@commonfabric/data-model/VALUE_TAGS";
-import { tagFromNativeValue } from "@commonfabric/data-model/native-type-tags";
 import {
   getCellOrThrow,
   isCell,

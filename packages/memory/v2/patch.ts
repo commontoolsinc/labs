@@ -3,10 +3,10 @@ import {
   cloneForMutation,
   CloneForMutationError,
   cloneIfNecessary,
+  deepFreeze,
   type MutableFabricContainerValueLayer,
   valueEqual,
 } from "@commonfabric/data-model";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { isInstance, isObjectNotArray } from "@commonfabric/utils/types";
 import { type EntityDocument, isEntityDocument, type PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";

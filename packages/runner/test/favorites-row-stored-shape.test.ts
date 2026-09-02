@@ -2,7 +2,7 @@ import { expect } from "@std/expect";
 import { fromFileUrl } from "@std/path/from-file-url";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 

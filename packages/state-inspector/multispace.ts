@@ -26,7 +26,7 @@
 // `seq` is per-space and is NOT comparable across spaces; divergence is judged
 // by value equality, with per-space write metadata offered as evidence.
 
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 
 import { openSpace, type SpaceDb } from "./db.ts";
 import { annotate, linksWithPaths, type LinkWalkBounds } from "./decode.ts";

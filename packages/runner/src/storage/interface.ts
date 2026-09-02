@@ -2817,7 +2817,16 @@ export interface ISpaceReplica extends ISpace {
  */
 export type SealedCommitVerdict =
   | { committed: { seq: number } }
-  | { withdrawn: { message: string; superseded?: true } };
+  | {
+    withdrawn: {
+      message: string;
+      superseded?: true;
+      /** Structured withdrawal classification for consumers that must not
+       * parse diagnostic prose. A contribution drop is retryable in place;
+       * an explicit wave abandon is expected enclosing-lifecycle teardown. */
+      cause?: "contribution-dropped" | "wave-abandoned";
+    };
+  };
 
 /** A replica's handle for one sealed native commit. */
 export interface SealedNativeCommit {

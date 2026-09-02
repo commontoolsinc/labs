@@ -30,6 +30,16 @@ import {
   type HarnessHandleTable,
   MIN_HANDLE_TOKEN_SUFFIX_LENGTH,
 } from "./contracts/handle-table.ts";
+import type { HarnessSkillAcquisition } from "./contracts/skill.ts";
+
+/** Acquisition fields every recorded provenance must carry as a non-empty string. */
+const ACQUISITION_STRING_FIELDS = [
+  "registryId",
+  "commitSha",
+  "sourceUrl",
+  "valueDigest",
+  "receivedAt",
+] as const satisfies readonly (keyof HarnessSkillAcquisition)[];
 
 /**
  * Digest function used to derive token suffixes. A seam for tests that need
@@ -62,10 +72,14 @@ const HANDLE_REF_CONTEXT_SPACE =
  * deterministically, and `createLLMFriendlyLink()` omits the DID), which is
  * what the cast relies on.
  *
+ * This is the rule minting holds a ref to, exported so a surface taking a
+ * ref from an operator can refuse it under the same rule before a run
+ * exists to spend on it.
+ *
  * @throws Error when the text does not parse, or names an id outside the
  * entity URI schemes (a bare hash, an `opaque:` handle, a human name).
  */
-const normalizeHandleRef = (refText: string): NormalizedFullLink => {
+export const parseHandleRef = (refText: string): NormalizedFullLink => {
   const trimmed = refText.trim();
   const parsed = parseLLMFriendlyLink(
     trimmed.startsWith("/") ? trimmed : `/${trimmed}`,
@@ -161,6 +175,15 @@ export interface MintAddressHandleOptions {
    * provenance `describe_handle` discloses.
    */
   schema?: JSONSchema;
+
+  /**
+   * Where the caller fetched the value at the address from, when the caller is
+   * the host step that fetched it. Recorded verbatim onto the entry, and
+   * filled the same way a schema is: an entry that already carries one keeps
+   * it, because the token holders already delegating through it were told
+   * about the first.
+   */
+  acquisition?: HarnessSkillAcquisition;
 }
 
 /**
@@ -188,15 +211,17 @@ export const mintAddressHandle = async (
   options: MintAddressHandleOptions = {},
 ): Promise<{ table: HarnessHandleTable; token: string }> => {
   const hasher = options.hasher ?? sha256Hasher;
-  const link = normalizeHandleRef(refText);
+  const link = parseHandleRef(refText);
   const key = addressKey(link);
   const schema = options.schema;
   const capability = options.capability;
+  const acquisition = options.acquisition;
   const existing = table.entries.find((entry) => entry.addressKey === key);
   if (existing !== undefined) {
     const nextCapability = existing.capability ?? capability;
     if (
       (existing.schema !== undefined || schema === undefined) &&
+      (existing.acquisition !== undefined || acquisition === undefined) &&
       existing.capability === nextCapability
     ) {
       return { table, token: existing.token };
@@ -210,6 +235,9 @@ export const mintAddressHandle = async (
               ...entry,
               ...(entry.schema === undefined && schema !== undefined
                 ? { schema, schemaSource: "harness" as const }
+                : {}),
+              ...(entry.acquisition === undefined && acquisition !== undefined
+                ? { acquisition }
                 : {}),
               ...(nextCapability !== undefined
                 ? { capability: nextCapability }
@@ -242,6 +270,7 @@ export const mintAddressHandle = async (
     ...(schema !== undefined
       ? { schema, schemaSource: "harness" as const }
       : {}),
+    ...(acquisition !== undefined ? { acquisition } : {}),
   };
   return {
     table: { ...table, entries: [...table.entries, entry] },
@@ -264,7 +293,7 @@ export const resolveHandleToken = (
  */
 export const handleRefAddressKey = (refText: string): string | undefined => {
   try {
-    return addressKey(normalizeHandleRef(refText));
+    return addressKey(parseHandleRef(refText));
   } catch {
     return undefined;
   }
@@ -561,6 +590,43 @@ export const assertValidHarnessHandleTable = (
           String(entry.capability)
         }\``,
       );
+    }
+    if (entry.acquisition !== undefined) {
+      // Shape before fields: a persisted table is untrusted input, and reading
+      // a field off a null or an array would fail as a TypeError naming
+      // neither the table nor the entry.
+      if (
+        typeof entry.acquisition !== "object" || entry.acquisition === null ||
+        Array.isArray(entry.acquisition)
+      ) {
+        throw new Error(
+          `invalid handle table: entry \`${entry.token}\` has an acquisition that is not an object`,
+        );
+      }
+      // Acquisition provenance is trusted-side only, so a table that arrives
+      // claiming it on a handle no acquisition could have minted is refused
+      // rather than read: a `skill-context` capability is what says the value
+      // is skill text a host step fetched.
+      if (entry.capability !== "skill-context") {
+        throw new Error(
+          `invalid handle table: entry \`${entry.token}\` carries acquisition provenance without the \`skill-context\` capability`,
+        );
+      }
+      for (const field of ACQUISITION_STRING_FIELDS) {
+        const value = entry.acquisition[field];
+        if (typeof value !== "string" || value.length === 0) {
+          throw new Error(
+            `invalid handle table: entry \`${entry.token}\` has an empty acquisition \`${field}\``,
+          );
+        }
+      }
+      if (entry.acquisition.verification !== "git-commit-sha") {
+        throw new Error(
+          `invalid handle table: entry \`${entry.token}\` has an unknown acquisition verification \`${
+            String(entry.acquisition.verification)
+          }\``,
+        );
+      }
     }
     if (tokens.has(entry.token)) {
       throw new Error(

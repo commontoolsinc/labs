@@ -6,8 +6,8 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isSigilLink } from "../src/link-utils.ts";
 import { resolvedSchema } from "./schema-ref-helpers.ts";
 import { type SigilLink } from "../src/sigil-types.ts";

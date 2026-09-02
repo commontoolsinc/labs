@@ -2,6 +2,7 @@ import type { ReadonlyCell } from "@commonfabric/api";
 import {
   assertValidFabricValueLayer,
   cloneIfNecessary,
+  deepFreeze,
   type FabricConvertibleValue,
   fabricFromNativeValue,
   FabricInstance,
@@ -9,6 +10,7 @@ import {
   FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
+  hashStringOf,
   shallowCleanArray,
   shallowCleanPlainObject,
   shallowFabricFromNativeObjectElseUndefined,
@@ -19,13 +21,11 @@ import {
   entityRefFromString,
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
   isInternedSchema,
 } from "@commonfabric/data-model-schema";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import {
@@ -41,7 +41,6 @@ import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   type Immutable,
-  isFunction,
   isObjectNotArray,
   isObjectOrArray,
   isPlainContainer,
@@ -4204,12 +4203,38 @@ function convertOneToLinks(
   stack: string[],
   ancestors: IndexTrackingStack<object>,
 ): FabricValue {
-  if (isObjectOrArray(value)) {
-    const depth = ancestors.indexOf(value);
+  switch (typeof value) {
+    case "object": {
+      if (value === null) {
+        return value;
+      }
 
-    if (depth >= 0) {
-      return deepFreeze(linkRefFrom({ path: stack.slice(0, depth) }));
+      break;
     }
+    case "function": {
+      // No function has a fabric form, and none is a cell or a cell result
+      // either, so it is refused before the tests below. The type admits no
+      // function here either; this arm is for one that got past it. The
+      // refusal is the vetting's, so that it reads the same as everywhere
+      // else a value is vetted, and the assertion refuses every function, so
+      // the `throw` after it is unreachable: it is here so that the arm ends
+      // where it reads as ending, rather than as a `break` into the walk.
+      assertValidFabricValueLayer(value);
+      throw new Error("Unreachable: a function never passes vetting.");
+    }
+    default: {
+      // A primitive, which is a `FabricValue` by type. No primitive is vetted
+      // here, so a symbol the vetting would refuse is returned as given.
+      return value;
+    }
+  }
+
+  // At this point `value` is a non-`null` object.
+
+  const depth = ancestors.indexOf(value);
+
+  if (depth >= 0) {
+    return deepFreeze(linkRefFrom({ path: stack.slice(0, depth) }));
   }
 
   // Early-return cases
@@ -4217,15 +4242,11 @@ function convertOneToLinks(
     return linkToCell(getCellOrThrow(value), options);
   } else if (isCell(value)) {
     return linkToCell(value, options);
-  } else if (!(isObjectOrArray(value) || isFunction(value))) {
-    return value as FabricValue;
   }
-
-  // At this point `value` is a non-`null` object(ish) thing.
 
   // What goes onto `ancestors` -- and comes off again on the way back out --
   // is the object as given.
-  const original = value as object;
+  const original: object = value;
 
   // Only a container reaches the walk below: everything else has returned or
   // been refused by the time the branch ends, which is what the type says.

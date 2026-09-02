@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { assertThrows } from "@std/assert";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import {
   buildCfcPolicyArtifactManifest,
   buildCfcPolicySnapshot,

@@ -130,7 +130,7 @@ decoy is the one that runs.
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { isDeepFrozen } from "@commonfabric/data-model";
 
 describe("deep-freeze", () => {
   describe("isDeepFrozen()", () => {

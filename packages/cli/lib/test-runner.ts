@@ -38,7 +38,7 @@ import {
 } from "@commonfabric/test-support/records";
 
 import { internSchema } from "@commonfabric/data-model-schema";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {

@@ -35,8 +35,10 @@ import { fromFileUrl } from "@std/path/from-file-url";
 // a `FabricSpecialObject` (bytes, an epoch). Neither survives a structural
 // comparison unaided — see `comparableState`.
 import type { JSONSchemaObj } from "@commonfabric/api";
-import { FabricSpecialObject } from "@commonfabric/data-model";
-import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import {
+  FabricSpecialObject,
+  taggedHashStringOf,
+} from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import type { Signer } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";

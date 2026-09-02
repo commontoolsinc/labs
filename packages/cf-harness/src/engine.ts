@@ -41,6 +41,7 @@ import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import { harnessCredentialOwnersEqual } from "./contracts/run-manifest.ts";
 import type { HarnessRunReport } from "./contracts/run-report.ts";
 import type {
+  HarnessSkillAcquisition,
   HarnessSkillActivations,
   HarnessSkillRegistry,
   HarnessSkillResourceRead,
@@ -119,6 +120,7 @@ import {
   createHarnessRunState,
   type HarnessRunState,
   type HarnessRunTerminalReason,
+  isTerminalHarnessRunStatus,
   patchHarnessRunState,
   setHarnessRunStatus,
   setHarnessSubagentRun,
@@ -921,28 +923,68 @@ export class CfHarnessEngine {
     return this.getRunState();
   }
 
-  appendFailureFromError(
-    error: unknown,
-    options: Omit<ClassifyHarnessRunErrorOptions, "at"> = {},
-  ): HarnessRunState {
-    return this.appendFailureRecord(
-      classifyHarnessRunError(error, {
-        ...options,
-        at: this.#now(),
-      }),
-    );
-  }
-
-  setRunStatus(
-    status: HarnessRunState["status"],
-    terminalReason?: HarnessRunTerminalReason,
-  ): HarnessRunState {
+  /**
+   * Takes the run: `running`, with any earlier outcome cleared. The run's
+   * driver calls this when it begins bringing the run up, and again on
+   * resume, when a run re-enters its loop from a terminal record. The
+   * driver's next persist carries it to disk; a run that ends before one is
+   * persisted by the transition that ends it.
+   */
+  startRun(): HarnessRunState {
     this.#runState = setHarnessRunStatus(
       this.#runState,
-      status,
+      "running",
+      this.#now(),
+    );
+    return this.getRunState();
+  }
+
+  /**
+   * Ends the run as `completed` for `terminalReason`, persisted. A run has
+   * one outcome and its driver writes it once.
+   *
+   * @throws Error when the run already has its outcome.
+   */
+  async completeRun(
+    terminalReason: HarnessRunTerminalReason,
+  ): Promise<HarnessRunState> {
+    this.#runState = setHarnessRunStatus(
+      this.#runState,
+      "completed",
       this.#now(),
       terminalReason,
     );
+    await this.persistRunState();
+    return this.getRunState();
+  }
+
+  /**
+   * Ends the run as `failed` for `terminalReason`, persisted, recording
+   * `error` as the failure when one is given. A run has one outcome and its
+   * driver writes it once.
+   *
+   * @throws Error when the run already has its outcome.
+   */
+  async failRun(
+    terminalReason: HarnessRunTerminalReason,
+    error?: unknown,
+    options: Omit<ClassifyHarnessRunErrorOptions, "at"> = {},
+  ): Promise<HarnessRunState> {
+    const now = this.#now();
+    if (error !== undefined) {
+      this.#runState = appendHarnessFailureRecord(
+        this.#runState,
+        classifyHarnessRunError(error, { ...options, at: now }),
+        now,
+      );
+    }
+    this.#runState = setHarnessRunStatus(
+      this.#runState,
+      "failed",
+      now,
+      terminalReason,
+    );
+    await this.persistRunState();
     return this.getRunState();
   }
 
@@ -1051,12 +1093,20 @@ export class CfHarnessEngine {
     await this.persistRunState();
   }
 
-  /** Mints and records a handle consumable only as delegated skill context. */
-  async mintSkillContextHandle(ref: string): Promise<string> {
+  /**
+   * Mints and records a handle consumable only as delegated skill context,
+   * carrying `acquisition` as the entry's record of where the value came
+   * from. Only a host step that performed the fetch can supply that record,
+   * and it is what a later delegation's activation names.
+   */
+  async mintSkillContextHandle(
+    ref: string,
+    acquisition: HarnessSkillAcquisition,
+  ): Promise<string> {
     const minted = await mintAddressHandle(
       this.handleTable ?? createHarnessHandleTable(this.#runState.runId),
       ref,
-      { capability: "skill-context" },
+      { capability: "skill-context", acquisition },
     );
     await this.recordHandleTable(minted.table);
     return minted.token;
@@ -1300,14 +1350,15 @@ export class CfHarnessEngine {
     return this.getRunState();
   }
 
+  /**
+   * Fails the run as `process_interrupted` when the process is going down
+   * before its loop ended. A run that already has its outcome keeps it: the
+   * signal raced the loop's own end, and the record stands as written.
+   */
   async terminalizeInterruptedRun(
     signalName: string,
   ): Promise<HarnessRunState> {
-    const currentState = this.#runState;
-    if (
-      currentState.status === "failed" ||
-      currentState.terminalReason === "assistant_completed"
-    ) {
+    if (isTerminalHarnessRunStatus(this.#runState.status)) {
       return this.getRunState();
     }
     const now = this.#now();
@@ -1322,14 +1373,7 @@ export class CfHarnessEngine {
       }),
       now,
     );
-    this.#runState = setHarnessRunStatus(
-      this.#runState,
-      "failed",
-      now,
-      "process_interrupted",
-    );
-    await this.persistRunState();
-    return this.getRunState();
+    return await this.failRun("process_interrupted");
   }
 
   async persistTranscript(
@@ -1494,6 +1538,14 @@ export class CfHarnessEngine {
     return this.getRunState();
   }
 
+  /**
+   * Runs one builtin tool and records its output on the run. A tool call is
+   * one step of a run, not the run: the run's status is the driver's to
+   * write, and this touches neither it nor `endedAt`. A tool that throws is
+   * recorded as a failure and rethrown for the driver to end the run on.
+   *
+   * @throws Error from the tool, after the failure is recorded.
+   */
   async invokeBuiltinTool<TToolId extends BuiltinToolId>(
     toolId: TToolId,
     input: BuiltinToolInputMap[TToolId],
@@ -1505,11 +1557,6 @@ export class CfHarnessEngine {
     }
     this.#assertCfcTransportReady();
     await this.ensureDiagnosticsInitialized();
-    this.#runState = setHarnessRunStatus(
-      this.#runState,
-      "running",
-      this.#now(),
-    );
     try {
       const output = await tool.invoke(
         this.#createToolContext(options.signal),
@@ -1518,12 +1565,6 @@ export class CfHarnessEngine {
       return await this.recordBuiltinToolOutput(toolId, input, output);
     } catch (error) {
       const failureTime = this.#now();
-      this.#runState = setHarnessRunStatus(
-        this.#runState,
-        "failed",
-        failureTime,
-        "tool_error",
-      );
       this.#runState = appendHarnessFailureRecord(
         this.#runState,
         classifyHarnessRunError(error, {
@@ -1559,12 +1600,7 @@ export class CfHarnessEngine {
     );
     const completionTime = this.#now();
     this.#runState = appendToHarnessRunState(
-      setHarnessRunStatus(
-        this.#runState,
-        "completed",
-        completionTime,
-        "tool_completed",
-      ),
+      this.#runState,
       "toolOutputs",
       resultRef,
       completionTime,
@@ -1888,7 +1924,10 @@ export class CfHarnessEngine {
           getSkillsShAcquisitionClient: this.#skillsShAcquisitionClientFactory,
         }
         : {}),
-      mintSkillContextHandle: (ref: string) => this.mintSkillContextHandle(ref),
+      mintSkillContextHandle: (
+        ref: string,
+        acquisition: HarnessSkillAcquisition,
+      ) => this.mintSkillContextHandle(ref, acquisition),
       ...(this.#taskText !== undefined ? { taskText: this.#taskText } : {}),
       sandbox: this.sandbox,
       hostProcessRunner: this.hostProcessRunner,

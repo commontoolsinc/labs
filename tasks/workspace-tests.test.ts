@@ -1,7 +1,13 @@
-import { assertEquals, assertThrows } from "@std/assert";
+import {
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
 import {
   acceptsJUnitPath,
   acceptsPreload,
+  assertMemberTestTasksDefined,
   assertTaskTestsIncluded,
   initializeDb,
   junitCapableMembers,
@@ -589,4 +595,128 @@ Deno.test("the workspace's capable members are read from their manifests", async
   ) {
     assertEquals(capable.has(member), false, `${member} should not`);
   }
+});
+
+//
+// Every member's own `test` task
+//
+// The runner refuses to start a run when a member defines none: `deno task
+// test` in that member's directory resolves against the root workspace
+// instead, and the suite re-enters itself once per such member.
+//
+
+Deno.test("assertMemberTestTasksDefined names every member defining no test task", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-missing-test-task-" });
+  try {
+    await makeWorkspace(dir, ["a", "b", "c"]);
+    // Two shapes, one report: a manifest whose tasks are all something
+    // else, which is what falls through to the root workspace, and a member
+    // with no manifest, which never gets that far — Deno refuses to load a
+    // workspace at all when one of its members has no config file.
+    await Deno.writeTextFile(
+      `${dir}/packages/b/deno.jsonc`,
+      JSON.stringify({ tasks: { bench: "deno bench" } }),
+    );
+    await Deno.remove(`${dir}/packages/c/deno.jsonc`);
+
+    const members = await readWorkspaceMembers(`${dir}/deno.jsonc`);
+    const error = await assertRejects(
+      () => assertMemberTestTasksDefined(members, dir),
+      Error,
+      "Missing from: `./packages/b/deno.jsonc`, `./packages/c/deno.jsonc`",
+    );
+    // Whoever meets this has just added a package and does not know the
+    // rule, so the message carries the entry to add and where to copy it
+    // from.
+    assertStringIncludes(error.message, "echo 'No tests defined.'");
+    assertStringIncludes(error.message, "packages/utils/deno.jsonc");
+    // Creating the other manifest is the way out that costs the member its
+    // `imports`, so the message has to warn against it where it is met.
+    assertStringIncludes(error.message, "ignores the other whole");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("assertMemberTestTasksDefined accepts a test task defined by dependencies alone", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-dependency-test-task-" });
+  try {
+    await makeWorkspace(dir, ["a"]);
+    await Deno.writeTextFile(
+      `${dir}/packages/a/deno.jsonc`,
+      JSON.stringify({
+        tasks: {
+          check: "deno check .",
+          "just-test": "deno test",
+          test: { dependencies: ["check", "just-test"] },
+        },
+      }),
+    );
+
+    // Such a task resolves in the member's own directory, so the suite
+    // cannot re-enter itself through it. Whether it carries a command line
+    // is a different question, and the one `memberTestTask()` asks.
+    const members = await readWorkspaceMembers(`${dir}/deno.jsonc`);
+    await assertMemberTestTasksDefined(members, dir);
+    assertEquals(await memberTestTask("./packages/a", dir), undefined);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("assertMemberTestTasksDefined reads the manifest Deno resolves", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-manifest-precedence-" });
+  try {
+    await makeWorkspace(dir, ["a"]);
+    // `makeWorkspace` gave the member a `deno.jsonc` with a `test` task.
+    // Deno takes the `deno.json` where a member carries both and ignores the
+    // other file whole, so the task in it is not one `deno task test` can
+    // find, and the member falls through to the root workspace all the same.
+    await Deno.writeTextFile(
+      `${dir}/packages/a/deno.json`,
+      JSON.stringify({ tasks: { bench: "deno bench" } }),
+    );
+
+    const members = await readWorkspaceMembers(`${dir}/deno.jsonc`);
+    // The manifest named is the one Deno reads, not the one the author put
+    // the task in — which is the whole of what the member got wrong.
+    await assertRejects(
+      () => assertMemberTestTasksDefined(members, dir),
+      Error,
+      "Missing from: `./packages/a/deno.json`",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("runTests refuses a workspace whose member defines no test task", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-guarded-run-" });
+  try {
+    await makeWorkspace(dir, ["a", "b"]);
+    await Deno.writeTextFile(
+      `${dir}/packages/b/deno.jsonc`,
+      JSON.stringify({ tasks: { bench: "deno bench" } }),
+    );
+
+    await assertRejects(
+      () => runTests([], undefined, dir),
+      Error,
+      "Missing from: `./packages/b/deno.jsonc`",
+    );
+    // Each package's test task writes a marker when it runs, so an empty
+    // list is what says the refusal came ahead of the spawn loop rather than
+    // part way through it.
+    assertEquals(await ranPackages(dir, ["a", "b"]), []);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("every workspace member defines a test task of its own", async () => {
+  // The same assertion the runner makes ahead of its spawn loop, made here
+  // so that a member missing one is named by a failing test as well.
+  const rootUrl = new URL("../", import.meta.url);
+  const members = await readWorkspaceMembers(new URL("deno.jsonc", rootUrl));
+  await assertMemberTestTasksDefined(members, rootUrl);
 });
