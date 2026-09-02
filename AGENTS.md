@@ -221,8 +221,11 @@ is missed:
 2. A `"tasks"` object in its own `deno.jsonc` carrying a `"test"` entry — either
    `"deno test"`, or `"echo 'No tests defined.'"` when it has no tests yet.
    Without one, `deno task test` falls through to the root workspace's task and
-   re-runs the whole suite inside itself, spawning processes exponentially until
-   CI times out. `packages/utils/deno.jsonc` is a correct example.
+   re-runs the whole suite inside itself, spawning processes exponentially. The
+   workspace runner reads every member's manifest before it spawns anything and
+   refuses to start when one has no `"test"` entry, so what a missing entry
+   costs is a message naming the member rather than a CI timeout.
+   `packages/utils/deno.jsonc` is a correct example.
 
 When the package needs a dependency, follow `docs/development/DEPENDENCIES.md`.
 

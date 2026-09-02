@@ -245,15 +245,25 @@ function directoryUrl(root: string | URL): URL {
 }
 
 /**
- * The `test` task a member's manifest defines, when it defines one.
- * `deno.json` is read first because Deno resolves it first, so a member
- * carrying both is read the way its own tooling reads it.
+ * A task as a manifest writes it: the command line itself, or an object that
+ * may carry one. An object with no `command` is defined by its `dependencies`
+ * instead, and Deno runs those.
  */
-export async function memberTestTask(
+type TaskDefinition = string | { command?: string };
+
+/**
+ * The `test` task each of a member's manifests defines, in the order Deno
+ * resolves the manifests. `deno.json` comes first because Deno resolves it
+ * first, so a member carrying both is read the way its own tooling reads it.
+ * A manifest that is absent, or that defines no `test` task, contributes
+ * nothing, so an empty result denotes a member with no `test` task at all.
+ */
+async function memberTestTaskDefinitions(
   member: string,
-  root: string | URL = Deno.cwd(),
-): Promise<string | undefined> {
+  root: string | URL,
+): Promise<TaskDefinition[]> {
   const rootUrl = directoryUrl(root);
+  const definitions: TaskDefinition[] = [];
   for (const manifest of ["deno.json", "deno.jsonc"]) {
     let text: string;
     try {
@@ -262,13 +272,62 @@ export async function memberTestTask(
       continue;
     }
     const tasks = (parseJsonc(text) as {
-      tasks?: Record<string, string | { command?: string }>;
+      tasks?: Record<string, TaskDefinition>;
     })?.tasks;
-    const task = tasks?.test;
-    const command = typeof task === "string" ? task : task?.command;
+    if (tasks?.test !== undefined) definitions.push(tasks.test);
+  }
+  return definitions;
+}
+
+/**
+ * The command line a member's `test` task runs, when a manifest of that
+ * member defines the task with a command. A task defined by its
+ * `dependencies` alone carries no command and reads as `undefined` here, the
+ * same as a member defining no `test` task at all;
+ * `assertMemberTestTasksDefined()` is what tells those two apart.
+ */
+export async function memberTestTask(
+  member: string,
+  root: string | URL = Deno.cwd(),
+): Promise<string | undefined> {
+  for (const task of await memberTestTaskDefinitions(member, root)) {
+    const command = typeof task === "string" ? task : task.command;
     if (command !== undefined) return command;
   }
   return undefined;
+}
+
+/**
+ * Throws unless every member defines a `test` task of its own, in whatever
+ * form — a command, or dependencies alone. Starting a run with one missing is
+ * what this refuses: `deno task test` in that member's directory resolves
+ * against the root workspace instead, which is this suite, so the run
+ * re-enters itself once per such member.
+ */
+export async function assertMemberTestTasksDefined(
+  members: readonly string[],
+  root: string | URL = Deno.cwd(),
+): Promise<void> {
+  const missing: string[] = [];
+  for (const member of members) {
+    if ((await memberTestTaskDefinitions(member, root)).length === 0) {
+      missing.push(member);
+    }
+  }
+  if (missing.length === 0) return;
+  const named = missing.map((member) => `\`${member}\``).join(", ");
+  throw new Error(
+    [
+      `Every workspace member needs a \`test\` task of its own.`,
+      `Missing from: ${named}.`,
+      `Add a \`tasks\` object to the member's \`deno.json\` or \`deno.jsonc\``,
+      `carrying a \`test\` entry — \`deno test\` where the package has tests,`,
+      `or \`echo 'No tests defined.'\` where it has none yet, as`,
+      `\`packages/utils/deno.jsonc\` shows. Without that entry,`,
+      `\`deno task test\` in the package directory resolves against the root`,
+      `workspace instead, and the whole suite runs inside itself.`,
+    ].join(" "),
+  );
 }
 
 /**
@@ -417,11 +476,14 @@ export async function runTests(
   workspaceCwd: string = Deno.cwd(),
 ): Promise<boolean> {
   const suiteStartedAt = Date.now();
-  const units = selectShardMembers(
-    await readWorkspaceMembers(path.join(workspaceCwd, "deno.jsonc")),
-    disabledPackages,
-    shard,
+  const members = await readWorkspaceMembers(
+    path.join(workspaceCwd, "deno.jsonc"),
   );
+  // Before anything is spawned, and over every member rather than this
+  // shard's: a member with no `test` task of its own is what turns one run
+  // into an unbounded number of them.
+  await assertMemberTestTasksDefined(members, workspaceCwd);
+  const units = selectShardMembers(members, disabledPackages, shard);
   if (units.length === 0) {
     console.error("No workspace packages selected to test.");
     return false;

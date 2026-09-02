@@ -15,9 +15,17 @@ when it does not have them yet.
 This is not a tidiness rule. The root test runner (`tasks/test.ts`) walks every
 workspace member and runs `deno task test` in each. A member with no `test`
 task falls through to the root workspace's task, which is the whole suite —
-so the suite re-enters itself once per such package, spawning processes
-exponentially until CI times out. The symptom is a hung job, not an error
-message naming the package.
+so the suite would re-enter itself once per such package, spawning processes
+exponentially. The runner reads every member's manifest before it spawns
+anything and refuses to start when one has no `test` entry, naming it, so the
+symptom is that message rather than a hung job.
+
+A `test` task defined by its `"dependencies"` alone satisfies the rule, since
+the name still resolves in the package's own directory. The check therefore
+asks whether the manifest declares the task at all, which is a different
+question from the one `memberTestTask()` in `tasks/workspace-tests.ts` answers
+— what command line the task runs, which a dependencies-only task does not
+have.
 
 `packages/utils/deno.jsonc` is a correct minimal example.
 
