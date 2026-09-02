@@ -507,8 +507,14 @@ const evaluationIdentityKey = (options: TrackGraphOptions): string =>
  * adversarial query-shape churn, not the memory bound. Memory is bounded
  * by the server's cross-space retained-entity budget, which evicts by
  * weight (see Server's evaluation-cache budget).
+ *
+ * The bound holds by eviction: at the cap a new shape displaces the oldest
+ * entry (Map insertion order — the order the weight budget evicts in too)
+ * rather than going unrecorded, so a full cache keeps recording instead of
+ * freezing at whatever filled it first. Insertion-order eviction serves a
+ * repeated cycle of shapes only while the whole cycle fits under the cap.
  */
-const EVALUATION_CACHE_MAX_ENTRIES = 16;
+export const EVALUATION_CACHE_MAX_ENTRIES = 16;
 
 export type QueryEvaluationCacheDiagnostics = {
   seq: number;
@@ -520,6 +526,12 @@ export type QueryEvaluationCacheDiagnostics = {
 
   misses: number;
   rotations: number;
+
+  /** Entries displaced at the entry cap by a newer shape. */
+  capEvictions: number;
+
+  /** Entries removed by the server's cross-space weight budget. */
+  budgetEvictions: number;
 
   /** Serves of a scope-pure entry (identical for every identity). */
   hitsPure: number;
@@ -627,6 +639,13 @@ export type QueryEvaluationCache = {
   /** Times the cache was rotated out — a newer engine seq, or a different
    * engine object for the same space. */
   rotations: number;
+
+  /** Entries displaced at EVALUATION_CACHE_MAX_ENTRIES by a newer shape. */
+  capEvictions: number;
+
+  /** Entries the server's weight budget removed (its enforcement pass
+   * counts here; the cache itself never evicts by weight). */
+  budgetEvictions: number;
 };
 
 export const createQueryEvaluationCache = (): QueryEvaluationCache => ({
@@ -640,6 +659,8 @@ export const createQueryEvaluationCache = (): QueryEvaluationCache => ({
   residueRefusals: 0,
   misses: 0,
   rotations: 0,
+  capEvictions: 0,
+  budgetEvictions: 0,
 });
 
 export const queryEvaluationCacheDiagnostics = (
@@ -656,6 +677,8 @@ export const queryEvaluationCacheDiagnostics = (
     hits: cache.hitsPure + cache.hitsAbsentResidue + cache.hitsIdentity,
     misses: cache.misses,
     rotations: cache.rotations,
+    capEvictions: cache.capEvictions,
+    budgetEvictions: cache.budgetEvictions,
     hitsPure: cache.hitsPure,
     hitsAbsentResidue: cache.hitsAbsentResidue,
     hitsIdentity: cache.hitsIdentity,
@@ -1584,16 +1607,26 @@ export const trackGraph = (
     ...lazyState,
     rootFamilies,
   };
-  if (
-    cache !== undefined && cacheKeys !== undefined &&
-    cache.entries.size < EVALUATION_CACHE_MAX_ENTRIES
-  ) {
+  if (cache !== undefined && cacheKeys !== undefined) {
     // The cache keeps its own clone: the state returned below belongs to
     // the caller's session, whose refreshes and extensions mutate it.
     const share = classifyStateScope(state);
     const weight = state.entities.size;
     const key = share.kind === "tainted" ? cacheKeys.identity : cacheKeys.pure;
     const previous = cache.entries.get(key);
+    if (
+      previous === undefined &&
+      cache.entries.size >= EVALUATION_CACHE_MAX_ENTRIES
+    ) {
+      // A new shape at the cap displaces the oldest entry; re-recording a
+      // present key (a refused absent-residue share re-evaluated) replaces
+      // in place and grows nothing.
+      const oldestKey = cache.entries.keys().next().value!;
+      const oldest = cache.entries.get(oldestKey)!;
+      cache.entries.delete(oldestKey);
+      cache.weight -= oldest.weight;
+      cache.capEvictions++;
+    }
     cache.entries.set(key, {
       state: cloneTrackedGraphState(engine, state),
       share,

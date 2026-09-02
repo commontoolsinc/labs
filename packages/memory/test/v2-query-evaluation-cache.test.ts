@@ -4,11 +4,12 @@ import { applyCommit, open as openEngine } from "../v2/engine.ts";
 import {
   classifyStateScope,
   createQueryEvaluationCache,
+  EVALUATION_CACHE_MAX_ENTRIES,
   queryEvaluationCacheDiagnostics,
   type TrackedGraphState,
   trackGraph,
 } from "../v2/query.ts";
-import { Server } from "../v2/server.ts";
+import { getEvaluationCachesDiagnostics, Server } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
@@ -727,6 +728,8 @@ describe("v2 query evaluation cache", () => {
       hits: 0,
       misses: 0,
       rotations: 0,
+      capEvictions: 0,
+      budgetEvictions: 0,
       hitsPure: 0,
       hitsAbsentResidue: 0,
       hitsIdentity: 0,
@@ -933,9 +936,14 @@ describe("v2 query evaluation cache", () => {
         );
       }
       // Each corpus weighs 2; a budget of 3 holds one of them, so the
-      // second space's insert evicted the first space's entry.
+      // second space's insert evicted the first space's entry — and the
+      // evicted space's counter, not the inserting space's, records it.
       expect(server.evaluationCacheDiagnostics(spaces[0]).weight).toBe(0);
+      expect(server.evaluationCacheDiagnostics(spaces[0]).budgetEvictions)
+        .toBe(1);
       expect(server.evaluationCacheDiagnostics(spaces[1]).weight).toBe(2);
+      expect(server.evaluationCacheDiagnostics(spaces[1]).budgetEvictions)
+        .toBe(0);
     } finally {
       for (const connection of connections) {
         connection.close();
@@ -962,6 +970,7 @@ describe("v2 query evaluation cache", () => {
       expect(diagnostics.misses).toBe(1);
       expect(diagnostics.entries).toBe(0);
       expect(diagnostics.weight).toBe(0);
+      expect(diagnostics.budgetEvictions).toBe(1);
     } finally {
       connection.close();
     }
@@ -1166,6 +1175,124 @@ describe("v2 query evaluation cache", () => {
       );
       expect(server.evaluationCacheDiagnostics(spaces[0]).seq).toBe(-1);
       expect(server.evaluationCacheDiagnostics(spaces[1]).entries).toBe(1);
+    } finally {
+      for (const connection of connections) {
+        connection.close();
+      }
+    }
+  });
+
+  it("evicts the oldest shape when one past the cap is recorded at a sequence", async () => {
+    const space = "did:key:z6Mk-eval-cache-cap";
+    const engine = await openEngine({
+      url: new URL("memory:///eval-cache-cap"),
+    });
+    const count = EVALUATION_CACHE_MAX_ENTRIES + 1;
+    applyCommit(engine, {
+      sessionId: "session:test",
+      invocation: {
+        iss: "did:key:test",
+        aud: "did:key:service",
+        cmd: "/memory/transact",
+        sub: space,
+      },
+      authorization: { proof: "ok" },
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: Array.from({ length: count }, (_, index) => ({
+          op: "set" as const,
+          id: `of:doc:${index + 1}`,
+          value: { value: { n: index + 1 } },
+        })),
+      },
+    });
+    const cache = createQueryEvaluationCache();
+    // One root per shape: every evaluation is a distinct, scope-pure
+    // entry weighing one entity.
+    const evaluate = (shape: number) =>
+      trackGraph(
+        space,
+        engine,
+        {
+          roots: [{
+            id: `of:doc:${shape}`,
+            selector: { path: [], schema: true },
+          }],
+        },
+        undefined,
+        { evaluationCache: cache },
+      );
+    for (let shape = 1; shape <= count; shape++) evaluate(shape);
+
+    // One shape past the cap at a single sequence: the newest recorded by
+    // displacing the oldest, so the cache stays full and current instead
+    // of freezing at whatever filled it first.
+    let diagnostics = queryEvaluationCacheDiagnostics(cache);
+    expect(diagnostics.misses).toBe(count);
+    expect(diagnostics.entries).toBe(EVALUATION_CACHE_MAX_ENTRIES);
+    expect(diagnostics.weight).toBe(EVALUATION_CACHE_MAX_ENTRIES);
+    expect(diagnostics.capEvictions).toBe(1);
+
+    // The newest shape serves; the displaced one re-walks, and recording
+    // it again displaces the next-oldest in turn — no more than that: the
+    // shape after it is still served.
+    expect(evaluate(count).stats.rootsVisited).toBe(0);
+    expect(evaluate(1).stats.rootsVisited).toBe(1);
+    expect(evaluate(3).stats.rootsVisited).toBe(0);
+    expect(evaluate(2).stats.rootsVisited).toBe(1);
+    diagnostics = queryEvaluationCacheDiagnostics(cache);
+    expect(diagnostics.hitsPure).toBe(2);
+    expect(diagnostics.misses).toBe(count + 2);
+    expect(diagnostics.capEvictions).toBe(3);
+    expect(diagnostics.entries).toBe(EVALUATION_CACHE_MAX_ENTRIES);
+    expect(diagnostics.weight).toBe(EVALUATION_CACHE_MAX_ENTRIES);
+  });
+
+  it("reports every cached space through the health provider", async () => {
+    const server = createServer("memory://eval-cache-provider", 64);
+    const spaces = [
+      "did:key:z6Mk-eval-provider-1",
+      "did:key:z6Mk-eval-provider-2",
+    ];
+    const connections: ReturnType<Server["connect"]>[] = [];
+    try {
+      for (const space of spaces) {
+        const messages: ServerMessage[] = [];
+        const connection = server.connect((message) => messages.push(message));
+        connections.push(connection);
+        const sessionId = await openSession(
+          connection,
+          messages,
+          space,
+          space.slice(-10),
+        );
+        await seedDocs(server, messages, space, sessionId, ["of:doc:1"]);
+        await watchAdd(
+          connection,
+          messages,
+          space,
+          sessionId,
+          space.slice(-10),
+          [{ id: "of:doc:1" }],
+        );
+      }
+      // The module-level provider (the health route's handle) reads the
+      // last-constructed server: every space it has evaluated in, each
+      // exactly as the per-space peek reports it, under the caches' total
+      // weight and the budget in force; a never-evaluated space is absent.
+      const report = getEvaluationCachesDiagnostics();
+      expect(report).toEqual(server.evaluationCachesDiagnostics());
+      expect(report?.budget).toBe(64);
+      expect(report?.weight).toBe(2);
+      expect(Object.keys(report!.spaces).toSorted()).toEqual(spaces);
+      for (const space of spaces) {
+        expect(report!.spaces[space]).toEqual(
+          server.evaluationCacheDiagnostics(space),
+        );
+        expect(report!.spaces[space].entries).toBe(1);
+        expect(report!.spaces[space].misses).toBe(1);
+      }
     } finally {
       for (const connection of connections) {
         connection.close();

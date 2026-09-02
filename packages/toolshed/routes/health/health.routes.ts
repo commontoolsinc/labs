@@ -50,6 +50,16 @@ export const stats = createRoute({
             }),
           ),
         }).optional(),
+        // The memory server's query evaluation caches
+        // (packages/memory/v2/query.ts `QueryEvaluationCacheDiagnostics`),
+        // keyed by space, with the caches' retained weight against the
+        // cross-space budget — present whenever a memory server is
+        // co-hosted in this process.
+        evaluationCaches: z.object({
+          budget: z.number(),
+          weight: z.number(),
+          spaces: z.record(z.string(), z.any()),
+        }).optional(),
         // The serving loop's counters (server-execution v2,
         // serving-loop.md §7) — present only while an ExecutorHost runs
         // in this process (the ON arm).

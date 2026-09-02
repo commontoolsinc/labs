@@ -371,6 +371,25 @@ process:
   while a corpus is being walked means its working set does not fit the
   budget, and every walk is paying decode and deep-freeze for it again — on
   the Topics board that was most of a second of server time per walk.
+- `evaluationCaches` — the memory server's query evaluation caches
+  (`QueryEvaluationCache` in `packages/memory/v2/query.ts`): one entry per
+  space the server has evaluated in, under the caches' retained `weight`
+  against the cross-space `budget`. Each space carries the cache's current
+  `seq`, its live `entries` split by share class (`entriesPure`,
+  `entriesAbsentResidue`, `entriesTainted`) and the lifetime counters for
+  what became of the evaluations it saw: `hits` (split as `hitsPure`,
+  `hitsAbsentResidue`, `hitsIdentity`), `misses`, `residueRefusals`,
+  `rotations` (a commit or engine change cleared it), `capEvictions` (a new
+  shape displaced the oldest at the entry cap) and `budgetEvictions` (the
+  weight budget removed it). Read it as a difference across one repeated
+  load at a constant `seq`. Hits rising on the repeat means watch
+  establishment is being served. Misses rising together with
+  `entriesTainted` means the entries are keyed to the (principal, session)
+  that recorded them — a page load is a new session, so a reload never
+  matches. A `rotations` step between the captures means a commit landed and
+  the comparison is void. An eviction counter rising means the load's
+  distinct shapes outnumber the cap or outweigh the budget, and which counter
+  moved says which.
 - `servingLoop` — the serving loop's counters
   ([`serving-loop.md` §7](../../specs/server-side-execution/serving-loop.md)),
   present only when this process serves. `settle.series` is a ready-made

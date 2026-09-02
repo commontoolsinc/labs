@@ -4,6 +4,7 @@ import type { AppRouteHandler } from "@/lib/types.ts";
 import type { DashRoute, IndexRoute, StatsRoute } from "./health.routes.ts";
 import {
   getDocumentCachesDiagnostics,
+  getEvaluationCachesDiagnostics,
   getPushPriorityStats,
   getSlowQueries,
 } from "@commonfabric/memory/v2/server";
@@ -57,6 +58,11 @@ export const stats: AppRouteHandler<StatsRoute> = (c) => {
   // whether a corpus's working set stays resident between the walks that
   // read it. Present whenever a memory server is co-hosted.
   const documentCaches = getDocumentCachesDiagnostics();
+  // The memory server's query evaluation caches, per space: whether the
+  // corpus's watch establishment is being served or re-walked, and why
+  // (hit class, taint, rotation, eviction). Present whenever a memory
+  // server is co-hosted — every serving toolshed, both arms.
+  const evaluationCaches = getEvaluationCachesDiagnostics();
   return c.json({
     timestamp: Date.now(),
     serverStart: serverStartTimestamp,
@@ -64,6 +70,7 @@ export const stats: AppRouteHandler<StatsRoute> = (c) => {
     timingStats: getTimingStatsBreakdown(),
     slowQueries: [...getSlowQueries()],
     ...(documentCaches === undefined ? {} : { documentCaches }),
+    ...(evaluationCaches === undefined ? {} : { evaluationCaches }),
     ...(servingLoop === undefined ? {} : {
       servingLoop: { ...servingLoop, ...(push === undefined ? {} : { push }) },
     }),

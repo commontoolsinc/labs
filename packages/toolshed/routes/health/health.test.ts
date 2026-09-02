@@ -98,4 +98,35 @@ Deno.test("health routes", async (t) => {
       }
     },
   );
+
+  await t.step(
+    "GET /api/health/stats reports the memory server's evaluation caches",
+    async () => {
+      // The provider is module-level and registered by the Server
+      // constructor (last registration wins), so a server constructed here
+      // stands in for the co-hosted one; it has evaluated nothing.
+      const server = new Server({
+        store: new URL("memory://health-stats-test"),
+        authorizeSessionOpen: () => "did:key:z6Mk-health-stats-principal",
+        sessionOpenAuth: { audience: "did:key:z6Mk-health-stats-audience" },
+      });
+      try {
+        const response = await app.request("/api/health/stats");
+        assertEquals(response.status, 200);
+
+        const json = await response.json();
+        assertEquals(typeof json.serverStart, "number");
+        assertEquals(Array.isArray(json.slowQueries), true);
+        assertEquals(
+          json.evaluationCaches,
+          server.evaluationCachesDiagnostics(),
+        );
+        assertEquals(typeof json.evaluationCaches.budget, "number");
+        assertEquals(json.evaluationCaches.weight, 0);
+        assertEquals(json.evaluationCaches.spaces, {});
+      } finally {
+        await server.close();
+      }
+    },
+  );
 });

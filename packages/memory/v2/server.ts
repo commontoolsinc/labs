@@ -432,6 +432,24 @@ export const getDocumentCachesDiagnostics = ():
   | DocumentCachesDiagnostics
   | undefined => documentCachesDiagnosticsProviders.at(-1)?.();
 
+/** Every cached space's evaluation-cache counters, with the caches' total
+ * retained weight against the cross-space budget. */
+export type EvaluationCachesDiagnostics = {
+  budget: number;
+  weight: number;
+  spaces: Record<string, QueryEvaluationCacheDiagnostics>;
+};
+
+let evaluationCachesDiagnosticsProvider:
+  | (() => EvaluationCachesDiagnostics)
+  | undefined;
+
+/** The co-hosted memory server's evaluation-cache counters for the health
+ * route; undefined when no server has been constructed in this process. */
+export const getEvaluationCachesDiagnostics = ():
+  | EvaluationCachesDiagnostics
+  | undefined => evaluationCachesDiagnosticsProvider?.();
+
 const randomHex = (bytes: number): string => {
   const data = crypto.getRandomValues(new Uint8Array(bytes));
   return [...data].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -1608,6 +1626,8 @@ export class Server {
     documentCachesDiagnosticsProviders.push(
       this.#documentCachesDiagnosticsProvider,
     );
+    evaluationCachesDiagnosticsProvider = () =>
+      this.evaluationCachesDiagnostics();
   }
 
   /** This server's health-route providers, kept so close() can withdraw
@@ -4701,6 +4721,7 @@ export class Server {
         const entry = cache.entries.get(oldestEntry)!;
         cache.entries.delete(oldestEntry);
         cache.weight -= entry.weight;
+        cache.budgetEvictions++;
         total -= entry.weight;
       }
       if (total <= budget) return;
@@ -4717,6 +4738,27 @@ export class Server {
     return queryEvaluationCacheDiagnostics(
       cache ?? createQueryEvaluationCache(),
     );
+  }
+
+  /** Every cached space's counters and the caches' total retained weight
+   * against the budget — the health route's view. A peek like the
+   * per-space form: nothing is created or recency-bumped. A space lists
+   * for as long as its cache object lives (its counters outlive rotation,
+   * which clears entries only), and disappears once the space bound or a
+   * budget pass drops the cache itself. */
+  evaluationCachesDiagnostics(): EvaluationCachesDiagnostics {
+    const spaces: Record<string, QueryEvaluationCacheDiagnostics> = {};
+    let weight = 0;
+    for (const [space, cache] of this.#queryEvaluationCaches) {
+      spaces[space] = queryEvaluationCacheDiagnostics(cache);
+      weight += cache.weight;
+    }
+    return {
+      budget: this.options.queryEvaluationCacheBudget ??
+        QUERY_EVALUATION_CACHE_BUDGET,
+      weight,
+      spaces,
+    };
   }
 
   async evaluateGraphQuery(
