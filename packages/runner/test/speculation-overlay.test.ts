@@ -2320,6 +2320,140 @@ describe("Phase 2 speculation overlay", () => {
     }
   });
 
+  it("a piece-start instantiation still consumes a DURABLE in-flight layer: the mark excludes speculation, not everything pending (speculation.md §6)", async () => {
+    // The reverse pin of the case above, and the one that catches the
+    // wrong implementation of it. The durable-read mark must skip the
+    // process-local speculation layers and nothing else: a durable
+    // sealed layer is a real write on its way to the store, its localSeq
+    // is nameable in a commit basis, and an instantiation that stopped
+    // consuming it would build the graph from a value the store is
+    // already past. Written as "skip every pending layer" the case above
+    // still passes and this one reads 1.
+    //
+    // The two seals differ in exactly one token — the `speculative`
+    // option — so the values the two tests expect are what separates the
+    // two layer classes.
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+
+    const shared = clientRuntime.getCell<{ n: number }>(
+      space,
+      "piece-start-durable-input",
+      undefined,
+    );
+    await shared.sync();
+    {
+      const seed = clientRuntime.edit();
+      shared.withTx(seed).set({ n: 1 });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+
+    let instantiations = 0;
+    const readPerInstantiation: unknown[] = [];
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {
+        type: "object",
+        properties: { witness: { type: "number" } },
+      },
+      result: {},
+      nodes: [{
+        module: {
+          type: "raw",
+          implementation: (...args: unknown[]) => {
+            const parentCell = args[4] as Cell<Record<string, unknown>>;
+            instantiations += 1;
+            readPerInstantiation.push(
+              shared.withTx(parentCell.tx).key("n").get(),
+            );
+            parentCell.key("witness").set(instantiations);
+            return { action: () => {} };
+          },
+        } as Module,
+        inputs: {},
+        outputs: {},
+      }],
+    };
+
+    const witness = clientRuntime.getCell<Record<string, unknown>>(
+      space,
+      "piece-start-durable-witness",
+      undefined,
+    );
+    {
+      const tx = clientRuntime.edit();
+      const running = clientRuntime.runner.run(
+        tx,
+        pattern,
+        {},
+        witness.withTx(tx),
+      );
+      expect((await tx.commit()).error).toBeUndefined();
+      await running.pull();
+    }
+    await clientRuntime.storageManager.synced();
+    expect(instantiations).toBe(1);
+    expect(readPerInstantiation[0]).toBe(1);
+    clientRuntime.runner.stop(witness);
+
+    // A DURABLE sealed layer: the same shape as the speculative one
+    // above without the `speculative` option, so it is a write bound for
+    // the store whose verdict has not landed yet.
+    const replica = clientManager.open(space).replica;
+    const sharedLink = shared.getAsNormalizedFullLink();
+    const durableDoc = replica.getDocument(sharedLink.id, sharedLink.scope);
+    const verdict = Promise.withResolvers<SealedCommitVerdict>();
+    const sealed = replica.sealNative!(
+      {
+        operations: [{
+          op: "set",
+          id: sharedLink.id,
+          type: "application/json",
+          value: {
+            ...(durableDoc as Record<string, unknown>),
+            value: { n: 42 },
+          },
+        }],
+      },
+      undefined,
+      verdict.promise,
+    );
+    expect(shared.get()).toEqual({ n: 42 });
+
+    const refusals: unknown[] = [];
+    clientRuntime.pieceStartCommitFailureObserver = ({ error }) => {
+      refusals.push(error);
+    };
+    try {
+      expect(await clientRuntime.start(witness)).toBe(true);
+      await clientRuntime.idle();
+
+      // The layer is durable, so the instantiation consumed it.
+      expect(instantiations).toBe(2);
+      expect(readPerInstantiation[1]).toBe(42);
+      // And naming it is legitimate: whatever this commit's fate, it is
+      // never the terminal refusal a speculative basis earns. Its fate
+      // rides the seal's undischarged verdict, which is why the outcome
+      // itself is not asserted here.
+      await clientRuntime.runner.idlePieceInstantiationSettlements();
+      expect(
+        refusals.filter((error) =>
+          isTerminalRejection(error as { name?: string })
+        ),
+      ).toEqual([]);
+    } finally {
+      verdict.resolve({ withdrawn: { message: "test complete" } });
+      await sealed.settled.catch(() => {});
+    }
+  });
+
   it("under a standing overlay layer whose writes include /cfc, a blind-write tx's verifier-shaped read sees the DURABLE doc while an ordinary read sees the overlay — verify-durable and name-durable travel together (RULED 2026-08-21)", async () => {
     // The consistency pin for the ruled arm (b): the value the
     // verifier consumes must match the basis named for it. The echo
