@@ -828,6 +828,36 @@ describe("cf piece CFC labels", () => {
     }]);
   });
 
+  it("set-label preserves the class the WRITE will land beside", async () => {
+    // The write resolves the links the path crosses, so this update lands in
+    // the row doc beside its `observes: "value"` entry. Addressed through the
+    // crossing path it must do what it does addressed at the row itself:
+    // preserve the class, and return the label it wrote.
+    const { row, chainDeps } = await buildCrossingChain("cf-piece-label-set");
+
+    const updated = await setCellCfcLabel(
+      pieceConfig,
+      ["q", "result", 0, "shouted"],
+      { confidentiality: ["finance", "team"] },
+      {},
+      chainDeps as never,
+    );
+
+    expect(updated?.entries).toEqual([
+      {
+        path: [],
+        label: { confidentiality: ["finance", "team"] },
+        observes: "value",
+      },
+    ]);
+    await row.pull();
+    const stored = cfcLabelViewForCell(row)?.entries.find((entry) =>
+      entry.path[0] === "shouted"
+    );
+    expect(stored?.observes).toBe("value");
+    expect(stored?.label.confidentiality).toEqual(["finance", "team"]);
+  });
+
   it("documents JSON input and output on both commands", async () => {
     const getHelp = await cf("cell get-label --help");
     expect(getHelp.code).toBe(0);

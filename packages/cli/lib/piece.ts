@@ -4528,7 +4528,16 @@ export async function setCellCfcLabel(
     await (options.input ? piece.input.getCell() : piece.result.getCell());
   const targetCell = rootCell.key(...path);
   await targetCell.pull();
-  const currentView = cfcLabelViewForCommand(targetCell, path);
+  // Resolved, because the WRITE below is. `applyCfcSchemaToExistingValue`
+  // resolves through the links the path crosses, so a declared update at
+  // `q/result/0/secret` lands in the ROW doc. Reading the guard's "what
+  // classes already exist here" question against the unresolved doc asked it
+  // about a doc the write never touches: the row doc's `observes` was invisible
+  // to it, so the update silently REPLACED a value-class entry with a
+  // class-less one, and the command returned null while having written a label.
+  const currentView = cfcLabelViewForCommand(targetCell, path, {
+    resolveLinks: true,
+  });
   const value = targetCell.getRaw();
   if (value === undefined) {
     const location = path.length === 0 ? "<root>" : path.join("/");
@@ -4603,7 +4612,7 @@ export async function setCellCfcLabel(
   await pieces.synced();
 
   noteWroteTo(config.space);
-  return cfcLabelViewForCommand(targetCell, path);
+  return cfcLabelViewForCommand(targetCell, path, { resolveLinks: true });
 }
 
 export async function getCellValue(
