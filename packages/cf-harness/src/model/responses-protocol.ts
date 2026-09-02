@@ -10,6 +10,10 @@ import type {
   HarnessTranscriptMessage,
 } from "../contracts/transcript.ts";
 import { materializeImageAttachmentContentPart } from "../image-attachments.ts";
+import {
+  describeProviderError,
+  providerErrorFromPayload,
+} from "./provider-error.ts";
 
 /**
  * Shared OpenAI Responses API wire mapping.
@@ -334,18 +338,38 @@ export const addFirstUserPromptCacheBreakpoint = (
   );
 };
 
+/**
+ * The message for a terminal response whose status says the provider did not
+ * finish — `failed`, `incomplete`, or `cancelled` — carrying the provider's
+ * stated reason when the response has one, or `undefined` for any other
+ * status.
+ */
+export const describeTerminalFailure = (
+  response: Record<string, unknown>,
+  label: string,
+): string | undefined => {
+  const status = response.status;
+  if (
+    status !== "incomplete" && status !== "failed" && status !== "cancelled"
+  ) {
+    return undefined;
+  }
+  const providerError = providerErrorFromPayload(response);
+  return `${label} ended with status ${status}` +
+    (providerError === undefined
+      ? ""
+      : `: ${describeProviderError(providerError)}`);
+};
+
 export const normalizeTerminalResponse = (
   response: Record<string, unknown>,
   sourceModel: string,
   providerId: string,
   label: string,
 ): HarnessAssistantTranscriptMessage => {
+  const failure = describeTerminalFailure(response, label);
+  if (failure !== undefined) throw new Error(failure);
   const status = response.status;
-  if (
-    status === "incomplete" || status === "failed" || status === "cancelled"
-  ) {
-    throw new Error(`${label} ended with status ${String(status)}`);
-  }
   if (status !== "completed") {
     throw new Error(`${label} terminal event has an unknown status`);
   }

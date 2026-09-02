@@ -81,7 +81,7 @@ describe("model-attempt-duration", () => {
       const client = new OpenAICompatibleGatewayClient({
         baseUrl: "https://llm.stage.commontools.dev/",
         apiKey: "test-key",
-        chatCompletionTransportRetries: 0,
+        transportRetries: 0,
         monotonicNowMs: scriptedClock([1_000, 1_040]),
         fetchFn: () => Promise.reject(new Error("connection reset")),
       });
@@ -153,6 +153,7 @@ describe("model-attempt-duration", () => {
     it("ends `responseCompleteDurationMs` at the terminal stream event", async () => {
       const attempts: HarnessModelAttemptDiagnostic[] = [];
       const client = new OpenAICodexResponsesClient({
+        transportRetries: 0,
         credentialResolver: { resolve: () => Promise.resolve(credential) },
         monotonicNowMs: scriptedClock([1_000, 1_012, 1_900]),
         fetchFn: () =>
@@ -191,6 +192,7 @@ describe("model-attempt-duration", () => {
     it("records one attempt for a stream that ends without a terminal event", async () => {
       const attempts: HarnessModelAttemptDiagnostic[] = [];
       const client = new OpenAICodexResponsesClient({
+        transportRetries: 0,
         credentialResolver: { resolve: () => Promise.resolve(credential) },
         monotonicNowMs: scriptedClock([1_000, 1_012, 1_500]),
         fetchFn: () =>
@@ -215,6 +217,7 @@ describe("model-attempt-duration", () => {
     it("ends both durations at the failure for a transport error", async () => {
       const attempts: HarnessModelAttemptDiagnostic[] = [];
       const client = new OpenAICodexResponsesClient({
+        transportRetries: 0,
         credentialResolver: { resolve: () => Promise.resolve(credential) },
         monotonicNowMs: scriptedClock([1_000, 1_055]),
         fetchFn: () => Promise.reject(new Error("connection reset")),
@@ -240,6 +243,7 @@ describe("model-attempt-duration", () => {
     it("throws the abort reason for an abort landing while the attempt is emitted", async () => {
       const controller = new AbortController();
       const client = new OpenAICodexResponsesClient({
+        transportRetries: 0,
         credentialResolver: { resolve: () => Promise.resolve(credential) },
         monotonicNowMs: scriptedClock([1_000, 1_012, 1_900]),
         fetchFn: () =>

@@ -72,8 +72,15 @@ expose token material, account identifiers, expiry, or raw responses.
   explicit breakpoints are available only through the compatible API gateway.
 - Tool continuation retains both the public call id and provider function-item
   id, so the corresponding `function_call_output` remains paired after resume.
-- The first transport is SSE. WebSockets, transparent retries, endpoint probing,
-  and client-id fallback are not implemented.
+- The first transport is SSE. WebSockets, endpoint probing, and client-id
+  fallback are not implemented.
+- A transient failure — a transport error, a `429` or `5xx` status, an in-stream
+  `error` event or `response.failed` terminal whose type or code names overload,
+  rate limiting, or a server fault — is issued again under the bounded backoff
+  described in the package README under "Model attempts and transport retry".
+  The provider's stated `type`, `code`, and `message` are recorded on the
+  attempt and carried in the failure the turn ends with. A stream that delivered
+  a tool call before failing is not issued again.
 
 Provider-scoped model discovery uses only
 `https://chatgpt.com/backend-api/codex/models?client_version=0.0.0`. It sends
