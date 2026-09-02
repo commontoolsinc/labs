@@ -57,6 +57,20 @@ cf piece verbs --cell "$TOPICS_BOARD" --json
 cf call --cell "$TOPICS_BOARD" addTopic --help --json
 ```
 
+The deployment can be well behind the checkout the CLI runs from, and that gap
+explains board behavior that would otherwise read as a defect. Ask it which
+commit it serves before recording one:
+
+```bash
+curl -fsS "$CF_API_URL/api/meta" | jq -r .gitSha
+```
+
+Resolve that in the repository — `git log --oneline -1 <sha>`, and
+`git rev-list --count <sha>..upstream/main` for the distance — before concluding
+anything from a verb that behaves unlike the source in front of you. A gap of
+dozens of commits is ordinary, so which source is running is the first question,
+not the last.
+
 Repeat `describe`, `verbs`, and `call <verb> --help --json` after selecting a
 Topic. `piece verbs` lists contract verbs by default; `--all` additionally shows
 UI wrappers and deprecated verbs. The board's published Topic rows deliberately
@@ -111,6 +125,15 @@ compose directly into later commands. The space prefix appears only when the
 reference's space differs from the command's target space, so never reconstruct
 or edit the emitted address.
 
+That rule is about writing an address. Reading one has a counterpart: a Topic
+answers to more than one address, so two that differ as strings can name the
+same Topic. The `$link` a `mention` edge carries is not the string the board
+index hands out for the Topic it points at. Resolve each address and compare
+what comes back rather than comparing the addresses, and compare on something a
+separate document would not share — `createdAt`, or the comment thread — since a
+title alone can be duplicated. An address you do not recognise on an edge is not
+evidence the edge is wrong.
+
 Read one Topic's durable input before changing it:
 
 ```bash
@@ -151,12 +174,20 @@ When the result is present, carry `TOPIC` into the next command. Use JSON
 encoding or schema-derived flags for multiline Markdown; do not interpolate
 unescaped content into JSON.
 
-Current Estuary calls have a known observation asymmetry: `addTopic` has both
-reported an error after committing and reported success without committing.
-Treat every call envelope as an observation, not proof of durable state. Read
-back after every mutation. For `addTopic`, use a distinctive title and compare
-the narrow board index before and after the call; if the result is uncertain,
-recover its `$link` there rather than blindly creating another Topic.
+Current Estuary calls have a known observation asymmetry. `addTopic` has
+reported an error after committing and has reported success without committing.
+A call can also answer nothing at all: `addTopic` and `addLink` have each hung
+past a ten-minute client timeout and committed, and an `addTopic` has hung the
+same way and not committed. A timeout therefore settles nothing in either
+direction, and none of this is particular to `addTopic` — take it as the
+behavior of every authored-content verb.
+
+So treat every call envelope, and every absence of one, as an observation rather
+than proof of durable state, and read back after every mutation. For `addTopic`,
+use a distinctive title and compare the narrow board index before and after the
+call; if the result is uncertain, recover its `$link` there rather than blindly
+creating another Topic. Retrying on the strength of a timeout is how one Topic
+becomes two.
 
 ```bash
 cf get "$TOPICS_BOARD" index --step --select @,title
