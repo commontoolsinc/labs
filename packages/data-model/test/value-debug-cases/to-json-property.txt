@@ -8,3 +8,9 @@
     throw new Error("nope");
   },
 }
+
+{
+  toJSON: function toJSON(...) {...}
+}
+
+{toJSON:function toJSON(...) {...}}
