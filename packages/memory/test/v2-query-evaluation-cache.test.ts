@@ -696,6 +696,25 @@ describe("v2 query evaluation cache", () => {
     expect(classifyStateScope(state)).toEqual({ kind: "tainted" });
   });
 
+  it("classifies a scoped lazy registration as tainted", () => {
+    // A crossing's manifest can register a scoped instance without
+    // loading it or entering it in the tracker; its promotion would read
+    // and deliver that identity's instance, so the state is that
+    // identity's, not shareable.
+    const state = {
+      branch: "",
+      tracker: new Map(),
+      missed: new Map(),
+      missedBy: new Map(),
+      missesOf: new Map(),
+      lazy: new Set(["did:key:z6Mk-space/session:p:s/of:doc:lazy"]),
+      entities: new Map(),
+      memo: new Map(),
+      manager: { loadedAddresses: () => [] },
+    } as unknown as TrackedGraphState;
+    expect(classifyStateScope(state)).toEqual({ kind: "tainted" });
+  });
+
   it("reads a never-evaluated space's diagnostics as empty", () => {
     const server = createServer("memory://eval-cache-absent-diagnostics");
     const diagnostics = server.evaluationCacheDiagnostics(

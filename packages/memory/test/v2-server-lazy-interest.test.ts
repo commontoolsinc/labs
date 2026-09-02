@@ -321,4 +321,192 @@ describe("v2-server-lazy-interest", () => {
     // ...and the swap still reached the demand pass.
     expect(reasons).toContain("push-growth");
   });
+  it("registers a promoted document's own derived cells lazily in turn", async () => {
+    // A crossing's manifest registers its derived cell; the cell's own
+    // manifest names a further cell. Registration reads nothing, so that
+    // deeper cell is not interest yet — until the first cell's commit
+    // promotes it, when its manifest is sunk exactly as the crossing's was,
+    // and the subscription's reach grows one commit at a time.
+
+    const space = "did:key:z6Mk-memory-v2-lazy-chain";
+    const sessionId = await openSession(space);
+    const seeded = await server.transact(
+      transactMessage(space, sessionId, {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: "of:deeper-cell", value: { value: { n: 1 } } },
+          {
+            op: "set",
+            id: "of:derived-cell",
+            value: {
+              value: { n: 1 },
+              internal: [{ link: link(space, "of:deeper-cell") }],
+            },
+          },
+          {
+            op: "set",
+            id: "of:crossing",
+            value: {
+              value: { name: "crossing" },
+              internal: [{ link: link(space, "of:derived-cell") }],
+            },
+          },
+          {
+            op: "set",
+            id: "of:root",
+            value: { value: { child: link(space, "of:crossing") } },
+          },
+        ],
+      }),
+    );
+    expect(seeded.error).toBeUndefined();
+
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.watch.add",
+      requestId: "watch",
+      space,
+      sessionId,
+      watches: [{
+        id: "lazy-chain-watch",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:root",
+            selector: {
+              path: [],
+              schema: {
+                type: "object",
+                properties: {
+                  child: {
+                    type: "object",
+                    properties: { name: { type: "string" } },
+                  },
+                },
+              },
+            },
+          }],
+        },
+      }],
+    }));
+
+    const derivedKey = toDirtyKey("of:derived-cell");
+    const deeperKey = toDirtyKey("of:deeper-cell");
+    // The crossing registered its cell; the cell's own manifest was not
+    // read, so the deeper cell is not interest.
+    expect(server.sessionTracksAny(space, sessionId, new Set([derivedKey])))
+      .toBe(true);
+    expect(server.sessionTracksAny(space, sessionId, new Set([deeperKey])))
+      .toBe(false);
+
+    // A commit to the registered cell promotes it: delivered, and its own
+    // manifest registers the deeper cell.
+    const arrived = nextMessage();
+    const promoted = await server.transact(
+      transactMessage(space, sessionId, {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:derived-cell",
+          value: {
+            value: { n: 2 },
+            internal: [{ link: link(space, "of:deeper-cell") }],
+          },
+        }],
+      }),
+    );
+    expect(promoted.error).toBeUndefined();
+    await arrived;
+    expect(server.sessionTracksAny(space, sessionId, new Set([deeperKey])))
+      .toBe(true);
+  });
+  it("keeps a registered cell lazy through its deletion", async () => {
+    // Promotion needs a deliverable snapshot. A commit that deletes a
+    // registered cell touches it, but there is nothing to deliver, so the
+    // registration stays — still wake interest, so the recreation that
+    // follows can promote it — and no frame carries the deleted cell.
+
+    const space = "did:key:z6Mk-memory-v2-lazy-deleted";
+    const sessionId = await openSession(space);
+    const seeded = await server.transact(
+      transactMessage(space, sessionId, {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: "of:derived-cell", value: { value: { n: 1 } } },
+          {
+            op: "set",
+            id: "of:crossing",
+            value: {
+              value: { name: "crossing" },
+              internal: [{ link: link(space, "of:derived-cell") }],
+            },
+          },
+          {
+            op: "set",
+            id: "of:root",
+            value: { value: { child: link(space, "of:crossing") } },
+          },
+        ],
+      }),
+    );
+    expect(seeded.error).toBeUndefined();
+
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.watch.add",
+      requestId: "watch",
+      space,
+      sessionId,
+      watches: [{
+        id: "lazy-deleted-watch",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:root",
+            selector: {
+              path: [],
+              schema: {
+                type: "object",
+                properties: {
+                  child: {
+                    type: "object",
+                    properties: { name: { type: "string" } },
+                  },
+                },
+              },
+            },
+          }],
+        },
+      }],
+    }));
+    const cellKey = toDirtyKey("of:derived-cell");
+    expect(
+      server.sessionTracksAny(space, sessionId, new Set([cellKey])),
+      "registered after the watch",
+    ).toBe(true);
+
+    // Deleting the registered cell touches it, but nothing is deliverable:
+    // the registration stays, and no frame carries the cell.
+    const deletedArrived = nextMessage();
+    const framesBeforeDelete = messages.length;
+    const deleted = await server.transact(
+      transactMessage(space, sessionId, {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "delete", id: "of:derived-cell" }],
+      }),
+    );
+    expect(deleted.error).toBeUndefined();
+    await deletedArrived;
+    expect(
+      server.sessionTracksAny(space, sessionId, new Set([cellKey])),
+      "still interest after the deletion",
+    ).toBe(true);
+    expect(
+      JSON.stringify(messages.slice(framesBeforeDelete)).includes(
+        '"id":"of:derived-cell"',
+      ),
+    ).toBe(false);
+  });
 });
