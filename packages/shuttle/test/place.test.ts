@@ -12,6 +12,24 @@
  * `#name` wish target, and a reference naming its space by name — since
  * settling either needs a connection to resolve against. Their cases pin what
  * gets handed on, and that the place did not move.
+ *
+ * A refusal's text is pinned whole, and three of them are somebody else's
+ * words. Shuttle consumes the reference grammar rather than forking it, so a
+ * rooted operand's diagnostics come from that layer and reach the reader
+ * unaltered — the space-mismatch sentence and the unknown-suffix sentence
+ * from `normalizeLLMFriendlyRef`, and the no-piece-handle sentence from
+ * `parseReferenceParts`. Each is marked at its case as relayed. When one
+ * moves upstream, the fix is to copy the new sentence here, never to match a
+ * fragment of it: the whole sentence is what pins that the diagnostic arrives
+ * intact, and a substring would let a rewording through that says something
+ * else. Other diagnostics from that layer reach a reader without a case
+ * here — a bad space segment, a piece segment that is neither slug nor
+ * handle, a bad scope suffix on a reference — and pinning three of them is
+ * enough to hold the relay itself, since all of them travel the same path.
+ *
+ * Every other refusal in this file is shuttle's own, and two of those
+ * deliberately mirror the canonical wording so the two surfaces read as one
+ * — those move by choice rather than by upstream drift.
  */
 
 import { expect } from "@std/expect";
@@ -560,6 +578,9 @@ describe("place", () => {
           });
 
           it("refuses a complete reference naming another space", () => {
+            // Relayed: the canonical layer's sentence, not shuttle's
+            // to choose. See the file header.
+
             expect(atSpaceRoot().cd(`/@${OTHER_SPACE}/${HANDLE}`)).toEqual({
               kind: "refused",
               reason: `Reference names space "${OTHER_SPACE}" but the ` +
@@ -595,12 +616,15 @@ describe("place", () => {
           });
 
           it("refuses a reference carrying any other fragment", () => {
+            // Relayed: the canonical layer's sentence, not shuttle's
+            // to choose. See the file header.
+
             const move = atSpaceRoot().cd(`/${HANDLE}#result`);
             expect(move).toEqual({
               kind: "refused",
-              reason: 'Unknown reference suffix "#result". The one supported ' +
-                'suffix is "#argument", which selects the piece\'s arguments ' +
-                'cell the way "--input" does.',
+              reason: 'Unknown suffix "#result". The one supported suffix ' +
+                'is "#argument", which selects the piece\'s arguments cell ' +
+                'the way "--input" does.',
             });
           });
 
@@ -675,6 +699,9 @@ describe("place", () => {
           });
 
           it("refuses a rooted string that names no piece", () => {
+            // Relayed: the canonical layer's sentence, not shuttle's
+            // to choose. See the file header.
+
             expect(atSpaceRoot().cd("//")).toEqual({
               kind: "refused",
               reason:
