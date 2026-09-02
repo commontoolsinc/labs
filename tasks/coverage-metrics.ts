@@ -112,11 +112,15 @@ export async function collectCoverageDebtMetricsFromLcov(
 
 /**
  * Helper for `collectCoverageDebtMetricsFromLcov()`, which returns the debt
- * charged to a file the report has no record for. Two different things produce
- * a missing record, and they owe different amounts.
+ * charged to a file the report has no record for. Three different things
+ * produce a missing record, and they owe different amounts.
  *
  * A file no test ever loaded owes every tracked line: that is the case this
  * rule exists to catch.
+ *
+ * A file that opted out of coverage owes nothing. Deno leaves such a file out
+ * of the report whether or not a test loaded it, so its absence says nothing
+ * about what ran; see `isCoverageIgnoredFile()`.
  *
  * A file that compiles to no executable code — one holding only interfaces,
  * type aliases, or other declarations — owes nothing. It has no statement a
@@ -127,9 +131,21 @@ export async function collectCoverageDebtMetricsFromLcov(
  */
 async function debtWithoutCoverageRecord(source: SourceFile): Promise<number> {
   const content = await Deno.readTextFile(source.absolutePath);
+  if (isCoverageIgnoredFile(content)) return 0;
   return hasExecutableCode(content, source.absolutePath)
     ? source.trackedLineCount
     : 0;
+}
+
+/**
+ * Returns whether `content` opts its file out of coverage, which a
+ * `// deno-coverage-ignore-file` comment on the file's first line does. That
+ * is the line Deno reads it from: the same comment anywhere later leaves the
+ * file in the report, and so leaves it charged here.
+ */
+export function isCoverageIgnoredFile(content: string): boolean {
+  const [firstLine] = content.split("\n", 1);
+  return firstLine.trim() === "// deno-coverage-ignore-file";
 }
 
 /**
@@ -160,8 +176,8 @@ export async function collectUncoveredLinesForFiles(
       uncoveredLines = uncoveredProfileLineNumbers(coverage);
     } else {
       // No coverage record: either no test loaded the file, in which case every
-      // tracked line is uncovered, or it compiles to no executable code, in
-      // which case none of its lines can be covered (see
+      // tracked line is uncovered, or it opted out of coverage or compiles to
+      // no executable code, in which case none of its lines counts (see
       // debtWithoutCoverageRecord).
       let content: string;
       try {
@@ -173,7 +189,8 @@ export async function collectUncoveredLinesForFiles(
         if (error instanceof Deno.errors.NotFound) continue;
         throw error;
       }
-      uncoveredLines = hasExecutableCode(content, absolutePath)
+      uncoveredLines = !isCoverageIgnoredFile(content) &&
+          hasExecutableCode(content, absolutePath)
         ? trackedSourceLineNumbers(content)
         : [];
     }

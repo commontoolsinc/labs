@@ -218,6 +218,70 @@ Deno.test("a file that compiles to nothing carries no debt", async () => {
   }
 });
 
+Deno.test("a file that opts out of coverage carries no debt", async () => {
+  const rootDir = await Deno.makeTempDir({ prefix: "coverage-ignore-test-" });
+  try {
+    const writeSourceFile = async (relativePath: string, content: string) => {
+      const fullPath = path.join(rootDir, ...relativePath.split("/"));
+      await Deno.mkdir(path.dirname(fullPath), { recursive: true });
+      await Deno.writeTextFile(fullPath, content);
+    };
+
+    // Opted out on the first line, which is where Deno reads the comment: no
+    // test loaded it, and it owes nothing.
+    await writeSourceFile(
+      "packages/example/src/browser-only.js",
+      [
+        "// deno-coverage-ignore-file",
+        "// @ts-check",
+        "export function browserOnly() {",
+        "  return 1;",
+        "}",
+      ].join("\n"),
+    );
+    // The same comment on any later line is one Deno does not read, so the
+    // file stays charged in full, as it would stay in Deno's report.
+    await writeSourceFile(
+      "packages/example/src/late-comment.ts",
+      [
+        "// @ts-check",
+        "// deno-coverage-ignore-file",
+        "export function late() {",
+        "  return 1;",
+        "}",
+      ].join("\n"),
+    );
+
+    const metrics = await collectCoverageDebtMetricsFromLcov({
+      rootDir,
+      lcov: "",
+    });
+
+    // Comment lines are not tracked, so the charged file owes its three lines
+    // of code.
+    expect(
+      metrics.find((metric) =>
+        metric.name === "coverage-debt: packages/example uncovered lines"
+      )?.uncoveredLines,
+    ).toBe(3);
+
+    const uncovered = await collectUncoveredLinesForFiles({
+      rootDir,
+      lcov: "",
+      files: [
+        "packages/example/src/browser-only.js",
+        "packages/example/src/late-comment.ts",
+      ],
+    });
+    expect(uncovered.has("packages/example/src/browser-only.js")).toBe(false);
+    expect(uncovered.get("packages/example/src/late-comment.ts")?.length).toBe(
+      3,
+    );
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
+});
+
 Deno.test("integration pattern coverage feeds the debt metric", async () => {
   const rootDir = await Deno.makeTempDir({ prefix: "coverage-fold-test-" });
   try {
