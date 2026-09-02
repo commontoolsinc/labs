@@ -8,8 +8,9 @@
  *
  * The expression is evaluated with every `FabricInstance` and
  * `FabricPrimitive` class in scope under its own name, along with the three
- * abstract base classes and the codec-binding symbols, so that a case can
- * define a class of its own; nothing else beyond the language is in scope.
+ * abstract base classes and the realm codec's binding symbol, so that a case
+ * can define a class of its own; nothing else beyond the language is in
+ * scope.
  *
  * To rewrite each file's recorded renderings from the actual ones, run this
  * from the package directory:
@@ -23,7 +24,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { JSON_CODEC, REALM_CODEC } from "@/codec-interface/interface.ts";
+import { REALM_CODEC } from "@/codec-interface/interface.ts";
 import * as fabricInstances from "@/fabric-instances/index.ts";
 import * as fabricPrimitives from "@/fabric-primitives/index.ts";
 import {
@@ -61,7 +62,6 @@ const SCOPE: Record<string, unknown> = Object.fromEntries([
     FabricInstance,
     FabricPrimitive,
     FabricSpecialObject,
-    JSON_CODEC,
     REALM_CODEC,
   }),
 ]);
