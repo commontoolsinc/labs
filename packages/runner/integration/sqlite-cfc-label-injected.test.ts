@@ -9,9 +9,9 @@
  * `sqliteDatabase({ tables })` and hand it straight to `db.query`. This one
  * takes the operator's path instead: the handle is a raw `{ id, tables, rev }`
  * write at the id `deriveDiskHandleId` derives, the file is registered with the
- * server, and the handle is linked into the piece's `db` ARGUMENT — so the
- * contract reaches the builtin through an argument whose schema is the opaque
- * `SqliteDb` brand. The pattern never names the file.
+ * server, and the handle arrives as the piece's `db` ARGUMENT — so the contract
+ * reaches the builtin through an argument whose schema is the opaque `SqliteDb`
+ * brand. The pattern never names the file.
  *
  * Both label arms are covered, because they fail independently: an aliased
  * column read carries its origin column's declared confidentiality, and an

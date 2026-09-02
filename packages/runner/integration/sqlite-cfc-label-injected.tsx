@@ -3,8 +3,13 @@ import { pattern, type SqliteDb } from "commonfabric";
 // FIXTURE (integration): the database is an INPUT, not a `sqliteDatabase()`
 // call in the pattern body. An operator wires an injected on-disk source
 // (03.3) into `db` from outside, so the query's handle reaches the builtin
-// through the pattern's ARGUMENT link — the path a piece takes after
-// `cf piece link sqlite:<path> <piece>/db`. The pattern never names the file.
+// through the pattern's ARGUMENT link. The pattern never names the file.
+//
+// The test writes that argument itself rather than through the pieces
+// controller `cf piece link sqlite:` drives. What the builtin reads is the
+// same either way: the link the controller writes carries no schema (a
+// schemaless handle resolves to `schema === undefined`, and the emitted link
+// embeds none), so neither route can project the handle's `tables` away.
 //
 // Two projections, because they label through different arms of
 // `labelResultSchema`: an aliased column read carries its origin column's
