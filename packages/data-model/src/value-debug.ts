@@ -395,6 +395,7 @@ class DebugStringifier {
       return DebugStringifier.#renderElidedInstance(classNameOf(value));
     }
 
+    // Trim off the encoding version number.
     const open = `/${tag.replace(/@.*$/, "")}(`;
     const realm = (v: unknown, i: string) => this.#renderRealmState(v, i);
 
