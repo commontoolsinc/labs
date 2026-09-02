@@ -1783,11 +1783,24 @@ function dedupeNormalizedLinks(
   return deduped;
 }
 
+/**
+ * A started piece's registration: the cancel that retires it, carrying
+ * whether the pattern graph it was installed with is still there. The
+ * registration outlives that graph — a refused instantiation commit retires
+ * the graph and the recovery installs another under the same registration —
+ * so a caller asking what the piece can serve right now reads the probe
+ * rather than the registration's presence.
+ */
+type PieceRegistration = Cancel & { graphIsInstalled: () => boolean };
+
 export class Runner {
   // A member below declared `private` rather than `#` is one the runner suites
   // reach and drive directly; a `#` name would put it out of their reach.
 
-  readonly cancels = new Map<`${MemorySpace}/${ScopeKey}/${URI}`, Cancel>();
+  readonly cancels = new Map<
+    `${MemorySpace}/${ScopeKey}/${URI}`,
+    PieceRegistration
+  >();
   #allCancels = new Set<Cancel>();
   // In-flight unloadable-pointer roll-forward commits (CT-1923). Deliberately
   // outside the scheduler, like PatternUpdater's checks — dispose() settles
@@ -3359,12 +3372,16 @@ export class Runner {
     addCancel(() => retryReadinessTeardown.abort());
     const startLifecycleEpoch = this.#lifecycleEpoch;
     let active = true;
-    const cancel = () => {
+    const cancel = (() => {
       if (!active) return;
       active = false;
       this.#locallyCommittedHandlerResultStarts.delete(key);
       cancelGroup();
-    };
+    }) as PieceRegistration;
+    // `cancelNodes` holds the live graph's cancellation, and stands empty
+    // between the retirement a refused instantiation commit performs and the
+    // instantiation that replaces it.
+    cancel.graphIsInstalled = () => cancelNodes !== undefined;
     this.cancels.set(key, cancel);
     this.#allCancels.add(cancel);
 
@@ -6545,6 +6562,24 @@ export class Runner {
         visited,
       );
     }
+  }
+
+  /**
+   * Whether the piece owning `resultCell` has a pattern graph installed
+   * right now.
+   *
+   * A piece is registered from the moment its start walk runs, and the
+   * instantiation commit that graph was built in settles afterwards. A
+   * refused commit retires the graph while the registration stands, so a
+   * caller deciding what the piece can serve — the scheduler, holding an
+   * event for a stream it finds no handler on — asks this rather than
+   * reading the start's outcome.
+   *
+   * @param resultCell - The result doc or cell of the piece to ask about.
+   */
+  pieceGraphIsInstalled<T>(resultCell: Cell<T>): boolean {
+    return this.cancels.get(this.getDocKey(resultCell))?.graphIsInstalled() ===
+      true;
   }
 
   /**
