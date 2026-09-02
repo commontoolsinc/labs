@@ -163,6 +163,26 @@ describe("PatternsRoute", () => {
     });
   });
 
+  it("answers a HEAD with the headers its GET would carry", async () => {
+    // A host probing for a file, or revalidating what it holds, asks with
+    // HEAD. It is the validator it comes for, so that has to be the same one
+    // the body would have arrived with; the host drops the body itself.
+
+    await withRoute({ "main.tsx": ENTRY }, async (route) => {
+      const head = await route.serve(
+        new Request("https://host.invalid/api/patterns/main.tsx", {
+          method: "HEAD",
+        }),
+      );
+      const body = await route.serve(get("/api/patterns/main.tsx"));
+      expect(head?.status).toBe(200);
+      expect(head?.headers.get("ETag")).toBe(body?.headers.get("ETag"));
+      expect(head?.headers.get("Content-Type")).toBe(
+        body?.headers.get("Content-Type"),
+      );
+    });
+  });
+
   it("refuses a name that resolves outside the directory it serves", async () => {
     // `serve` rejects such a path before this, so the guard here is what a
     // host calling the file accessors directly relies on.
