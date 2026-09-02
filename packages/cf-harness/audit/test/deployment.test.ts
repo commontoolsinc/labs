@@ -64,6 +64,7 @@ const MAX_ENFORCEMENT_SPEC = parseExpectedPosture({
 const familyRefusing = (
   reasonCode: string,
   attested = false,
+  alsoCodes: readonly string[] = [],
 ): RunFamily => {
   const root = structuredClone(family.root);
   if (root.policyTrace.status !== "present") {
@@ -74,7 +75,7 @@ const familyRefusing = (
   };
   trace.decisions = [
     ...trace.decisions,
-    { decision: "denied", reasonCodes: [reasonCode] },
+    { decision: "denied", reasonCodes: [reasonCode, ...alsoCodes] },
   ];
   if (attested && root.policySnapshot.status === "present") {
     const snapshot = root.policySnapshot.value as {
@@ -112,25 +113,7 @@ const verdictOf = (
 
 describe("Group D deployment checks", () => {
   describe("AUD-16 refusal liveness", () => {
-    it("warns a corpus with no label-driven refusal", () => {
-      const results = auditDeployment({
-        families: [family],
-        paths: [FIXTURE_RUNS_DIR],
-        expectRefusals: false,
-      });
-      expect(verdictOf(results, "AUD-16")).toBe("warn");
-    });
-
-    it("fails the same corpus once it is declared adversarial", () => {
-      const results = auditDeployment({
-        families: [family],
-        paths: [FIXTURE_RUNS_DIR],
-        expectRefusals: true,
-      });
-      expect(verdictOf(results, "AUD-16")).toBe("fail");
-    });
-
-    it("names the not-attested and permissive-if-absent counts either way", () => {
+    it("names the not-attested and permissive-if-absent counts", () => {
       const [result] = auditDeployment({
         families: [family],
         paths: [FIXTURE_RUNS_DIR],
@@ -146,46 +129,55 @@ describe("Group D deployment checks", () => {
   });
 
   describe("counting label-driven refusals", () => {
-    it("counts a denied decision carrying a CFC reason code", () => {
+    it("counts no denial whose reason is missing direct-command authority", () => {
+      // `*_requires_direct_command` is the only denying arm of the harness's
+      // CFC family, and it denies because the human did not ask for the call
+      // — authority, not anything the data is labelled.
       const results = auditDeployment({
-        families: [familyRefusing("cfc_enforce_explicit_read")],
+        families: [
+          familyRefusing("cfc_enforce_explicit_requires_direct_command"),
+        ],
+        paths: [FIXTURE_RUNS_DIR],
+        expectRefusals: true,
+      });
+      expect(
+        results.find((result) => result.checkId === "AUD-16")?.message,
+      ).toContain("none of which could have been a release refusal");
+    });
+
+    it("counts no denial carrying an allow-side CFC code from another producer", () => {
+      // The miscount this predicate was tightened to remove: `*_read` is an
+      // ALLOW-side code, so a subagent-profile denial recording it alongside
+      // reads as a release refusal under a `cfc_`-prefix match.
+      const results = auditDeployment({
+        families: [
+          familyRefusing("cfc_enforce_explicit_read", false, [
+            "subagent_profile_not_allowed",
+          ]),
+        ],
         paths: [FIXTURE_RUNS_DIR],
         expectRefusals: true,
       });
       const refusal = results.find((result) => result.checkId === "AUD-16");
-      expect(refusal?.verdict).toBe("warn");
-      expect(refusal?.message).toContain("1 label-driven refusal");
+      expect(refusal?.verdict).toBe("inconclusive");
+      expect(refusal?.evidence[0]?.detail).toContain("0 label-driven refusals");
     });
 
-    it("passes once refusals exist and no run weakens its own posture", () => {
-      // The only arm where AUD-16 says the corpus shows the machinery
-      // deciding: refusals present, and nothing recording `not-attested` or
-      // `permissive-if-absent` to qualify them.
-      const results = auditDeployment({
-        families: [familyRefusing("cfc_enforce_explicit_read", true)],
-        paths: [FIXTURE_RUNS_DIR],
-        expectRefusals: true,
-      });
-      expect(results.find((result) => result.checkId === "AUD-16")?.verdict)
-        .toBe("pass");
-    });
-
-    it("ignores a denial whose reason is not about CFC", () => {
-      // A tool the profile does not offer says nothing about whether the
-      // label machinery ever fires, which is the question the check asks.
+    it("counts the denials it did see, so a corpus is not read as quiet", () => {
       const results = auditDeployment({
         families: [familyRefusing("tool_not_allowed")],
         paths: [FIXTURE_RUNS_DIR],
         expectRefusals: true,
       });
-      expect(results.find((result) => result.checkId === "AUD-16")?.verdict)
-        .toBe("fail");
+      expect(
+        results.find((result) => result.checkId === "AUD-16")?.message,
+      ).toContain("1 denial");
     });
 
     it("reads the decisions off the run report when the trace is absent", () => {
       // The trace is the artifact whose subject they are; a tree missing it
       // still has the same list on the report, and dropping to it is what
-      // lets an older tree be counted rather than read as refusal-free.
+      // lets an older tree be counted rather than read as denial-free.
       const root = structuredClone(family.root);
       if (
         root.policyTrace.status !== "present" ||
@@ -199,7 +191,7 @@ describe("Group D deployment checks", () => {
       };
       report.policyDecisions = [
         ...report.policyDecisions ?? [],
-        { decision: "denied", reasonCodes: ["cfc_enforce_explicit_read"] },
+        { decision: "denied", reasonCodes: ["tool_not_allowed"] },
       ];
       const results = auditDeployment({
         families: [{ root, children: [] }],
@@ -208,7 +200,76 @@ describe("Group D deployment checks", () => {
       });
       expect(
         results.find((result) => result.checkId === "AUD-16")?.message,
-      ).toContain("1 label-driven refusal");
+      ).toContain("1 denial");
+    });
+
+    it("stays inconclusive however adversarial the corpus is declared", () => {
+      // A corpus declared adversarial cannot turn "no vocabulary" into
+      // "enforcement failed"; the two are different findings.
+      for (const expectRefusals of [true, false]) {
+        const results = auditDeployment({
+          families: [family],
+          paths: [FIXTURE_RUNS_DIR],
+          expectRefusals,
+        });
+        expect(results.find((result) => result.checkId === "AUD-16")?.verdict)
+          .toBe("inconclusive");
+      }
+    });
+  });
+
+  describe("once a release-gating reason code exists", () => {
+    // The world the check is written for. `GATING` stands in for the code a
+    // release refusal would carry, so the arms that decide on refusal counts
+    // are exercised rather than waiting on a vocabulary that does not exist.
+    const GATING = new Set(["cfc_sink_ceiling_refused"]);
+
+    it("fails an adversarial corpus that produced no release refusal", () => {
+      const results = auditDeployment({
+        families: [familyRefusing("tool_not_allowed")],
+        paths: [FIXTURE_RUNS_DIR],
+        expectRefusals: true,
+        releaseGatingCodes: GATING,
+      });
+      expect(results.find((result) => result.checkId === "AUD-16")?.verdict)
+        .toBe("fail");
+    });
+
+    it("warns a corpus that produced none but claimed nothing about itself", () => {
+      const results = auditDeployment({
+        families: [familyRefusing("tool_not_allowed")],
+        paths: [FIXTURE_RUNS_DIR],
+        expectRefusals: false,
+        releaseGatingCodes: GATING,
+      });
+      expect(results.find((result) => result.checkId === "AUD-16")?.verdict)
+        .toBe("warn");
+    });
+
+    it("warns a corpus whose refusals came from runs that weakened their own posture", () => {
+      const results = auditDeployment({
+        families: [familyRefusing("cfc_sink_ceiling_refused")],
+        paths: [FIXTURE_RUNS_DIR],
+        expectRefusals: true,
+        releaseGatingCodes: GATING,
+      });
+      const refusal = results.find((result) => result.checkId === "AUD-16");
+      expect(refusal?.verdict).toBe("warn");
+      expect(refusal?.message).toContain("1 label-driven refusal");
+    });
+
+    it("passes once refusals exist and no run weakens its own posture", () => {
+      // The only arm where the corpus shows the machinery deciding: a release
+      // refusal present, and nothing recording `not-attested` or
+      // `permissive-if-absent` to qualify it.
+      const results = auditDeployment({
+        families: [familyRefusing("cfc_sink_ceiling_refused", true)],
+        paths: [FIXTURE_RUNS_DIR],
+        expectRefusals: true,
+        releaseGatingCodes: GATING,
+      });
+      expect(results.find((result) => result.checkId === "AUD-16")?.verdict)
+        .toBe("pass");
     });
   });
 
@@ -386,7 +447,7 @@ describe("Group D deployment checks", () => {
       // One record, both runs named under it: two entries here would be two
       // postures the corpus never had.
       expect(parity?.evidence.length).toBe(1);
-      expect(parity?.evidence[0]!.detail).toContain("2 run(s)");
+      expect(parity?.evidence[0]?.detail).toContain("2 run(s)");
     });
 
     it("warns a corpus whose surfaces recorded different postures", () => {

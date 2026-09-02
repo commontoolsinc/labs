@@ -42,6 +42,15 @@ export interface DeploymentAudit {
 
   /** Whether the corpus was declared adversarial (`--expect-refusals`). */
   expectRefusals: boolean;
+
+  /**
+   * The reason codes to read as release decisions, defaulting to
+   * {@link RELEASE_GATING_REASON_CODES}. A caller overrides it only to
+   * exercise the world where one exists — the check is written for that
+   * world, and a suite that could not reach those arms would be pinning a
+   * single verdict rather than the check.
+   */
+  releaseGatingCodes?: ReadonlySet<string>;
 }
 
 /** What a `/api/meta` fetch established. */
@@ -108,11 +117,50 @@ const count = (total: number, singular: string, plural: string): string =>
 //
 
 /**
- * A refusal the labels drove: a denied decision carrying a CFC reason code.
+ * The reason codes whose decision turns on a LABEL ON DATA — a confidentiality
+ * atom, a sink ceiling, a policy evaluation. A denial carrying one of these is
+ * a release refusal: the run held something and the labels said it could not
+ * go where it was going.
  *
- * A denial for a reason that is not about CFC — a tool the profile does not
- * offer, a malformed call — says nothing about whether the label machinery
- * ever fires, which is the question this check exists to ask.
+ * The set is EMPTY, and that is a finding rather than an oversight. Every
+ * `cfc_*` code the harness can record comes from one switch
+ * (`prompt-loop.ts`, the tool-policy gate), and that switch turns on exactly
+ * two things: the tool descriptor's static `effectClass`, and whether the
+ * invocation carries direct-command evidence. Neither is a label on data.
+ * Concretely:
+ *
+ * - `*_requires_direct_command` is the only denying arm in the family, and it
+ *   denies for missing AUTHORITY — the human did not ask for this — not for
+ *   anything the data is labelled;
+ * - `*_read` and `*_direct_command` are ALLOW-side codes. They ride along a
+ *   decision record whose denial came from somewhere else entirely (the
+ *   subagent-profile gate), so matching them is how a capability denial gets
+ *   miscounted as a release refusal;
+ * - the mediation-absence denials (`not-observable`, "did not include trusted
+ *   CFC mediation metadata") are fail-closed on a MISSING SUBSTRATE, and the
+ *   `read_file` redactions are fail-closed on a file that was not there.
+ *   Neither consulted a label either.
+ *
+ * So the harness's decision vocabulary today has no code in which a release
+ * refusal could be written down. An entry appears here when one exists, and
+ * {@link releaseGatingIsExpressible} is what stops the check reporting the
+ * absence of the vocabulary as the absence of refusals.
+ */
+const RELEASE_GATING_REASON_CODES: ReadonlySet<string> = new Set();
+
+/** The codes this audit reads as release decisions. */
+const releaseGatingCodesOf = (audit: DeploymentAudit): ReadonlySet<string> =>
+  audit.releaseGatingCodes ?? RELEASE_GATING_REASON_CODES;
+
+/**
+ * A refusal the labels drove: a denial whose reason is a release decision.
+ *
+ * Membership in {@link RELEASE_GATING_REASON_CODES} rather than a `cfc_`
+ * prefix. The prefix names which subsystem recorded the code, not what
+ * decided, and every denial in the September console corpus that carries a
+ * `cfc_` code is capability-shaped — three for missing direct-command
+ * authority, two for a subagent profile the run does not offer, where the
+ * `cfc_` code present is the allow-side one that PASSED.
  */
 const labelDrivenRefusals = (
   audit: DeploymentAudit,
@@ -122,9 +170,19 @@ const labelDrivenRefusals = (
       .filter((decision) => decision.decision === "denied")
       .flatMap((decision) =>
         (decision.reasonCodes ?? [])
-          .filter((code) => code.startsWith("cfc_"))
+          .filter((code) => releaseGatingCodesOf(audit).has(code))
           .map((code) => ({ runId: run.runId, code }))
       )
+  );
+
+/** Every denial of the corpus, whatever decided it. */
+const allDenials = (audit: DeploymentAudit): number =>
+  everyRun(audit).reduce(
+    (total, run) =>
+      total +
+      decisionsOf(run).filter((decision) => decision.decision === "denied")
+        .length,
+    0,
   );
 
 const refusalLiveness = (audit: DeploymentAudit): CheckResult => {
@@ -140,7 +198,9 @@ const refusalLiveness = (audit: DeploymentAudit): CheckResult => {
     {
       detail: `${
         count(refusals.length, "label-driven refusal", "label-driven refusals")
-      } across ${count(runs.length, "run", "runs")}`,
+      } across ${count(runs.length, "run", "runs")}, out of ${
+        count(allDenials(audit), "denial", "denials")
+      } in total`,
     },
     {
       artifact: "policy-snapshot.json",
@@ -157,6 +217,26 @@ const refusalLiveness = (audit: DeploymentAudit): CheckResult => {
       } recorded \`permissive-if-absent\``,
     },
   ];
+  if (releaseGatingCodesOf(audit).size === 0) {
+    // The honest verdict when the artifacts carry no code a release refusal
+    // could be written in: nothing was established either way. Reporting
+    // `fail` here would report the absence of a vocabulary as a behavioral
+    // failure, and `pass` would report it as compliance. The line retires
+    // when a release-gating reason code exists.
+    return corpusResult(
+      audit,
+      "AUD-16",
+      "refusal liveness",
+      citationsFor("AH-CFC-11", "AH-CFC-15"),
+      "inconclusive",
+      `this corpus recorded ${
+        count(allDenials(audit), "denial", "denials")
+      } across ${
+        count(runs.length, "run", "runs")
+      }, none of which could have been a release refusal: the harness records no reason code whose decision turns on a label, so whether release gating has ever fired is not established here`,
+      evidence,
+    );
+  }
   if (refusals.length === 0) {
     return corpusResult(
       audit,

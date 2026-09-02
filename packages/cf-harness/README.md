@@ -1827,7 +1827,7 @@ Group D finding is stamped `(corpus)` rather than with a run id.
 
 | Check  | Subject                                                                                                                                                                                                                                                                         | Turned on by                    |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| AUD-16 | how many label-driven refusals the corpus produced, beside the count of runs recording `not-attested` and `permissive-if-absent`. Zero refusals warns, and fails when the corpus is declared adversarial                                                                        | `--corpus`, `--expect-refusals` |
+| AUD-16 | how many label-driven refusals the corpus produced, beside the count of runs recording `not-attested` and `permissive-if-absent`. Zero refusals warns, and fails when the corpus is declared adversarial — but see below: today the check is structurally `inconclusive`        | `--corpus`, `--expect-refusals` |
 | AUD-17 | the posture a deployment publishes on `/api/meta`, against the expected-posture spec. A deployment publishing none fails: what it enforces is indistinguishable from the default. So does one publishing a `projected` record — a prediction where an attestation was asked for | `--toolshed-url`                |
 | AUD-18 | whether every surface in the corpus resolved the same posture. The harness's own surfaces diverge by default — the console opts sessions into the max-enforcement bundle, the CLI does not — so a mixed corpus surfaces that                                                    | `--corpus`                      |
 | AUD-19 | the shell's render ceiling, which nothing publishes: a permanent `inconclusive` line item, retiring when a publisher exists                                                                                                                                                     | any deployment flag             |
@@ -1840,6 +1840,29 @@ the first. A profile asserts only the fields it carries, and one asserting
 nothing is refused rather than passing: a spec that checks nothing is
 indistinguishable, in every line the audit prints, from a deployment whose every
 field held.
+
+### What AUD-16 can and cannot see
+
+A **label-driven refusal** is a denial whose decision turned on a label on data
+— a confidentiality atom, a sink ceiling, a policy evaluation. AUD-16 counts
+membership in an explicit release-gating reason-code set, not a `cfc_` prefix:
+the prefix names which subsystem recorded the code, not what decided.
+
+That set is currently **empty**, and it is a finding rather than an oversight.
+Every `cfc_*` code the harness can record comes from one switch (the tool-policy
+gate in `src/prompt-loop.ts`), and that switch turns on the tool descriptor's
+static `effectClass` and on whether the invocation carries direct-command
+evidence. Neither is a label. `*_requires_direct_command` is the family's only
+denying arm and it denies for missing authority; `*_read` and `*_direct_command`
+are allow-side codes that can ride along a denial another gate produced. The
+mediation-absence denials fail closed on a missing substrate, and the
+`read_file` redactions on a file that was not there.
+
+So the harness has no reason code in which a release refusal could be written
+down, and AUD-16 reports `inconclusive` while that is true, naming how many
+denials the corpus did record. A `fail` there would report the absence of a
+vocabulary as a behavioral failure, and a `pass` would report it as compliance.
+The line retires when a release-gating code exists.
 
 ### What a recorded posture is
 
