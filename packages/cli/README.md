@@ -409,6 +409,13 @@ selects it too. The paths in the returned view are relative to the selected
 path, and the view includes declared, derived, and link-carried labels. An
 unlabeled value returns JSON `null`.
 
+The path is followed through any links it crosses, so the view describes the doc
+that actually holds the value rather than the doc the path started in. That is
+what a labeled read commonly needs: a `db.query` result splits each row into its
+own entity doc and stores the row's labels there, so `q/result/0/txnDate`
+crosses a link at `result/0` and its label is two docs away. Selecting the row
+instead of the column returns one entry per labeled column.
+
 ```bash
 cf cell get-label --cell ID messages/0/body
 cf cell get-label --cell ID credentials --input

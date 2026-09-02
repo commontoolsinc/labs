@@ -68,6 +68,7 @@ import {
 import {
   type CfcLabelView,
   cfcLabelViewForCellWithStatus,
+  cfcLabelViewForResolvedCellWithStatus,
   cfcLabelViewFromSchema,
   cfcSchemaChildRoot,
   getCarriedCfcLabelView,
@@ -277,11 +278,22 @@ export function parseCellCfcLabelUpdate(
   } as CellCfcLabelUpdate;
 }
 
+/**
+ * `resolveLinks` is for an INSPECTION read, where the caller asked what the
+ * label at a path is and a path that crosses a link part way through must not
+ * answer "none" for a value that carries one. A read that feeds a WRITE keeps
+ * the unresolved view: the observation classes a label update preserves are the
+ * ones declared on the selected cell, not ones inherited from whatever doc its
+ * value happens to live in.
+ */
 function cfcLabelViewForCommand(
   cell: unknown,
   path: readonly (string | number)[],
+  options: { resolveLinks?: boolean } = {},
 ): CfcLabelView | null {
-  const { view, readFailed } = cfcLabelViewForCellWithStatus(cell);
+  const { view, readFailed } = options.resolveLinks
+    ? cfcLabelViewForResolvedCellWithStatus(cell)
+    : cfcLabelViewForCellWithStatus(cell);
   if (readFailed) {
     const location = path.length === 0 ? "<root>" : path.join("/");
     throw new Error(`Could not read CFC labels at "${location}".`);
@@ -4440,6 +4452,9 @@ async function verbReadRefusalOrNull(
  * Paths in the returned view are relative to the selected cell. The view
  * includes stored declared, derived, and link-carried labels and uses the same
  * display redaction as the runtime-client boundary.
+ *
+ * The path is followed through the links it crosses, so the answer describes
+ * the doc that holds the value rather than the doc the path started in.
  */
 export async function getCellCfcLabel(
   config: PieceConfig,
@@ -4464,7 +4479,7 @@ export async function getCellCfcLabel(
     await (options.input ? piece.input.getCell() : piece.result.getCell());
   const targetCell = rootCell.key(...path);
   await targetCell.pull();
-  return cfcLabelViewForCommand(targetCell, path);
+  return cfcLabelViewForCommand(targetCell, path, { resolveLinks: true });
 }
 
 /**

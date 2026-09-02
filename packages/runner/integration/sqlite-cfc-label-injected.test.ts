@@ -36,6 +36,7 @@ import app from "../../toolshed/app.ts";
 import {
   cfcLabelViewForCellWithStatus,
   cfcLabelViewForDereferenceTraces,
+  cfcLabelViewForResolvedCellWithStatus,
 } from "../src/cfc/label-view.ts";
 import { cfcConfidentialityForObservationNode } from "../src/cfc/observation.ts";
 import { type Cell, entityIdFrom, parseLink, Runtime } from "../src/index.ts";
@@ -299,8 +300,11 @@ async function runTest(base: URL, contractArrivesLate: boolean) {
         );
       }
 
-      // (d) The labels live on the row docs, NOT on the query doc. Pinning
-      // this keeps a future reader from probing the query doc, finding
+      // (d) The labels live on the row docs, NOT on the query doc. The
+      // one-hop reader follows a link the selected path lands ON, and these
+      // paths CROSS one at `result/0`, so it reports nothing for a result
+      // that plainly carries labels. Pinning that keeps the contrast in (e)
+      // honest, and keeps a future reader from probing the query doc, finding
       // nothing, and reporting a fully labeled result as unlabeled.
       for (const path of [[], ["result"], ["result", 0]] as const) {
         let probe: Cell<unknown> = direct as Cell<unknown>;
@@ -308,11 +312,70 @@ async function runTest(base: URL, contractArrivesLate: boolean) {
         const view = cfcLabelViewForCellWithStatus(probe).view;
         if (view !== undefined) {
           throw new Error(
-            `the query doc gained a label view at ${JSON.stringify(path)}: ${
-              JSON.stringify(view)
-            } — update this test and the loom-side probe together`,
+            `the one-hop reader gained a label view at ${
+              JSON.stringify(path)
+            }: ${JSON.stringify(view)} — update this test, (e), and the ` +
+              `loom-side probe together`,
           );
         }
+      }
+
+      // (e) The INSPECTION reader — what `cf piece get-label` calls — resolves
+      // the links the path crosses and reports the label a person asked about.
+      // Selecting the column reports it at the selection; selecting the row
+      // reports one entry per labeled column.
+      const resolvedAt = (
+        query: Cell<QueryState>,
+        path: readonly (string | number)[],
+      ) => {
+        let probe: Cell<unknown> = query as Cell<unknown>;
+        for (const key of path) probe = probe.key(key as never);
+        const status = cfcLabelViewForResolvedCellWithStatus(probe);
+        if (status.readFailed) {
+          throw new Error(
+            `label read failed at ${JSON.stringify(path)} — fail closed`,
+          );
+        }
+        return status.view;
+      };
+      const atColumn = resolvedAt(direct, ["result", 0, "secret"]);
+      const columnEntry = atColumn?.entries.find((e) => e.path.length === 0);
+      if (
+        !columnEntry?.label.confidentiality?.some((a) => a === "secret-body")
+      ) {
+        throw new Error(
+          `get-label reported no confidentiality at result/0/secret; got ${
+            JSON.stringify(atColumn)
+          }`,
+        );
+      }
+      const atRow = resolvedAt(direct, ["result", 0]);
+      const rowEntry = atRow?.entries.find((e) =>
+        e.path.length === 1 && e.path[0] === "secret"
+      );
+      if (!rowEntry?.label.confidentiality?.some((a) => a === "secret-body")) {
+        throw new Error(
+          `get-label reported no per-column entry at result/0; got ${
+            JSON.stringify(atRow)
+          }`,
+        );
+      }
+      // The null-origin column reaches the same reader with its class intact.
+      const atDerived = resolvedAt(derived, ["result", 0, "shouted"]);
+      const atDerivedEntry = atDerived?.entries.find((e) =>
+        e.path.length === 0
+      );
+      if (
+        !atDerivedEntry?.label.confidentiality?.some((a) =>
+          a === "secret-body"
+        ) ||
+        atDerivedEntry.observes !== "value"
+      ) {
+        throw new Error(
+          `get-label lost the null-origin column's value-class label; got ${
+            JSON.stringify(atDerived)
+          }`,
+        );
       }
     } finally {
       cancelSink();
