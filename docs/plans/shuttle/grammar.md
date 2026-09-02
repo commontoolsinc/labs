@@ -68,7 +68,7 @@ prefix, overriding it with the embedded space when one is present. A
 rooted reference is therefore exactly as space-dependent as a relative
 one; it is the piece and path it fixes, not the space.
 
-How a reading is matched says where it holds, and there are three ways.
+How a reading is matched says where it holds.
 `-` and a lone `/` are matched against the whole operand exactly, so
 neither governs a segment: a key named `-` is reachable relatively
 wherever it is not the whole operand. `@scope` and a lone leading `#` are
@@ -87,8 +87,8 @@ separator besides, so no segment of an operand holds one, and a key that
 does is spelled `~1`, which a reference unescapes and a walk does not.
 
 The property every door is held to is that a rendering may be refused but
-may never name a cell other than the one it was printed for. Two steps lose
-characters between a place and the rendering that names it. Reading a
+may never name a cell other than the one it was printed for. Characters go
+missing between a place and the rendering that names it. Reading a
 rendering back is a parse of a reference, which trims the string and drops a
 trailing empty segment. Writing one separates its lines with a newline. Both
 reach a path segment, so an empty segment, one ending in whitespace, and one

@@ -741,8 +741,9 @@ const NO_SUCH_NAME = "no piece carries that name: a slug is lowercase " +
  * `segment` from naming that path back, and returns nothing when nothing
  * does.
  *
- * Two steps lose characters. Reading a rendering back is a parse of a
- * reference, which trims the string it is given and drops a trailing empty
+ * Characters go missing on the way out and on the way back. Reading a
+ * rendering back is a parse of a reference, which trims the string it is
+ * given and drops a trailing empty
  * segment. Writing the rendering separates its lines with a newline, so a
  * segment holding one splits the position line and leaves a shorter reference
  * naming another cell. Both are refused wherever a segment sits and not only
@@ -784,7 +785,8 @@ function unnameableSegment(segment: PathSegment): Fault | undefined {
  * segment is the suffix and nothing else, so the split finds no id in front of
  * it and the parse refuses the whole reference.
  *
- * The other three rules answer to {@link NO_SUCH_NAME} instead, which is a
+ * The rules that are not the newline answer to {@link NO_SUCH_NAME}
+ * instead, which is a
  * weaker claim than the segment rules make and the honest one. This door is
  * the only check for a handle-shaped piece; for an empty one and for anything
  * slug-shaped the parse refuses already, so refusing here moves the refusal

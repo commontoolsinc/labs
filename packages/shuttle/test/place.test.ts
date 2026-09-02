@@ -172,14 +172,15 @@ describe("place", () => {
         // covered. So both parts a position spells vary, the empty value is
         // a candidate in its own right rather than something the shapes
         // happen not to reach, and every door that admits a position is
-        // driven — the two that take a caller's data, and the walk that
-        // takes a string.
+        // driven.
         //
         // Held fixed, and why: the space, which one connection settles and
-        // no operand supplies, and the facet, which is one of two literals.
+        // no operand supplies, and the facet, which is a fixed set of
+        // literals.
         // Everything else varies, and varies crosswise: both parts a
-        // position spells, each driven through each of the four doors, at
-        // each of the three scopes. Reading back stands at a scope of its
+        // position spells, each driven through every door in the table
+        // below, at each of the three scopes. Reading back stands at a
+        // scope of its
         // own, so the comparison sees whether the rendering carried the
         // scope or the reader supplied it.
 
@@ -1082,10 +1083,10 @@ describe("place", () => {
           describe("reserved readings", () => {
             // Each of these drives its character at the head of a later
             // segment, where the head-of-operand cases drive it first.
-            // That position is what tells the two kinds of reading apart —
-            // one decided on the whole operand, one decided segment by
-            // segment — so the four together pin which kind each reading
-            // is, rather than four instances of one kind.
+            // That position is what tells a reading decided on the whole
+            // operand from one decided segment by segment, so these pin
+            // which kind each reading is rather than several instances of
+            // one kind.
 
             it("reads `-` as a data key in a later segment", () => {
               const place = atReferencedPiece();
@@ -1349,10 +1350,9 @@ describe("place", () => {
 
         it("normalizes the path the way a reference's is normalized", () => {
           // A position names its cell and nothing about how it was reached,
-          // so the three doors have to agree on what a segment means. A
-          // canonical index is where they would part: the two `cd` branches
-          // convert one to a number and a resolution hands over what it
-          // read.
+          // so every door has to agree on what a segment means. A canonical
+          // index is where they would part: a door that skips the conversion
+          // lands a string where the others land a number.
 
           const entered = atSpaceRoot();
           entered.enter({ space: SPACE, piece: HANDLE, path: ["3"] }, "#x");
