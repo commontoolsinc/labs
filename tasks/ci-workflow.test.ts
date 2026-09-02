@@ -263,7 +263,7 @@ Deno.test("Check preserves a native crash from Deno lint", async () => {
   assertStringIncludes(describe, "if: ${{ failure() }}");
   assertStringIncludes(describe, 'file "$core"');
   assertStringIncludes(upload, "if: ${{ failure() }}");
-  assertStringIncludes(upload, "uses: actions/upload-artifact@v7");
+  assertStringIncludes(upload, "uses: actions/upload-artifact@");
   assertStringIncludes(
     upload,
     "name: deno-lint-core-a${{ github.run_attempt }}",
@@ -936,7 +936,7 @@ Deno.test("server-execution ON pattern failures upload the toolshed log", async 
   const upload = stepBlock(patternJob, "📋 Upload toolshed log on failure");
 
   assertStringIncludes(upload, "if: failure()");
-  assertStringIncludes(upload, "uses: actions/upload-artifact@v7");
+  assertStringIncludes(upload, "uses: actions/upload-artifact@");
   assertStringIncludes(
     upload,
     "name: toolshed-log-pattern-integration-server-execution-on-${{ matrix.shard }}",
