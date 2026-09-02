@@ -34,11 +34,15 @@ import {
   CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
   type PromptSlotBinding,
 } from "../../../src/contracts/prompt-slot.ts";
+import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
+
+import { CAPABILITY_PROBE_SENTINEL } from "../../../src/diagnostics.ts";
 import type {
   SandboxCommandRequest,
   SandboxCommandResult,
   SandboxRuntime,
   SandboxRuntimeDescription,
+  SandboxShellRequest,
 } from "../../../src/sandbox/types.ts";
 import { responsesBodyFromChatFixture } from "../../support/responses-fixture.ts";
 
@@ -96,10 +100,91 @@ export class InertSandboxRuntime implements SandboxRuntime {
     return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
   }
 
-  runShell(): Promise<SandboxCommandResult> {
+  runShell(_request: SandboxShellRequest): Promise<SandboxCommandResult> {
     return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
   }
 }
+
+/**
+ * A sandbox that answers the capability probe and then replays `results`.
+ *
+ * A result carrying a `cfcResult` is a mediated observation: the boundary
+ * spoke, and what it said about each channel is what the model-facing path
+ * and the influence ledger act on.
+ */
+export class ScriptedSandboxRuntime extends InertSandboxRuntime {
+  readonly #results: SandboxCommandResult[];
+
+  constructor(results: readonly SandboxCommandResult[]) {
+    super();
+    this.#results = [...results];
+  }
+
+  override runShell(
+    request: SandboxShellRequest,
+  ): Promise<SandboxCommandResult> {
+    if (request.command.includes(CAPABILITY_PROBE_SENTINEL)) {
+      return Promise.resolve({
+        stdout: "bash\tpresent\t/bin/bash\tGNU bash, version 5.2.26(1)-release",
+        stderr: "",
+        exitCode: 0,
+      });
+    }
+    return Promise.resolve(
+      this.#results.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+    );
+  }
+}
+
+/**
+ * A mediated bash result: `stdout` observed under `stdoutLabel`, and `stderr`
+ * either observed or refused.
+ *
+ * The two channels of one call are what let a property assert both directions
+ * of AH-CFC-7 at once — a labeled channel the model read must accumulate as
+ * influence, and a refused one must not.
+ */
+export const mediatedBashResult = (
+  stdout: string,
+  options: {
+    stdoutLabel?: CfcSandboxResult["stdout"]["label"];
+    stderrPolicy?: "observed" | "denied";
+  } = {},
+): SandboxCommandResult => {
+  const stdoutLabel = options.stdoutLabel ?? { confidentiality: ["secret"] };
+  return {
+    stdout,
+    stderr: "",
+    exitCode: 0,
+    cfcResult: {
+      version: 1,
+      stdout: {
+        channel: "stdout",
+        policy: "observed",
+        label: stdoutLabel,
+        segments: [{ text: stdout, label: stdoutLabel }],
+      },
+      stderr: options.stderrPolicy === "observed"
+        ? {
+          channel: "stderr",
+          policy: "observed",
+          label: { confidentiality: ["public"] },
+          segments: [{ text: "", label: { confidentiality: ["public"] } }],
+        }
+        : {
+          channel: "stderr",
+          policy: "denied",
+          label: { confidentiality: ["secret"] },
+          reason: "stderr release denied",
+        },
+      exitCode: {
+        policy: "observed",
+        label: { confidentiality: ["public"] },
+        value: 0,
+      },
+    },
+  };
+};
 
 export interface LabeledFabric {
   runtime: Runtime;
