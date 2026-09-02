@@ -72,6 +72,13 @@ import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import type { EntityKind } from "./entity-kind.ts";
 import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { resolveLink } from "./link-resolution.ts";
+import { FILTER_INPUT_SCHEMA } from "./builtins/filter.ts";
+import { FLATMAP_INPUT_SCHEMA } from "./builtins/flatmap.ts";
+import {
+  listCoordinatorPlan,
+  listElementResultCell,
+} from "./builtins/list-coordinator-plan.ts";
+import { MAP_INPUT_SCHEMA } from "./builtins/map.ts";
 import {
   areNormalizedLinksSame,
   type CellLink,
@@ -1285,15 +1292,21 @@ function defersInitialRunUntilSynced(
   return !!options.awaitSyncBeforeInitialRun;
 }
 
+/** One pattern instance the resume pre-sync visits: the pattern and the
+ * result cell it runs under. */
+type ResumePatternInstance = { pattern: Pattern; resultCell: Cell<any> };
+
+const LIST_OP_INPUT_SCHEMAS = {
+  map: MAP_INPUT_SCHEMA,
+  filter: FILTER_INPUT_SCHEMA,
+  flatMap: FLATMAP_INPUT_SCHEMA,
+} as const;
+
 // Options shared by run()/startWithTx()/startAfterSuccessfulCommit().
 type RunnerRunOptions = {
   doNotUpdateOnPatternChange?: boolean;
   // Resumed-from-synced-state: hold each action's initial rehydration/run until
-  // the space has finished syncing, so consumers don't race the data. For a
-  // piece that carries setup evidence already, the same intent fences
-  // INSTANTIATION: the start is commit-gated behind the resume pre-sync,
-  // because instantiating reads the piece's execution family, which the
-  // action-level hold begins too late to protect.
+  // the space has finished syncing, so consumers don't race the data.
   awaitSyncBeforeInitialRun?: boolean;
   // The piece root that INSTANTIATED this piece (a nested pattern node's
   // parent, a result-as-pattern child's producing piece). Its actions'
@@ -4353,7 +4366,6 @@ export class Runner {
     options: RunnerRunOptions = {},
     pullOnceAfterStart: boolean = false,
     speculativeConsequence?: { eventId: string },
-    preSyncResumedStart: boolean = false,
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const startLifecycleEpoch = this.#lifecycleEpoch;
@@ -4369,129 +4381,97 @@ export class Runner {
       }
       if (ownership.isCancelled()) return;
 
-      const startNow = () => {
-        const startTx = this.runtime.edit();
-        // Minted inside a commit callback — by definition outside any
-        // scheduler run; the deferred start's node wiring is piece
-        // machinery, stamped bookkeeping per serving-loop.md §3d. A
-        // flag-ON CLIENT's navigate-deferred start carries §3d's RULED
-        // speculative-consequence stamp (2026-08-13): it is a handler
-        // CONSEQUENCE (the receipt + result wrapper of a speculative
-        // echo), so it stamps event-handler-kind and the overlay
-        // diverts it — committing it authored would race the SERVING
-        // side's own deferred start for the create-only receipt, and a
-        // client win would suppress the served navigateTo (no intent
-        // would ever be computed). §3d's bookkeeping-only rule governs
-        // internal writes at the wave seal destination, which this
-        // client-side start tx never reaches. The serving side and the
-        // OFF arm keep bookkeeping.
-        this.runtime.stampServerRun(startTx, {
-          actionId: `piece-start/${resultLink.id}`,
-          ...(speculativeConsequence !== undefined
-            ? {
-              kind: "event-handler" as const,
-              eventId: speculativeConsequence.eventId,
-            }
-            : { kind: "bookkeeping" as const }),
-        });
-        // Phase 4 (builtins.md §4): a deferred start minted from an
-        // EVENT-HANDLER run carries that run's event context across to
-        // the start tx, so a navigateTo instantiated under it can address
-        // the firing session (navigate-context.ts's capture point 1).
-        const navigateContext = navigateEventContextFromRunInfo(
-          waveRunContextOf(tx) ?? speculationRunContextOf(tx),
-        );
-        if (navigateContext !== undefined) {
-          setNavigateEventContext(startTx, navigateContext);
-        }
-        const committedResultCell = this.runtime.getCellFromLink<T>(
-          resultLink,
-          undefined,
-          startTx,
-        );
-        try {
-          const installedRegistration = this.startWithTx(
-            startTx,
-            committedResultCell,
-            givenPattern,
-            options,
-          );
-          if (ownership.markInstalled(installedRegistration)) {
-            startTx.abort("Deferred runner start was cancelled");
-            return;
+      const startTx = this.runtime.edit();
+      // Minted inside a commit callback — by definition outside any
+      // scheduler run; the deferred start's node wiring is piece
+      // machinery, stamped bookkeeping per serving-loop.md §3d. A
+      // flag-ON CLIENT's navigate-deferred start carries §3d's RULED
+      // speculative-consequence stamp (2026-08-13): it is a handler
+      // CONSEQUENCE (the receipt + result wrapper of a speculative
+      // echo), so it stamps event-handler-kind and the overlay
+      // diverts it — committing it authored would race the SERVING
+      // side's own deferred start for the create-only receipt, and a
+      // client win would suppress the served navigateTo (no intent
+      // would ever be computed). §3d's bookkeeping-only rule governs
+      // internal writes at the wave seal destination, which this
+      // client-side start tx never reaches. The serving side and the
+      // OFF arm keep bookkeeping.
+      this.runtime.stampServerRun(startTx, {
+        actionId: `piece-start/${resultLink.id}`,
+        ...(speculativeConsequence !== undefined
+          ? {
+            kind: "event-handler" as const,
+            eventId: speculativeConsequence.eventId,
           }
-          this.runtime.prepareTxForCommit(startTx);
-          startTx.commit().then(({ error }) => {
-            if (error) {
-              if (
-                this.catchUpAndStartOnStaleRead(
-                  error,
-                  resultCell,
-                  "start",
-                  startLifecycleEpoch,
-                  pullOnceAfterStart,
-                  ownership,
-                  installedRegistration,
-                )
-              ) {
-                return;
-              }
-              ownership.cancel();
-              logger.error(
-                "tx-commit-error",
-                "Error committing deferred start transaction",
+          : { kind: "bookkeeping" as const }),
+      });
+      // Phase 4 (builtins.md §4): a deferred start minted from an
+      // EVENT-HANDLER run carries that run's event context across to
+      // the start tx, so a navigateTo instantiated under it can address
+      // the firing session (navigate-context.ts's capture point 1).
+      const navigateContext = navigateEventContextFromRunInfo(
+        waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+      );
+      if (navigateContext !== undefined) {
+        setNavigateEventContext(startTx, navigateContext);
+      }
+      const committedResultCell = this.runtime.getCellFromLink<T>(
+        resultLink,
+        undefined,
+        startTx,
+      );
+      try {
+        const installedRegistration = this.startWithTx(
+          startTx,
+          committedResultCell,
+          givenPattern,
+          options,
+        );
+        if (ownership.markInstalled(installedRegistration)) {
+          startTx.abort("Deferred runner start was cancelled");
+          return;
+        }
+        this.runtime.prepareTxForCommit(startTx);
+        startTx.commit().then(({ error }) => {
+          if (error) {
+            if (
+              this.catchUpAndStartOnStaleRead(
                 error,
-              );
+                resultCell,
+                "start",
+                startLifecycleEpoch,
+                pullOnceAfterStart,
+                ownership,
+                installedRegistration,
+              )
+            ) {
               return;
             }
-            if (pullOnceAfterStart && !ownership.isCancelled()) {
-              this.#pullCellOnceInPullMode(committedResultCell);
-            }
-          }).catch((error) => {
             ownership.cancel();
             logger.error(
               "tx-commit-error",
-              "Deferred start transaction commit rejected",
+              "Error committing deferred start transaction",
               error,
             );
-          });
-        } catch (error) {
-          startTx.abort(error);
+            return;
+          }
+          if (pullOnceAfterStart && !ownership.isCancelled()) {
+            this.#pullCellOnceInPullMode(committedResultCell);
+          }
+        }).catch((error) => {
           ownership.cancel();
-          logger.error("runner-start", "Deferred start failed", error);
-          throw error;
-        }
-      };
-      if (!preSyncResumedStart || givenPattern === undefined) {
-        startNow();
-        return;
+          logger.error(
+            "tx-commit-error",
+            "Deferred start transaction commit rejected",
+            error,
+          );
+        });
+      } catch (error) {
+        startTx.abort(error);
+        ownership.cancel();
+        logger.error("runner-start", "Deferred start failed", error);
+        throw error;
       }
-      // The resume-batch instantiation fence: instantiating reads the
-      // piece's execution family — the argument document, the derived
-      // internal cells, a handler's `$event` stream marker among them —
-      // and a crossing-delivered piece arrives without that family, so
-      // the same dependency pre-sync the ordinary resume path awaits
-      // runs first. Tracked so `synced()` covers the window between this
-      // commit and the fenced start.
-      const syncCell = this.runtime.getCellFromLink<T>(resultLink);
-      this.runtime.storageManager.trackUntilSettled(
-        this.syncCellsForRunningPattern(syncCell, givenPattern)
-          .catch((error) => {
-            logger.warn(
-              "runner-start",
-              "resume pre-sync before a deferred start failed; starting anyway",
-              error,
-            );
-          })
-          .then(() => {
-            if (ownership.isCancelled()) return;
-            startNow();
-          })
-          .catch(() => {
-            // startNow's own catch has already cancelled the ownership
-            // and logged; this chain has no further caller to inform.
-          }),
-      );
     });
     return ownership.cancel;
   }
@@ -5020,16 +5000,6 @@ export class Runner {
     // piece whose pattern moved underneath it is an ordinary in-place swap.
     const creatingPiece = options.sourceOrigin !== undefined &&
       getPatternIdentityRef(resultCell.withTx(tx)) === undefined;
-    // Read before setup stages anything: a resume-batch run
-    // (`awaitSyncBeforeInitialRun`) fences instantiation only for a piece
-    // that carries setup evidence already — the argument meta link every
-    // completed setup writes, which covers keyless in-session patterns
-    // exactly as compiled ones — and setup below writes it for a fresh
-    // piece, after which the two are indistinguishable. A fresh element
-    // created mid-resume has its whole state locally and keeps the
-    // synchronous start.
-    const resumesDurablePiece = options.awaitSyncBeforeInitialRun === true &&
-      getMetaLink(resultCell.withTx(tx), "argument") !== undefined;
     const { needsStart, pattern } = this.setupInternal(
       tx,
       patternOrModule,
@@ -5047,26 +5017,17 @@ export class Runner {
     let cancelDeferredStart: Cancel | undefined;
     if (needsStart) {
       const pullOnceAfterStart = this.#patternNeedsOneShotPull(pattern);
-      const deferUntilCommit = tx.tx.immediate === true &&
+      if (
+        tx.tx.immediate === true &&
         (tx.tx as { deferRunnerStartUntilCommit?: boolean })
-            .deferRunnerStartUntilCommit === true;
-      if (deferUntilCommit || resumesDurablePiece) {
-        // The `resumesDurablePiece` arm is the resume-batch instantiation
-        // fence: a coordinator resuming durable children (map/filter/
-        // flatMap under `awaitSyncBeforeInitialRun`) starts them only
-        // after this commit lands AND the resume pre-sync has delivered
-        // the child's execution family — the order Runner.start's resume
-        // path keeps — because instantiation itself reads that family
-        // (a handler's `$event` stream marker among it), before any
-        // scheduler-level sync hold can apply.
+            .deferRunnerStartUntilCommit === true
+      ) {
         cancelDeferredStart = this.#startAfterSuccessfulCommit(
           tx,
           resultCell,
           pattern,
           options,
           pullOnceAfterStart,
-          undefined,
-          resumesDurablePiece,
         );
       } else {
         installedCancel = this.startWithTx(
@@ -5739,19 +5700,15 @@ export class Runner {
     // transaction (resolveLink reads link metadata). The walk only reads, so the
     // transaction is discarded afterward.
     const resolveTx = this.runtime.edit();
-    const ownedCellsStart = cells.length;
+    const instances: ResumePatternInstance[] = [];
     this.#collectResumeOwnedCells(
       pattern,
       resultCell,
       cells,
       new Set(),
       resolveTx,
+      instances,
     );
-    // The owned internals feed a second scan of their own (below): a
-    // sub-piece a pattern starts dynamically is reachable only through the
-    // write redirects their ARRIVED values carry, which the static
-    // collector above cannot see.
-    const ownedInternalCells = cells.slice(ownedCellsStart);
     resolveTx.abort("collectResumeOwnedCells: read-only resolution");
 
     // Sync all the previously computed results.
@@ -5798,10 +5755,10 @@ export class Runner {
         argumentRoots,
         "resumeArgumentLinkTargetSync",
       ),
-      // Owned-internal redirect targets are a second-wave scan of their
-      // own: the values the first wave delivered are what carry the
-      // redirects, so this cannot run any earlier.
-      this.#syncResumeInternalRedirectTargets(ownedInternalCells),
+      // The list coordinators' children: the inputs their identities derive
+      // from arrived with the first wave, so this cannot run any earlier,
+      // and it must finish before instantiation runs those children.
+      this.#syncResumeListChildren(instances),
     ]);
 
     return true;
@@ -5997,68 +5954,120 @@ export class Runner {
   }
 
   /**
-   * Second-wave companion for the owned internals synced in the first
-   * wave: follow the WRITE-REDIRECT links their arrived values carry and
-   * sync each target by name.
+   * Name the children the pattern tree's list coordinators (map/filter/
+   * flatMap) will run, before anything instantiates.
    *
-   * A sub-piece a pattern starts dynamically is reachable only this way —
-   * its manifest sits behind a redirect in an owned computed's VALUE, not
-   * in the static node structure the owned-cell collector walks — and the
-   * first post-resume run reads through that manifest into documents its
-   * stored argument among them. Naming the manifest is what delivers that
-   * family; left cold, those reads enter the first commit's basis at
-   * seq 0 and conflict against the durable server state.
+   * A coordinator resumes its durable children from inside its own
+   * scheduler run, synchronously: `run()` instantiates the child in the
+   * coordinator's transaction, and instantiation reads the child's
+   * execution family — its argument document, its derived internal cells,
+   * a handler's `$event` stream marker among them. A child a subscription
+   * merely reached arrives without that family, so the family is named
+   * here, where every other resume dependency is: naming a child's result
+   * document delivers the family, and the coordinator's synchronous start
+   * — inside its scheduler transaction, under that transaction's retry
+   * envelope — then reads what it needs.
    *
-   * Write redirects only: they are the tree's own structure — the wiring
-   * a node's outputs and derived cells carry — while a plain data link is
-   * a reference to something this tree merely sees (a board's rows can
-   * name hundreds of foreign pieces), and naming those would pull each
-   * one's whole family into every resume. Two passes bound the reach the
-   * way the argument walk's two hops do: a chain the first pass found
-   * truncated by an absent mid-chain document resumes once that pass's
-   * syncs land, and a pass that discovers nothing new ends the scan.
+   * Which children a coordinator will run is derived exactly as the
+   * coordinator derives it (`listCoordinatorPlan`, shared with its
+   * reconcile), from inputs the first wave delivered. A child's own
+   * coordinators are handled in turn once its family has landed, so the
+   * reach is the tree's depth. A node whose plan cannot be derived —
+   * inputs not yet readable, an unresolvable op — contributes nothing
+   * rather than failing the resume; the coordinator's own reconcile
+   * holds for such inputs.
    */
-  async #syncResumeInternalRedirectTargets(
-    ownedCells: readonly Cell<any>[],
+  async #syncResumeListChildren(
+    instances: readonly ResumePatternInstance[],
   ): Promise<void> {
-    const synced = new Set<string>();
-    for (let pass = 0; pass < 2; pass++) {
+    const named = new Set<string>();
+    let frontier = [...instances];
+    while (frontier.length > 0) {
+      const next: ResumePatternInstance[] = [];
       const promises: Promise<unknown>[] = [];
-      for (const owned of ownedCells) {
-        let redirects: NormalizedFullLink[];
-        try {
-          redirects = findAllWriteRedirectCells(owned.getRawUntyped(), owned);
-        } catch (error) {
-          // A value the raw read cannot resolve contributes nothing rather
-          // than breaking the resume; log so a skipped root is diagnosable.
-          logger.warn("resume-internal-redirect-targets", () => [
-            "skipping an owned internal whose raw value did not resolve",
-            error,
-          ]);
-          continue;
+      const planTx = this.runtime.edit();
+      try {
+        for (const { pattern, resultCell } of frontier) {
+          // A fresh first run has no argument meta yet; nothing durable is
+          // resumed under it.
+          if (getMetaLink(resultCell, "argument") === undefined) continue;
+          for (const node of pattern.nodes) {
+            const module = node.module;
+            if (!isModule(module) || module.type !== "ref") continue;
+            const op = module.implementation;
+            if (op !== "map" && op !== "filter" && op !== "flatMap") continue;
+            let children: Cell<any>[];
+            let opPattern: Pattern;
+            try {
+              const resolved = this.runtime.moduleRegistry.getModule(
+                op,
+                module.defaultScope,
+              );
+              const { inputsCell, outputBinding } = this.#buildRawNodeInputs(
+                planTx,
+                resolved,
+                node.inputs,
+                node.outputs,
+                resultCell,
+                pattern,
+                op,
+              );
+              const plan = listCoordinatorPlan(
+                this.runtime,
+                planTx,
+                op,
+                inputsCell,
+                LIST_OP_INPUT_SCHEMAS[op],
+                resultCell,
+                outputBinding,
+              );
+              opPattern = plan.opPattern;
+              children = [...plan.elementKeys.values()].map((elementKey) =>
+                listElementResultCell(
+                  this.runtime,
+                  planTx,
+                  op,
+                  plan.container,
+                  elementKey,
+                )
+              );
+            } catch (error) {
+              logger.debug("resume-list-children", () => [
+                "skipping a list node whose children could not be derived",
+                error,
+              ]);
+              continue;
+            }
+            for (const child of children) {
+              const link = child.getAsNormalizedFullLink();
+              const key = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
+              if (named.has(key)) continue;
+              named.add(key);
+              // Unbound from the derivation transaction: the sync and the
+              // next round outlive it.
+              const unbound = this.runtime.getCellFromLink(link);
+              const syncStart = performance.now();
+              promises.push(
+                Promise.resolve(documentBoundedResumeCell(unbound).sync())
+                  .catch((error) => {
+                    logger.warn("resume-list-children", () => [
+                      "list child sync failed; resuming without it",
+                      error,
+                    ]);
+                  })
+                  .finally(() =>
+                    logger.time(syncStart, "start", "resumeListChildSync")
+                  ),
+              );
+              next.push({ pattern: opPattern, resultCell: unbound });
+            }
+          }
         }
-        for (const link of redirects) {
-          const docKey = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
-          if (synced.has(docKey)) continue;
-          synced.add(docKey);
-          const target = this.runtime.getCellFromLink(link);
-          const syncStart = performance.now();
-          promises.push(
-            Promise.resolve(target.sync())
-              .catch((error) => {
-                logger.warn("resume-internal-redirect-targets", () => [
-                  "redirect target sync failed; resuming without it",
-                  error,
-                ]);
-              })
-              .finally(() =>
-                logger.time(syncStart, "start", "resumeInternalRedirectSync")
-              ),
-          );
-        }
+      } finally {
+        planTx.abort("resume list children: read-only derivation");
       }
-      if (promises.length === 0) break;
       await Promise.all(promises);
+      frontier = next;
     }
   }
 
@@ -6077,11 +6086,15 @@ export class Runner {
     out: Cell<any>[],
     seen: Set<string>,
     tx: IExtendedStorageTransaction,
+    // Every (pattern, result cell) the walk visits, for the pre-sync's
+    // second pass over the list coordinators those patterns hold.
+    visited?: ResumePatternInstance[],
   ): void {
     const link = resultCell.getAsNormalizedFullLink();
     const key = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
     if (seen.has(key)) return;
     seen.add(key);
+    visited?.push({ pattern, resultCell });
 
     for (const descriptor of pattern.derivedInternalCells ?? []) {
       out.push(getDerivedInternalCell(resultCell, descriptor));
@@ -6194,6 +6207,7 @@ export class Runner {
         out,
         seen,
         tx,
+        visited,
       );
     }
   }
@@ -8749,27 +8763,29 @@ export class Runner {
     return undefined;
   }
 
-  #instantiateRawNode(
+  /**
+   * A raw builtin node's bound inputs and output binding: what
+   * `#instantiateRawNode` hands the builtin, derived from the node alone
+   * so the resume pre-sync can derive the same for a list coordinator it
+   * has not instantiated yet (`#syncResumeListChildren`).
+   */
+  #buildRawNodeInputs(
     tx: IExtendedStorageTransaction,
     module: Module,
     inputBindings: FabricExecValue,
     outputBindings: FabricExecValue,
     resultCell: Cell<any>,
-    addCancel: AddCancel,
     pattern: Pattern,
-    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
-    moduleRefName?: string,
-  ) {
-    if (typeof module.implementation !== "function") {
-      throw new Error(
-        `Raw module is not a function, got: ${module.implementation}`,
-      );
-    }
-
-    const builtinIdentity = resolveBuiltinImplementationIdentity(module);
-    if (builtinIdentity) {
-      tx.setCfcImplementationIdentity(builtinIdentity);
-    }
+    moduleRefName: string | undefined,
+  ): {
+    argumentCellLink: NormalizedFullLink;
+    mappedOutputBindings: FabricExecValue;
+    inputCells: NormalizedFullLink[];
+    outputCells: NormalizedFullLink[];
+    inputsCell: Cell<any>;
+    resolvedOutputSpot: NormalizedFullLink | undefined;
+    outputBinding: NormalizedFullLink | undefined;
+  } {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const mappedInputBindings = unwrapOneLevelAndBindToDoc(
       inputBindings,
@@ -8871,6 +8887,55 @@ export class Runner {
           module.defaultScope ?? resolvedOutputSpot.scope,
       }
       : undefined;
+    return {
+      argumentCellLink,
+      mappedOutputBindings,
+      inputCells,
+      outputCells,
+      inputsCell,
+      resolvedOutputSpot,
+      outputBinding,
+    };
+  }
+
+  #instantiateRawNode(
+    tx: IExtendedStorageTransaction,
+    module: Module,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
+    resultCell: Cell<any>,
+    addCancel: AddCancel,
+    pattern: Pattern,
+    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
+    moduleRefName?: string,
+  ) {
+    if (typeof module.implementation !== "function") {
+      throw new Error(
+        `Raw module is not a function, got: ${module.implementation}`,
+      );
+    }
+
+    const builtinIdentity = resolveBuiltinImplementationIdentity(module);
+    if (builtinIdentity) {
+      tx.setCfcImplementationIdentity(builtinIdentity);
+    }
+    const {
+      argumentCellLink,
+      mappedOutputBindings,
+      inputCells,
+      outputCells,
+      inputsCell,
+      resolvedOutputSpot,
+      outputBinding,
+    } = this.#buildRawNodeInputs(
+      tx,
+      module,
+      inputBindings,
+      outputBindings,
+      resultCell,
+      pattern,
+      moduleRefName,
+    );
 
     const builtinFrame = builtinIdentity
       ? pushFrameFromCause(undefined, {
