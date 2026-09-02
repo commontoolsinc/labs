@@ -25,8 +25,8 @@
  * 7 to 15 seconds and cost 430 rejected commits and 558 rolled-back writes —
  * and dropped two votes for the length of one burst on the way.
  * `packages/patterns/integration/lunch-poll-keyed-votes.test.ts` is the
- * assertion half of the same property, bounding rolled-back writes rather than
- * timing them.
+ * assertion half of the same property, requiring that a burst roll back no
+ * write at all rather than timing one.
  *
  * Sample count is the weak point, and it is inherent. An iteration takes about
  * 450ms on an Apple M5 Max and 2.6 seconds on a four-core CI host, so a run
