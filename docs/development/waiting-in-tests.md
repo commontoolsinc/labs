@@ -892,6 +892,21 @@ boundary the test can await without adding one to production code.
   elapsed milliseconds and the poll count, which is what separates a predicate
   that never came true from one the test never got to evaluate.
 
+  One class of that state does have a reporter after all: an engine row the
+  serving loop writes that also fans out to a flag-ON client — the served
+  intent landing in the firing session's effects instance is the canonical
+  case — reaches that client's storage-notification relay, the same relay the
+  effects channel consumes. `wait-on-delivery.ts` beside `wait-until.ts` wakes
+  on those deliveries and re-reads an engine predicate on each, subscribing
+  before its first check so an arrival cannot slip between the two; the engine
+  holds any such state before delivering it, which is what makes an engine
+  predicate safe to re-check on the client's wake. Its deadline is the same
+  kind of stuck-condition net, sized far past any healthy arrival so machine
+  load cannot carry a passing run across it — the failure mode a deadline
+  close to the healthy latency has under contention. The bounded poll stays
+  for the rest: the watermark, the stats counters, and engine rows nothing
+  delivers.
+
 ### A pull that drives its own loading
 
 `packages/generated-patterns/integration/pattern-harness.ts` compares a runtime
