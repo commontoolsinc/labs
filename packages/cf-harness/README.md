@@ -2046,6 +2046,34 @@ they are. [audit/citations.ts](audit/citations.ts) holds that table and
 quote to still be in it, so a specification edit that invalidates a check breaks
 the suite rather than leaving the check quietly wrong.
 
+### A consistency check cannot detect a consistent wrong answer
+
+Two encodings of one policy drift, and the repair is to collapse them so that
+one derivation feeds both the code that acts and the record that reports. That
+repair has a cost which is easy to miss: it also removes the disagreement a test
+was reading. Before the collapse, a wrong value in one encoding showed up as a
+mismatch against the other; after it, the two move together, and a test that
+only compares them passes on whatever answer they now agree on.
+
+So a collapse converts a detectable bug into an undetectable one unless it is
+paired with an anchor to something outside the system — a specification clause,
+a quoted requirement, a fact the code cannot restate for itself. **Every
+collapse of two encodings into one must ship with that anchor.** The
+correspondence test proves the halves cannot disagree; the anchor is what stops
+them agreeing on the wrong thing. Neither is sufficient alone, and of the two
+the anchor is the one that catches a deliberate but mistaken edit.
+
+The worked example is the absence policy. `enforce-explicit` published
+`permissive-if-absent` while failing closed, because the model-facing output
+path branched on the mode and the capability snapshot described the mode
+separately. `cfcAbsenceBehaviorForMode` is now the single derivation both read.
+Reverting the label after that collapse still passes the per-mode agreement test
+in `test/cfc-absence-policy.test.ts` — descriptor and behavior move together
+now, exactly as intended. What fails is the assertion anchored to AH-CFC-6,
+which states that absence of metadata must not read as an unlabeled successful
+observation. That clause is outside the code and cannot be moved by editing it,
+which is the whole of why it works.
+
 ## Testing
 
 Unit/package tests:
