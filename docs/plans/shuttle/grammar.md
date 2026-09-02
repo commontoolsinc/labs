@@ -43,7 +43,9 @@ as the canonical grammar's context rule already works:
   favorites resolve against the reading identity's home space regardless
   of the connected space (`packages/cli/lib/wish.ts`) — is refused with
   the reason in v1, which holds one connection to one space.
-- `..` — up one level; `cd -` — the previous place.
+- `/` — the space's own root, the leading `/` of a rooted reference
+  with nothing following it; `..` — up one level; `cd -` — the
+  previous place.
 - Anything else — relative: resolved as a child of the current position
   (a facet at a space root, a key or index inside a piece, a slug inside
   `slugs/`).
@@ -154,11 +156,13 @@ position levels, and an explicit suffix on an operand overrides it for
 that operand alone.
 
 A scope-only `@scope` is shuttle **navigation syntax**, not a reference. It
-sits with `..` and `-`: spellings that `cd` and `where` accept to move the
-cwd, and that the canonical grammar does not parse. `parseScopedIdSegment`
+sits with `/`, `..` and `-`: spellings that `cd` accepts to move the cwd,
+and that the canonical grammar does not parse. `parseScopedIdSegment`
 (`packages/runner/src/link-types.ts`) requires an id in front of the
-suffix and throws without one, so `@session` alone addresses nothing. The
-no-growth rule holds because the spelling never leaves those two verbs: an
+suffix and throws without one, so `@session` alone addresses nothing, and
+`parseReferenceParts` in the same module throws on a lone `/`, which names
+no piece handle, so the space root has no canonical spelling either. The
+no-growth rule holds because the spelling never leaves `cd` and `where`: an
 operand and a full reference always carry an id, no link endpoint can hold
 a scope-only suffix, and nothing serializes one. Setting the ambient scope
 is all `cd @session` does, and ordinary references pick it up from there.

@@ -499,12 +499,16 @@ describe("place", () => {
             });
           });
 
-          it("refuses `#argument` in a segment naming a piece", () => {
-            expect(inSlugs().cd("board#argument")).toEqual({
-              kind: "refused",
-              reason: 'The "#argument" suffix rides the reference form ' +
-                "(/of:fid1:...#argument), not the bare piece id.",
-            });
+          it("refuses `#argument` in a segment naming a piece for the same reason as a reference", () => {
+            // A place is result-rooted however the suffix was written, so
+            // the two spellings are pinned equal rather than each pinning
+            // its own text. That is what keeps a remedy naming the
+            // reference form — which `cd` refuses in turn — out of this
+            // one.
+
+            expect(inSlugs().cd("board#argument")).toEqual(
+              atSpaceRoot().cd(`/${HANDLE}#argument`),
+            );
           });
 
           it("refuses any other fragment for carrying no suffix at all", () => {

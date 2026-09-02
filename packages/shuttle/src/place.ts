@@ -339,15 +339,7 @@ function moveByReference(
   place: Place,
   reference: NormalizedLLMFriendlyRef,
 ): Step {
-  if (reference.input === true) {
-    return refuse(
-      "A place is result-rooted, so `cd` takes no `#argument` suffix. A " +
-        "place rooted at the arguments cell would leave every later " +
-        "relative read ambiguous about which side of the piece it " +
-        "addressed. Reach arguments per operand instead, as in " +
-        "`get topics/3#argument`.",
-    );
-  }
+  if (reference.input === true) return refuseArgumentSuffix();
   const moved: Place = {
     position: {
       kind: "piece",
@@ -445,10 +437,9 @@ function moveDown(from: Standing, segment: string): Step {
  * grammar carries it, and a suffix here moves the scope half of the place.
  *
  * A `#` is refused rather than taken as part of the id, for one of two
- * reasons. `#argument` is a real suffix in the wrong place: the alias grammar
- * has no fragments, and letting one through would bury the suffix inside the
- * id and fail as an unknown piece later, which is what the CLI's own
- * bare-alias intake says of the same spelling. Any other fragment is a
+ * reasons. `#argument` is refused for the reason it is refused on a
+ * reference — a place is result-rooted — which holds however the suffix is
+ * written, so both spellings give that one reason. Any other fragment is a
  * spelling nothing carries, `#` being reserved for `#argument` in the
  * reference form too, so the refusal says that rather than naming a form
  * which would refuse it again for a second reason.
@@ -462,16 +453,11 @@ function moveIntoPiece(
   const hash = segment.indexOf("#");
   if (hash !== -1) {
     const suffix = segment.slice(hash);
-    return suffix === "#argument"
-      ? refuse(
-        `The "#argument" suffix rides the reference form ` +
-          `(/of:fid1:...#argument), not the bare piece id.`,
-      )
-      : refuse(
-        `Unknown reference suffix "${suffix}". The one supported suffix ` +
-          `is "#argument", which the reference form carries and a bare ` +
-          `piece id does not.`,
-      );
+    return suffix === "#argument" ? refuseArgumentSuffix() : refuse(
+      `Unknown reference suffix "${suffix}". The one supported suffix ` +
+        `is "#argument", which the reference form carries and a bare ` +
+        `piece id does not.`,
+    );
   }
   let scoped;
   try {
@@ -522,6 +508,21 @@ function enterTarget(
 /** Whether `segment` names one of the facets a space root lists. */
 function isFacet(segment: string): segment is Facet {
   return (FACETS as readonly string[]).includes(segment);
+}
+
+/**
+ * Helper for the movers, which refuses the `#argument` suffix on a `cd`
+ * operand. A place is result-rooted, so no spelling of the suffix moves one
+ * and the reason never turns on which spelling carried it.
+ */
+function refuseArgumentSuffix(): Step {
+  return refuse(
+    "A place is result-rooted, so `cd` takes no `#argument` suffix. A " +
+      "place rooted at the arguments cell would leave every later " +
+      "relative read ambiguous about which side of the piece it " +
+      "addressed. Reach arguments per operand instead, as in " +
+      "`get topics/3#argument`.",
+  );
 }
 
 /** Helper for the movers, which builds a refusal carrying `reason`. */
