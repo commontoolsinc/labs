@@ -176,14 +176,6 @@ export const loadRunFamilies = async (
   return families;
 };
 
-/** Audits every run family under every named path. */
-export const auditPaths = async (
-  paths: readonly string[],
-): Promise<readonly CheckResult[]> =>
-  (await loadRunFamilies(paths)).flatMap((
-    family,
-  ) => [...auditRunFamily(family, RUN_CHECKS)]);
-
 /**
  * Reads a deployment's published posture.
  *

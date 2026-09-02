@@ -13,6 +13,7 @@ import { expect } from "@std/expect";
 
 import {
   harnessFabricSessionPosture,
+  harnessFabricSessionPostureBanner,
   renderCfcPostureReport,
 } from "../src/cfc-posture.ts";
 
@@ -121,6 +122,41 @@ describe("cfc-posture", () => {
       expect(text).toContain("deviation:");
       expect(text).toContain("owner:");
       expect(text).toContain("retires when:");
+    });
+  });
+
+  describe("harnessFabricSessionPostureBanner()", () => {
+    it("opens with the bundle the console opted into", () => {
+      expect(
+        harnessFabricSessionPostureBanner({
+          ...SESSION,
+          cfcPosture: "max-enforcement",
+        })[0],
+      ).toContain("max-enforcement");
+    });
+
+    it("names the fleet posture when the console opted into no bundle", () => {
+      expect(harnessFabricSessionPostureBanner(SESSION)[0]).toContain(
+        "first-party default",
+      );
+    });
+
+    it("carries the whole record under that opening line", () => {
+      // What an operator reads at startup is the banner, so the record
+      // reaching it is the property — a bundle name over an unprinted record
+      // says a deployment is enforcing without showing what.
+      const banner = harnessFabricSessionPostureBanner({
+        ...SESSION,
+        cfcPosture: "max-enforcement",
+      });
+      expect(banner.slice(1)).toEqual(
+        renderCfcPostureReport(
+          harnessFabricSessionPosture({
+            ...SESSION,
+            cfcPosture: "max-enforcement",
+          }),
+        ),
+      );
     });
   });
 });

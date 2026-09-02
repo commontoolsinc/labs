@@ -179,6 +179,28 @@ describe("the expected-posture spec", () => {
       ]);
     });
 
+    it("names a digest the record does not carry, against a record carrying none", () => {
+      const spec = parseExpectedPosture({ policyDigest: "digest-1" });
+      expect(postureMismatches(spec, FLEET_RECORD)).toEqual([
+        { field: "policyDigest", expected: "digest-1", found: "null" },
+      ]);
+    });
+
+    it("says so when the spec requires a ceiling on a sink nothing knows about", () => {
+      // A spec naming a sink the registry does not hold is a spec written
+      // against a different deployment, and reads as a typo either way.
+      const spec = parseExpectedPosture({
+        ceilingedSinks: ["fetchEverything"],
+      });
+      expect(postureMismatches(spec, MAX_ENFORCEMENT_RECORD)).toEqual([
+        {
+          field: "ceilingedSinks[fetchEverything]",
+          expected: "a confidentiality ceiling",
+          found: "not a known sink",
+        },
+      ]);
+    });
+
     it("requires a deviation for every ungated sink when the spec asks", () => {
       const spec = parseExpectedPosture({ requireDeviationsPublished: true });
       // The fleet posture leaves the six network-fetch sinks ungated with no

@@ -111,3 +111,19 @@ export const renderCfcPostureReport = (
   }
   return lines;
 };
+
+/**
+ * The posture block a console prints at startup: the bundle it opted into,
+ * then the record that bundle resolves to.
+ *
+ * Composed here rather than at the `console.log` calls so that what an
+ * operator reads is a value a test can read too. The console's own job is
+ * then only to write the lines out, which is the part a test has no reason to
+ * reach.
+ */
+export const harnessFabricSessionPostureBanner = (
+  config: HarnessFabricSessionConfig,
+): readonly string[] => [
+  `  cfc:        ${config.cfcPosture ?? "first-party default"}`,
+  ...renderCfcPostureReport(harnessFabricSessionPosture(config)),
+];

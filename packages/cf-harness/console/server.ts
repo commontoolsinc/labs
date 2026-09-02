@@ -55,10 +55,7 @@ import {
   FileHarnessProviderSettingsStore,
   resolveHarnessModelProviderPreference,
 } from "../src/auth/provider-settings.ts";
-import {
-  harnessFabricSessionPosture,
-  renderCfcPostureReport,
-} from "../src/cfc-posture.ts";
+import { harnessFabricSessionPostureBanner } from "../src/cfc-posture.ts";
 import type {
   HarnessFabricCfcEnforcementMode,
   HarnessFabricCfcFlowLabelsMode,
@@ -1650,15 +1647,8 @@ export const startConsoleServer = async (
       console.log(
         `  skills:     ${config.skillsSh?.baseUrl ?? "(not configured)"}`,
       );
-      console.log(
-        `  cfc:        ${
-          config.fabricSession.cfcPosture ?? "first-party default"
-        }`,
-      );
       for (
-        const line of renderCfcPostureReport(
-          harnessFabricSessionPosture(config.fabricSession),
-        )
+        const line of harnessFabricSessionPostureBanner(config.fabricSession)
       ) {
         console.log(line);
       }
