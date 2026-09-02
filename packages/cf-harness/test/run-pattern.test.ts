@@ -346,59 +346,69 @@ const TOTAL_SPENDING_RESULT_SCHEMA = {
 } as const;
 
 /**
- * Seeds an account the way an operator attaches one: a document whose
- * `account` field is a LINK to a second document, and the second document is
- * the one that carries the confidentiality, on its root. Returns the
- * LLM-friendly link to the first document's `account` field, which is what
- * the agent is handed — so the labeled document is one the agent's address
- * never names, reached only by dereferencing the link it holds.
+ * How the holder document an agent is handed reaches the labeled account:
+ * through a link in its `account` field, the way an operator attaches one;
+ * through a link at its own root, above the field the agent addresses; or
+ * through its `account` field beside a `notes` field linking to an
+ * unlabeled document, so a dereference the holder records leads somewhere
+ * the account never goes.
  */
-async function seedLabelledAccount(
+type AccountHolderShape = "field-link" | "root-link" | "two-fields";
+
+/**
+ * Seeds an account the way an operator attaches one: a holder document that
+ * reaches the account document by a link, with the confidentiality on the
+ * account document and not on the holder. Returns the LLM-friendly link to
+ * the holder's `account` position, which is what the agent is handed — so
+ * the labeled document is one the agent's address never names, reached only
+ * by dereferencing what the holder holds — and, for the two-field shape, the
+ * link to its `notes` position as well.
+ */
+async function seedAccountHolder(
   runtime: Runtime,
   space: ReturnType<PiecesController["getSpace"]>,
   cause: string,
-): Promise<string> {
+  shape: AccountHolderShape,
+): Promise<{ account: string; notes: string }> {
   const seed = runtime.edit();
+  const account = {
+    balance: 2000,
+    transactions: [{ amount: -120 }, { amount: 2000 }, { amount: -25 }],
+  };
   const accountCell = runtime.getCell(
     space,
     `${cause}-account`,
-    {
-      type: "object",
-      properties: {
-        balance: { type: "number" },
-        transactions: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: { amount: { type: "number" } },
-          },
-        },
-      },
-    },
+    undefined,
     seed,
   );
   const accountId = accountCell.getAsNormalizedFullLink().id;
   writeSeedEnvelopeDoc(seed, space);
+  // A root-linked holder continues into the account document at `account`,
+  // so that document carries the field and the label sits on it; the others
+  // link straight at the account, labeled at its root.
   seed.writeOrThrow({ space, scope: "space", id: accountId, path: [] }, {
-    value: {
-      balance: 2000,
-      transactions: [{ amount: -120 }, { amount: 2000 }, { amount: -25 }],
-    },
+    value: shape === "root-link" ? { account } : account,
     cfc: {
       version: 1,
       schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
       labelMap: {
         version: 1,
-        entries: [{ path: [], label: { confidentiality: ["finance"] } }],
+        entries: [{
+          path: shape === "root-link" ? ["account"] : [],
+          label: { confidentiality: ["finance"] },
+        }],
       },
     },
   });
-  const holderCell = runtime.getCell(
-    space,
-    `${cause}-holder`,
-    { type: "object", properties: { account: { type: "object" } } },
-    seed,
-  );
+  const notesCell = runtime.getCell(space, `${cause}-notes`, undefined, seed);
+  const notesId = notesCell.getAsNormalizedFullLink().id;
+  seed.writeOrThrow({ space, scope: "space", id: notesId, path: [] }, {
+    value: { text: "unlabeled" },
+  });
+  const linkTo = (id: string) => ({
+    "/": { "link@1": { id, path: [], scope: "space", space } },
+  });
+  const holderCell = runtime.getCell(space, `${cause}-holder`, undefined, seed);
   seed.writeOrThrow(
     {
       space,
@@ -407,20 +417,33 @@ async function seedLabelledAccount(
       path: [],
     },
     {
-      value: {
-        account: {
-          "/": {
-            "link@1": { id: accountId, path: [], scope: "space", space },
-          },
-        },
-      },
+      value: shape === "root-link"
+        ? linkTo(accountId)
+        : shape === "two-fields"
+        ? { account: linkTo(accountId), notes: linkTo(notesId) }
+        : { account: linkTo(accountId) },
     },
   );
   expect((await seed.commit()).ok).toBeDefined();
-  return createLLMFriendlyLink(
-    holderCell.key("account").getAsNormalizedFullLink(),
-    space,
-  );
+  return {
+    account: createLLMFriendlyLink(
+      holderCell.key("account").getAsNormalizedFullLink(),
+      space,
+    ),
+    notes: createLLMFriendlyLink(
+      holderCell.key("notes").getAsNormalizedFullLink(),
+      space,
+    ),
+  };
+}
+
+/** {@link seedAccountHolder} in the operator's shape, the account link alone. */
+async function seedLabelledAccount(
+  runtime: Runtime,
+  space: ReturnType<PiecesController["getSpace"]>,
+  cause: string,
+): Promise<string> {
+  return (await seedAccountHolder(runtime, space, cause, "field-link")).account;
 }
 
 /**
@@ -1647,6 +1670,85 @@ describe("run-pattern", () => {
         });
         expect(output.valueError).toContain('input "account"');
         expect(output.valueError).toContain("without it releases its values");
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("names the input when the link it follows sits above the input's address", async () => {
+      // The holder's root is itself a link, and the caller's address names
+      // the `account` field beneath it: the dereference the attribution read
+      // records starts above the address, so the address continues on the
+      // far side of the link, into the account document's own `account`
+      // field, where the label sits.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const refs = await seedAccountHolder(
+          runtime,
+          space,
+          "release-root-linked-holder",
+          "root-link",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: SPENDING_PATTERN_SOURCE,
+            inputs: { account: refs.account },
+            resultSchema: TOTAL_SPENDING_RESULT_SCHEMA,
+          },
+        );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.policyRefusal?.inputKeys).toEqual(["account"]);
+        expect(output.policyRefusal?.attribution).toBe("complete");
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("does not name an input for a dereference the holder made somewhere else", async () => {
+      // The holder links to the labeled account under `account` and to an
+      // unlabeled document under `notes`, and both are inputs. The `notes`
+      // dereference is recorded against the same holder document, but it
+      // starts beside the `account` address rather than at, below, or above
+      // it, so it leads the `account` input nowhere — and `notes` is not
+      // named, since nothing it reaches carries the label.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const refs = await seedAccountHolder(
+          runtime,
+          space,
+          "release-two-field-holder",
+          "two-fields",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: [
+              "import { computed, pattern } from 'commonfabric';",
+              "interface Transaction { amount: number; }",
+              "interface Account { balance: number; transactions: Transaction[]; }",
+              "interface Notes { text: string; }",
+              "interface Input { account: Account; notes: Notes; }",
+              "interface Output { totalSpending: number; noteLength: number; }",
+              "export default pattern<Input, Output>(({ account, notes }) => ({",
+              "  totalSpending: computed(() => account.transactions.reduce(",
+              "    (sum, t) => sum + (t.amount < 0 ? -t.amount : 0),",
+              "    0,",
+              "  )),",
+              "  noteLength: computed(() => notes.text.length),",
+              "}));",
+              "",
+            ].join("\n"),
+            inputs: { account: refs.account, notes: refs.notes },
+            resultSchema: TOTAL_SPENDING_RESULT_SCHEMA,
+          },
+        );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.policyRefusal?.inputKeys).toEqual(["account"]);
+        expect(output.policyRefusal?.attribution).toBe("complete");
+        expect(output.valueError).not.toContain('"notes"');
       } finally {
         await dispose();
       }

@@ -601,6 +601,12 @@ const pathHasPrefix = (
   prefix.length <= path.length &&
   prefix.every((segment, index) => segment === path[index]);
 
+/** Whether one path is a prefix of the other, either way round. */
+const pathsComparable = (
+  a: readonly string[],
+  b: readonly string[],
+): boolean => pathHasPrefix(a, b) || pathHasPrefix(b, a);
+
 const inputAddressKey = (address: RunPatternInputAddress): string =>
   JSON.stringify([address.key, address.hash, address.path]);
 
@@ -616,10 +622,13 @@ const inputAddressKey = (address: RunPatternInputAddress): string =>
  * dereference traces the attribution read recorded are the route from the
  * one to the other, and following them is what places such a read.
  *
- * A link at or below the input's address leads to its target as it stands.
- * A link above it — the document root is itself a link, say — leads to the
- * target extended by the rest of the input's path, since that is where the
- * value continues on the far side.
+ * A trace's target is the address the resolution continued to, not the bare
+ * far end of the link: a link above the input's address — the document root
+ * is itself a link, say — lands its trace at the input's own position on the
+ * far side. So a link at, below, or above the address leads to the target as
+ * it stands, and only a link beside the address, on a sibling path, leads the
+ * input nowhere. Every trace is a value dereference: the transaction that
+ * records them only reads.
  */
 const inputAddressesReached = (
   addresses: readonly RunPatternInputAddress[],
@@ -632,7 +641,6 @@ const inputAddressesReached = (
   for (let index = 0; index < reached.length; index += 1) {
     const from = reached[index];
     for (const trace of traces) {
-      if (trace.kind !== "value") continue;
       const targetHash = comparableEntityHash(trace.target.id);
       if (
         targetHash === undefined ||
@@ -640,18 +648,8 @@ const inputAddressesReached = (
       ) {
         continue;
       }
-      let path: readonly string[];
-      if (pathHasPrefix(trace.source.path, from.path)) {
-        path = trace.target.path;
-      } else if (pathHasPrefix(from.path, trace.source.path)) {
-        path = [
-          ...trace.target.path,
-          ...from.path.slice(trace.source.path.length),
-        ];
-      } else {
-        continue;
-      }
-      const next = { key: from.key, hash: targetHash, path };
+      if (!pathsComparable(trace.source.path, from.path)) continue;
+      const next = { key: from.key, hash: targetHash, path: trace.target.path };
       const key = inputAddressKey(next);
       if (!seen.has(key)) {
         seen.add(key);
