@@ -166,6 +166,9 @@ describe("resume-list-children-cross-space-append", () => {
     // The cross-space child's own run and the row over it land through
     // pending/retry cycles; settle them as the build did before leaving.
     await settle(b, rcB);
+    // The appended child renders on the page that appended it, without a
+    // reload.
+    expect(rowLabels(rcB)).toEqual(["child-1", "child-2"]);
     await b.dispose({ closeStorage: false });
     runtimes.splice(runtimes.indexOf(b), 1);
 

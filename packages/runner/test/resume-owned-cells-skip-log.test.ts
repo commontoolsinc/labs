@@ -14,24 +14,26 @@ import { trustExecutable } from "./support/trusted-builder.ts";
 // that would reach that child's own derivedInternalCells manifest. One is the
 // catch around binding/resolution; the other is the resolution simply coming
 // back undefined, which happens when a node's outputs hold no write redirect
-// the scan can resolve (outputs consisting only of deferred partialCause
-// aliases are the shape seen live). Both hide a skipped subtree that is
-// otherwise only discoverable by console probing, so both emit under the
-// `resume-owned-cells` key with the same identity payload.
+// the scan can resolve. Both hide a skipped subtree that is otherwise only
+// discoverable by console probing, so both emit under the `resume-owned-cells`
+// key with the same identity payload.
 //
 // Their LEVELS differ, and that difference is what these tests pin:
 //
 //   - the catch exit WARNS. Outputs that cannot even be bound are a genuine
 //     failure of an expectation.
-//   - the undefined exit DEBUGS. It is the by-design outcome for outputs made
-//     only of deferred partialCause aliases — #5143 deliberately moved that
-//     case off the throwing path — and the real home pattern takes it several
-//     times per healthy run. Warning there would be noise, not signal.
+//   - the undefined exit DEBUGS. Instantiation refuses the same node, having
+//     nothing to anchor the child's identity on, so the start that follows
+//     reports the failure itself; a warning here would only double it.
 //
-// So there are two obligations, and a test each way: the positive cases prove
-// each line still carries what a stranded-piece investigation needs, and the
-// healthy-home case proves an ordinary run stays SILENT at warn level. Putting
-// the debug back to warn fails the latter.
+// A healthy run takes NEITHER exit: the walk derives every sub-pattern node's
+// identity as instantiation derives it, so a pattern instantiation accepts is
+// a pattern the walk covers in full. The positive cases prove each line still
+// carries what a stranded-piece investigation needs; the healthy-home case
+// proves the walk over the real home pattern skips nothing at all. A walk that
+// fell out of step with instantiation — binding a nested implementation one
+// `defer` short of the bind that precedes its start, say — shows up there as
+// a skip of every child whose outputs are still deferred.
 //
 // resume-output-redirect-partialcause.test.ts asserts the scan's return value;
 // this asserts the consequence at the call site.
@@ -265,13 +267,12 @@ describe("resume owned-cell walk skip logging", () => {
     });
   }
 
-  it("stays silent at warn level through a healthy home pattern run", async () => {
-    // The negative half, and the reason the undefined exit is a debug: a
-    // healthy run of the REAL home pattern takes that exit repeatedly. While it
-    // was a warn, this run emitted the warning twice, and CI showed eight
-    // occurrences across passing home tests. This fails if the log goes back to
-    // warn — and, via the "really does take the exit" assertion, also if the
-    // branch stops being reached, so the silence it proves cannot go vacuous.
+  it("skips nothing through a healthy home pattern run", async () => {
+    // The negative half: a healthy run of the REAL home pattern takes neither
+    // exit. Every sub-pattern node instantiation accepts resolves for the walk
+    // too, at every nesting level — the home pattern nests pieces several
+    // levels deep, with deferred outputs at each — so a single skip here is a
+    // level the walk binds differently from its instantiation.
 
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
@@ -295,12 +296,7 @@ describe("resume owned-cell walk skip logging", () => {
         await runtime.idle();
       });
 
-      const skips = skipEmissions(emissions);
-      // The healthy run really does take the skip exit — otherwise the
-      // silence below would prove nothing.
-      expect(skips.length).toBeGreaterThan(0);
-      expect(skips.filter((emission) => emission.level === "warn")).toEqual([]);
-      expect(skips.every((emission) => emission.level === "debug")).toBe(true);
+      expect(skipEmissions(emissions)).toEqual([]);
     } finally {
       await runtime.dispose();
       await storageManager.close();

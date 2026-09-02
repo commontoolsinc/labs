@@ -3,9 +3,10 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
-import { parseLink } from "../src/link-utils.ts";
+import { getDerivedInternalCellLink, parseLink } from "../src/link-utils.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import type { Pattern } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("resume list children presync");
 const space = signer.did();
@@ -28,10 +29,12 @@ const PROGRAM: RuntimeProgram = {
 describe("resume-list-children-presync", () => {
   // A coordinator's children arrive at a cold replica without their execution
   // families, and the coordinator instantiates them synchronously inside its
-  // own run — so the resume pre-sync must name each child before the parent
-  // instantiates. The spy records every cell sync a replica issues; the
-  // assertions are on the children the pre-sync named, and on those being
-  // exactly the children the coordinator itself minted.
+  // own run — so the resume pre-sync must name each child, and the cells the
+  // child owns (its element pattern's derived internal cells, which its first
+  // run reads), before the parent instantiates. The spy records every cell
+  // sync a replica issues; the assertions are on the children and owned cells
+  // the pre-sync named, and on those being exactly the ones the coordinator
+  // itself mints.
 
   let server: ReturnType<typeof newSharedServer>;
   let managers: EmulatedStorageManager[];
@@ -101,6 +104,23 @@ describe("resume-list-children-presync", () => {
       return id === undefined ? [] : [id as string];
     });
     expect(childIds.length).toBe(2);
+    // The cell each child owns: the element pattern's one derived internal
+    // cell (`item.n * 2`), minted from the child's result cell exactly as
+    // the child's own setup mints it. Index-aligned with `childIds`.
+    const elementPattern = (compiled.nodes[0].inputs as { op: Pattern }).op;
+    expect(elementPattern.derivedInternalCells?.length).toBe(1);
+    const ownedIds: string[] = slots.flatMap((slot) => {
+      const childLink = parseLink(slot, container);
+      if (childLink === undefined) return [];
+      const childCell = author.runtime.getCellFromLink(childLink);
+      return (elementPattern.derivedInternalCells ?? []).map((descriptor) =>
+        getDerivedInternalCellLink(childCell, descriptor).id as string
+      );
+    });
+    expect(ownedIds.length).toBe(2);
+    const childOfOwned = new Map(
+      ownedIds.map((ownedId, index) => [ownedId, childIds[index]]),
+    );
     await author.runtime.dispose({ closeStorage: false });
     runtimes.splice(runtimes.indexOf(author.runtime), 1);
 
@@ -119,11 +139,16 @@ describe("resume-list-children-presync", () => {
     );
     resumer.runtime.storageManager.syncCell = ((cell, options) => {
       const id = cell.getAsNormalizedFullLink().id;
-      if (childIds.includes(id) && !registeredWhenNamed.has(id)) {
+      // An owned cell counts as named "while running" once ITS child is.
+      const pieceId = childOfOwned.get(id) ?? id;
+      if (
+        (childIds.includes(id) || ownedIds.includes(id)) &&
+        !registeredWhenNamed.has(id)
+      ) {
         registeredWhenNamed.set(
           id,
           [...resumer.runtime.runner.cancels.keys()].some((key) =>
-            key.endsWith(`/${id}`)
+            key.endsWith(`/${pieceId}`)
           ),
         );
       }
@@ -142,6 +167,14 @@ describe("resume-list-children-presync", () => {
     // ...and each was named while it was not yet running — the pre-sync
     // ran ahead of the coordinator's instantiation.
     for (const id of childIds) {
+      expect(registeredWhenNamed.get(id)).toBe(false);
+    }
+    // The cell each child owns was named the same way (mutation: without the
+    // owned-cell collection the child's first run is the first thing to
+    // touch it, after the child has registered — or nothing syncs it at all
+    // and the map holds no entry).
+    for (const id of ownedIds) {
+      expect(resumer.syncedIds).toContain(id);
       expect(registeredWhenNamed.get(id)).toBe(false);
     }
     expect(

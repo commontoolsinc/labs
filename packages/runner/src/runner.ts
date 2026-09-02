@@ -5970,17 +5970,29 @@ export class Runner {
    *
    * Which children a coordinator will run is derived exactly as the
    * coordinator derives it (`listCoordinatorPlan`, shared with its
-   * reconcile), from inputs the first wave delivered. A child's own
-   * coordinators are handled in turn once its family has landed, so the
-   * reach is the tree's depth. A node whose plan cannot be derived —
-   * inputs not yet readable, an unresolvable op — contributes nothing
-   * rather than failing the resume; the coordinator's own reconcile
-   * holds for such inputs.
+   * reconcile), from inputs the first wave delivered. Each child is then
+   * a resumed instance like any other: the cells it owns — its derived
+   * internal cells, and those of the sub-patterns nested in it — are
+   * collected the way the owned-cell walk collects them for the root, so
+   * a child's first run reads them warm rather than entering the commit
+   * basis at seq 0 (the one cold read a populated home's reload otherwise
+   * makes per element). A child's own coordinators are handled in turn
+   * once its family has landed, so the reach is the tree's depth. A node
+   * whose plan cannot be derived — inputs not yet readable, an unresolvable
+   * op — contributes nothing rather than failing the resume; the
+   * coordinator's own reconcile holds for such inputs.
    */
   async #syncResumeListChildren(
     instances: readonly ResumePatternInstance[],
   ): Promise<void> {
     const named = new Set<string>();
+    // The owned-cell walk's own dedup: an instance the root walk already
+    // visited is not collected again here.
+    const walked = new Set<string>();
+    for (const { resultCell } of instances) {
+      const link = resultCell.getAsNormalizedFullLink();
+      walked.add(`${link.space}\0${link.id}\0${link.scope ?? "space"}`);
+    }
     let frontier = [...instances];
     while (frontier.length > 0) {
       const next: ResumePatternInstance[] = [];
@@ -6059,7 +6071,40 @@ export class Runner {
                     logger.time(syncStart, "start", "resumeListChildSync")
                   ),
               );
-              next.push({ pattern: opPattern, resultCell: unbound });
+              // The child's owned cells, and the instances nested in it —
+              // those join the next round for the coordinators they hold.
+              const owned: Cell<any>[] = [];
+              const nested: ResumePatternInstance[] = [];
+              this.#collectResumeOwnedCells(
+                opPattern,
+                unbound,
+                owned,
+                walked,
+                planTx,
+                nested,
+              );
+              for (const cell of owned) {
+                const ownedLink = cell.getAsNormalizedFullLink();
+                const ownedKey = `${ownedLink.space}\0${ownedLink.id}\0${
+                  ownedLink.scope ?? "space"
+                }`;
+                if (named.has(ownedKey)) continue;
+                named.add(ownedKey);
+                const ownedStart = performance.now();
+                promises.push(
+                  Promise.resolve(documentBoundedResumeCell(cell).sync())
+                    .catch((error) => {
+                      logger.warn("resume-list-children", () => [
+                        "list child owned-cell sync failed; resuming without it",
+                        error,
+                      ]);
+                    })
+                    .finally(() =>
+                      logger.time(ownedStart, "start", "resumeListChildSync")
+                    ),
+                );
+              }
+              next.push(...nested);
             }
           }
         }
@@ -6116,8 +6161,6 @@ export class Runner {
       }
       const childPattern = module.implementation;
       const targetSpace = module.targetSpace ?? resultCell.space;
-      const childScope = patternDefaultScope(childPattern) ??
-        module.defaultScope;
       // Resolve the node's reserved output spot the way instantiatePatternNode
       // does: unwrap one level (so a deferred-alias output is decremented and
       // followed) and follow the write-redirect chain to its resolved end (a
@@ -6127,11 +6170,31 @@ export class Runner {
       // mints; the unresolved head of a multi-hop binding would be a different
       // cell, pre-syncing the wrong owned-cell subtree.
       let spotLink: NormalizedFullLink | undefined;
+      let boundChildPattern: Pattern;
       try {
+        // The identity bind, manifest-blind exactly as `#instantiatePatternNode`
+        // performs it: a partialCause output renders as its derived cell's
+        // kind-free id, which `causeOnlySpotIds` below has the scan take as
+        // it stands. Binding with the manifest instead would render the
+        // KINDED cell and resolve through it to a different spot — a child
+        // identity the instantiation never mints.
         const unwrappedOutputs = unwrapOneLevelAndBindToDoc(
           node.outputs,
           argumentLink,
           resultCell,
+        );
+        // The child's nodes are walked as the child's own start sees them:
+        // `#instantiatePatternNode` binds the implementation once at this
+        // level before the child instantiates it, and that bind is what
+        // crosses one `defer` boundary of every alias inside it. Walking the
+        // raw implementation instead leaves each nested level one decrement
+        // behind, so its deferred outputs never resolve and every such child
+        // stays invisible to the resume.
+        boundChildPattern = unwrapOneLevelAndBindToDoc(
+          childPattern,
+          argumentLink,
+          resultCell,
+          { derivedInternalCells: pattern.derivedInternalCells },
         );
         // The same cause-only skip instantiatePatternNode's spot
         // derivation applies, so the two derive identical coordinates.
@@ -6159,17 +6222,17 @@ export class Runner {
         // pre-sync AND the recursion that would reach the child's own
         // `derivedInternalCells` manifest — reached without an error: the
         // outputs bound, but held no write redirect the scan could resolve
-        // (e.g. they consist only of deferred partialCause aliases, which
-        // denote a deeper level's derived internal cells rather than this
-        // node's reserved result spot).
+        // (outputs consisting only of partialCause aliases still deferred to
+        // a deeper level, say). Instantiation refuses the same node, since
+        // it has nothing to anchor the child's identity on, so a healthy run
+        // never takes this exit; a pattern that does reach it fails at its
+        // own start.
         //
-        // DEBUG, not warn: this is the BY-DESIGN outcome for such outputs, not
-        // a failure. #5143 deliberately moved that case off the throwing path,
-        // and ordinary healthy runs of the home pattern take this exit several
-        // times per resume — warning here would be noise, not signal. It still
-        // hides a skipped subtree, so it carries the same key and the same
-        // identity payload as its sibling, and turning this logger up to debug
-        // brings it back for someone tracing a stranded piece:
+        // DEBUG, not warn: the start that follows reports the refusal itself.
+        // The exit still hides a skipped subtree, so it carries the same key
+        // and the same identity payload as its sibling, and turning this
+        // logger up to debug brings it back for someone tracing a stranded
+        // piece:
         // `commonfabric.logger["runner"].level = "debug"` on the main thread,
         // `commonfabric.rt.setLoggerLevel("debug", "runner")` for the worker
         // the runner actually lives in. (`CF_LOG_LEVEL` will NOT do it: it is a
@@ -6183,6 +6246,8 @@ export class Runner {
         ]);
         continue;
       }
+      const childScope = patternDefaultScope(boundChildPattern) ??
+        module.defaultScope;
       let childResultCell = this.runtime.getCell(
         targetSpace,
         {
@@ -6192,7 +6257,7 @@ export class Runner {
             path: [...spotLink.path],
           },
         },
-        childPattern.resultSchema,
+        boundChildPattern.resultSchema,
       );
       if (childScope !== undefined && childScope !== "space") {
         const childLink = childResultCell.getAsNormalizedFullLink();
@@ -6202,7 +6267,7 @@ export class Runner {
         });
       }
       this.#collectResumeOwnedCells(
-        childPattern,
+        boundChildPattern,
         childResultCell,
         out,
         seen,
