@@ -42,6 +42,12 @@ function inSlugs(): CurrentPlace {
   return place;
 }
 
+/** Helper for the cases below, which reads the position `pwd` printed. */
+function printedPosition(place: CurrentPlace): string {
+  const [position] = place.render().split("\n");
+  return position.slice("position  ".length);
+}
+
 /** Helper for the cases below, which stands an instance at a piece. */
 function atPiece(): CurrentPlace {
   const place = inSlugs();
@@ -66,15 +72,15 @@ describe("place", () => {
   });
 
   describe("renderPlace()", () => {
-    it("returns the space root with a trailing slash, and the scope", () => {
+    it("returns a space root with no leading slash, and the scope", () => {
       expect(renderPlace(placeAtSpaceRoot(SPACE))).toBe(
-        "position  /@did:key:z6MkConnectedSpace/\nscope     @space",
+        "position  @did:key:z6MkConnectedSpace/\nscope     @space",
       );
     });
 
-    it("returns a facet with a trailing slash", () => {
+    it("returns a facet with no leading slash", () => {
       expect(renderPlace(inSlugs().place)).toBe(
-        "position  /@did:key:z6MkConnectedSpace/slugs/\nscope     @space",
+        "position  @did:key:z6MkConnectedSpace/slugs/\nscope     @space",
       );
     });
 
@@ -86,6 +92,35 @@ describe("place", () => {
         "position  /@did:key:z6MkConnectedSpace/board/topics/3\n" +
           "scope     @session",
       );
+    });
+
+    describe("round-tripping", () => {
+      // What a reader copies has to name the place it was printed for, or
+      // name nothing. A piece is a cell, so its rendering is a reference and
+      // `cd` takes it back; a container is not a cell, so its rendering is
+      // not a reference and `cd` refuses it rather than resolving it to a
+      // piece whose slug happens to match the container's name.
+
+      it("returns a piece rendering `cd` takes back to the same place", () => {
+        const place = atPiece();
+        place.cd("topics/3");
+        const elsewhere = atSpaceRoot();
+        elsewhere.cd(printedPosition(place));
+        expect(elsewhere.place).toEqual(place.place);
+      });
+
+      it("returns a space root rendering `cd` refuses", () => {
+        const place = atSpaceRoot();
+        expect(place.cd(printedPosition(place)).kind).toBe("refused");
+        expect(place.place).toEqual(placeAtSpaceRoot(SPACE));
+      });
+
+      it("returns a facet rendering `cd` refuses", () => {
+        const place = inSlugs();
+        const facet = place.place;
+        expect(place.cd(printedPosition(place)).kind).toBe("refused");
+        expect(place.place).toEqual(facet);
+      });
     });
   });
 
@@ -164,7 +199,6 @@ describe("place", () => {
                   space: SPACE,
                   piece: "board",
                   path: [],
-                  facet: "slugs",
                 },
                 scope: "space",
               },
@@ -181,6 +215,17 @@ describe("place", () => {
               space: SPACE,
               piece: "board",
               path: ["topics"],
+            });
+          });
+
+          it("restores the route, so `..` backs out the way it came", () => {
+            const place = atPiece();
+            place.cd("..");
+            place.cd("-");
+            place.cd("..");
+            expect(place.place.position).toEqual({
+              kind: "facet",
+              space: SPACE,
               facet: "slugs",
             });
           });
@@ -204,7 +249,6 @@ describe("place", () => {
                   space: SPACE,
                   piece: "board",
                   path: [],
-                  facet: "slugs",
                 },
                 scope: "session",
               },
@@ -216,6 +260,17 @@ describe("place", () => {
             place.cd("@user");
             place.cd("@space");
             expect(place.place.scope).toBe("space");
+          });
+
+          it("keeps the route, so `..` still backs out to the facet", () => {
+            const place = atPiece();
+            place.cd("@session");
+            place.cd("..");
+            expect(place.place.position).toEqual({
+              kind: "facet",
+              space: SPACE,
+              facet: "slugs",
+            });
           });
 
           it("refuses a suffix naming no scope", () => {
@@ -236,7 +291,6 @@ describe("place", () => {
                   space: SPACE,
                   piece: "board",
                   path: [],
-                  facet: "slugs",
                 },
                 scope: "session",
               },
@@ -329,7 +383,7 @@ describe("place", () => {
           });
 
           it("refuses a rooted string that names no piece", () => {
-            expect(atSpaceRoot().cd("/")).toEqual({
+            expect(atSpaceRoot().cd("//")).toEqual({
               kind: "refused",
               reason:
                 'Target must include a piece handle, e.g. "/of:fid1:abc123/path".',
@@ -350,6 +404,44 @@ describe("place", () => {
                 scope: "space",
               },
             });
+          });
+        });
+
+        describe("the space root", () => {
+          it("moves to the space root for `/` from a piece", () => {
+            expect(atPiece().cd("/")).toEqual({
+              kind: "moved",
+              place: {
+                position: { kind: "root", space: SPACE },
+                scope: "space",
+              },
+            });
+          });
+
+          it("moves to the space root for `/` from a path in a piece", () => {
+            const place = atPiece();
+            place.cd("topics/3");
+            place.cd("/");
+            expect(place.place.position).toEqual({
+              kind: "root",
+              space: SPACE,
+            });
+          });
+
+          it("moves to the space root for `/` from a facet", () => {
+            const place = inSlugs();
+            place.cd("/");
+            expect(place.place.position).toEqual({
+              kind: "root",
+              space: SPACE,
+            });
+          });
+
+          it("leaves the scope alone for `/`", () => {
+            const place = atPiece();
+            place.cd("@session");
+            place.cd("/");
+            expect(place.place.scope).toBe("session");
           });
         });
 
@@ -390,7 +482,6 @@ describe("place", () => {
                   space: SPACE,
                   piece: "board",
                   path: [],
-                  facet: "slugs",
                 },
                 scope: "space",
               },
@@ -405,7 +496,25 @@ describe("place", () => {
               space: SPACE,
               piece: "board",
               path: ["topics", 3],
-              facet: "slugs",
+            });
+          });
+
+          it("refuses `#` in a segment naming a piece", () => {
+            expect(inSlugs().cd("board#argument")).toEqual({
+              kind: "refused",
+              reason: 'The "#argument" suffix rides the reference form ' +
+                "(/of:fid1:...#argument), not the bare piece id.",
+            });
+          });
+
+          it("reads `#` inside a piece as part of a data key", () => {
+            const place = atPiece();
+            place.cd("topics#argument");
+            expect(place.place.position).toEqual({
+              kind: "piece",
+              space: SPACE,
+              piece: "board",
+              path: ["topics#argument"],
             });
           });
 
@@ -417,7 +526,6 @@ describe("place", () => {
               space: SPACE,
               piece: "board",
               path: ["mail@example"],
-              facet: "slugs",
             });
           });
 
@@ -429,7 +537,6 @@ describe("place", () => {
               space: SPACE,
               piece: "board",
               path: ["topics", 3],
-              facet: "slugs",
             });
           });
 
@@ -460,6 +567,23 @@ describe("place", () => {
             });
           });
 
+          it("walks out one level per `..`", () => {
+            const place = atPiece();
+            place.cd("..");
+            place.cd("..");
+            expect(place.place.position).toEqual({
+              kind: "root",
+              space: SPACE,
+            });
+          });
+
+          it("keeps the scope backing out of a piece a reference named", () => {
+            const place = atSpaceRoot();
+            place.cd(`/${HANDLE}@user`);
+            place.cd("..");
+            expect(place.place.scope).toBe("user");
+          });
+
           it("moves from a facet to the space root", () => {
             const place = inSlugs();
             place.cd("..");
@@ -478,7 +602,6 @@ describe("place", () => {
               space: SPACE,
               piece: "board",
               path: ["topics"],
-              facet: "slugs",
             });
           });
 
@@ -489,6 +612,18 @@ describe("place", () => {
               kind: "facet",
               space: SPACE,
               facet: "slugs",
+            });
+          });
+
+          it("drops a path segment inside a piece a reference named", () => {
+            const place = atSpaceRoot();
+            place.cd(`/${HANDLE}/topics/3`);
+            place.cd("..");
+            expect(place.place.position).toEqual({
+              kind: "piece",
+              space: SPACE,
+              piece: HANDLE,
+              path: ["topics"],
             });
           });
 
@@ -561,6 +696,38 @@ describe("place", () => {
           const place = atSpaceRoot();
           place.enter({ space: OTHER_SPACE, piece: HANDLE }, "#profile");
           expect(place.place).toEqual(placeAtSpaceRoot(SPACE));
+        });
+      });
+
+      describe("settle()", () => {
+        it("lands the place the move worked out", () => {
+          const place = atSpaceRoot();
+          const move = place.cd(`/@estuary/${HANDLE}/title`);
+          if (move.kind !== "space-by-name") throw new Error("not handed on");
+          expect(place.settle(move)).toEqual({
+            kind: "moved",
+            place: move.place,
+          });
+        });
+
+        it("keeps the scope a space-named reference asked for", () => {
+          const place = atSpaceRoot();
+          const move = place.cd(`/@estuary/${HANDLE}@user`);
+          if (move.kind !== "space-by-name") throw new Error("not handed on");
+          place.settle(move);
+          expect(place.place.scope).toBe("user");
+        });
+
+        it("carries no route, so `..` leaves the piece for the root", () => {
+          const place = inSlugs();
+          const move = place.cd(`/@estuary/${HANDLE}`);
+          if (move.kind !== "space-by-name") throw new Error("not handed on");
+          place.settle(move);
+          place.cd("..");
+          expect(place.place.position).toEqual({
+            kind: "root",
+            space: SPACE,
+          });
         });
       });
 

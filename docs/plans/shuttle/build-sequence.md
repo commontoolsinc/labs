@@ -118,11 +118,12 @@ and the tests covering it together.
 
 **B1 — walking skeleton** (after A1; A2 for nothing yet). Open, and landing
 in slices. In, as `packages/shuttle/src/place.ts`: the pair itself, `cd` over
-relative segments, `..`, `-`, a scope-only `@scope`, and rooted and complete
-references; the `slugs/` and `pieces/` facets a space root reserves; what
-`pwd` prints of both halves; and the refusals — a reference carrying
-`#argument`, and a move into a space other than the connected one, which is
-the gate a home-anchored entry point meets once resolution hands it a space.
+relative segments, `..`, `-`, `/`, a scope-only `@scope`, and rooted and
+complete references; the `slugs/` and `pieces/` facets a space root reserves;
+what `pwd` prints of both halves; and the refusals — a reference carrying
+`#argument`, a `#` buried in a bare piece id, and a move into a space other
+than the connected one, which is the gate a home-anchored entry point meets
+once resolution hands it a space.
 Still to come: the prompt, the readline loop, the verbs over a held
 controller, wish and slug resolution, `where`, and both halves of liveness.
 The place value and its owner module — the whole pair, position *and*

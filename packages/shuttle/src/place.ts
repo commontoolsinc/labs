@@ -7,8 +7,8 @@
  * nothing read. The address grammar belongs to the fabric
  * (`normalizeLLMFriendlyRef` over the runner's `parseReferenceParts`) and this
  * module consumes it; what it adds is the navigation spellings that grammar
- * has no room for — `..`, `-`, and a scope-only `@scope` — and the refusals a
- * place is subject to.
+ * has no room for — `..`, `-`, `/`, and a scope-only `@scope` — and the
+ * refusals a place is subject to.
  */
 
 import type { CellScope } from "@commonfabric/api";
@@ -71,17 +71,14 @@ export interface PiecePosition {
 
   /** Path inside the piece's result; empty while standing at the piece. */
   readonly path: readonly PathSegment[];
-
-  /**
-   * The facet this piece was reached through, where it was reached through
-   * one. A piece is the same piece however it is reached, so this records the
-   * route and not the address: it is what `..` walks back out through, and it
-   * is absent for a piece a reference named outright.
-   */
-  readonly facet?: Facet;
 }
 
-/** Where in a space shuttle stands. */
+/**
+ * Where in a space shuttle stands. A position answers which cell this is and
+ * nothing else, so two arrivals at one cell are one position however
+ * differently they were reached; how shuttle got there is the trail
+ * {@link CurrentPlace} keeps.
+ */
 export type Position = SpaceRootPosition | FacetPosition | PiecePosition;
 
 /**
@@ -98,27 +95,39 @@ export interface Place {
 }
 
 /**
- * What a move did. It either lands, is refused, or names something only the
- * connection can settle: a wish target to resolve, or a space written as a
- * name, where comparing two spellings needs a session to derive a DID.
+ * A move that worked out a place but not whether the space its reference named
+ * by name is the connected one, which needs a session to derive a DID from a
+ * name. Confirming that name — `validateEmbeddedSpaces` does it — and handing
+ * this back to {@link CurrentPlace.settle} is what lands it.
  */
-export type Move =
-  /** The move landed, and `place` is where shuttle now stands. */
-  | { readonly kind: "moved"; readonly place: Place }
+export interface SpaceNamedMove {
+  /** Names this arm of {@link Move}. */
+  readonly kind: "space-by-name";
+
+  /** The space name the reference carried. */
+  readonly name: string;
+
+  /** Where the reference lands, in the scope the reference asked for. */
+  readonly place: Place;
+}
+
+/** The arms of a {@link Move} that leave shuttle where it stood. */
+type Unlanded =
   /** The move is refused, for the reason given. */
   | { readonly kind: "refused"; readonly reason: string }
   /** The operand is a wish target, which the connected space resolves. */
   | { readonly kind: "wish"; readonly target: string }
-  /**
-   * The reference names its space by name. `place` is where it lands once that
-   * name is confirmed to be the connected space, which `validateEmbeddedSpaces`
-   * settles against a session.
-   */
-  | {
-    readonly kind: "space-by-name";
-    readonly name: string;
-    readonly place: Place;
-  };
+  | SpaceNamedMove;
+
+/**
+ * What a move did. It either lands, is refused, or names something only the
+ * connection can settle: a wish target to resolve, or a space written as a
+ * name.
+ */
+export type Move =
+  /** The move landed, and `place` is where shuttle now stands. */
+  | { readonly kind: "moved"; readonly place: Place }
+  | Unlanded;
 
 /** What resolving a named entry point against the fabric produced. */
 export interface ResolvedTarget {
@@ -140,12 +149,13 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
 /**
  * What `pwd` prints: both halves of the place, each on its own line.
  *
- * The position renders as a complete reference wherever it is one, since that
- * is the form which denotes the same cell read from anywhere and so the form
- * worth copying. A root and a facet are containers rather than cells, and
- * render with the trailing slash their names carry. The scope renders here
- * rather than through the reference serializer, which emits no suffix for the
- * base scope.
+ * A leading `/` is what makes a string a reference, so it marks the one
+ * position that is a cell. A piece therefore renders as a complete reference —
+ * the form that denotes the same cell read from anywhere, and so the form
+ * worth copying — while a root and a facet are containers and render without
+ * one, which is what keeps a container's own rendering from resolving as a
+ * piece whose slug happens to match. The scope renders here rather than
+ * through the reference serializer, which emits no suffix for the base scope.
  */
 export function renderPlace(place: Place): string {
   return `position  ${renderPosition(place.position)}\n` +
@@ -153,29 +163,30 @@ export function renderPlace(place: Place): string {
 }
 
 /**
- * The one owner of a shuttle's place: it holds where shuttle stands and where
- * it stood before, moves between them, and refuses what the design refuses.
+ * The one owner of a shuttle's place: it holds where shuttle stands, where it
+ * stood before, and the levels it walked through to get there, moves between
+ * them, and refuses what the design refuses.
  *
  * Per instance rather than per process, so that several places — tabs, split
  * views, an agent holding more than one — stay reachable.
  */
 export class CurrentPlace {
-  #place: Place;
-  #previous: Place | undefined;
+  #here: Standing;
+  #previous: Standing | undefined;
 
   /** Constructs an instance standing at `place`, with no previous place. */
   constructor(place: Place) {
-    this.#place = place;
+    this.#here = { place, trail: [] };
   }
 
   /** Where shuttle stands. */
   get place(): Place {
-    return this.#place;
+    return this.#here.place;
   }
 
   /** Where it stood before its last landed move, once there has been one. */
   get previous(): Place | undefined {
-    return this.#previous;
+    return this.#previous?.place;
   }
 
   /**
@@ -184,7 +195,7 @@ export class CurrentPlace {
    * shuttle where it was.
    */
   cd(operand: string): Move {
-    return this.#commit(movePlace(this.#place, operand, this.#previous));
+    return this.#commit(movePlace(this.#here, operand, this.#previous));
   }
 
   /**
@@ -193,41 +204,98 @@ export class CurrentPlace {
    * connection serves one space.
    */
   enter(target: ResolvedTarget, operand: string): Move {
-    return this.#commit(enterTarget(this.#place, target, operand));
+    return this.#commit(enterTarget(this.#here.place, target, operand));
+  }
+
+  /**
+   * Lands a {@link SpaceNamedMove} whose space name the caller has confirmed
+   * names the connected space. The place is adopted as the move worked it out,
+   * scope included, which is what carries an `@scope` suffix through a
+   * reference that also named its space by name.
+   */
+  settle(move: SpaceNamedMove): Move {
+    return this.#commit(land(move.place, []));
   }
 
   /** What `pwd` prints for this place. */
   render(): string {
-    return renderPlace(this.#place);
+    return renderPlace(this.#here.place);
   }
 
-  /** Helper for the movers, which adopts a move that landed. */
-  #commit(move: Move): Move {
-    if (move.kind === "moved") {
-      this.#previous = this.#place;
-      this.#place = move.place;
-    }
-    return move;
+  /**
+   * Helper for the movers, which adopts a step that landed and reduces every
+   * step to the outcome a caller sees. The trail is navigation history rather
+   * than part of the place, so it stops here.
+   */
+  #commit(step: Step): Move {
+    if (step.kind !== "moved") return step;
+    this.#previous = this.#here;
+    this.#here = step.to;
+    return { kind: "moved", place: step.to.place };
   }
 }
 
 /**
- * Where `operand` moves `place` to, `previous` being the place `-` returns to.
+ * The levels walked through to reach where shuttle stands, outermost first,
+ * each the position one descent came from.
  *
- * The operand is read in the order the spellings can be told apart: `-` and a
- * scope-only `@scope` are shuttle's own navigation syntax, a rooted string is
- * a reference for the fabric's grammar to parse, a leading `#` is a wish
- * target, and anything else is a relative walk from where shuttle stands.
+ * `..` walks back out through it, which is what lets `cd slugs`, `cd board`,
+ * `cd ..` return to `slugs/` while the piece itself stays one position however
+ * it was reached. Three moves replace it wholesale rather than pushing: a
+ * reference and a resolved target carry no route, and `-` restores the route
+ * that came with the place it returns to.
  */
-function movePlace(place: Place, operand: string, previous?: Place): Move {
+type Trail = readonly Position[];
+
+/** Where shuttle stands, and the trail it walked to get there. */
+interface Standing {
+  /** The place itself. */
+  readonly place: Place;
+
+  /** How shuttle reached it. */
+  readonly trail: Trail;
+}
+
+/** A move as the movers pass it around, a landing carrying its trail. */
+type Step =
+  /** The move landed on `to`. */
+  | { readonly kind: "moved"; readonly to: Standing }
+  | Unlanded;
+
+/**
+ * Where `operand` moves `from` to, `previous` being the standing `-` returns
+ * to.
+ *
+ * The operand is read in the order the spellings can be told apart: `-`, a
+ * scope-only `@scope`, and `/` are shuttle's own navigation syntax, any other
+ * rooted string is a reference for the fabric's grammar to parse, a leading
+ * `#` is a wish target, and anything else is a relative walk from where
+ * shuttle stands.
+ */
+function movePlace(
+  from: Standing,
+  operand: string,
+  previous?: Standing,
+): Step {
+  const place = from.place;
   const trimmed = operand.trim();
   if (trimmed === "") return refuse("`cd` takes a place to move to.");
   if (trimmed === "-") {
     return previous === undefined
       ? refuse("There is no previous place to return to.")
-      : land(previous);
+      : land(previous.place, previous.trail);
   }
-  if (trimmed.startsWith("@")) return moveScope(place, trimmed.slice(1));
+  if (trimmed.startsWith("@")) return moveScope(from, trimmed.slice(1));
+
+  // A leading `/` roots a reference, and `/` alone roots one and names
+  // nothing further: the space's own root, which the grammar has no id
+  // segment to spell.
+  if (trimmed === "/") {
+    return land(
+      { ...place, position: { kind: "root", space: place.position.space } },
+      [],
+    );
+  }
 
   let reference;
   try {
@@ -240,22 +308,23 @@ function movePlace(place: Place, operand: string, previous?: Place): Move {
   if (reference !== undefined) return moveByReference(place, reference);
 
   if (trimmed.startsWith("#")) return { kind: "wish", target: trimmed };
-  return moveBySegments(place, trimmed);
+  return moveBySegments(from, trimmed);
 }
 
 /**
- * Where a `@scope` operand moves `place` to. `word` is the suffix without its
+ * Where a `@scope` operand moves `from` to. `word` is the suffix without its
  * `@`, and the scopes it may name are the canonical grammar's own, so no
- * reference can carry a scope this refuses.
+ * reference can carry a scope this refuses. The position does not move, so the
+ * trail comes through untouched.
  */
-function moveScope(place: Place, word: string): Move {
+function moveScope(from: Standing, word: string): Step {
   if (!CELL_SCOPE_VALUES.has(word)) {
     return refuse(
       `\`@${word}\` names no scope. The scopes are \`@space\`, \`@user\`, ` +
         `and \`@session\`.`,
     );
   }
-  return land({ ...place, scope: word as CellScope });
+  return land({ ...from.place, scope: word as CellScope }, from.trail);
 }
 
 /**
@@ -269,7 +338,7 @@ function moveScope(place: Place, word: string): Move {
 function moveByReference(
   place: Place,
   reference: NormalizedLLMFriendlyRef,
-): Move {
+): Step {
   if (reference.input === true) {
     return refuse(
       "A place is result-rooted, so `cd` takes no `#argument` suffix. A " +
@@ -289,77 +358,76 @@ function moveByReference(
     scope: reference.scope ?? place.scope,
   };
   return reference.embeddedSpace === undefined
-    ? land(moved)
+    ? land(moved, [])
     : { kind: "space-by-name", name: reference.embeddedSpace, place: moved };
 }
 
 /**
- * Where a relative operand moves `place` to, one segment at a time. Each
+ * Where a relative operand moves `from` to, one segment at a time. Each
  * segment is read against the level the one before it landed on, so `..` and a
  * descent compose in one operand.
  */
-function moveBySegments(place: Place, operand: string): Move {
+function moveBySegments(from: Standing, operand: string): Step {
   const segments = operand.split("/");
   if (segments[segments.length - 1] === "") segments.pop();
 
-  let moved = place;
+  let moved = from;
   for (const segment of segments) {
     if (segment === "") {
       return refuse(`\`${operand}\` has an empty segment.`);
     }
     const step = segment === ".." ? moveUp(moved) : moveDown(moved, segment);
     if (step.kind !== "moved") return step;
-    moved = step.place;
+    moved = step.to;
   }
-  return land(moved);
-}
-
-/** Where `..` moves `place` to: out of the level it stands in. */
-function moveUp(place: Place): Move {
-  const position = place.position;
-  switch (position.kind) {
-    case "root":
-      return land(place);
-    case "facet":
-      return land({
-        ...place,
-        position: { kind: "root", space: position.space },
-      });
-    case "piece":
-      if (position.path.length > 0) {
-        return land({
-          ...place,
-          position: { ...position, path: position.path.slice(0, -1) },
-        });
-      }
-      return land({
-        ...place,
-        position: position.facet === undefined
-          ? { kind: "root", space: position.space }
-          : { kind: "facet", space: position.space, facet: position.facet },
-      });
-  }
+  return land(moved.place, moved.trail);
 }
 
 /**
- * Where one relative segment moves `place` to: a facet at a space root, a
- * piece inside a facet, and a data key or index inside a piece.
+ * Where `..` moves `from` to: back out through the trail where there is one,
+ * and out of the level it stands in where the trail is empty, which is how a
+ * position a reference named outright backs out.
  */
-function moveDown(place: Place, segment: string): Move {
+function moveUp(from: Standing): Step {
+  const top = from.trail.at(-1);
+  return top === undefined
+    ? land({ ...from.place, position: enclosing(from.place.position) }, [])
+    : land({ ...from.place, position: top }, from.trail.slice(0, -1));
+}
+
+/**
+ * Helper for {@link moveUp}, which is the level `position` sits inside: the
+ * path one segment shorter where the position is one, and the space root
+ * otherwise, since a facet and a piece alike sit directly inside it.
+ */
+function enclosing(position: Position): Position {
+  return position.kind === "piece" && position.path.length > 0
+    ? { ...position, path: position.path.slice(0, -1) }
+    : { kind: "root", space: position.space };
+}
+
+/**
+ * Where one relative segment moves `from` to: a facet at a space root, a piece
+ * inside a facet, and a data key or index inside a piece. A descent pushes the
+ * level it left onto the trail, which is what `..` walks back out.
+ */
+function moveDown(from: Standing, segment: string): Step {
+  const place = from.place;
   const position = place.position;
+  const trail = [...from.trail, position];
   switch (position.kind) {
     case "root":
       return isFacet(segment)
         ? land({
           ...place,
           position: { kind: "facet", space: position.space, facet: segment },
-        })
+        }, trail)
         : refuse(
           `A space root lists facets, and \`${segment}\` names none. The ` +
             `facets are \`slugs/\` and \`pieces/\`.`,
         );
     case "facet":
-      return moveIntoPiece(place, position, segment);
+      return moveIntoPiece(place, position, segment, trail);
     case "piece":
       return land({
         ...place,
@@ -367,7 +435,7 @@ function moveDown(place: Place, segment: string): Move {
           ...position,
           path: [...position.path, linkPathSegmentToCellPathSegment(segment)],
         },
-      });
+      }, trail);
   }
 }
 
@@ -375,12 +443,24 @@ function moveDown(place: Place, segment: string): Move {
  * Where a segment naming a piece inside `facet` moves `place` to. The segment
  * is the one a scope suffix may ride, since that is where the canonical
  * grammar carries it, and a suffix here moves the scope half of the place.
+ *
+ * A `#` is refused rather than taken as part of the id, matching what the
+ * CLI's own bare-alias intake does with the same spelling: the alias grammar
+ * has no fragments, and letting one through would bury the suffix inside the
+ * id and fail as an unknown piece later.
  */
 function moveIntoPiece(
   place: Place,
   facet: FacetPosition,
   segment: string,
-): Move {
+  trail: Trail,
+): Step {
+  if (segment.includes("#")) {
+    return refuse(
+      `The "#argument" suffix rides the reference form ` +
+        `(/of:fid1:...#argument), not the bare piece id.`,
+    );
+  }
   let scoped;
   try {
     scoped = parseScopedIdSegment(segment);
@@ -393,10 +473,9 @@ function moveIntoPiece(
       space: facet.space,
       piece: scoped.id,
       path: [],
-      facet: facet.facet,
     },
     scope: scoped.scope ?? place.scope,
-  });
+  }, trail);
 }
 
 /**
@@ -409,7 +488,7 @@ function enterTarget(
   place: Place,
   target: ResolvedTarget,
   operand: string,
-): Move {
+): Step {
   if (target.space !== place.position.space) {
     return refuse(
       `\`${operand}\` resolves in space \`${target.space}\`, and this ` +
@@ -425,7 +504,7 @@ function enterTarget(
       piece: target.piece,
       path: target.path ?? [],
     },
-  });
+  }, []);
 }
 
 /** Whether `segment` names one of the facets a space root lists. */
@@ -434,13 +513,13 @@ function isFacet(segment: string): segment is Facet {
 }
 
 /** Helper for the movers, which builds a refusal carrying `reason`. */
-function refuse(reason: string): Move {
+function refuse(reason: string): Step {
   return { kind: "refused", reason };
 }
 
-/** Helper for the movers, which builds a move that landed on `place`. */
-function land(place: Place): Move {
-  return { kind: "moved", place };
+/** Helper for the movers, which builds a step landing on `place`. */
+function land(place: Place, trail: Trail): Step {
+  return { kind: "moved", to: { place, trail } };
 }
 
 /** Helper for the movers, which reads the message off a thrown value. */
@@ -453,9 +532,9 @@ function renderPosition(position: Position): string {
   const space = `@${position.space}`;
   switch (position.kind) {
     case "root":
-      return encodeJsonPointer(["", space, ""]);
+      return encodeJsonPointer([space, ""]);
     case "facet":
-      return encodeJsonPointer(["", space, position.facet, ""]);
+      return encodeJsonPointer([space, position.facet, ""]);
     case "piece":
       return encodeJsonPointer([
         "",
