@@ -16,6 +16,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
 
+import type { HarnessCfcInvocationContext } from "../../src/contracts/cfc-invocation-context.ts";
 import type { HarnessHandleEntry } from "../../src/contracts/handle-table.ts";
 import type {
   HarnessPolicyDecisionReasonCode,
@@ -33,6 +34,7 @@ import {
   loadRunFamily,
   type RunEvidence,
   type RunFamily,
+  type ToolOutputArtifact,
 } from "../evidence.ts";
 import type { CheckVerdict } from "../report.ts";
 import { FIXTURE_RUN_ID, FIXTURE_RUNS_DIR } from "./regenerate-fixtures.ts";
@@ -115,6 +117,44 @@ const transcriptOf = (
     throw new Error("the fixture's transcript did not load");
   }
   return run.transcript.value as Mutable<HarnessTranscriptMessage>[];
+};
+
+/** The tool output the fixture's second invocation context explains. */
+const SECOND_BASH_OUTPUT_ID = `${FIXTURE_RUN_ID}:bash:2`;
+
+/**
+ * Removes the invocation contexts `drop` selects, from both artifacts that
+ * carry them, so the seeded run reads as one that never recorded them rather
+ * than as one whose artifacts disagree.
+ */
+const dropInvocationContexts = (
+  run: RunEvidence,
+  drop: (context: HarnessCfcInvocationContext) => boolean,
+): void => {
+  const state = stateOf(run);
+  state.cfcInvocationContexts = (state.cfcInvocationContexts ?? []).filter(
+    (context) => !drop(context),
+  );
+  const trace = traceOf(run);
+  trace.cfcInvocationContexts = (trace.cfcInvocationContexts ?? []).filter(
+    (context) => !drop(context),
+  );
+};
+
+/** Adds a file to the run's `tool-outputs/`, as a reader would have found it. */
+const seedToolOutput = (
+  run: RunEvidence,
+  fileName: string,
+  value: unknown,
+): void => {
+  if (run.toolOutputs.status !== "present") {
+    throw new Error("the fixture's tool outputs did not load");
+  }
+  (run.toolOutputs.entries as ToolOutputArtifact[]).push({
+    fileName,
+    path: join(run.toolOutputs.path, fileName),
+    value,
+  });
 };
 
 /**
@@ -226,6 +266,22 @@ describe("seeded violations", () => {
         traceOf(root).decisions[0]!.reasonCodes.push("cfc_observe_read");
       });
     });
+
+    it("fails a substrate-reaching side effect whose context was dropped", () => {
+      // AUD-9 turns with it: the call is unattested, and what would explain
+      // its result is the artifact that went missing.
+
+      expect(verdicts(seeded((root) => {
+        dropInvocationContexts(
+          root,
+          (context) => context.toolOutputId === SECOND_BASH_OUTPUT_ID,
+        );
+      }))).toEqual({
+        ...CLEAN,
+        [at("AUD-2")]: "fail",
+        [at("AUD-9")]: "fail",
+      });
+    });
   });
 
   describe("AUD-3 decision coverage", () => {
@@ -248,6 +304,31 @@ describe("seeded violations", () => {
           denied: surviving.filter((one) => one.decision === "denied").length,
         };
       });
+    });
+
+    it("fails a persisted tool output the run report does not list", () => {
+      turnsOnly("AUD-3", "fail", (root) => {
+        seedToolOutput(root, `${FIXTURE_RUN_ID}_bash_4-bash.json`, {
+          outputId: `${FIXTURE_RUN_ID}:bash:4`,
+          stdout: "unrecorded\n",
+          stderr: "",
+          exitCode: 0,
+        });
+      });
+    });
+
+    it("passes a run-pattern-source sidecar the run report does not list", () => {
+      expect(verdicts(seeded((root) => {
+        seedToolOutput(
+          root,
+          `${FIXTURE_RUN_ID}_run_pattern_4-run-pattern-source.json`,
+          {
+            type: "cf-harness.run-pattern-source",
+            outputId: `${FIXTURE_RUN_ID}:run_pattern:4`,
+            sourceText: "export default recipe(Input, () => ({}));",
+          },
+        );
+      }))).toEqual(CLEAN);
     });
   });
 
@@ -417,6 +498,21 @@ describe("seeded violations", () => {
     it("fails an enforcing run whose policy trace is gone", () => {
       turnsOnly("AUD-9", "fail", (root) => {
         root.policyTrace = { status: "absent", path: root.policyTrace.path };
+      });
+    });
+
+    it("warns a run whose side effects recorded no invocation context", () => {
+      // The two warns are one run read against two clauses: AUD-2 says the
+      // enforcing claim went untested, and this says retention cannot be
+      // confirmed, because a tree holding no context reads the same whether
+      // the effects ran host-side or the evidence was lost.
+
+      expect(verdicts(seeded((root) => {
+        dropInvocationContexts(root, () => true);
+      }))).toEqual({
+        ...CLEAN,
+        [at("AUD-2")]: "warn",
+        [at("AUD-9")]: "warn",
       });
     });
   });

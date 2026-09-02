@@ -399,6 +399,57 @@ const executedSideEffects = (
     activity.executionStatus === "completed"
   );
 
+/**
+ * The executed side effects of a run that could carry a CFC invocation
+ * context.
+ *
+ * Which tools reach the substrate that mints a context is not something an
+ * artifact tree states, so it is read off the run itself: a tool the run
+ * recorded a context for is a tool whose invocations carry CFC evidence, and
+ * a later call to it that carries none is evidence gone missing rather than a
+ * tool that never had any. A host-side tool — `delegate_task`, `assign_slug`
+ * — appears in no context and so is none of these.
+ *
+ * A run that recorded no context at all is the limit of this reading: it
+ * classifies nothing, because a tree holding no context looks the same
+ * whether its effects were host-side or its evidence was lost. AUD-2 and
+ * AUD-9 both turn on this question, and answering it in one place is what
+ * keeps a report from calling the same effects unattested under one check and
+ * beyond the substrate under the other.
+ */
+const substrateReachingSideEffects = (
+  run: RunEvidence,
+): readonly HarnessToolActivity[] => {
+  const transporting = new Set(
+    invocationContextsOf(run).map((context) => context.toolId),
+  );
+  return executedSideEffects(run).filter((activity) =>
+    transporting.has(activity.toolId)
+  );
+};
+
+/**
+ * The substrate-reaching side effects of a run that no retained invocation
+ * context explains.
+ *
+ * The contexts are keyed by the tool as well as the output: an output id is
+ * unique within a run, so a context another tool recorded would otherwise
+ * read as covering this activity.
+ */
+const substrateEffectsMissingContext = (
+  run: RunEvidence,
+): readonly HarnessToolActivity[] => {
+  const covered = new Set(
+    invocationContextsOf(run)
+      .filter((context) => context.toolOutputId !== undefined)
+      .map((context) => `${context.toolId}:${String(context.toolOutputId)}`),
+  );
+  return substrateReachingSideEffects(run).filter((activity) =>
+    activity.resultRef !== undefined &&
+    !covered.has(`${activity.toolId}:${String(activity.resultRef.outputId)}`)
+  );
+};
+
 const modeBehaviorAttestation: AuditCheck = {
   id: "AUD-2",
   title: "mode-behavior attestation",
@@ -456,27 +507,7 @@ const modeBehaviorAttestation: AuditCheck = {
     }
     const contexts = invocationContextsOf(run);
     const effects = executedSideEffects(run);
-    // Which tools reach the substrate is not something an artifact tree
-    // states, so it is read off the run itself: a tool the run recorded a
-    // context for is a tool whose invocations carry CFC evidence, and a later
-    // call to it that carries none is evidence gone missing rather than a
-    // tool that never had any.
-    const transporting = new Set(contexts.map((context) => context.toolId));
-    // Keyed by the tool as well as the output: an output id is unique within a
-    // run, so a context another tool recorded would otherwise read as covering
-    // this activity.
-    const covered = new Set(
-      contexts
-        .filter((context) => context.toolOutputId !== undefined)
-        .map((context) => `${context.toolId}:${String(context.toolOutputId)}`),
-    );
-    const uncovered = effects.filter((activity) =>
-      transporting.has(activity.toolId) &&
-      activity.resultRef !== undefined &&
-      !covered.has(
-        `${activity.toolId}:${String(activity.resultRef.outputId)}`,
-      )
-    );
+    const uncovered = substrateEffectsMissingContext(run);
     if (uncovered.length > 0) {
       return {
         verdict: "fail",
@@ -522,14 +553,21 @@ const modeBehaviorAttestation: AuditCheck = {
 //
 
 /**
- * The record a delegation writes into its child's `tool-outputs/` holding the
- * child's final text.
+ * The artifacts a run writes into `tool-outputs/` that are not the output of
+ * a tool the model called.
  *
- * It is the trusted side's own validation evidence rather than the result of
- * a tool the model called, so it joins to no tool activity, and its absence
- * from the report's `toolOutputs` is not an unrecorded effect.
+ * A delegation writes the child's final text there as the trusted side's own
+ * validation evidence, and a `run_pattern` call writes the source text it
+ * carried beside that call's own output, under the same output id. Neither is
+ * a tool effect: each joins to no tool activity, no policy decision is
+ * expected for it, and its absence from the report's `toolOutputs` is not an
+ * unrecorded effect. Each is recognized by the `type` its writer stamps into
+ * the file, which is the field that identifies it whatever the file is named.
  */
-const SUBAGENT_RAW_RETURN_TYPE = "cf-harness.subagent-raw-return";
+const NON_EFFECT_OUTPUT_TYPES: ReadonlySet<string> = new Set([
+  "cf-harness.subagent-raw-return",
+  "cf-harness.run-pattern-source",
+]);
 
 const countsAgree = (
   declared: HarnessPolicyDecisionCounts | undefined,
@@ -631,7 +669,8 @@ const decisionCoverage: AuditCheck = {
       for (const entry of run.toolOutputs.entries) {
         if (listed.has(entry.fileName)) continue;
         if (
-          isRecord(entry.value) && entry.value.type === SUBAGENT_RAW_RETURN_TYPE
+          isRecord(entry.value) && typeof entry.value.type === "string" &&
+          NON_EFFECT_OUTPUT_TYPES.has(entry.value.type)
         ) {
           continue;
         }
@@ -1266,12 +1305,33 @@ const cellLabelsRetentionDetail = (run: RunEvidence): string => {
   return `${run.cellLabels.status}; no read was attempted`;
 };
 
+/**
+ * AUD-9, which asks whether a run kept the artifacts that would explain why
+ * each of its results was exposed or denied.
+ *
+ * What AH-CFC-16 obliges a run to retain is bounded by what its execution
+ * produced. An invocation context is minted where a call reaches the CFC
+ * substrate, so a side effect that never goes near it mints none, and the
+ * clause is answered by the artifacts the run does hold. Which side effects
+ * could have carried one is read by the classifier AUD-2 uses, so a run that
+ * transports evidence for a tool and then calls it carrying none fails both
+ * checks: the call is unattested, and what would explain its result is gone.
+ *
+ * A run that recorded no context at all is the case the artifacts cannot
+ * decide. A tool activity states its identity and its effect class and not
+ * where it ran, so a run whose side effects were all host-side and a run that
+ * lost every context it minted are the same tree, and passing it would report
+ * an absence as a clean shape. That run warns, naming the ambiguity as the
+ * finding. It is AH-CFC-16's own — retention that cannot be confirmed —
+ * beside rather than inside AUD-2's warn on AH-CFC-15, which is about an
+ * enforcing claim that went untested.
+ */
 const evidenceRetention: AuditCheck = {
   id: "AUD-9",
   title: "evidence retention",
   citations: requiredBy("AH-CFC-16"),
   falsifiedBy:
-    "an enforcing run missing one of the artifacts that would explain why a result was exposed or denied: its policy trace, its policy snapshot or that snapshot's digest, an invocation context for a side effect it executed, or any recorded attempt to read its space's cell labels",
+    "an enforcing run missing one of the artifacts that would explain why a result was exposed or denied: its policy trace, its policy snapshot or that snapshot's digest, an invocation context for a side effect that reached the CFC substrate, or any recorded attempt to read its space's cell labels; and, as a warning, a run whose side effects recorded no invocation context at all, which its artifacts cannot tell from evidence that was lost",
   inspect(run) {
     if (run.runState.status !== "present") {
       return notReadable("run-state.json", run.runState);
@@ -1282,6 +1342,7 @@ const evidenceRetention: AuditCheck = {
       : runStateOf(run)?.policyTrace?.cfcPolicySnapshotDigest;
     const contexts = invocationContextsOf(run);
     const effects = executedSideEffects(run);
+    const unexplained = substrateEffectsMissingContext(run);
     const requirements: readonly RetentionRequirement[] = [
       {
         name: "policy-trace.json",
@@ -1300,10 +1361,10 @@ const evidenceRetention: AuditCheck = {
       },
       {
         name: "a CFC invocation context",
-        held: contexts.length > 0 || effects.length === 0,
+        held: unexplained.length === 0,
         detail: `${contexts.length} recorded beside ${
           count(effects.length, "executed side effect", "executed side effects")
-        }`,
+        }, ${unexplained.length} of which reached the substrate carrying none`,
       },
       {
         name: "a recorded cell-labels read",
@@ -1313,6 +1374,19 @@ const evidenceRetention: AuditCheck = {
       },
     ];
     const missing = requirements.filter((requirement) => !requirement.held);
+    if (missing.length === 0 && contexts.length === 0 && effects.length > 0) {
+      return {
+        verdict: "warn",
+        message: `retention unconfirmed: none of this run's ${
+          count(effects.length, "side effect", "side effects")
+        } recorded an invocation context, and its artifacts do not say whether they ran host-side or lost the evidence they minted`,
+        evidence: effects.map((activity) => ({
+          artifact: "run-report.json",
+          pointer: `toolActivity[${activity.sequence}]`,
+          detail: `\`${activity.toolId}\` completed with no invocation context`,
+        })),
+      };
+    }
     if (missing.length === 0) {
       return {
         verdict: "pass",
