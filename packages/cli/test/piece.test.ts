@@ -438,10 +438,50 @@ describe("cli piece parsing", () => {
       parsePieceOptions({ ...base, cell: `/${LLM_HANDLE}#argument` })
     )
       .toThrow(/does not take "--input"/);
-    // The alias grammar has no fragments; refusing loudly beats burying the
-    // suffix inside an id that later fails as unknown.
-    expect(() => parseSpaceOptions({ ...base, cell: `${PIECE}#argument` }))
-      .toThrow(/rides the reference form/);
+    // The command's own declaration is what decides, so the bare spelling of
+    // the same selection reaches the same refusal — and the refusal names the
+    // target rather than a reference, which is not what a slug is.
+    expect(() => parsePieceOptions({ ...base, cell: `${PIECE}#argument` }))
+      .toThrow(/does not take "--input"/);
+    expect(() => parsePieceOptions({ ...base, cell: "thermostat#argument" }))
+      .toThrow(
+        'The target selects the arguments cell ("#argument") but this ' +
+          'command does not take "--input".',
+      );
+  });
+
+  it('parseSpaceOptions() reads "#argument" off a bare id and off a slug', () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID };
+    expect(parseSpaceOptions({ ...base, cell: `${PIECE}#argument` }))
+      .toMatchObject({ piece: PIECE, pieceInput: true });
+    expect(parseSpaceOptions({ ...base, cell: "thermostat#argument" }))
+      .toMatchObject({ piece: "thermostat", pieceInput: true });
+    // The suffix comes off before the scope is read, so the two compose in
+    // the order the reference form writes them.
+    expect(parseSpaceOptions({ ...base, cell: "thermostat@session#argument" }))
+      .toMatchObject({
+        piece: "thermostat",
+        pieceScope: "session",
+        pieceInput: true,
+      });
+    // A target with no suffix names no cell but the result cell.
+    expect(
+      parsePieceOptions({ ...base, cell: "thermostat" }, {
+        acceptsArgument: true,
+      }).pieceInput,
+    ).toBeUndefined();
+  });
+
+  it("parseSpaceOptions() reports an unknown fragment on a bare target as one", () => {
+    // Left on the id the fragment is a piece nothing resolves, and the
+    // refusal that follows names the piece rather than the "#" that caused
+    // it. One sentence covers both spellings, since one reader splits both.
+
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID };
+    expect(() => parseSpaceOptions({ ...base, cell: "thermostat#result" }))
+      .toThrow(/Unknown suffix "#result"/);
+    expect(() => parseSpaceOptions({ ...base, cell: `/${LLM_HANDLE}#result` }))
+      .toThrow(/Unknown suffix "#result"/);
   });
 
   it("readTargetPositionals() reads a leading canonical reference as the address", () => {
@@ -610,6 +650,28 @@ describe("cli piece parsing", () => {
   it('parseLink() rejects the "#argument" suffix on a link endpoint', () => {
     expect(() => parseLink(`/${LLM_HANDLE}#argument`))
       .toThrow(/does not apply to a link endpoint/);
+    // A link endpoint names a position to store, and the arguments cell is
+    // not one — whichever spelling of the target asks for it.
+    expect(() => parseLink(`${LLM_HANDLE}#argument`))
+      .toThrow(/does not apply to a link endpoint/);
+    expect(() => parseLink("thermostat/draft#argument"))
+      .toThrow(/does not apply to a link endpoint/);
+  });
+
+  it("parseLink() keeps a `#` inside a bare endpoint's path key", () => {
+    // Why the refusal above tests `endsWith` rather than reading the fragment
+    // the way the shared reader does. A bare endpoint carries its piece and
+    // path in one word and has no positional path beside it, so reading every
+    // fragment here would leave a key holding `#` with no spelling at all.
+
+    expect(parseLink("tracker/we#ird")).toEqual({
+      pieceId: "tracker",
+      path: ["we#ird"],
+    });
+    // The reference form reserves `#` outright, which is the difference the
+    // two readers exist for.
+    expect(() => parseLink("/tracker/we#ird"))
+      .toThrow(/Unknown suffix "#ird"/);
   });
 
   it("parseSpaceOptions() refuses a piece reference beside a URL that names a piece", () => {
@@ -689,6 +751,68 @@ describe("cli piece parsing", () => {
     );
     expect(reads[1]?.slice(1)).toEqual([[], { input: true, step: undefined }]);
     expect(rendered).toEqual([{ ok: true }, { ok: true }]);
+  });
+
+  it('getCellValueFromCommand() reads "#argument" on a bare target as --input does', async () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
+    const reads: unknown[][] = [];
+    const deps = {
+      getCellValue: ((...args: unknown[]) => {
+        reads.push(args);
+        return Promise.resolve({ ok: true });
+      }) as never,
+      render: (() => {}) as never,
+    };
+
+    await getCellValueFromCommand(
+      { ...base, cell: "thermostat", input: true },
+      "target",
+      undefined,
+      deps,
+    );
+    await getCellValueFromCommand(
+      { ...base, cell: "thermostat#argument" },
+      "target",
+      undefined,
+      deps,
+    );
+    // Written together the two spellings union: one selection said twice.
+    await getCellValueFromCommand(
+      { ...base, cell: "thermostat#argument", input: true },
+      "target",
+      undefined,
+      deps,
+    );
+
+    expect(reads).toHaveLength(3);
+    for (const read of reads) {
+      expect(read[0]).toMatchObject({ piece: "thermostat" });
+      expect(read.slice(1)).toEqual([
+        ["target"],
+        { input: true, step: undefined },
+      ]);
+    }
+  });
+
+  it('setCellValueFromCommand() writes through "#argument" on a bare target', async () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
+    const writes: unknown[][] = [];
+    await setCellValueFromCommand(
+      { ...base, cell: "thermostat#argument" },
+      "target",
+      undefined,
+      {
+        drainStdin: (() => Promise.resolve(30)) as never,
+        setCellValue: ((...args: unknown[]) => {
+          writes.push(args);
+          return Promise.resolve();
+        }) as never,
+        render: (() => {}) as never,
+      },
+    );
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.[0]).toMatchObject({ piece: "thermostat" });
+    expect(writes[0]?.slice(1)).toEqual([["target"], 30, { input: true }]);
   });
 
   it("getCellValueFromCommand() leaves an unresolved path on the caller's sinks rather than exiting", async () => {
