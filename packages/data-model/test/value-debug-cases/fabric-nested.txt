@@ -5,14 +5,14 @@
 }
 
 {
-  when: /EpochNsec(...),
+  when: /EpochNsec(1n),
   list: [
-    /EpochNsec(...),
-    /Bytes(...)
+    /EpochNsec(2n),
+    /Bytes("0x01")
   ],
   deeper: {
     link: /Link(...)
   }
 }
 
-{when:/EpochNsec(...),list:[/EpochNsec(...),/Bytes(...)],deeper:{link:/Link(...)}}
+{when:/EpochNsec(1n),list:[/EpochNsec(2n),/Bytes("0x01")],deeper:{link:/Link(...)}}

@@ -19,7 +19,7 @@ import {
 // initialization". `codecOf.ts` itself is a leaf.
 import { codecOf } from "@/codec-common/codecOf.ts";
 import { isCodecTypeTag } from "@/codec-common/isCodecTypeTag.ts";
-import { JSON_CODEC } from "@/codec-interface/interface.ts";
+import { REALM_CODEC } from "@/codec-interface/interface.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 
 /**
@@ -60,6 +60,22 @@ function taggedFormOf(
   }
 
   return { tag: onlyKey.slice(1), payload: value[onlyKey] };
+}
+
+/**
+ * Replacer for the conversion of a realm-crossing encoding, which represents
+ * the one terminal that encoding uses and no `FabricValue` can hold: an
+ * `ArrayBuffer`, rendered as a `0x`-prefixed hexadecimal string of its bytes.
+ * Everything else is returned as it stands.
+ */
+function replaceRealmTerminal(value: unknown): unknown {
+  if (value instanceof ArrayBuffer) {
+    const hex = [...new Uint8Array(value)]
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    return `0x${hex}`;
+  }
+  return value;
 }
 
 /**
@@ -399,24 +415,36 @@ class DebugStringifier {
   }
 
   /**
-   * Renders a `FabricPrimitive`, in the elided form `/TypeName(...)`, where the
-   * type name is that of its codec type tag. When the codec cannot be found,
-   * the class name stands in for the type name.
+   * Renders a `FabricPrimitive` as `/TypeName(<state>)`, where the type name
+   * is that of its codec type tag and the state is its realm-crossing
+   * encoding, in the same form a class instance's properties take. When the
+   * codec cannot be found, the class name stands in for the type name and the
+   * state is elided.
    */
-  #renderFabricPrimitive(value: FabricPrimitive): string {
+  #renderFabricPrimitive(value: FabricPrimitive, indent: string): string {
     let tag;
+    let state: FabricValue;
 
     try {
-      // A `FabricPrimitive` binds no `[CODEC]`, so its JSON codec supplies the
-      // tag. TODO(danfuzz): Replace `JSON_CODEC` with `DEBUG_CODEC` once the
-      // latter exists.
-      tag = codecOf(value, JSON_CODEC).tagForValue(value);
+      // A `FabricPrimitive` binds no `[CODEC]`, so its realm codec supplies
+      // the tag and the state. That codec is the one whose terminals are the
+      // richest -- a `bigint` stays a `bigint`, bytes stay bytes -- which is
+      // what makes it the one to render. TODO(danfuzz): Replace `REALM_CODEC`
+      // with `DEBUG_CODEC` once the latter exists.
+      const codec = codecOf(value, REALM_CODEC);
+      tag = codec.tagForValue(value);
+      state = toStructuredDebugValue(
+        codec.encode(value, NULL_LIVE_ENVIRONMENT),
+        DEBUG_STRING_MAX_DEPTH,
+        replaceRealmTerminal,
+      );
     } catch {
-      // Never let the debug renderer throw; fall back to the class name.
-      tag = classNameOf(value);
+      // Never let the debug renderer throw; fall back to the class name, with
+      // the state elided.
+      return DebugStringifier.#renderElidedInstance(classNameOf(value));
     }
 
-    return DebugStringifier.#renderElidedInstance(tag);
+    return this.#renderInstance(tag.replace(/@.*$/, ""), state, indent);
   }
 
   /**
@@ -571,7 +599,7 @@ class DebugStringifier {
         } else if (Array.isArray(value)) {
           return this.#renderArray(value, indent);
         } else if (value instanceof FabricPrimitive) {
-          return this.#renderFabricPrimitive(value);
+          return this.#renderFabricPrimitive(value, indent);
         } else {
           // The conversion represents every other non-plain object as a plain
           // one, so what is left is a plain object.
@@ -598,10 +626,10 @@ class DebugStringifier {
   //
 
   /**
-   * Renders the elided form of a `FabricInstance` or `FabricPrimitive`, given
-   * its codec type tag (or, failing that, its class name). The slash suggests
-   * a known encodable type rather than an instance of some random class, and
-   * the version of the tag is left out.
+   * Renders the elided form of a `FabricInstance`, or of a `FabricPrimitive`
+   * whose state cannot be had, given its codec type tag (or, failing that,
+   * its class name). The slash suggests a known encodable type rather than an
+   * instance of some random class, and the version of the tag is left out.
    */
   static #renderElidedInstance(tag: string): string {
     return `/${tag.replace(/@.*$/, "")}(...)`;

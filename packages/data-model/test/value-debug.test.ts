@@ -193,7 +193,7 @@ describe("value-debug", () => {
 
     it("renders a FabricPrimitive as its debug string, not `{}`", () => {
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
-      expect(Deno.inspect(bytes)).toBe("/Bytes(...)");
+      expect(Deno.inspect(bytes)).toBe('/Bytes("0x010203")');
     });
 
     it("renders a FabricInstance as its debug string, not `{}`", () => {
@@ -203,8 +203,9 @@ describe("value-debug", () => {
 
     it("renders when nested in containers", () => {
       const bytes = new FabricBytes(new Uint8Array([9]));
-      expect(Deno.inspect({ blob: bytes })).toBe("{ blob: /Bytes(...) }");
-      expect(Deno.inspect([bytes, bytes])).toBe("[ /Bytes(...), /Bytes(...) ]");
+      expect(Deno.inspect({ blob: bytes })).toBe('{ blob: /Bytes("0x09") }');
+      expect(Deno.inspect([bytes, bytes]))
+        .toBe('[ /Bytes("0x09"), /Bytes("0x09") ]');
     });
   });
 });

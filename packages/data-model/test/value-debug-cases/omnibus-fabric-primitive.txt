@@ -1,0 +1,28 @@
+{
+  "epoch nsec": new FabricEpochNsec(123456789n),
+  "epoch nsec, negative": new FabricEpochNsec(-1n),
+  "epoch day": new FabricEpochDay(19000),
+  bytes: new FabricBytes(new Uint8Array([0, 1, 2, 254, 255])),
+  "bytes, empty": new FabricBytes(new Uint8Array(0)),
+  regexp: new FabricRegExp(/ab+c/gi),
+  hash: FabricHash.fromString("fid1:0cBGQ4N2BoCM2jISu3ttc_0Rhu5phgRDnWyvlXWeBq4"),
+}
+
+{
+  "epoch nsec": /EpochNsec(123456789n),
+  "epoch nsec, negative": /EpochNsec(-1n),
+  "epoch day": /EpochDay(19000),
+  bytes: /Bytes("0x000102feff"),
+  "bytes, empty": /Bytes("0x"),
+  regexp: /RegExp(
+    source: "ab+c",
+    flags: "gi",
+    flavor: "es2025"
+  ),
+  hash: /Hash(
+    tag: "fid1",
+    hash: "0xd1c04643837606808cda3212bb7b6d73fd1186ee698604439d6caf95759e06ae"
+  )
+}
+
+{"epoch nsec":/EpochNsec(123456789n),"epoch nsec, negative":/EpochNsec(-1n),"epoch day":/EpochDay...
