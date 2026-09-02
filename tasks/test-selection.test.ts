@@ -21,6 +21,7 @@ import {
   sampleManifest,
 } from "./test-selection/testing.ts";
 import type { ManifestEntry } from "./test-selection/manifest.ts";
+import type { Suite } from "./test-topology/suite.ts";
 import {
   DIALS,
   EXCLUDED_FROM_COVERAGE_GATE,
@@ -28,6 +29,27 @@ import {
 } from "./test-selection/policy.ts";
 
 const TEST = { k: "unit", s: "memory", n: "space > writes" };
+
+/**
+ * One suite enumerating exactly these units. The manifest fixtures put
+ * their entries under `workspace-unit`, so a topology naming that suite
+ * is what the two are compared through.
+ */
+function suiteHolding(units: readonly string[]): Suite {
+  return {
+    id: "workspace-unit",
+    recordSurfaces: [{ kind: "unit", scope: "memory" }],
+    needs: ["deno"],
+    units: [...units],
+    unavailable: [],
+    locate: () => undefined,
+    command: () => Promise.resolve([]),
+  };
+}
+
+const TOPOLOGY: Suite[] = [
+  suiteHolding(["packages/memory/test/memory.test.ts"]),
+];
 
 describe("test-selection", () => {
   describe("parseIdentityArgument()", () => {
@@ -153,7 +175,7 @@ describe("test-selection", () => {
           sampleEntry({ k: "unit", s: "memory", n: "two" }, { cost: 1 }),
         ],
       });
-      const text = planLines(manifest, undefined).join("\n");
+      const text = planLines(manifest, TOPOLOGY, undefined).join("\n");
       expect(text).toContain("2 known identities");
       expect(text).toContain(`${LANES} lanes`);
       expect(text).toContain("lane 1:");
@@ -163,7 +185,7 @@ describe("test-selection", () => {
       const manifest = sampleManifest({
         entries: [sampleEntry({ k: "unit", s: "memory", n: "one" })],
       });
-      const text = planLines(manifest, 3).join("\n");
+      const text = planLines(manifest, TOPOLOGY, 3).join("\n");
       expect(text).toContain("lane 3:");
       expect(text).not.toContain("lane 1:");
     });
@@ -174,7 +196,7 @@ describe("test-selection", () => {
           cost: 10_000,
         })],
       });
-      expect(planLines(manifest, undefined).join("\n")).toContain(
+      expect(planLines(manifest, TOPOLOGY, undefined).join("\n")).toContain(
         "unschedulable",
       );
     });
@@ -252,7 +274,7 @@ describe("verdictFor()", () => {
 
   it("reports a test the packer takes, and how often it takes it", () => {
     const manifest = sampleManifest({ entries: [entry("cheap", 0.1)] });
-    const verdict = verdictFor(manifest, {
+    const verdict = verdictFor(manifest, TOPOLOGY, {
       k: "unit",
       s: "memory",
       n: "cheap",
@@ -276,7 +298,7 @@ describe("verdictFor()", () => {
       },
     });
     const test = { k: "unit", s: "memory", n: "heavy" };
-    const verdict = verdictFor(manifest, test);
+    const verdict = verdictFor(manifest, TOPOLOGY, test);
     expect(verdict.unschedulable).toBe(true);
     expect(verdict.loneSeconds).toBeCloseTo(600, 5);
     // What `explain` prints is that figure, not the entry's own 200: a
@@ -288,18 +310,24 @@ describe("verdictFor()", () => {
   });
 
   it("reports a test no lane could hold as unschedulable, not selected", () => {
-    const verdict = verdictFor(manifestOf(entry("enormous", 100_000)), {
-      k: "unit",
-      s: "memory",
-      n: "enormous",
-    });
+    const verdict = verdictFor(
+      manifestOf(entry("enormous", 100_000)),
+      TOPOLOGY,
+      {
+        k: "unit",
+        s: "memory",
+        n: "enormous",
+      },
+    );
     expect(verdict.selected).toBe(false);
     expect(verdict.unschedulable).toBe(true);
   });
 
   it("reports a test the manifest has never heard of as unselected", () => {
     const manifest = manifestOf(entry("cheap", 0.1));
-    expect(verdictFor(manifest, { k: "unit", s: "memory", n: "absent" }))
+    expect(
+      verdictFor(manifest, TOPOLOGY, { k: "unit", s: "memory", n: "absent" }),
+    )
       .toEqual({ selected: false });
   });
 
@@ -310,11 +338,17 @@ describe("verdictFor()", () => {
       }),
     );
     expect(
-      verdictFor(manifest, { k: "unit", s: "memory", n: "both", v: "on" })
+      verdictFor(manifest, TOPOLOGY, {
+        k: "unit",
+        s: "memory",
+        n: "both",
+        v: "on",
+      })
         .selected,
     ).toBe(true);
     expect(
-      verdictFor(manifest, { k: "unit", s: "memory", n: "both" }).selected,
+      verdictFor(manifest, TOPOLOGY, { k: "unit", s: "memory", n: "both" })
+        .selected,
     ).toBe(false);
   });
 });
@@ -361,6 +395,7 @@ describe("dispatch()", () => {
         members: () => Promise.resolve(["packages/memory"]),
         aliases: () =>
           Promise.resolve({ resolve: (test: TestIdentity) => test }),
+        topology: () => Promise.resolve(TOPOLOGY),
         ...sources,
       } as Sources);
       return { code, out: out.join("\n"), err: err.join("\n") };
@@ -476,15 +511,61 @@ describe("dispatch()", () => {
     expect(result.stop?.message).toContain("whole number from 1 to");
   });
 
-  it("stops on --verify before reading a manifest", async () => {
-    // The mode does not read one, so a store it never needed must not be
-    // what it fails on.
+  it("verifies the manifest against the tree", async () => {
+    const result = await ran(["plan", "--verify"]);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("accounts for every unit");
+  });
+
+  it("passes over a unit the configuration declares unavailable", async () => {
+    // A manifest holding nothing for a test that does not run is the
+    // manifest being right, so it is not something to fail on.
+    const suite = suiteHolding([
+      "packages/memory/test/memory.test.ts",
+      "packages/memory/test/skipped.test.ts",
+    ]);
     const result = await ran(["plan", "--verify"], {
-      manifest: () => {
-        throw new Error("--verify must not read a manifest");
-      },
+      topology: () =>
+        Promise.resolve([{
+          ...suite,
+          unavailable: [{
+            unit: "packages/memory/test/skipped.test.ts",
+            phase: "phase-2",
+            reason: "the server-execution arm cannot run it yet",
+          }],
+        }]),
     });
-    expect(result.code).toBe(2);
-    expect(result.stop?.message).toContain("test topology");
+    expect(result.code).toBe(0);
+    expect(result.out).not.toContain("skipped.test.ts");
+  });
+
+  it("reports a manifest entry the tree no longer enumerates", async () => {
+    // Nothing can be asked to run it, and the packer drops it without a
+    // word, so reporting it is the only place it is ever mentioned. It
+    // does not fail: a manifest is hours old, so a unit deleted since it
+    // was published is expected to linger in it.
+    const result = await ran(["plan", "--verify"], {
+      topology: () => Promise.resolve([suiteHolding(["packages/memory/x.ts"])]),
+    });
+    expect(result.out).toContain(
+      "no longer enumerates packages/memory/test/memory.test.ts",
+    );
+  });
+
+  it("fails --verify on a unit the manifest holds nothing for", async () => {
+    // Every lane treats such a unit as unknown and therefore mandatory,
+    // so a manifest missing many of them is a run that selects nothing
+    // and tests everything.
+    const result = await ran(["plan", "--verify"], {
+      topology: () =>
+        Promise.resolve([
+          suiteHolding([
+            "packages/memory/test/memory.test.ts",
+            "unrun.test.ts",
+          ]),
+        ]),
+    });
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("no identity for workspace-unit: unrun");
   });
 });

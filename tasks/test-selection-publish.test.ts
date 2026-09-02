@@ -4,6 +4,7 @@ import { expect } from "@std/expect";
 import {
   byDayThenName,
   dayPartitions,
+  inputChoice,
   parseArgs,
   partitionOf,
   publish,
@@ -18,7 +19,29 @@ import {
   type TestRecord,
 } from "@commonfabric/test-support/records";
 import { reportFromText } from "./test-selection/build.ts";
+import type { Suite } from "./test-topology/suite.ts";
 import { join } from "@std/path";
+
+/**
+ * A topology holding the one suite these cases record against. Supplied
+ * rather than read from the tree: what the publisher does with a
+ * classified identity is the subject, and walking the repository for
+ * every case would make each of them depend on what the tree holds.
+ */
+const TOPOLOGY: Suite[] = [{
+  id: "workspace-unit",
+  recordSurfaces: [{ kind: "unit", scope: "memory" }],
+  needs: ["deno"],
+  units: ["packages/memory/test/space.test.ts"],
+  unavailable: [],
+  locate: (record) =>
+    record.test.k === "unit" && record.test.s === "memory"
+      ? { level: "unit", unit: "packages/memory/test/space.test.ts" }
+      : undefined,
+  command: () => Promise.resolve([]),
+}];
+
+const suites = () => Promise.resolve(TOPOLOGY);
 
 const CI = (day: string, run: string) =>
   `labs/test-records/submissions/ci/v1/${day}/run-${run}-a.ndjson`;
@@ -89,6 +112,38 @@ describe("test-selection-publish", () => {
 
     it("reads nothing out of a name that carries no day", () => {
       expect(partitionOf("labs/test-selection/v1/state/x.json.gz")).toBe("");
+    });
+  });
+
+  describe("inputChoice()", () => {
+    it("passes over a pair whose receipt says its rollup is folded", () => {
+      // Rollups of this format carry no record of which arrivals they
+      // cover, so nothing can say how much a raw object would repeat.
+      expect(
+        inputChoice({ settled: true, foldedRaw: false, rollup: true }),
+      ).toBe("settled");
+      expect(
+        inputChoice({ settled: true, foldedRaw: true, rollup: true }),
+      ).toBe("settled");
+    });
+
+    it("takes the rollup of a pair nothing has been folded from", () => {
+      expect(
+        inputChoice({ settled: false, foldedRaw: false, rollup: true }),
+      ).toBe("rollup");
+    });
+
+    it("keeps a pair with raw contributions on the raw path", () => {
+      // A rollup written afterwards would overlap them.
+      expect(
+        inputChoice({ settled: false, foldedRaw: true, rollup: true }),
+      ).toBe("raw");
+    });
+
+    it("reads raw where there is no rollup, which is every local source", () => {
+      expect(
+        inputChoice({ settled: false, foldedRaw: false, rollup: false }),
+      ).toBe("raw");
     });
   });
 
@@ -192,6 +247,30 @@ function object(
   return buildObjectBody(context, [record]);
 }
 
+/** One object holding one run of one test on somebody's workstation. */
+function localObject(commit: string, at: string): string {
+  const context: RunContext = {
+    schema: 1,
+    line: "context",
+    reportId: `report-${commit}`,
+    repo: "commontoolsinc/labs",
+    commit,
+    dirty: false,
+    branch: "fix-writes",
+    env: "local",
+    os: "linux",
+    arch: "x86_64",
+    denoVersion: "2.9.4",
+    startedAt: at,
+  };
+  return buildObjectBody(context, [{
+    line: "record",
+    test: { k: "unit", s: "memory", n: "space > writes" },
+    outcome: "fail",
+    durationMs: 40,
+  }]);
+}
+
 /** The two runs a fresh store is seeded with: a failure, then its fix. */
 function seed(): Record<string, string> {
   return {
@@ -207,13 +286,14 @@ describe("publish()", () => {
     // An absent aggregate is either a genuine first run or one that went
     // missing, and an incremental run cannot tell the two apart.
     const { store, created } = fakeStore(seed());
-    expect(await publish(["--days", "1"], store, NOW)).toBe(1);
+    expect(await publish(["--days", "1"], store, NOW, suites)).toBe(1);
     expect(created.size).toBe(0);
   });
 
   it("writes a manifest and a state from a bootstrap", async () => {
     const { store, created } = fakeStore(seed());
-    expect(await publish(["--bootstrap", "--days", "1"], store, NOW)).toBe(0);
+    expect(await publish(["--bootstrap", "--days", "1"], store, NOW, suites))
+      .toBe(0);
     const names = [...created.keys()];
     const manifestName = names.find((name) => name.includes("/manifest-"));
     expect(manifestName).toBeDefined();
@@ -224,13 +304,111 @@ describe("publish()", () => {
     );
     expect(manifest).toBeDefined();
     expect(manifest!.entries.length).toBe(1);
+    // The suite and the unit are the topology's, which is what a lane
+    // looks a suite up by and what the packer charges overheads to. A
+    // surface derived from the record's own kind and scope would match
+    // no suite the tree holds, and every selection naming it would be
+    // dropped for naming a suite that does not exist.
+    expect(manifest!.entries[0]!.suite).toBe("workspace-unit");
+    expect(manifest!.entries[0]!.unit).toBe(
+      "packages/memory/test/space.test.ts",
+    );
     // The failure at c1 that c2 went on to fix is a catch on main.
     expect(manifest!.entries[0]!.inputs.mainCatches).toBe(1);
   });
 
+  it("leaves out an identity no suite claims, and says how many", async () => {
+    // Nothing can be asked to run it, so carrying it would put an entry
+    // in the manifest that every pass would consider and no lane could
+    // place. Saying how many there are is what keeps that visible.
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    const { store, created } = fakeStore(seed());
+    try {
+      await publish(
+        ["--bootstrap", "--days", "1"],
+        store,
+        NOW,
+        () => Promise.resolve([]),
+      );
+    } finally {
+      console.log = log;
+    }
+    const manifestName = [...created.keys()].find((name) =>
+      name.includes("/manifest-")
+    );
+    const manifest = parseManifest(
+      await gunzipToText(created.get(manifestName!)!),
+    );
+    expect(manifest!.entries).toEqual([]);
+    expect(lines.join("\n")).toContain("1 identities no suite claims");
+  });
+
+  it("carries what each configuration declares unavailable", async () => {
+    // A lane reads it to say why a test is absent. Without it the test
+    // looks merely unrecorded, which is reported and never failed on.
+    const { store, created } = fakeStore(seed());
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      () =>
+        Promise.resolve([{
+          ...TOPOLOGY[0]!,
+          variant: "server-execution",
+          unavailable: [{
+            unit: "packages/memory/test/space.test.ts",
+            leafName: "space > writes a fact",
+            phase: "phase-2",
+            reason: "the ON arm cannot run it yet",
+          }],
+        }]),
+    );
+    const manifestName = [...created.keys()].find((name) =>
+      name.includes("/manifest-")
+    );
+    const manifest = parseManifest(
+      await gunzipToText(created.get(manifestName!)!),
+    );
+    expect(manifest!.unavailable).toEqual([{
+      suite: "workspace-unit",
+      variant: "server-execution",
+      unit: "packages/memory/test/space.test.ts",
+      leafName: "space > writes a fact",
+      phase: "phase-2",
+      reason: "the ON arm cannot run it yet",
+    }]);
+  });
+
+  it("says how many identities measure a suite rather than a unit", async () => {
+    // An overlapping whole-invocation record names no unit, so nothing
+    // can be asked to run one, and it must not be summed with the steps
+    // inside it either.
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    const { store } = fakeStore(seed());
+    try {
+      await publish(
+        ["--bootstrap", "--days", "1"],
+        store,
+        NOW,
+        () =>
+          Promise.resolve([{
+            ...TOPOLOGY[0]!,
+            locate: () => ({ level: "suite" as const }),
+          }]),
+      );
+    } finally {
+      console.log = log;
+    }
+    expect(lines.join("\n")).toContain("1 identities measure a suite");
+  });
+
   it("folds from the state it left rather than the objects again", async () => {
     const { store, created } = fakeStore(seed());
-    await publish(["--bootstrap", "--days", "1"], store, NOW);
+    await publish(["--bootstrap", "--days", "1"], store, NOW, suites);
     const first = created.size;
     const readObjects: string[] = [];
     const watched: StoreAccess = {
@@ -240,7 +418,7 @@ describe("publish()", () => {
         return store.read(name);
       },
     };
-    expect(await publish(["--days", "1"], watched, NOW)).toBe(0);
+    expect(await publish(["--days", "1"], watched, NOW, suites)).toBe(0);
     expect(readObjects).toEqual([]);
     expect(created.size).toBeGreaterThan(first);
   });
@@ -254,13 +432,13 @@ describe("publish()", () => {
           ? Promise.reject(new Error("unreachable"))
           : store.list(prefix),
     };
-    expect(await publish(["--days", "1"], broken, NOW)).toBe(1);
+    expect(await publish(["--days", "1"], broken, NOW, suites)).toBe(1);
     expect(created.size).toBe(0);
   });
 
   it("refuses to publish from a window it could only partly read", async () => {
     const { store, created } = fakeStore(seed());
-    await publish(["--bootstrap", "--days", "1"], store, NOW);
+    await publish(["--bootstrap", "--days", "1"], store, NOW, suites);
     const after = created.size;
     const broken: StoreAccess = {
       ...store,
@@ -270,7 +448,7 @@ describe("publish()", () => {
           ? store.list(prefix)
           : Promise.resolve([CI(DAY, "9")]),
     };
-    expect(await publish(["--days", "1"], broken, NOW)).toBe(1);
+    expect(await publish(["--days", "1"], broken, NOW, suites)).toBe(1);
     expect(created.size).toBe(after);
   });
 
@@ -280,6 +458,7 @@ describe("publish()", () => {
       ["--bootstrap", "--days", "1", "--dry-run"],
       store,
       NOW,
+      suites,
     );
     expect(code).toBe(0);
     expect(created.size).toBe(0);
@@ -288,14 +467,19 @@ describe("publish()", () => {
   it("creates nothing without a credential", async () => {
     const { store, created } = fakeStore(seed());
     const anonymous: StoreAccess = { ...store, token: () => undefined };
-    const code = await publish(["--bootstrap", "--days", "1"], anonymous, NOW);
+    const code = await publish(
+      ["--bootstrap", "--days", "1"],
+      anonymous,
+      NOW,
+      suites,
+    );
     expect(created.size).toBe(0);
     expect(code).toBe(0);
   });
 
   it("reports a malformed command line rather than publishing", async () => {
     const { store, created } = fakeStore(seed());
-    expect(await publish(["--nonsense"], store, NOW)).toBe(2);
+    expect(await publish(["--nonsense"], store, NOW, suites)).toBe(2);
     expect(created.size).toBe(0);
   });
 });
@@ -311,6 +495,7 @@ describe("publish() --out", () => {
         ["--bootstrap", "--days", "1", "--dry-run", "--out", out],
         store,
         NOW,
+        suites,
       );
       expect(code).toBe(0);
       // A dry run creates nothing in the store, and the directory is how
@@ -342,6 +527,7 @@ describe("publish() --out", () => {
           ["--bootstrap", "--days", "1", "--dry-run", "--out", out],
           store,
           NOW,
+          suites,
         ),
       ).toBe(0);
       expect((await Deno.stat(join(out, "manifest.json"))).isFile).toBe(true);
@@ -369,16 +555,19 @@ describe("publish() over a day that has been compacted", () => {
         return store.read(name);
       },
     };
-    expect(await publish(["--bootstrap", "--days", "1"], watched, NOW)).toBe(0);
+    expect(await publish(["--bootstrap", "--days", "1"], watched, NOW, suites))
+      .toBe(0);
     expect(read).toEqual([ROLLUP]);
   });
 
-  it("does not read the rollup on an incremental run", async () => {
+  it("asks nothing about a source and date already settled", async () => {
+    // The receipt answers, so the store is not asked at all. It is the
+    // rule that decides, rather than which flag the run was given.
     const { store } = fakeStore({
       ...seed(),
       [ROLLUP]: object("c3", "fail", "2026-08-20T03:00:00.000Z"),
     }, { [DAY]: [ROLLUP] });
-    await publish(["--bootstrap", "--days", "1"], store, NOW);
+    await publish(["--bootstrap", "--days", "1"], store, NOW, suites);
     const asked: string[] = [];
     const watched: StoreAccess = {
       ...store,
@@ -387,8 +576,89 @@ describe("publish() over a day that has been compacted", () => {
         return store.rollupShards(day);
       },
     };
-    expect(await publish(["--days", "1"], watched, NOW)).toBe(0);
+    expect(await publish(["--days", "1"], watched, NOW, suites)).toBe(0);
     expect(asked).toEqual([]);
+  });
+
+  it("takes a rollup on an incremental run over a day it has not seen", async () => {
+    // One rule, so a run catching up after an outage or a widened window
+    // reaches a day the same way a bootstrap does. A flag is permission
+    // to start from an empty aggregate and a wider window, not a second
+    // way to choose inputs.
+    const older = "2026/08/19";
+    const olderRollup =
+      `labs/test-records/aggregated/v1/${older}/shard-0.ndjson`;
+    const { store } = fakeStore({
+      ...seed(),
+      [CI(older, "9")]: object("c9", "pass", "2026-08-19T01:00:00.000Z"),
+      [olderRollup]: object("c9", "pass", "2026-08-19T01:00:00.000Z"),
+    }, { [older]: [olderRollup] });
+    // The first run's window holds only the newer day, so the older one
+    // is a day the aggregate has never seen.
+    expect(await publish(["--bootstrap", "--days", "1"], store, NOW, suites))
+      .toBe(0);
+    const read: string[] = [];
+    const watched: StoreAccess = {
+      ...store,
+      read: (name) => {
+        read.push(name);
+        return store.read(name);
+      },
+    };
+    expect(await publish(["--days", "2"], watched, NOW, suites)).toBe(0);
+    expect(read).toContain(olderRollup);
+    expect(read).not.toContain(CI(older, "9"));
+  });
+
+  it("stays on the raw path for a day it already holds raw objects from", async () => {
+    // A rollup written afterwards would overlap those contributions, and
+    // nothing in one of this format says by how much, so the pair that
+    // has raw objects in the aggregate keeps taking raw ones.
+    const { store } = fakeStore(seed());
+    await publish(["--bootstrap", "--days", "1"], store, NOW, suites);
+    const read: string[] = [];
+    const asked: string[] = [];
+    const later: StoreAccess = {
+      ...store,
+      // The rollup arrives after the raw objects were folded, which is
+      // the order compaction runs in.
+      rollupShards: (day) => {
+        asked.push(day);
+        return Promise.resolve(day === DAY ? [ROLLUP] : undefined);
+      },
+      read: (name) => {
+        read.push(name);
+        return store.read(name);
+      },
+    };
+    expect(await publish(["--days", "1"], later, NOW, suites)).toBe(0);
+    expect(read).not.toContain(ROLLUP);
+    // Nor was the store asked: the aggregate already answers for the pair.
+    expect(asked).toEqual([]);
+  });
+
+  it("still reads the local submissions of a settled day", async () => {
+    // Rollups cover the continuous-integration area alone. A receipt
+    // naming the day by itself would say the day is accounted for, and
+    // the local submissions of that day — the evidence the score weighs
+    // highest — would never be read.
+    const local = LOCAL(DAY, "ianh");
+    const { store } = fakeStore({
+      [ROLLUP]: object("c3", "pass", "2026-08-20T03:00:00.000Z"),
+      [local]: localObject("c4", "2026-08-20T04:00:00.000Z"),
+    }, { [DAY]: [ROLLUP] });
+    const read: string[] = [];
+    const watched: StoreAccess = {
+      ...store,
+      read: (name) => {
+        read.push(name);
+        return store.read(name);
+      },
+    };
+    expect(await publish(["--bootstrap", "--days", "1"], watched, NOW, suites))
+      .toBe(0);
+    expect(read).toContain(ROLLUP);
+    expect(read).toContain(local);
   });
 
   it("leaves a day open when a shard of its rollup will not read", async () => {
@@ -411,7 +681,8 @@ describe("publish() over a day that has been compacted", () => {
           : store.read(name);
       },
     };
-    expect(await publish(["--bootstrap", "--days", "1"], broken, NOW)).toBe(0);
+    expect(await publish(["--bootstrap", "--days", "1"], broken, NOW, suites))
+      .toBe(0);
     // The run carried on and folded the day's raw objects instead.
     expect(read).toContain(CI(DAY, "1"));
     expect(read).toContain(CI(DAY, "2"));
@@ -424,7 +695,7 @@ describe("publish() over an aggregate it cannot make sense of", () => {
 
   it("refuses rather than starting again from nothing", async () => {
     const { store, created } = fakeStore(seed());
-    await publish(["--bootstrap", "--days", "1"], store, NOW);
+    await publish(["--bootstrap", "--days", "1"], store, NOW, suites);
     const state = [...created.keys()].find((name) => name.includes("/state/"))!;
     const after = created.size;
     const broken: StoreAccess = {
@@ -434,7 +705,7 @@ describe("publish() over an aggregate it cannot make sense of", () => {
           ? Promise.resolve('{"schema":1,"nonsense":true}')
           : store.readText(name),
     };
-    expect(await publish(["--days", "1"], broken, NOW)).toBe(1);
+    expect(await publish(["--days", "1"], broken, NOW, suites)).toBe(1);
     expect(created.size).toBe(after);
   });
 });
@@ -475,19 +746,19 @@ describe("publish() over a store that answers badly", () => {
 
   it("refuses when the aggregate object will not read", async () => {
     const { store, created } = fakeStore(seed());
-    await publish(["--bootstrap", "--days", "1"], store, NOW);
+    await publish(["--bootstrap", "--days", "1"], store, NOW, suites);
     const after = created.size;
     const broken: StoreAccess = {
       ...store,
       readText: () => Promise.reject(new Error("that object is gone")),
     };
-    expect(await publish(["--days", "1"], broken, NOW)).toBe(1);
+    expect(await publish(["--days", "1"], broken, NOW, suites)).toBe(1);
     expect(created.size).toBe(after);
   });
 
   it("refuses when the submissions cannot be listed", async () => {
     const { store, created } = fakeStore(seed());
-    await publish(["--bootstrap", "--days", "1"], store, NOW);
+    await publish(["--bootstrap", "--days", "1"], store, NOW, suites);
     const after = created.size;
     const broken: StoreAccess = {
       ...store,
@@ -496,7 +767,7 @@ describe("publish() over a store that answers badly", () => {
           ? Promise.reject(new Error("the store is unreachable"))
           : store.list(prefix),
     };
-    expect(await publish(["--days", "1"], broken, NOW)).toBe(1);
+    expect(await publish(["--days", "1"], broken, NOW, suites)).toBe(1);
     expect(created.size).toBe(after);
   });
 });
@@ -518,7 +789,8 @@ describe("publish() reporting what no lane can hold", () => {
     const log = console.log;
     console.log = (...parts: unknown[]) => said.push(parts.join(" "));
     try {
-      expect(await publish(["--bootstrap", "--days", "1"], store, NOW)).toBe(0);
+      expect(await publish(["--bootstrap", "--days", "1"], store, NOW, suites))
+        .toBe(0);
     } finally {
       console.log = log;
     }

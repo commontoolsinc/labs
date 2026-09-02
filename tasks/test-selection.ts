@@ -29,6 +29,8 @@ import {
   LANES,
 } from "./test-selection/policy.ts";
 import { fetchManifest } from "./test-selection/store.ts";
+import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
+import { type Suite, unavailableUnits } from "./test-topology/suite.ts";
 import type { Manifest } from "./test-selection/manifest.ts";
 import { plan } from "./test-selection/plan.ts";
 import { readWorkspaceMembers } from "./workspace-tests.ts";
@@ -262,22 +264,27 @@ function laneLine(
 
 /**
  * The packing, over a manifest and no diff, as a lane would compute it.
- * Which capabilities a suite needs is declared by the topology, which
- * lands with part two, so until then the map is empty and a lane's
- * capability setup costs nothing here. The publisher computes its
- * reference plan the same way and for the same reason.
+ * The capabilities a suite opens are most of what a lane's budget goes
+ * on, so the topology is what makes this the answer a lane would give
+ * rather than one that leaves the setup out. The publisher computes its
+ * reference plan the same way.
  */
-function planFor(manifest: Manifest) {
-  return plan({ manifest, mandatory: new Map(), capabilities: new Map() });
+function planFor(manifest: Manifest, suites: readonly Suite[]) {
+  return plan({
+    manifest,
+    mandatory: new Map(),
+    capabilities: capabilitiesBySuite(suites),
+  });
 }
 
 /** What `plan --dry-run` prints, as lines. */
 export function planLines(
   manifest: Manifest,
+  suites: readonly Suite[],
   laneNumber: number | undefined,
 ): string[] {
   const lines: string[] = [];
-  const result = planFor(manifest);
+  const result = planFor(manifest, suites);
   const lanes = laneNumber === undefined
     ? result.lanes
     : result.lanes.filter((lane) => lane.lane === laneNumber);
@@ -328,9 +335,10 @@ export function planLines(
  */
 export function verdictFor(
   manifest: Manifest,
+  suites: readonly Suite[],
   test: TestIdentity,
 ): PlanVerdict {
-  const result = planFor(manifest);
+  const result = planFor(manifest, suites);
   const key = testIdentityKey(test);
   const taken = result.lanes.flatMap((lane) => lane.selections).find((
     selection,
@@ -345,6 +353,73 @@ export function verdictFor(
     verdict.loneSeconds = refused.cost;
   }
   return verdict;
+}
+
+/** What comparing the manifest against the working tree found. */
+export interface Verification {
+  lines: string[];
+
+  /** Whether anything it found should stop a build. */
+  fails: boolean;
+}
+
+/**
+ * Whether the newest manifest accounts for the tree in front of it.
+ *
+ * Two directions, and they are not the same claim. A unit the topology
+ * enumerates that the manifest holds nothing for is one every lane
+ * treats as unknown and therefore mandatory, so a manifest missing many
+ * of them is a run that selects nothing and tests everything. That is
+ * what this fails on, and it is the check to run before anything depends
+ * on selection working.
+ *
+ * A manifest entry naming a suite or unit the tree no longer holds is
+ * work no lane can be asked to do, and the packer drops it silently. It
+ * is reported rather than failed on, the way the drift guard reports its
+ * own reverse direction: a manifest is hours old by construction, so a
+ * unit deleted since it was published is expected to linger in it.
+ */
+export function verifyLines(
+  manifest: Manifest,
+  suites: readonly Suite[],
+): Verification {
+  const held = new Set(
+    manifest.entries.map((entry) => `${entry.suite}\t${entry.unit}`),
+  );
+  const enumerated = new Set<string>();
+  const missing: string[] = [];
+  for (const suite of suites) {
+    // A unit this configuration declares unavailable does not run, so a
+    // manifest holding nothing for it is the manifest being right.
+    const unavailable = unavailableUnits(suite);
+    for (const unit of suite.units) {
+      if (unavailable.has(unit)) continue;
+      enumerated.add(`${suite.id}\t${unit}`);
+      if (!held.has(`${suite.id}\t${unit}`)) {
+        missing.push(`${suite.id}: ${unit}`);
+      }
+    }
+  }
+  const stale = [...held].filter((key) => !enumerated.has(key)).sort();
+  const lines = [
+    `manifest of ${manifest.generatedAt}, from ${manifest.runs} runs at ` +
+    `${manifest.commit}`,
+    `${enumerated.size} units enumerated, ${manifest.entries.length} ` +
+    `identities in the manifest`,
+  ];
+  for (const unit of missing.sort()) {
+    lines.push(`  no identity for ${unit}, so every lane runs it as unknown`);
+  }
+  for (const key of stale) {
+    const [suite, unit] = key.split("\t") as [string, string];
+    lines.push(
+      `  reported: ${suite} no longer enumerates ${unit}, so nothing runs it`,
+    );
+  }
+  if (missing.length === 0) {
+    lines.push("  the manifest accounts for every unit the topology holds");
+  }
+  return { lines, fails: missing.length > 0 };
 }
 
 /** The manifest the newest publisher run wrote, or nothing with a reason. */
@@ -373,12 +448,16 @@ export interface Sources {
   aliases(): Promise<{
     resolve(test: TestIdentity, day: string): TestIdentity;
   }>;
+
+  /** The suites, read from the working tree. */
+  topology(): Promise<readonly Suite[]>;
 }
 
 const LIVE: Sources = {
   manifest: newestManifest,
   members: gatedMembers,
   aliases: loadAliasResolver,
+  topology: loadTopology,
 };
 
 /**
@@ -425,11 +504,12 @@ export async function dispatch(
         test,
         manifest.generatedAt.slice(0, 10),
       );
+      const suites = await sources.topology();
       for (
         const line of explainLines(
           manifest,
           resolved,
-          verdictFor(manifest, resolved),
+          verdictFor(manifest, suites, resolved),
         )
       ) {
         console.log(line);
@@ -437,14 +517,8 @@ export async function dispatch(
       return 0;
     }
     case "plan": {
-      // Before the manifest, because this mode does not read one and
-      // would otherwise fail on a store it never needed.
-      if (args.includes("--verify")) {
-        fail(
-          "plan --verify needs the test topology, which is not in the tree " +
-            "yet.\nSee docs/plans/pull-request-test-selection.md, part two.",
-        );
-      }
+      // Before the manifest, because a lane number this cannot read is a
+      // mistake to report rather than a reason to reach for the store.
       const laneNumber = laneArgument(args);
       // Silently filtering every lane would exit zero having printed
       // nothing, which reads as "this lane runs no tests".
@@ -453,7 +527,15 @@ export async function dispatch(
       }
       const manifest = await sources.manifest();
       if (manifest === undefined) return 1;
-      for (const line of planLines(manifest, laneNumber)) console.log(line);
+      const suites = await sources.topology();
+      if (args.includes("--verify")) {
+        const verification = verifyLines(manifest, suites);
+        for (const line of verification.lines) console.log(line);
+        return verification.fails ? 1 : 0;
+      }
+      for (const line of planLines(manifest, suites, laneNumber)) {
+        console.log(line);
+      }
       return 0;
     }
     default:

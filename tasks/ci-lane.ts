@@ -40,7 +40,7 @@ import {
   type Selection,
   type SelectionReason,
 } from "./test-selection/plan.ts";
-import type { Manifest } from "./test-selection/manifest.ts";
+import type { Manifest, WithheldReason } from "./test-selection/manifest.ts";
 import { LANE_BUDGET_SECONDS, LANES } from "./test-selection/policy.ts";
 
 /** What the lane was asked to do. */
@@ -457,6 +457,13 @@ export function spoolRecords(
  * before the next can reuse a path the runner owns. Every repeat must
  * pass: a repeat is not a retry, and three runs of a test is strictly
  * stricter than one.
+ *
+ * A record whose kind and scope are outside the suite's declared
+ * surfaces, or that a producer marked with a variant the batch did not
+ * run in, is kept as its producer wrote it and reported. The batch is
+ * not failed for it: the mistake is in the metadata, and the tests it
+ * came with either passed or did not. The record then belongs to no
+ * suite, which is what the store half of the drift guard fails on.
  */
 export async function runBatch(
   batch: Batch,
@@ -464,8 +471,14 @@ export async function runBatch(
   workDir: string,
   spool: string | undefined,
   env: Record<string, string>,
-): Promise<{ ok: boolean; records: TestRecord[]; seconds: number }> {
+): Promise<{
+  ok: boolean;
+  records: TestRecord[];
+  conflicts: TestRecord[];
+  seconds: number;
+}> {
   const records: TestRecord[] = [];
+  const conflicts: TestRecord[] = [];
   let ok = true;
   let seconds = 0;
   for (let run = 1; run <= batch.repeats; run++) {
@@ -488,22 +501,23 @@ export async function runBatch(
       });
       seconds += outcome.seconds;
       if (!outcome.ok) ok = false;
-      records.push(
-        ...await collectRecords({
-          spoolDir: batchSpool,
-          junit: (invocation.junit ?? []).map((output) => ({
-            kind: output.kind,
-            scope: output.scope,
-            glob: output.path,
-            ...(output.filePrefix === undefined
-              ? {}
-              : { prefix: output.filePrefix }),
-          })),
-          ...(batch.suite.variant === undefined
+      const collected = await collectRecords({
+        spoolDir: batchSpool,
+        junit: (invocation.junit ?? []).map((output) => ({
+          kind: output.kind,
+          scope: output.scope,
+          glob: output.path,
+          ...(output.filePrefix === undefined
             ? {}
-            : { variant: batch.suite.variant }),
-        }),
-      );
+            : { prefix: output.filePrefix }),
+        })),
+        surfaces: batch.suite.recordSurfaces,
+        ...(batch.suite.variant === undefined
+          ? {}
+          : { variant: batch.suite.variant }),
+      });
+      records.push(...collected.records);
+      conflicts.push(...collected.conflicts);
       await Deno.remove(batchSpool, { recursive: true }).catch(() => {});
       await Deno.mkdir(batchSpool, { recursive: true });
     }
@@ -514,16 +528,110 @@ export async function runBatch(
       timingRecord(`ci-lane batch ${batch.suite.id}`, seconds, ok),
     ]);
   }
-  return { ok, records, seconds };
+  return { ok, records, conflicts, seconds };
 }
 
-/** Prints what the lane is about to do, for the job summary. */
+/** Says something both on the lane's output and in the job summary. */
+function say(lines: readonly string[]): void {
+  const text = `${lines.join("\n")}\n`;
+  console.log(text);
+  const summary = Deno.env.get("GITHUB_STEP_SUMMARY");
+  if (summary !== undefined && summary.length > 0) {
+    Deno.writeTextFileSync(summary, text, { append: true });
+  }
+}
+
+/**
+ * Names the records this lane produced that no suite describes, which is
+ * the only report they get before the store half of the drift guard
+ * fails on them.
+ */
+export function describeConflicts(conflicts: readonly TestRecord[]): void {
+  if (conflicts.length === 0) return;
+  say([
+    "These records name a surface the suite that ran them does not " +
+    "declare, so they were kept as written rather than marked:",
+    "",
+    ...conflicts.map((record) => `- ${testIdentityKey(record.test)}`),
+  ]);
+}
+
+/** What a withheld identity is absent for, in words. */
+const WITHHELD_REASONS: Record<WithheldReason, string> = {
+  "main-red": "already failing in the latest run on `main`",
+  flaky: "too noisy to judge a change by",
+};
+
+/**
+ * Names what the manifest withheld from selection, so that what a lane
+ * did not run is visible rather than quietly absent.
+ *
+ * An identity the change made mandatory comes back in spite of being
+ * withheld, since a change touching what a failing test covers is very
+ * likely a fix and must be allowed to prove itself. Saying which of them
+ * that happened to is the difference between "this did not run" and
+ * "this ran because you touched it".
+ */
+export function describeWithheld(
+  withheld: Manifest["withheld"],
+  mandatory: ReadonlyMap<string, SelectionReason>,
+): void {
+  if (withheld.length === 0) return;
+  const lines = [
+    "Withheld from selection, so no lane chose them:",
+    "",
+    "| Identity | Suite | Withheld because | Ran anyway |",
+    "| --- | --- | --- | --- |",
+  ];
+  for (const entry of withheld) {
+    const back = mandatory.has(testIdentityKey(entry.test));
+    lines.push(
+      `| ${testIdentityKey(entry.test)} | ${entry.suite} | ` +
+        `${WITHHELD_REASONS[entry.reason]} | ` +
+        `${back ? "yes, the change reaches it" : "no"} |`,
+    );
+  }
+  say(lines);
+}
+
+/** What one suite's share of a lane was chosen for, and what it costs. */
+function chosenFor(
+  suite: string,
+  selections: readonly Selection[],
+): { identities: number; seconds: number; why: string } {
+  const mine = selections.filter((s) => s.entry.suite === suite);
+  const reasons = new Map<SelectionReason, number>();
+  let seconds = 0;
+  for (const selection of mine) {
+    reasons.set(selection.reason, (reasons.get(selection.reason) ?? 0) + 1);
+    seconds += selection.entry.cost * selection.repeats;
+  }
+  return {
+    identities: mine.length,
+    seconds,
+    why: [...reasons].sort().map(([reason, count]) => `${reason} ${count}`)
+      .join(", "),
+  };
+}
+
+/**
+ * Prints what the lane is about to do, for the job summary.
+ *
+ * Where the lane is running a selection, each batch says what it is
+ * expected to take and why each of its identities was chosen. "Why did
+ * my test not run" is the question a selected run provokes, and a
+ * summary that only names the suites cannot begin to answer it. The
+ * seconds are the tests' own measured time and not what the lane will
+ * take: the overheads the packer charged on top are per lane rather than
+ * per identity, and `projectedSeconds` is where the whole figure is.
+ */
 export function describePlan(
   options: LaneOptions,
   batches: readonly Batch[],
   capabilities: readonly CapabilityId[],
   manifest: { objectName?: string; absent?: string },
   unschedulable: readonly string[] = [],
+  chosen?: { selections: readonly Selection[]; projectedSeconds: number },
 ): void {
   const lines: string[] = [];
   lines.push(`## Lane ${options.lane} of ${options.of}`);
@@ -535,13 +643,32 @@ export function describePlan(
   );
   lines.push("");
   lines.push(`Capabilities: ${capabilities.join(", ") || "none"}`);
-  lines.push("");
-  lines.push("| Suite | Units | Repeats |");
-  lines.push("| --- | --- | --- |");
-  for (const batch of batches) {
+  if (chosen !== undefined) {
+    lines.push("");
     lines.push(
-      `| ${batch.suite.id} | ${batch.units.length} | ${batch.repeats} |`,
+      `Projected: ${chosen.projectedSeconds.toFixed(0)}s of ` +
+        `${LANE_BUDGET_SECONDS}s`,
     );
+  }
+  lines.push("");
+  if (chosen === undefined) {
+    lines.push("| Suite | Units | Repeats |");
+    lines.push("| --- | --- | --- |");
+    for (const batch of batches) {
+      lines.push(
+        `| ${batch.suite.id} | ${batch.units.length} | ${batch.repeats} |`,
+      );
+    }
+  } else {
+    lines.push("| Suite | Units | Tests | Their own time | Repeats | Chosen |");
+    lines.push("| --- | --- | --- | --- | --- | --- |");
+    for (const batch of batches) {
+      const share = chosenFor(batch.suite.id, chosen.selections);
+      lines.push(
+        `| ${batch.suite.id} | ${batch.units.length} | ${share.identities} | ` +
+          `${share.seconds.toFixed(1)}s | ${batch.repeats} | ${share.why} |`,
+      );
+    }
   }
   if (unschedulable.length > 0) {
     lines.push("");
@@ -549,12 +676,7 @@ export function describePlan(
     lines.push("");
     for (const entry of unschedulable) lines.push(`- ${entry}`);
   }
-  const text = `${lines.join("\n")}\n`;
-  console.log(text);
-  const summary = Deno.env.get("GITHUB_STEP_SUMMARY");
-  if (summary !== undefined && summary.length > 0) {
-    Deno.writeTextFileSync(summary, text, { append: true });
-  }
+  say(lines);
 }
 
 /** What the lane reaches for beyond its own arguments. */
@@ -585,6 +707,10 @@ export async function runLane(
   let batches: Batch[];
   let unschedulable: string[] = [];
   let fetched: { objectName?: string; absent?: string } = {};
+  let sayWithheld = (): void => {};
+  let chosen:
+    | { selections: readonly Selection[]; projectedSeconds: number }
+    | undefined;
   if (options.full) {
     batches = everyBatch(suites, options.lane, options.of);
     fetched = { absent: "running everything, so nothing is selected" };
@@ -622,7 +748,22 @@ export async function runLane(
       const mine = laid.lanes.find((lane) =>
         lane.lane === options.lane
       );
-      batches = batchesOf(suites, manifest.manifest, mine?.selections ?? []);
+      if (mine === undefined) {
+        // A lane outside the run it belongs to. Taking an empty share
+        // instead would run nothing and exit zero, reporting a pass over
+        // a set no lane ran, which is the one failure of this design
+        // that would be silent.
+        throw new RangeError(
+          `lane ${options.lane} has no share of a plan for ${options.of} ` +
+            `lanes`,
+        );
+      }
+      batches = batchesOf(suites, manifest.manifest, mine.selections);
+      chosen = {
+        selections: mine.selections,
+        projectedSeconds: mine.projectedSeconds,
+      };
+      sayWithheld = () => describeWithheld(laid.withheld, mandatory);
       // A discretionary identity costing more than a lane's hard bound
       // runs nowhere, because a lane holding it would be killed before it
       // reported anything. Naming it is what turns that into something
@@ -647,7 +788,15 @@ export async function runLane(
   for (const batch of batches) {
     for (const capability of batch.suite.needs) needs.add(capability);
   }
-  describePlan(options, batches, [...needs].sort(), fetched, unschedulable);
+  describePlan(
+    options,
+    batches,
+    [...needs].sort(),
+    fetched,
+    unschedulable,
+    chosen,
+  );
+  sayWithheld();
   if (options.dryRun) return true;
 
   const workDir = await Deno.makeTempDir({ prefix: "ci-lane-" });
@@ -666,6 +815,7 @@ export async function runLane(
     );
   }
   let ok = true;
+  const conflicts: TestRecord[] = [];
   try {
     for (const batch of batches) {
       // A failure never stops the lane: one failing batch would otherwise
@@ -673,6 +823,7 @@ export async function runLane(
       // lane is what it measured.
       const result = await runBatch(batch, options, workDir, spool, opened.env);
       if (!result.ok) ok = false;
+      conflicts.push(...result.conflicts);
     }
   } finally {
     await opened.close();
@@ -680,6 +831,7 @@ export async function runLane(
     // it, so it goes whether the batches passed, failed, or never ran.
     await Deno.remove(workDir, { recursive: true }).catch(() => {});
   }
+  describeConflicts(conflicts);
   return ok;
 }
 

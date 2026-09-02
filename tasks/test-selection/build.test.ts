@@ -10,12 +10,15 @@ import {
 
 import {
   buildManifest,
+  CI_SOURCE,
   dayOf,
   emptyAggregate,
   Fold,
   foldReports,
   identityOfKey,
+  lastRun,
   localReporter,
+  locateSurfaces,
   parseAggregate,
   provenance,
   readReport,
@@ -24,6 +27,7 @@ import {
   reportFromText,
 } from "./build.ts";
 import { parseManifest, serializeManifest } from "./manifest.ts";
+import type { Suite } from "../test-topology/suite.ts";
 import {
   daysBetween,
   emptyState,
@@ -285,35 +289,80 @@ describe("build", () => {
         NO_ALIASES,
         "2026-08-20",
       );
-      expect(fold.knowsDay("2026/08/10")).toBe(false);
-      fold.markCompacted("2026/08/10");
-      expect(fold.knowsDay("2026/08/10")).toBe(true);
-      expect(fold.finish().aggregate.compactedDays).toEqual(["2026/08/10"]);
+      expect(fold.settled(CI_SOURCE, "2026/08/10")).toBe(false);
+      fold.markSettled(CI_SOURCE, "2026/08/10");
+      expect(fold.settled(CI_SOURCE, "2026/08/10")).toBe(true);
+      expect(fold.finish().aggregate.compacted).toEqual(["ci\t2026/08/10"]);
     });
 
-    it("carries the compacted days across a saved aggregate", () => {
+    it("leaves a local source of a settled day still owing", () => {
+      // Rollups cover the continuous-integration area alone, so a receipt
+      // naming the day by itself would say the day is accounted for and
+      // that day's local submissions would never be read.
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      fold.markSettled(CI_SOURCE, "2026/08/10");
+      expect(fold.settled("local/ianh", "2026/08/10")).toBe(false);
+    });
+
+    it("knows which source and date it holds raw objects from", () => {
+      // A rollup written after them would overlap what they contributed,
+      // and nothing in one of this format says by how much.
+      const fold = new Fold(
+        {
+          ...emptyAggregate("2026-08-20"),
+          folded: [CI_NAME, LOCAL_NAME],
+        },
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      expect(fold.hasRaw(CI_SOURCE, "2026/08/20")).toBe(true);
+      expect(fold.hasRaw("local/ianh", "2026/08/20")).toBe(true);
+      expect(fold.hasRaw(CI_SOURCE, "2026/08/19")).toBe(false);
+      expect(fold.hasRaw("local/someone-else", "2026/08/20")).toBe(false);
+    });
+
+    it("carries the settled pairs across a saved aggregate", () => {
       const first = new Fold(
         emptyAggregate("2026-08-20"),
         NO_ALIASES,
         "2026-08-20",
       );
-      first.markCompacted("2026/08/10");
+      first.markSettled(CI_SOURCE, "2026/08/10");
       const saved = parseAggregate(
         JSON.stringify(first.finish().aggregate),
       );
       expect(saved).toBeDefined();
       const second = new Fold(saved!, NO_ALIASES, "2026-08-21");
-      expect(second.knowsDay("2026/08/10")).toBe(true);
+      expect(second.settled(CI_SOURCE, "2026/08/10")).toBe(true);
     });
 
-    it("reads an aggregate written before rollups as compacting nothing", () => {
+    it("reads an aggregate written before rollups as settling nothing", () => {
       const older = { ...emptyAggregate("2026-08-20") } as Record<
         string,
         unknown
       >;
-      delete older.compactedDays;
+      delete older.compacted;
       const parsed = parseAggregate(JSON.stringify(older));
-      expect(parsed?.compactedDays).toEqual([]);
+      expect(parsed?.compacted).toEqual([]);
+    });
+
+    it("reads a receipt naming a day alone as the shared area's", () => {
+      // That area is the only one a rollup has ever covered, so nothing
+      // else could have written the receipt, and reading it forward is
+      // exact rather than a guess.
+      const older = { ...emptyAggregate("2026-08-20") } as Record<
+        string,
+        unknown
+      >;
+      delete older.compacted;
+      older.compactedDays = ["2026/08/10"];
+      expect(parseAggregate(JSON.stringify(older))?.compacted).toEqual([
+        "ci\t2026/08/10",
+      ]);
     });
 
     it("carries what the cross-run rules saw into the next run", () => {
@@ -381,7 +430,7 @@ describe("build", () => {
         day: "2026-08-20",
         folded: [],
         states: {},
-        compactedDays: [],
+        compacted: [],
       };
       const refused: Array<[string, unknown]> = [
         ["a document that is not an object", 7],
@@ -393,9 +442,9 @@ describe("build", () => {
         ["null states", { ...whole, states: null }],
         [
           "a compacted list that is not one",
-          { ...whole, compactedDays: "2026-08-20" },
+          { ...whole, compacted: "2026-08-20" },
         ],
-        ["a compacted day that is not one", { ...whole, compactedDays: [7] }],
+        ["a settled pair that is not one", { ...whole, compacted: [7] }],
       ];
       for (const [what, value] of refused) {
         expect(parseAggregate(JSON.stringify(value)), what).toBeUndefined();
@@ -411,7 +460,7 @@ describe("build", () => {
         folded: [],
         states: {},
       };
-      expect(parseAggregate(JSON.stringify(before))?.compactedDays).toEqual([]);
+      expect(parseAggregate(JSON.stringify(before))?.compacted).toEqual([]);
     });
   });
 
@@ -434,6 +483,101 @@ describe("build", () => {
       expect(identityOfKey("not json")).toBeUndefined();
       expect(identityOfKey('["unit","memory"]')).toBeUndefined();
       expect(identityOfKey('["unit",1,"a"]')).toBeUndefined();
+    });
+  });
+
+  describe("locateSurfaces()", () => {
+    /** A suite claiming what a case tells it to. */
+    function claiming(id: string, locate: Suite["locate"]): Suite {
+      return {
+        id,
+        recordSurfaces: [{ kind: "unit", scope: "memory" }],
+        needs: ["deno"],
+        units: [],
+        unavailable: [],
+        locate,
+        command: () => Promise.resolve([]),
+      };
+    }
+
+    it("names the suite and unit the topology says, not the record's own", () => {
+      const { placed } = locateSurfaces(
+        [claiming("workspace-unit", () => ({
+          level: "unit",
+          unit: "packages/memory/test/space.test.ts",
+        }))],
+        new Map([[KEY, {
+          suite: "unit:memory",
+          unit: "packages/memory/test/space.test.ts",
+          fromFile: true,
+        }]]),
+      );
+      expect(placed.get(KEY)).toEqual({
+        suite: "workspace-unit",
+        unit: "packages/memory/test/space.test.ts",
+        fromFile: true,
+      });
+    });
+
+    it("passes on an identity that measures the suite rather than a unit", () => {
+      // An overlapping whole-invocation record names no unit, so nothing
+      // can be asked to run one of them.
+      const { placed, unplaced } = locateSurfaces(
+        [claiming("cli-core", () => ({ level: "suite" }))],
+        new Map([[KEY, {
+          suite: "unit:memory",
+          unit: "space > writes",
+          fromFile: false,
+        }]]),
+      );
+      expect(placed.size).toBe(0);
+      expect(unplaced.suiteLevel).toEqual([KEY]);
+    });
+
+    it("passes on an identity no suite claims", () => {
+      const { placed, unplaced } = locateSurfaces(
+        [claiming("workspace-unit", () => undefined)],
+        new Map([[KEY, {
+          suite: "unit:memory",
+          unit: "space > writes",
+          fromFile: false,
+        }]]),
+      );
+      expect(placed.size).toBe(0);
+      expect(unplaced.unclaimed).toEqual([KEY]);
+    });
+
+    it("passes over a key that names no identity", () => {
+      // The surfaces come from a stored aggregate, which is untrusted
+      // input like every other object in the store, so a key nothing can
+      // read is skipped rather than thrown on.
+      const { placed, unplaced } = locateSurfaces(
+        [claiming("workspace-unit", () => ({ level: "unit", unit: "one" }))],
+        new Map([["not an identity key", {
+          suite: "unit:memory",
+          unit: "space > writes",
+          fromFile: false,
+        }]]),
+      );
+      expect(placed.size).toBe(0);
+      expect(unplaced).toEqual({ suiteLevel: [], unclaimed: [] });
+    });
+
+    it("passes on an identity two suites claim", () => {
+      // Two claims on one identity is a topology defect that the drift
+      // guard fails on, and placing it either way would put the work in
+      // whichever suite happened to come first.
+      const unit = { level: "unit" as const, unit: "one" };
+      const { placed, unplaced } = locateSurfaces(
+        [claiming("a", () => unit), claiming("b", () => unit)],
+        new Map([[KEY, {
+          suite: "unit:memory",
+          unit: "space > writes",
+          fromFile: false,
+        }]]),
+      );
+      expect(placed.size).toBe(0);
+      expect(unplaced.unclaimed).toEqual([KEY]);
     });
   });
 
@@ -484,6 +628,52 @@ describe("build", () => {
       expect(manifest.withheld.map((held) => held.reason)).toEqual([
         "main-red",
       ]);
+    });
+
+    it("takes the last day an identity actually ran, not the last it holds", () => {
+      // A day can be carried with no runs in it once the counters have
+      // been aged, and reading that as the last run would tell the
+      // exploration draw a test it has been ignoring was just run.
+      expect(lastRun({
+        ...emptyState(),
+        runsByDay: { "2026-08-18": 3, "2026-08-19": 0, "2026-08-20": 0 },
+      })).toBe("2026-08-18");
+    });
+
+    it("has no last day for an identity nothing has run", () => {
+      expect(lastRun(emptyState())).toBeUndefined();
+    });
+
+    it("carries the last day anything ran an identity", () => {
+      // The exploration draw takes the longest-unrun first, so without
+      // this it has nothing to order by and sweeps nothing.
+      const folded = foldReports(
+        emptyAggregate("2026-08-19"),
+        [
+          stored(CI_NAME, context(), [record()]),
+          stored(
+            `${CI_NAME}2`,
+            context({
+              commit: "c2",
+              startedAt: "2026-08-19T00:00:00.000Z",
+            }),
+            [record()],
+          ),
+        ],
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      const manifest = buildManifest({
+        states: folded.states,
+        mainRed: folded.mainRed,
+        surfaces: folded.surfaces,
+        today: "2026-08-20",
+        generatedAt: "2026-08-20T04:00:00.000Z",
+        seed: "01K3",
+        commit: "c1",
+        runs: 2,
+      });
+      expect(manifest.entries[0]!.lastRun).toBe("2026-08-20");
     });
   });
 });
