@@ -119,6 +119,26 @@ describe("place", () => {
         expect(elsewhere.place).toEqual(place.place);
       });
 
+      it("escapes a `/` in a key, and takes that rendering back whole", () => {
+        const place = atSpaceRoot();
+        place.cd(`/${HANDLE}/a~1b`);
+        const printed = printedPosition(place);
+        expect(printed).toBe(
+          "/@did:key:z6MkConnectedSpace/of:fid1:abcdefghijklmnop/a~1b",
+        );
+        const elsewhere = atSpaceRoot();
+        elsewhere.cd(printed);
+        expect(elsewhere.place).toEqual(place.place);
+      });
+
+      it("returns a rendering `cd` refuses where a key holds a `#`", () => {
+        const place = atReferencedPiece();
+        place.cd("a#b");
+        const elsewhere = atSpaceRoot();
+        expect(elsewhere.cd(printedPosition(place)).kind).toBe("refused");
+        expect(elsewhere.place).toEqual(placeAtSpaceRoot(SPACE));
+      });
+
       it("returns a space root rendering `cd` refuses", () => {
         const place = atSpaceRoot();
         expect(place.cd(printedPosition(place)).kind).toBe("refused");
@@ -392,6 +412,38 @@ describe("place", () => {
             });
           });
 
+          it("refuses a reference holding an empty segment", () => {
+            // A rendering has to name the position it was printed for. The
+            // reference grammar drops a trailing empty segment, so a path
+            // ending in one would print as a reference to the piece above
+            // it — a different cell, with nothing said. The walk already
+            // refuses the spelling; this is the same refusal at the other
+            // door, and it costs the empty key its only spelling.
+
+            expect(atSpaceRoot().cd(`/${HANDLE}//`)).toEqual({
+              kind: "refused",
+              reason: `\`/${HANDLE}//\` has an empty segment.`,
+            });
+          });
+
+          it("refuses a reference holding an empty segment mid-path", () => {
+            expect(atSpaceRoot().cd(`/${HANDLE}/a//b`)).toEqual({
+              kind: "refused",
+              reason: `\`/${HANDLE}/a//b\` has an empty segment.`,
+            });
+          });
+
+          it("reads a trailing slash as the piece itself", () => {
+            const place = atSpaceRoot();
+            place.cd(`/${HANDLE}/`);
+            expect(place.place.position).toEqual({
+              kind: "piece",
+              space: SPACE,
+              piece: HANDLE,
+              path: [],
+            });
+          });
+
           it("refuses a rooted string that names no piece", () => {
             expect(atSpaceRoot().cd("//")).toEqual({
               kind: "refused",
@@ -570,7 +622,7 @@ describe("place", () => {
           });
 
           it("refuses a leading `@` inside a piece, reading it as a scope word", () => {
-            expect(atReferencedPiece().cd("@foo")).toEqual({
+            expect(atPiece().cd("@foo")).toEqual({
               kind: "refused",
               reason: "`@foo` names no scope. The scopes are `@space`, " +
                 "`@user`, and `@session`.",
@@ -778,6 +830,30 @@ describe("place", () => {
             space: SPACE,
             piece: HANDLE,
             path: [3],
+          });
+        });
+
+        it("carries no route, so `..` lands on the piece it entered", () => {
+          const entered = atSpaceRoot();
+          entered.enter({ space: SPACE, piece: HANDLE, path: ["3"] }, "#x");
+          entered.cd("..");
+          expect(entered.place.position).toEqual({
+            kind: "piece",
+            space: SPACE,
+            piece: HANDLE,
+            path: [],
+          });
+        });
+
+        it("refuses a target whose path holds an empty segment", () => {
+          expect(
+            atSpaceRoot().enter(
+              { space: SPACE, piece: HANDLE, path: ["a", ""] },
+              "#favorites",
+            ),
+          ).toEqual({
+            kind: "refused",
+            reason: "`#favorites` resolves to a path with an empty segment.",
           });
         });
 

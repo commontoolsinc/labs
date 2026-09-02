@@ -64,8 +64,9 @@ cell, the same selection `--input` spells as a flag
 (`normalizeLLMFriendlyRef` in `packages/cli/lib/llm-friendly-ref.ts`, which
 strips it before the runner grammar sees the string, and refuses every
 other fragment). And inside a piece it is an ordinary character of a data
-key, because every segment there is data: neither reserved reading reaches
-a path segment.
+key — within a segment, and at the head of any segment after the first,
+because a lone leading `#` is read as a wish target before the operand is
+split at all.
 
 A place is **result-rooted**, and holds exactly space, piece, path, and
 scope. `cd` refuses a reference carrying `#argument` rather than dropping

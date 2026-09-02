@@ -145,16 +145,20 @@ Still to come:
   (`resolveStoredPieceAddress`, `listSpaceSlugs`), so no CLI-surface arc
   step gates B1.
 - **The vocabulary a relative segment speaks.** A relative operand splits
-  on `/` and its segments are literal, so three characters read differently
-  in a key depending on the door. A key holding the separator has no
-  relative spelling, and a segment lifted out of a rendering reads as a
-  different key without saying so — the one half that misleads. A leading
-  `@` reads as a scope word, and a `#` anywhere in the path makes the whole
-  rendering a reference `cd` refuses; both stop a reader rather than moving
-  one, and both leave the key reachable by its rooted spelling. `ls`
-  settles all three: how such a key prints and how it is typed back want
-  deciding together. Segment validation is the same question — a slug's
-  vocabulary holds a reference and not a relative segment.
+  on `/` and its segments are literal, so three characters are read
+  differently by the two doors, and each such key is reachable through the
+  door the other refuses. A key holding the separator, and one whose first
+  character is `@`, are reachable rooted and not relatively: `~1` escaping
+  reaches a reference and not a walk, and a leading `@` reads as a scope
+  word. A key holding `#` is the mirror, reachable relatively and not
+  rooted, since the reference grammar reserves `#` for `#argument`. One of
+  the three misleads and the rest refuse: a segment holding the separator,
+  lifted out of a rendering, reads as a different key without saying so.
+  `ls` settles all three: how such a key prints and how it is typed back
+  want deciding together. Segment validation is the same question — a
+  slug's vocabulary holds a reference and not a relative segment, and an
+  empty segment is refused at every door, which leaves the empty key with
+  no spelling rather than one that prints as its parent.
 - **`where`**, the printing surface for the ambient record; later
   milestones add their dimensions to it as they add the dimensions
   themselves.

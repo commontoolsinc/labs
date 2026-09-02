@@ -69,7 +69,12 @@ export interface PiecePosition {
   /** The piece as the operand named it: a handle or a slug. */
   readonly piece: string;
 
-  /** Path inside the piece's result; empty while standing at the piece. */
+  /**
+   * Path inside the piece's result; empty while standing at the piece. No
+   * segment of it is itself empty: the reference grammar drops a trailing
+   * empty segment, so a path ending in one would render as a reference to
+   * the piece above it and name a different cell.
+   */
   readonly path: readonly PathSegment[];
 }
 
@@ -139,9 +144,10 @@ export interface ResolvedTarget {
 
   /**
    * Path inside that piece, absent or empty for the piece itself, with each
-   * segment as the resolution spelled it. {@link CurrentPlace.enter}
-   * normalizes them, so a caller hands over what it read rather than what a
-   * cell path holds.
+   * segment as the resolution spelled it. This is `NormalizedLink.path`'s
+   * own component type, so a resolution hands over what it is already
+   * holding; {@link CurrentPlace.enter} converts each segment to the
+   * number-or-string form a cell path takes.
    */
   readonly path?: readonly string[];
 }
@@ -313,7 +319,9 @@ function movePlace(
   } catch (error) {
     return refuse(messageOf(error));
   }
-  if (reference !== undefined) return moveByReference(place, reference);
+  if (reference !== undefined) {
+    return moveByReference(place, reference, trimmed);
+  }
 
   if (trimmed.startsWith("#")) return { kind: "wish", target: trimmed };
   return moveBySegments(from, trimmed);
@@ -346,8 +354,10 @@ function moveScope(from: Standing, word: string): Step {
 function moveByReference(
   place: Place,
   reference: NormalizedLLMFriendlyRef,
+  operand: string,
 ): Step {
   if (reference.input === true) return refuseArgumentSuffix();
+  if (reference.path.includes("")) return refuseEmptySegment(operand);
   const moved: Place = {
     position: {
       kind: "piece",
@@ -378,9 +388,7 @@ function moveBySegments(from: Standing, operand: string): Step {
 
   let moved = from;
   for (const segment of segments) {
-    if (segment === "") {
-      return refuse(`\`${operand}\` has an empty segment.`);
-    }
+    if (segment === "") return refuseEmptySegment(operand);
     const step = segment === ".." ? moveUp(moved) : moveDown(moved, segment);
     if (step.kind !== "moved") return step;
     moved = step.to;
@@ -511,6 +519,9 @@ function enterTarget(
         `connection serves one space.`,
     );
   }
+  if (target.path?.includes("")) {
+    return refuse(`\`${operand}\` resolves to a path with an empty segment.`);
+  }
   return land({
     ...place,
     position: {
@@ -540,6 +551,16 @@ function refuseArgumentSuffix(): Step {
       "addressed. Reach arguments per operand instead, as in " +
       "`get topics/3#argument`.",
   );
+}
+
+/**
+ * Helper for the movers, which refuses `operand` for holding an empty path
+ * segment. A position's path holds none, because the reference grammar drops
+ * a trailing empty segment: a position holding one would render as a
+ * reference naming the piece above it.
+ */
+function refuseEmptySegment(operand: string): Step {
+  return refuse(`\`${operand}\` has an empty segment.`);
 }
 
 /** Helper for the movers, which builds a refusal carrying `reason`. */
