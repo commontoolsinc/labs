@@ -691,6 +691,75 @@ Deno.test("parseCfHarnessCliArgs rejects fabric CFC dials without a fabric sessi
   );
 });
 
+const withFabricSession = (...extra: string[]) => [
+  "--prompt",
+  "hi",
+  "--fabric-api-url",
+  "https://toolshed.example/",
+  "--fabric-identity",
+  "keys/agent.pkcs8",
+  "--fabric-space",
+  "my-space",
+  ...extra,
+];
+
+Deno.test("parseCfHarnessCliArgs resolves the space database against the working directory", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    withFabricSession("--space-db", "cache/memory/space.sqlite"),
+    { cwd: "/tmp/project", env: {} },
+  );
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.spaceDbPath, "/tmp/project/cache/memory/space.sqlite");
+});
+
+Deno.test("parseCfHarnessCliArgs takes the space database from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(withFabricSession(), {
+    cwd: "/tmp/project",
+    env: { CF_HARNESS_SPACE_DB: "/srv/toolshed/space.sqlite" },
+  });
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.spaceDbPath, "/srv/toolshed/space.sqlite");
+});
+
+Deno.test("parseCfHarnessCliArgs leaves the space database unset when nothing names one", async () => {
+  const parsed = await parseCfHarnessCliArgs(withFabricSession(), {
+    cwd: "/tmp/project",
+    env: {},
+  });
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.spaceDbPath, undefined);
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a space database without a fabric session", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--space-db", "space.sqlite"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "needs --fabric-api-url, --fabric-identity, and --fabric-space",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an empty space database value", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(withFabricSession("--space-db", "  "), {
+        cwd: "/tmp/project",
+        env: {},
+      }),
+    Error,
+    "--space-db requires a non-empty value",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs resolves run manifest paths", async () => {
   const parsed = await parseCfHarnessCliArgs(
     ["--prompt", "hi", "--run-manifest", "loom-run.json"],

@@ -195,6 +195,7 @@ const CLI_STRING_FLAGS = [
   "fabric-cfc-enforcement-mode",
   "fabric-cfc-flow-labels",
   "fabric-cfc-posture",
+  "space-db",
   "pattern-index-url",
   "host-mount",
   "browser-access-lease-id",
@@ -533,6 +534,10 @@ Options:
                                 into the named CFC posture bundle (every staged
                                 enforcement dial on); the two dials above still
                                 apply over the bundle
+  --space-db <path>             The space database the run's per-cell label
+                                snapshot reads. Give it when this run's working
+                                directory shares no ancestor with the server's,
+                                which is what the discovery walk looks under
   --pattern-index-url <url>     Base URL of the pattern index for search_patterns,
                                 record_feedback, and run_pattern's patternId argument;
                                 signs with the fabric session identity, so it needs the
@@ -564,6 +569,7 @@ Environment:
   CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE Default value for --fabric-cfc-enforcement-mode
   CF_HARNESS_FABRIC_CFC_FLOW_LABELS Default value for --fabric-cfc-flow-labels
   CF_HARNESS_FABRIC_CFC_POSTURE Default value for --fabric-cfc-posture
+  CF_HARNESS_SPACE_DB           Default value for --space-db
   CF_HARNESS_PATTERN_INDEX_URL  Default value for --pattern-index-url
   CF_HARNESS_PATTERN_INDEX_PUBLISH 0 applies --no-pattern-index-publish
   CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE 1 offers successful authored
@@ -1370,6 +1376,7 @@ export const parseCfHarnessCliArgs = async (
       CF_HARNESS_FABRIC_API_URL: Deno.env.get("CF_HARNESS_FABRIC_API_URL"),
       CF_HARNESS_FABRIC_IDENTITY: Deno.env.get("CF_HARNESS_FABRIC_IDENTITY"),
       CF_HARNESS_FABRIC_SPACE: Deno.env.get("CF_HARNESS_FABRIC_SPACE"),
+      CF_HARNESS_SPACE_DB: Deno.env.get("CF_HARNESS_SPACE_DB"),
       CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE: Deno.env.get(
         "CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE",
       ),
@@ -1685,6 +1692,23 @@ export const parseCfHarnessCliArgs = async (
       "--fabric-cfc-enforcement-mode, --fabric-cfc-flow-labels, and --fabric-cfc-posture configure the fabric session's runtime and need --fabric-api-url, --fabric-identity, and --fabric-space",
     );
   }
+  const rawSpaceDb = typeof args["space-db"] === "string"
+    ? args["space-db"].trim()
+    : nonEmptyEnvValue(env.CF_HARNESS_SPACE_DB);
+  if (rawSpaceDb === "") {
+    throw new Error("--space-db requires a non-empty value");
+  }
+  if (rawSpaceDb !== undefined && fabricSession === undefined) {
+    // The snapshot it points at is taken over the cells of a fabric session,
+    // so without one there is nothing for the database to be read for, and a
+    // path accepted here would silently do nothing all run.
+    throw new Error(
+      "--space-db names the database the fabric session's labels are read from and needs --fabric-api-url, --fabric-identity, and --fabric-space",
+    );
+  }
+  const spaceDbPath = rawSpaceDb === undefined
+    ? undefined
+    : resolve(cwd, rawSpaceDb);
   const rawPatternIndexUrl = typeof args["pattern-index-url"] === "string"
     ? args["pattern-index-url"].trim()
     : nonEmptyEnvValue(env.CF_HARNESS_PATTERN_INDEX_URL);
@@ -1841,6 +1865,7 @@ export const parseCfHarnessCliArgs = async (
     ...(sandboxDockerRuntime !== undefined ? { sandboxDockerRuntime } : {}),
     ...(fabricMount !== undefined ? { fabricMount } : {}),
     ...(fabricSession !== undefined ? { fabricSession } : {}),
+    ...(spaceDbPath !== undefined ? { spaceDbPath } : {}),
     ...(patternIndex !== undefined ? { patternIndex } : {}),
     ...(skillsSh !== undefined ? { skillsSh } : {}),
     hostMounts,

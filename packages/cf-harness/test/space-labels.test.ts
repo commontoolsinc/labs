@@ -8,6 +8,7 @@ import type { LinkWalkBounds } from "@commonfabric/state-inspector";
 
 import {
   cellAddressOfRef,
+  type LinkGraphBounds,
   openSpaceLabelReader,
   readSpaceCellLabels,
   type SpaceLabelReader,
@@ -86,10 +87,51 @@ const NESTER = entity("nester");
  */
 const DEEPER = entity("deeper");
 
+/**
+ * A chain of three documents, each linking to the next at `next`. The cell a
+ * run holds a reference to is the piece, and a pattern's results hang off it
+ * with results of their own below them, so the label a reader is after sits
+ * at the end of a chain like this one rather than one link from the piece.
+ */
+const CHAIN_TOP = entity("chainTop");
+const CHAIN_MID = entity("chainMid");
+const CHAIN_END = entity("chainEnd");
+
+/**
+ * Two documents that link to each other at `peer`. Following links until
+ * there are none left never terminates on these, so what stops the walk is
+ * recognizing the loop rather than running out of a budget.
+ */
+const LOOP_ONE = entity("loopOne");
+const LOOP_TWO = entity("loopTwo");
+
+/**
+ * A document reaching {@link CHAIN_END} twice and at two distances: directly
+ * at `right`, and at `left` through the cell above it in the chain. The label
+ * sits at both paths, so a reader that recorded it at one of them would leave
+ * the other reading as a path the space labels nothing at.
+ */
+const DIAMOND = entity("diamond");
+
+/**
+ * A document linking at `gone` to {@link NEVER_WRITTEN}, which the store holds
+ * nothing for. The link addresses a cell; the store cannot speak for it.
+ */
+const DANGLING = entity("dangling");
+
+/**
+ * A document labelled at two of its paths, `account` and `other`, and one
+ * that links into it at `account` alone. A pattern's result names the input
+ * value it was computed from by the path inside the input cell that holds
+ * it, so the label a reader is after covers exactly what the link addresses.
+ */
+const ACCOUNTS = entity("accounts");
+const SLOTTED = entity("slotted");
+
 /** One stored link, in the at-rest sigil form the store holds. */
-const link = (id: string, space?: string) => ({
+const link = (id: string, space?: string, path: string[] = []) => ({
   "/": {
-    "link@1": { id, path: [], ...(space === undefined ? {} : { space }) },
+    "link@1": { id, path, ...(space === undefined ? {} : { space }) },
   },
 });
 
@@ -213,6 +255,97 @@ const documents: Record<string, unknown> = {
       deep: { down: link(COLLIDING) },
     },
   },
+  [CHAIN_TOP]: { value: { next: link(CHAIN_MID) } },
+  [CHAIN_MID]: {
+    value: { next: link(CHAIN_END) },
+    cfc: {
+      version: 1,
+      labelMap: {
+        version: 1,
+        entries: [
+          stored(
+            [],
+            { confidentiality: ["mid-secret"], integrity: [] },
+            "link",
+          ),
+        ],
+      },
+    },
+  },
+  [CHAIN_END]: {
+    value: { leaf: "the end of the chain" },
+    cfc: {
+      version: 1,
+      labelMap: {
+        version: 1,
+        entries: [
+          stored([], {
+            confidentiality: ["end-secret"],
+            integrity: [],
+          }, "derived"),
+        ],
+      },
+    },
+  },
+  [LOOP_ONE]: {
+    value: { peer: link(LOOP_TWO) },
+    cfc: {
+      version: 1,
+      labelMap: {
+        version: 1,
+        entries: [
+          stored(
+            [],
+            { confidentiality: ["one-secret"], integrity: [] },
+            "link",
+          ),
+        ],
+      },
+    },
+  },
+  [LOOP_TWO]: {
+    value: { peer: link(LOOP_ONE) },
+    cfc: {
+      version: 1,
+      labelMap: {
+        version: 1,
+        entries: [
+          stored(
+            [],
+            { confidentiality: ["two-secret"], integrity: [] },
+            "link",
+          ),
+        ],
+      },
+    },
+  },
+  [DIAMOND]: { value: { left: link(CHAIN_MID), right: link(CHAIN_END) } },
+  [DANGLING]: { value: { gone: link(NEVER_WRITTEN) } },
+  [ACCOUNTS]: {
+    value: { account: { balance: 1 }, other: "not addressed" },
+    cfc: {
+      version: 1,
+      labelMap: {
+        version: 1,
+        entries: [
+          stored(["account"], {
+            confidentiality: ["account-secret"],
+            integrity: [],
+          }, "declared"),
+          stored(["other"], {
+            confidentiality: ["other-secret"],
+            integrity: [],
+          }, "declared"),
+        ],
+      },
+    },
+  },
+  [SLOTTED]: {
+    value: {
+      slot: link(ACCOUNTS, undefined, ["account"]),
+      leaf: link(CHAIN_END, undefined, ["leaf"]),
+    },
+  },
   [COMMITTED]: {
     value: { attachment: "…" },
     cfc: {
@@ -253,7 +386,20 @@ const SHALLOW: LinkWalkBounds = {
 const SPENT: LinkWalkBounds = { maxDepth: 64, maxNodes: 2 };
 
 /** The documents written as plain JSON rather than through the codec. */
-const PLAIN = new Set([UNLABELLED, LINKER, NESTER, DEEPER]);
+const PLAIN = new Set([
+  UNLABELLED,
+  LINKER,
+  NESTER,
+  DEEPER,
+  CHAIN_TOP,
+  CHAIN_MID,
+  LOOP_ONE,
+  LOOP_TWO,
+  DIAMOND,
+  DANGLING,
+  ACCOUNTS,
+  SLOTTED,
+]);
 
 /**
  * A stored `revision.data` payload. Most documents go in through the codec,
@@ -323,6 +469,21 @@ describe("space-labels", () => {
     const bounded = await openSpaceLabelReader("demo-space", {
       dbPath: didDbPath,
       linkWalk,
+    });
+    try {
+      body(bounded);
+    } finally {
+      bounded.close();
+    }
+  };
+
+  const withGraphBoundedReader = async (
+    linkGraph: LinkGraphBounds,
+    body: (bounded: SpaceLabelReader) => void,
+  ): Promise<void> => {
+    const bounded = await openSpaceLabelReader("demo-space", {
+      dbPath: didDbPath,
+      linkGraph,
     });
     try {
       body(bounded);
@@ -433,9 +594,20 @@ describe("space-labels", () => {
       expect(read.schemaHash).toBe(undefined);
     });
 
-    it("returns an empty entry list for an entity the space never wrote", () => {
-      expect(reader.read({ id: NEVER_WRITTEN, scope: "space" }).entries)
-        .toEqual([]);
+    it("returns an entity the store holds no document for as unread", () => {
+      expect(reader.read({ id: NEVER_WRITTEN, scope: "space" })).toEqual({
+        entries: [],
+        linked: [],
+        unread: "no-document",
+      });
+    });
+
+    it("returns the path of a link to an entity the store holds no document for as unread", () => {
+      const read = didReader.read({ id: DANGLING, scope: "space" });
+      expect(read.unreadPaths).toEqual([
+        { path: ["gone"], reason: "no-document" },
+      ]);
+      expect(read.unread).toBe(undefined);
     });
 
     it("returns a disjunctive confidentiality clause as one atom carrying its alternatives", () => {
@@ -509,8 +681,8 @@ describe("space-labels", () => {
     it("returns the labels of the linked cells naming no space and naming the opened one", () => {
       const read = didReader.read({ id: LINKER, scope: "space" });
       expect(read.linked).toEqual([
-        { path: ["mine"], id: COLLIDING },
-        { path: ["ours"], id: COLLIDING },
+        { path: ["mine"], id: COLLIDING, into: [] },
+        { path: ["ours"], id: COLLIDING, into: [] },
       ]);
       expect(read.entries).toEqual([
         {
@@ -549,7 +721,11 @@ describe("space-labels", () => {
 
     it("returns only the link naming no space when the opened file proves no DID", () => {
       const read = reader.read({ id: LINKER, scope: "space" });
-      expect(read.linked).toEqual([{ path: ["mine"], id: COLLIDING }]);
+      expect(read.linked).toEqual([{
+        path: ["mine"],
+        id: COLLIDING,
+        into: [],
+      }]);
       expect(read.entries.map((entry) => entry.path)).toEqual([["mine"]]);
     });
 
@@ -584,8 +760,8 @@ describe("space-labels", () => {
     it("returns an array index as a path segment of a link held in an array", () => {
       const read = didReader.read({ id: NESTER, scope: "space" });
       expect(read.linked).toEqual([
-        { path: ["nested", "mine"], id: COLLIDING },
-        { path: ["list", "0", "ours"], id: COLLIDING },
+        { path: ["nested", "mine"], id: COLLIDING, into: [] },
+        { path: ["list", "0", "ours"], id: COLLIDING, into: [] },
       ]);
     });
 
@@ -614,6 +790,118 @@ describe("space-labels", () => {
       ]);
     });
 
+    it("returns the label of a cell two links out under the path that reached it", () => {
+      const read = didReader.read({ id: CHAIN_TOP, scope: "space" });
+      expect(read.entries).toEqual([
+        {
+          path: ["next"],
+          confidentiality: [{ type: "mid-secret", name: "mid-secret" }],
+          integrity: [],
+          origin: "link",
+          source: CHAIN_MID,
+        },
+        {
+          path: ["next", "next"],
+          confidentiality: [{ type: "end-secret", name: "end-secret" }],
+          integrity: [],
+          origin: "derived",
+          source: CHAIN_END,
+        },
+      ]);
+    });
+
+    it("returns the label at the path a link addresses at the link itself", () => {
+      const read = didReader.read({ id: SLOTTED, scope: "space" });
+      expect(read.entries).toEqual([
+        {
+          path: ["slot"],
+          confidentiality: [{ type: "account-secret", name: "account-secret" }],
+          integrity: [],
+          origin: "declared",
+          source: ACCOUNTS,
+        },
+        {
+          path: ["leaf"],
+          confidentiality: [{ type: "end-secret", name: "end-secret" }],
+          integrity: [],
+          origin: "derived",
+          source: CHAIN_END,
+        },
+      ]);
+    });
+
+    it("returns the label of a cell reached two ways under each path that reached it", () => {
+      const read = didReader.read({ id: DIAMOND, scope: "space" });
+      expect(read.entries.map((entry) => [entry.source, entry.path])).toEqual([
+        [CHAIN_MID, ["left"]],
+        [CHAIN_END, ["right"]],
+        [CHAIN_END, ["left", "next"]],
+      ]);
+    });
+
+    it("unfolds a loop once, holding the label of each cell on it", () => {
+      const read = didReader.read({ id: LOOP_ONE, scope: "space" });
+      expect(read.entries).toEqual([
+        {
+          path: [],
+          confidentiality: [{ type: "one-secret", name: "one-secret" }],
+          integrity: [],
+          origin: "link",
+        },
+        {
+          path: ["peer"],
+          confidentiality: [{ type: "two-secret", name: "two-secret" }],
+          integrity: [],
+          origin: "link",
+          source: LOOP_TWO,
+        },
+        {
+          path: ["peer", "peer"],
+          confidentiality: [{ type: "one-secret", name: "one-secret" }],
+          integrity: [],
+          origin: "link",
+          source: LOOP_ONE,
+        },
+      ]);
+      expect(read.truncation).toBe(undefined);
+    });
+
+    it("returns the path of a link further out than the read follows links as unread", async () => {
+      await withGraphBoundedReader({ maxHops: 1, maxDocuments: 64 }, (b) => {
+        const read = b.read({ id: CHAIN_TOP, scope: "space" });
+        expect(read.unreadPaths).toEqual([
+          { path: ["next", "next"], reason: "beyond-link-hops" },
+        ]);
+        expect(read.truncation).toBe(undefined);
+      });
+    });
+
+    it("returns the label of the cell a hop-bounded read did reach", async () => {
+      await withGraphBoundedReader({ maxHops: 1, maxDocuments: 64 }, (b) => {
+        const read = b.read({ id: CHAIN_TOP, scope: "space" });
+        expect(read.entries.map((entry) => entry.source)).toEqual([CHAIN_MID]);
+      });
+    });
+
+    it("returns the whole cell truncated when the read runs out of documents", async () => {
+      await collectWarnings(async () => {
+        await withGraphBoundedReader({ maxHops: 8, maxDocuments: 1 }, (b) => {
+          const read = b.read({ id: CHAIN_TOP, scope: "space" });
+          expect(read.truncation).toBe("document-budget-exhausted");
+          expect(read.entries.map((entry) => entry.source)).toEqual([
+            CHAIN_MID,
+          ]);
+        });
+      });
+    });
+
+    it("returns no truncation for a cell whose graph fits the document budget", async () => {
+      await withGraphBoundedReader({ maxHops: 8, maxDocuments: 64 }, (b) => {
+        expect(b.read({ id: CHAIN_TOP, scope: "space" }).truncation)
+          .toBe(undefined);
+      });
+    });
+
     it("returns the path a shallower walk stopped short of as unread", async () => {
       await withBoundedReader(SHALLOW, (bounded) => {
         const read = bounded.read({ id: DEEPER, scope: "space" });
@@ -627,7 +915,11 @@ describe("space-labels", () => {
     it("returns the labels of the link a shallower walk did reach", async () => {
       await withBoundedReader(SHALLOW, (bounded) => {
         const read = bounded.read({ id: DEEPER, scope: "space" });
-        expect(read.linked).toEqual([{ path: ["shallow"], id: COLLIDING }]);
+        expect(read.linked).toEqual([{
+          path: ["shallow"],
+          id: COLLIDING,
+          into: [],
+        }]);
         expect(read.entries.map((entry) => entry.path)).toEqual([["shallow"]]);
       });
     });
@@ -705,6 +997,32 @@ describe("space-labels", () => {
     it("drops a reference that names no document", async () => {
       const snapshot = await read(["my notebook", `/${DECLARED}`]);
       expect(snapshot.cells.map((cell) => cell.entityId)).toEqual([DECLARED]);
+    });
+
+    it("records a reference the store holds no document for as unread", async () => {
+      const [snapshot, warnings] = await collectWarningsOf(() =>
+        read([`/${NEVER_WRITTEN}`, `/${DECLARED}`])
+      );
+      expect(snapshot.status).toBe("read");
+      expect(snapshot.cells.map((cell) => cell.unreadReason)).toEqual([
+        "no-document",
+        undefined,
+      ]);
+      expect(warnings).toEqual([]);
+    });
+
+    it("warns that the store is a different one when it holds none of the cells the run held", async () => {
+      const [snapshot, warnings] = await collectWarningsOf(() =>
+        read([`/${NEVER_WRITTEN}`, `/${entity("neverEither")}`])
+      );
+      expect(snapshot.status).toBe("read");
+      expect(snapshot.cells.map((cell) => cell.unreadReason)).toEqual([
+        "no-document",
+        "no-document",
+      ]);
+      expect(warnings.length).toBe(1);
+      expect(warnings[0]).toContain(dbPath);
+      expect(warnings[0]).toContain("--space-db");
     });
 
     const readAgainstDid = (refs: readonly string[]) =>

@@ -92,6 +92,16 @@ export interface HarnessSessionConfig {
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
 
   fabricSession?: HarnessFabricSessionConfig;
+
+  /**
+   * The space database the run's per-cell label snapshot reads. The labels a
+   * session writes land in the serving toolshed's own store, and the snapshot
+   * reads that file rather than asking over the wire; absent, the file is
+   * found by searching this host's caches for the space the fabric session
+   * names, which finds only a toolshed serving from the same checkout.
+   */
+  spaceDbPath?: string;
+
   patternIndex?: HarnessPatternIndexConfig;
   skillsSh?: HarnessSkillsShConfig;
 
@@ -222,6 +232,9 @@ export const harnessSessionEngineOptions = (
       : {}),
     ...(config.fabricSession !== undefined
       ? { fabricSession: config.fabricSession }
+      : {}),
+    ...(config.spaceDbPath !== undefined
+      ? { spaceDbPath: config.spaceDbPath }
       : {}),
     ...(config.patternIndex !== undefined
       ? { patternIndex: config.patternIndex }

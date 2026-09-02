@@ -353,7 +353,11 @@ cells the space holds no label for. The database is opened read-only, and it is
 found by the space the fabric session names; `--space-db` points at the file
 instead, for a host whose store is not where the search looks — and a file named
 for anything but its space proves no DID, so every spaced reference and link
-goes unread against one.
+goes unread against one. A cell the opened file holds no document for is
+recorded as unread too, not as unlabeled: the run held a reference to it, so a
+store with nothing at it is a store the run did not write into. A file holding
+none of a run's cells is said out loud as the wrong store, with the fix beside
+it.
 
 ## Reading a run
 

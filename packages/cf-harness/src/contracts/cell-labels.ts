@@ -112,11 +112,24 @@ export interface HarnessCellLabelEntry {
  * `below-read-depth` is a path sitting deeper inside a document than the
  * reader descends into one. Nothing was read at it or beneath it, and the
  * path names exactly where that begins.
+ *
+ * `beyond-link-hops` is the same fact along the other axis: a link sitting
+ * further out of the cell than the reader follows links. The document it
+ * addresses was not read, and neither was anything it links to in turn.
+ *
+ * `no-document` is an id the opened store holds no document for — never
+ * written, deleted, or undecodable. The run held a reference to it, so the
+ * cell exists somewhere; a store with nothing at it is a store that did not
+ * receive the run's writes, which is what a snapshot taken against the wrong
+ * file looks like, and the reading "this cell carries no label" would be
+ * exactly wrong.
  */
 export type HarnessCellLabelUnreadReason =
   | "cross-space"
   | "space-unproven"
-  | "below-read-depth";
+  | "below-read-depth"
+  | "beyond-link-hops"
+  | "no-document";
 
 /**
  * Why a cell's labels are some of what the space holds rather than all of it.
@@ -133,18 +146,27 @@ export type HarnessCellLabelUnreadReason =
  * evidence of the value the budget exists against — a restored graph with a
  * cycle in it, or a row no reader could enumerate the paths of — so it is
  * something to investigate rather than something to expect.
+ *
+ * `document-budget-exhausted` is the same statement about the graph rather
+ * than about one value: the reader spent its allowance of documents before
+ * the cells reachable from this one ran out. The links it had yet to follow
+ * were enumerated, but the paths beneath each of them were not, so naming
+ * them would claim more than was read.
  */
-export type HarnessCellLabelTruncationReason = "node-budget-exhausted";
+export type HarnessCellLabelTruncationReason =
+  | "node-budget-exhausted"
+  | "document-budget-exhausted";
 
 /**
  * One path inside a cell whose labels were not looked for, and why.
  *
- * A link one hop out of a cell is followed only where the store it addresses
- * is the opened one, and a path deeper than the reader descends is not
- * reached at all; either way the path holds no entry. Recording it is what
- * keeps it readable as a cell nobody asked about: an entry list carries no
- * gaps of its own, so a path missing from one is otherwise a path the space
- * holds no label for.
+ * A link is followed only where the store it addresses is the opened one,
+ * holds a document at it, and the reader still has hops to spend, and a path
+ * deeper than the reader descends is not reached at all; either way the path
+ * holds no entry.
+ * Recording it is what keeps it readable as a cell nobody asked about: an
+ * entry list carries no gaps of its own, so a path missing from one is
+ * otherwise a path the space holds no label for.
  */
 export interface HarnessCellLabelUnreadPath {
   /** The path inside the document, as an entry at it would be written. */
