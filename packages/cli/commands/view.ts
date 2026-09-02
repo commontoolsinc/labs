@@ -41,7 +41,8 @@ COMMON USAGE:
   cf check ./p.tsx --show-transformed --no-run | cf view --plain | bat
 
 KEYS (press ? in the viewer for the full list):
-  ↑/↓ k/j scroll · ←/→ h/l pan · Space/b page · g/G top/bottom · / search
+  mouse wheel, ↑/↓ or k/j scroll · ←/→ h/l pan · Space/b page
+  g/G top/bottom · / search
   structure tree: w/s sibling · a/d parent/child · Tab/⇧Tab depth-first
   Enter info card · in it: ↑/↓ pick a reference · Enter opens it · z reveals it
   v source/rendered · t look up a definition · # line numbers · \\ wrap mode · q quit
