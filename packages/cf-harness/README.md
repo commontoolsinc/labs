@@ -276,6 +276,10 @@ What is not done yet:
 - [src/contracts/](src/contracts/)
   - prompt-slot, run-manifest, observation, policy, run-report, subagent, skill,
     transcript, tool-result, and handle-table contracts
+- [audit/](audit/)
+  - the CFC audit: a read-only checker that reads a run family's artifacts and
+    reports, per clause of the agent-harness CFC profile, what they establish.
+    See [The CFC audit](#the-cfc-audit)
 - [console/](console/)
   - the console: a localhost page that starts a session, watches it live, and
     reads any run back as a map of its cells, calls and CFC verdicts. See
@@ -296,6 +300,12 @@ From [packages/cf-harness](.):
 - `deno task run -- ...`
 - `deno task test`
 - `deno task test:integration`
+- `deno task cfc-audit <runDir | artifactRoot> [more paths...] [--json]
+  [--fail-on fail|warn|inconclusive]`
+  — audit session artifacts against the CFC integration profile. See
+  [The CFC audit](#the-cfc-audit)
+- `deno task cfc-audit-fixtures` — rewrite the committed artifact tree the audit
+  suites read
 - `deno task console` — build the console page and serve it on `127.0.0.1:8100`
 - `deno task console:build`, `deno task console:watch` — the build on its own,
   and a rebuild on save while changing the page
@@ -760,7 +770,7 @@ registry's shape like any other reference.
 What the model receives is a token and fixed prose, never data. Reading anything
 behind the token means running a pattern over it, where the CFC boundary rules
 as it does for every other flow — in particular, a piece's `$NAME` is a value,
-and a name computed from labelled data taints a name-listing pattern's result,
+and a name computed from labeled data taints a name-listing pattern's result,
 which strict enforcement refuses whole. The announcement says so and names the
 fallback: a pattern that returns the entry references without reading any
 values, which cannot taint and whose addresses come back as tokens through the
@@ -1088,7 +1098,7 @@ three session flags present. `--fabric-cfc-enforcement-mode`
 confidentiality its target's declared policy does not admit has its commit
 refused. `--fabric-cfc-flow-labels` (`CF_HARNESS_FABRIC_CFC_FLOW_LABELS`)
 accepts `off`, `observe`, or `persist`; `persist` stamps the derived flow labels
-onto everything a pattern's transaction writes, which is what makes a labelled
+onto everything a pattern's transaction writes, which is what makes a labeled
 read visible to that refusal. `--fabric-cfc-posture`
 (`CF_HARNESS_FABRIC_CFC_POSTURE`) accepts `max-enforcement` and opts the
 session's runtime into the named CFC posture bundle
@@ -1706,6 +1716,52 @@ Current caveat:
   - `--skill` requires `--skills-root`
   - skill preload is not supported with `--resume-run`
   - dynamic `load_skill` activation is still planned
+
+## The CFC audit
+
+`deno task cfc-audit` reads a run's artifacts and reports what they establish
+about the CFC clauses the harness answers to. It reads only: no live runtime, no
+space database, no network, and it writes nothing into an artifact tree.
+
+```bash
+cd packages/cf-harness
+deno task cfc-audit .cf-harness-console/runs
+deno task cfc-audit .cf-harness-console/runs/<runId> --json
+deno task cfc-audit .cf-harness-console/runs --fail-on fail
+```
+
+A run directory audits that run together with the `delegate_task` children
+written beside it; an artifact root, or a directory of run directories, audits
+every run under it.
+
+The checks are in [audit/checks/structural.ts](audit/checks/structural.ts), one
+per clause family:
+
+| Check | Subject                                                                                                               | Clauses                                    |
+| ----- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| AUD-1 | one enforcement mode across every artifact of a run                                                                   | AH-CFC-14                                  |
+| AUD-2 | decision reason codes belong to the claimed mode, and its side effects carry invocation contexts                      | AH-CFC-14, AH-CFC-15                       |
+| AUD-3 | every side effect joins to a policy decision, and the counts reconcile                                                | AH-CFC-9, AH-CFC-11, AH-TOOL-3             |
+| AUD-4 | every denial reached the model as a typed denial carrying no payload                                                  | AH-CFC-6, AH-CFC-11                        |
+| AUD-5 | the handle table is well formed, no token precedes its disclosure, no parent token crosses into a child untransferred | AH-CFC-12, AH-CFC-13, AH-CFC-18, AH-CFC-19 |
+| AUD-6 | tool calls and tool results pair                                                                                      | AH-CFC-16, AH-LIFE-6                       |
+| AUD-7 | a run at `observe` is reported as diagnostic rather than as enforcement                                               | AH-CFC-15, §6                              |
+| AUD-8 | labeled observations the model read are accumulated as influence, and denied ones are not                             | AH-CFC-7, AH-CFC-8                         |
+| AUD-9 | the artifacts that explain why a result was exposed or denied were retained                                           | AH-CFC-16, AH-CFC-17                       |
+
+Five verdicts, and the distinctions between them are the point. `inconclusive`
+is a check whose evidence was absent or unreadable — it is never `pass`, and
+`--fail-on` treats it as failure unless told otherwise, so an audit over a tree
+missing its artifacts cannot exit green. `not-applicable` is stronger: the
+evidence was there and said the check's subject does not arise. `warn` is a run
+whose posture makes its own assurance weaker than an enforcing run's.
+
+Every check carries the clauses it rests on and an exact quote from each, both
+printed with the finding and included in `--json`.
+[audit/citations.ts](audit/citations.ts) holds that table and
+`audit/test/citation-drift.test.ts` reads every cited document and requires each
+quote to still be in it, so a specification edit that invalidates a check breaks
+the suite rather than leaving the check quietly wrong.
 
 ## Testing
 

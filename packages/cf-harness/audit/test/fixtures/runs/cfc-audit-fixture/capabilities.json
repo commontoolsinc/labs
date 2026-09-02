@@ -1,0 +1,80 @@
+{
+  "type": "cf-harness.capability-snapshot",
+  "at": "2026-09-02T02:06:50.416Z",
+  "commands": {
+    "bash": {
+      "present": true,
+      "path": "/bin/bash",
+      "version": "GNU bash, version 5.2.26(1)-release"
+    },
+    "sh": {
+      "present": true,
+      "path": "/bin/sh",
+      "version": "BusyBox v1.36.1"
+    },
+    "node": {
+      "present": false
+    },
+    "deno": {
+      "present": true,
+      "path": "/usr/local/bin/deno",
+      "version": "deno 2.2.0"
+    },
+    "python": {
+      "present": false
+    },
+    "python3": {
+      "present": true,
+      "path": "/usr/bin/python3",
+      "version": "Python 3.11.9"
+    },
+    "git": {
+      "present": true,
+      "path": "/usr/bin/git",
+      "version": "git version 2.45.1"
+    }
+  },
+  "cfc": {
+    "enforcementMode": "enforce-explicit",
+    "absenceBehavior": "permissive-if-absent",
+    "substrateStatus": "not-attested",
+    "runManifest": {
+      "present": false
+    },
+    "sandbox": {
+      "kind": "docker-runsc-cfc",
+      "defaultWorkingDirectory": "/workspace",
+      "cfc": {
+        "runtimeRequested": true,
+        "workspaceMountPath": "/workspace"
+      }
+    },
+    "mounts": {
+      "workspace": {
+        "kind": "workspace",
+        "status": "configured",
+        "sandboxPath": "/workspace",
+        "readOnly": false
+      },
+      "fabric": {
+        "kind": "fabric-fuse",
+        "status": "not-configured",
+        "sandboxPath": "/fabric",
+        "writeGovernance": {
+          "policy": "not-configured",
+          "statusProbe": "not-probed",
+          "delegatedToCfc": false
+        }
+      },
+      "hostBinds": []
+    },
+    "protectedXattrs": {
+      "expectedSandboxVisible": false,
+      "sandboxVisibility": "not-probed"
+    }
+  },
+  "model": {
+    "providerId": "openai-compatible-gateway",
+    "authSource": "api-key"
+  }
+}

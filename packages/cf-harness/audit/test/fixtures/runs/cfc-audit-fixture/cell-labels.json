@@ -1,0 +1,9 @@
+{
+  "type": "cf-harness.cell-labels",
+  "version": 1,
+  "generatedAt": "2026-09-02T02:06:50.458Z",
+  "status": "unavailable",
+  "unavailableReason": "space-not-found",
+  "unavailableDetail": "the fixture run has no fabric session, so no space database was opened",
+  "cells": []
+}
