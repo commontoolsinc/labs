@@ -30,7 +30,8 @@ export type PathSegment = string | number;
 /**
  * The facets a space root lists. A populated space is too large for a flat
  * root, so the root offers these and never pieces directly, and these names
- * are reserved at the root alone — inside a piece every segment is data.
+ * are reserved at the root alone — inside a piece a facet name is an
+ * ordinary data key.
  */
 export const FACETS = ["slugs", "pieces"] as const;
 

@@ -516,16 +516,24 @@ describe("place", () => {
             });
           });
 
-          it("hands back `#argument` too, since the head reading is one rule", () => {
+          it("hands back `#argument` as a target rather than refusing it", () => {
             // The wish reading is decided on the whole operand, so it does
             // not ask which word follows the `#`. `#argument` earns the
             // result-rooted refusal as a *suffix* on a reference; standing
             // alone it is a target name like any other, and the connection
-            // is what discovers there is none.
+            // is what discovers there is none. The case below drives the
+            // same point through a spelling a reference refuses outright.
 
             expect(atSpaceRoot().cd("#argument")).toEqual({
               kind: "wish",
               target: "#argument",
+            });
+          });
+
+          it("hands back a target holding a second `#`", () => {
+            expect(atSpaceRoot().cd("#a#b")).toEqual({
+              kind: "wish",
+              target: "#a#b",
             });
           });
         });
@@ -678,14 +686,12 @@ describe("place", () => {
           });
 
           describe("reserved readings", () => {
-            // Where a reading is decided says where it holds. `-`,
-            // `@scope`, `/` and a lone leading `#` are read on the whole
-            // operand before it is split, so each governs the head alone
-            // and is data everywhere after it; `..` is read segment by
-            // segment, so it is reserved wherever it appears. These four
-            // pin that rule rather than four instances of it, which is why
-            // each drives its character at the head of a later segment
-            // where the head-of-operand cases drive it first.
+            // Each of these drives its character at the head of a later
+            // segment, where the head-of-operand cases drive it first.
+            // That position is what tells the two kinds of reading apart —
+            // one decided on the whole operand, one decided segment by
+            // segment — so the four together pin which kind each reading
+            // is, rather than four instances of one kind.
 
             it("reads `-` as a data key in a later segment", () => {
               const place = atReferencedPiece();
