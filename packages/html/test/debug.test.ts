@@ -20,23 +20,19 @@ describe("debug", () => {
   describe("formatTree", () => {
     it("names a `FabricBytes` standing where a node would", () => {
       expect(formatTree(new FabricBytes(new Uint8Array([1, 2, 3]))))
-        .toBe('{"/Bytes@1":"AQID"}');
+        .toBe("/Bytes(...)");
     });
 
     it("names a `FabricError`, the `FabricInstance` arm", () => {
       // A debug renderer names an instance rather than refusing it: the value
-      // it was handed is the very thing being debugged. The stack in its
-      // state names this file and a line in it, so the assertion stops short
-      // of the stack.
+      // it was handed is the very thing being debugged.
       expect(formatTree(FabricError.fromNativeError(new Error("boom"))))
-        .toMatch(
-          /^\{"\/Error@1":\{type:"Error",name:null,message:"boom"/,
-        );
+        .toBe("/Error(...)");
     });
 
     it("indents a named special object like any other node", () => {
       expect(formatTree(new FabricBytes(new Uint8Array([1])), 2))
-        .toBe('    {"/Bytes@1":"AQ"}');
+        .toBe("    /Bytes(...)");
     });
 
     it("names a special object held as a render prop", () => {
@@ -45,7 +41,7 @@ describe("debug", () => {
         props: { when: new FabricEpochNsec(1_000n) },
       };
 
-      expect(formatTree(node)).toContain('when={"/EpochNsec@1":"A-g"}');
+      expect(formatTree(node)).toContain("when=/EpochNsec(...)");
     });
   });
 });

@@ -1,11 +1,5 @@
 new FabricRegExp(/ab+c/gi)
 
-{
-  "/RegExp@1": {
-    source: "ab+c",
-    flags: "gi",
-    flavor: "es2025"
-  }
-}
+/RegExp(...)
 
-{"/RegExp@1":{source:"ab+c",flags:"gi",flavor:"es2025"}}
+/RegExp(...)

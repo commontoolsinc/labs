@@ -18,6 +18,7 @@ import {
 // that cycle fails with "Cannot access 'BaseFabricInstance' before
 // initialization". `codecOf.ts` itself is a leaf.
 import { codecOf } from "@/codec-common/codecOf.ts";
+import { isCodecTypeTag } from "@/codec-common/isCodecTypeTag.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 
@@ -291,9 +292,9 @@ class DebugConverter {
  * value, except that an object key which is a valid identifier is written
  * bare, and a bare token -- `42n`, `undefined`, `NaN`, `-0`, `Infinity`,
  * `@name`, `Symbol("name")`, `<circle>`, `<hole>` -- wherever it cannot. A
- * `FabricPrimitive`, which the conversion passes through as itself, is
- * rendered under its codec tag with its JSON encoding, in the same shape the
- * conversion gives a `FabricInstance`.
+ * `FabricInstance`, which the conversion carries as its encoding under its
+ * codec type tag, and a `FabricPrimitive`, which the conversion passes
+ * through as itself, are both rendered in the elided form `/TypeName(...)`.
  */
 class DebugStringifier {
   readonly #indent: string | undefined;
@@ -363,26 +364,24 @@ class DebugStringifier {
   }
 
   /**
-   * Renders a `FabricPrimitive`, under its codec tag with its JSON encoding.
-   * When the codec cannot be found or cannot encode the value, the
-   * `/unconvertible` form is rendered in its place.
+   * Renders a `FabricPrimitive`, in the elided form `/TypeName(...)`, where the
+   * type name is that of its codec type tag. When the codec cannot be found,
+   * the class name stands in for the type name.
    */
-  #renderFabricPrimitive(value: FabricPrimitive, indent: string): string {
-    let converted: FabricValue;
+  #renderFabricPrimitive(value: FabricPrimitive): string {
+    let tag;
 
     try {
       // A `FabricPrimitive` binds no `[CODEC]`, so its JSON codec supplies the
-      // tag and encoding. TODO(danfuzz): Replace `JSON_CODEC` with
-      // `DEBUG_CODEC` once the latter exists.
-      const codec = codecOf(value, JSON_CODEC);
-      const tag = codec.tagForValue(value);
-      const encoded = codec.encode(value, NULL_LIVE_ENVIRONMENT) as FabricValue;
-      converted = { [`/${tag}`]: encoded };
-    } catch (e) {
-      converted = makeUnconvertibleResult(e);
+      // tag. TODO(danfuzz): Replace `JSON_CODEC` with `DEBUG_CODEC` once the
+      // latter exists.
+      tag = codecOf(value, JSON_CODEC).tagForValue(value);
+    } catch {
+      // Never let the debug renderer throw; fall back to the class name.
+      tag = value.constructor?.name ?? "<anonymous>";
     }
 
-    return this.#renderSubvalue(converted, indent);
+    return DebugStringifier.#renderElidedInstance(tag);
   }
 
   /**
@@ -391,12 +390,19 @@ class DebugStringifier {
    */
   #renderPlainObject(value: FabricPlainObject, indent: string): string {
     const keys = Object.keys(value);
+    const onlyKey = (keys.length === 1) ? keys[0] : undefined;
 
-    if (keys.length === 1) {
+    if (onlyKey !== undefined) {
       // The conversion's single-key marker forms. No key of the original value
       // can arrive here in one of these forms, because the conversion escapes
       // every key with a leading slash.
-      switch (keys[0]) {
+      const tag = onlyKey.slice(1);
+      if ((onlyKey[0] === "/") && isCodecTypeTag(tag)) {
+        // A `FabricInstance`, carried as its encoding under its codec type tag.
+        return DebugStringifier.#renderElidedInstance(tag);
+      }
+
+      switch (onlyKey) {
         case "/circle": {
           // A reference back to an enclosing object.
           return "<circle>";
@@ -459,7 +465,7 @@ class DebugStringifier {
         } else if (Array.isArray(value)) {
           return this.#renderArray(value, indent);
         } else if (value instanceof FabricPrimitive) {
-          return this.#renderFabricPrimitive(value, indent);
+          return this.#renderFabricPrimitive(value);
         } else {
           // The conversion represents every other non-plain object as a plain
           // one, so what is left is a plain object.
@@ -479,6 +485,20 @@ class DebugStringifier {
   /** Returns the indentation for the contents of a container indented by `indent`. */
   #innerIndent(indent: string): string {
     return `${indent}${this.#indent ?? ""}`;
+  }
+
+  //
+  // Static members
+  //
+
+  /**
+   * Renders the elided form of a `FabricInstance` or `FabricPrimitive`, given
+   * its codec type tag (or, failing that, its class name). The slash suggests
+   * a known encodable type rather than an instance of some random class, and
+   * the version of the tag is left out.
+   */
+  static #renderElidedInstance(tag: string): string {
+    return `/${tag.replace(/@.*$/, "")}(...)`;
   }
 }
 
@@ -517,8 +537,8 @@ function renderDebugString(value: unknown, indent?: number): string {
  * * unique (uninterned) symbols, as `Symbol("name")`.
  * * a reference back to an enclosing object, as `<circle>`.
  * * a hole in an array, as `<hole>`, and a run of them as `<N holes>`.
- * * `FabricPrimitive`s, under their codec tag with their JSON encoding, e.g.
- *   `{"/Bytes@1":"AQID"}`.
+ * * `FabricInstance`s and `FabricPrimitive`s, in the elided form
+ *   `/TypeName(...)`.
  *
  * If the rendering could not be completed, this function returns the literal
  * string `"<unrenderable debug string>"`.

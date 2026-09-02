@@ -205,7 +205,7 @@ export abstract class BaseFabricInstance extends FabricInstance {
    *
    * Delegates to the canonical debug renderer rather than formatting here, so
    * that this surface improves whenever that one does. Instance state is
-   * rendered under the value's codec tag.
+   * elided as `(...)`.
    *
    * Duplicated on `BaseFabricPrimitive`, unavoidably. There is no shared base
    * class below `FabricSpecialObject`, and `FabricSpecialObject` itself is the

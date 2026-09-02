@@ -148,19 +148,21 @@ describe("value-debug", () => {
       );
     });
 
-    it("renders a `FabricInstance` under its codec tag with its state", () => {
-      // The stack in a `FabricError`'s state names this file and a line in
-      // it, so the assertion stops short of the stack.
-
+    it("renders a `FabricInstance` in the elided `/Name(...)` form", () => {
       const inst = FabricError.fromNativeError(new Error("eek!"));
-      expect(toCompactDebugString(inst)).toMatch(
-        /^\{"\/Error@1":\{type:"Error",name:null,message:"eek!",stack:/,
-      );
+      expect(toCompactDebugString(inst)).toBe("/Error(...)");
+      expect(toCompactDebugString({ e: inst })).toBe("{e:/Error(...)}");
     });
 
-    it("renders a `FabricPrimitive` under its codec tag with its JSON encoding", () => {
+    it("renders a `FabricPrimitive` in the elided `/Name(...)` form", () => {
       const inst = new FabricEpochNsec(123456789n);
-      expect(toCompactDebugString(inst)).toBe('{"/EpochNsec@1":"B1vNFQ"}');
+      expect(toCompactDebugString(inst)).toBe("/EpochNsec(...)");
+      expect(toCompactDebugString([inst])).toBe("[/EpochNsec(...)]");
+    });
+
+    it("renders a key of the value that reads like a codec type tag as itself, escaped", () => {
+      expect(toCompactDebugString({ "/Error@1": { message: "eek!" } }))
+        .toBe('{"//Error@1":{message:"eek!"}}');
     });
 
     it("renders a non-plain non-`FabricSpecialObject` under its class name", () => {
@@ -325,12 +327,11 @@ describe("value-debug", () => {
         );
       });
 
-      it("renders the error message in place of a `FabricPrimitive` with no codec", () => {
+      it("renders a `FabricPrimitive` with no codec under its class name", () => {
         class RoguePrimitive extends FabricPrimitive {}
 
-        expect(toCompactDebugString(new RoguePrimitive())).toBe(
-          '{"/unconvertible":"Shouldn\'t happen: no `[CODEC]` for `RoguePrimitive`."}',
-        );
+        expect(toCompactDebugString(new RoguePrimitive()))
+          .toBe("/RoguePrimitive(...)");
       });
 
       it("renders a plain object's `toJSON` as the function it is, without calling it", () => {
@@ -547,25 +548,21 @@ describe("value-debug", () => {
   describe("custom inspector", () => {
     // Without the inspector these all render as `{}`: state lives in private
     // fields, which have no enumerable own properties for an inspector to find.
-    // Delegating to the debug renderer is what makes the state visible.
 
     it("renders a FabricPrimitive as its debug string, not `{}`", () => {
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
-      expect(Deno.inspect(bytes)).toBe('{"/Bytes@1":"AQID"}');
+      expect(Deno.inspect(bytes)).toBe("/Bytes(...)");
     });
 
     it("renders a FabricInstance as its debug string, not `{}`", () => {
       const err = FabricError.fromNativeError(new Error("boom"));
-      expect(Deno.inspect(err)).toMatch(
-        /^\{"\/Error@1":\{type:"Error",name:null,message:"boom",stack:/,
-      );
+      expect(Deno.inspect(err)).toBe("/Error(...)");
     });
 
     it("renders when nested in containers", () => {
       const bytes = new FabricBytes(new Uint8Array([9]));
-      expect(Deno.inspect({ blob: bytes })).toBe('{ blob: {"/Bytes@1":"CQ"} }');
-      expect(Deno.inspect([bytes, bytes]))
-        .toBe('[ {"/Bytes@1":"CQ"}, {"/Bytes@1":"CQ"} ]');
+      expect(Deno.inspect({ blob: bytes })).toBe("{ blob: /Bytes(...) }");
+      expect(Deno.inspect([bytes, bytes])).toBe("[ /Bytes(...), /Bytes(...) ]");
     });
   });
 });

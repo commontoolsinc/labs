@@ -60,8 +60,7 @@ describe("toIndentedDebugString()", () => {
   it("renders an exotic (non-plain) value without throwing", () => {
     const inst = new FabricEpochNsec(123456789n);
     expect(() => toIndentedDebugString(inst)).not.toThrow();
-    expect(toIndentedDebugString(inst))
-      .toBe('{\n  "/EpochNsec@1": "B1vNFQ"\n}');
+    expect(toIndentedDebugString(inst)).toBe("/EpochNsec(...)");
   });
 
   it("renders a circular reference as `<circle>` rather than throwing", () => {
