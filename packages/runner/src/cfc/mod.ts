@@ -296,6 +296,7 @@ export type {
   SinkGovernanceRegistry,
   SinkMaxConfidentiality,
   SinkUngatedRationale,
+  UngatedSinkName,
 } from "./sink-inventory.ts";
 export { markRendererTrustedEvent } from "./ui-contract.ts";
 export {

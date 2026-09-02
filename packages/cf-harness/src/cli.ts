@@ -58,11 +58,11 @@ import {
   type HarnessSubagentProfile,
 } from "./contracts/subagent.ts";
 import { type BuiltinToolId } from "./contracts/tool-descriptor.ts";
+import { renderCfcPostureReport } from "./cfc-posture.ts";
 import type {
   HarnessTranscriptEvent,
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
-import { renderCfcPostureReport } from "./cfc-posture.ts";
 import { CfHarnessEngine } from "./engine.ts";
 import type { HarnessFabricSessionFactory } from "./fabric-session.ts";
 import {

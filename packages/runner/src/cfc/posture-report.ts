@@ -19,8 +19,8 @@
  * sink missing from it is exactly the gap a reader needed to see.
  */
 
+import type { CfcConfClause } from "./clause.ts";
 import type { PolicySnapshot } from "./policy.ts";
-import { type CfcConfClause } from "./clause.ts";
 import {
   KNOWN_SINKS,
   type KnownSinkName,
@@ -211,7 +211,7 @@ const sinkReports = (
  * deployment that has not configured a ceiling, which the audit weighs
  * against whatever posture the surface claims rather than against this list.
  */
-const deviations = (
+const postureDeviations = (
   ceilings: SinkMaxConfidentiality,
 ): readonly CfcPostureDeviation[] =>
   KNOWN_SINKS.flatMap((sink: KnownSinkName): CfcPostureDeviation[] => {
@@ -336,5 +336,5 @@ export const cfcPostureReport = (
   ),
   policyDigest: source.cfcPolicySnapshot?.digest ?? null,
   sinks: sinkReports(source.cfcSinkMaxConfidentiality),
-  deviations: deviations(source.cfcSinkMaxConfidentiality),
+  deviations: postureDeviations(source.cfcSinkMaxConfidentiality),
 });

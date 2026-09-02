@@ -744,7 +744,16 @@ export class CfHarnessEngine {
       } else if (
         recorded.enforcementMode !== fabricSessionCfc.enforcementMode ||
         recorded.flowLabels !== fabricSessionCfc.flowLabels ||
-        recorded.posture !== fabricSessionCfc.posture
+        recorded.posture !== fabricSessionCfc.posture ||
+        // The whole record too, where the run recorded one. The two dials
+        // above can agree while a dial neither of them names has moved under
+        // the run — a changed runtime default, a changed posture bundle — and
+        // a resume that kept the recorded record would attest a posture the
+        // executing runtime is not at. A run that recorded no record predates
+        // one and is compared on the dials alone.
+        (recorded.record !== undefined &&
+          JSON.stringify(recorded.record) !==
+            JSON.stringify(fabricSessionCfc.record))
       ) {
         throw new Error(
           `fabric session CFC posture mismatch on resume: run state records ` +

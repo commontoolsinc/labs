@@ -123,14 +123,15 @@
  */
 
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
-import type {
-  CfcEnforcementMode,
-  CfcFlowLabelsMode,
-  SinkGovernanceRegistry,
-  SinkMaxConfidentiality,
-  TrustSnapshot,
+import {
+  type CfcEnforcementMode,
+  type CfcFlowLabelsMode,
+  sinkCeilingsOf,
+  type SinkGovernanceRegistry,
+  type SinkMaxConfidentiality,
+  type TrustSnapshot,
+  ungatedSink,
 } from "./cfc/mod.ts";
-import { sinkCeilingsOf, ungatedSink } from "./cfc/mod.ts";
 import { parseFlagValue } from "./experimental-posture.ts";
 import { STANDARD_PROMPT_CAVEAT_POLICY } from "./cfc/mod.ts";
 import type { CommitBackpressurePolicy } from "./scheduler/backpressure.ts";

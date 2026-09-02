@@ -86,13 +86,13 @@ export type SinkGovernance =
  * content is exactly what an llm sink exists to process, so a public-only
  * ceiling would refuse the flows the sink is for.
  */
-const LLM_SINK_UNGATED: SinkUngatedRationale = {
+const LLM_SINK_UNGATED: SinkUngatedRationale = Object.freeze({
   reason:
     "ceiling membership is exact clause subsumption, so a public-only ceiling would refuse the risk-caveated ingested content an llm sink exists to process",
   owner: "CFC runtime (Epic B, sink governance)",
   retirement:
     "a boundary-scoped admission mechanism exists — a public-only ceiling paired with an exchange rule admitting the material-risk family at llm-class boundaries",
-};
+});
 
 /** One posture's decision about every known sink. */
 export type SinkGovernanceRegistry = Readonly<
@@ -121,6 +121,17 @@ export const sinkCeilingsOf = (
     ),
   );
 
+/** Each sink's rationale, by sink; the exported view below carries the why. */
+const SINK_UNGATED_RATIONALE_TABLE = {
+  llm: LLM_SINK_UNGATED,
+  llmDialog: LLM_SINK_UNGATED,
+  generateText: LLM_SINK_UNGATED,
+  generateObject: LLM_SINK_UNGATED,
+} as const satisfies Partial<Record<KnownSinkName, SinkUngatedRationale>>;
+
+/** A sink the inventory records a deliberate ungated rationale for. */
+export type UngatedSinkName = keyof typeof SINK_UNGATED_RATIONALE_TABLE;
+
 /**
  * Why each sink that knowingly releases without a ceiling does so.
  *
@@ -134,23 +145,12 @@ export const sinkCeilingsOf = (
  */
 export const SINK_UNGATED_RATIONALES: Readonly<
   Partial<Record<KnownSinkName, SinkUngatedRationale>>
-> = Object.freeze({
-  llm: Object.freeze(LLM_SINK_UNGATED),
-  llmDialog: Object.freeze(LLM_SINK_UNGATED),
-  generateText: Object.freeze(LLM_SINK_UNGATED),
-  generateObject: Object.freeze(LLM_SINK_UNGATED),
-});
+> = Object.freeze(SINK_UNGATED_RATIONALE_TABLE);
 
 /** The rationale for `sink`, as a governance entry a posture can declare. */
-export const ungatedSink = (sink: KnownSinkName): SinkGovernance => {
-  const rationale = SINK_UNGATED_RATIONALES[sink];
-  if (rationale === undefined) {
-    throw new Error(
-      `sink \`${sink}\` has no ungated rationale; declare one in SINK_UNGATED_RATIONALES or give the sink a ceiling`,
-    );
-  }
-  return { ungated: rationale };
-};
+export const ungatedSink = (sink: UngatedSinkName): SinkGovernance => ({
+  ungated: SINK_UNGATED_RATIONALE_TABLE[sink],
+});
 
 export const INITIAL_SINK_INVENTORY: readonly InitialSinkName[] = Object.freeze(
   [...KNOWN_SINKS],

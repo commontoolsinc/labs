@@ -55,16 +55,16 @@ import {
   FileHarnessProviderSettingsStore,
   resolveHarnessModelProviderPreference,
 } from "../src/auth/provider-settings.ts";
+import {
+  harnessFabricSessionPosture,
+  renderCfcPostureReport,
+} from "../src/cfc-posture.ts";
 import type {
   HarnessFabricCfcEnforcementMode,
   HarnessFabricCfcFlowLabelsMode,
   HarnessFabricSessionConfig,
   HarnessModelProviderId,
 } from "../src/config.ts";
-import {
-  harnessFabricSessionPosture,
-  renderCfcPostureReport,
-} from "../src/cfc-posture.ts";
 import type { CfcPosture } from "@commonfabric/runner";
 import {
   type HarnessChatError,

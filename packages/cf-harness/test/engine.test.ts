@@ -297,6 +297,40 @@ Deno.test("CfHarnessEngine refuses to resume under a fabric-session posture that
     record: recordFor(posturedSession),
   });
 
+  // A dial neither itemized field names, moved under the run: the recorded
+  // record no longer describes what the resumed session would run, so the
+  // resume is refused rather than attesting a posture the runtime is not at.
+  const drifted = structuredClone(runState) as {
+    fabricSessionCfc?: {
+      record?: { writeFloor: { rung: string } };
+    };
+  } & typeof runState;
+  drifted.fabricSessionCfc!.record!.writeFloor.rung = "off";
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        fabricSession: posturedSession,
+        runState: drifted,
+      }),
+    Error,
+    "fabric session CFC posture mismatch on resume",
+  );
+
+  // A run recorded before the record existed is compared on the dials alone,
+  // and resumes: backfilling one would attest this checkout's resolution
+  // rather than the run's.
+  const legacy = structuredClone(runState);
+  delete legacy.fabricSessionCfc!.record;
+  assertEquals(
+    new CfHarnessEngine({
+      workspaceHostPath: "/host/project",
+      fabricSession: posturedSession,
+      runState: legacy,
+    }).getRunState().fabricSessionCfc?.record,
+    undefined,
+  );
+
   // A resume with no session at all keeps the record as history: no runtime
   // exists for it to contradict.
   const detached = new CfHarnessEngine({
