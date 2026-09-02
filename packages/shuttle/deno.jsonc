@@ -1,0 +1,6 @@
+{
+  // Dependency guide: ../../docs/development/DEPENDENCIES.md
+  "tasks": {
+    "test": "echo 'No tests defined.'"
+  }
+}
