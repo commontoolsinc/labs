@@ -70,6 +70,61 @@ a focused browser regression with a plain Deno unit test for any extracted
 policy or state machine, because code executed inside Chrome does not enter
 Deno's V8 coverage profile.
 
+### Running a test under the server-execution ON arm
+
+`serverExecution` is off by default, and CI runs the ON arm as its own lanes on
+a toolshed binary built with `EXPERIMENTAL_SERVER_EXECUTION=true`.
+[EXPERIMENTAL_OPTIONS.md](EXPERIMENTAL_OPTIONS.md#serverexecution) covers the
+flag itself.
+
+Running one of those tests locally means putting the flag on every process the
+test spans, not only the one `deno test` starts. A pattern integration test
+drives a runtime in the test process and commits through a toolshed, and the
+per-class commit admission rows are enforced by the memory server under the
+flag, so a test process on the ON arm talking to a toolshed on the OFF arm is
+on neither arm. Start the servers with it too:
+
+```bash
+EXPERIMENTAL_SERVER_EXECUTION=true ./scripts/start-local-dev.sh
+cd packages/patterns
+EXPERIMENTAL_SERVER_EXECUTION=true API_URL=http://localhost:8000/ \
+  deno test --no-check -A ./integration/<name>.test.ts
+```
+
+Then ask the server what posture it is in, rather than trusting the command
+that set it:
+
+```bash
+curl -fsS http://localhost:8000/api/health/stats | jq -e '.servingLoop != null'
+```
+
+`servingLoop` is null on the OFF arm and an object on the ON arm, and this is
+the check CI's own posture-probe step makes against the server; the paragraph
+below covers the shell half, which that step asserts separately.
+
+The toolshed log records the same thing, but it accumulates NUL bytes, so
+`grep` can decide it is binary and print nothing rather than the line that is
+there; pass `grep -a` if you read it.
+
+`restart-local-dev.sh` is the reason to check rather than assume. It runs
+`start-local-dev.sh` as a fresh process without the environment it was itself
+given, so restarting to pick up an edit returns the toolshed to the default
+while the posture the reader set appears to still be in place. Stop and start,
+or re-supply the variable to the restart.
+
+A posture mismatch does not announce itself. It fails the test, which reads as
+the behavior under test being broken, so a run against a default-posture
+toolshed can report a test as failing at every commit while CI has that test
+green. That is enough to send a bisect to the wrong answer, which is the cost
+worth avoiding here.
+
+None of this reaches a test that opens a browser. The shell's half of the
+posture is a build-time define that the local dev servers do not carry:
+`/api/meta` reports `shellServerExecutionDefine` as null whatever the toolshed
+was started with, where CI's ON lane requires `"true"`. So this recipe covers a
+browser-free test, whose whole posture is the test process and the toolshed. A
+browser test on a faithful ON arm needs the built binary.
+
 ### Tests that start Deno
 
 For deliberate import-map and lockfile changes, follow the
