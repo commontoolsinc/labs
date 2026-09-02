@@ -120,13 +120,18 @@ const DIAMOND = entity("diamond");
 const DANGLING = entity("dangling");
 
 /**
- * A document labelled at two of its paths, `account` and `other`, and one
- * that links into it at `account` alone. A pattern's result names the input
- * value it was computed from by the path inside the input cell that holds
- * it, so the label a reader is after covers exactly what the link addresses.
+ * A document labelled at two of its paths, `account` and `other`, holding a
+ * link at `other`, and one that links into it at `account` alone. A
+ * pattern's result names the input value it was computed from by the path
+ * inside the input cell that holds it, so the label a reader is after covers
+ * exactly what the link addresses — and what sits elsewhere in the document,
+ * label and link alike, is not reached through it.
  */
 const ACCOUNTS = entity("accounts");
 const SLOTTED = entity("slotted");
+
+/** A document linking at `via` to {@link LINKER}, whose own links go unread. */
+const VIA = entity("via");
 
 /** One stored link, in the at-rest sigil form the store holds. */
 const link = (id: string, space?: string, path: string[] = []) => ({
@@ -322,7 +327,7 @@ const documents: Record<string, unknown> = {
   [DIAMOND]: { value: { left: link(CHAIN_MID), right: link(CHAIN_END) } },
   [DANGLING]: { value: { gone: link(NEVER_WRITTEN) } },
   [ACCOUNTS]: {
-    value: { account: { balance: 1 }, other: "not addressed" },
+    value: { account: { balance: 1 }, other: link(CHAIN_END) },
     cfc: {
       version: 1,
       labelMap: {
@@ -346,6 +351,7 @@ const documents: Record<string, unknown> = {
       leaf: link(CHAIN_END, undefined, ["leaf"]),
     },
   },
+  [VIA]: { value: { via: link(LINKER) } },
   [COMMITTED]: {
     value: { attachment: "…" },
     cfc: {
@@ -399,6 +405,7 @@ const PLAIN = new Set([
   DANGLING,
   ACCOUNTS,
   SLOTTED,
+  VIA,
 ]);
 
 /**
@@ -827,6 +834,29 @@ describe("space-labels", () => {
           origin: "derived",
           source: CHAIN_END,
         },
+      ]);
+    });
+
+    it("returns no cell reached through a link elsewhere in the document a link addresses part of", () => {
+      const read = didReader.read({ id: SLOTTED, scope: "space" });
+      expect(read.linked).toEqual([
+        { path: ["slot"], id: ACCOUNTS, into: ["account"] },
+        { path: ["leaf"], id: CHAIN_END, into: ["leaf"] },
+      ]);
+      expect(read.entries.map((entry) => entry.path)).toEqual([
+        ["slot"],
+        ["leaf"],
+      ]);
+    });
+
+    it("returns the unread path of a linked cell under the path that reached it", () => {
+      const read = didReader.read({ id: VIA, scope: "space" });
+      expect(read.unreadPaths).toEqual([
+        { path: ["via", "theirs"], reason: "cross-space" },
+      ]);
+      expect(read.entries.map((entry) => entry.path)).toEqual([
+        ["via", "mine"],
+        ["via", "ours"],
       ]);
     });
 
