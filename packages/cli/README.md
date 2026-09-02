@@ -155,10 +155,10 @@ since all three designate the same piece. Only commands that take `--input`
 accept it; `#` is reserved for the suffix, so a path key containing `#` needs
 the positional path spelling. A `--url` carries no fragment into the reference
 it decomposes to, whatever the URL names, so a `#argument` written on one is
-dropped rather than refused. A URL that names the piece admits no target beside
-it, and `--input` is what reaches the arguments cell there; a URL that names
-only the space leaves the target to arrive as it always does — a positional
-address, or `--cell` — carrying the suffix like any other.
+dropped rather than refused. A URL that names the piece admits no `--cell` or
+positional address beside it, and `--input` is what reaches the arguments cell
+there; a URL that names only the space leaves the target to arrive as it always
+does — a positional address, or `--cell` — carrying the suffix like any other.
 
 `cf piece apply` replaces a piece's whole input rather than one path within it.
 It validates the document against the pattern's `argumentSchema` and re-executes

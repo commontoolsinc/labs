@@ -73,11 +73,11 @@ The suffix rides every spelling of the target — the reference form
 A `--url` is not one of those spellings. It carries no fragment into the
 reference it decomposes to, whatever the URL names: a URL fragment is not part
 of the path a URL's piece is read out of, so a `#argument` written on a `--url`
-is dropped without comment and the read goes to the result cell. A URL that
-names the piece admits no target beside it, so `--input` is what reaches the
-arguments cell there. A URL that names only the space leaves the target to
-arrive as it always does — a positional address, or `--cell` — carrying the
-suffix like any other.
+is dropped without comment and any read it would have redirected goes to the
+result cell. A URL that names the piece admits no `--cell` or positional
+address beside it, so `--input` is what reaches the arguments cell there. A URL
+that names only the space leaves the target to arrive as it always does — a
+positional address, or `--cell` — carrying the suffix like any other.
 
 Hold on to the asymmetry. A suffix written on the target is honored where the
 command takes `--input` and refused by name where it does not; a suffix written
