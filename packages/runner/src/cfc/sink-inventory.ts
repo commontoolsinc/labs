@@ -85,6 +85,9 @@ export type SinkGovernance =
  * material-risk caveat regardless of `source`" — while risk-caveated ingested
  * content is exactly what an llm sink exists to process, so a public-only
  * ceiling would refuse the flows the sink is for.
+ *
+ * Building the mechanism the retirement condition names is planned in
+ * `docs/plans/cfc-llm-sink-admission.md`.
  */
 const LLM_SINK_UNGATED: SinkUngatedRationale = Object.freeze({
   reason:

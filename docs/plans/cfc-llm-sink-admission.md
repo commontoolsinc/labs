@@ -8,14 +8,16 @@ standing note.
 ## The gap
 
 The max-enforcement posture declares public-only confidentiality ceilings for
-every network-fetch sink and none for the llm sinks (`llm`, `llmDialog`,
-`generateText`, `generateObject`). A sink with no ceiling gets no gate, so
-llm-sink release is ungoverned under the posture: any confidentiality — a
-secret as much as a risk caveat — reaches the llm sinks without a policy
-evaluation running for them. The note on `MAX_ENFORCEMENT_SINK_CEILINGS`
-(`packages/runner/src/runtime-presets.ts`) names what governing it takes: a
-public-only ceiling paired with an exchange rule that admits the material-risk
-family at llm-class boundaries.
+every network-fetch sink and an explicit ungated release for the llm sinks
+(`llm`, `llmDialog`, `generateText`, `generateObject`). A sink with no
+ceiling gets no gate, so llm-sink release is ungoverned under the posture:
+any confidentiality — a secret as much as a risk caveat — reaches the llm
+sinks without a policy evaluation running for them. The sink registry records
+that gap as a published deviation with a reason, an owner, and a retirement
+condition (`SINK_UNGATED_RATIONALES` in
+`packages/runner/src/cfc/sink-inventory.ts`), and the retirement condition is
+this plan's subject: a public-only ceiling paired with an exchange rule that
+admits the material-risk family at llm-class boundaries.
 
 The gap is load-bearing once the runtime-owned-store change (#6740) is in:
 before it, a pattern calling `llm(...)` over labeled content was refused by
@@ -59,11 +61,19 @@ built parts plus policy decisions.
   §8.10.6; `packages/runner/src/cfc/render-ceiling.ts`) mints
   `sinkClass:"display"` boundary atoms and the profile's display rules match
   them — the same shape this mechanism needs at an llm class.
+- **A total governance registry.** `MAX_ENFORCEMENT_SINK_GOVERNANCE`
+  (`packages/runner/src/runtime-presets.ts`) decides every sink `KNOWN_SINKS`
+  names — a ceiling, or an explicit ungated release carrying its rationale —
+  and a sink added without a decision is a compile error. The posture record
+  every surface publishes carries the ungated set as a deviation, and the CFC
+  audit names every sink releasing with no ceiling. So the mechanism has a
+  declared landing site: flipping the four llm rows from ungated to a ceiling
+  is what retires the published deviation.
 - **Landing checkpoints.** `max-enforcement-posture.test.ts` pins the ungated
   hand-staged path ("lets a secret-labeled value reach the llm sink with no
-  gate at all"); #6740 adds a builtin-path pin in
-  `builtin-abandoned-request.test.ts`. Both are written to flip to asserting
-  the refusal when this mechanism lands.
+  gate at all") and the registry's totality; #6740 adds a builtin-path pin in
+  `builtin-abandoned-request.test.ts`. The two ungated-path pins are written
+  to flip to asserting the refusal when this mechanism lands.
 
 ## Stage 1 — decisions
 
@@ -116,9 +126,9 @@ and sink classes) govern the shapes below.
 
 ## Stage 2 — mechanical
 
-- [ ] Ceiling entries for `llm`, `llmDialog`, `generateText`, and
-  `generateObject` in `MAX_ENFORCEMENT_SINK_CEILINGS` (public-only baseline,
-  `[]`).
+- [ ] Flip the four llm rows in `MAX_ENFORCEMENT_SINK_GOVERNANCE` from
+  `ungatedSink(...)` to a ceiling (public-only baseline, `[]`), retiring
+  their `SINK_UNGATED_RATIONALES` rows.
 - [ ] An llm sink class. Every initial-inventory sink today mints
   `sinkClass:"network"`, so a rule scoped there would fire at the fetch sinks
   too. The four llm sinks need a class of their own, declared beside the
@@ -131,9 +141,11 @@ and sink classes) govern the shapes below.
 - [ ] Flip the pinned tests: the two named under landing checkpoints, and the
   abandoned-request cases that declare local `llm: []` ceilings once the
   bundle carries real ones.
-- [ ] Update the places that describe the gap: the
-  `MAX_ENFORCEMENT_SINK_CEILINGS` note,
-  `docs/development/EXPERIMENTAL_OPTIONS.md`, and — once #6740 is in —
+- [ ] Update the places that describe the gap: the `LLM_SINK_UNGATED`
+  rationale and its JSDoc in the sink inventory, the
+  `MAX_ENFORCEMENT_SINK_GOVERNANCE` comment,
+  `docs/development/EXPERIMENTAL_OPTIONS.md`, the posture-record and audit
+  goldens that assert the ungated set, and — once #6740 is in —
   `docs/specs/cfc-enforcement-matrix.md` §4 and `packages/cf-harness/README.md`.
 
 ## Spec references
