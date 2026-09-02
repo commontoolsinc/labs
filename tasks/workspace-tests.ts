@@ -251,31 +251,46 @@ function directoryUrl(root: string | URL): URL {
  */
 type TaskDefinition = string | { command?: string };
 
+/** The manifest Deno resolves for a member, and its `test` task. */
+interface MemberManifest {
+  /** Path to the manifest, relative to the workspace root. */
+  readonly path: string;
+
+  /** The `test` task it defines, where it defines one. */
+  readonly testTask: TaskDefinition | undefined;
+}
+
 /**
- * The `test` task the manifest Deno resolves for a member defines, or
- * `undefined` where that manifest defines none. A member carrying both a
- * `deno.json` and a `deno.jsonc` is read the way its own tooling reads it:
- * Deno takes the `deno.json` and ignores the other file entirely rather than
- * merging the two, so a `test` task written in the manifest Deno ignores is
- * not a task anything can run.
+ * The manifest Deno resolves for a member, and the `test` task that one
+ * manifest defines. A member carrying both a `deno.json` and a `deno.jsonc`
+ * is read the way its own tooling reads it: Deno takes the `deno.json` and
+ * ignores the other file entirely rather than merging the two, so a `test`
+ * task written in the manifest Deno ignores is not a task anything can run.
+ *
+ * A member with no manifest at all takes the `deno.jsonc` path, so that a
+ * report naming it names the file to write. Such a member never reaches the
+ * fall-through a `test` task exists to prevent, because Deno refuses to load
+ * a workspace at all when one of its members has no config file.
  */
-async function memberTestTaskDefinition(
+async function memberManifest(
   member: string,
   root: string | URL,
-): Promise<TaskDefinition | undefined> {
+): Promise<MemberManifest> {
   const rootUrl = directoryUrl(root);
   for (const manifest of ["deno.json", "deno.jsonc"]) {
+    const manifestPath = `${member}/${manifest}`;
     let text: string;
     try {
-      text = await Deno.readTextFile(new URL(`${member}/${manifest}`, rootUrl));
+      text = await Deno.readTextFile(new URL(manifestPath, rootUrl));
     } catch {
       continue;
     }
-    return (parseJsonc(text) as {
+    const tasks = (parseJsonc(text) as {
       tasks?: Record<string, TaskDefinition>;
-    })?.tasks?.test;
+    })?.tasks;
+    return { path: manifestPath, testTask: tasks?.test };
   }
-  return undefined;
+  return { path: `${member}/deno.jsonc`, testTask: undefined };
 }
 
 /**
@@ -289,8 +304,8 @@ export async function memberTestTask(
   member: string,
   root: string | URL = Deno.cwd(),
 ): Promise<string | undefined> {
-  const task = await memberTestTaskDefinition(member, root);
-  return typeof task === "string" ? task : task?.command;
+  const { testTask } = await memberManifest(member, root);
+  return typeof testTask === "string" ? testTask : testTask?.command;
 }
 
 /**
@@ -307,21 +322,24 @@ export async function assertMemberTestTasksDefined(
 ): Promise<void> {
   const missing: string[] = [];
   for (const member of members) {
-    const task = await memberTestTaskDefinition(member, root);
-    if (task === undefined) missing.push(member);
+    const { path, testTask } = await memberManifest(member, root);
+    if (testTask === undefined) missing.push(path);
   }
   if (missing.length === 0) return;
-  const named = missing.map((member) => `\`${member}\``).join(", ");
+  const named = missing.map((manifest) => `\`${manifest}\``).join(", ");
   throw new Error(
     [
       `Every workspace member needs a \`test\` task of its own.`,
       `Missing from: ${named}.`,
-      `Add a \`tasks\` object to the member's \`deno.json\` or \`deno.jsonc\``,
-      `carrying a \`test\` entry — \`deno test\` where the package has tests,`,
-      `or \`echo 'No tests defined.'\` where it has none yet, as`,
-      `\`packages/utils/deno.jsonc\` shows. Without that entry,`,
-      `\`deno task test\` in the package directory resolves against the root`,
-      `workspace instead, and the whole suite runs inside itself.`,
+      `Add a \`test\` entry to that manifest's \`tasks\` — \`deno test\` where`,
+      `the package has tests, or \`echo 'No tests defined.'\` where it has`,
+      `none yet, as \`packages/utils/deno.jsonc\` shows. Put it in the file`,
+      `named above rather than in a second manifest beside it: where a member`,
+      `carries both a \`deno.json\` and a \`deno.jsonc\`, Deno takes the`,
+      `\`deno.json\` and ignores the other whole, \`imports\` and all.`,
+      `Without the entry, \`deno task test\` in the package directory resolves`,
+      `against the root workspace instead, and the whole suite runs inside`,
+      `itself.`,
     ].join(" "),
   );
 }

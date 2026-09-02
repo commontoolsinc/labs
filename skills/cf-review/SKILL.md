@@ -199,8 +199,10 @@ transformer bug with a repro — not to hand-build a workaround.
 Stray cruft is trivial to fix but shouldn't merge: leftover debug logging /
 `*.log` / scratch notes, commented-out code, `.only` on tests, "temp" / "HACK"
 stopgaps, abandoned TODOs. A new workspace package must register in the root
-`deno.jsonc` and carry its own `tasks.test` (a missing one makes the root runner
-recurse and time out CI). Run `deno fmt` and `deno lint` on touched files.
+`deno.jsonc` and carry its own `tasks.test`, in the manifest Deno resolves — a
+`deno.json` shadows a `deno.jsonc` beside it. Without one the root runner
+refuses to start and names the member. Run `deno fmt` and `deno lint` on touched
+files.
 
 **A doc comment detached from its declaration** belongs here too, and a diff is
 the one place it is easy to see. A definition added directly under an existing
