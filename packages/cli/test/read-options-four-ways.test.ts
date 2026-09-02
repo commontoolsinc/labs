@@ -1,3 +1,34 @@
+/**
+ * The exit criterion of the read options: **the same cell, reached four ways,
+ * renders identically under the same selection.**
+ *
+ * One cell is seeded once. Each of the four arrivals — `cf get`,
+ * `cf call`, `cf wish`, `cf exec` — is driven at its own outermost
+ * in-process seam against that cell, under one selection, and the four
+ * SELECTED VALUES are compared byte for byte. A vocabulary that answers from
+ * two starting points and silently does nothing from the other two teaches a
+ * rule that is false half the time, and only a comparison across all four can
+ * witness that.
+ *
+ * The selected value is the whole of what is compared here, and deliberately
+ * so: the envelope around it is each command's own. A verb arrival wraps its
+ * answer in the Invocation JSON, a read arrival writes the value alone, and
+ * those bytes therefore differ by design — comparing raw stdout across the
+ * four would assert a sameness the commands do not have and should not. What
+ * the envelope is, at each arrival, is pinned separately below and in
+ * test/exec-read-options.test.ts.
+ *
+ * The cell is the profile the `#profile` wish resolves to, because that is the
+ * one cell a wish can be made to arrive at without inventing a target: a wish
+ * resolves a query rather than an address, so the other three arrivals are
+ * pointed at what the wish found rather than the other way round.
+ *
+ * The runtime is real and emulated-storage-backed. Only the piece controller
+ * and the callable cell are doubles, and each is the seam its own command
+ * resolves through — the selection step under test is the production one in
+ * every arrival.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { dirname, join } from "@std/path";
@@ -28,37 +59,8 @@ import {
 } from "../lib/cell-selection.ts";
 import { safeStringify } from "../lib/render.ts";
 
-/**
- * The exit criterion of the read options: **the same cell, reached four ways,
- * renders identically under the same selection.**
- *
- * One cell is seeded once. Each of the four arrivals — `cf piece get`,
- * `cf piece call`, `cf wish`, `cf exec` — is driven at its own outermost
- * in-process seam against that cell, under one selection, and the four
- * SELECTED VALUES are compared byte for byte. A vocabulary that answers from
- * two starting points and silently does nothing from the other two teaches a
- * rule that is false half the time, and only a comparison across all four can
- * witness that.
- *
- * The selected value is the whole of what is compared here, and deliberately
- * so: the envelope around it is each command's own. A verb arrival wraps its
- * answer in the Invocation JSON, a read arrival writes the value alone, and
- * those bytes therefore differ by design — comparing raw stdout across the
- * four would assert a sameness the commands do not have and should not. What
- * the envelope is, at each arrival, is pinned separately below and in
- * test/exec-read-options.test.ts.
- *
- * The cell is the profile the `#profile` wish resolves to, because that is the
- * one cell a wish can be made to arrive at without inventing a target: a wish
- * resolves a query rather than an address, so the other three arrivals are
- * pointed at what the wish found rather than the other way round.
- *
- * The runtime is real and emulated-storage-backed. Only the piece controller
- * and the callable cell are doubles, and each is the seam its own command
- * resolves through — the selection step under test is the production one in
- * every arrival.
- */
 const userIdentity = await Identity.fromPassphrase("cf-four-ways-user");
+
 const profileSpace = (await Identity.fromPassphrase("cf-four-ways-profile"))
   .did();
 
@@ -168,7 +170,7 @@ describe("read options, four ways", () => {
     return { pieces, piece };
   }
 
-  /** `cf piece get <piece>` — the read that arrives by address. */
+  /** `cf get <piece>` — the read that arrives by address. */
   async function viaPieceGet(
     profile: Cell<unknown>,
     selection: CellSelection,
@@ -191,7 +193,7 @@ describe("read options, four ways", () => {
     );
   }
 
-  /** `cf piece call <verb>` — the read that arrives through a verb's receipt. */
+  /** `cf call <verb>` — the read that arrives through a verb's receipt. */
   async function viaPieceCall(
     profile: Cell<unknown>,
     selection: CellSelection,
@@ -225,9 +227,10 @@ describe("read options, four ways", () => {
 
   /** `cf exec <mountedFile>` — the read that arrives through a filesystem
    * mount. A real mount-state file and a real mounted callable path; the
-   * runtime under it is the same one the other three read through. */
-  /** `cf exec`'s whole outcome, so both the selected value and the envelope
-   * written around it can be read from one drive of the command. */
+   * runtime under it is the same one the other three read through.
+   *
+   * Answers with `cf exec`'s whole outcome, so both the selected value and the
+   * envelope written around it can be read from one drive of the command. */
   async function execOutcome(
     profile: Cell<unknown>,
     selection: CellSelection,

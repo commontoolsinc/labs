@@ -1,7 +1,7 @@
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { FragmentWriter } from "@commonfabric/test-support/records";
 import { createRuntime } from "../packages/cli/lib/dev.ts";
-import { collectPatternFiles, PATTERNS_DIR } from "./pattern-files.ts";
+import { collectAllPatternFiles } from "./pattern-files.ts";
 
 function formatError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -30,7 +30,7 @@ function parseShard(): { index: number; count: number } {
 
 const shard = parseShard();
 
-const allFiles = await collectPatternFiles(PATTERNS_DIR);
+const allFiles = await collectAllPatternFiles();
 const filesToCheck = allFiles.filter((_file, i) =>
   i % shard.count === shard.index
 );

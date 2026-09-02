@@ -17,6 +17,10 @@ import {
   containsCfcFieldCommitment,
 } from "../src/cfc/label-representation.ts";
 import type { CfcLabelMetadataProtectionMode } from "../src/cfc/mod.ts";
+import {
+  CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
+  runtimeWritePolicyAuthorization,
+} from "../src/cfc/types.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -41,16 +45,17 @@ type PersistedEntry = {
   };
 };
 
-// Inv-12 Stage 1 (SC-25; docs/specs/cfc-label-metadata-confidentiality.md
-// §2/§5; spec §4.6.4.1 "Cross-space derived labels"): at the cross-space
-// persist seam, prepareBoundaryCommit applies the classification table to
-// every source-bearing atom field of entries whose observations originate
-// OUTSIDE the destination space — link-origin entries whose link source
-// lives in another space (including the carried sigil `cfcLabelView`
-// entries, the in-value copy) and flow-derived entries whose join consumed a
-// labeled foreign observation. Same-space-only labels persist verbatim.
-// Behind `cfcLabelMetadataProtection: off | observe | enforce`.
 describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", () => {
+  // Inv-12 Stage 1 (SC-25; docs/specs/cfc-label-metadata-confidentiality.md
+  // §2/§5; spec §4.6.4.1 "Cross-space derived labels"): at the cross-space
+  // persist seam, prepareBoundaryCommit applies the classification table to
+  // every source-bearing atom field of entries whose observations originate
+  // OUTSIDE the destination space — link-origin entries whose link source lives
+  // in another space (including the carried sigil `cfcLabelView` entries, the
+  // in-value copy) and flow-derived entries whose join consumed a labeled
+  // foreign observation. Same-space-only labels persist verbatim. Behind
+  // `cfcLabelMetadataProtection: off | observe | enforce`.
+
   const fullSource = { space: spaceA, id: "of:remote-origin", path: [] };
   const caveatAtom = {
     type: CFC_ATOM_TYPE.Caveat,
@@ -449,6 +454,73 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
         // The foreign User clause landed committed; Space-free plaintext
         // DIDs are gone.
         expect(flowEntry!.label.confidentiality).toContainEqual({
+          type: CFC_ATOM_TYPE.User,
+          subject: commitCfcFieldValue("did:key:alice"),
+        });
+        expect(JSON.stringify(entries)).not.toContain("did:key:alice");
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("commits the piece-substrate declaration built from that same join", async () => {
+      // The §8.12.5 route-2 declaration a piece's setup mints carries the
+      // flow join as its content, so it is the one `declared` entry the
+      // transform applies to. Leaving it verbatim beside the committed
+      // derived stamp of the same atoms would publish in one entry what the
+      // other protects.
+
+      const { storageManager, runtime } = makeRuntime("enforce", {
+        cfcFlowLabels: "persist",
+      });
+      try {
+        await seedSource(runtime, spaceA, "substrate-source");
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          spaceA,
+          "substrate-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const result = runtime.getCell(
+          spaceB,
+          "substrate-result",
+          undefined,
+          tx,
+        );
+        const substrate = runtime.getCell(spaceB, "substrate", undefined, tx);
+        const resultLink = result.getAsNormalizedFullLink();
+        const substrateLink = substrate.getAsNormalizedFullLink();
+        tx.recordCfcWritePolicyInput({
+          kind: "structural-provenance",
+          target: {
+            space: substrateLink.space,
+            scope: substrateLink.scope,
+            id: substrateLink.id,
+            path: [],
+          },
+          claim: CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
+          sources: [{
+            space: resultLink.space,
+            scope: resultLink.scope,
+            id: resultLink.id,
+            path: [],
+          }],
+        }, runtimeWritePolicyAuthorization);
+        substrate.set({ copied: `${raw.secret}!` });
+        tx.prepareCfc();
+        expect((await tx.commit()).ok).toBeDefined();
+
+        const entries = persistedEntriesFor(
+          storageManager,
+          spaceB,
+          substrateLink.id,
+        );
+        const declared = entries.find((e) => e.origin === "declared");
+        expect(declared).toBeDefined();
+        expect(declared!.label.confidentiality).toContainEqual({
           type: CFC_ATOM_TYPE.User,
           subject: commitCfcFieldValue("did:key:alice"),
         });

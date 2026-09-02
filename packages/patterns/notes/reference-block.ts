@@ -23,8 +23,10 @@ export interface ReferenceDefinition {
 export interface SplitBody {
   /** The prose, with no trailing definition block and no trailing blank run. */
   content: string;
+
   /** The definitions that were attached to it, in the order they appeared. */
   definitions: ReferenceDefinition[];
+
   /**
    * Lines in the trailing block that are not definitions. A block holding one
    * is not a generated block, so the whole run stays prose — dropping a line

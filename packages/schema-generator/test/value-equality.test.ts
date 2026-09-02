@@ -57,10 +57,11 @@ Deno.test("dedupeByValueEqual: collapses genuinely equal schemas", () => {
   assertEquals(deduped, [{ type: "number", default: 5 }, { type: "string" }]);
 });
 
-// An executable statement of why the previous comparisons were wrong, so that
-// if these ever start passing the refactor is no longer load-bearing and can be
-// revisited.
 Deno.test("contrast: JSON.stringify and Set conflate what dedupeByValueEqual separates", () => {
+  // An executable statement of why the previous comparisons were wrong, so that
+  // if these ever start passing the refactor is no longer load-bearing and can
+  // be revisited.
+
   // JSON.stringify collides the values the value model distinguishes...
   assertEquals(JSON.stringify(-0), JSON.stringify(0)); // both "0"
   assertEquals(JSON.stringify(NaN), JSON.stringify(null)); // both "null"

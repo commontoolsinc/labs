@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import { valueEqual } from "@commonfabric/data-model/fabric-value";
+import { valueEqual } from "@commonfabric/data-model";
 import {
   FabricBytes,
   FabricEpochNsec,
@@ -124,7 +124,7 @@ describe("cf piece CFC labels", () => {
       apiUrl: "https://example.com",
       identity: "/identity.key",
       space: signer.did(),
-      piece: "piece",
+      cell: "piece",
       input: true,
       quiet: true,
     };

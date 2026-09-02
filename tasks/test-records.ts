@@ -66,8 +66,10 @@ async function git(
 interface CheckoutFacts {
   /** Output of `git rev-parse HEAD`; absent outside a repository. */
   commit?: string;
+
   /** Output of `git branch --show-current`; empty on a detached checkout. */
   branch?: string;
+
   /** Output of `git status --porcelain`; empty when the tree is clean. */
   status?: string;
 }

@@ -8,6 +8,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 // A pattern that maps over durable data must accept the rows its PRODUCER
 // actually writes. Nothing checks that agreement: the row's element schema
@@ -227,7 +228,7 @@ describe("a stored favorite row instantiates in favorites-manager", () => {
     managerCell.withTx(v2Tx).setMetaRaw("patternIdentity", {
       identity: v2Ref.identity,
       symbol: v2Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await v2Tx.commit();
     await rt.idle();
     await rt.runner.idlePointerMaintenance();

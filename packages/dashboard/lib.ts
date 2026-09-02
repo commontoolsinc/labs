@@ -8,11 +8,29 @@
 
 import type { Status } from "./types.ts";
 import { PROD_SERVICE } from "./config.ts";
-import { CHART_HIGHLIGHT } from "./theme.ts";
 import {
   type GitHubPrimaryRateLimit,
   performanceGitHubRateLimit,
 } from "./github-rate-limit.ts";
+import {
+  daysLabel,
+  DURATION_LABEL_HEIGHT,
+  durationTag,
+  escapeHtml,
+  humanSpan,
+  SPARKLINE_HEIGHT,
+  STATUS_DOT,
+} from "./tile-render-values.ts";
+
+export {
+  daysLabel,
+  DURATION_LABEL_HEIGHT,
+  durationTag,
+  escapeHtml,
+  humanSpan,
+  SPARKLINE_HEIGHT,
+  STATUS_DOT,
+};
 
 // The service.name to scope a SigNoz query to. The name lands inside a query
 // expression, so anything outside the shape a service name has falls back to the
@@ -481,32 +499,6 @@ export function memo<T>(ttlMs: number, fn: () => Promise<T>): () => Promise<T> {
   };
 }
 
-// good/warn/bad/unknown -> the dot color class the renderer uses.
-export const STATUS_DOT: Record<Status, string> = { good: "green", warn: "amber", bad: "red", unknown: "gray" };
-
-export const escapeHtml = (s: string) =>
-  s.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
-
-export { SPARK_FADE_CSS as SPARK_FADE } from "./palette.ts";
-
-// How a sparkline caption spells a day span, consistently across tiles:
-// "5 days", "1 day", "<1 day".
-export function daysLabel(days: number): string {
-  if (days < 1) return "<1 day";
-  return `${days} day${days === 1 ? "" : "s"}`;
-}
-
-// A time span for sparkline captions: "5 days" (>= 1 day, via daysLabel), else a
-// finer "8 hours", else "30 min".
-export function humanSpan(ms: number): string {
-  if (ms >= 86_400_000) return daysLabel(Math.round(ms / 86_400_000));
-  if (ms >= 3_600_000) {
-    const hr = Math.round(ms / 3_600_000);
-    return `${hr} hour${hr === 1 ? "" : "s"}`;
-  }
-  return `${Math.max(1, Math.round(ms / 60_000))} min`;
-}
-
 export function humanDur(ms: number): string {
   const m = Math.floor(ms / 60000);
   if (m < 60) return `${m}m`;
@@ -578,14 +570,6 @@ export function lighten(hex: string, amount = 0.6): string {
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
 }
 
-// The span the line covers, formatted with humanSpan for the bottom-left corner
-// of a chart, absolutely positioned. The renderer draws it for a tile's `duration`
-// slot; standalone chart pages (the bench drill-down) reuse it directly. Its
-// container must be position:relative.
-export function durationTag(ms: number): string {
-  return `<span style="position:absolute;left:1px;bottom:0;font-size:9px;line-height:1;color:${CHART_HIGHLIGHT};pointer-events:none">${escapeHtml(humanSpan(ms))}</span>`;
-}
-
 function scaleValues(
   vals: number[],
   scale: { trim?: number; minValues?: number } | undefined,
@@ -600,13 +584,14 @@ function scaleValues(
 // trailing `count` points are overdrawn in a second color (e.g. to pick out the
 // most recent runs against a longer trend). The vertical scale is normalized to
 // those recent points' range plus 25% headroom, so older outliers clip off the
-// edges instead of flattening the recent detail into a useless line. `fadeFrom`
-// makes the base line a horizontal gradient from that color on the far left up to
-// `color` by the tile's midpoint. `xs` gives each point's horizontal position as a
-// fraction 0..1 of the width (for placing several sparklines on one shared axis —
-// e.g. a real time axis); a series that doesn't reach the ends occupies only part
-// of the width. Without it, points are spaced evenly. The line has no label of its
-// own — a tile's `duration` slot draws the span in the corner. `scale.trim`
+// edges instead of flattening the recent detail into a useless line. `fade`
+// makes the base line a horizontal gradient from transparent on the far left up
+// to `color` by the tile's midpoint. `xs` gives each point's horizontal
+// position as a fraction 0..1 of the width (for placing several sparklines on
+// one shared axis — e.g. a real time axis); a series that doesn't reach the
+// ends occupies only part of the width. Without it, points are spaced evenly.
+// The line has no label of its own. A tile's `duration` slot draws the span in
+// the corner. `scale.trim`
 // excludes that many values from each end of the sorted scale inputs without
 // removing the points themselves. A series below `scale.minValues`, or too short
 // to leave two scale values, keeps its full range.
@@ -614,7 +599,7 @@ export function sparkline(
   vals: number[],
   color: string,
   highlight?: { count: number; color: string; scaleAll?: boolean },
-  fadeFrom?: string,
+  fade = false,
   xs?: number[],
   scale?: { trim?: number; minValues?: number },
 ): string {
@@ -633,21 +618,35 @@ export function sparkline(
   const pts = vals.map((v, i) =>
     `${xAt(i).toFixed(1)},${(h - 3 - ((v - min) / rng) * (h - 6)).toFixed(1)}`
   );
-  // The base line fades from `fadeFrom` on the far left to `color`, then holds
-  // `color` (SVG extends the last stop). objectBoundingBox units keep the
-  // transition placed regardless of the preserveAspectRatio stretch.
+  // The base line fades from transparent on the far left to `color`, then holds
+  // `color` (SVG extends the last stop). userSpaceOnUse keeps the transition at
+  // the same screen x when `xs` places the line on only part of the chart.
   let defs = "", baseStroke = color;
-  if (fadeFrom) {
+  if (fade) {
     // Reach `color` by the tile's midpoint — or sooner, if the highlight starts
     // before halfway (so the base is fully `color` before the handoff).
-    const edge = highlight
-      ? Math.max(0, Math.min(1, (vals.length - highlight.count) / (vals.length - 1)))
+    const edge = highlight && highlight.count >= 2 && highlight.count < vals.length
+      ? Math.max(
+        0,
+        Math.min(
+          1,
+          xs?.length === vals.length
+            ? xs[vals.length - highlight.count]
+            : (vals.length - highlight.count) / (vals.length - 1),
+        ),
+      )
       : 1;
     const tf = Math.min(0.5, edge);
     if (tf > 0) {
-      const id = `spk-${fadeFrom.replace(/[^0-9a-fA-F]/g, "")}-${color.replace(/[^0-9a-fA-F]/g, "")}-${Math.round(tf * 100)}`;
-      defs = `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="0">` +
-        `<stop offset="0" stop-color="${fadeFrom}"/><stop offset="${tf.toFixed(3)}" stop-color="${color}"/>` +
+      const id = `spk-${
+        color.replace(/[^0-9a-fA-F]/g, "")
+      }-${Math.round(tf * 100)}`;
+      defs = `<defs><linearGradient id="${id}" ` +
+        `gradientUnits="userSpaceOnUse" x1="0" y1="0" ` +
+        `x2="${w}" y2="0">` +
+        `<stop offset="0" stop-color="${color}" stop-opacity="0"/>` +
+        `<stop offset="${tf.toFixed(3)}" stop-color="${color}" ` +
+        `stop-opacity="1"/>` +
         `</linearGradient></defs>`;
       baseStroke = `url(#${id})`;
     }
@@ -662,17 +661,17 @@ export function sparkline(
   // The svg is a block, so the chart's box is the height it draws: an inline svg
   // sits on a text baseline, and the line box around it reserves descender space
   // underneath.
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="24" preserveAspectRatio="none" style="display:block;margin-top:9px">${defs}${lines.join("")}</svg>`;
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${SPARKLINE_HEIGHT}" preserveAspectRatio="none" style="display:block;margin-top:9px">${defs}${lines.join("")}</svg>`;
 }
 
 // Overlaid trend lines (each oldest -> newest) sharing one vertical scale, each
 // in its own color. With a per-series `label`, that series' value is placed in a
 // right-hand gutter at the line's end height, in the line color. With
-// `opts.fadeFrom`, each line fades from that color on the far left up to its own
-// color, reaching full color by the midpoint (or by the start of the highlight,
-// if that comes sooner) — like the ci-duration sparkline. A series' `xs`
-// places its points on a shared horizontal axis. Its `highlightCount` redraws
-// its trailing points, including explicit markers, in a lighter tint.
+// `opts.fade`, each line fades from transparent on the far left up to its own
+// color, reaching full opacity by the midpoint (or by the start of the
+// highlight, if that comes sooner) — like the ci-duration sparkline. The `xs`
+// field positions points on a shared horizontal axis. The `highlightCount`
+// field redraws trailing points, including explicit markers, in a lighter tint.
 // `opts.highlight` supplies the count for series that do not set one. `maxXGap`
 // breaks a path when adjacent horizontal positions are farther apart than that
 // fraction of the chart. `showSinglePoint` draws explicit markers for a
@@ -692,7 +691,7 @@ export function multiSparkline(
     showSinglePoint?: boolean;
   }[],
   opts: {
-    fadeFrom?: string;
+    fade?: boolean;
     highlight?: { count: number };
     scale?: { trim?: number; minValues?: number };
   } = {},
@@ -710,11 +709,11 @@ export function multiSparkline(
   const w = 220, h = 34, min = lo - pad, max = hi + pad, rng = (max - min) || 1;
   const yv = (v: number) => h - 3 - ((v - min) / rng) * (h - 6);
 
-  // Each line fades from `fadeFrom` on the left up to its own color, reaching full
-  // color at the handoff `tf`: the midpoint, or the start of the highlight when
-  // that comes sooner (so the base is solid before the handoff). userSpaceOnUse
-  // keeps the transition at the same screen x for every line and avoids the
-  // zero-bbox quirk when a line is flat.
+  // Each line fades from transparent on the left up to its own color, reaching
+  // full opacity at the handoff `tf`: the midpoint, or the start of the
+  // highlight when that comes sooner (so the base is solid before the handoff).
+  // userSpaceOnUse keeps the transition at the same screen x for every line and
+  // avoids the zero-bbox quirk when a line is flat.
   const defs: string[] = [];
   const highlightCount = (
     line: (typeof series)[number],
@@ -722,7 +721,7 @@ export function multiSparkline(
   const highlightEdge = (line: (typeof series)[number]): number => {
     const count = highlightCount(line);
     if (count < 2) return 1;
-    if (count >= line.vals.length) return 0;
+    if (count >= line.vals.length) return 1;
     const index = line.vals.length - count;
     return line.xs?.length === line.vals.length
       ? line.xs[index]
@@ -730,14 +729,17 @@ export function multiSparkline(
   };
   const strokeFor = (line: (typeof series)[number]): string => {
     const color = line.color;
-    if (!opts.fadeFrom) return color;
+    if (!opts.fade) return color;
     const tf = Math.min(0.5, Math.max(0, highlightEdge(line)));
     const off = String(+tf.toFixed(3));
-    const id = `mspk-${opts.fadeFrom.replace(/[^0-9a-fA-F]/g, "")}-${color.replace(/[^0-9a-fA-F]/g, "")}-${Math.round(tf * 100)}`;
+    const id = `mspk-${
+      color.replace(/[^0-9a-fA-F]/g, "")
+    }-${Math.round(tf * 100)}`;
     if (!defs.some((d) => d.includes(`"${id}"`))) {
       defs.push(
         `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="${w}" y2="0">` +
-          `<stop offset="0" stop-color="${opts.fadeFrom}"/><stop offset="${off}" stop-color="${color}"/>` +
+          `<stop offset="0" stop-color="${color}" stop-opacity="0"/>` +
+          `<stop offset="${off}" stop-color="${color}" stop-opacity="1"/>` +
           `</linearGradient>`,
       );
     }
@@ -848,21 +850,30 @@ export function multiSparkline(
 
   const labeled = drawable.filter((s) => s.label !== undefined);
   if (labeled.length === 0) {
-    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="32" preserveAspectRatio="none" style="display:block;margin-top:9px">${defsBlock}${lines}</svg>`;
+    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${SPARKLINE_HEIGHT}" preserveAspectRatio="none" style="display:block;margin-top:9px">${defsBlock}${lines}</svg>`;
   }
-  const RH = 32; // rendered svg height, px
+  const RH = SPARKLINE_HEIGHT;
+  const LABEL_INSET = 6;
+  const LABEL_GAP = 12;
+  const labelEdge = RH - LABEL_INSET;
   // Each label sits at its line's end height; when a chart is drawn its value
-  // appears only here, so spread any labels that would overlap into one unreadable
-  // stack — sort by height and push each down to at least MIN_GAP below the last.
-  const MIN_GAP = 12;
+  // appears only here. Sort the labels by height and spread close labels apart.
+  // A crowded chart divides the available band evenly between every label.
   const placed = labeled
-    .map((s) => ({ s, py: Math.max(6, Math.min(26, (yv(s.vals[s.vals.length - 1]) / h) * RH)) }))
+    .map((s) => ({ s, py: Math.max(LABEL_INSET, Math.min(labelEdge, (yv(s.vals[s.vals.length - 1]) / h) * RH)) }))
     .sort((a, b) => a.py - b.py);
+  const gap = placed.length > 1
+    ? Math.min(LABEL_GAP, (labelEdge - LABEL_INSET) / (placed.length - 1))
+    : 0;
   for (let i = 1; i < placed.length; i++) {
-    if (placed[i].py - placed[i - 1].py < MIN_GAP) placed[i].py = placed[i - 1].py + MIN_GAP;
+    placed[i].py = Math.max(placed[i].py, placed[i - 1].py + gap);
   }
-  const overflow = placed.length ? placed[placed.length - 1].py - 26 : 0;
-  if (overflow > 0) for (const p of placed) p.py -= overflow;
+  if (placed[placed.length - 1].py > labelEdge) {
+    placed[placed.length - 1].py = labelEdge;
+    for (let i = placed.length - 2; i >= 0; i--) {
+      placed[i].py = Math.min(placed[i].py, placed[i + 1].py - gap);
+    }
+  }
   const tags = placed.map(({ s, py }) =>
     `<span style="position:absolute;right:0;top:${py.toFixed(1)}px;transform:translateY(-50%);font-size:11px;line-height:1;color:${s.color};font-variant-numeric:tabular-nums;pointer-events:none">${escapeHtml(s.label!)}</span>`
   ).join("");
@@ -881,9 +892,11 @@ export function thin<T>(arr: T[], max: number): T[] {
 }
 
 // A grid of small run-outcome cells (one per run, oldest first) laid out in
-// `cols` fixed columns. Each cell links to that run's CI results. Cells shrink
-// to fit width.
-export function strip(cells: { outcome: string; href: string }[], cols: number): string {
+// responsive columns. Each cell links to that run's CI results.
+export function strip(
+  cells: { outcome: string; href: string }[],
+  labelSpace = false,
+): string {
   if (!cells.length) return "";
   const col = (d: string) =>
     d === "green"
@@ -896,7 +909,8 @@ export function strip(cells: { outcome: string; href: string }[], cols: number):
   const html = cells.map((c) =>
     `<a class="cell" href="${escapeHtml(c.href)}" target="_blank" rel="noopener" style="background:${col(c.outcome)}"></a>`
   ).join("");
-  return `<div class="cells" style="grid-template-columns:repeat(${cols},1fr)">${html}</div>`;
+  const className = labelSpace ? "cells labeled" : "cells";
+  return `<div class="${className}">${html}</div>`;
 }
 
 // The PR that landed a commit: squash titles end "(#123)", merge commits start

@@ -72,7 +72,10 @@ type Right = { [NAME]: string; [UI]: VNode; label: string };
 
 The compiler rejects the first form: `pattern-result:opaque-reserved-key`,
 raised at the `pattern()` call by `reserved-result-keys.ts` in
-`packages/ts-transformers`. It reaches the root of a **result** schema and
+`packages/ts-transformers`. The rejection applies where an author can act —
+`cf check`, deploy, candidate admission; the runtime's identity-pinned reload
+of already-deployed stored source demotes it to a warning, so pieces that
+predate the rule keep loading. It reaches the root of a **result** schema and
 nothing else, which leaves two shapes legal and needed. Below the root, a
 reserved key names a field of another piece, where `unknown` is what keeps the
 field a reference to that piece's own screen rather than a copy, so the
@@ -102,8 +105,8 @@ Three rules decide whether such a read reaches the value:
 **Name the property.** Naming it is what reliably overrides a declared field
 schema. An operand of `entries?: any[]` can lower to `items: true`, and a `true`
 schema defers to the schema the cell itself carries (`traverse.ts`,
-`combineOptionalSchema`: a true parent falls through to
-`combineSchema(parentSchema, linkSchema)`) — with `piece: unknown` still inside
+`combineSchemaForLink`: a true reader schema adopts the link's schema) — with
+`piece: unknown` still inside
 it, so `entries[0].piece` is undefined. `entries?: { piece: any }[]` names the
 property, and the piece materializes: the same read of
 `entries[0].piece.nickname` yields the module's real nickname under the second

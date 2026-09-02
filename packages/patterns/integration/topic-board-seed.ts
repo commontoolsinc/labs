@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run -A
+
 /**
  * Seeds one synthetic topic board and writes the fixture describing it.
  *

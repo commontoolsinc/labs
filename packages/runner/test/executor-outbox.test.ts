@@ -70,6 +70,7 @@ describe("stage G outbox + sqlite discharge", () => {
   let storageManager: EmulatedStorageManager;
   let runtime: Runtime;
   let engine: Engine.Engine;
+
   /** One process-lifetime counter per test, shared by every sink and
    * outbox (the replay-keying discipline — engine-wave-sink.ts). */
   let localSeqRef: { value: number };
@@ -160,7 +161,9 @@ describe("stage G outbox + sqlite discharge", () => {
     await server.close();
   });
 
-  // ---- the effect handoff at the seal destination ----
+  //
+  // The effect handoff at the seal destination
+  //
 
   it("defers a sealed tx's post-commit effects to the destination; without the hook the inline flush stays (serving-loop.md §3)", async () => {
     const lease = liveLease();
@@ -231,7 +234,9 @@ describe("stage G outbox + sqlite discharge", () => {
     lease.release();
   });
 
-  // ---- the process-local effect half ----
+  //
+  // The process-local effect half
+  //
 
   it("admits sealed effects post-commit with in-flight dedupe per key; counters and carriage are live (serving-loop.md §4–§5, §7)", async () => {
     const { outbox, stats } = newOutbox();
@@ -379,7 +384,9 @@ describe("stage G outbox + sqlite discharge", () => {
     expect(stats.outbox.completed).toBe(0);
   });
 
-  // ---- the durable half: rows in the wave's own transaction (FP1) ----
+  //
+  // The durable half (FP1): rows in the wave's own transaction
+  //
 
   it("lands outbound append rows INSIDE the wave's engine transaction, for surviving contributions only (FP1; the model's committed-only fold)", async () => {
     const lease = liveLease();
@@ -470,7 +477,9 @@ describe("stage G outbox + sqlite discharge", () => {
     lease.release();
   });
 
-  // ---- delivery: admit at the target, then delete (FP1 closure) ----
+  //
+  // Delivery (FP1 closure): admit at the target, then delete
+  //
 
   it("delivers pending rows: delegated admission at the target stamps firedAt from the CARRIED actor (LT5 envelope), then deletes the row; a re-sent duplicate dedupes at the eventId horizon", async () => {
     const lease = liveLease();
@@ -583,77 +592,13 @@ describe("stage G outbox + sqlite discharge", () => {
     lease2.release();
   });
 
-  it("stops the drain at a transport failure: the failed row AND its successors stay, preserving per-stream FIFO; the re-drain delivers in order (round-2 thread 7)", async () => {
-    // Three rows to ONE target stream, inserted directly (the crashed-
-    // before-delivery shape the drain recovers).
-    const fifoStream = { id: "of:fifo-stream-link", path: [] as string[] };
-    const fifoSidecar = streamEntriesDocId(fifoStream);
-    insertExecutionOutboxRows(engine, {
-      branch: "",
-      createdSeq: 1,
-      rows: [1, 2, 3].map((n) => ({
-        targetSpace,
-        targetStream: fifoSidecar,
-        targetStreamLink: fifoStream,
-        eventId: `evt-fifo-${n}`,
-        payload: { n },
-        actingPrincipal: "user:alice",
-        actingSession: "sess-1",
-        capabilityRef: "cap-fifo",
-      })),
-    });
-
-    // A transport that fails the FIRST delivery attempt only.
-    let failuresLeft = 1;
-    const flakyOnce = new Proxy(server, {
-      get(target, prop, receiver) {
-        if (prop === "commitDelegatedAppend" && failuresLeft > 0) {
-          return () => {
-            failuresLeft -= 1;
-            return Promise.reject(new Error("transport down"));
-          };
-        }
-        const value = Reflect.get(target, prop, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    });
-    const flakyOutbox = new SpaceOutbox({
-      stats: emptyServingLoopStats(),
-      server: flakyOnce as typeof server,
-      engine,
-      sessionId: holder,
-      localSeqRef,
-    });
-
-    // The failed first row STOPS the drain: nothing delivered, ALL
-    // three rows kept (pre-fix, rows 2 and 3 delivered past the
-    // retained row 1 — the per-stream FIFO break the re-send then
-    // completes: 2, 3, 1).
-    const first = await flakyOutbox.deliverPendingAppends();
-    expect(first.remaining).toBe(3);
-    expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
-      .toBe(3);
-    const targetEngine = await server.engineForSpace(targetSpace);
-    const empty = Engine.read(targetEngine, { id: fifoSidecar });
-    expect(
-      ((empty?.value as { entries?: Array<unknown> })?.entries ?? []).length,
-    ).toBe(0);
-
-    // The healthy re-drain delivers everything IN INSERTION ORDER.
-    const second = await flakyOutbox.deliverPendingAppends();
-    expect(second.remaining).toBe(0);
-    expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
-      .toBe(0);
-    const after = Engine.read(targetEngine, { id: fifoSidecar });
-    const entries =
-      (after?.value as { entries?: Array<{ eventId?: string }> })?.entries ??
-        [];
-    expect(entries.map((entry) => entry.eventId)).toEqual([
-      "evt-fifo-1",
-      "evt-fifo-2",
-      "evt-fifo-3",
-    ]);
-  });
+  //
+  // The fold's completeness, and the gate at the source
+  //
+  // What the durable half must still carry — a foreign-only survivor's
+  // appends, and a tx that sealed nothing but staged some — and the refusal
+  // that happens at enqueue rather than at delivery.
+  //
 
   it("folds a FOREIGN-only-seal survivor's appends into the home batch's outbox rows (FP1 fold completeness; the stage-G review's M-A)", async () => {
     // A contribution whose only sealed space is FOREIGN (the Phase-5
@@ -840,6 +785,15 @@ describe("stage G outbox + sqlite discharge", () => {
     wave.abandon("test over");
     lease.release();
   });
+
+  //
+  // Refusals and failures at delivery
+  //
+  // What the drain does at the floor: a declared userless row delivers, an
+  // undeclared one retires, a deterministic rejection retires — one of them
+  // after writing its failure notice back onto the source event — and a
+  // transport failure keeps the row for the next drain.
+  //
 
   it("does not retry an LT4 deterministic admission rejection: the row is deleted and counted failed", async () => {
     // The accumulator refuses userless entries at the source (above),
@@ -1051,6 +1005,78 @@ describe("stage G outbox + sqlite discharge", () => {
     lease.release();
   });
 
+  it("stops the drain at a transport failure: the failed row AND its successors stay, preserving per-stream FIFO; the re-drain delivers in order (round-2 thread 7)", async () => {
+    // Three rows to ONE target stream, inserted directly (the crashed-
+    // before-delivery shape the drain recovers).
+    const fifoStream = { id: "of:fifo-stream-link", path: [] as string[] };
+    const fifoSidecar = streamEntriesDocId(fifoStream);
+    insertExecutionOutboxRows(engine, {
+      branch: "",
+      createdSeq: 1,
+      rows: [1, 2, 3].map((n) => ({
+        targetSpace,
+        targetStream: fifoSidecar,
+        targetStreamLink: fifoStream,
+        eventId: `evt-fifo-${n}`,
+        payload: { n },
+        actingPrincipal: "user:alice",
+        actingSession: "sess-1",
+        capabilityRef: "cap-fifo",
+      })),
+    });
+
+    // A transport that fails the FIRST delivery attempt only.
+    let failuresLeft = 1;
+    const flakyOnce = new Proxy(server, {
+      get(target, prop, receiver) {
+        if (prop === "commitDelegatedAppend" && failuresLeft > 0) {
+          return () => {
+            failuresLeft -= 1;
+            return Promise.reject(new Error("transport down"));
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const flakyOutbox = new SpaceOutbox({
+      stats: emptyServingLoopStats(),
+      server: flakyOnce as typeof server,
+      engine,
+      sessionId: holder,
+      localSeqRef,
+    });
+
+    // The failed first row STOPS the drain: nothing delivered, ALL
+    // three rows kept (pre-fix, rows 2 and 3 delivered past the
+    // retained row 1 — the per-stream FIFO break the re-send then
+    // completes: 2, 3, 1).
+    const first = await flakyOutbox.deliverPendingAppends();
+    expect(first.remaining).toBe(3);
+    expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
+      .toBe(3);
+    const targetEngine = await server.engineForSpace(targetSpace);
+    const empty = Engine.read(targetEngine, { id: fifoSidecar });
+    expect(
+      ((empty?.value as { entries?: Array<unknown> })?.entries ?? []).length,
+    ).toBe(0);
+
+    // The healthy re-drain delivers everything IN INSERTION ORDER.
+    const second = await flakyOutbox.deliverPendingAppends();
+    expect(second.remaining).toBe(0);
+    expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
+      .toBe(0);
+    const after = Engine.read(targetEngine, { id: fifoSidecar });
+    const entries =
+      (after?.value as { entries?: Array<{ eventId?: string }> })?.entries ??
+        [];
+    expect(entries.map((entry) => entry.eventId)).toEqual([
+      "evt-fifo-1",
+      "evt-fifo-2",
+      "evt-fifo-3",
+    ]);
+  });
+
   it("keeps the row on a transport-class delivery failure (admit-before-delete): the next drain delivers exactly one entry", async () => {
     const transportStream = { id: "of:transport-stream", path: [] as string[] };
     const transportSidecar = streamEntriesDocId(transportStream);
@@ -1109,7 +1135,9 @@ describe("stage G outbox + sqlite discharge", () => {
       .toBe(0);
   });
 
-  // ---- the sqliteQuery memo decision (B1's fix, serving-loop.md §4/§6) ----
+  //
+  // The sqliteQuery memo decision (B1's fix, serving-loop.md §4/§6)
+  //
 
   it("sqliteQuery memo decision: a settled result is a hit, a bare claim never is; an orphaned claim re-issues ONLY under the serving posture", () => {
     // No stored key: issue (the ordinary miss).
@@ -1167,7 +1195,13 @@ describe("stage G outbox + sqlite discharge", () => {
     })).toBe("issue");
   });
 
-  // ---- the sqlite bound's discharge ----
+  //
+  // Discharging a sqlite op through the attachment hook
+  //
+  // What the decision above leads to: a folded op applied atomically through
+  // the hook, and a loud refusal everywhere else — no hook, no resolved scope
+  // key, or a foreign batch.
+  //
 
   // Unique per test run: the cell-db FILE for a memory-URL engine lives
   // at a deterministic TMPDIR path keyed by (space, id) — a stable id

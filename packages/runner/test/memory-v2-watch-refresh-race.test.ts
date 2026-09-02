@@ -147,14 +147,17 @@ class DelayedWatchAddTransport extends ScriptedSessionTransport {
 }
 
 class IncrementalEffectTransport extends ScriptedSessionTransport {
+  readonly #docs: Map<URI, SessionSyncUpsert["doc"]>;
+
   constructor(
-    private readonly docs: Map<URI, SessionSyncUpsert["doc"]>,
+    docs: Map<URI, SessionSyncUpsert["doc"]>,
   ) {
     super({
       name: "incremental-effect",
       sessionId: "session:incremental-effect",
       space,
     });
+    this.#docs = docs;
   }
 
   protected override ackServerSeq(): number {
@@ -175,7 +178,7 @@ class IncrementalEffectTransport extends ScriptedSessionTransport {
             serverSeq: roots.length,
             sync: fullSync(
               roots.length,
-              roots.map((id, index) => doc(id, index + 1, this.docs.get(id))),
+              roots.map((id, index) => doc(id, index + 1, this.#docs.get(id))),
             ),
           },
         });

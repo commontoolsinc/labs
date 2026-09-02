@@ -54,11 +54,16 @@ export const PIECE_CONTEXT_MENU_EVENT = "cf-piece-context-menu";
 export interface PieceContextMenuDetail {
   /** The space holding the piece. */
   space: DID;
+
   /** The piece's full schemed id. */
   pieceId: string;
-  /** Client coordinates of the click, for placing the menu. */
+
+  /** Client X coordinate of the click, for placing the menu. */
   x: number;
+
+  /** Client Y coordinate of the click, read the same way. */
   y: number;
+
   /** The variant the piece was rendered at. */
   variant: UIVariant;
 }
@@ -303,7 +308,10 @@ export class CFRender extends BaseElement {
   private accessor _hasRendered = false;
   private _startPromise?: Promise<boolean>;
 
+  //
   // Debug helpers
+  //
+
   private _instanceId = DEBUG_LOGGING
     ? Math.random().toString(36).substring(7)
     : "";

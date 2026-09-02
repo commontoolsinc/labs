@@ -40,6 +40,7 @@ export interface HandleState {
   writeTarget?: unknown;
   cfcAuthorizedOperations: Set<CfcExistingWritebackOperation>;
   cfcAuthorizationAnnotation?: CfcNodeAnnotation;
+
   /**
    * For a read-only snapshot of a generated file, when its bytes were
    * published. A getattr on this handle reports it so the size and the
@@ -64,8 +65,8 @@ export function handleHasBufferedContent(
 }
 
 export class HandleMap {
-  private nextFh = 1n;
-  private handles = new Map<bigint, HandleState>();
+  #nextFh = 1n;
+  #handles = new Map<bigint, HandleState>();
 
   /**
    * Open a file handle. Copies current content into buffer if writable.
@@ -86,10 +87,10 @@ export class HandleMap {
       readSnapshotMtime?: number;
     },
   ): bigint {
-    const fh = this.nextFh++;
+    const fh = this.#nextFh++;
     const isWritable = (flags & O_WRONLY) !== 0 || (flags & O_RDWR) !== 0;
     const snapshot = options?.readSnapshot;
-    this.handles.set(fh, {
+    this.#handles.set(fh, {
       ino,
       flags,
       dirty: false,
@@ -109,13 +110,13 @@ export class HandleMap {
   }
 
   get(fh: bigint): HandleState | undefined {
-    return this.handles.get(fh);
+    return this.#handles.get(fh);
   }
 
   close(fh: bigint): HandleState | undefined {
-    const state = this.handles.get(fh);
+    const state = this.#handles.get(fh);
     if (state) {
-      this.handles.delete(fh);
+      this.#handles.delete(fh);
     }
     return state;
   }
@@ -124,7 +125,7 @@ export class HandleMap {
     fh: bigint,
     operation: CfcExistingWritebackOperation,
   ): boolean {
-    return this.handles.get(fh)?.cfcAuthorizedOperations.has(operation) ??
+    return this.#handles.get(fh)?.cfcAuthorizedOperations.has(operation) ??
       false;
   }
 
@@ -132,7 +133,7 @@ export class HandleMap {
     fh: bigint,
     operation: CfcExistingWritebackOperation,
   ): boolean {
-    const state = this.handles.get(fh);
+    const state = this.#handles.get(fh);
     if (!state) return false;
     state.cfcAuthorizedOperations.add(operation);
     return true;
@@ -140,7 +141,7 @@ export class HandleMap {
 
   /** Write data into the handle's buffer at offset, extending if needed. */
   write(fh: bigint, data: Uint8Array, offset: number): boolean {
-    const state = this.handles.get(fh);
+    const state = this.#handles.get(fh);
     if (!state) return false;
 
     if (!validateVirtualFileRange(offset, data.length).ok) return false;
@@ -157,7 +158,7 @@ export class HandleMap {
     state.truncatePending = false;
     state.version++;
 
-    for (const [otherFh, otherState] of this.handles) {
+    for (const [otherFh, otherState] of this.#handles) {
       if (otherFh !== fh && otherState.ino === state.ino) {
         otherState.truncatePending = false;
       }
@@ -168,7 +169,7 @@ export class HandleMap {
 
   /** Mark a handle as truncated to an empty buffer without committing yet. */
   markTruncated(fh: bigint): boolean {
-    const state = this.handles.get(fh);
+    const state = this.#handles.get(fh);
     if (!state) return false;
     state.buffer = new Uint8Array(0);
     state.bufferValid = true;
@@ -185,7 +186,7 @@ export class HandleMap {
     options?: { pendingFh?: bigint },
   ): boolean {
     if (!validateVirtualFileRange(0, size).ok) return false;
-    for (const [fh, state] of this.handles) {
+    for (const [fh, state] of this.#handles) {
       if (state.ino === ino) {
         const shouldFlush = options?.pendingFh === undefined ||
           options.pendingFh === fh;
@@ -214,7 +215,7 @@ export class HandleMap {
 
   /** Truncate the handle's buffer to the given size. */
   truncate(fh: bigint, size: number): boolean {
-    const state = this.handles.get(fh);
+    const state = this.#handles.get(fh);
     if (!state) return false;
     if (!validateVirtualFileRange(0, size).ok) return false;
 

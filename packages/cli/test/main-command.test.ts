@@ -59,7 +59,7 @@ describe("main command", () => {
     );
     const commands = [main];
     const mismatchedUsage: string[] = [];
-    const customUsageCommands = new Set(["cf piece call", "cf call"]);
+    const customUsageCommands = new Set(["cf call", "cf call"]);
 
     for (const command of commands) {
       commands.push(...command.getCommands());
@@ -93,7 +93,7 @@ describe("main command", () => {
     // the handling committed. The two sit adjacent in `--help`, so a caveat
     // on one and silence on the other reads as a real difference between
     // them.
-    const { code, stdout, stderr } = await cf("piece call --help");
+    const { code, stdout, stderr } = await cf("call --help");
     checkStderr(stderr);
     const help = stripAnsi(stdout.join("\n")).replaceAll(/\s+/g, " ");
     expect(help).toContain(
@@ -107,30 +107,30 @@ describe("main command", () => {
   });
 
   it("describes and parses piece call's accepted input forms", async () => {
-    const { piece } = await import(
+    const { pieceDataCommand } = await import(
       "../commands/piece.ts?piece-call-usage-test"
     );
-    const call = piece.getCommand("call")!;
+    const call = pieceDataCommand("call");
     const expectedUsage =
       "--identity <identity> --url <url> --api-url <api-url> --space <space> " +
-      "--piece <piece> [address] <callable> [input]";
+      "--cell <cell> [address] <callable> [input]";
 
     expect(call.getArgsDefinition()).toBe(
       "<callable:string> [tail...:string]",
     );
     expect(call.getUsage()).toBe(expectedUsage);
-    const { code, stdout, stderr } = await cf("piece call --help");
+    const { code, stdout, stderr } = await cf("call --help");
     checkStderr(stderr);
     const help = stripAnsi(stdout.join("\n"));
     const renderedUsage = help.split("\n").find((line) =>
       line.trimStart().startsWith("Usage:")
     );
     expect(renderedUsage?.replaceAll(/\s+/g, " ").trim()).toBe(
-      `Usage: cf piece call ${expectedUsage}`,
+      `Usage: cf call ${expectedUsage}`,
     );
     const normalizedHelp = help.replaceAll(/\s+/g, " ");
     expect(normalizedHelp).toContain(
-      `The callable name separates piece-call options from the callable's arguments. Arguments after the callable use the same parser as cf exec. Use --json with an optional inline value for complete JSON input; bare --json reads JSON from stdin. A single positional JSON value or "-" stdin sentinel is also accepted. Use --help --json for machine-readable schema help. Put schema-derived flags after --. Handlers interpret piped input when no input argument is present.`,
+      `The callable name opens the callable's section and "--" closes it: piece-call options come before the name, the callable's own arguments after it, and the read options (--select, --schema, --filter) past the marker. Arguments in the section use the same parser as cf exec. Use --json with an optional inline value for complete JSON input; bare --json reads JSON from stdin. A single positional JSON value or "-" stdin sentinel is also accepted. Use --help --json for machine-readable schema help. Handlers interpret piped input when no input argument is present.`,
     );
     expect(code).toBe(0);
 
@@ -144,10 +144,11 @@ describe("main command", () => {
         literalArguments: this.getLiteralArgs(),
       });
     });
-    await piece.parse(["call", "search", '{"query":"tea"}']);
-    await piece.parse(["call", "search", "--help"]);
-    await piece.parse(["call", "search", "-"]);
-    await piece.parse(["call", "search", "--", "--json"]);
+    await call.parse(["search", '{"query":"tea"}']);
+    await call.parse(["search", "--help"]);
+    await call.parse(["search", "-"]);
+    await call.parse(["search", "--query", "milk"]);
+    await call.parse(["search", "--", "--select", "id"]);
     expect(parsedCalls).toEqual([
       {
         positionals: ["search", '{"query":"tea"}'],
@@ -155,31 +156,37 @@ describe("main command", () => {
       },
       { positionals: ["search", "--help"], literalArguments: [] },
       { positionals: ["search", "-"], literalArguments: [] },
-      { positionals: ["search"], literalArguments: ["--json"] },
+      // The verb opened the section, so its own flags are positionals of
+      // this command and the marker sets nothing aside.
+      {
+        positionals: ["search", "--query", "milk"],
+        literalArguments: [],
+      },
+      // And the marker is what hands the read step its words.
+      { positionals: ["search"], literalArguments: ["--select", "id"] },
     ]);
   });
 
   it("reads piece call's invocation session from `CF_INVOCATION_SESSION`, behind `--invocation-session`", async () => {
-    const { piece } = await import(
+    const { pieceDataCommand } = await import(
       "../commands/piece.ts?piece-call-session-test"
     );
-    const call = piece.getCommand("call")!;
+    const call = pieceDataCommand("call");
     const sessions: Array<string | undefined> = [];
-    call.action((options) => {
+    call.action((options: { invocationSession?: string }) => {
       sessions.push(options.invocationSession);
     });
 
     await withEnv("CF_INVOCATION_SESSION", "from-env", async () => {
-      await piece.parse([
-        "call",
+      await call.parse([
         "--invocation-session",
         "from-flag",
         "increment",
       ]);
-      await piece.parse(["call", "increment"]);
+      await call.parse(["increment"]);
     });
     await withEnv("CF_INVOCATION_SESSION", undefined, async () => {
-      await piece.parse(["call", "increment"]);
+      await call.parse(["increment"]);
     });
 
     // The environment is the standing default for a shell or an agent run,
@@ -196,29 +203,58 @@ describe("main command", () => {
     expect(sessions).toEqual(["from-flag", "from-env", undefined]);
   });
 
-  it("rejects multiple inline inputs to piece call", async () => {
+  it("refuses a projection before the verb on piece call", async () => {
+    // Refused on the argv alone, before a piece is resolved or a request
+    // sent: the api-url below is never reached. Two inline payloads are the
+    // other shape, and they are NOT refused here — they belong to the
+    // callable's section, so its own parser is what names them.
     const { main } = await import(
       "../commands/main.ts?piece-call-inline-validation-test"
     );
     await expect(
       main.parse([
-        "piece",
+        "call",
         "--identity",
         "./identity.key",
         "--api-url",
         "https://cf.dev",
         "--space",
         "common-knowledge",
-        "call",
         "--piece",
         "abcdefghijklmnopqrstuvwxyz",
+        "--select",
+        "id",
         "search",
         '{"query":"tea"}',
-        '{"limit":5}',
       ]),
-    ).rejects.toThrow(
-      'Use a single inline JSON argument or "--" before schema-derived flags.',
+    ).rejects.toThrow(/--select shapes the result/);
+  });
+
+  it("mounts the data commands at top level and nowhere under piece", async () => {
+    // The removal is only observable as an absence, so it needs its own
+    // assertion: every other test here names a command that exists, and would
+    // pass unchanged if `cf piece get` came back.
+    const { main } = await import(
+      "../commands/main.ts?piece-data-absence"
     );
+    const top = main.getCommands().map((command) => command.getName());
+    expect(top).toContain("get");
+    expect(top).toContain("set");
+    expect(top).toContain("call");
+
+    const piece = main.getCommands().find((command) =>
+      command.getName() === "piece"
+    );
+    expect(piece).toBeDefined();
+    const nested = piece!.getCommands(true).map((command) => command.getName());
+    expect(nested).not.toContain("get");
+    expect(nested).not.toContain("set");
+    expect(nested).not.toContain("call");
+    // The lifecycle commands that merely start with the same word stay.
+    expect(nested).toContain("setsrc");
+    expect(nested).toContain("getsrc");
+    expect(nested).toContain("get-label");
+    expect(nested).toContain("set-label");
   });
 
   it("registers visible commands and reports configured environment defaults", async () => {
@@ -257,6 +293,26 @@ describe("main command", () => {
         );
       });
     });
+  });
+
+  it("refuses --list beside the target flag, under either of its names", async () => {
+    // The conflict names the option's Cliffy key, and both spellings share
+    // one. A stale key here is silent: the command runs, the list selector
+    // wins, and a repair --apply mutates a target the line does not name.
+    for (const flag of ["--cell", "--piece"]) {
+      for (const command of ["piece survey", "piece repair"]) {
+        const where = `${command} ${flag}`;
+        const { code, stderr } = await cf(
+          `${command} ${flag} holder --list member`,
+        );
+        // The whole command line is echoed to stderr, so a looser assertion
+        // here passes whether or not the conflict fires. Name the refusal.
+        expect(stripAnsi(stderr.join("\n")), where).toContain(
+          'Option "--list" conflicts with option "--cell".',
+        );
+        expect(code, where).toBe(2);
+      }
+    }
   });
 
   it("shows exec command help before trying to resolve a mounted file", async () => {

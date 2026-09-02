@@ -8,7 +8,7 @@
  * the cross-space load pool. The root doc's own round-trip was in neither, so
  * pull resolved whenever the scheduler quiesced — which over a low-latency
  * link is AFTER the doc arrives, and over a real network is BEFORE. Measured
- * in production shape: a same-id retry's receipt readback (`cf piece call
+ * in production shape: a same-id retry's receipt readback (`cf call
  * --invocation`, the WS-D collision path reading the winner's receipt via
  * getCellFromLink → pull) returned the original result against a local
  * toolshed and `undefined` against a remote host, every time. sync()'s own
@@ -105,6 +105,53 @@ describe("pull() and the first sync of an unseen doc", () => {
       gate.resolve();
 
       expect(await pullPromise).toEqual(RECEIPT_VALUE);
+    } finally {
+      await readerRt.dispose();
+      await readerStorage.close();
+    }
+  });
+
+  it("includes a sink's in-flight first sync in pull convergence", async () => {
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const readerRt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: readerStorage,
+    });
+    try {
+      const link = writerRt
+        .getCell(space, RECEIPT_CAUSE, undefined)
+        .getAsNormalizedFullLink();
+      const gate = Promise.withResolvers<void>();
+      const originalSyncCell = readerStorage.syncCell.bind(readerStorage);
+      readerStorage.syncCell = (<T>(cell: Cell<T>): Promise<Cell<T>> => {
+        const target = cell.getAsNormalizedFullLink();
+        if (target.id === link.id) {
+          return gate.promise.then(() => originalSyncCell(cell));
+        }
+        return originalSyncCell(cell);
+      }) as typeof readerStorage.syncCell;
+
+      const receipt = readerRt.getCellFromLink<typeof RECEIPT_VALUE>(link);
+      const seen: Array<typeof RECEIPT_VALUE | undefined> = [];
+      const cancel = receipt.sink((value) => {
+        seen.push(value);
+      });
+      const pullPromise = receipt.pull();
+      let pullResolved = false;
+      void pullPromise.then(() => {
+        pullResolved = true;
+      });
+
+      await readerRt.scheduler.idle();
+      await Promise.resolve();
+      expect(pullResolved).toBe(false);
+
+      gate.resolve();
+      expect(await pullPromise).toEqual(RECEIPT_VALUE);
+      expect(seen).toEqual([undefined, RECEIPT_VALUE]);
+      cancel();
     } finally {
       await readerRt.dispose();
       await readerStorage.close();

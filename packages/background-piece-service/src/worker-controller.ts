@@ -49,58 +49,65 @@ interface Task {
  * @event error A terminal error occurred in the worker.
  */
 export class WorkerController extends EventTarget {
-  private worker: Worker;
-  private did: string;
-  private toolshedUrl: string;
-  private identity: Identity;
-  private timeoutMs: number;
-  private experimental?: WorkerOptions["experimental"];
-  private msgId: number = 0;
-  private pending = new Map<
+  #worker: Worker;
+  #did: string;
+  #toolshedUrl: string;
+  #identity: Identity;
+  #timeoutMs: number;
+  #experimental?: WorkerOptions["experimental"];
+  #msgId: number = 0;
+  #pending = new Map<
     number,
     Task
   >();
-  // Promise that resolves when the worker is fully initialized
-  private initializeDeferred = defer();
-  public initializeResolve = this.initializeDeferred.promise;
-  private state = WorkerState.Uninitialized;
+
+  /**
+   * Settled when `startInitialize()` finishes: resolved once the worker is
+   * ready, rejected with the error that stopped it.
+   */
+  #initializeDeferred = defer();
+
+  /** Promise that resolves when the worker is fully initialized. */
+  public initializeResolve = this.#initializeDeferred.promise;
+
+  #state = WorkerState.Uninitialized;
 
   constructor(options: WorkerOptions) {
     super();
-    this.did = options.did;
-    this.identity = options.identity;
-    this.toolshedUrl = options.toolshedUrl;
-    this.timeoutMs = options.timeoutMs ?? DEFAULT_TASK_TIMEOUT;
-    this.experimental = options.experimental;
+    this.#did = options.did;
+    this.#identity = options.identity;
+    this.#toolshedUrl = options.toolshedUrl;
+    this.#timeoutMs = options.timeoutMs ?? DEFAULT_TASK_TIMEOUT;
+    this.#experimental = options.experimental;
 
-    console.log(`${this.did}: Creating worker controller`);
+    console.log(`${this.#did}: Creating worker controller`);
 
-    this.worker = new Worker(
+    this.#worker = new Worker(
       new URL("./worker.ts", import.meta.url).href,
       {
         type: "module",
-        name: `worker-${this.did}`,
+        name: `worker-${this.#did}`,
       },
     );
-    this.worker.addEventListener("message", this.onWorkerMessage);
-    this.worker.addEventListener("error", this.onWorkerError);
+    this.#worker.addEventListener("message", this.onWorkerMessage);
+    this.#worker.addEventListener("error", this.#onWorkerError);
   }
 
   async startInitialize() {
-    if (this.state !== WorkerState.Uninitialized) {
+    if (this.#state !== WorkerState.Uninitialized) {
       throw new Error("Worker is not uninitialized.");
     }
-    this.state = WorkerState.Initializing;
+    this.#state = WorkerState.Initializing;
     try {
       await this.exec(WorkerIPCMessageType.Initialize, {
-        did: this.did,
-        toolshedUrl: this.toolshedUrl,
-        encodedIdentity: realmValueFromKeyPair(this.identity.keyPair),
-        experimental: this.experimental,
+        did: this.#did,
+        toolshedUrl: this.#toolshedUrl,
+        encodedIdentity: realmValueFromKeyPair(this.#identity.keyPair),
+        experimental: this.#experimental,
       });
-      this.state = WorkerState.Ready;
+      this.#state = WorkerState.Ready;
     } catch (e) {
-      this.state = WorkerState.Error;
+      this.#state = WorkerState.Error;
       throw e;
     }
   }
@@ -108,7 +115,7 @@ export class WorkerController extends EventTarget {
   async runPiece(
     bg: Cell<BGPieceEntry>,
   ): Promise<void> {
-    if (this.state !== WorkerState.Ready) {
+    if (this.#state !== WorkerState.Ready) {
       throw new Error("Worker not ready.");
     }
     return await this.exec(WorkerIPCMessageType.Run, {
@@ -118,17 +125,17 @@ export class WorkerController extends EventTarget {
 
   async shutdown() {
     if (
-      this.state === WorkerState.Terminating ||
-      this.state === WorkerState.Terminated
+      this.#state === WorkerState.Terminating ||
+      this.#state === WorkerState.Terminated
     ) {
-      throw new Error(`Worker is already ${this.state}.`);
+      throw new Error(`Worker is already ${this.#state}.`);
     }
-    this.state = WorkerState.Terminating;
+    this.#state = WorkerState.Terminating;
 
-    for (const [_, task] of this.pending.entries()) {
+    for (const [_, task] of this.#pending.entries()) {
       task.deferred.reject(new Error("Worker shutting down."));
     }
-    this.pending.clear();
+    this.#pending.clear();
 
     try {
       await this.exec(WorkerIPCMessageType.Cleanup);
@@ -137,17 +144,22 @@ export class WorkerController extends EventTarget {
         `Failed to shutdown worker gracefully: ${err}`,
       );
     }
-    this.worker.terminate();
-    this.state = WorkerState.Terminated;
+    this.#worker.terminate();
+    this.#state = WorkerState.Terminated;
   }
 
   isReady(): boolean {
-    return this.state === WorkerState.Ready;
+    return this.#state === WorkerState.Ready;
   }
 
-  // send a message and return a promise that resolves with the response
+  /**
+   * Sends a message and returns a promise that resolves with the response.
+   *
+   * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
+   * drives this member directly.
+   */
   private exec(type: WorkerIPCMessageType, data?: unknown): Promise<void> {
-    const msgId = this.msgId++;
+    const msgId = this.#msgId++;
 
     const message: Record<string, unknown> = {
       msgId,
@@ -167,7 +179,7 @@ export class WorkerController extends EventTarget {
       // Whatever processing is occurring in the worker graph should be
       // terminated and recreated in the future.
       deferred.reject(new Error(`Worker timed out.`));
-    }, this.timeoutMs);
+    }, this.#timeoutMs);
 
     const task = {
       startTime: performance.now(),
@@ -175,41 +187,45 @@ export class WorkerController extends EventTarget {
       type,
       deferred,
     };
-    this.pending.set(msgId, task);
+    this.#pending.set(msgId, task);
 
-    this.worker.postMessage(message);
+    this.#worker.postMessage(message);
 
     return deferred.promise.then(() => {
-      this.logTaskResults(task);
+      this.#logTaskResults(task);
     }, (error: Error) => {
-      this.logTaskResults(task, error.message);
+      this.#logTaskResults(task, error.message);
       throw new Error(error.message);
     }).finally(() => {
       clearTimeout(timeout);
-      this.pending.delete(msgId);
+      this.#pending.delete(msgId);
     });
   }
 
+  /**
+   * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
+   * drives this member directly.
+   */
   private onWorkerMessage = (event: MessageEvent) => {
     const response = event.data;
     if (!isWorkerIPCResponse(response)) {
       console.error(
-        `${this.did}: Received malformed WorkerIPCResponse: ${response}`,
+        `${this.#did}: Received malformed WorkerIPCResponse: ${response}`,
       );
       return;
     }
 
     if (response.type === "ready") {
       this.startInitialize().then(
-        () => this.initializeDeferred.resolve(),
-        (error) => this.initializeDeferred.reject(error),
+        () => this.#initializeDeferred.resolve(),
+        (error) => this.#initializeDeferred.reject(error),
       );
       return;
     }
-    const pending = this.pending.get(response.msgId);
+    const pending = this.#pending.get(response.msgId);
     if (!pending) {
       console.error(
-        `${this.did}: WorkerIPCResponse does not match a request: ${response.msgId}`,
+        `${this.#did}: WorkerIPCResponse does not match a request: ${response.msgId}`,
       );
       return;
     }
@@ -218,28 +234,28 @@ export class WorkerController extends EventTarget {
     } else {
       pending.deferred.resolve();
     }
-    this.pending.delete(response.msgId);
+    this.#pending.delete(response.msgId);
   };
 
-  private onWorkerError = (err: ErrorEvent) => {
-    console.error(`${this.did}: Worker error:`, err);
+  #onWorkerError = (err: ErrorEvent) => {
+    console.error(`${this.#did}: Worker error:`, err);
     // If not prevented, error is rethrown in this context.
     err.preventDefault();
 
     // Set state to `Error`, terminating the worker immediately
-    this.state = WorkerState.Error;
-    this.worker.terminate();
+    this.#state = WorkerState.Error;
+    this.#worker.terminate();
 
     this.dispatchEvent(new WorkerControllerErrorEvent(err));
   };
 
-  private logTaskResults(task: Task, error?: string) {
+  #logTaskResults(task: Task, error?: string) {
     const errorMessage = error ? `: ${error}` : "";
     const state = error ? "failed" : "completed";
     const id = `"${task.type}/${task.msgId}"`;
     const duration = (performance.now() - task.startTime).toFixed(0);
     const message =
-      `${this.did}: Worker task ${state}: ${id} (${duration}ms)${errorMessage}`;
+      `${this.#did}: Worker task ${state}: ${id} (${duration}ms)${errorMessage}`;
     if (error) {
       console.warn(message);
     } else {

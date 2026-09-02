@@ -19,7 +19,6 @@ import { FragmentWriter } from "@commonfabric/test-support/records";
 
 // Directory paths (no glob expansion needed).
 const DIRS = [
-  "packages/agents-host",
   "packages/api",
   "packages/background-piece-service",
   "packages/cf-harness",
@@ -27,10 +26,16 @@ const DIRS = [
   "packages/cli/lib",
   "packages/cli/support",
   "packages/cli/test",
-  "packages/connectors/agents",
+  "packages/connectors/agents/connector",
+  "packages/connectors/agents/debug-view",
+  "packages/connectors/agents/host",
+  "packages/connectors/github/activity-view",
+  "packages/connectors/github/connector",
+  "packages/connectors/github/host",
   "packages/content-hash",
   "packages/dashboard",
   "packages/data-model",
+  "packages/data-model-schema",
   "packages/deno-web-test",
   "packages/felt",
   "packages/fuse",
@@ -86,6 +91,11 @@ const GLOBS = [
   "packages/static/*.ts",
   "packages/patterns/*.ts",
   "packages/patterns/*.tsx",
+  // Iframe guests compile as ordinary browser modules. Their generated
+  // pattern wrappers remain under the classic JSX environment owned by
+  // `deno task cfcheck`.
+  "packages/patterns/*/guest.ts",
+  "packages/patterns/*/guest.tsx",
   "packages/ts-transformers/test/**/*.test.ts",
   // schema-generator tests, excluding test/fixtures: the `*.input.ts`
   // fixtures name ambient wrappers (Cell, Stream, Writable) without
@@ -146,7 +156,9 @@ async function uiComponentFiles(root: string): Promise<string[]> {
 export function scopeOfPath(checkPath: string): string {
   const parts = checkPath.split("/");
   if (parts[0] === "packages") {
-    if (parts[1] === "connectors") return "connectors/agents";
+    if (parts[1] === "connectors") {
+      return parts.slice(1, 4).join("/");
+    }
     return parts[1] ?? "repo";
   }
   return parts[0] ?? "repo";
@@ -225,6 +237,7 @@ export interface TypecheckOptions {
   list?: boolean;
   reload?: boolean;
   check?: typeof checkGroup;
+
   /**
    * Spool one typecheck record per scope.
    *

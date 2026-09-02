@@ -291,19 +291,21 @@ describe("SES security regressions", () => {
     cancel();
   });
 
-  // CT-1644: this test compiles
-  //   handler((_e, _s) => [computed(() => format('a'))][0])
-  // The nested `computed(...)` is a callback that must be verified/blessed so
-  // it can run in trusted compartments. Before Phase 2 the computed lowered to
-  // a lift INSIDE the handler body, so it was blessed at INVOCATION time, and
-  // this test asserted the verified-function registry GREW when the handler
-  // ran. After Phase 2 the computed lowers to a module-scope
-  // `const __cfLift_N = lift(false, fn)` blessed ONCE AT LOAD; the handler body
-  // just calls `__cfLift_N()`. Berni confirmed (2026-06-02) load-time blessing
-  // is sufficient, so the assertion is updated to the load-time shape: the
-  // nested computation is already in the registry after load, and invoking the
-  // handler succeeds without needing (or losing) an invocation-time entry.
   it("blesses nested callbacks at load (CT-1644: hoisted to module scope)", async () => {
+    // CT-1644: this test compiles
+    //   handler((_e, _s) => [computed(() => format('a'))][0])
+    // The nested `computed(...)` is a callback that must be verified/blessed so
+    // it can run in trusted compartments. Before Phase 2 the computed lowered
+    // to a lift INSIDE the handler body, so it was blessed at INVOCATION time,
+    // and this test asserted the verified-function registry GREW when the
+    // handler ran. After Phase 2 the computed lowers to a module-scope `const
+    // __cfLift_N = lift(false, fn)` blessed ONCE AT LOAD; the handler body just
+    // calls `__cfLift_N()`. Berni confirmed (2026-06-02) load-time blessing is
+    // sufficient, so the assertion is updated to the load-time shape: the
+    // nested computation is already in the registry after load, and invoking
+    // the handler succeeds without needing (or losing) an invocation-time
+    // entry.
+
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -659,12 +661,14 @@ describe("SES security regressions", () => {
     expect(probeResult.main?.default()).toBe(expectedApiUrl);
   });
 
-  // Programs compile from TS sources and every module body is verified, so a
-  // hand-injected bundle is not a reachable input. The loader-agnostic invariant
-  // this pins is that no loader machinery leaks into the module compartment's
-  // global surface — no callable `define`, no ambient `require`, nothing that
-  // would let authored code reach loader-backed hidden state.
   it("does not expose loader machinery on the module compartment globals", async () => {
+    // Programs compile from TS sources and every module body is verified, so a
+    // hand-injected bundle is not a reachable input. The loader-agnostic
+    // invariant this pins is that no loader machinery leaks into the module
+    // compartment's global surface — no callable `define`, no ambient
+    // `require`, nothing that would let authored code reach loader-backed
+    // hidden state.
+
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [

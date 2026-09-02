@@ -12,9 +12,9 @@
 //     inherited function as the bound value;
 //   - writing `undefined` to such a key looked like a no-op and was dropped.
 //
-// These pin the fix at the two paths reachable from the public API. Each has a
-// control case using an ordinary name, so a harness that stops exercising the
-// path fails loudly rather than passing vacuously.
+// These pin the fix on the paths below, each through the surface a caller
+// actually uses. Each has a control case using an ordinary name, so a harness
+// that stops exercising the path fails loudly rather than passing vacuously.
 //
 // Sibling of the same bug class in the query-result proxy's
 // `getOwnPropertyDescriptor` trap (#5357).
@@ -180,9 +180,6 @@ describe("properties named after Object.prototype members", () => {
     expect(stored.toLocaleString).toBe("written");
   });
 
-  // Review of the first pass found four more public paths with the same
-  // predicate. Each is pinned here through the surface a caller actually uses.
-
   it("removing such a property actually removes it", () => {
     const c = runtime.getCell<Record<string, unknown>>(
       space,
@@ -251,9 +248,10 @@ describe("properties named after Object.prototype members", () => {
   });
 });
 
-// `path-utils` and `piece-helpers` are exported surfaces, so they get direct
-// coverage rather than being exercised only through a cell.
 describe("path helpers and prototype-named segments", () => {
+  // `path-utils` is an exported surface, so it gets direct coverage rather
+  // than being exercised only through a cell.
+
   it("getValueAtPath does not hand back an inherited member", () => {
     expect(getValueAtPath({}, ["toString"])).toBe(undefined);
     expect(getValueAtPath({}, ["valueOf"])).toBe(undefined);
@@ -282,12 +280,13 @@ describe("path helpers and prototype-named segments", () => {
     expect(setValueAtPath(target, ["toString"], "stored")).toBe(false);
   });
 
-  // Narrowing the read to own properties must not cost the OWN properties a
-  // primitive genuinely has. `Object.hasOwn` coerces with `ToObject`, so it
-  // keeps a string's `length` and indices while still refusing its prototype
-  // methods — callers reconstructing write details walk over primitive
-  // subtrees and would otherwise see a valid value as absent.
   it("getValueAtPath keeps own properties of primitives", () => {
+    // Narrowing the read to own properties must not cost the OWN properties a
+    // primitive genuinely has. `Object.hasOwn` coerces with `ToObject`, so it
+    // keeps a string's `length` and indices while still refusing its prototype
+    // methods — callers reconstructing write details walk over primitive
+    // subtrees and would otherwise see a valid value as absent.
+
     expect(getValueAtPath("abc", ["length"])).toBe(3);
     expect(getValueAtPath("abc", ["0"])).toBe("a");
     expect(getValueAtPath({ a: "xy" }, ["a", "length"])).toBe(2);

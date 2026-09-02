@@ -117,7 +117,7 @@ async function runTest() {
 
   // Read the pattern file content
   const patternContent = await Deno.readTextFile(
-    "./integration/derive_array_leak.test.tsx",
+    "./integration/derive_array_leak.tsx",
   );
 
   const pattern = await compileAndSavePattern(

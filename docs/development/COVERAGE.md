@@ -18,6 +18,13 @@ profile into an LCOV file, and the job uploads it as a `coverage-profile-*`
 artifact. Most test jobs set `DENO_COVERAGE_DIR`, including both pattern
 integration jobs.
 
+A focused `*.browser.test.ts` file run through `deno-web-test` executes its
+application module inside Chrome. That browser execution proves DOM behavior,
+but it does not enter the Deno V8 profile. Put reusable policy and state
+transitions in an ordinary source module and exercise them from a plain Deno
+unit test as well; keep the browser case for the boundary only a real DOM can
+prove.
+
 Do not name a source file so that its path ends in `test.ts` (or `test.tsx`,
 `test.js`, `test.mjs`, `test.jsx`). `deno coverage` takes those for test files
 and leaves them out of the report, even though V8 records them and even if
@@ -325,6 +332,20 @@ moved — a sibling branch in the same file is the next one to flap.
 follows that line from a group-level `+2` down to the two integration hits that
 covered it in one run and not the next.
 
+What the second party holds need not be a write. A lease row another process
+owns puts a branch in the same position: the server executor's `activate()`
+reports `lease-unavailable` and returns `false` only when the space's execution
+lease is already held, and the host arm that unregisters the refused space runs
+only behind that. Nothing in the suite asks for a rival holder, so both were
+reached when one case's park happened to chain a re-activation while the rival
+row it had installed for a different purpose still stood. The way out is the
+same one: a lease is a row, so a test writes the row and calls `activate()`. The
+cases are in `packages/runner/test/executor-space-server.test.ts` and
+`packages/runner/test/executor-serving-loop.test.ts`, and
+[their investigation record](../history/development/coverage-flake-executor-contention-paths-2026-08-26.md)
+follows ten lines across three files from a group-level `+10` down to the two
+shards that reached them.
+
 ### Failure reports reached only when the operation fails
 
 A fourth shape is the branch that reports a failure: the `if (error)` arm of an
@@ -400,6 +421,42 @@ it to commit.
 follows those five lines from the group-level `+5` down to the single artifact
 that covered them, and to the sibling rethrow that no artifact in either run
 covered.
+
+### Branches reached only when a batch carries unrelated work
+
+A fifth shape is the branch that handles what a failure did not touch: the
+skip for the entry a bulk operation leaves alone, the arm that keeps the
+survivors of a partial failure moving. Whether the branch runs is decided by
+what else was in the batch when the failure landed, and that is assembled by
+scheduling rather than named by any test.
+
+The server executor's wave withdrawal is one of those. When a foreign space's
+co-hosted engine cannot be resolved, `commitWave()` in
+`packages/runner/src/executor/wave.ts` walks the wave's contributions and
+withdraws the ones that sealed into that space — an event handler requeues, a
+derivation drops — while everything else commits. Reaching the skip that lets
+everything else through takes a wave holding both a contribution that crossed
+into the failed space and one that did not. An end-to-end test can provoke the
+first; the second is whatever the serving loop had sealed by then. The loop was
+entered by exactly one artifact in each of two consecutive runs, and it saw two
+contributions on one and one on the other.
+
+Assemble the batch in the test rather than provoking one. `WaveAccumulator`
+takes its space, lease and replica lookup as arguments and exposes
+`failForeignSpace()` as a method, so a test seals the contributions it wants,
+fails a space, and commits, with nothing else deciding what the wave holds. The
+`an unresolvable foreign space withdraws exactly its own crossings` case in
+`packages/runner/test/executor-wave.test.ts` puts one contribution of each kind
+in the wave and asserts the disposition of each, so a version that withdrew the
+bystander with the crossings fails rather than staying green on the line count.
+State all the arms in the one case rather than only the arm that moved. The
+derivation drop arm beside this flapping skip had never been covered on any
+run, and it comes for free once the wave is built by hand — whereas a case
+written for the skip alone leaves it exactly where it was, and a second case
+added for it later would set up the same wave twice.
+[The investigation record](../history/development/coverage-flake-foreign-space-withdrawal-2026-08-26.md)
+follows the single line from the group-level `+1` down to the one artifact that
+covered it, and to the two arms neither run reached.
 
 ### Checks the layer below already makes
 
@@ -565,6 +622,13 @@ under `---BEGIN COPY-PASTE---` at the end of the Coverage Check job's log. A lin
 that starts with `ACCEPT_COVERAGE_DEBT:` and that the check cannot read fails the
 job and says what form to write instead, rather than being passed over as though
 it were not there.
+
+An accepted group keeps its attribution. The gate keeps one comment on the pull
+request and rewrites it in place as the answer changes, and the comment an
+acceptance leaves behind names the files holding the lines it accepted, under
+"Files with new uncovered lines" — the same heading and the same counts the
+failing run wrote. So the pull request goes on saying which file the debt is in
+after the acceptance stops anything from failing over it.
 
 The left margin is what tells an acceptance from a mention of one. A description
 can name the marker in a sentence, and can indent an example of it into a code

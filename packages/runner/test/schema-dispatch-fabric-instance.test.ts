@@ -11,6 +11,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { internSchema } from "@commonfabric/data-model-schema";
+import type { FabricValue } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   FabricError,
@@ -20,14 +22,16 @@ import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   Entity,
   Revision,
   State,
   URI,
 } from "@commonfabric/memory/interface";
-import type { SchemaPathSelector } from "@commonfabric/api";
+import {
+  FABRIC_SPECIAL_OBJECT_BRAND,
+  type SchemaPathSelector,
+} from "@commonfabric/api";
 
 import {
   createDefaultTraversalContext,
@@ -113,6 +117,38 @@ describe("value-type dispatch: FabricSpecialObject subclasses", () => {
     expect((result as Record<string, unknown>).field).toBeInstanceOf(
       FabricBytes,
     );
+  });
+
+  it("matches a FabricPrimitive's anyOf branch by prototype-chain required keys", () => {
+    // The branch prefilter's `required` check tests membership with `in`
+    // for a FabricSpecialObject — accessors like `length` count, the
+    // nominal brand key is satisfied by construction — and an unresolvable
+    // $ref branch passes the prefilter to complain in traversal proper.
+    const blob = new FabricBytes(new Uint8Array([1, 2, 3]));
+    const anyOfSelector: SchemaPathSelector = {
+      path: ["value"],
+      // Interned and at the schema root: the prepared branch prefilter
+      // under test runs only for interned schemas, the identity-stable
+      // form a resolved link's schema arrives in.
+      schema: internSchema({
+        anyOf: [
+          { $ref: "#/$defs/absent" },
+          { type: "object", required: ["missing"] },
+          {
+            type: "object",
+            required: [FABRIC_SPECIAL_OBJECT_BRAND, "length"],
+          },
+        ],
+      })!,
+    };
+    const { traverser, doc } = traverserOver(
+      "of:dispatch-primitive-anyof",
+      blob,
+      anyOfSelector,
+    );
+
+    const { ok: result } = traverser.traverse(doc);
+    expect(result).toBeInstanceOf(FabricBytes);
   });
 
   it("routes a modern FabricLink through pointer traversal", () => {

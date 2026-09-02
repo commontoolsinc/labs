@@ -36,6 +36,8 @@ import {
   relativeToRepo,
   removeVintages,
   reportCaptureRefusedOnRed,
+  reportCapturesSuperseded,
+  reportDropsApplied,
   reportEveryGenerationCurrent,
   reportFailures,
   reportNothingReplayed,
@@ -410,6 +412,45 @@ describe("reporting", () => {
     })).toContain(
       "2 target(s) were served routes and not identity-compared.",
     );
+  });
+
+  it("names each derived target held back once, with the rule that held it", () => {
+    // A target can be raised by several vintages, and the count is of targets
+    // rather than of times one came up — otherwise "held 6 back" describes two
+    // targets and reads as four more than are there.
+    const report = reportCapturesSuperseded([
+      "topics/topics.tsx#rows",
+      "system/home.tsx#nav",
+      "topics/topics.tsx#rows",
+    ]);
+
+    expect(report).toContain("Held 2 derived sub-pattern target(s) back");
+    // Sorted, so a run's output does not reorder with the replay order.
+    expect(report.split("\n").slice(1)).toEqual([
+      "  system/home.tsx#nav",
+      "  topics/topics.tsx#rows",
+    ]);
+    // The grounds travel with the count. A held-back target read without them
+    // looks like state the gate lost rather than state it re-supplies.
+    expect(report).toContain(
+      "a hoist is derivation the updated source re-runs",
+    );
+    expect(report).toContain("root contracts still gate");
+  });
+
+  it("names the exemption list beside the paths it forgave", () => {
+    // The reader's next move is to retire the entry once the removal it was
+    // granted for is done, so the report says where that entry lives.
+    const report = reportDropsApplied(
+      new Set(["topics/topics.tsx journal", "system/home.tsx nav"]),
+    );
+
+    expect(report).toContain("Held 2 path(s) back from their vintage");
+    expect(report).toContain("tasks/pattern-vintage-accepted-drops.ts");
+    expect(report.split("\n").slice(1)).toEqual([
+      "  system/home.tsx nav",
+      "  topics/topics.tsx journal",
+    ]);
   });
 
   it("refuses --update with no test named, and says what to name", () => {
@@ -941,7 +982,7 @@ describe("relaxing the stored schema for reading", () => {
     // `unknown` field lowers to the first, and an index signature
     // (`[key: string]: unknown`, which `system/default-app.tsx` declares) to
     // the second. Measured on the committed `default-app.tsx` fixture, the
-    // second is what hid `recentPieces`, `summaryIndex` and `trackRecent`.
+    // second is what hid `summaryIndex`, which the result type does not name.
     expect(schemaRelaxedForComparison({
       type: "object",
       properties: { note: { type: "unknown" } },

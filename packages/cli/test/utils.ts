@@ -41,6 +41,30 @@ export function checkStderr(stderr: string[]) {
   expect(relevant[0]).toMatch(/deno run /);
 }
 
+/**
+ * Collects what `body` writes to `console.error`, restoring the console
+ * afterwards even where `body` throws.
+ *
+ * Every argument is stringified, so a `null` or an `undefined` among them
+ * reads as its own name rather than as the empty string `join` alone would
+ * give it.
+ */
+export async function captureStderr(
+  body: () => Promise<void>,
+): Promise<string[]> {
+  const lines: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  };
+  try {
+    await body();
+  } finally {
+    console.error = original;
+  }
+  return lines;
+}
+
 export interface CliResult {
   code: number;
   stdout: string[];

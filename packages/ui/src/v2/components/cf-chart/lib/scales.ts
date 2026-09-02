@@ -3,6 +3,7 @@
  *
  * Collects data domains across all marks and creates d3 scales.
  */
+
 // @ts-types="@types/d3-scale"
 import {
   type ScaleBand,

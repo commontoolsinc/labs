@@ -33,10 +33,11 @@ import {
   SPARSE,
 } from "./fixtures/codec-fixtures.ts";
 
-/** Encoded forms, for the decode direction. */
+/** Encoded forms of the singles, for the decode direction. */
 const SINGLES_JSON = SINGLES.map(([n, v]) =>
   [n, jsonFromFabricValue(v)] as const
 );
+
 const ARRAYS_JSON = ARRAYS.map(([n, v]) =>
   [n, jsonFromFabricValue(v)] as const
 );
@@ -171,12 +172,10 @@ for (const [size, json] of OBJECTS_JSON) {
   });
 }
 
-//
 // Bulk payloads by magnitude, both reaching base64url text of a byte string
 // of the same length. Sized in bytes so the two columns answer the same
 // question of each; what separates them is the trip a `bigint` takes through
 // `toString(16)` to become bytes in the first place.
-//
 
 const BULK: readonly (readonly [
   string,
@@ -235,12 +234,10 @@ for (const [leaves, json] of OMNIBUSES_JSON) {
   });
 }
 
-//
 // Omnibus trees whose contents need no encoding, and those whose contents need
 // none only under a realm-crossing format. The gap between the two is what
 // this format's tagging and escaping cost over a tree that another format
 // carries directly.
-//
 
 for (const [leaves, value] of JSON_PASS_THROUGH_OMNIBUSES) {
   Deno.bench({

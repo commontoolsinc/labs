@@ -32,9 +32,14 @@ import { selectPendingStreamEventDocs } from "@commonfabric/memory/v2/engine";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Runtime } from "../runtime.ts";
 import type { MemorySpace } from "../storage/interface.ts";
-import { SpaceServer, type SpaceServerPolicy } from "./space-server.ts";
+import {
+  SpaceServer,
+  type SpaceServerOptions,
+  type SpaceServerPolicy,
+} from "./space-server.ts";
 import {
   emptyServingLoopStats,
+  refreshDeliveryCheckpointStats,
   registerServingLoopStatsProvider,
   type ServingLoopStats,
 } from "./stats.ts";
@@ -64,20 +69,22 @@ const failureParkBackoffDelayMs = (
 
 export type ExecutorHostOptions = {
   server: MemoryServer;
+
   /** The service identity (DID) DR1 holders are minted from — also the
    * loopback sessions' principal (the read-row admission matches it,
    * protocol.md §2). */
   serviceIdentity: string;
+
   /** Build a serving runtime for one space over the loopback plane. The
    * factory owns auth and runtime options; it MUST pass
-   * `experimental: { serverExecution: true, systemPatternAutoUpdate:
-   * true }` — the flag posture and §3e's server-side pattern-update
-   * flip. */
+   * `experimental: { serverExecution: true }`. */
   createRuntime: (space: MemorySpace) => Promise<{
     runtime: Runtime;
     dispose: () => Promise<void>;
   }>;
+
   policy?: SpaceServerPolicy;
+
   /** The RULED test switch for the tenure's space-root ensure (OW45
    * arm-B stage 1, RULED 2026-08-24 — see SpaceServerOptions.
    * ensureSpaceRoots): default ON (production posture); `false`
@@ -85,17 +92,22 @@ export type ExecutorHostOptions = {
    * whole-instance switch — per-space discrimination is deferred by
    * the same ruling. */
   ensureSpaceRoots?: boolean;
+
+  /** Forwarded internal deterministic-verification seam. */
+  decorateWaveCommitSink?: SpaceServerOptions["decorateWaveCommitSink"];
 };
 
 export class ExecutorHost {
   readonly #options: ExecutorHostOptions;
   readonly #spaces = new Map<string, SpaceServer>();
   readonly #activating = new Map<string, Promise<void>>();
+
   /** Records admitted while a space's activation is still in flight
    * (before its SpaceServer registers): buffered here, drained into the
    * feed at registration — an admission racing activation must never be
    * dropped (its seq may pass the activation's scan head). */
   readonly #pendingNotices = new Map<string, AdmittedCommitNotice[]>();
+
   /** The ONE process-lifetime localSeq counter for every sink this host
    * builds (the replay keying — engine-wave-sink.ts): survives
    * park/re-activate, shared across ALL spaces. It must be
@@ -114,14 +126,17 @@ export class ExecutorHost {
    * in every store (the engine keys replay by equality, never
    * contiguity). */
   readonly #sinkLocalSeq = { value: 0 };
+
   /** Consecutive `loop-failed` parks per space (the re-activation
    * backoff's streak). Incremented at each failure park, cleared by a
    * successfully committed wave — real served progress, not merely a
    * runtime that got built (every crash-loop tenure builds one). */
   readonly #failureParkStreaks = new Map<string, number>();
+
   /** Wakers for in-flight backoff sleeps — close() flushes them so a
    * delayed re-activation never stalls shutdown. */
   readonly #backoffWakers = new Set<() => void>();
+
   readonly #stats: ServingLoopStats = emptyServingLoopStats();
   #releaseServerExecution: () => void = () => {};
   #closed = false;
@@ -160,6 +175,7 @@ export class ExecutorHost {
   /** The §7 counters, live: static counts merged with per-space state
    * (activeSpaces and watermarkLag read the current SpaceServers). */
   stats(): ServingLoopStats {
+    refreshDeliveryCheckpointStats(this.#stats);
     let watermarkLag = 0;
     let activeSpaces = 0;
     for (const server of this.#spaces.values()) {
@@ -173,7 +189,13 @@ export class ExecutorHost {
       // the top-level spread shares its reference (the same reason as
       // NIT-1's settle-series copy below).
       derivedCommitsBySpace: { ...this.#stats.derivedCommitsBySpace },
-      events: { ...this.#stats.events },
+      events: {
+        ...this.#stats.events,
+        needsAttention: {
+          ...this.#stats.events.needsAttention,
+          byPhase: { ...this.#stats.events.needsAttention.byPhase },
+        },
+      },
       demand: { ...this.#stats.demand },
       settle: {
         // NIT-1: deep-copy the entries — a series row stays live after it
@@ -203,6 +225,24 @@ export class ExecutorHost {
 
   #onCommitAdmitted(notice: AdmittedCommitNotice): void {
     if (this.#closed) return;
+    // THE SESSION REMOUNT's trigger (storage/v2.ts
+    // `consumeOwedSessionRemount`): this commit touched the ACL document
+    // (`of:<space>` — the memory server's aclDocId), which is the ONLY
+    // input the authorization verdict that revokes a session has. Every
+    // serving runtime is told, not just this space's: the session that
+    // starves is typically a CROSS-SPACE replica — a served dispatch's
+    // argument link into the viewer's home space, whose pre-genesis
+    // session that space's genesis ACL de-authorized. Latch-only and
+    // no-op unless a runtime actually holds a terminated session for the
+    // space, so the fan-out costs one map walk per ACL-doc admission.
+    if (
+      this.#spaces.size > 0 &&
+      notice.writes.some((write) => write.id === `of:${notice.space}`)
+    ) {
+      for (const server of this.#spaces.values()) {
+        server.noteSpaceAclChanged(notice.space as MemorySpace);
+      }
+    }
     // Phase 5's server-internal foreign wake needs NO host machinery
     // (survival-tested: a fan-out built here was mutation-probed
     // redundant and removed): a foreign commit's frames arrive on the
@@ -432,6 +472,11 @@ export class ExecutorHost {
         policy: this.#options.policy,
         ...(this.#options.ensureSpaceRoots !== undefined
           ? { ensureSpaceRoots: this.#options.ensureSpaceRoots }
+          : {}),
+        ...(this.#options.decorateWaveCommitSink !== undefined
+          ? {
+            decorateWaveCommitSink: this.#options.decorateWaveCommitSink,
+          }
           : {}),
         onParked: (reason) => {
           // The backoff streak: a `loop-failed` park extends it; an

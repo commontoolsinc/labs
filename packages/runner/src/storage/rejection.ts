@@ -13,7 +13,7 @@ export function isPermanentRejection(
  * The names of terminal commit rejections: a commit-time evaluation that
  * DETERMINISTICALLY refused the committed data itself, so re-running the
  * identical handler recomputes the identical refused write and can NEVER
- * converge.
+ * converge. One member per evaluation site:
  *
  * - `RowLabelCommitError` (server-side, wire): a CFC per-row label
  *   commit-rule violation (memory/v2/sqlite/commit-eval.ts, evaluated
@@ -31,10 +31,22 @@ export function isPermanentRejection(
  *   same live echo and refuses identically. Never crosses the wire —
  *   minted in storage/v2.ts (`makeSpeculativeBasisRefusal`) before the
  *   push.
+ * - `CfcCommitRefusalError` (client-side, CFC boundary): flow enforcement
+ *   evaluated the transaction's own reads and writes and refused them
+ *   before storage ever saw the commit (`rejectCommitBeforeStorage` in
+ *   extended-storage-transaction.ts). Carries the prepare refusal reasons
+ *   as a structured `reasons` array. Never crosses the wire either.
+ *   VERDICTS only, and every recorded reason must be one. A reason is a
+ *   verdict when its producer tags it (`cfc/verdict-reason.ts`); an
+ *   untagged reason — an input prepare could not evaluate, a resolution
+ *   that failed, a prepared state a caller disturbed through
+ *   `invalidateCfc` — keeps the retryable `StorageTransactionAborted`
+ *   name, because a fresh attempt can decide differently.
  */
 const TERMINAL_REJECTION_NAMES: ReadonlySet<string> = new Set([
   "RowLabelCommitError",
   "SpeculativeBasisError",
+  "CfcCommitRefusalError",
 ]);
 
 /**
@@ -43,8 +55,9 @@ const TERMINAL_REJECTION_NAMES: ReadonlySet<string> = new Set([
  * terminal like a {@link isPermanentRejection}, but classified separately: a
  * permanent rejection is an idempotency/lineage precondition
  * (`origin-committed`/`receipt-exists`), whereas a terminal rejection refuses
- * the committed data on its own merits (server commit-rule evaluation, or the
- * client-side speculative-basis export refusal). Both must stop the
+ * the committed data on its own merits (server commit-rule evaluation, the
+ * client-side speculative-basis export refusal, or the client's CFC boundary).
+ * Both must stop the
  * handler immediately: a doomed handler that keeps re-running through its retry
  * budget produces speculative rev bumps on each attempt that starve concurrent
  * sibling commits sharing reactive state. Unlike a stale-read
@@ -205,9 +218,13 @@ export function isStorageTransactionInconsistent(
  * re-established session its convergence argument needs never arrives. Nothing
  * between two `editWithRetry` attempts clears or remounts one:
  *  - `SpaceReplica.sessionHandle()` (storage/v2.ts) memoizes the mount and drops
- *    it only in `close()`/`closeNow()`, so every attempt reuses the very handle
- *    the server just refused;
- *  - `SpaceSession.reopen()` (memory/v2/client.ts) runs only from `restore()`,
+ *    it only in `close()`/`closeNow()` — and, since 2026-08-26, when an admitted
+ *    commit touches the space's ACL doc (`consumeOwedSessionRemount`, the READ
+ *    path's fix for the profile-starvation fifth face). Nothing an `editWithRetry`
+ *    ATTEMPT does clears it, so every attempt still reuses the very handle the
+ *    server just refused: the remount is driven by the ACL changing, not by the
+ *    retry, which is exactly why it does not make this class retryable;
+ *  - `SpaceSession.#reopen()` (memory/v2/client.ts) runs only from `restore()`,
  *    which only the client's `reconnect()` calls — i.e. only after a TRANSPORT
  *    close;
  *  - `sendOutstandingCommit`'s catch (memory/v2/client.ts) keeps a commit
@@ -222,7 +239,7 @@ export function isStorageTransactionInconsistent(
  * SERVER dropped — an ACL de-authorization sweep (`#revokeDeauthorizedSessions`,
  * memory/v2/server.ts, whose own comment is "its next message fails closed
  * (Unknown session)"), or a takeover, both of which also delete the entry
- * `Connection.requireSession` checks. That is terminal for the session: the
+ * `Connection.#requireSession` checks. That is terminal for the session: the
  * client's remedy is the `session/revoked` frame, which CLOSES it
  * (`terminateSession`), not a reopen — and a reopen would be denied at
  * `session.open`.
@@ -236,6 +253,13 @@ export function isStorageTransactionInconsistent(
  * would have seen on attempt 1. Move it back into the allow-list the day the
  * retry path clears `#sessionHandle`, or the client reopens on `SessionError`:
  * the convergence argument is sound, only the remount is missing.
+ * (2026-08-26 — the READ path's half of that gap is now closed, and it is
+ * worth being precise about which half. `consumeOwedSessionRemount` remounts
+ * when the ACL CHANGES, which is the only event that can change this verdict;
+ * a commit RETRY is not that event, so the sentence above still stands for
+ * this predicate. What would move `SessionError` into the allow-list is a
+ * retry path that waits for the remount rather than one that re-fires
+ * immediately.)
  */
 export function isTransientCommitRejection(
   error: { name?: string } | undefined | null,
@@ -245,21 +269,56 @@ export function isTransientCommitRejection(
 }
 
 /**
- * The attempt was discarded before it ever reached storage, so there is no
- * server verdict to respect: either the `editWithRetry` callback called
- * `tx.abort()` to throw this attempt away, or CFC enforcement refused to hand
- * the transaction to storage (`rejectCommitBeforeStorage` in
- * extended-storage-transaction.ts). Re-running produces a genuinely new
- * attempt, and — unlike every other rejection class — a discarded attempt costs
- * no round-trip and no `finalizeRejection`, so retrying one is local work
- * rather than churn against the server.
+ * The opening words of the message on every commit CFC enforcement refuses
+ * before the transaction reaches storage (`rejectCommitBeforeStorage` in
+ * extended-storage-transaction.ts). The refusal travels as a
+ * `StorageTransactionAborted` whose message carries the detail, so the prefix
+ * is what tells one apart from an ordinary `tx.abort()`. Minted and matched
+ * from this one constant.
+ */
+export const CFC_ENFORCEMENT_REJECTION_PREFIX =
+  "CFC enforcement rejected commit";
+
+/**
+ * CFC enforcement refused this commit before it reached storage: the
+ * transaction was relevant to enforcement and did not come out of prepare in a
+ * prepared state, or the prepared digest changed under it. The refusal names
+ * the rule that produced it — a writer-fit confidentiality misfit, a
+ * writeAuthorizedBy failure, an egress ceiling violation.
  *
- * It is NOT free of observable churn: `rejectCommitBeforeStorage` calls
- * `runCommitCallbacks(result)`, so every `cell.set(v, cb)` callback and every
- * `tx.addCommitCallback` consumer registered on the discarded transaction fires
- * with the failure — once per doomed attempt, same as any other rejection. The
- * cheapness argument is about server round-trips, not about staying invisible
- * to commit-callback consumers.
+ * A refusal does not say whether another attempt would fare better, and the
+ * reasons behind one differ on exactly that. A rule's verdict on the data — a
+ * shape its rules do not support — recurs on every attempt. A reason naming
+ * metadata prepare could not read, a `cid:` schema document or a link source
+ * this replica does not hold yet, is answered by the attempt that reads it.
+ * So this classifies the refusal and not its prospects: it says CFC enforcement
+ * refused the commit, which is what makes a dropped write worth reporting, and
+ * the decision to stop attempting belongs to whoever owns the retries.
+ *
+ * The refusal travels as a `StorageTransactionAborted` whose message opens with
+ * the prefix, and the prefix is what the test reads. A commit error normalized
+ * on its way here can lose its class and keep its message, so testing the
+ * message is what covers both shapes of the same refusal.
+ */
+export function isCfcEnforcementRejection<
+  T extends { message?: string },
+>(
+  error: T | undefined | null,
+): error is T & { message: string } {
+  return typeof error?.message === "string" &&
+    error.message.startsWith(CFC_ENFORCEMENT_REJECTION_PREFIX);
+}
+
+/**
+ * The attempt was discarded before it ever reached storage, so there is no
+ * server verdict to respect: the `editWithRetry` callback called `tx.abort()`
+ * to throw this attempt away, asking for a fresh one. Re-running produces a
+ * genuinely new attempt, and — unlike every other rejection class — a
+ * discarded attempt costs no round-trip and no `finalizeRejection`, so
+ * retrying one is local work rather than churn against the server. The CFC
+ * boundary refusal shares the never-reached-storage shape but NOT the
+ * convergence argument — the refusal is deterministic — so it carries its own
+ * name (`CfcCommitRefusalError`) and classifies as terminal, not discarded.
  *
  * NOTE the asymmetry with a callback that THROWS: `editWithRetry` aborts that
  * transaction and returns immediately without retrying, because a thrown

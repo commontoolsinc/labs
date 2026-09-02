@@ -25,9 +25,10 @@ import { deepFreeze, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "../fabric-instances/fixtures.ts";
 
 describe("ProblematicValue", () => {
-  // Subclass-checking-superclass identity: lives directly under the class
-  // describe (the rule's cross-cutting carve-out).
   it("is an instance of `BaseFabricInstance`", () => {
+    // Subclass-checking-superclass identity: lives directly under the class
+    // describe (the rule's cross-cutting carve-out).
+
     const value = new ProblematicValue("Test@1", "state", "oops");
     expect(value instanceof BaseFabricInstance).toBe(true);
   });
@@ -60,6 +61,7 @@ describe("ProblematicValue", () => {
       // call site: `Object.freeze()` throws on a typed array with elements,
       // and this class deep-freezes its state. Reporting a failure must not
       // itself fail.
+
       const ps = new ProblematicValue("T@1", new Uint8Array([1, 2, 3]), "b");
 
       expect(() => deepFreeze(ps)).not.toThrow();
@@ -70,6 +72,7 @@ describe("ProblematicValue", () => {
       // `isValidFabricValue()` itself has a defect, since throwing here would
       // replace the failure being reported rather than add to it. A hostile
       // proxy is the only way to provoke that from outside.
+
       const hostile = new Proxy({}, {
         get() {
           throw new Error("hostile");
@@ -165,6 +168,7 @@ describe("ProblematicValue", () => {
       it("compares a non-string tag by the rendering it kept", () => {
         // The tag is normalized on the way in, so two instances built from the
         // same unusable tag agree.
+
         expect(new ProblematicValue(42, "s", "boom").equals(
           new ProblematicValue(42, "s", "boom"),
         )).toBe(true);
@@ -179,6 +183,7 @@ describe("ProblematicValue", () => {
           // A preserved tag need not be a tag, so it cannot be the tag this
           // encodes under; `UnknownValue` is the class that round-trips to
           // what it preserved.
+
           const preserved = new ProblematicValue("Weird@7", "s", "oops");
           const malformed = new ProblematicValue("hole", "s", "oops");
 
@@ -211,6 +216,7 @@ describe("ProblematicValue", () => {
 
         it("returns `true` for a `state` present and `undefined`", () => {
           // Every `FabricValue` is a valid state, `undefined` among them.
+
           expect(ProblematicValue[CODEC].canDecode(
             { tag: "Weird@7", state: undefined, error: "oops" },
           )).toBe(true);
@@ -220,6 +226,7 @@ describe("ProblematicValue", () => {
           // An absent property is the only thing that marks a record this
           // codec did not write. Filling it in would put a reshaped record
           // back on the wire rather than reporting the one that arrived.
+
           expect(ProblematicValue[CODEC].canDecode(
             { tag: "Weird@7", error: "oops" },
           )).toBe(false);

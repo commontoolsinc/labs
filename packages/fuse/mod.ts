@@ -9,6 +9,7 @@
 
 import { parseArgs } from "@std/cli/parse-args";
 
+import type { PatternUpdateReceipt } from "@commonfabric/piece/ops";
 import { linkRefFrom } from "@commonfabric/runner/shared";
 
 import {
@@ -72,6 +73,7 @@ import {
   createFuseOperationState,
 } from "./operation-wiring.ts";
 import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
+import { finalizeCommittedSourceWrite } from "./source-write-finalize.ts";
 import {
   EACCES,
   EFBIG,
@@ -745,8 +747,7 @@ export async function main(argv: string[] = Deno.args) {
     Deno.exit(1);
   }
 
-  // --- Callbacks ---
-  // Keep references so GC doesn't collect them.
+  // Callbacks: Keep references so GC doesn't collect them.
   // deno-lint-ignore no-explicit-any
   const callbacks: Deno.UnsafeCallback<any>[] = [];
 
@@ -1703,6 +1704,11 @@ export async function main(argv: string[] = Deno.args) {
         cfcWritebacks.markRunnerCommitFailed(handle.ino, operation, reason);
       }
     };
+    const completeWrite = (kind: string): 0 => {
+      writeStats.flushed++;
+      console.log(`[write-trace] flush-ok ino=${handle.ino} kind=${kind}`);
+      return 0;
+    };
     try {
       if (writeTarget?.kind === "ignored") {
         if (handle.version === flushVersion) {
@@ -1743,9 +1749,7 @@ export async function main(argv: string[] = Deno.args) {
           handle.buffer = new Uint8Array(0); // fire-and-forget
           handle.bufferValid = false;
         }
-        writeStats.flushed++;
-        console.log(`[write-trace] flush-ok ino=${handle.ino} kind=handler`);
-        return 0;
+        return completeWrite("handler");
       }
 
       if (writeTarget?.kind === "source") {
@@ -1824,46 +1828,50 @@ export async function main(argv: string[] = Deno.args) {
           return EACCES;
         }
 
+        let receipt: PatternUpdateReceipt;
         try {
-          await piece.setPattern({
+          receipt = await piece.setPattern({
             main: baseMain,
             mainExport: baseMainExport,
             files: updatedFiles,
             sourceRoots: program.sourceRoots,
             dataFiles: program.dataFiles,
           }, { dangerouslyAllowIncompatibleSchema });
-          // Clear error.log on success
-          const errorLogIno = tree.lookup(srcIno, "error.log");
-          if (errorLogIno !== undefined) {
-            tree.updateFile(errorLogIno, "");
-          }
-          markExistingReady();
-          await bridge.finalizeSourceWritePath(writeTarget.target);
-          reconcileCfcWritebacks("source flush post-finalize");
-          markExistingFinalized();
-          if (handle.version === flushVersion) {
-            handle.dirty = false;
-            handle.truncatePending = false;
-          }
-          writeStats.flushed++;
-          console.log(`[write-trace] flush-ok ino=${handle.ino} kind=source`);
-          return 0;
         } catch (e) {
-          // Write compile error to error.log
+          // No receipt means no source transaction committed. Report the
+          // write as failed; every operation after this catch is local
+          // projection work and cannot negate the durable outcome.
           const errorMsg = e instanceof Error ? e.message : String(e);
           if (isConnectionWriteFailure(e)) {
             noteWriteFailure(e);
             markExistingFailed(errorMsg);
             return EROFS;
           }
-          const errorLogIno = tree.lookup(srcIno, "error.log");
-          if (errorLogIno !== undefined) {
-            tree.updateFile(errorLogIno, errorMsg);
-          }
+          bridge.writeSourceErrorLog(writeTarget.target, errorMsg);
           console.error(`[source] Compile error in ${relPath}: ${errorMsg}`);
           markExistingFailed(errorMsg);
           return EACCES;
         }
+
+        bridge.writeSourceErrorLog(writeTarget.target, "");
+        markExistingReady();
+        const finalize = () =>
+          bridge.finalizeSourceWritePath(writeTarget.target, receipt);
+        const finalized = await finalizeCommittedSourceWrite(receipt, finalize);
+        if (finalized.status === "failed") {
+          const error = finalized.error;
+          // The source is already durable, but the mount should still enter
+          // degraded mode when its projection refresh discovers an outage.
+          if (isConnectionWriteFailure(error)) noteWriteFailure(error);
+          console.error(`[source] ${finalized.warning}`);
+          bridge.writeSourceErrorLog(writeTarget.target, finalized.warning);
+        }
+        reconcileCfcWritebacks("source flush post-finalize");
+        markExistingFinalized();
+        if (handle.version === flushVersion) {
+          handle.dirty = handle.truncatePending = false;
+        }
+        return completeWrite("source");
       }
 
       if (
@@ -1900,11 +1908,7 @@ export async function main(argv: string[] = Deno.args) {
         } catch {
           // Stale inode after subscription rebuild — ignore.
         }
-        writeStats.flushed++;
-        console.log(
-          `[write-trace] flush-ok ino=${handle.ino} kind=fsProjection`,
-        );
-        return 0;
+        return completeWrite("fsProjection");
       }
 
       let value: unknown;
@@ -1962,9 +1966,7 @@ export async function main(argv: string[] = Deno.args) {
         // rebuilt the tree with the correct data.
       }
 
-      writeStats.flushed++;
-      console.log(`[write-trace] flush-ok ino=${handle.ino} kind=value`);
-      return 0;
+      return completeWrite("value");
     } catch (e) {
       const logPrefix = writeTarget?.kind === "handler" ||
           (callableNode?.kind === "callable" &&
@@ -3432,7 +3434,7 @@ export async function main(argv: string[] = Deno.args) {
   );
   callbacks.push(symlinkCb);
 
-  // --- Build ops struct ---
+  // Build ops struct
   const opsBuf = new ArrayBuffer(OPS_SIZE);
   const opsView = new DataView(opsBuf);
 
@@ -3473,7 +3475,7 @@ export async function main(argv: string[] = Deno.args) {
   }
   setOp(OPS_OFFSETS.create, createCb);
 
-  // --- Mount ---
+  // Mount
   const fuseArgs = buildMountFuseArgs({
     os: Deno.build.os,
     provider: platform.provider(),

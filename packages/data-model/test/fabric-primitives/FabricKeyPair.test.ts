@@ -104,6 +104,7 @@ describe("FabricKeyPair", () => {
       // The names agree and the key types are right, so this is refused by the
       // parameter check alone. A P-256 public key and a P-384 private key
       // cannot operate together.
+
       const { publicKey } = await crypto.subtle.generateKey(
         { name: "ECDSA", namedCurve: "P-256" },
         false,
@@ -124,6 +125,7 @@ describe("FabricKeyPair", () => {
       // `publicExponent` byte array, both of which the parameter check
       // compares. A genuine pair reports them identically on both keys, so
       // deepening the check must not have made this one refusable.
+
       const pair = await crypto.subtle.generateKey(
         {
           name: "RSASSA-PKCS1-v1_5",
@@ -182,6 +184,7 @@ describe("FabricKeyPair", () => {
         // fresh, its contents are not. A `CryptoKey` is an opaque handle, and
         // two calls handing back different handles would be a different
         // contract entirely.
+
         const source = { publicKey: PUBLIC_KEY, privateKey: PRIVATE_KEY };
         const pair = new FabricKeyPair(source);
 
@@ -439,6 +442,7 @@ describe("FabricKeyPair", () => {
           // The one thing the constructor refuses about an algorithm name.
           // Left to `decode()`, it would arrive as a constructor throw, which
           // that method reports as a detached buffer.
+
           expect(
             codec.canDecode({
               algorithm: "",
@@ -497,11 +501,12 @@ describe("FabricKeyPair", () => {
   });
 
   describe("as a `FabricValue`", () => {
-    // An instance in either state has to pass the vetting boundary. The
-    // realm encoding does not vet what it passes through, so a value that
-    // fails here can still cross and still work, right up until something
-    // checks it.
     it("returns `true` from `isValidFabricValue()` in either state", async () => {
+      // An instance in either state has to pass the vetting boundary. The
+      // realm encoding does not vet what it passes through, so a value that
+      // fails here can still cross and still work, right up until something
+      // checks it.
+
       expect(isValidFabricValue(materialPair())).toBe(true);
       expect(isValidFabricValue(new FabricKeyPair(await generatePair())))
         .toBe(true);
@@ -511,6 +516,7 @@ describe("FabricKeyPair", () => {
       // State lives in private fields and reaches a caller through prototype
       // accessors, so a structural view of an instance sees nothing -- which
       // is what keeps an own accessor property off it.
+
       expect(Object.getOwnPropertyNames(materialPair())).toEqual([]);
       expect(
         Object.getOwnPropertyNames(new FabricKeyPair(await generatePair())),
@@ -521,6 +527,7 @@ describe("FabricKeyPair", () => {
       // Both directions, and every accessor, so that adding one to a class
       // whose whole contract is "the other arm's accessors throw" cannot
       // quietly leave the new one answering for both states.
+
       const handles = new FabricKeyPair(await generatePair());
       const material = materialPair();
 
@@ -574,6 +581,7 @@ describe("FabricKeyPair", () => {
     it("hashes a swapped pair differently from the original", () => {
       // The two keys are fed in a fixed order, so a pair holding them the
       // other way round is a different value rather than the same one.
+
       const swapped = new FabricKeyPair(
         "ExampleAlgorithm",
         PRIVATE_BYTES,

@@ -2,7 +2,7 @@
 # The Topics content-safety drill: deploy a board, seed it, snapshot the
 # store, export, clobber a topic the worst way a bad migration would, restore
 # it, and prove the restore byte-exact — the loop
-# docs/plans/topics-migration-rehearsal.md's "restore drill" section makes
+# docs/history/plans/topics-migration-rehearsal.md's "restore drill" section makes
 # part of every clean rehearsal pass, runnable as one command.
 #
 # Unlike verbs-over-the-cli.sh, this deliberately exercises the REAL topics
@@ -99,7 +99,7 @@ BOARD="$(
 
 step "seed: one topic with markdown body, two comments, one link"
 BODY='# Drill\n\n    indented code block\n    second line\n\ntrailing prose'
-$CF piece call -q --piece "$BOARD" --space "$SPACE" --api-url "$API_URL" \
+$CF call -q --piece "$BOARD" --space "$SPACE" --api-url "$API_URL" \
   addTopic "{\"title\":\"Drill: alpha\",\"body\":\"$BODY\",\"agentName\":\"drill\"}" \
   > "$WORK/create.json" 2> /dev/null
 TOPIC_ALIAS="$(jq -r '.result.topic["$link"] // empty' "$WORK/create.json")"
@@ -116,13 +116,13 @@ fi
   bad "no topic address"
   exit 1
 }
-$CF piece call -q --piece "$TOPIC_ALIAS" --space "$SPACE" \
+$CF call -q --piece "$TOPIC_ALIAS" --space "$SPACE" \
   --api-url "$API_URL" addComment \
   '{"body":"first drill comment","agentName":"drill"}' > /dev/null 2>&1
-$CF piece call -q --piece "$TOPIC_ALIAS" --space "$SPACE" \
+$CF call -q --piece "$TOPIC_ALIAS" --space "$SPACE" \
   --api-url "$API_URL" addComment \
   '{"body":"second drill comment","agentName":"drill"}' > /dev/null 2>&1
-$CF piece call -q --piece "$TOPIC_ALIAS" --space "$SPACE" \
+$CF call -q --piece "$TOPIC_ALIAS" --space "$SPACE" \
   --api-url "$API_URL" addLink \
   '{"kind":"pr","url":"https://example.com/pr/1","label":"PR 1","agentName":"drill"}' \
   > /dev/null 2>&1
@@ -145,7 +145,8 @@ while read -r candidate; do
   [ -n "$candidate" ] || continue
   sqlite3 "$ENGINE_DIR/$candidate" "VACUUM INTO '$WORK/$candidate'" \
     2> /dev/null || continue
-  if deno run --allow-run --allow-read --allow-write \
+  if deno run --allow-read --allow-write --allow-env --allow-ffi \
+    --allow-net=github.com,release-assets.githubusercontent.com \
     "$REPO_ROOT/scripts/topics-export.ts" "$WORK/$candidate" \
     --out "$WORK/export.json" > "$WORK/export.log" 2>&1; then
     NEW_DB="$candidate"

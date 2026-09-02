@@ -10,13 +10,19 @@
 #
 # What is NOT exercised entry by entry is the rest of the provider table: a
 # dozen slots that hand the shell a constant `files` or `dirs` directive and
-# nothing else — --root, --datafile, --to, `view <file>`, `exec <mountedFile>`,
+# nothing else — --datafile, `view <file>`, `exec <mountedFile>`,
 # `id did <keypath>`, the space-management directories, and the two entries
 # item 16 of the plan records as belonging to commands that declare no options
 # at all. They read no state, so a fabric cannot change what they answer, and
 # they are asserted one by one — kind and glob — in
 # packages/cli/test/completion-providers.test.ts, which is where a constant
-# belongs. Nothing here re-checks them.
+# belongs. Nothing here re-checks them, and `deno task check-completion-slots`
+# is what catches a slot with no entry at all.
+#
+# The exception is an option name that means two things on two commands —
+# --from, --to, --root, --scope. There the answer turns on which command was
+# typed rather than on the name, so both sides of each are asserted below,
+# through the real command line rather than through a resolved slot.
 #
 # The unit tests under packages/cli/test/completion-*.test.ts cover the pure
 # half — line resolution, candidate shaping, and the degrade-to-empty path —
@@ -332,7 +338,7 @@ check "$ADD_PROSE" \
   "and the candidate is annotated with the same sentence"
 
 step "7. Past the callable name, cf's own flags are not offered"
-# `piece call` is stopEarly(), so the first positional ends option parsing and
+# `cf call` is stopEarly(), so the first positional ends option parsing and
 # every later word belongs to the callable's schema-derived parser. A flag the
 # command refuses there is a candidate that teaches a caller something false.
 check "0" "$(succeeds $CF call --quiet --piece board $ARGS addItem \
@@ -349,8 +355,8 @@ step "8. The verb's own fields do not complete yet"
 # author's vocabulary, not the CLI's. `shapeVerbFlagCandidates` derives them
 # from the listing's `inputSchema` — the same enumeration the help page below
 # renders, so a flag the parser accepts cannot be named by one and not the
-# other. Only the slot waits: step 10 of docs/plans/cli-surface-shape.md
-# decides whether a verb's fields are written before the marker or after it.
+# other. Only the wiring is left: the fields stand directly after the verb
+# name, which is the `tail` positional no provider dispatches on yet.
 check "pinned,title" "$($CF piece verbs --piece board $ARGS --json 2>/dev/null |
   jq -r '.verbs[] | select(.name == "addItem") | .inputSchema.properties |
     keys | sort | join(",")')" \
@@ -361,9 +367,9 @@ check "1" "$(printf '%s\n' "$HELP" | grep -c -- '^  --title <string>')" \
 check "1" "$(printf '%s\n' "$HELP" | grep -c -- '^  --pinned | --no-pinned')" \
   "including both spellings of a boolean field"
 check "1" "$(succeeds $CF call --quiet --piece board $ARGS --invocation flags-1 \
-  addItem -- --title 'Flagged item')" "and the parser accepts them as flags"
-gap "cf call $LINE_ARGS --piece board addItem -- --" \
-  "a verb's fields after the marker"
+  addItem --title 'Flagged item')" "and the parser accepts them as flags"
+gap "cf call $LINE_ARGS --piece board addItem --" \
+  "a verb's fields inside the section the verb opens"
 
 step "9. A cell path completes one segment at a time"
 check ":cf:nospace" "$(directives_at "cf get $LINE_ARGS --piece board ")" \
@@ -431,8 +437,10 @@ check "@,density,density@,theme,theme@" \
 check "dark" "$($CF get --quiet --piece board $ARGS settings --select theme \
   2>/dev/null | jq -r '.theme')" "and the command reads it from there too"
 # A verb's result is a different vocabulary and is not this one; `cf call`'s
-# projection stays empty until the verb before it can be read.
-check "" "$(complete_at "cf call $LINE_ARGS --piece board --select ")" \
+# projection stays empty until the verb before it can be read. Written past
+# the marker, which is the one position the grammar accepts it in — before the
+# verb it is refused rather than completed.
+check "" "$(complete_at "cf call $LINE_ARGS --piece board addItem -- --select ")" \
   "a call's projection is not completed from the piece's root"
 
 step "12. A name on two cells completes against the one the dispatcher reaches"
@@ -511,6 +519,86 @@ check "1" "$(complete_at "cf piece link $LINE_ARGS $BOARD/revision $ITEM_ID/rec"
 check "1" "$(succeeds $CF piece link --quiet $LINE_ARGS \
   "$BOARD/revision" "$ITEM_ID/recorded")" \
   "a pair of completed endpoints is a link the command writes"
+step "15. The operator surface completes from the same store"
+# `cf inspect` reads space DBs directly, so it wants the store step 13 looked
+# for. Both positionals are probed either way, on the same terms that step
+# holds to: what the listing exits with decides whether its output can be read
+# at all, and where there is nothing to list the slot must still run and come
+# back empty.
+if [ -n "$DISCOVERED" ]; then
+  check "1" "$(complete_at "cf inspect entities ${DISCOVERED:0:20}" |
+    grep -c "^$DISCOVERED\$")" "the space positional completes from it"
+  # The same prefix under --remote: the command would resolve it through the
+  # remote's listing and open the snapshot it fetches, so the local DID it
+  # completes to above is one that read rejects. The pair is what shows the
+  # silence is a decision rather than an empty disk.
+  check "" "$(complete_at \
+    "cf inspect entities --remote=http://remote.invalid ${DISCOVERED:0:20}")" \
+    "and offers nothing once --remote moves the space off this disk"
+  run $CF inspect entities "$DISCOVERED" --json
+  check "0" "$RUN_STATUS" "cf inspect entities runs against it"
+  ENTITY=$(printf '%s\n' "$RUN_OUT" | jq -r '.[0].id // empty' 2>/dev/null)
+  if [ -n "$ENTITY" ]; then
+    check "1" "$(complete_at "cf inspect piece $DISCOVERED ${ENTITY:0:12}" |
+      grep -c "^$ENTITY\$")" \
+      "and the entity positional completes what inspect entities lists"
+  else
+    probe "cf inspect piece $DISCOVERED "
+    check "0" "$PROBE_STATUS" "the entity slot runs against a space holding none"
+    check "" "$(printf '%s\n' "$PROBE_OUT" | grep -v '^:cf:')" \
+      "and offers nothing, which is all that space holds"
+  fi
+else
+  probe "cf inspect entities "
+  check "0" "$PROBE_STATUS" "the space positional still runs with no store"
+  check "" "$(printf '%s\n' "$PROBE_OUT" | grep -v '^:cf:')" \
+    "and offers nothing, which is all there is on disk to offer"
+  # The entity positional too, so this branch asserts as much as the one above
+  # and a machine with no store cannot pass by checking less.
+  probe "cf inspect piece did:key:zNoSuchSpace "
+  check "0" "$PROBE_STATUS" "the entity positional runs against no store either"
+fi
+# `inspect pull` names a space on the REMOTE, resolved through the remote's own
+# listing, so a locally discovered DID is a candidate it rejects. Asserted in
+# both branches above's terms: whatever the store holds, this slot is empty.
+check "" "$(directives_at "cf inspect pull ")$(complete_at "cf inspect pull ")" \
+  "the remote-only space positional offers nothing local"
+# `--remote` is global on `inspect` and says the same thing about every one of
+# its slots. Asserted with no store too, so the branch above cannot be the only
+# place this is checked.
+check "" "$(complete_at "cf inspect summary --remote=http://remote.invalid ")" \
+  "a --remote space positional offers nothing local"
+check "" "$(complete_at \
+  "cf inspect piece --remote=http://remote.invalid did:key:zNoSuchSpace ")" \
+  "and neither does the entity beside it"
+
+step "16. wish and the enumerated remainder"
+# These are the CLI's own vocabulary rather than a pattern's, which is what
+# puts them below the slots above. Each set is in the command's own help.
+check "1" "$(complete_at "cf wish #profileN" | grep -cx '#profileName')" \
+  "a wish target completes"
+check "profile" "$(complete_at "cf wish '#profile' --scope p" | paste -sd, -)" \
+  "and a wish scope completes its named values"
+check "ascii,dot" "$(candidates_at "cf piece map --format ")" \
+  "an enumerated option completes exactly what its help lists"
+check "1" "$(complete_at "cf inspect entities x --kind ow" |
+  grep -cx 'owned-cell')" "and so does the other one"
+# An option name means one thing per command, and the provider says where it
+# applies: a file on one, a sequence number on the other.
+check ":cf:files" "$(directives_at "cf space clone x --from ")" \
+  "--from offers a snapshot file where it names one"
+check "" "$(directives_at "cf inspect diff x y --from ")$(complete_at \
+  "cf inspect diff x y --from ")" \
+  "and nothing where it names a sequence number"
+check ":cf:dirs" "$(directives_at "cf space clone x --to ")" \
+  "--to offers a clone directory where it names one"
+check "" "$(directives_at "cf inspect diff x y --to ")$(complete_at \
+  "cf inspect diff x y --to ")" \
+  "and nothing where it names a sequence number"
+check ":cf:dirs" "$(directives_at "cf piece new --root ")" \
+  "--root offers a source directory where it names one"
+check "" "$(directives_at "cf inspect graph --root ")" \
+  "and hands the shell no directory where it names an entity"
 
 ELAPSED=$(($(date +%s) - START))
 printf '\n== %d passed, %d failed, %d gaps open — %ds wall clock\n' \

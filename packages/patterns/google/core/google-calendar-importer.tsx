@@ -403,8 +403,7 @@ const toggleDebugMode = handler<
   { settings: Writable<Settings> }
 >(
   ({ target }, { settings }) => {
-    const current = settings.get();
-    settings.set({ ...current, debugMode: target.checked });
+    settings.update({ debugMode: target.checked });
   },
 );
 
@@ -522,8 +521,10 @@ export interface Output {
   [UI]: VNode;
   events: CalendarEvent[];
   calendars: Calendar[];
+
   /** Number of events imported */
   eventCount: number;
+
   /** Summary of container-level events for hierarchical indexing */
   summary: string;
 }

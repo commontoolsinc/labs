@@ -18,6 +18,7 @@ import type { Action, ReactivityLog, SpaceScopeAndURI } from "./types.ts";
 export interface TriggerIndexState {
   /** Identity entity keys resolve scoped addresses against (keys.ts). */
   readonly scopeKeyIdentity: () => ScopeKeyIdentity;
+
   readonly triggers: Map<
     SpaceScopeAndURI,
     Map<Action, SortedAndCompactPaths>
@@ -88,8 +89,18 @@ function removeTriggerMapSpace(
 }
 
 export class SchedulerTriggerSubscriptions implements TriggerSubscriptionState {
+  readonly #state: {
+    readonly triggerIndex: TriggerIndexState;
+    readonly cancels: WeakMap<Action, Cancel>;
+    readonly getActionId: (action: Action) => string;
+    readonly onTriggerUnsubscribe?: (
+      actionId: string,
+      entityCount: number,
+    ) => void;
+  };
+
   constructor(
-    private readonly state: {
+    state: {
       readonly triggerIndex: TriggerIndexState;
       readonly cancels: WeakMap<Action, Cancel>;
       readonly getActionId: (action: Action) => string;
@@ -98,36 +109,38 @@ export class SchedulerTriggerSubscriptions implements TriggerSubscriptionState {
         entityCount: number,
       ) => void;
     },
-  ) {}
+  ) {
+    this.#state = state;
+  }
 
   get scopeKeyIdentity(): TriggerIndexState["scopeKeyIdentity"] {
-    return this.state.triggerIndex.scopeKeyIdentity;
+    return this.#state.triggerIndex.scopeKeyIdentity;
   }
 
   get triggers(): TriggerIndexState["triggers"] {
-    return this.state.triggerIndex.triggers;
+    return this.#state.triggerIndex.triggers;
   }
 
   get nonRecursiveTriggers(): TriggerIndexState["nonRecursiveTriggers"] {
-    return this.state.triggerIndex.nonRecursiveTriggers;
+    return this.#state.triggerIndex.nonRecursiveTriggers;
   }
 
   get actionTriggerEntities(): TriggerIndexState["actionTriggerEntities"] {
-    return this.state.triggerIndex.actionTriggerEntities;
+    return this.#state.triggerIndex.actionTriggerEntities;
   }
 
   get cancels(): WeakMap<Action, Cancel> {
-    return this.state.cancels;
+    return this.#state.cancels;
   }
 
   get getActionId(): (action: Action) => string {
-    return this.state.getActionId;
+    return this.#state.getActionId;
   }
 
   get onTriggerUnsubscribe():
     | ((actionId: string, entityCount: number) => void)
     | undefined {
-    return this.state.onTriggerUnsubscribe;
+    return this.#state.onTriggerUnsubscribe;
   }
 
   addActionReads(
@@ -138,30 +151,30 @@ export class SchedulerTriggerSubscriptions implements TriggerSubscriptionState {
     entities: Set<SpaceScopeAndURI>;
     triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
   } {
-    return this.state.triggerIndex.addActionReads(action, reads, shallowReads);
+    return this.#state.triggerIndex.addActionReads(action, reads, shallowReads);
   }
 
   removeActionFromEntities(
     action: Action,
     entities: Iterable<SpaceScopeAndURI>,
   ): void {
-    this.state.triggerIndex.removeActionFromEntities(action, entities);
+    this.#state.triggerIndex.removeActionFromEntities(action, entities);
   }
 
   removeSpace(space: MemorySpace): void {
-    this.state.triggerIndex.removeSpace(space);
+    this.#state.triggerIndex.removeSpace(space);
   }
 
   collectReadersForWrite(write: IMemorySpaceAddress): Set<Action> {
-    return this.state.triggerIndex.collectReadersForWrite(write);
+    return this.#state.triggerIndex.collectReadersForWrite(write);
   }
 
   hasRegisteredTriggers(): boolean {
-    return this.state.triggerIndex.hasRegisteredTriggers();
+    return this.#state.triggerIndex.hasRegisteredTriggers();
   }
 
   clear(): void {
-    this.state.triggerIndex.clear();
+    this.#state.triggerIndex.clear();
   }
 
   collectTriggeredActionsForChange(
@@ -172,7 +185,7 @@ export class SchedulerTriggerSubscriptions implements TriggerSubscriptionState {
     hasMatchingTriggerPaths: boolean;
     triggeredActions: Action[];
   } {
-    return this.state.triggerIndex.collectTriggeredActionsForChange(
+    return this.#state.triggerIndex.collectTriggeredActionsForChange(
       space,
       change,
     );

@@ -58,10 +58,13 @@ import {
 export interface GateRoots {
   /** Repo root, used only to shorten paths in reports. */
   repoRoot: string;
+
   /** Directory pattern keys are resolved against. */
   patternsRoot: string;
+
   /** Directory fixtures live under. */
   vintagesRoot: string;
+
   /** Signer every capture and replay runs as. */
   signer: Identity;
 }
@@ -142,6 +145,7 @@ export function snippet(value: unknown): string {
 /** Which test's fixture records a pattern, and whether it can credit it. */
 export interface VintageAttribution {
   testKey: string;
+
   /**
    * PINNED is the only tier coverage counts. It breaks TIES over which test to
    * name, and selects a remedy: `reportUncovered` scopes by whether the
@@ -154,10 +158,13 @@ export interface VintageAttribution {
 /** What replaying ONE fixture found, kept per fixture rather than summed. */
 export interface VintageOutcome {
   ref: VintageRef;
+
   /** Recorded instantiations that are legitimate upgrade targets. */
   targets: number;
+
   /** Of those, the ones whose source moved since this fixture was captured. */
   changed: number;
+
   /** Whether replaying this fixture produced any failure at all. */
   failed: boolean;
 }
@@ -218,8 +225,10 @@ export function staleTestKeys(
 export interface ReplayReport {
   /** Instantiations the fixture recorded. Zero means it proved nothing. */
   candidates: number;
+
   /** Recorded instantiations that are legitimate upgrade targets. */
   targets: number;
+
   /**
    * Recorded instantiations that cannot be mapped to a file to apply.
    *
@@ -231,12 +240,16 @@ export interface ReplayReport {
    * failure mode. Kept as a count for the tests that pin that behavior.
    */
   unmappable: number;
+
   /** Targets whose source CHANGED since capture — the actual migrations. */
   changed: number;
+
   /** Changed targets that applied cleanly. */
   updated: number;
+
   /** Keys an applied update stopped being able to read back. */
   stranded: number;
+
   /**
    * Targets recorded under a SERVED route rather than a repo path.
    *
@@ -245,6 +258,7 @@ export interface ReplayReport {
    * read as thorough coverage.
    */
   servedRoute: number;
+
   /**
    * Pattern keys this fixture actually replayed a target for.
    *
@@ -254,6 +268,7 @@ export interface ReplayReport {
    * "X was replayed" — and the second is the one that matters.
    */
   covered: Set<string>;
+
   /**
    * Pattern keys this fixture's manifest NAMES, whether or not each was
    * credited as coverage.
@@ -270,6 +285,7 @@ export interface ReplayReport {
    * since `uncovered` is exactly the required keys ABSENT from `covered`.
    */
   recorded: Set<string>;
+
   /**
    * Accepted-drop entries that actually removed something from a vintage here.
    *
@@ -278,6 +294,7 @@ export interface ReplayReport {
    * unless the run counts where each was used. Keyed by the entry's pattern.
    */
   dropsApplied: Set<string>;
+
   /**
    * Derived-hoist targets held back from failing, each entry tagged with the
    * rule that held it. Two refusal shapes qualify: STORED ARGUMENTS today's
@@ -294,6 +311,7 @@ export interface ReplayReport {
    * cell's cause-stability (the moved-`.for()` class) gated.
    */
   capturesSuperseded: string[];
+
   failures: ReplayFailure[];
 }
 
@@ -335,6 +353,7 @@ export async function replayVintage(
     capturesSuperseded: [],
     failures: [{ ...where, detail }],
   });
+
   /** Every pattern key a manifest names, for attributing a failed fixture. */
   const recordedFrom = (entries: readonly VintageManifestEntry[]) =>
     new Set(
@@ -342,6 +361,7 @@ export async function replayVintage(
         .map((e) => patternKeyFromMain(e.main, patternsPrefix(roots)))
         .filter((key): key is string => key !== undefined),
     );
+
   // Stated once, because every "this fixture is not usable" message needs it and
   // the obvious remedy is WRONG: `--update` skips a key that already has a
   // pinned vintage and the capture refuses to overwrite one, so "recapture it"
@@ -931,6 +951,7 @@ export async function replayAll(
     stranded: number;
     servedRoute: number;
     covered: Set<string>;
+
     /**
      * Which TEST's fixture RECORDS each pattern, and whether that fixture is
      * the tier that credits coverage.
@@ -951,6 +972,7 @@ export async function replayAll(
      * fixture can need.
      */
     coveredBy: Map<string, VintageAttribution>;
+
     /**
      * What each fixture individually found, in walk order.
      *
@@ -963,13 +985,16 @@ export async function replayAll(
      * with the one that produced the verdict.
      */
     perVintage: VintageOutcome[];
+
     /** Accepted-drop entries that forgave something somewhere in this run. */
     dropsApplied: Set<string>;
+
     /**
      * Derived-hoist targets held back, each tagged with the rule that held
      * it — a superseded stored argument, or a hoist no longer emitted.
      */
     capturesSuperseded: string[];
+
     failures: ReplayFailure[];
   }
 > {

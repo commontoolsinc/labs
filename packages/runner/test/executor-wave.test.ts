@@ -29,7 +29,11 @@
 // - DR1/§2: a lease lost mid-wave aborts the wave commit — work sealed
 //   under a lapsed tenure never commits;
 // - protocol.md §2b: multi-space seals commit foreign-first, and a
-//   foreign failure withholds the home commit.
+//   foreign failure withholds the home commit;
+// - protocol.md §2b, the F1b fix: a foreign space whose engine cannot be
+//   resolved withdraws exactly the contributions that sealed into it —
+//   the handler requeues, the derivation drops, everything else commits,
+//   and no batch is ever built for the failed space.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -80,7 +84,10 @@ import {
   createDuplicateWorkTransaction,
   createNonReactiveTransaction,
 } from "../src/storage/extended-storage-transaction.ts";
-import { EngineWaveCommitSink } from "../src/executor/engine-wave-sink.ts";
+import {
+  EngineWaveCommitSink,
+  waveCommitFailureResult,
+} from "../src/executor/engine-wave-sink.ts";
 import {
   effectCompletionKeyOf,
   markEffectCompletion,
@@ -240,6 +247,101 @@ describe("stage D seal-into-wave", () => {
     expect(wave.contributionCount).toBe(0);
     expect(Engine.serverSeq(engine)).toBe(seqBefore);
     runtime.clearSealDestination();
+  });
+
+  it("attributes a proven-no-commit row-label refusal to the failed operation's one served event", async () => {
+    const wave = newWave();
+    runtime.installSealDestination(wave);
+    const first = runtime.getCell<{ value: number }>(
+      space,
+      "row-label-owner-first",
+      undefined,
+    );
+    const second = runtime.getCell<{ value: number }>(
+      space,
+      "row-label-owner-second",
+      undefined,
+    );
+    for (
+      const [cell, eventId, index, seq] of [
+        [first, "row-label-event-first", 2, 12],
+        [second, "row-label-event-second", 5, 15],
+      ] as const
+    ) {
+      const tx = runtime.edit();
+      stampWaveRunContext(tx, {
+        actionId: `row-label-owner:${eventId}`,
+        kind: "event-handler",
+        eventId,
+        streamEntry: {
+          sidecarId: "of:stream-events:row-label-owner",
+          index,
+          seq,
+        },
+      });
+      cell.withTx(tx).set({ value: seq });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    runtime.clearSealDestination();
+
+    const inner = newSink();
+    const sink: WaveCommitSink = {
+      currentHeads: (target, docs) => inner.currentHeads(target, docs),
+      concurrentWritePaths: (target, doc, sinceSeq) =>
+        inner.concurrentWritePaths(target, doc, sinceSeq),
+      commitWave: (batch) => {
+        const failedOperation = batch.operations.findIndex((operation) =>
+          operation.op !== "sqlite" &&
+          operation.id === second.getAsNormalizedFullLink().id
+        );
+        expect(failedOperation).toBeGreaterThanOrEqual(0);
+        return Promise.resolve({
+          error: {
+            name: "RowLabelCommitError",
+            message: "sqlite commit refused: synthetic owner pin",
+            failedOperation,
+          },
+        });
+      },
+    };
+    const outcome = await wave.commitWave(sink);
+    await wave.settled();
+
+    expect(outcome.requeuedEventIds).toEqual([
+      "row-label-event-first",
+      "row-label-event-second",
+    ]);
+    expect(outcome.provenNoCommitDeliveryFailures).toEqual([{
+      eventId: "row-label-event-second",
+      streamEntry: {
+        sidecarId: "of:stream-events:row-label-owner",
+        index: 5,
+        seq: 15,
+      },
+      failureClass: "protocol",
+      recoveryEpoch: "row-label-verdict",
+      permanentEvidence: true,
+    }]);
+  });
+
+  it("preserves a row-label refusal's failed operation at the engine sink boundary", () => {
+    const error = new Engine.RowLabelCommitError(
+      "sqlite commit refused: synthetic operation pin",
+    );
+    error.operationIndex = 4;
+    expect(waveCommitFailureResult(error)).toEqual({
+      error: {
+        name: "RowLabelCommitError",
+        message: "sqlite commit refused: synthetic operation pin",
+        failedOperation: 4,
+      },
+    });
+    expect(waveCommitFailureResult("plain refusal")).toEqual({
+      error: {
+        name: "WaveCommitRejected",
+        message: "plain refusal",
+      },
+    });
   });
 
   it("seals into the wave instead of committing; later txs read the layered view; the wave commits once", async () => {
@@ -802,6 +904,88 @@ describe("stage D seal-into-wave", () => {
     expect(stored?.document).toEqual({ value: { a: 2, b: 50 } });
   });
 
+  it("rebases an event's consequence mark against a CONCURRENT tail append to the same stream sidecar (§3d's stream-sidecar refinement)", async () => {
+    // The sidecar's two writers meet at `/value/entries`: the loop marks
+    // the entry it just processed, and a delivery appends a new one. The
+    // general prefix-overlap rule reads that as a conflict — an
+    // index-addressed mark sits under the appended-to array — and would
+    // requeue every event whose stream took a concurrent fire. A tail
+    // append creates only NEW indices, so the two commute.
+
+    const streamLink = { id: "of:sidecar-rebase-stream", path: ["stream"] };
+    const sidecarId = streamEntriesDocId(streamLink);
+    const deliver = (eventId: string, localSeq: number) =>
+      server.commitDelegatedAppend({
+        targetSpace: space,
+        targetStream: sidecarId,
+        targetStreamLink: streamLink,
+        eventId,
+        payload: { via: "sidecar rebase" },
+        actingPrincipal: "did:key:alice",
+        actingSession: "sidecar-rebase-session",
+        capabilityRef: "cap-sidecar-rebase",
+        sessionId: `service:${space}`,
+        localSeq,
+      });
+
+    // The event under processing: one durable entry at index 0.
+    expect((await deliver("e-marked", 900_001)).deduped).toBe(false);
+    // Loaded before the mark, as the drain leaves it: a write against an
+    // unloaded doc commits as a whole-doc set, and only a patch can
+    // commute with anything.
+    await runtime.getCellFromLink({
+      space,
+      id: sidecarId as never,
+      scope: "space",
+      path: [],
+    }).sync();
+
+    const lease = liveLease();
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, {
+      actionId: "sidecar-handler",
+      kind: "event-handler",
+      eventId: "e-marked",
+      acting: { user: "did:key:alice" },
+    });
+    // The consequence mark, written exactly as the dispatch writes it:
+    // the handler's own tx carries `entries/<index>/consequenced`.
+    runtime.getCellFromLink<boolean>({
+      space,
+      id: sidecarId as never,
+      scope: "space",
+      path: ["entries", "0", "consequenced"],
+    }).withTx(tx).set(true);
+    expect((await tx.commit()).error).toBeUndefined();
+    runtime.clearSealDestination();
+
+    // The concurrent writer: a second event delivered onto the same
+    // stream after the wave's basis — a tail append at `/value/entries`,
+    // the only shape the sidecar admits from anyone but the loop.
+    expect((await deliver("e-appended", 900_002)).deduped).toBe(false);
+
+    const outcome = await wave.commitWave(newSink());
+    await wave.settled();
+
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.requeuedEventIds).toEqual([]);
+    expect(outcome.committedEventIds).toEqual(["e-marked"]);
+    // Both survive: the appended entry AND the mark on the entry that
+    // was already there.
+    const stored = Engine.readState(engine, { id: sidecarId })?.document
+      ?.value as {
+        entries?: Array<{ eventId?: string; consequenced?: boolean }>;
+      } | undefined;
+    expect(stored?.entries?.map((entry) => entry.eventId)).toEqual([
+      "e-marked",
+      "e-appended",
+    ]);
+    expect(stored?.entries?.[0].consequenced).toBe(true);
+    expect(stored?.entries?.[1].consequenced).toBeUndefined();
+  });
+
   it("aborts the wave commit when the lease tenure lapsed (work sealed under a lapsed tenure never commits)", async () => {
     let now = 1_000_000;
     const cycle = new ExecutionLeaseCycle({
@@ -958,6 +1142,158 @@ describe("stage D seal-into-wave", () => {
       // replays (§2b).
       expect(Engine.serverSeq(engine)).toBe(homeSeqBefore);
     }
+  });
+
+  it("an unresolvable foreign space withdraws exactly its own crossings: the handler requeues, the derivation drops, a home-only contribution commits, and no batch reaches the failed space (protocol.md §2b; the F1b fix)", async () => {
+    // What a wave is carrying when a foreign space fails decides which
+    // arms of the withdrawal run: the requeue arm needs a handler that
+    // crossed into that space, the drop arm needs a derivation that
+    // crossed, and the skip arm needs a contribution that stayed home.
+    // A test driving the serving loop gets whichever of the three
+    // happen to seal into one wave, so this one builds the wave itself
+    // and puts all three in it.
+    const foreignSigner = await Identity.fromPassphrase(
+      "wave foreign unresolvable",
+    );
+    const foreign = foreignSigner.did() as MemorySpace;
+    const foreignEngine = await server.engineForSpace(foreign);
+    seedGenesisAcl(foreignEngine, foreign);
+    const lease = liveLease();
+
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+
+    // The crossing handler: a §2b provisioning run with a home write of
+    // its own, so its withdrawal is visible in both spaces.
+    const handlerForeign = runtime.getCell<{ value: number }>(
+      foreign,
+      "f1b-handler-foreign",
+      undefined,
+    );
+    const handlerHome = runtime.getCell<{ value: number }>(
+      space,
+      "f1b-handler-home",
+      undefined,
+    );
+    const handlerTx = runtime.edit();
+    stampWaveRunContext(handlerTx, {
+      actionId: "provision/handler",
+      kind: "event-handler",
+      eventId: "e-crossing",
+      acting: { user: "did:key:alice", session: "sess-1" },
+      capabilityRef: "cap:test-grant",
+    });
+    handlerTx.enableMultiSpaceWrites?.([foreign, space]);
+    handlerForeign.withTx(handlerTx).set({ value: 1 });
+    handlerHome.withTx(handlerTx).set({ value: 2 });
+    expect((await handlerTx.commit()).error).toBeUndefined();
+
+    // The crossing derivation: same target space, and no event behind
+    // it, so it takes the drop arm rather than the requeue arm.
+    const derivationForeign = runtime.getCell<{ value: number }>(
+      foreign,
+      "f1b-derivation-foreign",
+      undefined,
+    );
+    const derivationHome = runtime.getCell<{ value: number }>(
+      space,
+      "f1b-derivation-home",
+      undefined,
+    );
+    const derivationTx = runtime.edit();
+    stampWaveRunContext(derivationTx, {
+      actionId: "derive/crossing",
+      kind: "derivation",
+      acting: { user: "did:key:alice", session: "sess-1" },
+      scopeKeyIdentity: { principal: "did:key:alice", sessionId: "sess-1" },
+      capabilityRef: "cap:test-grant",
+    });
+    derivationTx.enableMultiSpaceWrites?.([foreign, space]);
+    derivationForeign.withTx(derivationTx).set({ value: 3 });
+    derivationHome.withTx(derivationTx).set({ value: 4 });
+    expect((await derivationTx.commit()).error).toBeUndefined();
+
+    // The bystander: everything else the wave is carrying. It never
+    // touched the failed space and reads nothing the withdrawals take
+    // away, so it commits.
+    const bystander = runtime.getCell<{ value: number }>(
+      space,
+      "f1b-bystander",
+      undefined,
+    );
+    const bystanderTx = runtime.edit();
+    stampWaveRunContext(bystanderTx, {
+      actionId: "derive/bystander",
+      kind: "derivation",
+    });
+    bystander.withTx(bystanderTx).set({ value: 5 });
+    expect((await bystanderTx.commit()).error).toBeUndefined();
+    runtime.clearSealDestination();
+
+    wave.failForeignSpace(foreign, "engine open failed (test)");
+
+    // The sink stands in for the serving loop's own, which reaches the
+    // failed space through an engine lookup that has nothing to return:
+    // a batch built for it can only be refused, and the refusal aborts
+    // the wave. The recorded spaces say whether one was built at all.
+    const foreignSeqBefore = Engine.serverSeq(foreignEngine);
+    const inner = newSink();
+    const committedSpaces: MemorySpace[] = [];
+    const recordingSink: WaveCommitSink = {
+      currentHeads: (s, docs) => inner.currentHeads(s, docs),
+      concurrentWritePaths: (s, doc, since) =>
+        inner.concurrentWritePaths(s, doc, since),
+      commitWave: (
+        batch,
+      ): Promise<Result<{ seq: number }, WaveCommitRejection>> => {
+        committedSpaces.push(batch.space);
+        if (batch.space !== space) {
+          return Promise.resolve({
+            error: {
+              name: "WaveCommitRejected",
+              message: `no resolved co-hosted engine for ${batch.space}`,
+            },
+          });
+        }
+        return inner.commitWave(batch);
+      },
+    };
+    const outcome = await wave.commitWave(recordingSink);
+    await wave.settled();
+
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.dispositions).toEqual([
+      { kind: "requeued" },
+      { kind: "dropped" },
+      { kind: "committed" },
+    ]);
+    // The handler's event stays pending and replays; the derivation is
+    // recomputed on demand, and its one withdrawn home write is counted.
+    expect(outcome.requeuedEventIds).toEqual(["e-crossing"]);
+    expect(outcome.dependencyDroppedWrites).toBe(1);
+
+    // Nothing reached the failed space, and at home only the bystander's
+    // write landed.
+    expect(committedSpaces).toEqual([space]);
+    expect(Engine.serverSeq(foreignEngine)).toBe(foreignSeqBefore);
+    expect(
+      Engine.selectDocHead(engine, {
+        id: handlerHome.getAsNormalizedFullLink().id,
+        scopeKey: "space",
+      }),
+    ).toBe(0);
+    expect(
+      Engine.selectDocHead(engine, {
+        id: derivationHome.getAsNormalizedFullLink().id,
+        scopeKey: "space",
+      }),
+    ).toBe(0);
+    expect(
+      Engine.selectDocHead(engine, {
+        id: bystander.getAsNormalizedFullLink().id,
+        scopeKey: "space",
+      }),
+    ).toBeGreaterThan(0);
   });
 
   it("refuses a foreign-space write at ACCUMULATION on the default posture: the action fails loudly and counted, the wave survives (serving-loop.md §3d, RULED 2026-08-14 (c))", async () => {
@@ -2328,7 +2664,11 @@ describe("stage D seal-into-wave", () => {
     class BootstrapLoopbackFactory implements SessionFactory {
       readonly supportsAclBootstrap = true;
       readonly principals: string[] = [];
-      constructor(private readonly server: MemoryV2Server.Server) {}
+      readonly #server: MemoryV2Server.Server;
+
+      constructor(server: MemoryV2Server.Server) {
+        this.#server = server;
+      }
       async create(
         targetSpace: MemorySpace,
         sessionSigner?: Signer,
@@ -2336,7 +2676,7 @@ describe("stage D seal-into-wave", () => {
       ) {
         this.principals.push(sessionSigner?.did() ?? "<anonymous>");
         const client = await MemoryV2Client.connect({
-          transport: MemoryV2Client.loopback(this.server),
+          transport: MemoryV2Client.loopback(this.#server),
         });
         const session = await client.mount(
           targetSpace,

@@ -95,14 +95,16 @@ export function make() {
     assertEquals(literalToValue(receiver.arguments[1]!), { type: "number" });
   });
 
-  it("registers cast-wrapped non-exported builder consts in __cfReg (CT-1743)", async () => {
+  it("registers wrapped non-exported builder consts in __cfReg (CT-1743)", async () => {
     // A non-exported top-level handler written as `const x = handler(...) as T`
-    // must still be __cfReg-registered. Without unwrapping the `as` cast its
-    // AsExpression initializer fails the CallExpression check, so it is excluded
-    // from __cfReg, gets no content-addressed provenance, and at resolve time
-    // falls to the SES source fallback that strips its builder imports — the
-    // CT-1743 `navigateTo`-of-undefined crash. The no-cast sibling is the
-    // positive control (it has always registered).
+    // must still be __cfReg-registered. Without unwrapping the wrapper its
+    // initializer fails the CallExpression check, so it is excluded from
+    // __cfReg, gets no content-addressed provenance, and at resolve time falls
+    // to the SES source fallback that strips its builder imports — the CT-1743
+    // `navigateTo`-of-undefined crash. Every transparent wrapper spelling has
+    // to register, not just the cast: the registration reads the shared set, so
+    // a spelling left out of it fails silently at runtime rather than loudly
+    // here. The no-wrapper sibling is the positive control.
     const source = `
 import { handler } from "commonfabric";
 
@@ -114,6 +116,20 @@ const openWithCast = handler<
 >((_event, { count }) => {
   void count;
 }) as OpenFactory;
+
+const openWithNonNull = handler<
+  { id: string },
+  { count: number }
+>((_event, { count }) => {
+  void count;
+})!;
+
+const openWithSatisfies = handler<
+  { id: string },
+  { count: number }
+>((_event, { count }) => {
+  void count;
+}) satisfies unknown;
 
 const openNoCast = handler<
   { id: string },
@@ -142,6 +158,8 @@ const openNoCast = handler<
     );
     assert(keys.includes("openNoCast")); // positive control
     assert(keys.includes("openWithCast")); // CT-1743 regression guard
+    assert(keys.includes("openWithNonNull"));
+    assert(keys.includes("openWithSatisfies"));
   });
 
   it("adds stable property causes to pattern-owned lowered derives", async () => {

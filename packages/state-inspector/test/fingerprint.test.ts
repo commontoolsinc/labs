@@ -12,9 +12,11 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 import { Database } from "@db/sqlite";
 
 import { openSpace, type SpaceDb } from "../db.ts";
+import { listEntityModels } from "../model.ts";
 import {
   contentFingerprint,
   diffFingerprints,
+  entityAddressKey,
   generatedInternalCellIds,
   hashEntityValue,
 } from "../fingerprint.ts";
@@ -198,6 +200,27 @@ Deno.test("the same id in two scopes is fingerprinted separately", () => {
   });
 });
 
+Deno.test("an entity address key never aliases a different address", () => {
+  // The key decides which entity is which: `diffFingerprints` pairs rows by it,
+  // and `verifyClone` subtracts generated exclusions by it — where an alias
+  // clears a removal that really happened rather than merely misattributing a
+  // count. Nothing the runtime mints carries a separator byte (ids are
+  // `of:fid1:<base64url>` or DIDs; scope keys percent-encode their segments,
+  // and the admission predicate refuses one that does not), so this pins the
+  // key itself rather than a store shape: the tool reads stores it did not
+  // write, where both columns are opaque TEXT.
+  assert(
+    entityAddressKey({ id: "of:a", scope: "b c" }) !==
+      entityAddressKey({ id: "of:a b", scope: "c" }),
+    "a printable separator would run these two addresses together",
+  );
+  assertEquals(
+    entityAddressKey({ id: "of:a", scope: "space" }),
+    entityAddressKey({ id: "of:a", scope: "space" }),
+    "and one address always keys the same",
+  );
+});
+
 Deno.test("the fingerprint is deterministic and order-independent", () => {
   withSpace([{ id: "of:z", doc: { value: 1 } }, {
     id: "of:a",
@@ -283,6 +306,31 @@ Deno.test("a possibly truncated enumeration is refused, not fingerprinted", () =
       Error,
       "truncated enumeration",
     );
+  });
+});
+
+Deno.test("a scope holding exactly the cap is complete, and is fingerprinted", () => {
+  // The refusal boundary is EXCLUSIVE, which `FingerprintOptions.enumerationCap`
+  // states and nothing pinned: a scope of exactly `cap` entities was enumerated
+  // whole, so refusing it would withhold a hash over a complete reading. One
+  // below the count refuses; at it and above, the same hash comes back.
+  withSpace([], (space) => {
+    // The cap is compared against what the scan ENUMERATES, which is not
+    // `report.entities` — that is the post-exclusion count, smaller by the
+    // generated internal cells the fingerprint drops. Take the number the
+    // refusal actually reads.
+    const enumerated = listEntityModels(space).extent.total;
+    assert(enumerated > 1, "the fixture must hold enough to have a boundary");
+
+    assertThrows(
+      () => contentFingerprint(space, { enumerationCap: enumerated - 1 }),
+      Error,
+      "truncated enumeration",
+    );
+
+    const atCap = contentFingerprint(space, { enumerationCap: enumerated });
+    assertEquals(atCap.hash, contentFingerprint(space).hash);
+    assertEquals(atCap.entities, contentFingerprint(space).entities);
   });
 });
 

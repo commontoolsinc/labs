@@ -54,6 +54,14 @@ describe("aliases", () => {
       });
       expect(typeof parseAliasLine(line)).toBe("string");
     });
+
+    it("returns an error for a variant-scoped alias", () => {
+      const line = JSON.stringify({
+        ...FULL,
+        from: { ...FULL.from, v: "wood-fired" },
+      });
+      expect(parseAliasLine(line)).toBe("has a malformed `from`");
+    });
   });
 
   describe("aliasGraphProblems()", () => {
@@ -156,6 +164,24 @@ describe("aliases", () => {
         { k: "unit", s: "bakery", n: "anything" },
         "2026/08/10",
       )).toEqual({ k: "unit", s: "patisserie", n: "anything" });
+    });
+
+    it("keeps the variant while resolving aliases", () => {
+      const resolver = new AliasResolver([FULL, SCOPE]);
+      expect(resolver.resolve(
+        {
+          k: "unit",
+          s: "bakery",
+          n: "glaze > sets",
+          v: "wood-fired",
+        },
+        "2026/08/10",
+      )).toEqual({
+        k: "unit",
+        s: "patisserie",
+        n: "glaze > cures",
+        v: "wood-fired",
+      });
     });
 
     it("prefers a full-identity mapping over the scope's", () => {

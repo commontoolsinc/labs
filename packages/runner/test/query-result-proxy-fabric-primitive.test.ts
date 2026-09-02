@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
+import { FabricPrimitive } from "@commonfabric/data-model";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { internCellLinkSchema } from "../src/cell.ts";
@@ -57,10 +57,11 @@ describe("query-result proxy: FabricPrimitive leaves are not proxy-wrapped", () 
   });
 });
 
-// End-to-end: a schema whose `default` carries a non-JSON FabricValue, read
-// through a query-result proxy, must intern without throwing AND without losing
-// the value to a JSON shadow.
 describe("internCellLinkSchema preserves FabricValue schema defaults read through a proxy", () => {
+  // End-to-end: a schema whose `default` carries a non-JSON FabricValue, read
+  // through a query-result proxy, must intern without throwing AND without
+  // losing the value to a JSON shadow.
+
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;

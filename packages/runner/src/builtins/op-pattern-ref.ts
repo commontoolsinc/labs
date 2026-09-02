@@ -1,7 +1,17 @@
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { Pattern } from "../builder/types.ts";
-import type { MemorySpace } from "../cell.ts";
+import type { Cell, MemorySpace } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
+
+/**
+ * The session-hint key for a list-builtin node's immutable inputs doc — the
+ * address `Runner.#instantiateRawNode` registers a KEYLESS op's in-session
+ * resolution under (`PatternManager.registerKeylessOpResolution`).
+ */
+export function opInputsDocKey(inputsCell: Cell<unknown>): string {
+  const link = inputsCell.getAsNormalizedFullLink();
+  return `${link.space}\0${link.id}`;
+}
 
 /**
  * Compact reference to a pattern by its content-addressed `{ identity, symbol }`
@@ -9,7 +19,7 @@ import type { Runtime } from "../runtime.ts";
  * `map`/`filter`/`flatMap` nodes.
  *
  * The runner substitutes this sentinel for the serialized op graph at node
- * instantiation (see `Runner.substituteOpPatternRefs`), once the op pattern's
+ * instantiation (see `Runner.#substituteOpPatternRefs`), once the op pattern's
  * entry ref is known. Because it is plain data (no symbol keys), it survives the
  * `getImmutableCell` JSON round-trip that strips the in-memory
  * derivation backref — so the builtin reads it back intact and
@@ -47,22 +57,27 @@ export function isPatternRefSentinel(
  *   same way when its module evaluated this session; a ref from a module that
  *   never evaluated here throws — loud, since a sync Action cannot await the
  *   storage-backed `loadPatternByIdentity`.
- * - Otherwise `op` is an embedded pattern graph, used as-is. Post-CT-1812
- *   this is ONLY the stored-keyless remnant: a live op whose original is a
- *   trusted builder pattern gets a `keyless:` identity minted at node
- *   instantiation (`Runner.substituteOpPatternRefs`) and arrives here as a
- *   sentinel; what still arrives embedded is a graph deserialized from a
- *   stored no-entry-ref pattern VALUE (the live keyless writer path pinned
- *   by stored-pattern-rehydration.test.ts), for which no pristine artifact
- *   exists to resolve instead. CT-1812 residual: for THAT form, a nested
- *   grandchild's derived-internal output aliases remain defer-corrupted by
- *   the immutable-cell round-trip — re-rooting a bare stored graph without
- *   binding is the open surgery recorded on the ticket.
+ * - A KEYLESS op arrives as its embedded graph (a session-synthetic
+ *   `keyless:` identity must never land in the durable inputs doc — L3(a),
+ *   RULED 2026-08-27), but the instantiating session registered its pristine
+ *   artifact under the inputs doc's address
+ *   (`Runner.#instantiateRawNode` → `registerKeylessOpResolution`), so pass
+ *   `inputsCell` and the hint resolves it without touching the embedded
+ *   graph — the CT-1812 defer corruption never engages in-session.
+ * - Otherwise `op` is an embedded pattern graph, used as-is: a graph
+ *   deserialized from a stored no-entry-ref pattern VALUE (the live keyless
+ *   writer path pinned by stored-pattern-rehydration.test.ts), or a keyless
+ *   op read by a session other than its instantiator (no hint), for which no
+ *   pristine artifact exists to resolve instead. CT-1812 residual: for THAT
+ *   form, a nested grandchild's derived-internal output aliases remain
+ *   defer-corrupted by the immutable-cell round-trip — re-rooting a bare
+ *   stored graph without binding is the open surgery recorded on the ticket.
  */
 export function resolveOpPattern(
   runtime: Runtime,
   rawOp: unknown,
   builtinName: string,
+  inputsCell?: Cell<unknown>,
 ): Pattern {
   const resolved = resolveStoredPattern(runtime, rawOp);
   if (resolved === undefined && isPatternRefSentinel(rawOp)) {
@@ -71,6 +86,17 @@ export function resolveOpPattern(
         `${rawOp.$patternRef.symbol} did not evaluate in this session and ` +
         `carries no graph`,
     );
+  }
+  if (
+    resolved !== undefined && !isPatternRefSentinel(rawOp) &&
+    inputsCell !== undefined
+  ) {
+    // Embedded graph: prefer the instantiating session's pristine artifact
+    // for this node, when registered (the keyless-op hint).
+    const hinted = runtime.patternManager.keylessOpPatternFor(
+      opInputsDocKey(inputsCell),
+    );
+    if (hinted !== undefined) return hinted;
   }
   return resolved as Pattern;
 }

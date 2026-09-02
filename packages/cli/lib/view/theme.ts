@@ -129,54 +129,78 @@ export function bracketStyle(depth: number): Style {
 export const ui = {
   /** The editor background painted behind every content cell. */
   editorBg: C.editorBg,
+
   /** Faint background tint marking a JSON-schema object-literal region. */
   schemaRegionBg: C.schemaBg,
+
   /** Faint background tint marking a closure (arrow/function-expression) body. */
   closureRegionBg: C.closureBg,
+
   /** Background of the line range belonging to the selected structure node. */
   selectionBg: C.selectionBg,
+
   /** The vertical guide bar drawn beside a selected node. */
   guide: { fg: C.cyan, bold: true, bg: C.editorBg } as Style,
+
   /** Continuation and diff-margin markers. The renderer supplies the content
    * row's editor or diff background. */
   wrapMarker: { fg: C.yellow, bold: true } as Style,
+
   /** End-of-document ornament. */
   endMark: { fg: C.fgDim } as Style,
+
   statusBar: { fg: C.fg, bg: C.panel } as Style,
   statusKey: { fg: C.red, bg: C.panel, bold: true } as Style,
+
   /** The current file name on the status bar. */
   statusFile: { fg: C.fgBright, bg: C.panel, bold: true } as Style,
+
   statusDim: { fg: C.fgDim, bg: C.panel } as Style,
+
   /** The notice region above the status bar (e.g. the files a save would
    * write), tinted to read as a callout rather than ordinary content. */
   noticeBar: { fg: C.ink, bg: C.cyan } as Style,
+
   lineNumber: { fg: C.fgDim, bg: C.editorBg } as Style,
   lineNumberCurrent: { fg: C.yellow, bg: C.editorBg } as Style,
   searchMatch: { fg: C.ink, bg: C.cyan } as Style,
   searchCurrent: { fg: C.ink, bg: C.yellow, bold: true } as Style,
-  /** A dialog is a panel a shade lighter than the editor, with a bright frame
-   * and a drop shadow, distinct from the content behind it. */
+
+  /** Background of an overlay or dialog panel: a shade lighter than the
+   * editor, distinct from the content behind it. */
   overlayBg: C.panel,
+
+  /** The panel's bright frame. */
   overlayBorder: { fg: C.white, bold: true } as Style,
+
   /** Border of an overlay that shows source (an editor window). */
   overlaySourceBorder: { fg: C.cyan, bold: true } as Style,
+
   /** The highlighted (selected) reference line inside a card. */
   overlayHighlightBg: C.panelHi,
+
   /** The drop shadow cast to the right of and below a dialog: the content behind
    * shows through, darkened. */
   overlayShadow: { fg: C.fgDim, bg: C.shadow } as Style,
+
   overlayTitle: { fg: C.fgBright, bold: true } as Style,
+
   /** Body text inside a modal prompt dialog. */
   dialogText: { fg: C.fg } as Style,
+
   /** A Turbo Vision push-button: dark text on a green face. */
   button: { fg: C.ink, bg: C.button } as Style,
+
   /** The default (Enter) button, drawn in bright white so it stands out. */
   buttonDefault: { fg: C.white, bg: C.button, bold: true } as Style,
+
   /** The highlighted shortcut letter on a button face. */
   buttonKey: { fg: C.yellow, bg: C.button, bold: true } as Style,
+
   /** The drop shadow cast below and right of a button, painted with half-block
    * glyphs so it reads as a thin edge rather than a full cell. */
   buttonShadow: { fg: C.shadow } as Style,
+
   scrollbarTrack: { fg: C.fgDim } as Style,
   scrollbarThumb: { fg: C.cyan } as Style,
 };

@@ -87,6 +87,38 @@ export function verifySinkRequestRelease(
   return undefined;
 }
 
+/**
+ * Stage a sink request on `tx` and run `flush` once that transaction commits.
+ *
+ * The work happens after the commit because the request's own state — the
+ * pending flag, the request hash a later run recognizes — has to be durable
+ * before anything is sent. So the commit failing means the work never starts.
+ * Usually that is right: the action runs again, stages the request again, and
+ * a later attempt sends it. When the code that owns those attempts stops
+ * making them, the caller is left with a request that was staged, never sent,
+ * and never answered. `onRejected` is where a caller settles that. It is
+ * called once, when the transaction is abandoned, and never on a rejection
+ * another attempt still follows — the scheduler decides which is which, since
+ * no rejection says so on its own.
+ *
+ * What it is handed says the request was refused and names the sink, and stops
+ * there. A caller records that error where a pattern reads it, and the refusal
+ * detail — the document the rule named, the confidentiality atoms that did not
+ * fit, and with them the `source` of each caveat, the principal that introduced
+ * it — is precisely what the pattern-facing surface withholds (inv-12 / audit
+ * 28b, the rule `redactCaveatSourcesForDisplay` applies to label views). It
+ * would be a strange bargain to refuse the write and then hand its reason to
+ * the writer. The detail travels on `cause` and to the log below, both of which
+ * face the operator. A deployment that wants a pattern to read some of the
+ * reason declassifies the fields it chooses through an error exchange rule,
+ * which names each field and the confidentiality it is released to.
+ *
+ * A rejected request has no receipt and no partial send. The refusal happens
+ * before the transaction reaches storage, which clears the post-commit outbox,
+ * so `flush` — and with it the release check below that would mint one — never
+ * runs. `onRejected` reports what did not happen; it must not write anything
+ * that stands for a completed request.
+ */
 export function enqueueSinkRequestPostCommitEffect(
   tx: Pick<
     IExtendedStorageTransaction,
@@ -106,13 +138,34 @@ export function enqueueSinkRequestPostCommitEffect(
      * its cells pending forever (the stage-G round-2 headline). The
      * CFC policy-input `effectId` stays unscoped either way. */
     idempotencyKey?: string;
+
+    /** Called once, with an error naming the refusal, when the transaction
+     * staging this request is abandoned — no further attempt at it is
+     * coming, so the request will never be sent. */
+    onRejected?: (error: Error) => void;
   },
 ): void {
   const policyInput = createSinkRequestPolicyInput(sink, effectId, request);
   tx.recordCfcWritePolicyInput(policyInput);
+  const onRejected = options?.onRejected;
   tx.enqueuePostCommitEffect({
     id: effectId,
     idempotencyKey: options?.idempotencyKey ?? effectId,
+    // The other half of this effect's outcome. The outbox drops a second
+    // effect staged under a key it is already holding, and drops this with it,
+    // so one request is abandoned once however many times it is staged.
+    abandon: onRejected === undefined ? undefined : (error) => {
+      console.error(
+        `[cfc] ${kind} was abandoned before it started; the request is not ` +
+          `sent.`,
+        { sink, effectId, rejection: (error as { message?: string })?.message },
+      );
+      onRejected(
+        new Error(`${sink} request was refused before it started`, {
+          cause: error,
+        }),
+      );
+    },
     kind,
     flush: async (committedTx) => {
       const reason = verifySinkRequestRelease(

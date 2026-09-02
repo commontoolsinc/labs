@@ -53,15 +53,20 @@ export interface PagerTty {
 export interface PagerDeps {
   /** Open the controlling terminal for reading; throws when there is none. */
   openTty(): PagerTty;
+
   write(text: string): void;
+
   /** The terminal size; may throw when there is no console. */
   consoleSize(): { columns: number; rows: number };
+
   env(key: string): string | undefined;
   addSignalListener(signal: Deno.Signal, handler: () => void): void;
   removeSignalListener(signal: Deno.Signal, handler: () => void): void;
   exit(code: number): never;
+
   /** Schedule `handler` after `ms`; returns a function that cancels it. */
   setTimer(handler: () => void, ms: number): () => void;
+
   /** Resolve after `ms`. Used to hold a frame on screen for a moment on a path
    * that then tears the screen down, where a cancellable timer has nothing left
    * to run in. */

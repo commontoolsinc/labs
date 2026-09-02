@@ -12,7 +12,9 @@
  * traversal and the lazy view a lift's argument goes through — have to answer
  * them identically, or the same field means two things.
  */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";

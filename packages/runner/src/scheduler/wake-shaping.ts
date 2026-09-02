@@ -86,12 +86,16 @@ export const CELL_GROUP_PREFIX = "cell:";
 /** One shaped wake. See the module comment for the per-field semantics. */
 export interface WakeHold {
   groupKey: string;
+
   /** Coalescing unit within the group; omitted, the wake is kept FIFO. */
   itemKey?: string;
+
   /** Same key as the group's last charged hold ⇒ ride that token. */
   chargeKey?: object;
+
   /** Deliver the leading edge on a fresh macrotask instead of synchronously. */
   defer?: boolean;
+
   deliver: () => void;
 }
 
@@ -100,16 +104,21 @@ export interface WakeHold {
 // activity; an idle, fully refilled bucket is closed.
 interface ThrottleGroup {
   tokens: number;
+
   /** itemKey -> deliver thunk; unique keys preserve FIFO, shared keys coalesce. */
   pending: Map<string, () => void>;
+
   timer: ReturnType<typeof setTimeout> | undefined;
+
   /** Deferred leading-edge deliveries scheduled but not yet run. */
   inFlight: number;
+
   /**
    * The charge key of the hold that most recently took a burst token. Holds
    * carrying the same key ride that token instead of spending their own.
    */
   lastBurstCharge: object | undefined;
+
   /** Source of unique item keys for keep-all (FIFO) holds. */
   uniqueSeq: number;
 }
@@ -261,24 +270,27 @@ export class WakeShaper {
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Event-path adapter (channel 3)
-// ---------------------------------------------------------------------------
+//
 
 export interface DeliverOpts {
   eventId?: string;
   originTx?: IExtendedStorageTransaction;
   time?: number;
+
   /** Runtime-injection provenance, carried through a held delivery unchanged
    * so shaping can never strip the closed-world gate's exemption. Renderer
    * events (the only shapable class) are never injection sites, so this is
    * defensive plumbing, not a live path. */
   runtimeInjectedEventKeys?: readonly string[];
+
   /** The serving drain's per-event carriage (Phase 3), carried through a
    * held delivery unchanged — same defensive plumbing as above (drained
    * store entries are never renderer-trusted, so shaping never holds
    * them in practice). */
   served?: ServedEventDispatch;
+
   /** The client-echo cascade thread (QueuedEvent.parentEventId), carried
    * through a held delivery unchanged — defensive plumbing like `served`
    * (a cascade send from a handler frame is never renderer-trusted). */
@@ -451,9 +463,9 @@ export function holdShapedEvent(
   });
 }
 
-// ---------------------------------------------------------------------------
+//
 // Cell-path adapter (plan B, channels 4 and 5)
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Shape a cell-flip wake (plan B). `groupKey` identifies the observing pattern

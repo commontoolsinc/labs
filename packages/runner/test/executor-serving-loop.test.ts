@@ -47,6 +47,8 @@ import {
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { getArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { waitUntil } from "./support/wait-until.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 class SharedServerStorageManager extends EmulatedStorageManager {
   // Delegate to the base connectTo (shared-harness extraction, CT-1962):
@@ -93,21 +95,6 @@ const serviceSigner = await Identity.fromPassphrase("serving loop service");
 const aliceSigner = await Identity.fromPassphrase("serving loop alice");
 const bobSigner = await Identity.fromPassphrase("serving loop bob");
 
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string | (() => string),
-  timeoutMs = 10_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      const rendered = typeof label === "function" ? label() : label;
-      throw new Error(`timed out waiting for ${rendered}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
-
 describe("stage F serving loop", () => {
   let server: MemoryV2Server.Server;
   let host: ExecutorHost | undefined;
@@ -115,18 +102,14 @@ describe("stage F serving loop", () => {
   let clientRuntime: Runtime;
   let servingRuntime: Runtime | undefined;
   let onServingRuntime: ((runtime: Runtime) => Promise<void>) | undefined;
+
   /** Stage G: the serving runtime's injected fetch (egress stub) —
    * effectful builtins served by the loop call THIS, never the network. */
   let servingFetch:
     | ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>)
     | undefined;
-  // serving-loop.md §3e: the pattern-update posture flips server-side.
-  // The updater's source CHECK fetches over the network, which this
-  // fully-local harness cannot serve — the posture flip is asserted by
-  // its own test below; the loop tests run with the check off so idle()
-  // is not at the mercy of a network timeout.
-  let autoUpdate = false;
 
+  // serving-loop.md §3e: the pattern-update posture flips server-side.
   const newHost = (
     policy?: ConstructorParameters<typeof ExecutorHost>[0]["policy"],
   ): ExecutorHost =>
@@ -144,7 +127,6 @@ describe("stage F serving loop", () => {
           ...(servingFetch !== undefined ? { fetch: servingFetch } : {}),
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: autoUpdate,
           },
         });
         servingRuntime = runtime;
@@ -165,7 +147,6 @@ describe("stage F serving loop", () => {
     servingRuntime = undefined;
     onServingRuntime = undefined;
     servingFetch = undefined;
-    autoUpdate = false;
   });
 
   afterEach(async () => {
@@ -915,14 +896,8 @@ describe("stage F serving loop", () => {
     // The SWAP half — the patternIdentity sink reacting to a pointer
     // write, teardown + reinstantiation included — is what this test
     // drives, and it is installed with the piece (gated only by
-    // doNotUpdateOnPatternChange), independent of the
-    // systemPatternAutoUpdate CHECK half. The check half (network source
-    // polling + roll-forward) is enabled by the production wiring
-    // (toolshed's serving-runtime factory) and needs a real patterns
-    // route to poll; in this fully-local fixture its source probe syncs
-    // docs that never resolve and would wedge the settle — the flagged
-    // stage-F residual.
-    autoUpdate = false;
+    // doNotUpdateOnPatternChange). Following an origin is separate and
+    // belongs to whoever opens a piece; a serving tenure opens none.
 
     let v2Ref: { identity: string; symbol: string } | undefined;
     onServingRuntime = async (runtime) => {
@@ -1016,7 +991,11 @@ describe("stage F serving loop", () => {
     // v1's pre-swap derived commits.
     const preSwapHead = Engine.serverSeq(engine);
     const pointerTx = clientRuntime.edit();
-    clientResult.withTx(pointerTx).setMetaRaw("patternIdentity", v2Ref!);
+    clientResult.withTx(pointerTx).setMetaRaw(
+      "patternIdentity",
+      v2Ref!,
+      rawMetaWriteAuthorization,
+    );
     expect((await pointerTx.commit()).error).toBeUndefined();
 
     // The SpaceServer's watcher swaps to v2 and the wave serves the new
@@ -1094,6 +1073,72 @@ describe("stage F serving loop", () => {
     );
     expect(host.stats().lease.lost).toBeGreaterThanOrEqual(1);
     expect(host.stats().activeSpaces).toBe(0);
+  });
+
+  it("leaves a space unserved while a rival process holds its lease, and serves it once that lease is gone (serving-loop.md §2)", async () => {
+    const engine = await server.engineForSpace(space);
+    const rival = executionLeaseHolder("did:key:activation-rival");
+    expect(
+      acquireExecutionLease(engine, { space, holder: rival, ttlMs: 600_000 }),
+    ).toBe(true);
+
+    let built = 0;
+    onServingRuntime = () => {
+      built += 1;
+      return Promise.resolve();
+    };
+    host = newHost();
+    openClient();
+    const demand = clientRuntime.getCell<{ value: number }>(
+      space,
+      "rival-lease-demand",
+      undefined,
+    );
+    await demand.sync();
+    // The admission trigger's own precondition, checked rather than
+    // assumed: with a live client session an authored admission
+    // activates, so the notice below reaches the refusal.
+    expect(
+      server.hasLiveSessionsForSpace(space, {
+        excludePrincipal: serviceSigner.did(),
+      }),
+    ).toBe(true);
+    server.noteExecutorCommit({
+      space,
+      seq: Engine.serverSeq(engine),
+      class: "authored",
+      sessionId: "rival-lease-issuer",
+      writes: [{ id: "of:rival-lease-c1", scopeKey: "space" }],
+    });
+    // The notice entered the activation synchronously, and close()
+    // awaits every activation in flight — so this is the refusal
+    // landing, not a guess at when it lands.
+    await host.close();
+
+    // The refusal precedes the runtime factory: a second deriver builds
+    // nothing, registers nothing, and leaves the rival's row alone.
+    expect(built).toBe(0);
+    expect(host.stats().lease.held).toBe(0);
+    expect(host.spaceServer(space)).toBeUndefined();
+    expect(liveExecutionLeaseHolder(engine, space)).toBe(rival);
+
+    // The control: with the row released, the SAME trigger against the
+    // SAME live session serves the space — so the refusal above is the
+    // lease's doing, not a trigger that never fired.
+    releaseExecutionLease(engine, { space, holder: rival });
+    host = newHost();
+    server.noteExecutorCommit({
+      space,
+      seq: Engine.serverSeq(engine),
+      class: "authored",
+      sessionId: "rival-lease-issuer",
+      writes: [{ id: "of:rival-lease-c2", scopeKey: "space" }],
+    });
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "the activation once the rival's lease is gone",
+    );
+    expect(built).toBe(1);
   });
 
   it("parks on a renew-blip mid-wave abort: reacquire succeeds, the aborted wave's space still parks and W does not move (serving-loop.md §2)", async () => {
@@ -1300,7 +1345,6 @@ describe("stage F serving loop", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         created.push({ runtime, manager });
@@ -1421,7 +1465,6 @@ describe("stage F serving loop", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         return {

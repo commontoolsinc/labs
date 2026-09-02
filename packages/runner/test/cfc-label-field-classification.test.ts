@@ -7,10 +7,11 @@ import {
   LABEL_FIELD_CLASSIFICATION,
 } from "../src/cfc/label-field-classification.ts";
 
-// The design §2 initial-assignment table
-// (docs/specs/cfc-label-metadata-confidentiality.md, SC-25) as data.
-// Stage 0: table + lookup only; the Stage 1 persist transform consumes it.
 describe("CFC label-field classification (inv-12 / SC-25)", () => {
+  // The design §2 initial-assignment table
+  // (docs/specs/cfc-label-metadata-confidentiality.md, SC-25) as data. Stage 0:
+  // table + lookup only; the Stage 1 persist transform consumes it.
+
   it("classifies each design-table row", () => {
     expect(
       classifyLabelField({ type: CFC_ATOM_TYPE.Caveat }, ["source"]),

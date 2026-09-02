@@ -69,10 +69,13 @@ class ResumeBatchGate {
   readonly #open: [boolean, boolean] = [false, false];
   readonly #resolve: [(() => void) | undefined, (() => void) | undefined];
   #deliver: (payload: string) => void = () => {};
+
   /** Resolves once a top-level document has been held back. */
   readonly topHeld: Promise<void>;
+
   /** Resolves once a per-element document has been held back. */
   readonly elementsHeld: Promise<void>;
+
   constructor() {
     let resolveTop!: () => void;
     let resolveElements!: () => void;
@@ -109,10 +112,12 @@ class ResumeBatchGate {
       setCloseReceiver: (r: (e?: Error) => void) => inner.setCloseReceiver?.(r),
     };
   }
+
   /** How many documents of a stage are currently held back. */
   heldCount(stage: 0 | 1): number {
     return this.#held[stage].length;
   }
+
   /** Open a stage and flush every document it holds. */
   release(stage: 0 | 1): void {
     this.#open[stage] = true;
@@ -121,14 +126,20 @@ class ResumeBatchGate {
 }
 
 class GatedSessionFactory implements SessionFactory {
+  readonly #getServer: () => MemoryV2Server.Server;
+  readonly #gate?: ResumeBatchGate;
+
   constructor(
-    private readonly getServer: () => MemoryV2Server.Server,
-    private readonly gate?: ResumeBatchGate,
-  ) {}
+    getServer: () => MemoryV2Server.Server,
+    gate?: ResumeBatchGate,
+  ) {
+    this.#getServer = getServer;
+    this.#gate = gate;
+  }
   async create(spaceId: string, sgnr?: Signer) {
-    const base = MemoryV2Client.loopback(this.getServer());
+    const base = MemoryV2Client.loopback(this.#getServer());
     const client = await MemoryV2Client.connect({
-      transport: this.gate ? this.gate.wrap(base) : base,
+      transport: this.#gate ? this.#gate.wrap(base) : base,
     });
     const session = await client.mount(
       spaceId,

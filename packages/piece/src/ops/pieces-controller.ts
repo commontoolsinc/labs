@@ -5,7 +5,7 @@ import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { homeSchema } from "@commonfabric/home-schemas";
 import {
   createSession,
@@ -20,7 +20,6 @@ import {
   type Cell,
   Console as RuntimeConsole,
   createSpaceRootIfAbsent,
-  DEFAULT_ROOT_RUN_OPTIONS,
   EntityId,
   entityIdFrom,
   type EntityIdListOptions,
@@ -30,6 +29,8 @@ import {
   getEntityId,
   getMetaLink,
   getPatternIdentityRef,
+  getPatternSetupIdentityRef,
+  getPatternSource,
   getPieceSourceSnapshot,
   isCell,
   isLink,
@@ -44,7 +45,9 @@ import {
   parseLink,
   type Pattern,
   type PatternCoverageCollector,
-  type PatternUpdateOutcome,
+  PatternManager,
+  type PatternSetupCommitReceipt,
+  PatternSetupPostCommitError,
   type PieceSourceTransition,
   preparePieceSourceTransitionBaseline,
   Runtime,
@@ -55,6 +58,7 @@ import {
   setPatternSource,
   type SpaceCellContents,
 } from "@commonfabric/runner";
+import type { CfcPosture } from "@commonfabric/runner";
 import type {
   CfcEnforcementMode,
   CfcFlowLabelsMode,
@@ -72,10 +76,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { prepareSourceClosureVerification } from "../../../runner/src/compilation-cache/cell-cache.ts";
-import {
-  getResultCellWithSourceSchema,
-  isLegacyPieceRegistryRoot,
-} from "../../../runner/src/piece-helpers.ts";
+import { getResultCellWithSourceSchema } from "../../../runner/src/piece-helpers.ts";
 import { pieceId } from "../piece-id.ts";
 // System space-root pattern refs, their derivation, and the source→URL
 // resolution live in ../system-pattern-url.ts; re-exported here for existing
@@ -87,7 +88,9 @@ import {
   patternSourceUrl,
 } from "../system-pattern-url.ts";
 import { PieceController } from "./piece-controller.ts";
+import { reconcilePieceSource } from "./piece-origin.ts";
 import { compileProgram } from "./utils.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 export {
   DEFAULT_APP_PATTERN_SOURCE,
   deriveSystemPatternSource,
@@ -99,20 +102,29 @@ ensureNotRenderThread();
 const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
   Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
+/**
+ * What opening a piece does beyond resolving its cell.
+ *
+ * `reconcile` rolls a stored source forward to the origin it follows, keeping
+ * a followed root current. `start` runs the pattern, which materializes
+ * everything its result reaches.
+ *
+ * They are separable because they are wanted separately: a caller that
+ * RENDERS a piece needs both, while a caller that reads what a piece
+ * exported needs the value it reads to be current without paying to run it.
+ * A boolean asks for both or neither.
+ */
+export type PieceOpen = { reconcile: boolean; start: boolean };
+
+const normalizePieceOpen = (open: boolean | PieceOpen): PieceOpen =>
+  typeof open === "boolean" ? { reconcile: open, start: open } : open;
+
 const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
   type: "array",
   items: { type: "unknown", asCell: ["cell"] },
   default: [],
   ifc: { confidentiality: [cfcAtom.resource("PrivilegedPieceList")] },
 });
-
-// Default roots have a stronger update policy than ordinary pieces: an
-// existing root is reconciled before start, while a new root is compiled from
-// the current source immediately before creation. Keep the runner's watcher,
-// but do not schedule its duplicate fire-and-forget source check.
-// DEFAULT_ROOT_RUN_OPTIONS moved to the runner's ensure-space-root.ts
-// (OW45 arm-B stage 1): the space-root creation is shared with the
-// SpaceServer's ensure, and the run options ride with it.
 
 // Timing stats record even while the logger is disabled, so every phase is
 // visible in the load summaries (browser worker included, where the
@@ -152,42 +164,42 @@ function filterOutCell(
   );
 }
 
-/** Backward-compatible name for the result of a pattern update check. */
-export type UpdateOutcome = PatternUpdateOutcome;
+/**
+ * The migration token in its FRAMED reason position — `: <token>: ` — the
+ * exact shape the CFC prepare catch emits (`${token}: ${message}` recorded as
+ * a reason, surfaced by the commit as `…not prepared: ${reason}`). A bare
+ * `includes(token)` would also match the token appearing incidentally inside
+ * an UNRELATED, user-influenced error — e.g. an ordinary incompatible-type
+ * merge failure at a property path literally named
+ * `/cfc-schema-migration-incompatible` — and wrongly authorize a root
+ * replacement for a non-additive incompatibility. The `: … : ` framing cannot
+ * be produced by a path or value that merely contains the token string.
+ */
+const FRAMED_MIGRATION_REASON =
+  `: ${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: `;
 
 /**
- * A cold-start setup repair failed specifically because the CFC SCHEMA
- * MIGRATION rejected the commit — the pinned pattern loads but cannot migrate
- * preserved input or unclassified document data onto a now-required field that
- * carries no default. Generated result fields are not in this class: pattern
- * setup materializes them. This is ONE of the two repair-failure classes the
- * runnability backstop ({@link PiecesController.healDefaultRootByRollForward})
- * acts on — the other is a refused stored argument
- * ({@link isStoredArgumentSchemaRefusal}); every other failure stays
- * fail-closed.
+ * Reports whether a cold-start setup repair failed specifically because the
+ * CFC SCHEMA MIGRATION rejected the commit — the pinned pattern loads but
+ * cannot migrate preserved input or unclassified document data onto a
+ * now-required field that carries no default. Generated result fields are not
+ * in this class: pattern setup materializes them. This is ONE of the two
+ * repair-failure classes the runnability backstop
+ * (`PiecesController.#healDefaultRootByRollForward`) acts on — the other is a
+ * refused stored argument ({@link isStoredArgumentSchemaRefusal}); every other
+ * failure stays fail-closed.
  *
  * The bare `CFC enforcement rejected commit` prefix is NOT a safe trigger: the
  * runner emits it for prepared-digest races, unprepared transactions, and
  * policy/provenance rejections too (`extended-storage-transaction.ts`), none of
- * which are repaired by repointing the root's pattern identity. So we require
- * the machine-stable migration token the CFC prepare tags onto this class
- * (`migration-reason.ts`). Matching a token in the message — not the error
- * class — is what survives the plain-`Error` re-wrap the runner applies at its
- * setup-commit boundary (`runner.ts`), keeping producer and consumer in
+ * which are repaired by repointing the root's pattern identity. So the check
+ * requires the machine-stable migration token the CFC prepare tags onto this
+ * class (`migration-reason.ts`), and only in its framed position
+ * ({@link FRAMED_MIGRATION_REASON}). Matching a token in the message — not the
+ * error class — is what survives the plain-`Error` re-wrap the runner applies
+ * at its setup-commit boundary (`runner.ts`), keeping producer and consumer in
  * lockstep across that boundary and across packages.
- *
- * Crucially we match the token only in its FRAMED reason position — `: <token>:
- * ` — the exact shape the prepare catch emits (`${token}: ${message}` recorded
- * as a reason, surfaced by the commit as `…not prepared: ${reason}`). A bare
- * `includes(token)` would also match the token appearing incidentally inside an
- * UNRELATED, user-influenced error — e.g. an ordinary incompatible-type merge
- * failure at a property path literally named `/cfc-schema-migration-incompatible`
- * — and wrongly authorize a root replacement for a non-additive incompatibility.
- * The `: … : ` framing cannot be produced by a path or value that merely
- * contains the token string.
  */
-const FRAMED_MIGRATION_REASON =
-  `: ${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: `;
 const isCfcMigrationRejection = (error: unknown): boolean =>
   error instanceof Error &&
   error.message.startsWith("CFC enforcement rejected commit") &&
@@ -197,25 +209,6 @@ const isCfcMigrationRejection = (error: unknown): boolean =>
 // env reads are guarded like PIECE_TRACE_TIMINGS: absent env ⇒ defaults.
 const readEnv: EnvReader = (key) =>
   typeof Deno !== "undefined" ? Deno.env.get(key) : undefined;
-
-/**
- * Records a piece a running pattern navigated to in the space's registry, so a
- * piece a pattern created inside this runtime is reachable from the space
- * afterwards. A piece the registry already lists is left alone.
- */
-export async function registerNavigatedPiece(
-  pieces: PiecesController,
-  target: Cell<unknown>,
-): Promise<void> {
-  const id = pieceId(target);
-  if (id === undefined) {
-    throw new Error("navigateTo: the target carries no piece id");
-  }
-  await pieces.runtime.storageManager.synced();
-  const registry = await pieces.getPieceRegistry();
-  if (registry.get().some((piece) => pieceId(piece) === id)) return;
-  await pieces.add([target]);
-}
 
 export interface PiecesControllerOptions {
   deferSpaceCellSync?: boolean;
@@ -233,11 +226,13 @@ export interface CreatePieceOptions {
  * the space's default root pattern. One instance serves one space.
  */
 export class PiecesController<T = unknown> {
-  private space: MemorySpace;
+  #session: Session;
 
-  private spaceCell: Cell<SpaceCellContents>;
+  #space: MemorySpace;
 
-  private diagnosticConsole: RuntimeConsole;
+  #spaceCell: Cell<SpaceCellContents>;
+
+  #diagnosticConsole: RuntimeConsole;
 
   /**
    * Promise resolved when the controller is ready.
@@ -245,27 +240,27 @@ export class PiecesController<T = unknown> {
   ready: Promise<void>;
 
   constructor(
-    private session: Session,
+    session: Session,
     public runtime: Runtime,
     options: PiecesControllerOptions = {},
   ) {
-    this.diagnosticConsole = new RuntimeConsole(runtime.harness);
-    this.space = this.session.space;
+    this.#session = session;
+    this.#diagnosticConsole = new RuntimeConsole(runtime.harness);
+    this.#space = this.#session.space;
 
     // Use the space DID as the cause - it's derived from the space name
     // and consistently available everywhere
-    const isHomeSpace = this.space === this.runtime.userIdentityDID;
-    this.spaceCell = isHomeSpace
+    const isHomeSpace = this.#space === this.runtime.userIdentityDID;
+    this.#spaceCell = isHomeSpace
       ? this.runtime.getHomeSpaceCell()
-      : this.runtime.getSpaceCell(this.space);
+      : this.runtime.getSpaceCell(this.#space);
 
     const syncSpaceCellContents = options.deferSpaceCellSync
       ? Promise.resolve()
-      : Promise.resolve(this.spaceCell.sync());
+      : Promise.resolve(this.#spaceCell.sync());
 
-    // Note: pieceRegistry and recentPieces are managed by the default pattern,
-    // not directly on the space cell. The space cell only contains a link to
-    // defaultPattern.
+    // The piece registry is managed by the default pattern, not directly on
+    // the space cell. The space cell only contains a link to defaultPattern.
     // Default pattern creation is handled by ensureDefaultPattern(), which is
     // called by CLI/shell entry points. Construction doesn't auto-create it.
     this.ready = syncSpaceCellContents.then(() => {});
@@ -279,8 +274,7 @@ export class PiecesController<T = unknown> {
    * authorization error. A connection that does not complete takes its socket
    * and its replica down with it.
    *
-   * A pattern that navigates to a piece has that piece recorded in the
-   * space's registry, and one that reaches the LLM reaches this deployment's.
+   * A pattern that reaches the LLM reaches this deployment's service.
    */
   static async initialize(
     {
@@ -291,19 +285,24 @@ export class PiecesController<T = unknown> {
       moduleByteCache,
       patternCoverage,
       navigateCallback,
+      onPatternInstantiated,
       cfcEnforcementMode,
       cfcFlowLabels,
+      cfcPosture,
     }: {
       apiUrl: URL | string;
       identity: Identity;
+
       /** The space to open, as a `did:key:` DID or as a space name. */
       space: string;
+
       /**
        * Open the space's session without syncing the space cell's contents. A
        * caller that reaches pieces by id, and never reads the space record,
        * does not need those contents.
        */
       deferSpaceCellSync?: boolean;
+
       // Optional compiled-module-byte cache to share across controllers. Supplied
       // only by test code (see the integration suite's compile-byte-cache helper);
       // unset in production, so no cache is installed.
@@ -322,18 +321,25 @@ export class PiecesController<T = unknown> {
       navigateCallback?: Parameters<
         typeof runtimePresets.remoteClient
       >[0]["navigateCallback"];
+      // Optional instantiation observer, passed to the remoteClient preset: a
+      // host that must know which patterns this controller materialized, and
+      // under which pointer, supplies one. Observation only — the runtime runs
+      // the same either way — and unset means the runtime tells nobody.
+      onPatternInstantiated?: Parameters<
+        typeof runtimePresets.remoteClient
+      >[0]["onPatternInstantiated"];
       // Host-controlled CFC rollout dials, passed through to the remoteClient
       // preset; unset means the preset's first-party posture.
       cfcEnforcementMode?: CfcEnforcementMode;
       cfcFlowLabels?: CfcFlowLabelsMode;
+      // Named CFC posture bundle for this controller's runtime (the
+      // remoteClient preset's `cfcPosture` opt-in); the two dials above still
+      // apply over it.
+      cfcPosture?: CfcPosture;
     },
   ): Promise<PiecesController> {
     const api = new URL(apiUrl);
     setLLMUrl(api.toString());
-    // Holds the controller built below, which the navigate callback reads and
-    // the runtime takes at construction. A pattern navigates only from a
-    // running piece, and the controller is what starts one.
-    const piecesRef: { current?: PiecesController } = {};
     const session = await createSession(
       isDID(space)
         ? { identity, spaceDid: space }
@@ -362,10 +368,9 @@ export class PiecesController<T = unknown> {
       patternCoverage,
       ...(cfcEnforcementMode !== undefined ? { cfcEnforcementMode } : {}),
       ...(cfcFlowLabels !== undefined ? { cfcFlowLabels } : {}),
-      // A caller-supplied surface (the client-effect channel's test hook,
-      // server-execution v2 Phase 4) overrides the registry default.
-      navigateCallback: navigateCallback ??
-        ((target) => registerNavigatedPiece(piecesRef.current!, target)),
+      ...(cfcPosture !== undefined ? { cfcPosture } : {}),
+      ...(navigateCallback !== undefined ? { navigateCallback } : {}),
+      ...(onPatternInstantiated !== undefined ? { onPatternInstantiated } : {}),
       trustSnapshotProvider: () => ({
         id: `principal:${session.as.did()}`,
         actingPrincipal: session.as.did(),
@@ -378,7 +383,6 @@ export class PiecesController<T = unknown> {
       const pieces = new PiecesController(session, runtime, {
         deferSpaceCellSync,
       });
-      piecesRef.current = pieces;
       // Opening the space's session is what turns a permanent denial into an
       // error: the per-space status below is written while the session opens,
       // and `synced()` stays quiet about a denial so that a denied cross-space
@@ -400,11 +404,11 @@ export class PiecesController<T = unknown> {
   }
 
   getSpace(): MemorySpace {
-    return this.space;
+    return this.#space;
   }
 
   getSpaceName(): string | undefined {
-    return this.session.spaceName;
+    return this.#session.spaceName;
   }
 
   async synced(): Promise<void> {
@@ -414,19 +418,20 @@ export class PiecesController<T = unknown> {
 
   async ensureSpaceSession(): Promise<void> {
     await this.ready;
-    await this.runtime.storageManager.open(this.space).ensureSession?.();
+    await this.runtime.storageManager.open(this.#space).ensureSession?.();
   }
 
   async listEntityIds(): Promise<string[] | undefined> {
     await this.ready;
-    return await this.runtime.storageManager.open(this.space).listEntityIds?.();
+    return await this.runtime.storageManager.open(this.#space)
+      .listEntityIds?.();
   }
 
   async listEntityIdPage(
     options: EntityIdListOptions = {},
   ): Promise<EntityIdListResult | undefined> {
     await this.ready;
-    return await this.runtime.storageManager.open(this.space)
+    return await this.runtime.storageManager.open(this.#space)
       .listEntityIdPage?.(
         options,
       );
@@ -434,13 +439,13 @@ export class PiecesController<T = unknown> {
 
   async entityIdExists(id: string): Promise<boolean | undefined> {
     await this.ready;
-    return await this.runtime.storageManager.open(this.space).entityIdExists?.(
+    return await this.runtime.storageManager.open(this.#space).entityIdExists?.(
       id,
     );
   }
 
   getSpaceCellContents(): Cell<SpaceCellContents> {
-    return this.spaceCell;
+    return this.#spaceCell;
   }
 
   async dispose() {
@@ -455,10 +460,16 @@ export class PiecesController<T = unknown> {
   async linkDefaultPattern(
     defaultPatternCell: Cell<any>,
   ): Promise<void> {
-    await this.runtime.editWithRetry((tx) => {
-      const spaceCellWithTx = this.spaceCell.withTx(tx);
+    const { error } = await this.runtime.editWithRetry((tx) => {
+      const spaceCellWithTx = this.#spaceCell.withTx(tx);
       spaceCellWithTx.key("defaultPattern").set(defaultPatternCell.withTx(tx));
     });
+    if (error) {
+      throw new Error(
+        `Linking the default pattern failed because storage returned ${error.name}: ${error.message}`,
+        { cause: error },
+      );
+    }
     await this.runtime.idle();
   }
 
@@ -467,10 +478,16 @@ export class PiecesController<T = unknown> {
    * Used when the default pattern is being deleted.
    */
   async unlinkDefaultPattern(): Promise<void> {
-    await this.runtime.editWithRetry((tx) => {
-      const spaceCellWithTx = this.spaceCell.withTx(tx);
+    const { error } = await this.runtime.editWithRetry((tx) => {
+      const spaceCellWithTx = this.#spaceCell.withTx(tx);
       spaceCellWithTx.key("defaultPattern").set(undefined);
     });
+    if (error) {
+      throw new Error(
+        `Unlinking the default pattern failed because storage returned ${error.name}: ${error.message}`,
+        { cause: error },
+      );
+    }
     await this.runtime.idle();
   }
 
@@ -479,11 +496,12 @@ export class PiecesController<T = unknown> {
    * @returns The default pattern cell, or undefined if not set
    */
   async getDefaultPattern(
-    runIt: boolean = true,
+    open: boolean | PieceOpen = true,
   ): Promise<Cell<NameSchema> | undefined> {
+    const { reconcile, start } = normalizePieceOpen(open);
     const cell = await timePiecePhase(
       "getDefaultPattern.spaceCell.sync",
-      () => this.spaceCell.key("defaultPattern").sync(),
+      () => this.#spaceCell.key("defaultPattern").sync(),
     );
     const defaultPattern = cell.get();
     if (!defaultPattern) {
@@ -502,70 +520,61 @@ export class PiecesController<T = unknown> {
     }
     try {
       return await timePiecePhase(
-        `getDefaultPattern.get(runIt=${runIt})`,
+        `getDefaultPattern.get(reconcile=${reconcile},start=${start})`,
         () =>
           this.getPieceCell(
             defaultPattern,
-            runIt,
+            { reconcile, start },
             nameSchema,
           ),
       );
     } catch (error) {
-      // An obsolete root whose stored pattern this runtime can no longer load
-      // used to heal on ONE entry point only — the boot path
-      // (ensureDefaultPattern reconciles before start).
-      // Every other consumer resolves the root HERE — piece registry
-      // listings, `cf piece ls`, FUSE, the shell's list cells — and
-      // inherited no heal at all: the load failure propagated and every
-      // listing died with the root (2026-07-29 vendor gate,
-      // the cf-cell-context type retirement). Run the same awaited updater
-      // check from this choke point and retry the start ONCE when it
-      // updated; any other outcome rethrows the original failure untouched.
-      if (!runIt || !this.runtime.experimental?.systemPatternAutoUpdate) {
-        throw error;
-      }
-      let outcome: PatternUpdateOutcome;
+      // An unopenable root takes every consumer down with it — piece registry
+      // listings, `cf piece ls`, FUSE, the shell's list cells all resolve the
+      // root HERE. Opening it already reconciled it against its origin, so a
+      // start that still failed is not out of date; the one remaining rescue
+      // is for a root that records no origin at all and whose stored pattern
+      // this runtime cannot load. Roll that one forward to the space's
+      // official system root and retry the start ONCE. Every other failure
+      // rethrows untouched.
+      if (!start) throw error;
+      let healed: Cell<NameSchema>;
       try {
         const root = await this.getPieceCell(defaultPattern, false, nameSchema);
-        outcome = await this.runtime.patternUpdater.checkDefaultPattern(
+        const pinnedRef = getPatternIdentityRef(root);
+        if (pinnedRef === undefined || !this.#rootNeedsRollForward(root)) {
+          throw error;
+        }
+        if (
+          await this.runtime.patternManager.loadPatternByIdentity(
+            pinnedRef.identity,
+            pinnedRef.symbol,
+            this.#space,
+          ) !== undefined
+        ) throw error;
+        healed = await this.#healDefaultRootByRollForward(
           root,
-          deriveSystemPatternSource(this.space, this.runtime),
+          pinnedRef,
+          error,
+          "unloadable",
         );
       } catch {
         throw error;
       }
-      if (outcome !== "updated" && outcome !== "repaired-provenance") {
-        throw error;
-      }
       pieceUpdateLogger.warn("default-root-healed-on-load-failure", () => [
-        "getDefaultPattern: start failed, updater rolled the root forward;",
-        `retrying start once (${this.space})`,
+        "getDefaultPattern: start failed, the root rolled forward to the",
+        `space's official system root; retrying start once (${this.#space})`,
       ]);
-      // The metadata swap committed through a transaction view; settle, then
-      // resolve the root AGAIN so the retry observes the committed
-      // patternIdentity rather than the pre-transaction snapshot held by
-      // `defaultPattern` (same trap the boot path documents in
-      // startEnsuredDefaultPattern). The whole settle/re-resolve/retry
-      // sequence surfaces the ORIGINAL start failure if anything in it goes
-      // wrong — a secondary failure here is a diagnostic detail, not the
-      // caller's error.
       try {
         await this.runtime.idle();
-        const refreshedSlot = await timePiecePhase(
-          "getDefaultPattern.spaceCell.resync(after-heal)",
-          () => this.spaceCell.key("defaultPattern").sync(),
-        );
-        const healedPattern = refreshedSlot.get();
-        if (!healedPattern) throw error;
-        await healedPattern.sync();
         return await timePiecePhase(
           "getDefaultPattern.get(retry-after-heal)",
-          () => this.getPieceCell(healedPattern, runIt, nameSchema),
+          () => this.getPieceCell(healed, { reconcile, start }, nameSchema),
         );
       } catch (retryError) {
         pieceUpdateLogger.warn("default-root-heal-retry-failed", () => [
           "getDefaultPattern: post-heal retry failed; surfacing the",
-          `original start failure (${this.space})`,
+          `original start failure (${this.#space})`,
           retryError,
         ]);
         throw error;
@@ -574,42 +583,116 @@ export class PiecesController<T = unknown> {
   }
 
   /**
+   * Whether a root that cannot be started may be replaced with the space's
+   * official system root.
+   *
+   * A root qualifies when it records no origin, and when it already follows
+   * that same official source — a root pinned to an export of it that this
+   * runtime cannot load reaches the identity the source advertises but not a
+   * runnable pattern, and rolling it forward changes no source. A root
+   * following anything else has an owner's choice behind it, and replacing its
+   * source with the system default would discard that choice rather than
+   * repair anything.
+   *
+   * A by-identity load probe is the evidence this rests on, and with CFC
+   * enforcement disabled that probe reports every artifact outside the
+   * in-memory index as absent, so it proves nothing there.
+   */
+  #rootNeedsRollForward(root: Cell<NameSchema>): boolean {
+    if (this.runtime.cfcEnforcementMode === "disabled") return false;
+    const origin = getPatternSource(root);
+    return origin === undefined ||
+      origin === deriveSystemPatternSource(this.#space, this.runtime);
+  }
+
+  /** The root's `pieceRegistry` export, addressed but not yet synced. */
+  #pieceRegistryExport(root: Cell<NameSchema>): Cell<Cell<unknown>[]> {
+    const cell = root.asSchema({
+      type: "object",
+      properties: {
+        pieceRegistry: pieceListSchema,
+      },
+    });
+    return cell.key("pieceRegistry") as Cell<Cell<unknown>[]>;
+  }
+
+  /**
    * Get the cell containing the registered pieces in this space.
    * This is the discovery root, not a list of every stored piece root. Reads
-   * the default pattern's pieceRegistry export. An eligible legacy system root
-   * is read through its retired registry export.
+   * the default pattern's pieceRegistry export.
+   *
+   * A listing is a read, and a read does not need the root running. Every
+   * writer of this export — {@link add}, {@link remove}, the root's own
+   * remove handler, and patterns that reach it through `wish()` — persists
+   * what it writes, so the stored value is current at every quiescent
+   * moment, and a listing can be served from it.
+   *
+   * The root is reconciled before the registry is read, so a listing heals a
+   * stale root without calling `runtime.start()`, the dominant phase of
+   * opening a space whose root reaches a large piece.
+   * Running is kept for the cases that cannot be served from what is stored:
+   * a root that has never exported a registry here, one whose passive open
+   * fails, and `add()`.
    */
   async getPieceRegistry(): Promise<Cell<Cell<unknown>[]>> {
-    const defaultPattern = await this.getDefaultPattern(true);
+    // Reconcile without starting so the registry is read from current stored
+    // exports without materializing the root's result graph.
+    let passiveError: unknown;
+    let passiveRoot: Cell<NameSchema> | undefined;
+    try {
+      passiveRoot = await this.getDefaultPattern({
+        reconcile: true,
+        start: false,
+      });
+    } catch (error) {
+      passiveError = error;
+      pieceUpdateLogger.warn("passive-registry-open-failed", () => [
+        "getPieceRegistry: passive default-root open failed; retrying with start",
+        error,
+      ]);
+    }
+    if (passiveRoot) {
+      const exported = this.#pieceRegistryExport(passiveRoot);
+      await this.syncPieces(exported);
+      // `pieceListSchema` carries `default: []`, so a root that never
+      // exported a registry and a root whose registry is empty read the same
+      // way through the schema. The raw value is what separates them, and
+      // only the first needs the root run.
+      if (exported.getRaw() !== undefined) {
+        return exported;
+      }
+    }
+
+    // The running path supplies a registry when no stored export is available.
+    // If both opens fail, retain both causes so the passive failure is not
+    // hidden by the fallback.
+    let defaultPattern: Cell<NameSchema> | undefined;
+    try {
+      defaultPattern = await this.getDefaultPattern(true);
+    } catch (error) {
+      if (passiveError !== undefined) {
+        throw new AggregateError(
+          [passiveError, error],
+          `Could not open the piece registry for space ${this.#space}`,
+        );
+      }
+      throw error;
+    }
     if (!defaultPattern) {
+      if (passiveError !== undefined) throw passiveError;
       // Return empty array cell if no default pattern. Loud on purpose: any
       // subscription made against this placeholder never fires again, so a
       // cold-cache miss here silently freezes piece listings (e.g. FUSE).
       console.warn(
-        `getPieceRegistry: no default pattern found for space ${this.space}; ` +
+        `getPieceRegistry: no default pattern found for space ${this.#space}; ` +
           "returning detached empty piece list",
       );
-      return this.runtime.getCell(this.space, "empty-pieces", pieceListSchema);
+      return this.runtime.getCell(this.#space, "empty-pieces", pieceListSchema);
     }
 
-    const cell = defaultPattern.asSchema({
-      type: "object",
-      properties: {
-        pieceRegistry: pieceListSchema,
-        allPieces: pieceListSchema,
-      },
-    });
-    const pieceRegistry = cell.key("pieceRegistry") as Cell<Cell<unknown>[]>;
+    const pieceRegistry = this.#pieceRegistryExport(defaultPattern);
     await this.syncPieces(pieceRegistry);
-    if (!isLegacyPieceRegistryRoot(defaultPattern)) {
-      return pieceRegistry;
-    }
-
-    const legacyPieceRegistry = cell.key("allPieces") as Cell<
-      Cell<unknown>[]
-    >;
-    await this.syncPieces(legacyPieceRegistry);
-    return legacyPieceRegistry;
+    return pieceRegistry;
   }
 
   /** Return the piece registry, not every stored piece root. */
@@ -691,27 +774,28 @@ export class PiecesController<T = unknown> {
    */
   async getPieceCell<S extends JSONSchema = JSONSchema>(
     id: string | Cell<unknown>,
-    runIt: boolean,
+    open: boolean | PieceOpen,
     asSchema: S,
     scope?: CellScope,
   ): Promise<Cell<Schema<S>>>;
   async getPieceCell<T = unknown>(
     id: string | Cell<unknown>,
-    runIt?: boolean,
+    open?: boolean | PieceOpen,
     asSchema?: JSONSchema,
     scope?: CellScope,
   ): Promise<Cell<T>>;
   async getPieceCell<T = unknown>(
     id: string | Cell<unknown>,
-    runIt: boolean = false,
+    open: boolean | PieceOpen = false,
     asSchema?: JSONSchema,
     scope?: CellScope,
   ): Promise<Cell<T>> {
+    const { reconcile, start } = normalizePieceOpen(open);
     // Get the piece cell
     const addressed: Cell<unknown> = isCell(id)
       ? id
       : this.runtime.getCellFromEntityId(
-        this.space,
+        this.#space,
         entityIdFrom(id),
         [],
         undefined,
@@ -735,9 +819,22 @@ export class PiecesController<T = unknown> {
     // operate on the real piece rather than the wrapper. The sync above already
     // made the canonical cell local, so this resolves over local links with no
     // further sync. Idempotent for a normal top-level piece.
-    const piece = addressed.resolveAsCell();
+    let piece = addressed.resolveAsCell();
 
-    if (runIt) {
+    if (reconcile) {
+      const outcome = await timePiecePhase(
+        "get.reconcileSource",
+        () => reconcilePieceSource(this.runtime, piece),
+      );
+      if (outcome === "updated") {
+        // The transition committed through a transaction view, and the caller
+        // may have handed us a cell bound to a read transaction older than it.
+        // Detach and resync, or a start below loads the identity the origin
+        // just replaced — and reads through the returned cell describe it.
+        piece = await piece.withTx().sync();
+      }
+    }
+    if (start) {
       // start() handles pattern loading and running. It's idempotent - no
       // effect if already running.
       await timePiecePhase(
@@ -807,7 +904,7 @@ export class PiecesController<T = unknown> {
       try {
         argumentValue = argumentCell.getRaw();
       } catch (err) {
-        this.diagnosticConsole.debug("Error getting argument value:", err);
+        this.#diagnosticConsole.debug("Error getting argument value:", err);
         return result;
       }
 
@@ -878,7 +975,7 @@ export class PiecesController<T = unknown> {
 
             const resultCell = followCellToResult(
               this.runtime.getCellFromLink(link),
-              this.diagnosticConsole,
+              this.#diagnosticConsole,
               new Set(),
               0,
             );
@@ -894,7 +991,7 @@ export class PiecesController<T = unknown> {
                   depth + 1,
                 );
               } catch (err) {
-                this.diagnosticConsole.debug(
+                this.#diagnosticConsole.debug(
                   `Error processing array item at index ${i}:`,
                   err,
                 );
@@ -914,7 +1011,7 @@ export class PiecesController<T = unknown> {
                   depth + 1,
                 );
               } catch (err) {
-                this.diagnosticConsole.debug(
+                this.#diagnosticConsole.debug(
                   `Error processing object property '${key}':`,
                   err,
                 );
@@ -922,7 +1019,7 @@ export class PiecesController<T = unknown> {
             }
           }
         } catch (err) {
-          this.diagnosticConsole.debug("Error in processValue:", err);
+          this.#diagnosticConsole.debug("Error in processValue:", err);
         }
       };
 
@@ -936,7 +1033,7 @@ export class PiecesController<T = unknown> {
         );
       }
     } catch (error) {
-      this.diagnosticConsole.debug(
+      this.#diagnosticConsole.debug(
         "Error finding references in piece arguments:",
         error,
       );
@@ -1019,13 +1116,13 @@ export class PiecesController<T = unknown> {
             // Check if cell link's source chain leads to our target
             const resultCell = followCellToResult(
               this.runtime.getCellFromLink(link),
-              this.diagnosticConsole,
+              this.#diagnosticConsole,
               new Set(),
               0,
             );
             if (resultCell?.sourceURI === piece.sourceURI) return true;
           } catch (err) {
-            this.diagnosticConsole.debug(
+            this.#diagnosticConsole.debug(
               "Error handling cell link in checkRefersToTarget:",
               err,
             );
@@ -1048,7 +1145,7 @@ export class PiecesController<T = unknown> {
                 return true;
               }
             } catch (err) {
-              this.diagnosticConsole.debug(
+              this.#diagnosticConsole.debug(
                 `Error checking array item at index ${i}:`,
                 err,
               );
@@ -1072,7 +1169,7 @@ export class PiecesController<T = unknown> {
                 return true;
               }
             } catch (err) {
-              this.diagnosticConsole.debug(
+              this.#diagnosticConsole.debug(
                 `Error checking object property '${key}':`,
                 err,
               );
@@ -1080,7 +1177,7 @@ export class PiecesController<T = unknown> {
           }
         }
       } catch (err) {
-        this.diagnosticConsole.debug("Error in checkRefersToTarget:", err);
+        this.#diagnosticConsole.debug("Error in checkRefersToTarget:", err);
       }
 
       return false;
@@ -1130,7 +1227,7 @@ export class PiecesController<T = unknown> {
     scope?: CellScope,
   ): Promise<Cell<T>> {
     const cell = this.runtime.getCellFromEntityId<T>(
-      this.space,
+      this.#space,
       id,
       path,
       schema,
@@ -1161,35 +1258,52 @@ export class PiecesController<T = unknown> {
     return piece;
   }
 
-  // note: removing a piece doesn't clean up the piece's cells
+  /**
+   * Remove a piece from this space's registry. Does not clean up the piece's
+   * cells. Returns whether this call removed the piece — `false` means the
+   * piece was not registered, and nothing was written. When the removed piece
+   * is the space's default pattern, the link to it is cleared in the same
+   * commit, so the registry and the link cannot land in a split state. A
+   * removal that cannot commit throws instead, so `false` never stands in for
+   * a storage failure.
+   */
   async remove(pieceOrId: string | Cell<unknown>): Promise<boolean> {
     const piece = typeof pieceOrId === "string"
-      ? this.runtime.getCellFromEntityId(this.space, entityIdFrom(pieceOrId))
+      ? this.runtime.getCellFromEntityId(this.#space, entityIdFrom(pieceOrId))
       : pieceOrId;
     const piecesCell = await this.getPieceRegistry();
     await this.syncPieces(piecesCell);
 
-    // Check if this is the default pattern and clear the link
-    const defaultPattern = await this.getDefaultPattern(false);
-    if (
-      defaultPattern &&
-      piece.resolveAsCell().equals(defaultPattern.resolveAsCell())
-    ) {
-      await this.unlinkDefaultPattern();
-    }
-
-    const { ok } = await this.runtime.editWithRetry((tx) => {
+    const { ok, error } = await this.runtime.editWithRetry((tx) => {
       const pieces = piecesCell.withTx(tx);
 
       // Remove from main list
       const newPieces = filterOutCell(pieces, piece);
-      if (newPieces.length !== pieces.get().length) {
-        pieces.set(newPieces);
-        return true;
-      } else {
+      if (newPieces.length === pieces.get().length) {
         return false;
       }
+      pieces.set(newPieces);
+
+      // Clear the default-pattern link when it points at the removed piece,
+      // in the same commit as the registry write. Read the link inside the
+      // transaction: a conflict retry reruns this callback against fresh
+      // state, and a link concurrently repointed at another piece must be
+      // left in place (the same precondition-guard shape as the roll-forward
+      // swap in startEnsuredDefaultPattern).
+      const defaultPatternCell = this.#spaceCell.withTx(tx)
+        .key("defaultPattern");
+      const linked = defaultPatternCell.get();
+      if (linked && piece.resolveAsCell().equals(linked.resolveAsCell())) {
+        defaultPatternCell.set(undefined);
+      }
+      return true;
     });
+    if (error) {
+      throw new Error(
+        `Removing the piece failed because storage returned ${error.name}: ${error.message}`,
+        { cause: error },
+      );
+    }
 
     // Ensure full synchronization
     if (ok) {
@@ -1244,6 +1358,12 @@ export class PiecesController<T = unknown> {
   // id `pieceId`, applies the provided `pattern` (which may be
   // its current pattern -- useful when we are only updating inputs),
   // and optionally applies `inputs` if provided.
+  //
+  // Reports a failure as itself, whether it happened before or after the
+  // setup transaction committed. `runPatternUpdate` below runs the same
+  // post-commit work and differs precisely here: it issues a receipt, so it
+  // reports a post-commit failure as a `PatternSetupPostCommitError` carrying
+  // that receipt. Callers classifying failures by message want this one.
   async runWithPattern(
     pattern: Pattern | Module,
     pieceId: string,
@@ -1263,7 +1383,7 @@ export class PiecesController<T = unknown> {
     },
   ): Promise<Cell<unknown>> {
     const piece = this.runtime.getCellFromEntityId(
-      this.space,
+      this.#space,
       entityIdFrom(pieceId),
     );
     await piece.sync();
@@ -1294,6 +1414,62 @@ export class PiecesController<T = unknown> {
   }
 
   /**
+   * Applies a pattern through an owned transaction and returns its receipt.
+   *
+   * A later failure to synchronize dependencies, start the piece, load its
+   * schema, or pull its result throws `PatternSetupPostCommitError`, whose
+   * `.commit` remains the accepted transaction's result.
+   */
+  async runPatternUpdate(
+    pattern: Pattern | Module,
+    pieceId: string,
+    inputs: object | undefined,
+    options: {
+      expectedPatternIdentity: { identity: string; symbol: string };
+      /** Invariant over the argument stored before setup changes it. */
+      validateCurrentArgument?: (argumentCell: Cell<unknown>) => void;
+      /** Invariant over links retained by the candidate argument schema. */
+      validateArgumentLinks?: (
+        argumentCell: Cell<unknown>,
+        argumentSchema: JSONSchema,
+      ) => void;
+      /** Repository locator written atomically with pattern setup. */
+      repository?: string;
+      /** Fresh source lifecycle revision written atomically with setup. */
+      sourceTransition: PieceSourceTransition;
+    },
+  ): Promise<{
+    /** Cell view reconciled to the pattern current after post-commit work. */
+    cell: Cell<unknown>;
+    /** Receipt issued from the accepted setup transaction. */
+    commit: PatternSetupCommitReceipt;
+  }> {
+    const piece = this.runtime.getCellFromEntityId(
+      this.#space,
+      entityIdFrom(pieceId),
+    );
+    const result = await this.runtime.runSyncedWithCommit(
+      piece,
+      pattern,
+      inputs,
+      {
+        expectedPatternIdentity: options.expectedPatternIdentity,
+        patternRepository: options.repository,
+        pieceSourceTransition: options.sourceTransition,
+        validateCurrentArgument: options.validateCurrentArgument,
+        validateArgumentLinks: options.validateArgumentLinks,
+      },
+    );
+    try {
+      await this.syncPattern(result.cell);
+      await this.getResult(result.cell).pull();
+      return result;
+    } catch (error) {
+      throw new PatternSetupPostCommitError(result.commit, error);
+    }
+  }
+
+  /**
    * Prepare a new piece by setting up its process/result cells and pattern
    * metadata without scheduling the pattern's nodes.
    */
@@ -1308,8 +1484,8 @@ export class PiecesController<T = unknown> {
       () => this.runtime.idle(),
     );
     const piece = this.runtime.getCell<T>(
-      this.space,
-      cause ?? { space: this.space, random: crypto.randomUUID() },
+      this.#space,
+      cause ?? { space: this.#space, random: crypto.randomUUID() },
       pattern.resultSchema,
     );
     // Fast path: the pattern's content-addressed entry ref, if it carries one
@@ -1344,10 +1520,41 @@ export class PiecesController<T = unknown> {
     return piece;
   }
 
+  /**
+   * Open a piece: bring its source up to date with the origin it follows, then
+   * start it.
+   *
+   * Reconciling before the start is what keeps a piece from running source its
+   * own origin has already replaced. A piece that records no origin, or whose
+   * origin cannot be reached, starts on the source it has. A piece compiled
+   * moments ago from the source it was created with is started directly
+   * through {@link startPiece} instead: following that origin again would only
+   * fetch what it was just built from.
+   */
+  async openPiece<T = unknown>(pieceOrId: string | Cell<T>): Promise<void> {
+    const piece = typeof pieceOrId === "string"
+      ? await timePiecePhase(
+        "openPiece.get",
+        () => this.getPieceCell<T>(pieceOrId),
+      )
+      : pieceOrId;
+    if (!piece) throw new Error("Piece not found");
+    const outcome = await timePiecePhase(
+      "openPiece.reconcileSource",
+      () => reconcilePieceSource(this.runtime, piece),
+    );
+    // The transition committed through a transaction view, and the caller may
+    // have handed us a cell bound to a read transaction older than it. Detach
+    // and resync, or the start below loads the identity the origin just
+    // replaced.
+    await this.startPiece(
+      outcome === "updated" ? await piece.withTx().sync() : piece,
+    );
+  }
+
   /** Start scheduling and running a prepared piece. */
   async startPiece<T = unknown>(
     pieceOrId: string | Cell<T>,
-    options: { schedulePatternUpdate?: boolean } = {},
   ): Promise<void> {
     const piece = typeof pieceOrId === "string"
       ? await timePiecePhase(
@@ -1358,7 +1565,7 @@ export class PiecesController<T = unknown> {
     if (!piece) throw new Error("Piece not found");
     await timePiecePhase(
       "startPiece.runtime.start",
-      () => this.runtime.start(piece, options),
+      () => this.runtime.start(piece),
     );
     await timePiecePhase(
       "startPiece.result.pull",
@@ -1382,15 +1589,34 @@ export class PiecesController<T = unknown> {
     await timePiecePhase("syncPattern.piece.sync", () => piece.sync());
 
     // When we subscribe to a doc, our subscription includes the doc's pattern
-    // pointer (`patternIdentity`), so read that.
-    let ref = getPatternIdentityRef(piece);
+    // pointer (`patternIdentity`), so read that. A KEYLESS piece carries no
+    // durable pointer (the never-durable contract; L3(a), RULED 2026-08-27)
+    // — in the session that set it up, the runner's session-side pointer
+    // answers instead, and `loadPatternByIdentity` serves the minted
+    // identity from the in-memory index. A durable `keyless:` pointer is a
+    // LEGACY orphan (pre-guard leak, or one delivered by a lagging remote
+    // sync after this session's setup cleared it) — unloadable everywhere
+    // except the session that minted it, never this one — so it must not
+    // shadow the live session pointer; it stays the last resort so a fresh
+    // session's orphan keeps its designed no-pattern outcome.
+    const resolvePatternRef = () => {
+      const durable = getPatternIdentityRef(piece);
+      if (
+        durable !== undefined &&
+        !PatternManager.isKeylessPatternIdentity(durable.identity)
+      ) {
+        return durable;
+      }
+      return this.runtime.runner.sessionPatternPointerFor(piece) ?? durable;
+    };
+    let ref = resolvePatternRef();
     if (!ref) {
       // Under remote sync, metadata can transiently lag the result value even
       // though setup just wrote both. Wait for storage to settle and retry once
       // before treating the pattern metadata as missing.
       await timePiecePhase("syncPattern.retry.synced", () => this.synced());
       await timePiecePhase("syncPattern.retry.piece.sync", () => piece.sync());
-      ref = getPatternIdentityRef(piece);
+      ref = resolvePatternRef();
     }
     if (!ref) throw new Error("piece missing pattern identity");
 
@@ -1405,7 +1631,7 @@ export class PiecesController<T = unknown> {
     const pattern = await this.runtime.patternManager.loadPatternByIdentity(
       ref.identity,
       ref.symbol,
-      this.space,
+      this.#space,
     );
     return pattern;
   }
@@ -1447,7 +1673,7 @@ export class PiecesController<T = unknown> {
   ): Promise<void> {
     const start = options?.start ?? true;
     let linkCell = this.runtime.getCellFromEntityId(
-      this.space,
+      this.#space,
       entityIdFrom(linkPieceId),
       [],
       undefined,
@@ -1477,7 +1703,7 @@ export class PiecesController<T = unknown> {
         // For pieces, target fields are in the result cell's argument
         const resultCell = followCellToResult(
           targetInputCell,
-          this.diagnosticConsole,
+          this.#diagnosticConsole,
         );
         if (!resultCell) {
           throw new Error("Target piece has no result cell");
@@ -1513,14 +1739,18 @@ export class PiecesController<T = unknown> {
    * Read the configured default app source from the home space.
    *
    * The value is authored as a URL and canonicalized to the ref that names the
-   * same file, so a root is born with the provenance it will keep. Stamping the
-   * authored spelling instead would leave every new root waiting on a migration
-   * to become followable — and on a deployment with the update flag off, waiting
-   * forever. A locator naming no pattern route is returned as authored.
+   * same file, so a root is born with the provenance it will keep rather than
+   * with a spelling that has to be migrated before anything follows it.
    *
-   * Returns empty string if not configured or if home space is not accessible.
+   * A rooted path that names no file under the patterns route is refused
+   * outright. Resolving one against the host reaches whatever the site serves
+   * for an unrouted path, and a piece cannot record an origin nothing can
+   * follow. An absolute URL is kept as authored: it names its own host.
+   *
+   * Returns empty string if not configured, if the configured value cannot be
+   * an origin, or if the home space is not accessible.
    */
-  private async getDefaultAppUrlFromHome(): Promise<string> {
+  async #getDefaultAppUrlFromHome(): Promise<string> {
     try {
       const homeSpaceCell = this.runtime.getHomeSpaceCell();
       await timePiecePhase(
@@ -1534,9 +1764,15 @@ export class PiecesController<T = unknown> {
           homeSpaceCell.key("defaultPattern")
             .asSchema(homeSchema).key("defaultAppUrl").get(),
       );
-      return typeof url === "string"
-        ? normalizePatternSource(url.trim(), this.runtime.apiUrl)
-        : "";
+      if (typeof url !== "string") return "";
+      const source = normalizePatternSource(url.trim(), this.runtime.apiUrl);
+      if (!source.startsWith("/")) return source;
+      console.warn(
+        `Ignoring the configured defaultAppUrl ${source}: a rooted path ` +
+          "names no pattern this deployment serves, so nothing could follow " +
+          "it. Configure a system pattern or an absolute URL.",
+      );
+      return "";
     } catch (error) {
       console.warn("Failed to read defaultAppUrl from home space:", error);
       return "";
@@ -1600,7 +1836,7 @@ export class PiecesController<T = unknown> {
           cause: `home-pattern-${Date.now()}`,
         };
       } else {
-        const customUrl = await this.getDefaultAppUrlFromHome();
+        const customUrl = await this.#getDefaultAppUrlFromHome();
         patternConfig = {
           name: "DefaultPieceList",
           source: customUrl || DEFAULT_APP_PATTERN_SOURCE,
@@ -1636,25 +1872,15 @@ export class PiecesController<T = unknown> {
       );
 
       // Run pattern setup within same transaction
-      this.runtime.run(
-        tx,
-        pattern,
-        {},
-        pieceCell,
-        DEFAULT_ROOT_RUN_OPTIONS,
-      );
+      this.runtime.run(tx, pattern, {}, pieceCell);
 
       // Stamp the provenance the piece tracks for updates, mirroring
-      // ensureDefaultPattern (CT-1890). Without this, every recreated root
-      // is born unprovenanced and checkAndUpdateDefaultPattern can only admit
-      // it while its ref exactly equals the current official identity — the
-      // repair path would otherwise mint roots with no durable update source.
-      // A custom program has no URL the
-      // auto-updater could re-fetch (stamping the "custom" placeholder
-      // would poison URL resolution — it would resolve relative to the
-      // host); its locator, when supplied, is recorded via
-      // setPatternRepository below, so a custom root without a repository
-      // intentionally stays unstamped.
+      // ensureDefaultPattern (CT-1890). Without this, every recreated root is
+      // born detached, and nothing supplies it code again. A custom program
+      // has no URL to re-fetch (stamping the "custom" placeholder would poison
+      // URL resolution — it would resolve relative to the host); its locator,
+      // when supplied, is recorded via setPatternRepository below, so a custom
+      // root without a repository intentionally stays unstamped.
       if (options?.customProgram === undefined) {
         setPatternSource(pieceCell, tx, patternConfig.source);
       }
@@ -1682,7 +1908,7 @@ export class PiecesController<T = unknown> {
     }
 
     // Start the piece
-    await this.startPiece(finalPattern, DEFAULT_ROOT_RUN_OPTIONS);
+    await this.startPiece(finalPattern);
     await this.runtime.idle();
     await this.synced();
 
@@ -1702,13 +1928,12 @@ export class PiecesController<T = unknown> {
    * @returns The default pattern piece, either existing or newly created
    */
   async ensureDefaultPattern(): Promise<PieceController<NameSchema>> {
-    // Fast path: resolve the existing root WITHOUT starting it. The updater
-    // must get a chance to replace an obsolete patternIdentity before
-    // bootstrap tries to load that identity; otherwise an unloadable old root
-    // prevents the very repair that would make it loadable.
+    // Fast path: resolve the existing root WITHOUT starting it, so opening it
+    // can follow its origin before bootstrap tries to load an identity that
+    // origin has already replaced.
     const existingPattern = await this.getDefaultPattern(false);
     if (existingPattern) {
-      return await this.startEnsuredDefaultPattern(existingPattern, true);
+      return await this.#startEnsuredDefaultPattern(existingPattern, true);
     }
 
     // Determine which pattern to use based on space type
@@ -1725,7 +1950,7 @@ export class PiecesController<T = unknown> {
     } else {
       const customUrl = await timePiecePhase(
         "ensureDefaultPattern.getDefaultAppUrlFromHome",
-        () => this.getDefaultAppUrlFromHome(),
+        () => this.#getDefaultAppUrlFromHome(),
       );
       patternConfig = {
         name: "DefaultPieceList",
@@ -1766,36 +1991,50 @@ export class PiecesController<T = unknown> {
     // source immediately above. If another writer won the race, treat the
     // discovered root like every other persisted root and reconcile it before
     // start.
-    return await this.startEnsuredDefaultPattern(
+    return await this.#startEnsuredDefaultPattern(
       finalPattern,
       !createdByThisCall,
     );
   }
 
-  private async startEnsuredDefaultPattern(
+  /**
+   * `reconcileBeforeStart` is false only for a root this call just created
+   * from its source: following that origin again would fetch the route to
+   * learn what was compiled from it moments ago.
+   */
+  async #startEnsuredDefaultPattern(
     root: Cell<NameSchema>,
     reconcileBeforeStart: boolean,
   ): Promise<PieceController<NameSchema>> {
     let rootToStart = root;
     if (reconcileBeforeStart) {
-      await timePiecePhase(
-        "ensureDefaultPattern.checkAndUpdateDefaultPattern",
-        () => this.checkAndUpdateDefaultPattern(root),
+      const outcome = await timePiecePhase(
+        "ensureDefaultPattern.reconcileSource",
+        () => reconcilePieceSource(this.runtime, root),
       );
-      // The metadata swap committed through a transaction view. Resolve the
-      // root again so start() observes the committed patternIdentity rather
-      // than the pre-transaction snapshot held by the caller's cell.
+      // The swap committed through a transaction view. Resolve the root again
+      // so start() observes the committed patternIdentity rather than the
+      // pre-transaction snapshot held by the caller's cell.
       rootToStart = await this.getDefaultPattern(false) ?? root;
+      // Only when the origin CONFIRMED the pinned pattern. Then a disagreeing
+      // setup marker says the document is staged by another version while the
+      // right one is pinned, which is a stale document rather than a stale
+      // pattern. A root the origin did not confirm may be pinned to a pattern
+      // that is simply wrong for it, and re-staging that one buys nothing the
+      // repair below cannot do with the failure in hand.
+      if (outcome === "current" || outcome === "migrated") {
+        rootToStart = await this.#restageRootSetupIfStale(rootToStart);
+      }
     }
 
     try {
       await timePiecePhase(
         "ensureDefaultPattern.startPiece",
-        () => this.startPiece(rootToStart, DEFAULT_ROOT_RUN_OPTIONS),
+        () => this.startPiece(rootToStart),
       );
     } catch (startError) {
-      // Cold-start setup repair. checkAndUpdateDefaultPattern moves
-      // patternIdentity WITHOUT running the setup phase ("Never calls run()"),
+      // Cold-start setup repair. A source transition moves patternIdentity
+      // WITHOUT running the setup phase,
       // and Runner.start() of a not-running piece instantiates the stored
       // identity directly — also without setup. A root whose identity moved
       // while it was not running (the bricked-space heal: no watcher existed
@@ -1820,7 +2059,11 @@ export class PiecesController<T = unknown> {
       // cannot proceed or fails for its own reasons, surface the ORIGINAL start
       // error; nothing is torn down or overwritten.
       const runtime = this.runtime;
-      const ref = getPatternIdentityRef(rootToStart);
+      // Keyless pieces resolve through the session pointer (never stamped
+      // durably); a fresh session correctly finds nothing and surfaces the
+      // original start error.
+      const ref = getPatternIdentityRef(rootToStart) ??
+        runtime.runner.sessionPatternPointerFor(rootToStart);
       if (ref === undefined) throw startError;
       let pattern;
       try {
@@ -1830,9 +2073,29 @@ export class PiecesController<T = unknown> {
           this.getSpace(),
         );
       } catch {
+        // A THROWN load may be transient, and a transient failure is not
+        // evidence that the pinned pattern is wrong.
         throw startError;
       }
-      if (pattern === undefined) throw startError;
+      if (pattern === undefined) {
+        // The pattern is not merely unrunnable, it is unreachable through every
+        // supported recovery path, so re-running its setup cannot help. A root
+        // that records no origin has nothing else to fall back on and its space
+        // would stop opening, so it rolls forward to the official system root
+        // for its kind. One that follows an origin keeps what its owner chose:
+        // opening it already tried that origin, and replacing its source with
+        // the system default would discard the choice rather than repair it.
+        if (!this.#rootNeedsRollForward(rootToStart)) throw startError;
+        return new PieceController<NameSchema>(
+          this,
+          await this.#healDefaultRootByRollForward(
+            rootToStart,
+            ref,
+            startError,
+            "unloadable",
+          ),
+        );
+      }
       pieceUpdateLogger.warn(
         "cold-start-setup-repair",
         () => [
@@ -1846,11 +2109,6 @@ export class PiecesController<T = unknown> {
       // Pattern hands back a cell bound to a read-only tx, and runSynced
       // would otherwise adopt it for the setup writes.
       const writableRoot = rootToStart.withTx();
-      // runSynced does not plumb schedulePatternUpdate, so the repair may let
-      // the lazy updater schedule one redundant check post-start. Benign: the
-      // awaited checkAndUpdateDefaultPattern above already reconciled, so the
-      // check observes a current identity and no-ops.
-      //
       // expectedPatternIdentity is the repair precondition, not a formality:
       // it atomically rejects a repair superseded by a concurrent source
       // update (the identity is re-asserted inside every setup retry), and it
@@ -1923,7 +2181,7 @@ export class PiecesController<T = unknown> {
             repairError,
           ],
         );
-        rootToStart = await this.healDefaultRootByRollForward(
+        rootToStart = await this.#healDefaultRootByRollForward(
           rootToStart,
           ref,
           repairError,
@@ -1943,7 +2201,66 @@ export class PiecesController<T = unknown> {
   }
 
   /**
-   * Runnability backstop for {@link startEnsuredDefaultPattern}'s cold-start
+   * Re-stage a root whose document was last set up by a different pattern
+   * version than the one it is pinned to.
+   *
+   * Such a root starts without error and then reads wrong: its result
+   * projection and `schema` meta still describe the version that staged the
+   * document, so fields the pinned version added read as absent. The
+   * cold-start repair below catches the same state only once it has made the
+   * start fail outright. Best-effort — a failed re-stage leaves the root as it
+   * was, and the start reports whatever it reports.
+   */
+  async #restageRootSetupIfStale(
+    root: Cell<NameSchema>,
+  ): Promise<Cell<NameSchema>> {
+    // Nothing to re-stage: a root with no pattern to stage from, or one whose
+    // stored setup already names the pattern it is pinned to.
+    const ref = getPatternIdentityRef(root);
+    const setupRef = getPatternSetupIdentityRef(root);
+    if (
+      ref === undefined ||
+      (setupRef?.identity === ref.identity && setupRef.symbol === ref.symbol)
+    ) return root;
+    try {
+      const pattern = await this.runtime.patternManager.loadPatternByIdentity(
+        ref.identity,
+        ref.symbol,
+        this.getSpace(),
+      );
+      if (pattern === undefined) return root;
+      const result = await timePiecePhase(
+        "ensureDefaultPattern.restageRootSetup",
+        () =>
+          this.runtime.editWithRetry((tx) => {
+            const candidate = root.withTx(tx);
+            const currentRef = getPatternIdentityRef(candidate);
+            if (
+              currentRef?.identity !== ref.identity ||
+              currentRef.symbol !== ref.symbol
+            ) return false;
+            void this.runtime.setup(tx, pattern, undefined, candidate, {
+              prepareForResume: true,
+              reapplyStoredSetup: true,
+            });
+            return true;
+          }),
+      );
+      if (result.error !== undefined || !result.ok) return root;
+      await this.runtime.idle();
+      return await this.getDefaultPattern(false) ?? root;
+    } catch (error) {
+      pieceUpdateLogger.warn("root-setup-restage-failed", () => [
+        "startEnsuredDefaultPattern: could not re-stage a root whose setup",
+        `marker disagrees with its pinned pattern (${this.#space})`,
+        error,
+      ]);
+      return root;
+    }
+  }
+
+  /**
+   * Runnability backstop for `#startEnsuredDefaultPattern`'s cold-start
    * repair. Reached only when the pinned pattern's OWN setup repair failed in a
    * way that re-running it cannot fix — a root that loads but cannot run.
    * Exactly two signals qualify: the CFC migration rejected the commit (gated
@@ -1974,10 +2291,11 @@ export class PiecesController<T = unknown> {
    * Returns the healed root cell so the caller starts/returns the swapped-in
    * pattern rather than the stale pinned view.
    */
-  private async healDefaultRootByRollForward(
+  async #healDefaultRootByRollForward(
     rootToStart: Cell<NameSchema>,
     pinnedRef: { identity: string; symbol: string },
     migrationError: unknown,
+    reason: "unloadable" | "unrunnable" = "unrunnable",
   ): Promise<Cell<NameSchema>> {
     const runtime = this.runtime;
     const space = this.getSpace();
@@ -1989,7 +2307,9 @@ export class PiecesController<T = unknown> {
     // Name the check that actually refused. Two signals escalate to this heal —
     // a CFC migration rejection and a refused stored argument — and reporting
     // the second as a migration failure sends the reader to the wrong guard.
-    const pinnedFailure = isStoredArgumentSchemaRefusal(migrationError)
+    const pinnedFailure = reason === "unloadable"
+      ? "could not be loaded"
+      : isStoredArgumentSchemaRefusal(migrationError)
       ? "could not read its stored argument"
       : "failed CFC migration";
     const clearError = (reason: string, cause: unknown) =>
@@ -2050,10 +2370,14 @@ export class PiecesController<T = unknown> {
     // no longer `default`) is NOT already-official — rolling it forward to the
     // official `default` entry is exactly the recovery, so it must not
     // short-circuit here. This mirrors PatternUpdater's identity+symbol gate.
-    if (
-      officialRef.identity === pinnedRef.identity &&
-      officialRef.symbol === pinnedRef.symbol
-    ) {
+    const alreadyOfficial = officialRef.identity === pinnedRef.identity &&
+      officialRef.symbol === pinnedRef.symbol;
+    if (alreadyOfficial && reason === "unrunnable") {
+      // The pinned pattern LOADED and its setup was refused. Materializing the
+      // same entry again refuses identically, so do not loop — surface the
+      // clear error now. A root that could not be loaded is a different case:
+      // compiling the official source has just made its artifact available, so
+      // the materialize below is the repair.
       throw clearError(
         `is already the pinned entry ${officialRef.identity}#` +
           `${officialRef.symbol}, so this cannot be repaired by rolling ` +
@@ -2074,6 +2398,18 @@ export class PiecesController<T = unknown> {
     // clobbered by our stale `officialRef`. Returning `false` aborts the write
     // without committing — precedent: pattern-updater's `stillMatches`/
     // `canWrite`. `result.ok === false` (no error) then means "superseded".
+    if (alreadyOfficial) {
+      // Nothing to swap: the root already names the entry the official source
+      // compiles to, and that source has just been compiled into this space.
+      // Materializing it over the document is the whole repair.
+      return await this.#materializeHealedRoot(
+        rootToStart,
+        officialPattern,
+        officialRef,
+        clearError,
+      );
+    }
+
     const sourceSnapshot = getPieceSourceSnapshot(rootToStart);
     if (sourceSnapshot === undefined) {
       throw clearError("has no source state to update", migrationError);
@@ -2108,12 +2444,25 @@ export class PiecesController<T = unknown> {
         officialRef,
         sourceTransition,
       );
-      rootTx.setMetaRaw("displacedPattern", {
-        identity: pinnedRef.identity,
-        symbol: pinnedRef.symbol,
-        displacedAt: sourceTransition.timestamp,
-      });
-      rootTx.setMetaRaw("patternIdentity", officialRef);
+      // A keyless displaced identity must never land durably (L3(a)):
+      // `displacedPattern` exists for recovery, recovery to a
+      // session-synthetic identity is impossible by construction, and the
+      // absent record is the honest one — the same gate
+      // `applyPieceSourceTransition`'s unavailable arm applies to ITS stamp
+      // four lines up. Reachable with a keyless `pinnedRef` when a legacy
+      // orphan pointer coincides with a start failure on a default root.
+      if (!PatternManager.isKeylessPatternIdentity(pinnedRef.identity)) {
+        rootTx.setMetaRaw("displacedPattern", {
+          identity: pinnedRef.identity,
+          symbol: pinnedRef.symbol,
+          displacedAt: sourceTransition.timestamp,
+        }, rawMetaWriteAuthorization);
+      }
+      rootTx.setMetaRaw(
+        "patternIdentity",
+        officialRef,
+        rawMetaWriteAuthorization,
+      );
       return true;
     });
     if (swapResult.error) {
@@ -2151,34 +2500,13 @@ export class PiecesController<T = unknown> {
 
     // Re-resolve so the materialize observes the committed patternIdentity
     // (the caller's cell is a pre-swap transaction view), then materialize the
-    // OFFICIAL pattern. expectedPatternIdentity asserts the just-committed
-    // identity and makes runSynced THROW on a setup-commit failure rather than
-    // log-and-continue — so an official pattern that ALSO cannot migrate the
-    // doc surfaces here as the clear error below, not a silently-dead root.
-    const swappedRoot = await this.getDefaultPattern(false) ??
-      rootToStart;
-    try {
-      await timePiecePhase(
-        "ensureDefaultPattern.rollForwardMaterialize",
-        () =>
-          runtime.runSynced(swappedRoot.withTx(), officialPattern, undefined, {
-            expectedPatternIdentity: officialRef,
-          }),
-      );
-    } catch (materializeError) {
-      // The official pattern cannot take this doc either — the end of the line.
-      // Name which check refused rather than always saying "CFC migration": an
-      // argument refusal reaches here too, and reporting that as a migration
-      // failure sends the reader to the wrong guard.
-      throw clearError(
-        `also failed ${
-          isCfcMigrationRejection(materializeError)
-            ? "CFC migration"
-            : "to materialize"
-        } (${msg(materializeError)})`,
-        materializeError,
-      );
-    }
+    // OFFICIAL pattern.
+    const swappedRoot = await this.#materializeHealedRoot(
+      await this.getDefaultPattern(false) ?? rootToStart,
+      officialPattern,
+      officialRef,
+      clearError,
+    );
 
     pieceUpdateLogger.warn(
       "default-root-rolled-forward",
@@ -2192,38 +2520,45 @@ export class PiecesController<T = unknown> {
   }
 
   /**
-   * Roll the space's system root pattern forward in place if its toolshed
-   * serves a newer content identity. Best-effort: every failure logs and
-   * returns without throwing. During {@link ensureDefaultPattern}, this runs
-   * before the persisted root is started, so an eligible tracked root's
-   * unloadable obsolete identity can be replaced before bootstrap. If the root
-   * is already running, its watcher applies the same metadata swap in place.
+   * Stage the healed pattern over the root's existing document.
    *
-   * Never calls run()/stop()/recreateDefaultPattern.
+   * `expectedPatternIdentity` asserts the identity the root must already carry
+   * and makes `runSynced` THROW on a setup-commit failure rather than log and
+   * continue — so an official pattern that also cannot migrate the document
+   * surfaces as one clear error rather than a silently dead root.
    */
-  async checkAndUpdateDefaultPattern(
-    resolvedRoot?: Cell<NameSchema>,
-  ): Promise<UpdateOutcome> {
-    const runtime = this.runtime;
-    const space = this.getSpace();
-    if (!runtime.experimental?.systemPatternAutoUpdate) {
-      return "skipped-disabled";
-    }
+  async #materializeHealedRoot(
+    root: Cell<NameSchema>,
+    pattern: Pattern,
+    ref: { identity: string; symbol: string },
+    clearError: (reason: string, cause: unknown) => Error,
+  ): Promise<Cell<NameSchema>> {
     try {
-      const root = resolvedRoot ?? await this.getDefaultPattern(false);
-      if (!root) return "current";
-      return await runtime.patternUpdater.checkDefaultPattern(
-        root,
-        deriveSystemPatternSource(space, runtime),
+      await timePiecePhase(
+        "ensureDefaultPattern.rollForwardMaterialize",
+        () =>
+          this.runtime.runSynced(root.withTx(), pattern, undefined, {
+            expectedPatternIdentity: ref,
+          }),
       );
-    } catch (error) {
-      pieceUpdateLogger.warn("root-resolution-failed", () => [
-        "checkAndUpdateDefaultPattern: root resolution failed",
-        space,
-        error,
-      ]);
-      return "current";
+    } catch (materializeError) {
+      // Name which check refused rather than always saying "CFC migration": an
+      // argument refusal reaches here too, and reporting that as a migration
+      // failure sends the reader to the wrong guard.
+      throw clearError(
+        `also failed ${
+          isCfcMigrationRejection(materializeError)
+            ? "CFC migration"
+            : "to materialize"
+        } (${
+          materializeError instanceof Error
+            ? materializeError.message
+            : String(materializeError)
+        })`,
+        materializeError,
+      );
     }
+    return root;
   }
 }
 
@@ -2254,7 +2589,11 @@ async function getCellByIdOrPiece(
     }
     if (
       getMetaLink(piece, "result") === undefined &&
-      getPatternIdentityRef(piece) === undefined
+      getPatternIdentityRef(piece) === undefined &&
+      // A KEYLESS piece carries no durable pointer (the never-durable
+      // contract; L3(a), RULED 2026-08-27); in the session that set it up
+      // the runner's session pointer vouches for it.
+      pieces.runtime.runner.sessionPatternPointerFor(piece) === undefined
     ) {
       throw new Error(
         `Piece ${cellId} has neither a parent result nor a pattern`,

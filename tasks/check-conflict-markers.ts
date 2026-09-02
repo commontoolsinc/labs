@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-run=git
+
 /**
  * Fails when a tracked file contains an unresolved merge-conflict marker.
  *

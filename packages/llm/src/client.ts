@@ -80,9 +80,9 @@ export const setLLMUrl = (toolshedUrl: string) => {
   llmApiUrl = new URL("/api/ai/llm", toolshedUrl).toString();
 };
 
-// ============================================================================
+//
 // Mock Mode for Testing
-// ============================================================================
+//
 
 type MockResponseMatcher = (request: LLMRequest) => boolean;
 type MockObjectResponseMatcher = (request: LLMGenerateObjectRequest) => boolean;
@@ -96,19 +96,19 @@ type MockEntry =
   };
 
 class MockCatalog {
-  private mocks: MockEntry[] = [];
-  private enabled = false;
+  #mocks: MockEntry[] = [];
+  #enabled = false;
 
   enable(): void {
-    this.enabled = true;
+    this.#enabled = true;
   }
 
   disable(): void {
-    this.enabled = false;
+    this.#enabled = false;
   }
 
   clear(): void {
-    this.mocks = [];
+    this.#mocks = [];
   }
 
   reset(): void {
@@ -117,18 +117,18 @@ class MockCatalog {
   }
 
   isEnabled(): boolean {
-    return this.enabled;
+    return this.#enabled;
   }
 
   addResponse(matcher: MockResponseMatcher, response: LLMResponse): void {
-    this.mocks.push({ type: "sendRequest", matcher, response });
+    this.#mocks.push({ type: "sendRequest", matcher, response });
   }
 
   addObjectResponse(
     matcher: MockObjectResponseMatcher,
     response: LLMGenerateObjectResponse,
   ): void {
-    this.mocks.push({ type: "generateObject", matcher, response });
+    this.#mocks.push({ type: "generateObject", matcher, response });
   }
 
   /**
@@ -136,11 +136,11 @@ class MockCatalog {
    * Removes the matched mock (one-time use).
    */
   findResponse(request: LLMRequest): LLMResponse | undefined {
-    const index = this.mocks.findIndex((m) =>
+    const index = this.#mocks.findIndex((m) =>
       m.type === "sendRequest" && m.matcher(request)
     );
     if (index === -1) return undefined;
-    const [mock] = this.mocks.splice(index, 1);
+    const [mock] = this.#mocks.splice(index, 1);
     if (mock.type === "sendRequest") return mock.response;
   }
 
@@ -151,11 +151,11 @@ class MockCatalog {
   findObjectResponse(
     request: LLMGenerateObjectRequest,
   ): LLMGenerateObjectResponse | undefined {
-    const index = this.mocks.findIndex((m) =>
+    const index = this.#mocks.findIndex((m) =>
       m.type === "generateObject" && m.matcher(request)
     );
     if (index === -1) return undefined;
-    const [mock] = this.mocks.splice(index, 1);
+    const [mock] = this.#mocks.splice(index, 1);
     if (mock.type === "generateObject") return mock.response;
   }
 }
@@ -272,9 +272,9 @@ export function addMockObjectResponse(
   mockCatalog.addObjectResponse(matcher, response);
 }
 
-// ============================================================================
+//
 // Conversation Fixtures for Testing
-// ============================================================================
+//
 
 /**
  * Optional assertions to validate the request when a fixture entry is matched.
@@ -283,12 +283,16 @@ export function addMockObjectResponse(
 export interface ConversationFixtureAssertions {
   /** Assert request has exactly this many messages */
   messageCount?: number;
+
   /** Assert each string appears in at least one message (strings may match different messages) */
   messagesContain?: string[];
+
   /** Assert the last message content contains this string */
   lastMessageContains?: string;
+
   /** Assert these tool names are present in the request */
   hasTools?: string[];
+
   /** Assert system prompt contains this string */
   systemContains?: string;
 }
@@ -669,129 +673,131 @@ export class LLMClient {
       const data = await response.json();
       return normalizeLLMResponse(data, id);
     }
-    return await this.stream(response.body, id, callback);
+    return await readLLMStream(response.body, id, callback);
   }
+}
 
-  private async stream(
-    body: ReadableStream,
-    id: string,
-    callback?: PartialCallback,
-  ): Promise<LLMResponse> {
-    const reader = body.getReader();
-    const decoder = new TextDecoder();
+/**
+ * Reads one streamed LLM response to completion, reporting partial text
+ * to `callback` as it arrives.
+ */
+export async function readLLMStream(
+  body: ReadableStream,
+  id: string,
+  callback?: PartialCallback,
+): Promise<LLMResponse> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
 
-    let doneReading = false;
-    let buffer = "";
-    let text = "";
-    const toolCalls: LLMToolCall[] = [];
-    const toolResults: LLMToolResult[] = [];
-    let nativeModelToolResults: LLMNativeModelToolResult[] | undefined;
+  let doneReading = false;
+  let buffer = "";
+  let text = "";
+  const toolCalls: LLMToolCall[] = [];
+  const toolResults: LLMToolResult[] = [];
+  let nativeModelToolResults: LLMNativeModelToolResult[] | undefined;
 
-    while (!doneReading) {
-      const { value, done } = await reader.read();
-      doneReading = done;
-      if (value) {
-        const chunk = decoder.decode(value, { stream: true });
-        buffer += chunk;
+  while (!doneReading) {
+    const { value, done } = await reader.read();
+    doneReading = done;
+    if (value) {
+      const chunk = decoder.decode(value, { stream: true });
+      buffer += chunk;
 
-        let newlineIndex: number;
-        while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
-          const line = buffer.slice(0, newlineIndex).trim();
-          buffer = buffer.slice(newlineIndex + 1);
+      let newlineIndex: number;
+      while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
 
-          if (line) {
-            try {
-              const event = JSON.parse(line);
+        if (line) {
+          try {
+            const event = JSON.parse(line);
 
-              // Handle different event types from AI SDK fullStream
-              if (typeof event === "string") {
-                // Legacy text delta format
-                text += event;
-                if (callback) callback(text);
-              } else if (event.type === "text-delta") {
-                // New structured text delta
-                text += event.textDelta;
-                if (callback) callback(text);
-              } else if (event.type === "tool-call") {
-                // Tool call event
-                const toolCall: LLMToolCall = {
-                  id: event.toolCallId,
-                  name: event.toolName,
-                  input: event.args,
-                };
-                toolCalls.push(toolCall);
-              } else if (event.type === "tool-result") {
-                // Tool result event
-                const toolResult: LLMToolResult = {
-                  toolCallId: event.toolCallId,
-                  result: event.result,
-                  error: event.error,
-                };
-                toolResults.push(toolResult);
-              } else if (event.type === "finish") {
-                if (
-                  isLLMNativeModelToolResults(event.nativeModelToolResults)
-                ) {
-                  nativeModelToolResults = event.nativeModelToolResults;
-                }
-                // Stream finished
-                break;
-              } else if (event.type === "error") {
-                throw new LLMStreamError(event.error ?? "LLM stream error");
+            // Handle different event types from AI SDK fullStream
+            if (typeof event === "string") {
+              // Legacy text delta format
+              text += event;
+              if (callback) callback(text);
+            } else if (event.type === "text-delta") {
+              // New structured text delta
+              text += event.textDelta;
+              if (callback) callback(text);
+            } else if (event.type === "tool-call") {
+              // Tool call event
+              const toolCall: LLMToolCall = {
+                id: event.toolCallId,
+                name: event.toolName,
+                input: event.args,
+              };
+              toolCalls.push(toolCall);
+            } else if (event.type === "tool-result") {
+              // Tool result event
+              const toolResult: LLMToolResult = {
+                toolCallId: event.toolCallId,
+                result: event.result,
+                error: event.error,
+              };
+              toolResults.push(toolResult);
+            } else if (event.type === "finish") {
+              if (
+                isLLMNativeModelToolResults(event.nativeModelToolResults)
+              ) {
+                nativeModelToolResults = event.nativeModelToolResults;
               }
-            } catch (error) {
-              if (error instanceof LLMStreamError) throw error;
-              console.error("Failed to parse JSON line:", line, error);
+              // Stream finished
+              break;
+            } else if (event.type === "error") {
+              throw new LLMStreamError(event.error ?? "LLM stream error");
             }
+          } catch (error) {
+            if (error instanceof LLMStreamError) throw error;
+            console.error("Failed to parse JSON line:", line, error);
           }
         }
       }
     }
-
-    // Handle any remaining buffer
-    if (buffer.trim()) {
-      try {
-        const event = JSON.parse(buffer.trim());
-        if (typeof event === "string") {
-          text += event;
-          if (callback) callback(text);
-        } else if (event.type === "error") {
-          throw new LLMStreamError(event.error ?? "LLM stream error");
-        } else if (event.type === "finish") {
-          if (isLLMNativeModelToolResults(event.nativeModelToolResults)) {
-            nativeModelToolResults = event.nativeModelToolResults;
-          }
-        }
-      } catch (error) {
-        if (error instanceof LLMStreamError) throw error;
-        console.error("Failed to parse final JSON line:", buffer, error);
-      }
-    }
-
-    // Build content array with text and tool calls
-    const content: any[] = [];
-
-    if (text.trim()) {
-      content.push({ type: "text", text });
-    }
-
-    // Add tool calls as content parts
-    for (const toolCall of toolCalls) {
-      content.push({
-        type: "tool-call",
-        toolCallId: toolCall.id,
-        toolName: toolCall.name,
-        input: toolCall.input,
-      });
-    }
-
-    return {
-      role: "assistant",
-      content: content.length > 0 ? content : text,
-      id,
-      ...(nativeModelToolResults !== undefined
-        ? { nativeModelToolResults }
-        : {}),
-    };
   }
+
+  // Handle any remaining buffer
+  if (buffer.trim()) {
+    try {
+      const event = JSON.parse(buffer.trim());
+      if (typeof event === "string") {
+        text += event;
+        if (callback) callback(text);
+      } else if (event.type === "error") {
+        throw new LLMStreamError(event.error ?? "LLM stream error");
+      } else if (event.type === "finish") {
+        if (isLLMNativeModelToolResults(event.nativeModelToolResults)) {
+          nativeModelToolResults = event.nativeModelToolResults;
+        }
+      }
+    } catch (error) {
+      if (error instanceof LLMStreamError) throw error;
+      console.error("Failed to parse final JSON line:", buffer, error);
+    }
+  }
+
+  // Build content array with text and tool calls
+  const content: any[] = [];
+
+  if (text.trim()) {
+    content.push({ type: "text", text });
+  }
+
+  // Add tool calls as content parts
+  for (const toolCall of toolCalls) {
+    content.push({
+      type: "tool-call",
+      toolCallId: toolCall.id,
+      toolName: toolCall.name,
+      input: toolCall.input,
+    });
+  }
+
+  return {
+    role: "assistant",
+    content: content.length > 0 ? content : text,
+    id,
+    ...(nativeModelToolResults !== undefined ? { nativeModelToolResults } : {}),
+  };
 }

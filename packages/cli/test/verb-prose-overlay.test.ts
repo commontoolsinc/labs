@@ -4,7 +4,7 @@
  * result schema, and folding it into the schema a caller is served.
  *
  * Its companion `verb-prose-live.test.ts` drives the same code through
- * `cf piece verbs` and `cf piece call --help` against compiled, run patterns,
+ * `cf piece verbs` and `cf call --help` against compiled, run patterns,
  * and that is where the behavior a caller sees is pinned. This file exists for
  * the shapes a compiled pattern does not produce and a served schema may still
  * hold: a reference naming a definition that is not there, a definition that is
@@ -35,6 +35,7 @@ function registeredRefTo(schema: JSONSchema): string {
   }
   return rootRef;
 }
+
 import { declaredVerbProse, withDeclaredFieldProse } from "../lib/piece.ts";
 
 /** `withDeclaredFieldProse` with both sides as plain objects. */

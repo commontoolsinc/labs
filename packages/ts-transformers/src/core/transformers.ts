@@ -11,6 +11,7 @@ import type { BuilderSourceSite } from "./runtime-contract.ts";
 export type SchemaHint = {
   /** Override for array items schema (e.g., false for items: false) */
   readonly items?: unknown;
+
   readonly cfcUiContract?: {
     readonly helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
     readonly action?: string;
@@ -43,6 +44,7 @@ export type CapabilityParamSummary = {
   readonly opaquePaths?: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+
   /**
    * Write-exhaustiveness is unverifiable for this parameter — `writePaths`
    * may be incomplete. Set by unrecognized or dynamic method calls on
@@ -54,6 +56,7 @@ export type CapabilityParamSummary = {
    * (`const f = cell.send; f(x)`) are outside the contract.
    */
   readonly hasUnverifiedCellUse?: boolean;
+
   readonly identityOnly?: boolean;
   readonly identityPaths?: readonly (readonly string[])[];
   readonly identityCellPaths?: readonly (readonly string[])[];
@@ -75,8 +78,10 @@ export type UnreadableCellArgument = {
 
 export type FunctionCapabilitySummary = {
   readonly params: readonly CapabilityParamSummary[];
+
   /** True when analysis was short-circuited due to recursion. */
   readonly recursive?: boolean;
+
   /** Cell arguments passed to parameters the contract could not classify. */
   readonly unreadableCellArguments?: readonly UnreadableCellArgument[];
 };
@@ -124,6 +129,7 @@ export interface BuilderSourceSiteOptions {
  * Type is used in multiple places with different access patterns.
  */
 export type SchemaHints = WeakMap<ts.Node, SchemaHint>;
+
 export type SyntheticReactiveCollectionRegistry = WeakSet<ts.Symbol>;
 
 export type TransformationOptions = {
@@ -137,13 +143,16 @@ export type TransformationOptions = {
    * its own and stores it back here, so `context.state` is always present.
    */
   readonly state?: CrossStageState;
+
   /**
    * Shared diagnostics collector that accumulates diagnostics across all transformers.
    * If provided, diagnostics are pushed to this array in addition to the local context.
    */
   readonly diagnosticsCollector?: TransformationDiagnostic[];
+
   readonly patternCoverage?: PatternCoverageOptions;
   readonly builderSourceSites?: BuilderSourceSiteOptions;
+
   /**
    * Whether an `assert(...)` body records its operands, so that a failing
    * pattern-test assertion can report them. Defaults to true.
@@ -154,8 +163,10 @@ export type TransformationOptions = {
    * debug rendering in its assertion bodies.
    */
   readonly assertDiagnostics?: boolean;
+
   /** Content identity assigned by the compiler for every authored source. */
   readonly moduleIdentities?: ReadonlyMap<string, string>;
+
   /**
    * Compile-name → authored-name mapping for CFC writer-identity file
    * spellings (claim minting, provenance stamping, `PolicyOf` source
@@ -166,6 +177,21 @@ export type TransformationOptions = {
    * verbatim (modulo path-separator normalization).
    */
   readonly canonicalWriterIdentityFile?: (fileName: string) => string;
+
+  /**
+   * The program is DURABLE STORED pattern source being reloaded — bytes
+   * nobody can re-author, recompiled by a toolchain newer than the one that
+   * accepted them, under an identity pin that guarantees this compile admits
+   * nothing new. Authoring-shape gates report as warnings in this mode
+   * instead of errors, so a new rule cannot retroactively brick every
+   * stored pattern of an older shape (the 2026-08-25 estuary deploy: the
+   * opaque-reserved-key rule refused every piece pinned to a pre-`VNode`
+   * pattern, profiles fleet-wide among them). The transformer-level twin of
+   * the compiler option of the same name (CT-1916). Authoring paths — cf
+   * check, deploy, candidate admission — leave this off and stay strict:
+   * there the author is present and can fix the shape.
+   */
+  readonly storedSource?: boolean;
 };
 
 export type DiagnosticSeverity = "error" | "warning";

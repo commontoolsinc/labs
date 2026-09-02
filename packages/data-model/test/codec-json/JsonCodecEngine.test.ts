@@ -312,6 +312,7 @@ describe("JsonCodecEngine", () => {
     it("expands a nonterminal codec's state on the way to the encoded form", () => {
       // The `/quote` wrapper is the walker's mark: it saw a plain object with
       // a reserved key and escaped it.
+
       expect(encodedFormatFrom(new ProbeNonterminalCodec())).toEqual({
         [`/${PROBE_TAG}`]: { "/quote": { "/Bytes@1": "AQID" } },
       });
@@ -337,6 +338,7 @@ describe("JsonCodecEngine", () => {
       // `BigInt@1` sees a non-string and rejects it, which is the judgment
       // this pins; a lenient engine keeps that verdict as a value, naming the
       // tag whose codec made it.
+
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
 
       const result = jsonCodecEngine.decode(
@@ -357,6 +359,7 @@ describe("JsonCodecEngine", () => {
       // The same rejection, through a strict engine. `BigInt@1` reports by
       // RETURNING a `ProblematicValue` rather than throwing, and the engine
       // settles the two reporting styles into one answer.
+
       const jsonCodecEngine = newDefaultJsonCodecEngine();
 
       expect(jsonCodecEngine.lenient).toBe(false);
@@ -421,6 +424,7 @@ describe("JsonCodecEngine", () => {
       // wrong shape for this format settles against `lenient` exactly as a
       // malformation inside a well-formed one does. Anything else would make
       // the outermost check the one refusal `lenient` could not contain.
+
       const decoded = newDefaultJsonCodecEngine({ lenient: true })
         .decode(NOT_OURS, new TestLiveEnvironment());
 
@@ -442,6 +446,7 @@ describe("JsonCodecEngine", () => {
       // is a refusal of the serialized form just as an absent tag is, so it
       // settles the same way -- otherwise `lenient` would contain one half of
       // "is this well-formed?" and not the other.
+
       const decoded = newDefaultJsonCodecEngine({ lenient: true })
         .decode("fvj1:{not json", new TestLiveEnvironment());
 
@@ -612,6 +617,7 @@ describe("JsonCodecEngine", () => {
       // registry key), so no codec claims them. A default-configured
       // `JsonCodecEngine` must then fail loudly rather than silently flatten the
       // symbol to `{}`.
+
       const { jsonCodecEngine } = makeTestCodec();
       expect(() => jsonCodecEngine.encode(Symbol("nope"))).toThrow(
         "no applicable codec",
@@ -686,6 +692,7 @@ describe("JsonCodecEngine", () => {
     it("throws on a non-plain object with no codec (e.g. a raw `Map`)", () => {
       // A non-plain object that is neither a FabricInstance nor codec-handled
       // must fail loudly, not be mis-encoded as a plain object.
+
       const { jsonCodecEngine } = makeTestCodec();
       expect(() => jsonCodecEngine.encode(new Map() as unknown as FabricValue))
         .toThrow("no applicable codec");
@@ -768,6 +775,7 @@ describe("JsonCodecEngine", () => {
     it("returns a `ProblematicValue` given a count past the array maximum", () => {
       // A safe integer can still be more elements than an array can hold, in
       // which case setting the length is what would fail.
+
       const result = decodeArray(["a", { "/hole": 2 ** 40 }, "b"]);
 
       expect(result).toBeInstanceOf(ProblematicValue);
@@ -779,6 +787,7 @@ describe("JsonCodecEngine", () => {
     it("returns a `ProblematicValue` when later entries carry the total past it", () => {
       // The run alone is exactly what an array can hold; the two entries
       // placed after it are what make the total too large.
+
       const result = decodeArray([{ "/hole": 2 ** 32 - 1 }, "a", "b"]);
 
       expect(result).toBeInstanceOf(ProblematicValue);
@@ -793,6 +802,7 @@ describe("JsonCodecEngine", () => {
       // index and the array is exactly as long as one may be. A step further
       // and the entry would become a plain property rather than an element,
       // which the previous case is what catches.
+
       const result = decodeArray(
         [{ "/hole": (2 ** 32 - 1) - 1 }, "z"],
       ) as FabricValue[];
@@ -819,6 +829,7 @@ describe("JsonCodecEngine", () => {
   describe("sparse arrays", () => {
     it("encodes `[1,,3]` with `/hole`", () => {
       // deno-lint-ignore no-sparse-arrays
+
       const arr = [1, , 3];
       const result = toEncodedFormat(arr) as JsonCodecValue[];
       expect(result.length).toBe(3);
@@ -829,6 +840,7 @@ describe("JsonCodecEngine", () => {
 
     it("round-trips `[1,,3]` preserving holes", () => {
       // deno-lint-ignore no-sparse-arrays
+
       const arr = [1, , 3];
       const result = roundTrip(arr) as FabricValue[];
       expect(result.length).toBe(3);
@@ -839,6 +851,7 @@ describe("JsonCodecEngine", () => {
 
     it("encodes consecutive holes as run-length encoded", () => {
       // deno-lint-ignore no-sparse-arrays
+
       const arr = [1, , , , 5];
       const result = toEncodedFormat(arr) as JsonCodecValue[];
       expect(result.length).toBe(3); // [1, {"/hole": 3}, 5]
@@ -849,6 +862,7 @@ describe("JsonCodecEngine", () => {
 
     it("round-trips `[1,,,,5]`", () => {
       // deno-lint-ignore no-sparse-arrays
+
       const arr = [1, , , , 5];
       const result = roundTrip(arr) as FabricValue[];
       expect(result.length).toBe(5);
@@ -861,6 +875,7 @@ describe("JsonCodecEngine", () => {
 
     it("round-trips all-holes array `[,,,]`", () => {
       // deno-lint-ignore no-sparse-arrays
+
       const arr = [, , ,];
       const result = roundTrip(arr) as FabricValue[];
       expect(result.length).toBe(3);
@@ -975,6 +990,7 @@ describe("JsonCodecEngine", () => {
         // U+10000 (UTF-16: D800 DC00; UTF-8: F0 90 80 80) sorts AFTER U+E000
         // (UTF-16: E000; UTF-8: EE 80 80) in UTF-8 byte order, but BEFORE it in
         // JS native (UTF-16) order. The encoder must use UTF-8 order.
+
         const obj = {
           ["\u{10000}"]: 1,
           [""]: 2,
@@ -986,6 +1002,7 @@ describe("JsonCodecEngine", () => {
       it("matches the key order used by `value-hash.ts`", () => {
         // Both subsystems must agree on the canonical sort order. Cross-check
         // via `utf8SortedKeysOf`, which is the function value-hash.ts uses.
+
         const obj = {
           ["\u{1F600}"]: 1,
           b: 2,
@@ -1073,6 +1090,7 @@ describe("JsonCodecEngine", () => {
         // *through* the array; otherwise the inner wrapper survives into the
         // output, and decoding -- which strips exactly one `/quote` layer --
         // hands back the wrapper instead of the object the caller wrote.
+
         const obj = { "/outer": [{ "/inner": "val" }] };
         expect(toEncodedFormat(obj)).toEqual({
           "/quote": { "/outer": [{ "/inner": "val" }] },
@@ -1199,6 +1217,7 @@ describe("JsonCodecEngine", () => {
         it("produces `ProblematicValue` for a multi-key object with a `/`-prefixed key", () => {
           // Wire data without a `/quote` or `/object` wrapper: the decoder must
           // not silently round-trip it as a plain object.
+
           const data = { a: 1, "/b": 2 } as JsonCodecValue;
           const result = fromEncodedFormat(data, true);
           expect(result).toBeInstanceOf(ProblematicValue);
@@ -1209,6 +1228,7 @@ describe("JsonCodecEngine", () => {
           // after stripping the leading slash) is an encoding error. Decoding
           // must produce a `ProblematicValue`, not an `UnknownValue` with an
           // empty tag.
+
           const data = { "/": "x" } as JsonCodecValue;
           const result = fromEncodedFormat(data, true);
           expect(result).toBeInstanceOf(ProblematicValue);
@@ -1241,6 +1261,7 @@ describe("JsonCodecEngine", () => {
         // the plain-object path, so they produce an `UnknownValue` for the
         // unrecognized tag and never reach the multi-key guard's
         // `ProblematicValue`.
+
         const data = { "/Future@7": { id: "x" } } as JsonCodecValue;
         const result = fromEncodedFormat(data);
         expect(result).toBeInstanceOf(UnknownValue);
@@ -1254,6 +1275,7 @@ describe("JsonCodecEngine", () => {
         // literal whose content happens to be `{"/quote": "x"}`. Decoding must
         // return that inner object as a frozen plain object, and must _not_
         // recurse into it and return just `x`.
+
         const encoded = { "/quote": { "/quote": "x" } } as JsonCodecValue;
         const result = fromEncodedFormat(encoded) as Record<
           string,
@@ -1266,6 +1288,7 @@ describe("JsonCodecEngine", () => {
         // In `{"/x": {"/quote": "inner"}}`, the value at `/x` is user data
         // that happens to have a `/quote` key. It must survive encode and
         // decode intact.
+
         const obj = { "/x": { "/quote": "inner" } };
         const result = roundTrip(obj) as Record<
           string,
@@ -1289,6 +1312,7 @@ describe("JsonCodecEngine", () => {
         // property, so a literal cannot express this encoded shape at all.
         // `JSON.parse()`, which is how such bytes actually arrive, does create
         // the own property.
+
         expect(
           fromEncodedFormat({ ["__proto__"]: { hostile: true }, a: 1 }, true),
         )
@@ -1304,6 +1328,7 @@ describe("JsonCodecEngine", () => {
         // the key is dropped in the rebuild, and on one without, it reaches
         // the wire as text this same decoder refuses -- written and never
         // readable.
+
         for (const key of ["__proto__", "constructor"]) {
           const value = Object.defineProperty({ a: 1 }, key, {
             value: "payload",
@@ -1343,6 +1368,7 @@ describe("JsonCodecEngine", () => {
         // what browsers have and what this code also runs under, and pins the
         // outcome the refusal exists to produce: nothing decoded, and no
         // prototype repointed.
+
         const saved = Object.getOwnPropertyDescriptor(
           Object.prototype,
           "__proto__",
@@ -1443,6 +1469,7 @@ describe("JsonCodecEngine", () => {
 
     it("preserves the `UnknownValue` tag in the encoded form via `encode()`", () => {
       // Encoding an UnknownValue produces the original tagged form.
+
       const us = new UnknownValue("FutureType@2", { some: "data" });
       const encodedFormat = toEncodedFormat(us);
       expect(encodedFormat).toEqual({
@@ -1463,6 +1490,7 @@ describe("JsonCodecEngine", () => {
       // Per spec §9, `UnknownValue` is for a syntactically well-formed tag no
       // codec claims. `hole` is a meta-tag, meaningful only among array
       // elements, and is a structural violation anywhere else.
+
       const data = { "/hole": 5 } as JsonCodecValue;
 
       expect(() => fromEncodedFormat(data)).toThrow(/malformed tag/);
@@ -1618,6 +1646,7 @@ describe("JsonCodecEngine", () => {
       // What the state assertion pins is what the *report* carries, which is
       // the encoded form. That the *codec* is handed the encoded form is a separate
       // fact, pinned separately above.
+
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       const data = { "/Undefined@1": { "/Bytes@1": "AQID" } } as JsonCodecValue;
 
@@ -1640,6 +1669,7 @@ describe("JsonCodecEngine", () => {
       // witnesses the deep-frozen contract on the lenient path. The codecs
       // that report by RETURNING one are frozen by the arm above instead, so
       // neither arm stands in for the other.
+
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       const data = { "/Undefined@1": { "/Bytes@1": "AQID" } } as JsonCodecValue;
 
@@ -1723,10 +1753,15 @@ describe("JsonCodecEngine", () => {
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    // Every arm of the dispatch, so that the guarantee does not depend on
-    // which one produced the value. `isDeepFrozen()` rather than
-    // `Object.isFrozen()`: an arm that froze only the value it built, and not
-    // what it wrapped, would pass the shallow check.
+    //
+    // The fallback arms, deep-frozen
+    //
+    // These pin the guarantee on the arms that wrap wire state rather than
+    // decode it — an `UnknownValue` and a `ProblematicValue`. They assert
+    // with `isDeepFrozen()` rather than `Object.isFrozen()`, because an arm
+    // that froze only the value it built, and not what it wrapped, would pass
+    // the shallow check.
+    //
 
     it("deep-freezes an `UnknownValue` from an unrecognized tag", () => {
       const result = fromEncodedFormat(
@@ -1751,6 +1786,7 @@ describe("JsonCodecEngine", () => {
     it("deep-freezes a `ProblematicValue` from a malformed tag", () => {
       // `malformed`, because the wrap helper validates with a strict decode
       // and would otherwise reject the very payload this case is made of.
+
       const result = fromEncodedFormat(
         { "/": { a: 1 } } as JsonCodecValue,
         true,
@@ -1770,6 +1806,7 @@ describe("JsonCodecEngine", () => {
     it("deep-freezes a codec-produced value at the boundary", () => {
       // `/EpochNsec@1` dispatches through a registered codec; the
       // decoded FabricEpochNsec must be deep-frozen on return.
+
       const result = fromEncodedFormat(
         { "/EpochNsec@1": "AA" } as JsonCodecValue,
       );
@@ -1782,6 +1819,7 @@ describe("JsonCodecEngine", () => {
       // lenient catch produces a ProblematicValue -- still a codec-arm return,
       // so the contract deep-freezes it (not a crash: it is the value
       // lenient mode produces precisely to avoid crashing).
+
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       const runtime = new TestLiveEnvironment();
       const result = jsonCodecEngine.decode(
@@ -1874,6 +1912,7 @@ describe("JsonCodecEngine", () => {
       // An object whose keys are all /-prefixed but whose values are all
       // quote-safe routes through the encode-side /quote path, then back
       // through the decode /quote `return state` arm.
+
       const value = {
         "/a": 1,
         "/b": { plain: [1, 2] },
@@ -1965,6 +2004,7 @@ describe("JsonCodecEngine", () => {
         // The same detection, kept as a value. Which side of this a caller
         // gets is `lenient` and nothing else -- notably not whether a codec
         // or the walk noticed, which these cases are the walk noticing.
+
         expect(fromEncodedFormat(encoded, true)).toBeInstanceOf(
           ProblematicValue,
         );
@@ -2027,6 +2067,7 @@ describe("JsonCodecEngine", () => {
       // The `@1` in the tag makes this a versioned encoded surface, so the exact
       // shape asserted below is the contract rather than an implementation
       // detail.
+
       const se = FabricError.fromNativeError(new TypeError("compat test"));
       const encoded = toEncodedFormat(
         se,
@@ -2046,6 +2087,7 @@ describe("JsonCodecEngine", () => {
     // JSON that happens to look similar does not. One case feeds it real
     // encoder output, so the shape recognized here cannot drift from the shape
     // produced.
+
     it("recognizes a string with the encoding prefix", () => {
       expect(JsonCodecEngine.seemsLikeEncoded('fvj1:{"a":1}')).toBe(true);
       expect(JsonCodecEngine.seemsLikeEncoded("fvj1:null")).toBe(true);
@@ -2068,6 +2110,7 @@ describe("JsonCodecEngine", () => {
     it("returns `false` for plain JSON without the prefix", () => {
       // These are plain JSON without the prefix, so the dispatch must reject
       // them.
+
       expect(JsonCodecEngine.seemsLikeEncoded("true")).toBe(false);
       expect(JsonCodecEngine.seemsLikeEncoded("false")).toBe(false);
       expect(JsonCodecEngine.seemsLikeEncoded("null")).toBe(false);
@@ -2113,6 +2156,7 @@ describe("JsonCodecEngine", () => {
       it("preserves a value plain JSON could not carry", () => {
         // The case that motivates having a golden format at all: these survive
         // the trip only as tagged forms.
+
         const encoded = newDefaultJsonCodecEngine().encode(
           { z: -0, n: NaN, i: -Infinity },
         );
@@ -2130,6 +2174,7 @@ describe("JsonCodecEngine", () => {
       it("throws given a string carrying no tag", () => {
         // The whole point of the tag: untagged JSON is not one of ours, however
         // well-formed it happens to be.
+
         expect(() => JsonCodecEngine.unwrapEncodedValueForTesting("42"))
           .toThrow();
       });
@@ -2142,6 +2187,7 @@ describe("JsonCodecEngine", () => {
       it("throws given a tag with nothing after it", () => {
         // `seemsLikeEncoded()` accepts this, so only the throwaway decode
         // catches it.
+
         expect(() =>
           JsonCodecEngine.unwrapEncodedValueForTesting(ENCODING_PREFIX)
         )
@@ -2177,6 +2223,7 @@ describe("JsonCodecEngine", () => {
       it("decodes a pretty-printed body", () => {
         // The re-encoded form is not compared against the input, so whitespace
         // is immaterial -- which is what lets a golden file be readable.
+
         const pretty = JSON.stringify({ a: 1, b: [2, 3] }, null, 2);
         const encoded = JsonCodecEngine.wrapEncodedValueForTesting(pretty);
         const { runtime } = makeTestCodec();
@@ -2197,6 +2244,7 @@ describe("JsonCodecEngine", () => {
       it("throws given an already-tagged string", () => {
         // Double-tagging is a mistake worth catching: the tag is not part of
         // the JSON, so the result would not parse.
+
         const encoded = newDefaultJsonCodecEngine().encode(42);
         expect(() => JsonCodecEngine.wrapEncodedValueForTesting(encoded))
           .toThrow();
@@ -2208,6 +2256,7 @@ describe("JsonCodecEngine", () => {
       // payload the codec cannot decode. Reaching that codec takes a
       // registry that has it: against the format-only default, `Map@1` is
       // merely an unrecognized tag and decodes to an `UnknownValue`.
+
       const undecodable = JSON.stringify({ "/Map@1": [["key", "value"]] });
 
       it("refuses a payload undecodable by the given registry's codecs", () => {
@@ -2244,6 +2293,7 @@ describe("JsonCodecEngine", () => {
         // Malformed means malformed: the flag is a caller saying the payload is
         // broken on purpose, so nothing is checked and the tag simply goes on
         // the front.
+
         expect(JsonCodecEngine.wrapEncodedValueForTesting("{nope", true))
           .toBe(`${ENCODING_PREFIX}{nope`);
       });
@@ -2260,6 +2310,7 @@ describe("JsonCodecEngine", () => {
       it("still requires the tag on unwrap, however deliberate", () => {
         // Not a judgment about the payload: stripping a prefix that is not
         // there yields nonsense, not the body.
+
         expect(() => JsonCodecEngine.unwrapEncodedValueForTesting("42", true))
           .toThrow();
       });

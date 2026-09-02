@@ -24,7 +24,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -45,17 +45,21 @@ import {
 import {
   ignoreReadForScheduling,
   internalVerifierRead,
+  isDurableReadTx,
   isInternalVerifierRead,
   isReadIgnoredForCommit,
+  markDurableReadTx,
   markUiInputBlindWriteTx,
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "../src/storage/reactivity-log.ts";
+import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import { getDirectTransactionReadActivities } from "../src/storage/transaction-inspection.ts";
 import { isTerminalRejection } from "../src/storage/rejection.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("speculation overlay space");
 const space = spaceSigner.did() as MemorySpace;
@@ -63,20 +67,6 @@ const serviceSigner = await Identity.fromPassphrase(
   "speculation overlay service",
 );
 const aliceSigner = await Identity.fromPassphrase("speculation overlay alice");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 15_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 describe("Phase 2 speculation overlay", () => {
   let server: MemoryV2Server.Server;
@@ -99,7 +89,6 @@ describe("Phase 2 speculation overlay", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         _servingRuntime = runtime;
@@ -314,11 +303,8 @@ describe("Phase 2 speculation overlay", () => {
 
     // Retirement (speculation.md §4): the covering watermark retires
     // every entry; the STORE value renders through the same path.
-    await waitUntil(
-      () => overlay!.entryCount(space) === 0,
-      "overlay retirement after settle",
-      30_000,
-    );
+    await overlay!.waitForSpaceQuiescence(space);
+    expect(overlay!.entryCount(space)).toBe(0);
     await waitUntil(
       () => clientResult.key("total").get() === 56,
       "the authoritative value to render",
@@ -678,6 +664,23 @@ describe("Phase 2 speculation overlay", () => {
     const sealed = await destination.seal(withEventTx);
     expect(sealed.error).toBeDefined();
     expect(sealed.error?.message).toContain("does not support sealing");
+
+    // A transaction that CAN seal but cannot take the whole-document mark
+    // is refused on the same footing: its ops would be patches, which
+    // compose with the layer beneath them (speculation.md §1). Named
+    // separately from the sealing arm so the refusal says which.
+    const patchOnlyTx = {
+      tx: { sealInto: () => Promise.resolve({ ok: {} }) },
+    } as unknown as IExtendedStorageTransaction;
+    stampSpeculationRunContext(patchOnlyTx, {
+      actionId: "spec-derivation-patch-only",
+      kind: "derivation",
+    });
+    const patchOnly = await destination.seal(patchOnlyTx);
+    expect(patchOnly.error).toBeDefined();
+    expect(patchOnly.error?.message).toContain(
+      "does not support whole-document writes",
+    );
   });
 
   it("an authored tx that read a speculative echo is refused LOUDLY at the client, terminal, with no wire export (speculation.md §6; leg-C RULED 2026-08-13)", async () => {
@@ -2097,6 +2100,76 @@ describe("Phase 2 speculation overlay", () => {
     );
   });
 
+  it("a durable-read direct transaction authors from confirmed state while a speculative echo stands", async () => {
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+    const engine = await server.engineForSpace(space);
+    const database = clientRuntime.getCell<{ id: string; rev: number }>(
+      space,
+      "direct-durable-database",
+      undefined,
+    );
+    await database.sync();
+    {
+      const tx = clientRuntime.edit();
+      database.withTx(tx).set({ id: "db-1", rev: 1 });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+
+    const replica = clientManager.open(space).replica;
+    const link = database.getAsNormalizedFullLink();
+    const durableDoc = replica.getDocument(link.id, link.scope);
+    const verdict = Promise.withResolvers<
+      {
+        committed: { seq: number };
+      } | {
+        withdrawn: { message: string };
+      }
+    >();
+    const sealed = replica.sealNative!(
+      {
+        operations: [{
+          op: "set",
+          id: link.id,
+          type: "application/json",
+          value: {
+            ...(durableDoc as Record<string, unknown>),
+            value: { id: "db-1", rev: 9 },
+          },
+        }],
+      },
+      undefined,
+      verdict.promise,
+      { speculative: true },
+    );
+    expect(database.get()).toEqual({ id: "db-1", rev: 9 });
+    const commitsBefore = Engine.selectCommitsSince(engine, { fromSeq: 0 })
+      .length;
+
+    const tx = clientRuntime.edit();
+    markDurableReadTx(tx);
+    const wrapped = new TransactionWrapper(tx);
+    expect(isDurableReadTx(wrapped)).toBe(true);
+    expect(database.withTx(wrapped).get()).toEqual({ id: "db-1", rev: 1 });
+    database.key("rev").withTx(wrapped).set(2);
+    clientRuntime.prepareTxForCommit(tx);
+    const outcome = await tx.commit();
+
+    expect(outcome.error).toBeUndefined();
+    expect(Engine.selectCommitsSince(engine, { fromSeq: 0 }).length).toBe(
+      commitsBefore + 1,
+    );
+    verdict.resolve({ withdrawn: { message: "test complete" } });
+    await sealed.settled;
+  });
+
   it("under a standing overlay layer whose writes include /cfc, a blind-write tx's verifier-shaped read sees the DURABLE doc while an ordinary read sees the overlay — verify-durable and name-durable travel together (RULED 2026-08-21)", async () => {
     // The consistency pin for the ruled arm (b): the value the
     // verifier consumes must match the basis named for it. The echo
@@ -2373,6 +2446,10 @@ describe("Phase 2 speculation overlay", () => {
     // Seal the speculative entry through the destination.
     const sealTx = {
       tx: {
+        // These doubles hand-build the ops they seal, so the mark has nothing
+        // to shape; it is present because the seal refuses a transaction that
+        // cannot take it.
+        markWholeDocumentWrites: () => {},
         sealInto: (collector: {
           sealSpaceCommit: (
             space: MemorySpace,
@@ -2408,12 +2485,10 @@ describe("Phase 2 speculation overlay", () => {
     // promotes off the pending stack. NO further watermark event.
     ackedSeq = 5;
     pendingLocalSeqs.splice(0, pendingLocalSeqs.length, 30);
+    const quiescence = destination.waitForSpaceQuiescence(space);
     replica.speculationAckObserver?.();
-    await waitUntil(
-      () => destination.entryCount(space) === 0,
-      "the verdict-raced entry to retire on the ack wake",
-      5_000,
-    );
+    await quiescence;
+    expect(destination.entryCount(space)).toBe(0);
     destination.close();
   });
 
@@ -2457,6 +2532,7 @@ describe("Phase 2 speculation overlay", () => {
     const gate = Promise.withResolvers<void>();
     const sealTx = {
       tx: {
+        markWholeDocumentWrites: () => {},
         sealInto: async (collector: {
           sealSpaceCommit: (
             space: MemorySpace,
@@ -2516,6 +2592,7 @@ describe("Phase 2 speculation overlay", () => {
     const verdictsBefore = verdicts.length;
     const rejectTx = {
       tx: {
+        markWholeDocumentWrites: () => {},
         sealInto: async (collector: {
           sealSpaceCommit: (
             space: MemorySpace,
@@ -2609,5 +2686,179 @@ describe("Phase 2 speculation overlay", () => {
       | undefined;
     expect(rendered?.result).toBeUndefined();
     cancelDemand();
+  });
+
+  it("an overlay entry over an ARRAY renders the value its derivation computed, whatever the confirmed value beneath it becomes (the pivot flake: a positional splice re-applied over the authoritative array)", async () => {
+    // An entry's ops sit ABOVE the confirmed value and are materialized
+    // over it on every read, so an op that is POSITIONAL — a splice
+    // carrying an index and an element — describes a value only while the
+    // layer beneath is the one the run diffed against. The authoritative
+    // derivation arrives on that layer before the entry retires, and the
+    // same splice then inserts a second copy of an element the arrived
+    // array already carries.
+    //
+    // The symptom this pins: a board's derived pivot read one row per
+    // topic plus one, and one row short, in the same suite — a doubled
+    // element and a dropped one are the two directions of one re-applied
+    // splice.
+    const LIST_PATTERN = [
+      "import { Default, lift, pattern, Writable } from 'commonfabric';",
+      "const doubleAll = lift(",
+      "  ({ items }: { items: number[] }) => items.map((n) => n * 2),",
+      ");",
+      "export default pattern<",
+      "  { items?: Writable<number[] | Default<[]>> },",
+      "  { doubled: number[] }",
+      ">(({ items }) => ({ doubled: doubleAll({ items: items! }) }));",
+    ].join("\n");
+
+    const openRuntime = (flagOn: boolean) => {
+      const manager = EmulatedStorageManager.connectTo(server, {
+        as: aliceSigner,
+      });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: manager,
+        experimental: { serverExecution: flagOn },
+      });
+      return { manager, runtime };
+    };
+
+    /** Installs the pattern over the shared cells and hands back the
+     * result cell plus a live reader, which IS the demand that makes the
+     * lift run at all. */
+    const install = async (runtime: Runtime) => {
+      const compiled = await runtime.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: LIST_PATTERN }],
+      }, { space });
+      const argument = runtime.getCell<{ items: number[] }>(
+        space,
+        "splice-arg",
+        undefined,
+      );
+      const result = runtime.getCell<{ doubled: number[] }>(
+        space,
+        "splice-result",
+        compiled.resultSchema,
+      );
+      await argument.sync();
+      await result.sync();
+      const tx = runtime.edit();
+      runtime.run(tx, compiled, argument, result);
+      expect((await tx.commit()).error).toBeUndefined();
+      return { argument, result, release: result.sink(() => {}) };
+    };
+
+    // The confirmed two-element array, committed by an ordinary flag-OFF
+    // client — the deriving committer this test needs, without an
+    // executor host to advance a watermark later on.
+    const seeder = openRuntime(false);
+    let derivedLink;
+    try {
+      const seeded = await install(seeder.runtime);
+      const tx = seeder.runtime.edit();
+      seeded.argument.withTx(tx).set({ items: [1, 2] });
+      expect((await tx.commit()).error).toBeUndefined();
+      await seeder.runtime.idle();
+      await waitUntil(
+        () => (seeded.result.key("doubled").get() ?? []).length === 2,
+        "the seeded two-element array",
+      );
+      await seeder.runtime.storageManager.synced();
+      // The derived document itself, so the arrival below lands on the
+      // very layer an entry's ops are materialized over.
+      derivedLink = seeded.result.key("doubled").resolveAsCell()
+        .getAsNormalizedFullLink();
+      seeded.release();
+    } finally {
+      await seeder.runtime.dispose();
+      await seeder.manager.close();
+    }
+
+    // The flag-ON client, opened over the settled state. Its first run
+    // computes the array already stored, so the no-op elision seals no
+    // entry — which is what leaves the NEXT run diffing against the
+    // CONFIRMED value rather than against an echo of its own.
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+    const client = await install(clientRuntime);
+    await clientRuntime.idle();
+    await waitUntil(
+      () => (client.result.key("doubled").get() ?? []).length === 2,
+      "the stored two-element array at the flag-ON client",
+    );
+    // The same derived document both sides derive into, so the arrival
+    // below lands under the entry this client seals rather than beside it.
+    expect(
+      client.result.key("doubled").resolveAsCell().getAsNormalizedFullLink()
+        .id,
+    ).toBe(derivedLink.id);
+    // Its run computed what is already stored, so nothing sealed.
+    expect(clientRuntime.speculationOverlay?.entryCount(space) ?? 0).toBe(0);
+
+    // The speculative run: three elements diffed against the confirmed
+    // two, which is the splice. Nothing advances the watermark here, so
+    // the entry stands — that is the window the flake lives in, held
+    // open rather than raced.
+    {
+      const tx = clientRuntime.edit();
+      client.argument.withTx(tx).set({ items: [1, 2, 3] });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.idle();
+    await waitUntil(
+      () => (client.result.key("doubled").get() ?? []).length === 3,
+      "the speculative three-element echo",
+    );
+    expect(clientRuntime.speculationOverlay!.entryCount(space))
+      .toBeGreaterThanOrEqual(1);
+    // Released before the arrival below, so the entry under test is the
+    // one this run sealed and no re-derivation seals another over it.
+    client.release();
+
+    // The authoritative value arrives under the standing entry. Written
+    // from a second session because that is what moves the CONFIRMED
+    // value: a write through this client would land as one more layer
+    // above it. Deliberately NOT the array the speculation computed, so
+    // the assertion separates three outcomes — the entry rendering its
+    // own value, the splice composing with what arrived, and the entry
+    // having quietly retired.
+    const writer = openRuntime(false);
+    try {
+      const arrived = writer.runtime.getCellFromLink<number[]>(derivedLink);
+      await arrived.sync();
+      const tx = writer.runtime.edit();
+      arrived.withTx(tx).set([7, 8, 9]);
+      expect((await tx.commit()).error).toBeUndefined();
+      await writer.runtime.storageManager.synced();
+    } finally {
+      await writer.runtime.dispose();
+      await writer.manager.close();
+    }
+    const replica = clientRuntime.storageManager.open(space).replica;
+    await waitUntil(
+      () =>
+        JSON.stringify(
+          (replica.getNonSpeculativeDocument!(
+            derivedLink.id,
+            derivedLink.scope,
+          ) as { value?: unknown } | undefined)?.value,
+        ) === JSON.stringify([7, 8, 9]),
+      "the authoritative array to reach the client's confirmed view",
+    );
+
+    // The entry still stands, so what renders is the entry's own value —
+    // the three elements its derivation computed — and neither the
+    // arrived array nor those three composed with it.
+    expect(clientRuntime.speculationOverlay!.entryCount(space))
+      .toBeGreaterThanOrEqual(1);
+    expect(client.result.key("doubled").get()).toEqual([2, 4, 6]);
   });
 });

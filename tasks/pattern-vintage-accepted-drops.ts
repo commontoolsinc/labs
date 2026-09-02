@@ -41,11 +41,13 @@
 export interface AcceptedStateDrop {
   /** Pattern key: the path relative to `packages/patterns`. */
   pattern: string;
+
   /**
    * Dotted paths into the pattern's result state that it no longer holds.
    * A segment ending in `[]` steps through every element of that list.
    */
   paths: readonly string[];
+
   /**
    * Capture stamp of the newest vintage this entry forgives, as
    * `VintageRef.stamp` spells one (ISO-8601 with `:` replaced, so it sorts as
@@ -60,8 +62,10 @@ export interface AcceptedStateDrop {
    * exemption covers the removal it was granted for and stops there.
    */
   capturedThrough: string;
+
   /** Why the removal was accepted. */
   reason: string;
+
   /**
    * Repo-relative path of the decision record under `docs/history/` — shared
    * with the matching Tier 1 entry where there is one. Existence is enforced
@@ -74,36 +78,82 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
   {
     pattern: "topics/main.tsx",
     paths: [
+      // The unsigned caller retires. The per-topic display names it fed go
+      // with it, and are listed once below among the narrowed demand rather
+      // than twice — the two removals take the same paths.
+      "myName",
+      "setMyName",
+      // --- the demand narrowing (docs/history/topics-demand-narrowing-break.md)
+      // The board demanded the topic's whole published surface of every stored
+      // topic, three verb streams among them. A holder's required demands are
+      // write-once and a stream cannot carry a default, so a verb named there
+      // priced every future verb as a break of the board. The demand is now the
+      // eight members the board reads.
+      //
+      // These sit in this entry rather than their own because `acceptedDropsFor`
+      // takes the FIRST entry matching a pattern and window: a second entry for
+      // `topics/main.tsx` covering the same vintages would shadow this one
+      // instead of adding to it, and the paths above would silently stop
+      // applying. Two breaks on one pattern inside one window share an entry.
+      //
+      // A stored topic loses none of this. What it loses is the board's claim
+      // on it: the fields and verbs stay on the topic, reachable at its own
+      // address, and only the board's view of them narrows.
+      "topics[].addComment",
+      "topics[].addLink",
+      "topics[].bodyUpdatedAt",
+      "topics[].bodyUpdatedBy",
+      "topics[].comments",
+      "topics[].createdByName",
+      "topics[].links",
+      "topics[].setBody",
+      // --- the mention-universe index follows
+      // (docs/history/topics-mentionable-index-break.md)
+      // `mentionable` is listed WHOLE: it was an alias of `topics` — a link,
+      // no state of its own — and is now a derived document of two-string
+      // rows, so nothing of the old value survives to be compared field by
+      // field while the topics themselves survive at their own addresses.
+      // Listing the root retires the per-element demand-narrowing paths that
+      // used to sit here (`mentionable[].addComment` and kin): the strip
+      // never descends past a dropped root, so an element path under it
+      // could forgive nothing and would fail the liveness guard.
+      "mentionable",
+      // --- the reference-graph rebuild follows
+      "crossrefs",
+      "index[].refsOut",
+      "index[].referencedBy",
+      "index[].topic",
+      "topics[].crossrefs",
+      // The retired edge row's `mentionable[]` copy needs no path of its
+      // own: the whole-`mentionable` drop above already strips the list it
+      // sat on.
       // `crossrefs` is listed WHOLE, and that is the honest shape of what
       // happened: the old graph row carried an fid, a title, summary counts and
       // two edge sets, and the pivot row that replaced it carries a topic and
       // who mentions it. Nothing of the old row survives to be compared field
       // by field.
-      "crossrefs",
       // The old index rows carried the same two edge sets beside their
       // summaries. The summaries themselves are untouched.
-      "index[].refsOut",
-      "index[].referencedBy",
       // An index row IS its topic now, so the title-only reference that used to
       // sit beside it goes; the row's own address is the topic's. The copied
       // `fid` field goes with it, and needs no entry here: no replayed vintage
       // holds a resolved one.
-      "index[].topic",
-      // The retired per-topic edge row, seen through each of the board's two
-      // lists of children.
-      "topics[].crossrefs",
-      "mentionable[].crossrefs",
     ],
-    // The newest topics vintage predating the rebuild. Both replayed fixtures
-    // sit at or under it, and any captured from here on hold the pivot rows,
-    // which owe the comparison the same answer as anything else.
+    // The newest topics vintage predating the rebuild AND the mention-universe
+    // index — both replayed fixtures sit at or under it. Anything captured
+    // from here on holds pivot rows and index rows, which owe the comparison
+    // the same answer as anything else.
     capturedThrough: "2026-08-06T23-04-13.189Z",
     reason:
       "Topics' reference graph was rebuilt on cell identity — see the matching " +
       "entry in tasks/pattern-compat-accepted-breaks.ts. A topic publishes " +
       "`referencedBy` instead of deriving its own edge row, so the old row is " +
       "gone from every child the board lists. The index rows became the topics " +
-      "themselves, which is what retires their copied address and reference.",
+      "themselves, which is what retires their copied address and reference. " +
+      "Carried with it, same pattern and window, so one entry: the mention " +
+      "universe became a derived index " +
+      "(docs/history/topics-mentionable-index-break.md), which replaces the " +
+      "`mentionable` alias wholesale.",
     record: "docs/history/topics-crossref-identity-break.md",
   },
   {
@@ -111,13 +161,35 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
     // The topic's own edge row, whole. A topic no longer derives one: inbound
     // references are read out of the board's pivot and published as
     // `referencedBy`, so nothing reads this path.
-    paths: ["crossrefs"],
+    paths: [
+      "crossrefs",
+      // The unsigned caller retires, and the display names it fed go with it:
+      // a comment always carries a structured author now, so the mirror beside
+      // it describes nothing. A stored topic keeps what it holds; what goes is
+      // the pattern's claim to publish these.
+      "createdByName",
+      "comments[].authorName",
+      // And the structured author a legacy topic used to get FROM that name.
+      // `createdByOf` projected `createdByName` into `createdBy` when a topic
+      // had no structured author; with the name retired, such a topic reads as
+      // the inert sentinel instead.
+      //
+      // Accepted on evidence, not on principle: every one of the 113 topics on
+      // the deployed board carries a structured `createdBy.name`, so no live
+      // topic reaches the projection being removed. The replayed vintages
+      // predate structured authorship and do, which is what surfaces here. A
+      // census belongs in the migration's pre-flight rather than being taken
+      // on trust from this comment.
+      "createdBy",
+    ],
     capturedThrough: "2026-08-06T23-04-13.189Z",
     reason:
       "Topics' reference graph was rebuilt on cell identity — see the matching " +
       "entry in tasks/pattern-compat-accepted-breaks.ts. The board's own " +
       "`crossrefs` came back as a pivot and strands nothing, so only a topic's " +
-      "retired per-topic row is listed here.",
+      "retired per-topic row is listed here. Carried with it: the unsigned " +
+      "caller's retirement, whose display-name mirrors go too — one entry per " +
+      "pattern, because a second would shadow this one rather than add to it.",
     record: "docs/history/topics-crossref-identity-break.md",
   },
   {

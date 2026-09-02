@@ -24,15 +24,15 @@
  */
 
 import {
+  FabricInstance,
+  FabricPrimitive,
+  type FabricValue,
+} from "@commonfabric/data-model";
+import {
   dataUriFromValue,
   isFabricDataUri,
   valueFromDataUri,
 } from "@commonfabric/data-model/data-uri-codec";
-import {
-  FabricInstance,
-  FabricPrimitive,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { type Cell, isCell } from "./cell.ts";

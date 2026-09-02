@@ -15,9 +15,9 @@ function createMockHost(): ReactiveControllerHost {
   } as unknown as ReactiveControllerHost;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Immediate strategy
-// ---------------------------------------------------------------------------
+//
 
 describe("InputTimingController — immediate", () => {
   it("fires callback synchronously", () => {
@@ -32,9 +32,9 @@ describe("InputTimingController — immediate", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Debounce strategy
-// ---------------------------------------------------------------------------
+//
 
 describe("InputTimingController — debounce", () => {
   let time: FakeTime;
@@ -111,9 +111,9 @@ describe("InputTimingController — debounce", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Throttle strategy
-// ---------------------------------------------------------------------------
+//
 
 describe("InputTimingController — throttle", () => {
   let time: FakeTime;
@@ -191,9 +191,9 @@ describe("InputTimingController — throttle", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Blur strategy
-// ---------------------------------------------------------------------------
+//
 
 describe("InputTimingController — blur", () => {
   it("does not fire until onBlur()", () => {
@@ -244,9 +244,9 @@ describe("InputTimingController — blur", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // flush()
-// ---------------------------------------------------------------------------
+//
 
 describe("InputTimingController — flush", () => {
   let time: FakeTime;
@@ -335,9 +335,9 @@ describe("InputTimingController — flush", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Lifecycle and configuration
-// ---------------------------------------------------------------------------
+//
 
 describe("InputTimingController — lifecycle", () => {
   let time: FakeTime;

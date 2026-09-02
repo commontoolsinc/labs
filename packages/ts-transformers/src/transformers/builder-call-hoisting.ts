@@ -120,6 +120,7 @@ interface HoistableBuilderSpec {
     call: ts.CallExpression,
     context: TransformationContext,
   ) => ts.CallExpression | undefined;
+
   /**
    * Optional: produce the replacement for the visited site once the inner call
    * has been hoisted to `hoistedName`. Omit for applied builders, which take
@@ -465,21 +466,15 @@ function collectTopLevelBuilderArtifacts(
   }
 }
 
-/** Strip parentheses and `as` / `satisfies` / type-assertion wrappers to reach
- * the underlying builder/identifier expression. Used both for `export default x`
- * recognition and for top-level `const foo = handler(...) as XFactory`
- * registration — without unwrapping, a cast-wrapped builder const is excluded
- * from `__cfReg`, loses content-addressed provenance, and falls to the SES
- * fallback at resolve time (CT-1743). */
+/** Strip the transparent wrapper set to reach the underlying
+ * builder/identifier expression. Used both for `export default x` recognition
+ * and for top-level `const foo = handler(...) as XFactory` registration —
+ * without unwrapping, a wrapped builder const is excluded from `__cfReg`, loses
+ * content-addressed provenance, and falls to the SES fallback at resolve time
+ * (CT-1743). Reading the shared set is what keeps that true of every spelling
+ * rather than of the casts alone. */
 function unwrapTypeWrappers(expr: ts.Expression): ts.Expression {
-  let current = expr;
-  while (
-    ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
-    ts.isSatisfiesExpression(current) || ts.isTypeAssertionExpression(current)
-  ) {
-    current = current.expression;
-  }
-  return current;
+  return unwrapExpression(expr);
 }
 
 /**

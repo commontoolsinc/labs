@@ -1,4 +1,4 @@
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { getLogger } from "@commonfabric/utils/logger";
 
 import type { Pattern } from "../builder/types.ts";
@@ -251,7 +251,12 @@ export function filter(
         return runtime.getCellFromLink(resolved, undefined, tx);
       });
 
-    const opPattern = resolveOpPattern(runtime, op.getRaw(), "filter");
+    const opPattern = resolveOpPattern(
+      runtime,
+      op.getRaw(),
+      "filter",
+      inputsCell,
+    );
     const argumentUsage = inferListOpArgumentUsage(opPattern);
     const outputScope = narrowestCellScope(runtime, tx, [
       inputsCell.key("list"),

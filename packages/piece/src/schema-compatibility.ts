@@ -7,17 +7,15 @@ import {
 } from "@commonfabric/runner";
 import {
   cfcSchemaChildRoot,
+  type IfcKey,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
   validateSchemaDefinition,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
 import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import {
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import { internSchema } from "@commonfabric/data-model-schema";
+import { type FabricValue, valueEqual } from "@commonfabric/data-model";
 
 type SchemaObject = Exclude<JSONSchema, boolean>;
 type SchemaRole = "argument" | "result";
@@ -27,6 +25,7 @@ interface CompatibilityContext {
   targetRoot: JSONSchema;
   role: SchemaRole;
   activePairs: ActivePairsByRoot;
+
   /**
    * Piece evolution deliberately permits a small set of non-subset changes
    * (for example, naming a previously-uncontracted field on an open argument
@@ -34,12 +33,16 @@ interface CompatibilityContext {
    * they must never be used as proof that one conjunct implies another.
    */
   allowEvolutionPolicy: boolean;
+
   /** Whether default-backed evolution remains safe through every ancestor. */
   allowEvolutionDefaults: boolean;
+
   /** Link materialization fills valid target defaults before validation. */
   allowTargetDefaults: boolean;
+
   /** Whether defaults describe a pattern migration or link materialization. */
   defaultComparison: "evolution" | "target";
+
   /**
    * True below a node both contracts mark `asCell: ["stream"]` — a verb, so
    * everything beneath is the verb's EVENT schema. There, a boolean
@@ -98,7 +101,7 @@ export const ANNOTATION_KEYS: ReadonlySet<string> = new Set([
   // Listing-tier extension (`tier: "wrapper"`): a UI affordance outside the
   // headless contract, inferred from session-scoped handler bindings.
   // Validation-neutral by construction — it shapes only what `cf piece
-  // verbs` shows by default; `cf piece call` never consults it.
+  // verbs` shows by default; `cf call` never consults it.
   "tier",
   "title",
 ]);
@@ -214,26 +217,213 @@ const WRITER_IDENTITY_VOLATILE_KEYS: ReadonlySet<string> = new Set([
  * `not`) is compared by whole-value equality instead, so its volatile identity
  * still participates and a recompile there is reported as a change.
  */
-const ifcWithoutVolatileWriterIdentity = (ifc: unknown): unknown => {
-  if (typeof ifc !== "object" || ifc === null) return ifc;
-  const claim = (ifc as Record<string, unknown>).writeAuthorizedBy;
+const writerClaimWithoutVolatileIdentity = (claim: unknown): unknown => {
   if (typeof claim !== "object" || claim === null || Array.isArray(claim)) {
-    return ifc;
+    return claim;
   }
   const identity = (claim as Record<string, unknown>).__ctWriterIdentityOf;
-  if (typeof identity !== "object" || identity === null) return ifc;
+  if (typeof identity !== "object" || identity === null) return claim;
   const strippedIdentity: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(identity)) {
     if (WRITER_IDENTITY_VOLATILE_KEYS.has(key)) continue;
     strippedIdentity[key] = value;
   }
   return {
-    ...(ifc as Record<string, unknown>),
-    writeAuthorizedBy: {
-      ...(claim as Record<string, unknown>),
-      __ctWriterIdentityOf: strippedIdentity,
-    },
+    ...(claim as Record<string, unknown>),
+    __ctWriterIdentityOf: strippedIdentity,
   };
+};
+
+/**
+ * What each `ifc` key contributes to this comparison.
+ *
+ * `declared` is the store policy a caller depends on: a claim about what the
+ * store holds, or a requirement on who may write or read it. A change to one is
+ * a change to the contract, and the values are compared as they stand.
+ *
+ * `derived` describes the label a write produces rather than the policy the
+ * store declares. CFC §8.12.8 gives a persisted path three label components and
+ * a discipline for each: the declared store policy is monotone, while the
+ * derived per-value component is replace-on-overwrite, and that section states
+ * that a runtime must not apply the monotone constraint to the derived one.
+ * This comparison is that monotone constraint, so it drops these keys — except
+ * for the part of a mint that an `ownerPrincipal` beside it turns into
+ * authorization evidence, which `comparableIfc` keeps.
+ *
+ * `writerIdentity` is the write authorization, compared except for the parts of
+ * its claim that move without the authorization moving.
+ */
+type IfcKeyRole = "declared" | "derived" | "writerIdentity";
+
+/**
+ * A role for every key of {@link IFC_KEYS}. The mapped type is the point: a new
+ * `ifc` key in the runtime fails to type-check here until someone decides what
+ * it means for two contracts to differ in it. A key this table does not name at
+ * all — an unrecognized extension — is compared as it stands, which is the
+ * fail-closed direction.
+ */
+const IFC_KEY_ROLES: { readonly [K in IfcKey]: IfcKeyRole } = {
+  confidentiality: "declared",
+  integrity: "declared",
+  requiredIntegrity: "declared",
+  maxConfidentiality: "declared",
+  ownerPrincipal: "declared",
+  exactCopyOf: "declared",
+  projection: "declared",
+  collection: "declared",
+  flowPrecisionClaim: "declared",
+  uiContract: "declared",
+  writeAuthorizedBy: "writerIdentity",
+  // `addIntegrity` is the lowered form of the spec's `addedIntegrity`
+  // transition annotation, and of the `RepresentsCurrentUser` and
+  // `AuthoredByCurrentUser` spellings that expand to it. It names atoms the
+  // runtime attaches to the integrity of the value a write produces (CFC
+  // §8.9.3's output labels), which is the derived component of §8.12.8.
+  //
+  // Dropping it is what lets a path repair a floor it cannot satisfy. A schema
+  // can require that anything written to one of its locations already carry a
+  // named atom, and that floor is tested against the value the write produces.
+  // An `addIntegrity` on the entries below the location does not reach a floor
+  // declared on the location itself, so a schema that requires an atom and
+  // attaches none refuses every write to that location. The repair is to attach
+  // the atom the same declaration asks for, and comparing this key for equality
+  // would report that repair as an incompatible successor.
+  //
+  // Dropping the key cuts both ways: losing a mint is not a contract change
+  // either. A pattern whose own writes stop satisfying its own floor is a
+  // defect its own tests catch, at the path where the write happens. A reader
+  // elsewhere whose floor rested on atoms this path minted fails at that
+  // reader's own check, which is where `docs/specs/piece-source-lifecycle.md`
+  // places a result contract's drift. Neither is a statement about the contract
+  // between two versions of this pattern, which is what this comparison
+  // decides.
+  addIntegrity: "derived",
+};
+
+/**
+ * Copy one key onto the reduced extension.
+ *
+ * Uses `defineProperty` rather than `kept[key] = value`, the same way
+ * `stripUndefinedProps` in `@commonfabric/utils` does, so that a key named
+ * `"__proto__"` lands as a plain own data property rather than reaching the
+ * prototype setter. A schema read off the wire can carry such a key, because
+ * `JSON.parse` makes it an own property, and a key this comparison does not
+ * recognize is one it has to keep comparing.
+ */
+const keep = (
+  kept: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void => {
+  Object.defineProperty(kept, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+};
+
+/**
+ * The parts of a mint that an `ownerPrincipal` check consults: the atoms
+ * claiming to represent a principal. Everything else is a label the runtime
+ * attaches and no authorization reads.
+ *
+ * The search walks arrays and object values, because
+ * `literalDidSubjectsForPrincipalClaim` (runner `cfc/prepare.ts`) does: an atom
+ * nested inside another structure still authorizes a write, so a flat scan
+ * would drop evidence the runtime acts on.
+ *
+ * Every such atom is kept, not only one whose subject reads as the owner. The
+ * runtime resolves a current-principal placeholder against the acting principal
+ * of a live trust snapshot before it matches, and this comparison has neither,
+ * so which atom will match cannot be decided here. Keeping all of them refuses
+ * a few updates that would in fact have been safe, which is the direction to
+ * err in.
+ */
+const representsPrincipalAtoms = (value: unknown): readonly unknown[] => {
+  if (Array.isArray(value)) return value.flatMap(representsPrincipalAtoms);
+  if (typeof value !== "object" || value === null) return [];
+  const record = value as Record<string, unknown>;
+  if (record.kind === "represents-principal") return [value];
+  return Object.values(record).flatMap(representsPrincipalAtoms);
+};
+
+/**
+ * Return an `ifc` extension reduced to what this comparison decides: the
+ * derived per-value keys dropped, and a write authorization's volatile identity
+ * normalized. Returns the input unchanged when neither applies.
+ *
+ * This runs where `ifc` is compared as a semantic-extension key, which the
+ * per-node recursion reaches for a node written directly on a property, behind
+ * a `$defs` reference, or in an `anyOf` branch. An `ifc` reached only through a
+ * composite keyword (`allOf`, `oneOf`, `if`/`then`, `not`) is compared by whole
+ * value instead, so a mint there still reads as a change — the same scope the
+ * writer-identity normalization has.
+ *
+ * An extension with no keys left comes back as `undefined`, the same as no
+ * extension at all, and so does one that arrived empty. A path that carried no
+ * `ifc` and gains only a mint therefore compares equal to what it was, and so
+ * does one whose last mint is removed. Without that, the reduced `{}` would differ
+ * from the absent one and the update would be refused for the very change this
+ * reduction exists to allow.
+ */
+const comparableIfc = (ifc: unknown): unknown => {
+  if (typeof ifc !== "object" || ifc === null || Array.isArray(ifc)) return ifc;
+  const source = ifc as Record<string, unknown>;
+  // Beside an `ownerPrincipal`, part of the mint is not a derived label at all.
+  // `currentPrincipalIntegrityReason` (runner `cfc/prepare.ts`) reads the
+  // `represents-principal` atoms out of `addIntegrity` and requires one whose
+  // subject is the owner before it authorizes the write, so losing those
+  // refuses writes the node used to accept. Every other atom in the array is
+  // still a label the runtime attaches and nothing consults, so only the
+  // owner-matching evidence is held to the contract.
+  const ownerAuthorizesWrites = source.ownerPrincipal !== undefined;
+  // Most `ifc` nodes carry only declared keys and come back untouched. Scanning
+  // for a key that needs handling walks the keys without building anything, so
+  // that common node costs no allocation at all.
+  let handled = false;
+  let empty = true;
+  for (const key in source) {
+    empty = false;
+    const role: IfcKeyRole | undefined = IFC_KEY_ROLES[key as IfcKey] as
+      | IfcKeyRole
+      | undefined;
+    if (role === "derived" || role === "writerIdentity") {
+      handled = true;
+      break;
+    }
+  }
+  // An extension with nothing in it says the same as no extension, whether it
+  // arrived that way or is what the reduction below leaves behind. Both come
+  // back as `undefined`, so the two compare equal either way round.
+  if (empty) return undefined;
+  if (!handled) return ifc;
+  const kept: Record<string, unknown> = {};
+  let changed = false;
+  for (const key in source) {
+    const value = source[key];
+    const role: IfcKeyRole | undefined = IFC_KEY_ROLES[key as IfcKey] as
+      | IfcKeyRole
+      | undefined;
+    if (role === "derived") {
+      const evidence = ownerAuthorizesWrites
+        ? representsPrincipalAtoms(value)
+        : [];
+      changed = true;
+      if (evidence.length > 0) keep(kept, key, evidence);
+      continue;
+    }
+    if (role === "writerIdentity") {
+      const normalized = writerClaimWithoutVolatileIdentity(value);
+      if (normalized !== value) changed = true;
+      keep(kept, key, normalized);
+      continue;
+    }
+    keep(kept, key, value);
+  }
+  if (!changed) return ifc;
+  for (const _key in kept) return kept;
+  return undefined;
 };
 
 /**
@@ -253,9 +443,9 @@ const ifcWithoutVolatileWriterIdentity = (ifc: unknown): unknown => {
  * an update whose durable argument the new schema cannot read is refused
  * instead of landing over unreadable state. Two sites do the checking, and the
  * line between them is whether the caller will (re)instantiate the graph, not
- * whether the piece happens to be running: `Runner.applySetupState` re-points
+ * whether the piece happens to be running: `Runner.#applySetupState` re-points
  * and validates the argument for a cold root and for the watcher's hot-swap,
- * both of which then instantiate; `Runner.validateStoredArgument` checks a
+ * both of which then instantiate; `Runner.#validateStoredArgument` checks a
  * piece that is being REUSED — its nodes stay as they are — and moves nothing
  * (`packages/runner/test/pattern-update-argument-validation.test.ts`).
  *
@@ -288,10 +478,17 @@ const ifcWithoutVolatileWriterIdentity = (ifc: unknown): unknown => {
  * write on `moduleIdentity` plus the binding `path` and never on `file`, and it
  * re-verifies the live writer's `moduleIdentity` against the claim at write
  * time, so holding those fields fixed here would reject a recompile or a
- * cross-resolver rebuild of an unchanged authorization (see
- * `ifcWithoutVolatileWriterIdentity`). The binding `path` and the whole
- * `uiContract` are still compared, and the runtime enforcement is untouched, so
- * this narrows nothing.
+ * cross-resolver rebuild of an unchanged authorization. The binding `path` and
+ * the whole `uiContract` are still compared, and the runtime enforcement is
+ * untouched, so this narrows nothing.
+ *
+ * The `ifc` comparison drops one key as well. `addIntegrity` names the derived
+ * per-value label rather than the store's declared policy, so a path gaining or
+ * losing a mint is not a change to the contract between two versions of the
+ * pattern — except beside an `ownerPrincipal`, where the atoms of that mint
+ * claiming to represent a principal are what authorizes the write, and those
+ * are compared. `comparableIfc` performs both reductions, and
+ * {@link IfcKeyRole} states which keys take part in each.
  */
 export function assertPatternSchemasBackwardCompatible(
   previous: Pattern,
@@ -524,13 +721,15 @@ function schemaSubsetIssue(
     for (const key of SEMANTIC_EXTENSION_KEYS) {
       // The `ifc` extension is compared for exact equality except for a
       // `writeAuthorizedBy` writer claim's volatile identity — its content hash
-      // and its resolver-dependent file spelling — which the runtime does not
-      // hold fixed either (see ifcWithoutVolatileWriterIdentity).
+      // and its resolver-dependent file spelling, which the runtime does not
+      // hold fixed either — and the derived per-value label annotations, which
+      // describe the label a write produces rather than the policy the store
+      // declares. `comparableIfc` removes both.
       const sourceValue = key === "ifc"
-        ? ifcWithoutVolatileWriterIdentity(source[key])
+        ? comparableIfc(source[key])
         : source[key];
       const targetValue = key === "ifc"
-        ? ifcWithoutVolatileWriterIdentity(target[key])
+        ? comparableIfc(target[key])
         : target[key];
       if (!fabricAwareEqual(sourceValue, targetValue)) {
         return `${path}: ${key} changed`;
@@ -749,15 +948,55 @@ function objectSubsetIssue(
       if (issue) return issue;
     }
   } else {
-    for (const property of targetRequired) {
-      if (!sourceRequired.has(property)) {
-        return `${path}.${property}: result field is no longer required`;
+    // Not below a verb node, where the same reasoning runs the other way. A
+    // result field that stops being required withdraws a guarantee its
+    // readers were given. An EVENT field that stops being required widens
+    // what the verb accepts: every call already written still sent it, so
+    // every one of them still validates. The argument side permits exactly
+    // this relaxation, and a verb's event is an argument in every respect but
+    // where it is declared.
+    if (!context.verbEvent) {
+      for (const property of targetRequired) {
+        if (!sourceRequired.has(property)) {
+          return `${path}.${property}: result field is no longer required`;
+        }
       }
     }
     // The candidate pattern produces its result. A newly required field does
     // not need a migration default: the new graph materializes that output when
     // it runs. Existing required-result guarantees above still cannot weaken,
     // and existing field types remain checked covariantly below.
+    //
+    // A verb's event is the exception, and it is one of location rather than of
+    // principle. The node sits in the result, so this covariant comparison
+    // reaches it — but the pattern does not produce the event, the CALLER
+    // supplies it. Requiring a field the previous event did not is therefore a
+    // demand made of every call already written, and each one that omits it is
+    // refused at dispatch once the update has landed. Below a verb node the
+    // rule is the argument side's, stated in this comparison's direction:
+    // `source` is the candidate here, where `target` is the candidate there.
+    // The rescue turns on the field's own default and not on
+    // `allowEvolutionDefaults`, which the verb node above has already set
+    // false: `asCell` is not default-stable, so descending through one
+    // withdraws permission to introduce a default anywhere below. That
+    // withdrawal is about defaults that CHANGE, which the check above decides
+    // on its own. A field that carried the same default before and after
+    // changes nothing and still materializes for a caller that omits it, so
+    // reusing the flag here would refuse the one evolution this rule means to
+    // allow.
+    if (context.verbEvent) {
+      for (const property of sourceRequired) {
+        if (
+          !targetRequired.has(property) &&
+          !schemaProvidesValidDefault(
+            sourceProperties[property],
+            context.sourceRoot,
+          )
+        ) {
+          return `${path}.${property}: newly required verb event field has no default`;
+        }
+      }
+    }
 
     const previousAdditional = target.additionalProperties ?? true;
     for (const property of Object.keys(candidateProperties)) {

@@ -2,9 +2,9 @@
  * Reading the source facts a piece records: the pattern it runs, the origin it
  * tracks, the history metadata it carries, and its authored source files.
  *
- * An origin is the source URL a piece remembers: either an external web URL or
- * a fabric `cf:` URL. `docs/specs/piece-source-lifecycle.md` is the design of
- * record.
+ * An origin is the source URL a piece remembers: either a `system:` ref naming
+ * a pattern this deployment serves, or a fabric `cf:` URL.
+ * `docs/specs/piece-source-lifecycle.md` is the design of record.
  */
 
 import {
@@ -15,36 +15,48 @@ import {
   getPatternIdentityRef,
   getPatternRepository,
   getPatternSource,
+  getPieceReconciliation,
   getPieceSourceRevisions,
   type MemorySpace,
   NAME,
+  normalizePatternSource,
   parseFabricRef,
+  type PieceReconciliation,
+  type ReconcileOutcome,
   resolveSystemPatternSource,
   type Runtime,
   type RuntimeProgram,
   spaceHostFromFabricAuthority,
 } from "@commonfabric/runner";
+import {
+  entityKindOfIdString,
+  stripEntityUriScheme,
+  uriSchemeForEntityKind,
+} from "@commonfabric/runner/entity-kind";
 import { nameSchema } from "@commonfabric/runner/schemas";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 
 /**
  * How an origin URL resolves.
  *
- * - `web`: an external program endpoint that can return new source later.
+ * - `system`: a pattern this deployment's toolshed serves from its patterns
+ *   directory, which a new release of the deployment can replace.
  * - `fabric-piece`: a stable, mutable fabric entity whose current pattern the
  *   origin names.
  * - `fabric-pattern`: exact content-addressed pattern source, either named
  *   directly or fixed by a trailing pin.
  */
-export type PieceOriginKind = "web" | "fabric-piece" | "fabric-pattern";
+export type PieceOriginKind = "system" | "fabric-piece" | "fabric-pattern";
 
 export interface PieceOrigin {
   /** The canonical origin URL. */
   url: string;
+
   kind: PieceOriginKind;
+
   /**
    * The URL as it was recorded on the piece, when normalization changed it. A
-   * legacy toolshed-relative path becomes an absolute web URL, so the recorded
+   * `system:` ref becomes the absolute route it addresses, so the recorded
    * form is kept for display.
    */
   recorded?: string;
@@ -55,24 +67,47 @@ export interface PieceSourceState {
   space: MemorySpace;
   pieceId: string;
   name?: string;
+
   /** The exact executable export the piece runs. */
   pattern?: { identity: string; symbol: string };
+
   /** The identity whose complete setup state was installed. */
   setupPattern?: { identity: string; symbol: string };
+
   /** The pattern identity an in-place update replaced, when one did. */
   displacedPattern?: { identity: string; symbol: string; displacedAt?: number };
+
   /** The active origin, absent when the piece is detached. */
   origin?: PieceOrigin;
+
+  /**
+   * A recorded source string no resolver can follow, with why. A piece
+   * carrying one is neither following nor detached: it holds something a
+   * person can read and repair.
+   */
+  unusableOrigin?: { recorded: string; reason: string };
+
+  /**
+   * What following the active origin last did. Absent when nothing has
+   * reconciled this piece against its origin.
+   */
+  reconciliation?: PieceReconciliation;
+
   /** Descriptive repository locator; never followed. */
   repository?: string;
+
   /** The canonical entry filename of the retained source, when readable. */
   entry?: string;
+
   /** The authored source files of the current pattern, when readable. */
   files: { name: string; contents: string }[];
+
   /** Names among `files` that carry data rather than code. */
   dataFiles?: string[];
+
   /** Ordered, append-only source and origin states accepted by the piece. */
   history: PieceSourceRevisionState[];
+
   currentRevisionId?: string;
 }
 
@@ -91,6 +126,20 @@ export interface PieceSourceRevisionState {
     | "follow"
     | "repoint";
   selectedRevisionId?: string;
+}
+
+/**
+ * Resolve the piece's origin and adopt its current source when it has moved.
+ *
+ * This runs when a user opens a piece. A candidate from an origin this
+ * deployment does not gate the releases of has to prove itself first;
+ * `SourceReconciler` carries which origins those are, and why.
+ */
+export function reconcilePieceSource(
+  runtime: Runtime,
+  piece: Cell<unknown>,
+): Promise<ReconcileOutcome> {
+  return runtime.sourceReconciler.reconcile(piece);
 }
 
 export class PieceOriginError extends Error {
@@ -131,15 +180,21 @@ export function qualifyFabricOrigin(
 /**
  * Resolves an origin now, returning the authored program and selected export a
  * repoint transition should apply.
+ *
+ * `self` names the piece the origin is being resolved for. A mutable fabric
+ * origin naming that piece is rejected: a piece that follows itself supplies
+ * its own next source, and there is no source outside it for either end of
+ * that loop to adopt.
  */
 export async function resolvePieceOriginSource(
   runtime: Runtime,
   destinationSpace: MemorySpace,
   recorded: string,
   historicalSymbol: string,
+  options: { self?: { space: MemorySpace; pieceId: string } } = {},
 ): Promise<ResolvedPieceOriginSource> {
   const origin = classifyOrigin(runtime, destinationSpace, recorded);
-  if (origin.kind === "web") {
+  if (origin.kind === "system") {
     const program = await runtime.harness.resolve(
       new HttpProgramResolver(
         origin.url,
@@ -174,6 +229,19 @@ export async function resolvePieceOriginSource(
   const sourceSpace = ref.space === undefined
     ? destinationSpace
     : ref.space as MemorySpace;
+
+  // Before the host below is registered, because registering it changes the
+  // route the space resolves through: a reference this call is going to
+  // refuse must not leave that behind.
+  const pinned = pinnedPatternIdentity(stableRef);
+  const self = options.self;
+  if (
+    pinned === undefined && self !== undefined &&
+    sourceSpace === self.space && namesEntity(stableRef, self.pieceId)
+  ) {
+    throw new PieceOriginError("a piece cannot follow itself");
+  }
+
   if (ref.host !== undefined) {
     const routedUrl = new URL(
       runtime.mappedHostFor(sourceSpace) ??
@@ -199,7 +267,6 @@ export async function resolvePieceOriginSource(
     }
   }
 
-  const pinned = pinnedPatternIdentity(stableRef);
   const pattern = pinned === undefined
     ? await mutableFabricOriginPattern(runtime, sourceSpace, stableRef)
     : { identity: pinned, symbol: historicalSymbol };
@@ -224,6 +291,17 @@ export async function resolvePieceOriginSource(
     program: { ...program, mainExport: pattern.symbol },
     pattern,
   };
+}
+
+/**
+ * Whether a stable fabric reference names the entity `pieceId` addresses. The
+ * id can arrive as a bare tagged hash or as its schemed URI, so both are
+ * reduced to the kind and hash the reference carries.
+ */
+function namesEntity(ref: StableFabricRef, pieceId: string): boolean {
+  return uriSchemeForEntityKind(entityKindOfIdString(pieceId)) ===
+      ref.ref.scheme &&
+    stripEntityUriScheme(pieceId) === `fid1:${ref.ref.hash}`;
 }
 
 async function mutableFabricOriginPattern(
@@ -280,22 +358,55 @@ export function classifyOrigin(
     };
   }
 
-  // A `system:` ref names a pattern this deployment's toolshed serves; it
-  // classifies as the web origin it resolves to, keeping the ref itself as the
+  // A `system:` ref names a pattern this deployment's toolshed serves. It
+  // carries the absolute route it resolves to, keeping the ref itself as the
   // recorded form so the panel shows what the piece actually stores.
   const systemRoute = resolveSystemPatternSource(source);
   if (systemRoute !== undefined) {
-    return webOrigin(
+    return systemOrigin(
       new URL(systemRoute, runtime.hostForSpace(space)),
       source,
     );
   }
 
   if (source.startsWith("/")) {
-    const host = runtime.hostForSpace(space);
-    return webOrigin(new URL(source, host), source);
+    const host = new URL(runtime.hostForSpace(space));
+    const resolved = new URL(source, host);
+    // A rooted path names a file on the host serving this space, and several
+    // strings that begin with a slash do not. `//elsewhere/x` is one;
+    // `/\elsewhere/x` is another, because the URL parser reads a backslash as
+    // a separator. Both read as local and resolve somewhere else, and nothing
+    // follows either, so a piece that accepted one would be left in the state
+    // this lifecycle exists to prevent: an origin reported as fine that no
+    // reconciliation will ever reach.
+    //
+    // What settles it is where the string actually resolved, not how it was
+    // spelled. A guard written against the spellings would have to grow one
+    // arm per trick the parser knows.
+    if (resolved.origin !== host.origin) {
+      throw new PieceOriginError(
+        `${source} resolves to ${resolved.origin}, not the host serving ` +
+          `this space; write the URL out if that is what you meant`,
+      );
+    }
+    // Resolving to this host is not enough. The path also has to name a file
+    // under the patterns route, because that route is the only thing this
+    // deployment serves as a program; any other path answers with whatever the
+    // site returns for it. `normalizePatternSource` yields the `system:` ref
+    // when the path names such a file and the input unchanged when it does
+    // not, which is the same test reconciliation applies before rewriting it.
+    if (normalizePatternSource(source, host) === source) {
+      throw new PieceOriginError(
+        `${source} addresses nothing under the patterns route`,
+      );
+    }
+    return systemOrigin(resolved, source);
   }
 
+  // The reasons below match `classifyPieceOriginString` word for word. The two
+  // classifiers answer different questions, and a test holds them to the same
+  // boundary; saying the same thing about a string neither can follow is what
+  // makes a panel's explanation and a reconciliation's refusal one answer.
   let url: URL;
   try {
     url = new URL(source);
@@ -303,24 +414,72 @@ export function classifyOrigin(
     throw new PieceOriginError(`${source} is not an absolute URL`);
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new PieceOriginError(`${source} is not a web URL`);
+    throw new PieceOriginError(`${source} names no program`);
   }
-  return webOrigin(url, source);
+
+  // The absolute spelling of a patterns-route locator on the host serving this
+  // space is the same file a `system:` ref names, and reconciliation rewrites
+  // it to that ref. It has to classify as followable here too, or the panel
+  // would call an origin unusable that reconciliation goes on following.
+  if (normalizePatternSource(source, runtime.hostForSpace(space)) !== source) {
+    return systemOrigin(url, source);
+  }
+
+  // Anything else absolute names an endpoint outside this deployment. A piece
+  // follows what the deployment serves and what the fabric holds, so such a
+  // string names no origin at all.
+  throw new PieceOriginError(
+    `${source} is an external endpoint, which is not a source origin`,
+  );
 }
 
 /**
- * A web origin at its canonical URL, keeping the recorded string whenever
- * canonicalizing changed it — a relative path resolved against a host, but also
- * an absolute URL the URL parser rewrote, such as one with no path or a default
- * port. The panel shows the recorded form beside the canonical one, so what a
- * piece stores stays visible.
+ * A deployment-served origin at its canonical route URL, keeping the recorded
+ * string whenever canonicalizing changed it — a `system:` ref, and the rooted
+ * path that is the spelling those carried before the scheme existed. The panel
+ * shows the recorded form beside the canonical one, so what a piece stores
+ * stays visible.
  */
-function webOrigin(url: URL, recorded: string): PieceOrigin {
+function systemOrigin(url: URL, recorded: string): PieceOrigin {
   return {
     url: url.href,
-    kind: "web",
+    kind: "system",
     ...(url.href === recorded ? {} : { recorded }),
   };
+}
+
+/**
+ * Accept a source URL a person typed, returning the string to record as the
+ * active origin.
+ *
+ * Classification decides which kind of origin the string is and rejects one no
+ * resolver can follow. On top of that, an origin may not carry credentials: a
+ * piece's origin is readable by everyone who can read the piece, and an
+ * authenticated fetch supplies its credential through a separately protected
+ * capability.
+ */
+export function acceptEnteredOrigin(
+  runtime: Runtime,
+  space: MemorySpace,
+  entered: string,
+): string {
+  const recorded = entered.trim();
+  const origin = classifyOrigin(runtime, space, recorded);
+  if (carriesCredentials(origin.url)) {
+    throw new PieceOriginError("a source URL may not carry credentials");
+  }
+  return recorded;
+}
+
+/**
+ * Whether a URL carries user information. A fabric URL with an authority can,
+ * the same as any other; one with no authority parses with both fields empty.
+ * Classification returns either a URL the parser has already accepted or a
+ * `cf:` reference, so parsing here cannot fail.
+ */
+function carriesCredentials(url: string): boolean {
+  const parsed = new URL(url);
+  return parsed.username !== "" || parsed.password !== "";
 }
 
 /**
@@ -360,8 +519,21 @@ export function readPieceSourceMetadata(
   if (isPatternRef(setupPattern)) state.setupPattern = setupPattern;
   const displaced = readDisplacedPattern(piece.getMetaRaw("displacedPattern"));
   if (displaced !== undefined) state.displacedPattern = displaced;
-  const origin = readPieceOrigin(runtime, piece);
-  if (origin !== undefined) state.origin = origin;
+  const recordedOrigin = getPatternSource(piece);
+  if (recordedOrigin !== undefined) {
+    try {
+      state.origin = classifyOrigin(runtime, piece.space, recordedOrigin);
+    } catch (error) {
+      // Every string it cannot classify leaves `classifyOrigin` as a
+      // PieceOriginError, so there is no other shape to read a reason from.
+      state.unusableOrigin = {
+        recorded: recordedOrigin,
+        reason: (error as PieceOriginError).message,
+      };
+    }
+  }
+  const reconciliation = getPieceReconciliation(piece);
+  if (reconciliation !== undefined) state.reconciliation = reconciliation;
   const repository = getPatternRepository(piece);
   if (repository !== undefined) state.repository = repository;
   const revisions = getPieceSourceRevisions(piece);
@@ -426,6 +598,7 @@ export async function readPieceSourceState(
 export interface PieceSourceRevisionSource {
   pattern: { identity: string; symbol: string };
   files: { name: string; contents: string }[];
+
   /** Names among `files` that carry data rather than code. */
   dataFiles?: string[];
 }

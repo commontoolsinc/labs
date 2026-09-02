@@ -33,6 +33,7 @@ interface Token {
   readonly start: number;
   readonly end: number;
   readonly cls: TokenClass;
+
   /** Nesting depth for `bracket` tokens, for rainbow coloring. */
   readonly depth?: number;
 }
@@ -307,7 +308,9 @@ export function jsonLinesDocument(text: string): Document {
   };
 }
 
-// --- structure ---------------------------------------------------------------
+//
+// structure
+//
 
 /** The significant tokens (no whitespace, no comments), which the structure
  * pass walks as a recursive-descent value grammar. */

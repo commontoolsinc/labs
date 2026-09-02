@@ -73,9 +73,21 @@ function isAppViewModeRef(view: object): view is AppViewModeRef {
   return !("mode" in view) || view.mode === "embed";
 }
 
+/**
+ * Whether two views address the same thing. Two views are equal when they hold
+ * the same fields with the same values, whatever order the route or control
+ * that built them wrote those fields in. Every value a view holds is a string,
+ * so the values compare by their contents. A field holding `undefined` counts
+ * as absent, which is what a URL or a history entry keeps of one.
+ */
 export function isAppViewEqual(a: AppView, b: AppView): boolean {
   if (a === b) return true;
-  return JSON.stringify(a) === JSON.stringify(b);
+  const held = (view: AppView) =>
+    new Map(Object.entries(view).filter(([, value]) => value !== undefined));
+  const fields = held(a);
+  const other = held(b);
+  return fields.size === other.size &&
+    [...fields].every(([name, value]) => other.get(name) === value);
 }
 
 export function isEmbeddedView(view: AppView): boolean {

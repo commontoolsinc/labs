@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-run --allow-read --allow-env
+
 /**
  * Restore one topic's authored content from a `topics-export.ts` export,
  * against a live server — never through verbs, which stamp their own write
@@ -34,15 +35,18 @@
  * map stops the restore rather than being guessed at, so a wiring input
  * added to the topic pattern announces itself here.
  *
- * Three honest costs. Comment and link elements are re-written as plain
+ * Four honest costs. Comment and link elements are re-written as plain
  * values, so their element entities are minted fresh: content, order,
  * timestamps, and attribution are exact, but a stored reference to an
  * individual old element is not preserved. A re-established link targets the
  * board's RESULT path where the original targeted its argument document —
  * aliases of one another (#5632), so a before/after diff of the stored link
- * differs while resolution does not. And the deprecated `myName` legacy link
- * is not restored — it exists only as the pre-agentName attribution
- * fallback.
+ * differs while resolution does not. The deprecated `myName` legacy link is
+ * not restored — it exists only as the pre-agentName attribution fallback.
+ * And a field the CURRENT schema retired is written but cannot be read back,
+ * so it is reported `not restored` and does not fail the run; only a field
+ * the schema still declares can be checked, and there a difference is still a
+ * failure.
  *
  * The target's deployed pattern identity must match the export row's;
  * --allow-identity-mismatch overrides, which a restore after a deliberate
@@ -55,9 +59,13 @@ import {
   cfApply,
   cfJson,
   deepEqual,
+  isAbsentPathError,
   normalizeFid,
+  retiredKeys,
   STRUCTURAL_LINK_SOURCES,
   type TopicsExport,
+  WHOLE_VALUE,
+  withoutKeys,
 } from "./topics-rehearsal-lib.ts";
 
 function usage(): never {
@@ -136,10 +144,14 @@ if (liveIdentity !== row.patternIdentity) {
 async function liveValue(field: string): Promise<unknown> {
   // A read of an absent optional path fails rather than returning null;
   // treat that as "absent" so it compares against an absent export value.
+  // Only that failure: absence is what the readback forgives as a retired
+  // field, so a read that never landed must stop the run rather than be
+  // forgiven as one.
   try {
     return await cfJson<unknown>(["get", "-q", ...addr, "--input", field]);
-  } catch {
-    return undefined;
+  } catch (error) {
+    if (isAbsentPathError(error)) return undefined;
+    throw error;
   }
 }
 
@@ -207,11 +219,27 @@ for (const field of structural) {
 let failed = 0;
 for (const field of Object.keys(restoreDoc)) {
   const after = await liveValue(field);
-  if (deepEqual(after, restoreDoc[field])) {
-    console.log(`${field}: restored`);
-  } else {
+  // A field the CURRENT schema no longer declares reads back absent however
+  // faithfully it was written, so comparing whole would report every
+  // comment-bearing topic as damaged after a migration that retired one. Real
+  // loss still shows as a difference, because a declared field reads back
+  // present even when empty.
+  const retired = retiredKeys(restoreDoc[field], after);
+  const wanted = withoutKeys(restoreDoc[field], new Set(retired));
+  if (!deepEqual(after, wanted)) {
     console.error(`${field}: WROTE BUT READBACK DIFFERS from export`);
     failed++;
+  } else if (retired.includes(WHOLE_VALUE)) {
+    // A retired scalar or object leaves nothing to read back, so there is no
+    // honest way to call it restored — only a reason not to call it damaged.
+    console.log(`${field}: not restored (the current schema retired it)`);
+  } else if (retired.length > 0) {
+    console.log(
+      `${field}: restored (${retired.length} field(s) the current schema ` +
+        `does not surface: ${retired.join(", ")})`,
+    );
+  } else {
+    console.log(`${field}: restored`);
   }
 }
 for (const field of structural) {

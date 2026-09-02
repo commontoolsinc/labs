@@ -121,6 +121,32 @@ What works today:
     [Inspecting a handle's shape](#inspecting-a-handles-shape))
   - `run_pattern` (present only when the run configures a fabric session; see
     [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
+  - `search_patterns` (present only when the run configures a pattern index with
+    `--pattern-index-url`; finds published patterns by hashtag or free text and
+    reports each one's kind, evidence quality, declared shapes, and import
+    specifier, never its source)
+  - `record_feedback` (under the same pattern-index gate; votes a pattern up or
+    down so the index learns which ones were worth offering)
+  - `search_skills` (present only on the parent surface when the run configures
+    the public registry with `--skills-registry-url`; returns sanitized
+    identifiers, names, sources, registry-reported install counts, and the
+    number of refused hits, never skill text. Install counts are unauthenticated
+    and unverifiable telemetry, not a trust signal)
+  - `acquire_skill` (present only on the parent surface when both the skills
+    registry and a Fabric session are configured; resolves a discovery id to a
+    full GitHub commit, checks the complete recursive tree, and returns a handle
+    or a first-class refusal, never skill text)
+- composing published patterns: source the model authors may
+  `import Sub from "cf:pattern:<patternId>"`, and `run_pattern` fetches and
+  compiles each named pattern into the space before compiling the source that
+  imports it, so composition costs the import line and nothing else — and no
+  part of an imported pattern's source reaches the conversation
+- publishing back to that index: a pattern the model authored and ran
+  successfully is recorded under the identity its compile recorded, with the
+  `description` and `hashtags` the `run_pattern` call named, unless the run was
+  started with `--no-pattern-index-publish`; it is not offered to search until
+  evidence earns discoverability. Curated seeding may opt in with
+  `CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE=1`
 - targeted exact-string edits plus whole-file replace/create and append writes
 - initial and in-run image attachments for model vision-capable flows
 - bounded public HTTP(S) fetches through `web_fetch`, with redirect validation,
@@ -141,7 +167,9 @@ What works today:
   snapshots, and tool outputs, plus explicit skill registry and activation
   artifacts
 - provider-neutral run-report model-attempt diagnostics, one record per attempt,
-  naming the provider and the API operation that served it
+  naming the provider and the API operation that served it, and timing it twice
+  — `durationMs` to the response headers, `responseCompleteDurationMs` to the
+  end of the body or stream, which is the model's own working time
 - provider-reported per-turn token usage in run reports, with aggregate input,
   cached-input, cache-write, output, reasoning, and total tokens surfaced in
   operator and batch results
@@ -248,6 +276,10 @@ What is not done yet:
 - [src/contracts/](src/contracts/)
   - prompt-slot, run-manifest, observation, policy, run-report, subagent, skill,
     transcript, tool-result, and handle-table contracts
+- [console/](console/)
+  - the console: a localhost page that starts a session, watches it live, and
+    reads any run back as a map of its cells, calls and CFC verdicts. See
+    [console/README.md](console/README.md)
 - [integration/](integration/)
   - environment-gated real `runsc-cfc` integration tests
 - [docs/SKILLS_SUPPORT_SPEC.md](docs/SKILLS_SUPPORT_SPEC.md)
@@ -264,6 +296,22 @@ From [packages/cf-harness](.):
 - `deno task run -- ...`
 - `deno task test`
 - `deno task test:integration`
+- `deno task console` — build the console page and serve it on `127.0.0.1:8100`
+- `deno task console:build`, `deno task console:watch` — the build on its own,
+  and a rebuild on save while changing the page
+- `deno task probe-skills-sh [--owner <owner>] "<query>"` — read a public skill
+  registry's search route and print the identifiers, names, and sources it
+  answers with, along with a count of the entries the client refused. It is the
+  one thing here that calls the live registry, which is why it is a script you
+  run rather than a test that runs itself; the committed tests use a captured
+  response. It uses the same guarded client as the parent-only `search_skills`
+  tool and prints no skill text. Configure discovery and pinned acquisition with
+  `--skills-registry-url` or `CF_HARNESS_SKILLS_REGISTRY_URL`; without either,
+  both tools are absent. `acquire_skill` additionally requires the three Fabric
+  session flags because its successful result is a durable cell handle. The
+  discovery half of
+  [`../../docs/plans/external-skill-acquisition.md`](../../docs/plans/external-skill-acquisition.md)
+  is what it exists to exercise.
 
 ## CLI Example
 
@@ -686,13 +734,16 @@ The prompt/tool loop applies the swaps at three seams. Successful tool output
 bound for model context carries tokens, while the persisted tool-output artifact
 keeps the raw addresses. Model-authored tool arguments resolve tokens back to
 canonical references before policy evaluation, summarization, and dispatch —
-except for `delegate_task`, whose arguments reach the child verbatim, so a token
-there is inert text to the parent boundary. And a sealed subagent
-structured-return string whose raw value names an address comes back as a token
-rather than an opaque `@link` object; the return's `linkedStringCount` counts
-only the positions still sealed. Denial-path tool messages are not swapped; that
-coverage, value handles, and an explicit release/readback mechanism are listed
-in [docs/ROADMAP.md](docs/ROADMAP.md).
+except for `delegate_task`, whose `goal` and `context` reach the child verbatim,
+so a token there is inert text to the parent boundary. Its `skillHandle` and
+`patternRefs` fields are resolved separately on the trusted side: materializing
+stored skill text and rebuilding selected pattern-search records are those
+parameters' whole point (see "Skill by handle" and "Pattern references by search
+record" below). And a sealed subagent structured-return string whose raw value
+names an address comes back as a token rather than an opaque `@link` object; the
+return's `linkedStringCount` counts only the positions still sealed. Denial-path
+tool messages are not swapped; that coverage, value handles, and an explicit
+release/readback mechanism are listed in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 #### Well-known grants
 
@@ -721,6 +772,28 @@ session that cannot be established leaves the run to proceed without its grants,
 and the CLI says so on stderr rather than staying silent. The grant list is
 designed to grow; the identity's profile is the expected next entry.
 
+#### Operator input cells
+
+`--input-cell <name>=<link>` (repeatable) passes a cell into the run by
+reference: a cell populated in the space before the run exists, handed to the
+run as its input. Cells are the runtime's medium of exchange; the handle minted
+for one is only how the harness names a cell to a model that cannot hold
+addresses. The model is told the token and the operator's `<name>` for it,
+nothing more: the run's inputs reach the model from its first turn while their
+values stay in the fabric, so a prompt never holds a literal it could inline or
+pass on by accident. No shape is stated on the flag, by rule: an input cell
+carries its own declared schema in the fabric — the same place its CFC labels
+live — and `describe_handle` answers from that declaration, so there is one
+source of truth and nothing an operator-written view could drift from or quietly
+claim.
+
+Unlike a grant, an input cell is explicit configuration, so failure is closed
+and loud rather than tolerated: a malformed argument is a usage error, and a
+reference that does not parse, targets another space, or arrives on a run
+without a fabric session fails the run before the model is involved. The cells
+are recorded in run state (`inputCells`), replayed rather than re-minted on
+resume, and reported in the operator summary as `inputCells:`.
+
 #### Inspecting a handle's shape
 
 A token says nothing about what it refers to, and an agent handed one cannot
@@ -745,14 +818,15 @@ piece the token names — and never the value.
 Two sources can answer, in this order. The referent's own declared schema, read
 through the run's fabric session when it has one: a piece's document schema is
 the result schema of the pattern behind it, which is exactly what an agent
-holding a handle to that piece would be wiring into a pattern of its own.
-Failing that, the schema the mint recorded out of the harness's own work — a
-`run_pattern` result reference carries the compiled pattern's result schema,
-which compilation produced anyway, and the entry is marked
-`schemaSource: "harness"`. A run with no session still answers from its own
-table, so shape stays inspectable in every run that has handles at all. A token
-the run's table does not hold comes back `known: false` rather than as an error,
-since a token from another run simply names nothing here.
+holding a handle to that piece would be wiring into a pattern of its own — and
+it is where a cell's CFC labels live, which is why an input cell's shape always
+answers from its own declaration. Failing that, the schema the mint recorded out
+of the harness's own work — a `run_pattern` result reference carries the
+compiled pattern's result schema, which compilation produced anyway, and the
+entry is marked `schemaSource: "harness"`. A run with no session still answers
+from its own table, so shape stays inspectable in every run that has handles at
+all. A token the run's table does not hold comes back `known: false` rather than
+as an error, since a token from another run simply names nothing here.
 
 **What is disclosed is structure and only structure**: property names, types,
 nesting, required-ness, array and object composition, a `type` from the schema
@@ -876,6 +950,82 @@ with no session configured the tool is absent from the child's surface rather
 than present-but-failing. The `browser`, `web_fetch`, and `web_search` profiles
 do not offer it.
 
+#### Skill by handle
+
+`acquire_skill` fills this path without exposing its payload to the chooser. It
+takes an exact id returned by `search_skills`, resolves the source repository's
+default branch to a full commit SHA, reads GitHub's recursive tree at that
+commit, and derives the candidate root from exact path-segment equality with the
+discovery slug. No case folding or path normalization participates. Zero or
+multiple candidates refuse, and a tree response marked `truncated` refuses
+because an unread inventory is not evidence of absence.
+
+The instructions-only whitelist is scoped to the selected candidate root's
+subtree, so sibling skills and repository files outside that root do not leak
+into the payload decision. Within the subtree, exactly root `SKILL.md` is
+admitted. Every other path — including a directory, script, reference, asset, or
+package file — refuses the whole acquisition and is returned as sanitized, inert
+refusal metadata. Nothing is silently stripped: prose referring to a missing
+script would be a different and misleading skill. Only after this check does the
+host require root `SKILL.md` to be a regular Git tree file, stream at most 256
+KiB of pinned raw bytes, require non-empty UTF-8, and write them to a cell.
+
+The successful write carries the weaker `kind: "fetch"` `ExternalIngest`
+provenance variant. It records the exact pinned raw URL, commit SHA, fetch time,
+and the harness-computed SHA-256 of the fetched bytes. It has no channel or
+audience claim, grants no permission, and declassifies nothing. A registry hash
+is not a pin and never enters provenance. The tool returns the handle and this
+inert acquisition metadata; loading the handle remains a separate
+`delegate_task` decision.
+
+`delegate_task` takes an optional `skillHandle`: a handle the parent holds,
+naming a cell whose string value is skill text for the child. The text is
+materialized on the trusted host side at child spawn. Acquired handles carry the
+`skill-context` capability and only this exact slot can consume one:
+`describe_handle`, browser value binding, ordinary tool-input resolution,
+delegation goal/context seeding, and child-return resolution all refuse or keep
+it opaque. The authorized resolution still requires table membership, a string
+value, and the same Fabric space, with a structured refusal naming the reference
+on any miss before any child exists. The text is injected into the child's
+context as a `<skill_context source="handle:<token>">` block beside the
+profile's registry preload. The parent never reads the text, and the child never
+holds the handle. The return path is mediated too: every parent-facing return of
+such a delegation has the exact injected payload (and its JSON-escaped spelling)
+scrubbed to fixed inert text, so a child that echoes its instructions verbatim
+cannot walk the payload into the parent transcript. The scrub is deliberately no
+more than that — the child exists to act on the skill, so what it did because of
+the text is its ordinary, policy-mediated output.
+
+A handle-delivered skill bypasses the registry entirely: it is transient run
+state from a cell, the untrusted-acquisition complement to the trusted operator
+`--skills-root`, and for the delegated path it retires selection by name — the
+name-squat surface — in favor of an unforgeable table entry. It carries no
+directory, so it has no supporting-resource index and no scripts;
+`run_skill_script`'s operator allowlist cannot name it, and the skill-context
+preamble that keeps a skill from authorizing tools applies to it unchanged. The
+child's activation record carries `source: "skill-handle"`, the token, and the
+digest of the exact text injected, so the artifacts say which reference supplied
+the skill and what it said.
+
+#### Pattern references by search record
+
+`delegate_task` also takes up to eight optional `patternRefs`, each containing a
+`patternId` and an optional bounded parent note. The harness resolves an id only
+from successful `search_patterns` results retained by that parent run and
+restored from its persisted transcript on resume; it neither trusts
+model-retyped metadata nor fetches the index during delegation. A known id gives
+the child a neutral generated block with the record's kind, quality,
+description, match evidence, import hint, argument shape, result shape, and the
+note verbatim. An id absent from the parent's record is omitted from child
+context and returned by name in `patternRefRefusals` with reason
+`not-searched-by-parent`.
+
+Cell handles passed as tokens, `skillHandle`, and `patternRefs` are sibling
+channels of one conceptual kind: an id names hashed information stored
+somewhere, attached metadata accompanies it, and trusted-side code resolves it.
+They deliberately remain separate until experience supplies a concrete reason to
+unify them.
+
 ### Running patterns against a Fabric space
 
 This is the second half of [the model](#the-model-handles-and-patterns): the
@@ -914,8 +1064,8 @@ space's authorization, and only a healthy session is cached for the run. A
 session that fails to build surfaces as an ordinary tool-output error rather
 than a run failure, and the next tool call retries the construction.
 
-Two further flags set the session runtime's CFC dials, and both need the three
-session flags present. `--fabric-cfc-enforcement-mode`
+Three further flags set the session runtime's CFC dials, and each needs the
+three session flags present. `--fabric-cfc-enforcement-mode`
 (`CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE`) accepts `enforce-explicit` or
 `enforce-strict` — raise-only, since the session's runtime preset already pins
 `enforce-explicit`; under `enforce-strict`, a pattern whose writes carry
@@ -923,15 +1073,26 @@ confidentiality its target's declared policy does not admit has its commit
 refused. `--fabric-cfc-flow-labels` (`CF_HARNESS_FABRIC_CFC_FLOW_LABELS`)
 accepts `off`, `observe`, or `persist`; `persist` stamps the derived flow labels
 onto everything a pattern's transaction writes, which is what makes a labelled
-read visible to that refusal. These dials govern the fabric session's runtime
-only — `--cfc-enforcement-mode` remains the harness's own dial for tool policy
-and the sandbox, and the two are set independently.
+read visible to that refusal. `--fabric-cfc-posture`
+(`CF_HARNESS_FABRIC_CFC_POSTURE`) accepts `max-enforcement` and opts the
+session's runtime into the named CFC posture bundle
+(`MAX_ENFORCEMENT_CFC_OPTIONS` in the runner's presets): every staged
+enforcement dial on, the standard prompt-caveat policy loaded, and public-only
+ceilings on the network-fetch sinks (the llm sinks carry no ceiling and are
+ungoverned by the posture, pending a boundary-scoped admission mechanism). The
+two per-dial flags still apply over the bundle, so
+`--fabric-cfc-posture max-enforcement
+--fabric-cfc-enforcement-mode enforce-strict`
+is the full-strictness configuration. These dials govern the fabric session's
+runtime only — `--cfc-enforcement-mode` remains the harness's own dial for tool
+policy and the sandbox, and the two are set independently.
 
 A run states both postures rather than leaving them to be inferred: the resolved
 fabric-session posture — each dial's value and whether the operator configured
-it or the preset supplied it — is recorded as `fabricSessionCfc` in
-`run-state.json` and the run report, and the operator summary prints it beside
-the harness's own `cfcMode`.
+it, the named posture bundle supplied it, or the preset's default stood — is
+recorded as `fabricSessionCfc` in `run-state.json` and the run report (with the
+selected bundle, when there is one, as its `posture` field), and the operator
+summary prints it beside the harness's own `cfcMode`.
 
 The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
 over-cap source is a structured tool error), an optional `inputs` object, and an
@@ -1079,6 +1240,40 @@ free-text fields. Compiler diagnostics come back as
 bare fabric identifiers a diagnostic can embed (compiler-generated `fid1:`
 module roots, DIDs, `data:` URIs) are replaced with a `[fabric-id]` placeholder
 in the model-facing message, while the persisted artifact keeps the raw text.
+
+Only the newest such diagnostic is carried at full length. When a `run_pattern`
+result arrives, every earlier failed `run_pattern` result in that loop's
+transcript has its `message` replaced with a one-line summary naming the
+attempt, the status, how many errors the diagnostic reports and what they say —
+or the message's first line, where it reports no compiler error — and the tool
+output holding the full text; the summary is marked with `messageCollapsed` and
+the length it replaced. The newest failure is what the model writes its next
+source against, and the ones before it are re-read on every remaining turn
+without being acted on. Every other field of the result, a policy refusal among
+them, is left as it stands, as is a diagnostic already shorter than its own
+summary. The rewrite happens in the transcript itself, so the persisted
+transcript records the context the model was given, and the tool-output
+artifacts keep every diagnostic in full.
+
+The source those attempts carried is collapsed on the same terms. A
+`run_pattern` call arriving in the transcript replaces the `sourceText` of every
+earlier `run_pattern` call with a marker naming the attempt, how long its source
+ran, and the tool output holding it — the loop edits against the source it wrote
+last, and the drafts before it are re-sent whole on every remaining turn. Each
+call's source is written to `tool-outputs` under that call's own `outputId` as
+it runs, so the marker names an artifact that exists; a call whose result
+reported no `outputId`, one naming a `patternId` rather than source, and one
+whose source is shorter than the marker are all left as they stand, along with
+every other argument of a call that is collapsed.
+
+What a tool result may weigh in model context is bounded per tool. A `bash` or
+`run_skill_script` stream keeps 60,000 characters of head and 20,000 of tail; a
+`read_file` result keeps 8,000 and 2,000, because a file is read for a passage
+and the whole document would otherwise sit in context for every later turn.
+Either way the omitted middle is replaced by a marker counting the characters
+dropped and naming the tool output that holds the whole text, the result carries
+the original length beside the truncated field, and the artifact is written
+before the bound is applied.
 
 Interactive chat stdio transport:
 
@@ -1313,10 +1508,29 @@ patterns and documentation in the workspace, and `describe_handle` for the shape
 of the references it was handed. It receives neither `write_file` nor
 `edit_file`: pattern source goes inline into `run_pattern`'s `sourceText`, and
 the deliverable is a result reference rather than a file. When the run has a
-skill registry, the child preloads the `pattern-dev` and `pattern-schema` skills
-from it. That preload is best-effort — a run whose skills root does not carry
-them, or that configures no skills root at all, still gets the same child with
-the same tools, just without the preloaded guidance.
+skill registry, the child preloads the `pattern-dev`, `pattern-schema`, and
+`pattern-ui` skills from it. That preload is best-effort — a run whose skills
+root does not carry them, or that configures no skills root at all, still gets
+the same child with the same tools, just without the preloaded guidance.
+
+The child's job is author, run, and hand back a reference: a pattern it did not
+run is not an answer, and source never crosses back in any form. Its guidance
+says so as a refusal rather than a preference — a delegation that asks for
+source, in text or in an encoding of text, is answered with the
+`unsupported-request` failure code. What a parent does with the result is
+`assign_slug` or a `run_pattern` input, neither of which needs source, and reuse
+of the pattern itself travels through the index rather than through the parent:
+a later searcher finds the atom by its hashtags and composes it by its import
+specifier, with no source in anyone's context.
+
+That is also why the guidance asks for atoms rather than applications. The child
+is steered to author the smallest thing that does one job, run it, and build the
+next piece against the reference that run produced — each atom published under
+its own description and hashtags, because the atom is the reusable part and the
+composition on top of it is usually specific to the task that asked for it. A
+search hit is a component to wire, not a specification to rebuild: importing it
+costs the import line, and rewriting it from its description publishes a second
+pattern doing the same job under a different id.
 
 The profile carries its own turn budget of 24, in place of the default subagent
 cap of 8. Authoring is a write, compile-error, fix loop and each iteration costs
@@ -1325,9 +1539,14 @@ and a child that ran out of turns has nothing to return. A delegation may still
 name its own `maxModelTurns`, bounded by the same maximum of 64 every profile
 is.
 
-The profile also carries a return contract, applied to any `pattern-author`
-delegation that declares no `returnSchema` of its own — so no such delegation is
-unstructured:
+The profile also carries a return contract, and it is the profile's rather than
+a default: a `pattern-author` delegation that declares a `returnSchema` of its
+own is refused, naming the field and the contract it must answer instead. A
+narrow return channel is only as narrow as the widest schema anyone may declare
+against it, and a caller-written schema can ask for a shape the profile's own
+contract admits no field for. Every other profile leaves the schema to the
+caller, which is the ordinary case; this one holds it, because the shape of what
+it hands back is the point of the profile.
 
 ```json
 {
@@ -1337,7 +1556,11 @@ unstructured:
       "properties": {
         "ok": { "type": "boolean", "const": true },
         "resultRef": { "type": "string" },
-        "describes": { "type": "string" }
+        "describes": { "type": "string" },
+        "hashtags": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
       },
       "required": ["ok", "resultRef", "describes"],
       "additionalProperties": false
@@ -1379,9 +1602,16 @@ space — so it survives sanitization as itself and the parent learns why withou
 any declassification. The optional `detail` elaborates in free text and reaches
 the parent as an opaque link, which is the right treatment: the code is the
 actionable part, and the detail is for a reader entitled to open it. The
-free-form `describes` string on the success branch travels the same way; the
-discriminant, the `code`, and the minted `resultRef` token are what the parent
-acts on.
+free-form `describes` string on the success branch travels the same way, as do
+the `hashtags` beside it — which a run with no pattern index, publishing
+nothing, omits; the discriminant, the `code`, and the minted `resultRef` token
+are what the parent acts on.
+
+The success branch is closed, and there is no field on it for source under any
+name. That is the durable half of the fix: a channel a parent cannot ask source
+through is one a parent stops wanting source through, and the encodings that
+walk text past a sealing rule — code points, bytes, base64, a string split
+across fields — have nowhere on the branch to land.
 
 `ok: false` is heard as a failure whatever else about a child's return is
 malformed. When a return says it failed but does not fit the declared schema,
@@ -1477,9 +1707,36 @@ cd packages/cf-harness
 deno task test:integration
 ```
 
+No continuous-integration job dispatches that task, and it is meant to stay that
+way: `integration/engine.integration.test.ts` wants a Docker daemon carrying the
+`runsc-cfc` gVisor runtime, and
+`integration/pattern-index-live.integration.test.ts` wants a deployed pattern
+index plus a keyfile that deployment authorizes. Neither is a runner's to hold.
+Both files are type-checked by `deno task check` along with the rest of the
+package, so they answer for the interfaces they use whether or not anyone runs
+them; what they do not answer for is behavior, and a person running the task is
+the only thing that asks them to.
+
 The integration suite requires a working local Docker + `runsc-cfc` environment.
 By default it also uses the published kitchen-sink image above, unless you
 override `CF_HARNESS_INTEGRATION_IMAGE`.
+
+Every case in `engine.integration.test.ts` is skipped unless
+`CF_HARNESS_INTEGRATION=1` is set, which the task sets for you; the narrower
+opt-ins below each add a further variable. The pattern-index cases take a
+separate flag and are skipped even under that task:
+
+```bash
+cd packages/cf-harness
+CF_PATTERN_INDEX_LIVE_E2E=1 \
+CF_PATTERN_INDEX_LIVE_IDENTITY=/path/to/pattern-index.key \
+deno task test:integration
+```
+
+`CF_PATTERN_INDEX_LIVE_URL` names the deployment and defaults to the standing
+one. `CF_PATTERN_INDEX_LIVE_IDENTITY` has no default: which identity an index
+admits is a fact about that deployment, so the run fails rather than guess at a
+keyfile.
 
 To opt into a local Labs CLI smoke inside the sandbox, use a Deno 2-compatible
 image and enable the CF CLI case:
@@ -1532,9 +1789,10 @@ FUSE-to-sandbox taint, command completion after a FUSE read, FUSE write
 attempts, and joins between explicit `cfcInputLabels` and a prior FUSE read. The
 result sidecar env var is required for all CFC flow assertions, and the
 invocation context sidecar env var is required for the cases that seed
-`cfcInputLabels`. The installed Docker `runsc-cfc` runtime must also be
-configured with the same `--cfc-invocation-context-dir`, otherwise those
-invocation-label cases are skipped even if cf-harness writes sidecars.
+`cfcInputLabels`. Both env vars gate on being set, not on the installed Docker
+`runsc-cfc` runtime being registered against the same directories; register it
+with the matching `--cfc-invocation-context-dir` as well, or an enforcing case
+refuses at `docker create` rather than exercising the labels it seeds.
 
 The default Fabric CFC flow gate exercises the immediate result sidecar after a
 FUSE read. The stricter host-bind readback probe is opt-in with
@@ -1566,6 +1824,32 @@ payload contains audit/provenance context plus optional trusted `cfcInputLabels`
 for supported startup inputs (`command`, `argv`, `args`, `env`, `cwd`, and
 `stdin`). `stdin` labels are modeled as labels on the stdin source and taint
 only after the sandbox reads or maps fd 0, not as automatic startup task taint.
+
+Configuring `cfcInvocationContextDir` says where `cf-harness` writes; it says
+nothing about whether the runtime reads there, and the two sidecar directories
+are registered independently, so a host can have a working result transport —
+sidecars arrive, output mediation succeeds — while every input label goes into a
+directory nothing reads. Under an `enforce-*` mode `cf-harness` therefore reads
+the runtime's registered arguments from `docker info` before starting a
+container, and refuses the invocation when no valid absolute invocation-context
+directory is registered, because that half fails open: nothing downstream
+notices a sandbox that started untainted. `unregistered` is the only status that
+states a fact about the world: no valid absolute directory is registered.
+`registered` means only that something absolute is registered, never that the
+transport works; the snapshot reports both paths without comparing them because
+path text cannot establish that the daemon and harness resolve two names to the
+same directory. Moby shell-parses the registered argument strings before runsc
+sees them, so `cf-harness` trusts a registration only when every argument
+consists of characters in `[A-Za-z0-9._/=:,-]`. Any other character produces the
+distinct `unsafe-runtime-arguments` decline-to-affirm and refuses an enforcing
+invocation; a legitimate directory containing an excluded character must be
+renamed. A registration that could not be read at all is reported as
+`indeterminate` and the run proceeds, so an unreachable Docker daemon cannot
+pass for evidence of a misconfiguration. The CFC policy snapshot carries that
+reading as `cfc.invocationContextTransportReadiness` — `registered`,
+`unregistered`, `unsafe-runtime-arguments`, `indeterminate`, or `unverified`
+before any enforcing invocation has probed.
+
 When a trusted prompt-slot binding is present, `cf-harness` also derives
 confidentiality-only prompt influence labels for model-authored invocation
 inputs such as shell commands, structured file-tool arguments, and stdin

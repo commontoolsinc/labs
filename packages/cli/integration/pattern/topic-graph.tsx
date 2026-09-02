@@ -17,19 +17,25 @@ interface TopicEntry {
   id: string;
   title: string;
   body: string;
+
   /** Attribution, interim `agentName` style (verb contract decision 5). */
   createdBy: string;
+
   /** "" until the body is revised. */
   bodyUpdatedBy: string;
+
   /** Ids of sibling topics this topic's body references. */
   references: string[];
 }
 
 interface CreateTopicEvent {
   title: string;
+
   /** The topic's initial body, part of the create's atomic unit. */
   body: string;
+
   agentName: string;
+
   /** Ids the body references, recorded as explicit edges. */
   references?: string[];
 }
@@ -65,10 +71,12 @@ interface TopicGraphOutput {
   [NAME]: string;
   topics: TopicEntry[];
   topicCount: number;
+
   /** Reciprocal edges, derived at read time and never persisted — topic id →
    * ids of the topics whose `references` name it. A derived result over a list
    * of children, which is what this fixture exercises the CLI against. */
   referencedBy: Record<string, string[]>;
+
   createTopic: Stream<CreateTopicEvent, CreateTopicResult>;
   reviseBody: Stream<ReviseBodyEvent, ReviseBodyResult>;
 }
@@ -76,7 +84,7 @@ interface TopicGraphOutput {
 /** A topics-like board whose verbs DECLARE results (verb contract C1
  * surface): `createTopic` returns the created child's reference and
  * `reviseBody` returns the revised topic's. Results flow schema-free
- * through the handling's receipt (the C3 deferral), where `cf piece call`
+ * through the handling's receipt (the C3 deferral), where `cf call`
  * reads them back under `plainResultReceipts`. */
 export default pattern<TopicGraphInput, TopicGraphOutput>(({ topics }) => {
   const createTopic = action<CreateTopicEvent, CreateTopicResult>(

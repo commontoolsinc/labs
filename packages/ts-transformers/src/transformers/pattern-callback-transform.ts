@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { preserveSourceMapRange } from "../ast/mod.ts";
 import {
   type CapabilityParamDefault,
   TransformationContext,
@@ -219,19 +220,24 @@ export function transformPatternCallback(
           );
         }
 
-        return factory.createVariableStatement(
-          undefined,
-          factory.createVariableDeclarationList(
-            [
-              factory.createVariableDeclaration(
-                factory.createIdentifier(binding.localName),
-                undefined,
-                undefined,
-                initializer,
-              ),
-            ],
-            ts.NodeFlags.Const,
+        const declaration = preserveSourceMapRange(
+          factory.createVariableDeclaration(
+            factory.createIdentifier(binding.localName),
+            undefined,
+            undefined,
+            initializer,
           ),
+          binding.bindingNode,
+        );
+        return preserveSourceMapRange(
+          factory.createVariableStatement(
+            undefined,
+            factory.createVariableDeclarationList(
+              [declaration],
+              ts.NodeFlags.Const,
+            ),
+          ),
+          binding.bindingNode,
         );
       });
       for (const binding of bindings) {

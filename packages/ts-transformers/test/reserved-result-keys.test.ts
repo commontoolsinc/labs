@@ -11,10 +11,13 @@ import { validateSource } from "./utils.ts";
 const DIAGNOSTIC_TYPE = "pattern-result:opaque-reserved-key";
 
 /** The diagnostics one schema draws, reported straight rather than compiled. */
-function diagnosticsFor(schema: unknown): DiagnosticInput[] {
+function diagnosticsFor(
+  schema: unknown,
+  options: { storedSource?: boolean } = {},
+): DiagnosticInput[] {
   const reported: DiagnosticInput[] = [];
   reportOpaqueReservedResultKeys(
-    { reportDiagnosticOnce: (input) => void reported.push(input) },
+    { reportDiagnosticOnce: (input) => void reported.push(input), options },
     schema,
     ts.factory.createIdentifier("anchor"),
   );
@@ -53,6 +56,23 @@ describe("reserved-result-keys", () => {
       expect(diagnosticsFor(null)).toEqual([]);
       expect(diagnosticsFor([OPAQUE_SCREEN])).toEqual([]);
       expect(diagnosticsFor({ type: "object" })).toEqual([]);
+    });
+
+    it("demotes the report to a warning over stored source", () => {
+      // Admission is judged once; reconstruction re-judges nothing. The
+      // identity-pinned reload of durable stored source (the engine's
+      // cold-recovery path) compiles bytes nobody can re-author, so the
+      // report keeps its visibility and loses its veto — the 2026-08-25
+      // estuary deploy is what happens otherwise: every piece pinned to a
+      // pre-`VNode` pattern, profiles fleet-wide among them, refused on
+      // reload. Authoring compiles keep the error (the cases below).
+      const reported = diagnosticsFor(OPAQUE_SCREEN, { storedSource: true });
+      expect(reported.map((d) => [d.type, d.severity])).toEqual([
+        [DIAGNOSTIC_TYPE, "warning"],
+      ]);
+      expect(
+        diagnosticsFor(OPAQUE_SCREEN).map((d) => [d.type, d.severity]),
+      ).toEqual([[DIAGNOSTIC_TYPE, "error"]]);
     });
 
     it("follows a root reference into the definition it names", () => {

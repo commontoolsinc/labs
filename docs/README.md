@@ -35,6 +35,19 @@ live document describes, update that document in the same change.** A live
 document that no longer matches the code is a bug. This applies to human and
 AI contributors alike.
 
+That obligation reaches only behavior some document already describes, so new
+surface needs the other half of it: **a capability a caller can reach is
+described somewhere a caller can find.** The two are not the same rule — nothing
+is out of date when a command ships with no prose, because nothing claimed to
+cover it, and the absence is visible only to someone who already knows the
+command exists.
+
+For the `cf` command surface that half is mechanical: `deno task check-command-docs`
+fails when a command the CLI accepts is named in no live document, and takes a
+recorded reason instead where a command genuinely needs none. Prose belongs with
+the code it describes — the README of the package that implements the command,
+or the feature document that owns the surface — which is where the gate looks.
+
 ## Historical documentation
 
 [`docs/history/`](history/README.md) holds point-in-time records: audit

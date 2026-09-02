@@ -200,6 +200,7 @@ export async function describeStateWaitFailure(
 
 export interface ShellIntegrationConfig {
   pipeConsole?: boolean;
+
   /**
    * When `true` (the default), `afterEach` throws if any browser
    * `console.error` message was collected during the test.
@@ -209,6 +210,7 @@ export interface ShellIntegrationConfig {
    * be narrowly allowlisted.
    */
   failOnConsoleError?: boolean;
+
   /**
    * Strings or RegExps that match console error messages that are known-
    * benign for this suite.  A collected error is suppressed (does not
@@ -228,6 +230,7 @@ export interface ShellIntegrationConfig {
    * ```
    */
   allowedConsoleErrors?: (string | RegExp)[];
+
   /** Optional participant metadata used only by `deno task demo`. */
   presentation?: PresentationParticipant;
 }
@@ -257,19 +260,19 @@ export class ShellIntegration {
   }
 
   page(): Page {
-    this.checkIsOk();
+    this.#checkIsOk();
     return this.#page!;
   }
 
   // Browser-level CDP websocket endpoint, for attaching a second CDP client
   // (e.g. `CdpWorkerProfiler`).
   wsEndpoint(): string {
-    this.checkIsOk();
+    this.#checkIsOk();
     return this.#browser!.wsEndpoint();
   }
 
   async newPage(url?: string): Promise<Page> {
-    this.checkIsOk();
+    this.#checkIsOk();
     const page = await this.#browser!.newPage(url);
     this.#attachPage(page);
     // Astral navigates to `url` inside its own `newPage`, before this wrapper
@@ -280,7 +283,7 @@ export class ShellIntegration {
   }
 
   async state(): Promise<AppStateSerialized | undefined> {
-    this.checkIsOk();
+    this.#checkIsOk();
     const page = this.page();
     return await page.evaluate(() => {
       return globalThis.app ? globalThis.app.serialize() : undefined;
@@ -296,12 +299,12 @@ export class ShellIntegration {
     await this.#disposePageRuntime();
   }
 
-  // Wait for the app state to match all properties
-  // provided here. Throws if timeout is reached.
+  // Wait for the shell's app state to hold this view, and this identity where
+  // one is given. Throws if the wait runs out.
   //
-  // If waiting for only `spaceName`, for example,
-  // the function returns successfully once state
-  // has a matching `spaceName`, ignoring all other properties.
+  // The view is matched whole, field for field: a state matches when its view
+  // holds the same fields this one holds. A view naming only a space is
+  // matched by the state of a space with no piece open.
   async waitForState(
     params: {
       view: AppView;
@@ -319,7 +322,7 @@ export class ShellIntegration {
       );
     }
 
-    this.checkIsOk();
+    this.#checkIsOk();
 
     // The last state the poll below managed to read. A failure reports it, so
     // the message says what the wait actually saw rather than only that it
@@ -367,7 +370,7 @@ export class ShellIntegration {
       identity?: Identity;
     },
   ): Promise<void> {
-    this.checkIsOk();
+    this.#checkIsOk();
 
     // Strip the proceeding "/" in the url path
     const path = appViewToUrlPath(view).substring(1);
@@ -465,7 +468,7 @@ export class ShellIntegration {
     await this.#browser?.close();
   };
 
-  private checkIsOk() {
+  #checkIsOk() {
     if (!this.#page) throw new Error("Page not initialized.");
   }
 

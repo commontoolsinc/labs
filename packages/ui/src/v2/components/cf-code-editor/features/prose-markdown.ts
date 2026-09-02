@@ -212,7 +212,7 @@ export function buildProseDecorations(
 
   syntaxTree(state).iterate({
     enter(node) {
-      // ── Headings ──
+      // Headings
       if (HEADING_NODES.has(node.name)) {
         const headingLine = doc.lineAt(node.from).number;
         const isActiveLine = hasFocus && headingLine === cursorLine;
@@ -245,7 +245,7 @@ export function buildProseDecorations(
         return;
       }
 
-      // ── Bullet list markers ──
+      // Bullet list markers
       if (
         node.name === "ListMark" &&
         node.node.parent?.parent?.name === "BulletList"
@@ -268,7 +268,7 @@ export function buildProseDecorations(
         return;
       }
 
-      // ── Ordered list markers ──
+      // Ordered list markers
       if (
         node.name === "ListMark" &&
         node.node.parent?.parent?.name === "OrderedList"
@@ -290,7 +290,7 @@ export function buildProseDecorations(
         return;
       }
 
-      // ── Blockquote markers ──
+      // Blockquote markers
       if (node.name === "QuoteMark") {
         const markLine = doc.lineAt(node.from).number;
         const isActiveLine = hasFocus && markLine === cursorLine;
@@ -313,7 +313,7 @@ export function buildProseDecorations(
         return;
       }
 
-      // ── Tables (GFM) ──
+      // Tables (GFM)
       if (node.name === "Table") {
         const startLine = doc.lineAt(node.from).number;
         const endLine = doc.lineAt(node.to).number;
@@ -381,7 +381,7 @@ export function buildProseDecorations(
         return;
       }
 
-      // ── Indented code blocks ──
+      // Indented code blocks
       if (node.name === "CodeBlock") {
         const startLine = doc.lineAt(node.from).number;
         const endLine = doc.lineAt(node.to).number;
@@ -396,7 +396,7 @@ export function buildProseDecorations(
         return;
       }
 
-      // ── Fenced code blocks ──
+      // Fenced code blocks
       if (node.name === "FencedCode") {
         const startLine = doc.lineAt(node.from).number;
         const endLine = doc.lineAt(node.to).number;
@@ -451,7 +451,7 @@ export function buildProseDecorations(
         return;
       }
 
-      // ── Horizontal rules ──
+      // Horizontal rules
       if (
         node.name === "HorizontalRule" || node.name === "ThematicBreak"
       ) {
@@ -469,7 +469,7 @@ export function buildProseDecorations(
         return;
       }
 
-      // ── Task markers (GFM) ──
+      // Task markers (GFM)
       if (node.name === "TaskMarker") {
         const markerText = doc.sliceString(node.from, node.to);
         const isChecked = /^\[[xX]\]$/.test(markerText);
@@ -502,7 +502,7 @@ export function buildProseDecorations(
         return;
       }
 
-      // ── Links ──
+      // Links
       if (node.name === "Link") {
         const isActive = hasFocus &&
           cursorPos >= node.from && cursorPos <= node.to;
@@ -575,7 +575,7 @@ export function buildProseDecorations(
         return;
       }
 
-      // ── Inline code ──
+      // Inline code
       if (node.name === "InlineCode") {
         const isActive = hasFocus &&
           cursorPos >= node.from && cursorPos <= node.to;
@@ -608,7 +608,7 @@ export function buildProseDecorations(
         return;
       }
 
-      // ── Inline syntax (bold, italic, strikethrough) ──
+      // Inline syntax (bold, italic, strikethrough)
       const inline = INLINE_SYNTAX[node.name];
       if (!inline) return;
 

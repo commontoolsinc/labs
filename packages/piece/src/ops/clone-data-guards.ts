@@ -9,10 +9,7 @@ import {
   type IExtendedStorageTransaction,
 } from "@commonfabric/runner";
 import { cfcLabelViewForCellFailClosed } from "@commonfabric/runner/cfc";
-import {
-  FabricInstance,
-  FabricPrimitive,
-} from "@commonfabric/data-model/fabric-value";
+import { FabricInstance, FabricPrimitive } from "@commonfabric/data-model";
 import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
 
 export function cloneCellKey(cell: Cell<unknown>): string {

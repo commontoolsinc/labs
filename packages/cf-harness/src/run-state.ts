@@ -5,9 +5,11 @@ import {
   type HarnessCfcModelContext,
   type HarnessCfcModelContextObservationInput,
 } from "./contracts/cfc-model-context.ts";
+import type { HarnessCellLabels } from "./contracts/cell-labels.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessHandleTable } from "./contracts/handle-table.ts";
 import type { HarnessWellKnownGrant } from "./contracts/well-known-grants.ts";
+import type { HarnessInputCell } from "./contracts/input-cells.ts";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type {
   HarnessPolicyDecisionRecord,
@@ -63,11 +65,25 @@ export type HarnessRunTerminalReason =
  */
 export interface HarnessFabricSessionCfcPosture {
   enforcementMode: "enforce-explicit" | "enforce-strict";
+
   /** `configured` when the operator set the dial; `preset-pin` otherwise. */
   enforcementModeSource: "configured" | "preset-pin";
+
   flowLabels: "off" | "observe" | "persist";
-  /** `configured` when the operator set the dial; `default` otherwise. */
-  flowLabelsSource: "configured" | "default";
+
+  /**
+   * `configured` when the operator set the dial; `posture` when the named
+   * bundle below supplied it; `default` otherwise.
+   */
+  flowLabelsSource: "configured" | "default" | "posture";
+
+  /**
+   * The named CFC posture bundle the session's runtime opted into, when the
+   * operator selected one (`--fabric-cfc-posture`). The bundle sets more
+   * dials than the two this record itemizes — the full set is
+   * `MAX_ENFORCEMENT_CFC_OPTIONS` in the runner's presets.
+   */
+  posture?: "max-enforcement";
 }
 
 export interface HarnessRunState {
@@ -108,8 +124,19 @@ export interface HarnessRunState {
   policyTracePath?: string;
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
+
+  /**
+   * The per-cell CFC labels the run's space holds for the cells it touched.
+   * Every other artifact a run writes is the run's own record of itself; this
+   * one is read out of the space, and it is the only place a reader working
+   * from the tree can learn what a cell is labelled.
+   */
+  cellLabels?: HarnessCellLabels;
+
+  cellLabelsPath?: string;
   handleTable?: HarnessHandleTable;
   wellKnownGrants?: HarnessWellKnownGrant[];
+  inputCells?: HarnessInputCell[];
   policyEvents: HarnessPolicyEvent[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
   toolOutputs: ToolResultRef[];
@@ -155,8 +182,11 @@ export interface CreateHarnessRunStateOptions {
   policyTracePath?: string;
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
+  cellLabels?: HarnessCellLabels;
+  cellLabelsPath?: string;
   handleTable?: HarnessHandleTable;
   wellKnownGrants?: HarnessWellKnownGrant[];
+  inputCells?: HarnessInputCell[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
   lineage?: HarnessSubagentLineage;
   subagentRuns?: HarnessSubagentRunRef[];
@@ -263,11 +293,20 @@ export const createHarnessRunState = (
     ...(options.cfcInvocationContexts !== undefined
       ? { cfcInvocationContexts: [...options.cfcInvocationContexts] }
       : {}),
+    ...(options.cellLabels !== undefined
+      ? { cellLabels: structuredClone(options.cellLabels) }
+      : {}),
+    ...(options.cellLabelsPath !== undefined
+      ? { cellLabelsPath: options.cellLabelsPath }
+      : {}),
     ...(options.handleTable !== undefined
       ? { handleTable: structuredClone(options.handleTable) }
       : {}),
     ...(options.wellKnownGrants !== undefined
       ? { wellKnownGrants: structuredClone(options.wellKnownGrants) }
+      : {}),
+    ...(options.inputCells !== undefined
+      ? { inputCells: structuredClone(options.inputCells) }
       : {}),
     ...(options.lineage !== undefined
       ? { lineage: structuredClone(options.lineage) }

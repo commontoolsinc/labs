@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read
+
 /**
  * Ask who called a key, using the containment forest in `measure-forest.ts`.
  *
@@ -33,6 +34,7 @@
  * too much — and is fixed differently from a caller with many parent spans
  * doing a little each, which is a frequency problem.
  */
+
 import {
   ancestors,
   buildForest,

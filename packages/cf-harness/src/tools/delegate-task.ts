@@ -3,7 +3,11 @@ import type {
   DelegateTaskToolOutput,
   HarnessSubagentProfile,
 } from "../contracts/subagent.ts";
-import { HARNESS_SUBAGENT_PROFILES } from "../contracts/subagent.ts";
+import {
+  HARNESS_SUBAGENT_PROFILES,
+  MAX_DELEGATE_PATTERN_REF_NOTE_LENGTH,
+  MAX_DELEGATE_PATTERN_REFS,
+} from "../contracts/subagent.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 import { createUnimplementedToolError } from "./types.ts";
 
@@ -25,7 +29,7 @@ export const delegateTaskTool: HarnessToolDefinition<
         goal: {
           type: "string",
           description:
-            "Specific task for the child run. Include all context the child needs; it will not see the parent transcript.",
+            'Specific task for the child run. Include all context the child needs; it will not see the parent transcript. Keep a "pattern-author" delegation focused on one buildable piece so its compile/fix loop fits the child turn budget. Name the words the capability should be findable under, so a later delegation can search the pattern index for the same component instead of asking for it again.',
         },
         profile: {
           type: "string",
@@ -33,12 +37,37 @@ export const delegateTaskTool: HarnessToolDefinition<
             ...HARNESS_SUBAGENT_PROFILES,
           ] satisfies HarnessSubagentProfile[],
           description:
-            "Named subagent profile to spawn. Defaults to the harness default profile.",
+            'Named subagent profile to spawn. Defaults to the harness default profile. Authoring or running a Common Fabric pattern goes through "pattern-author": when the configured skill registry carries the pattern skills, this profile preloads them; the default profile does not. A "pattern-author" child runs what it wrote and answers with a reference to the result cell, never with source: you get something to assign_slug or wire into a run_pattern input, and you never compile anything yourself.',
         },
         context: {
           type: "string",
           description:
             "Optional supporting context, paths, constraints, or expected output for the child run.",
+        },
+        patternRefs: {
+          type: "array",
+          maxItems: MAX_DELEGATE_PATTERN_REFS,
+          items: {
+            type: "object",
+            properties: {
+              patternId: {
+                type: "string",
+                minLength: 1,
+                description:
+                  "Pattern id exactly as this parent received it from search_patterns.",
+              },
+              note: {
+                type: "string",
+                maxLength: MAX_DELEGATE_PATTERN_REF_NOTE_LENGTH,
+                description:
+                  "Optional parent-authored context for this pattern selection. It reaches the child verbatim.",
+              },
+            },
+            required: ["patternId"],
+            additionalProperties: false,
+          },
+          description:
+            "Optional published patterns selected from this parent's earlier search_patterns results. The harness attaches their trusted metadata to the child; supply ids and optional notes only.",
         },
         maxModelTurns: {
           type: "integer",
@@ -53,7 +82,12 @@ export const delegateTaskTool: HarnessToolDefinition<
             { type: "object", additionalProperties: true },
           ],
           description:
-            "Optional JSON Schema for a structured child return. When provided, the child must return only JSON matching this schema; open-ended strings are linkified before the parent sees them.",
+            'Optional JSON Schema for a structured child return. When provided, the child must return only JSON matching this schema; open-ended strings are linkified before the parent sees them. Some profiles declare their own return contract and refuse a schema here — "pattern-author" is one — because the shape of what they hand back is the point of the profile.',
+        },
+        skillHandle: {
+          type: "string",
+          description:
+            "Optional handle (cfh:a:… token) naming a cell whose string value is skill text for the child. The text is materialized on the trusted host side and injected into the child's context; this run never sees it.",
         },
       },
     },

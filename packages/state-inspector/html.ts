@@ -35,20 +35,28 @@ import {
 export interface InspectorBundle {
   space: string;
   generatedAt: string;
+
   /** Base origin of the live shell, for deep links (`<base>/<space>/<id>`). */
   liveBase: string;
+
   summary: SpaceSummary;
   details: EntityDetail[];
+
   /** How far the entity scan behind `details` and `graph` reached. */
   extent: ScanExtent;
+
   graph: SpaceGraph;
   timeline: SpaceTimelineEntry[];
+
   /** Per-identity scopes present (space / user:<DID> / session:<DID>:*). */
   scopes: Scope[];
+
   /** Per-entity scope overlays — only for cells with non-space/multi-scope state. */
   overlays: ScopeOverlay[];
+
   /** Identities that touched this space (committers + per-user/session owners). */
   participants: Participant[];
+
   /** Contested entities (≥2 writer sessions); multi-user ones carry stale reads. */
   conflicts: ContendedEntity[];
 }
@@ -161,6 +169,7 @@ const STYLE = `
   --accent:#2563eb; --hover:#eef2ff;
   --piece:#f59e0b; --module:#3b82f6; --stream:#ec4899; --schema:#8b5cf6;
   --owned-cell:#10b981; --free-cell:#9ca3af; --unknown:#d1d5db;
+  --deleted:#71717a;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg:#0b0f17; --fg:#e5e7eb; --muted:#9ca3af; --line:#1f2937;
@@ -237,7 +246,7 @@ svg { max-width:100%; border:1px solid var(--line); border-radius:8px; backgroun
 const APP = String.raw`
 const B = JSON.parse(document.getElementById("bundle").textContent);
 const KC = { piece:"var(--piece)", module:"var(--module)", stream:"var(--stream)",
-  schema:"var(--schema)", "owned-cell":"var(--owned-cell)", "free-cell":"var(--free-cell)", unknown:"var(--unknown)" };
+  schema:"var(--schema)", "owned-cell":"var(--owned-cell)", "free-cell":"var(--free-cell)", unknown:"var(--unknown)", deleted:"var(--deleted)" };
 const EC = { pattern:"#2563eb", argument:"#16a34a", owns:"#6b7280", link:"#9ca3af" };
 const byId = new Map(B.details.map(d => [d.id, d]));
 const overlayById = new Map((B.overlays||[]).map(o => [o.id, o]));
@@ -275,7 +284,10 @@ function copyBtn(text, label){ return el("button",{class:"copy",title:"copy "+te
   onclick:e=>{e.stopPropagation(); navigator.clipboard?.writeText(text); flash("copied "+(label||"id"));}}, label||"copy"); }
 function kindChip(kind){ return el("span",{class:"kind "+kind,style:"background:"+(KC[kind]||"#999"),text:kind}); }
 
-// ---- live shell link --------------------------------------------------
+//
+// live shell link
+//
+
 let LIVE = localStorage.getItem("si-live") || B.liveBase || "";
 function liveUrl(id){ if(!LIVE) return null;
   // The shell navigates by the bare id form (fid1:…); the stored "of:" prefix
@@ -285,7 +297,10 @@ function liveAnchor(id){ const u = liveUrl(id); return u
   ? el("a",{href:u,target:"_blank",rel:"noopener",text:"open in app ↗",title:u})
   : el("span",{class:"muted",text:"(set app URL ↗ to enable live links)"}); }
 
-// ---- selection + history ----------------------------------------------
+//
+// selection + history
+//
+
 let cur = null; const hist = [];
 function select(id, push=true){
   if(!byId.has(id)) return;
@@ -298,7 +313,10 @@ function select(id, push=true){
 }
 function back(){ const id = hist.pop(); if(id){ cur=null; select(id,false); } }
 
-// ---- value renderer (links become clickable chips) --------------------
+//
+// value renderer (links become clickable chips)
+//
+
 function valueDom(v, depth=0){
   if(v===null) return el("span",{class:"muted",text:"null"});
   if(typeof v!=="object") return el("span",{text: typeof v==="string" ? JSON.stringify(v) : String(v)});
@@ -343,7 +361,10 @@ function linkChip(ref){
   return c;
 }
 
-// ---- detail pane ------------------------------------------------------
+//
+// detail pane
+//
+
 function section(title, openByDefault, bodyNodes){
   const d = el("details",{class:"sec"}); if(openByDefault) d.setAttribute("open","");
   d.append(el("summary",{text:title}));
@@ -488,7 +509,10 @@ function renderDetail(id){
 function fmtSession(s){ try{ s=decodeURIComponent(s);}catch{} const m=s.match(/^session:(did:key:)?([^:]+):([0-9a-f-]+)/i);
   if(m) return (m[2].length>12?m[2].slice(0,6)+"…"+m[2].slice(-4):m[2])+"/"+m[3].slice(0,6); return s.slice(0,18); }
 
-// ---- tree view --------------------------------------------------------
+//
+// tree view
+//
+
 function treeRow(d, childInfo){
   const ov = overlayById.get(d.id);
   const cf = conflictById.get(d.id);
@@ -546,7 +570,10 @@ function renderTree(){
   host.append(ul);
 }
 
-// ---- graph view -------------------------------------------------------
+//
+// graph view
+//
+
 function neighborhood(rootId, depth){
   const adj=new Map();
   for(const e of B.graph.edges){ (adj.get(e.from)??adj.set(e.from,[]).get(e.from)).push(e.to);
@@ -589,7 +616,10 @@ function renderGraph(){
   if(sel.value) layoutGraph(sel.value);
 }
 
-// ---- timeline ---------------------------------------------------------
+//
+// timeline
+//
+
 function renderTimeline(){
   const t=B.timeline; const host=$("#tl"); host.innerHTML="";
   if(!t.length){host.append(el("p",{class:"muted",text:"(no commits)"}));return;}
@@ -609,7 +639,10 @@ function renderTimeline(){
     el("th",{text:"touched"}),el("th",{text:"total"}),el("th",{text:"who"}),el("th",{text:"when"})])),tb]));
 }
 
-// ---- wiring -----------------------------------------------------------
+//
+// wiring
+//
+
 for(const b of $$("nav button")) b.onclick=()=>{
   $$("nav button").forEach(x=>x.classList.toggle("active",x===b));
   $$(".tabwrap").forEach(s=>s.classList.toggle("active",s.id===b.dataset.tab));
@@ -627,7 +660,10 @@ liveInput.onchange=()=>{ LIVE=liveInput.value.trim(); localStorage.setItem("si-l
   if(cur) renderDetail(cur); flash(LIVE?"live links on":"live links off"); };
 $("#copy-space").onclick=()=>{ navigator.clipboard?.writeText(B.space); flash("copied space DID"); };
 
-// --- identities (users of this space) ---
+//
+// identities (users of this space)
+//
+
 function renderIdentities(){
   const host=$("#idlist"); const ps=B.participants||[];
   $("#idpanel>summary").textContent="Identities ("+ps.length+")";
@@ -646,7 +682,10 @@ function renderIdentities(){
   }
   host.append(el("div",{class:"muted",style:"margin-top:6px",text:"cross-space (home + profiles): cf inspect identity <DID>"}));
 }
-// --- conflicts (contested cells) ---
+//
+// conflicts (contested cells)
+//
+
 function renderConflicts(){
   const host=$("#cflist"); const cs=B.conflicts||[];
   const mu=cs.filter(c=>c.multiUser).length;

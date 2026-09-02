@@ -30,6 +30,8 @@
  * that is exactly the distinction `decode()`'s contract turns on.
  */
 
+import { BenchWorker } from "@commonfabric/test-support/bench-worker";
+
 import type { RealmEncodedValue } from "@/codec-realm/interface.ts";
 import { realmFromFabricValue } from "@/codecs.ts";
 import type { FabricValue } from "@/interface.ts";
@@ -41,68 +43,10 @@ import {
   OBJECTS,
   REALM_PASS_THROUGH_OMNIBUSES,
 } from "./fixtures/codec-fixtures.ts";
-import type { IpcAck, IpcRequest } from "./fixtures/realm-ipc-worker.ts";
-
-/** The outstanding request's settlement, held while it is in flight. */
-type PendingRequest = {
-  readonly resolve: () => void;
-  readonly reject: (reason: Error) => void;
-};
-
-/**
- * One worker, kept for the whole run, with one message outstanding at a time.
- *
- * A fresh worker per iteration would measure worker startup, which is
- * milliseconds against microseconds of payload and would swamp everything this
- * file is trying to see.
- */
-class FarSide {
-  readonly #worker: Worker;
-  #pending: PendingRequest | undefined;
-
-  constructor() {
-    this.#worker = new Worker(
-      import.meta.resolve("./fixtures/realm-ipc-worker.ts"),
-      { type: "module" },
-    );
-
-    this.#worker.onmessage = (ev: MessageEvent<IpcAck>) => {
-      const pending = this.#pending;
-
-      this.#pending = undefined;
-
-      if (ev.data.ok) {
-        pending?.resolve();
-      } else {
-        pending?.reject(
-          new Error(`Far side refused the payload: ${ev.data.error}`),
-        );
-      }
-    };
-  }
-
-  /**
-   * Sends one request and settles when the far side acks it.
-   *
-   * @throws If the far side reports failure. An unexamined ack is what makes a
-   *   benchmark measure the wrong thing silently: a far side whose decode
-   *   throws still acks, still returns in about the time a clone takes, and
-   *   the run then reports that decoding is nearly free.
-   */
-  send(request: IpcRequest): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.#pending = { resolve, reject };
-      this.#worker.postMessage(request);
-    });
-  }
-
-  /** Ends the run. */
-  close(): void {
-    this.#worker.terminate();
-  }
-}
-
-const farSide = new FarSide();
+import type { IpcRequest } from "./fixtures/realm-ipc-worker.ts";
+const farSide = new BenchWorker<IpcRequest>(
+  import.meta.resolve("./fixtures/realm-ipc-worker.ts"),
+);
 
 /**
  * Subjects worth a crossing. Fewer than the in-realm benchmark measures: an

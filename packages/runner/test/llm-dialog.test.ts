@@ -1737,7 +1737,7 @@ describe("llmDialog", () => {
     expect(capturedRequest).toBeDefined();
     expect(Object.keys(capturedRequest.tools ?? {})).toEqual(["ping"]);
     expect(capturedRequest.system).not.toContain("# Link and Cell Model");
-    expect(capturedRequest.system).not.toContain("call listRecent()");
+    expect(capturedRequest.system).not.toContain("call listItems()");
 
     const flattenedTools = await result.key("flattenedTools").pull();
     expect(Object.keys(flattenedTools ?? {})).toEqual(["ping"]);
@@ -1772,8 +1772,8 @@ describe("llmDialog", () => {
       required: ["addMessage"],
     } as const satisfies JSONSchema;
 
-    const listRecentTool = pattern(
-      () => "recent",
+    const listItemsTool = pattern(
+      () => "items",
       { type: "object" },
       { type: "string" },
     );
@@ -1787,8 +1787,8 @@ describe("llmDialog", () => {
         const dialog = llmDialog({
           messages,
           tools: {
-            listRecent: patternTool(
-              listRecentTool,
+            listItems: patternTool(
+              listItemsTool,
             ) as unknown as BuiltInLLMTool,
           },
         });
@@ -1819,7 +1819,7 @@ describe("llmDialog", () => {
     await waitForLlmMessages(runtime, result, 2);
 
     expect(requests.length).toBeGreaterThan(0);
-    expect(requests[0].system).not.toContain("listRecent");
+    expect(requests[0].system).not.toContain("listItems");
     // The guidance for what the dialog does provide is unaffected.
     expect(requests[0].system).toContain("# Link and Cell Model");
   });

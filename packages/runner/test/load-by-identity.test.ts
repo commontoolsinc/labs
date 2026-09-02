@@ -34,12 +34,13 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("load-by-identity");
 const space = signer.did();
 
-// The load-by-identity warm path: build + evaluate a pattern directly from
-// cached compiled modules (no TS source, no resolve, no recompile), and the
-// cold-recovery path: recreate the pattern from the stored TypeScript alone
-// (content-addressed source set) when the compiled set is unavailable — the
-// runtime-version-bump scenario.
 describe("load by module identity (warm + version-bump recovery)", () => {
+  // The load-by-identity warm path: build + evaluate a pattern directly from
+  // cached compiled modules (no TS source, no resolve, no recompile), and the
+  // cold-recovery path: recreate the pattern from the stored TypeScript alone
+  // (content-addressed source set) when the compiled set is unavailable — the
+  // runtime-version-bump scenario.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let engine: Engine;
@@ -166,6 +167,63 @@ describe("load by module identity (warm + version-bump recovery)", () => {
     );
     expect(await runPattern(result.main, 5, "recovered run")).toEqual({
       result: 10,
+    });
+  });
+
+  it("reconstructs a stored pattern an authoring gate now refuses", async () => {
+    // The 2026-08-25 estuary outage, pinned at its seam. This source's
+    // result declares a reserved key opaque — the shape every pre-`VNode`
+    // pattern stored, and the shape the opaque-reserved-key authoring gate
+    // now refuses. Admission stays refused (the first assertion). But the
+    // cold-recovery path reloads durable stored bytes nobody can re-author,
+    // under an identity pin that admits nothing new — a piece pinned to
+    // such a pattern must keep loading, or a new authoring rule bricks
+    // every deployed piece of an older shape at the next runtime-version
+    // bump: profiles fleet-wide, in the incident.
+    const legacy: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { NAME, pattern, lift } from 'commonfabric';",
+            "const dbl = lift((x:number)=>x*2);",
+            "export default pattern<{ value: number }, { [NAME]?: unknown; result: number }>(({ value }) => {",
+            "  return { result: dbl(value) };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    await expect(engine.compileToRecordGraph(legacy)).rejects.toThrow(
+      "declared `unknown`",
+    );
+
+    const storedSource: Source[] = legacy.files.map((f) => ({
+      name: f.name,
+      contents: f.contents,
+    }));
+    const recovered = await engine.compileResolvedToRecordGraph(
+      storedSource,
+      legacy.main,
+    );
+    // Deterministic under reconstruction: the demoted report changes no
+    // emitted byte, so the identity a second reconstruction computes is the
+    // one the first did — what the caller's stored-identity pin checks.
+    const again = await engine.compileResolvedToRecordGraph(
+      storedSource,
+      legacy.main,
+    );
+    expect(again.entryIdentity).toBe(recovered.entryIdentity);
+
+    const result = await engine.evaluateCachedModules(
+      toCached(recovered.modules),
+      recovered.entryIdentity,
+      { sourceFiles: storedSource },
+    );
+    expect(await runPattern(result.main, 6, "legacy reconstruction")).toEqual({
+      result: 12,
     });
   });
 
@@ -572,19 +630,20 @@ describe("load by module identity (warm + version-bump recovery)", () => {
   });
 });
 
-// CT-1838: pre-#4158 pipelines stored the helper-INJECTED pretransform form
-// as the source-of-record. The current guard rejects the reserved
-// `__cfHelpers` symbol, so without tolerance every pre-#4158 stored pattern
-// bricks on cold load — and, via the default pattern, all piece creation in
-// aged spaces. These tests pin the tolerance: exact-envelope stored docs
-// self-heal on load (T1/T2), the authoring guard is untouched (T3), the
-// tolerance is exact-envelope-only (T4), mixed and replicated closures work
-// (T5/T6/T9), and a new pattern can fabric-import a legacy one (T10).
-// Fixture shape is byte-calibrated against a REAL poisoned doc dumped
-// from the production space (see packages/ts-transformers/test/core/
-// legacy-envelope.test.ts): stored bytes = [HELPERS_STMT, source,
-// usedStmt].join("\n"), identities computed over the INJECTED bytes.
 describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
+  // CT-1838: pre-#4158 pipelines stored the helper-INJECTED pretransform form
+  // as the source-of-record. The current guard rejects the reserved
+  // `__cfHelpers` symbol, so without tolerance every pre-#4158 stored pattern
+  // bricks on cold load — and, via the default pattern, all piece creation in
+  // aged spaces. These tests pin the tolerance: exact-envelope stored docs
+  // self-heal on load (T1/T2), the authoring guard is untouched (T3), the
+  // tolerance is exact-envelope-only (T4), mixed and replicated closures work
+  // (T5/T6/T9), and a new pattern can fabric-import a legacy one (T10).
+  // Fixture shape is byte-calibrated against a REAL poisoned doc dumped
+  // from the production space (see packages/ts-transformers/test/core/
+  // legacy-envelope.test.ts): stored bytes = [HELPERS_STMT, source,
+  // usedStmt].join("\n"), identities computed over the INJECTED bytes.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   const runtimes: Runtime[] = [];
 
@@ -1047,9 +1106,14 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
     }
   });
 
-  // Companion negative-memo coverage: only failures explicitly classified
-  // after source verification may suppress later attempts. Every transient
-  // boundary is exercised by making the missing state arrive in-session.
+  //
+  // Companion negative-memo coverage
+  //
+  // Only failures explicitly classified after source verification may suppress
+  // later attempts. Every transient boundary is exercised by making the missing
+  // state arrive in-session.
+  //
+
   it("T8a: a deterministic compile failure is memoized", async () => {
     const rt = newRuntime();
     const nonEnvelope = "// leading comment\n" + injectCfHelpers(
@@ -1320,6 +1384,15 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
     );
     expect(typeof loaded).toBe("function");
   });
+
+  //
+  // Tolerance on the remaining load paths
+  //
+  // The T1-T6 battery drives the plain cold load. T9 crosses a JS-trailer
+  // module variant through that same path, and T10 the authoring path, which
+  // feeds storage-fetched mounts through its own `injectMountSources` call
+  // and so needs the tolerance in a second place.
+  //
 
   it("T9: JS-trailer variant (.jsx module) heals through the cold path", async () => {
     await ensureCompilerStack();

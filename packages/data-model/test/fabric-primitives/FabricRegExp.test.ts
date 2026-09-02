@@ -27,20 +27,18 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import {
   isValidFabricConvertibleValue,
   shallowFabricFromNativeValue,
-} from "@/fabric-value.ts";
+} from "@/index.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
-import { isValidFabricNativeObject } from "@/native-conversion.ts";
-import {
-  NATIVE_TAGS,
-  tagFromNativeClass,
-  tagFromNativeValue,
-} from "@/native-type-tags.ts";
+import { isValidFabricNativeObject } from "@/type-check.ts";
+import { tagFromNativeClass, tagFromNativeValue } from "@/native-type-tags.ts";
+import { VALUE_TAGS } from "@/VALUE_TAGS.ts";
 import { hashOf } from "@/value-hash.ts";
 
 describe("FabricRegExp", () => {
-  // Pure type-identity / supertype check: cross-cutting carve-out per the
-  // rule (doesn't fit a single member, isn't construction mechanics).
   it("extends `FabricPrimitive` (not `FabricInstance`)", () => {
+    // Pure type-identity / supertype check: cross-cutting carve-out per the
+    // rule (doesn't fit a single member, isn't construction mechanics).
+
     const re = new FabricRegExp(/abc/gi);
     expect(re instanceof FabricPrimitive).toBe(true);
     expect(re instanceof FabricInstance).toBe(false);
@@ -286,10 +284,11 @@ describe("FabricRegExp", () => {
     });
   });
 
-  // The following exercise free functions' handling of `FabricRegExp` /
-  // `RegExp` rather than members of the class itself, so they live directly
-  // under the class `describe()` (the cross-cutting carve-out).
   describe("round-trip via `jsonFromFabricValue()` / `fabricFromJsonValue()`", () => {
+    // The following exercise free functions' handling of `FabricRegExp` /
+    // `RegExp` rather than members of the class itself, so they live directly
+    // under the class `describe()` (the cross-cutting carve-out).
+
     it("round-trips a `FabricRegExp`", () => {
       const original = new FabricRegExp(/hello\s+world/gim);
       const restored = fabricFromJsonValue(
@@ -344,13 +343,13 @@ describe("FabricRegExp", () => {
   describe("tag functions", () => {
     describe("tagFromNativeValue()", () => {
       it("returns the `RegExp` tag for `RegExp` instances", () => {
-        expect(tagFromNativeValue(/abc/)).toBe(NATIVE_TAGS.RegExp);
+        expect(tagFromNativeValue(/abc/)).toBe(VALUE_TAGS.RegExp);
       });
     });
 
     describe("tagFromNativeClass()", () => {
       it("returns the `RegExp` tag for the `RegExp` constructor", () => {
-        expect(tagFromNativeClass(RegExp)).toBe(NATIVE_TAGS.RegExp);
+        expect(tagFromNativeClass(RegExp)).toBe(VALUE_TAGS.RegExp);
       });
     });
 

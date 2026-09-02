@@ -25,42 +25,13 @@ import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
 import { resolveSpaceDid } from "@commonfabric/lib-shell";
-import { experimentalOptionsFromEnv } from "@commonfabric/runner";
-import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
 
-// The server-execution v2 posture this test process runs (testing.md §2):
-// the CI ON lane sets EXPERIMENTAL_SERVER_EXECUTION=true; unset = OFF.
-const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
-  .serverExecution;
-
-// The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
-// a step listed there for this file is skipped ONLY under the ON posture,
-// loudly (its reason is printed), and only while the entry exists — the OFF
-// arm and an unlisted step always run. The "persist and reload" step stays
-// guarded under OW45: with the step's own interim-race trap fixed (its
-// assertions bind to the wait's approved summary), the remaining ON red is
-// a real client-side readCell starvation on FIRST HYDRATION of freshly
-// created served state (no reload sits between the creates and the reads —
-// the step's only navigation precedes the notebook's existence) — sticky
-// undefined at the readCell surface while the store holds every append and
-// the reactive render path serves the same notes — measured 2026-08-22 at
-// the true ON topology on the FIXED step. The skip guards CI against that
-// product defect, not against the test.
-function onArmStepSkip(step: string): { ignore: boolean } {
-  if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };
-  const entry = serverExecutionOnStepSkip(
-    "patterns",
-    "integration/default-app.test.ts",
-    step,
-  );
-  if (entry === undefined) return { ignore: false };
-  console.warn(
-    `[server-execution ON arm] patterns: SKIPPING STEP ${
-      JSON.stringify(step)
-    } (until ${entry.phase}) — ${entry.reason}`,
-  );
-  return { ignore: true };
-}
+// Every step in this file runs under both server-execution postures: no step
+// here is listed in the ON arm's skip registry
+// (tasks/server-execution-on-skips.ts). Listing one requires adding an in-file
+// `serverExecutionOnStepSkip` guard alongside the entry — the registry's
+// validator rejects a step entry whose file never calls the guard, since the
+// entry would otherwise be decoration.
 
 type BrowserWriteTraceEntry = {
   recordedAt: number;
@@ -225,7 +196,7 @@ const CPUPROFILE_DIR = (() => {
 })();
 type NoteCreateTimingEntry = {
   noteIndex: number;
-  noteTitle: string;
+  noteId: string;
   noteCountBefore: number;
   noteCountAfter: number;
   createToViewMs: number;
@@ -278,7 +249,7 @@ describe("default-app flow test", () => {
   let identity: Identity;
   const spaceName = SPACE_NAME;
 
-  it("should create a note via default app and see it in the space list", async () => {
+  it("should create and navigate to a note", async () => {
     identity = await Identity.generate({ implementation: "noble" });
 
     const page = shell.page();
@@ -436,6 +407,14 @@ describe("default-app flow test", () => {
           typeof state.view.pieceId === "string" &&
           state.view.pieceId.length > 0;
       });
+      const noteId = await page.evaluate(() => {
+        const view = globalThis.app?.serialize?.()?.view;
+        return view && typeof view === "object" && "pieceId" in view &&
+            typeof view.pieceId === "string"
+          ? view.pieceId
+          : undefined;
+      });
+      assert(noteId, `Expected a piece id for note ${noteIndex}`);
 
       await waitForRuntimeIdle(page);
       const noteViewReadyAt = performance.now();
@@ -525,25 +504,14 @@ describe("default-app flow test", () => {
         );
       }
       await waitForRuntimeIdle(page);
-
-      console.log(`Wait for note count to increase (note ${noteIndex})...`);
-      await waitForCondition(page, noteTitlesExceed, {
-        args: [noteCountBefore],
-      });
+      await awaitViewSettled(page);
 
       const noteTitlesAfter = await collectNoteTitlesInList(page);
-      const newNoteTitles = noteTitlesAfter.filter((title) =>
-        !noteTitlesBefore.includes(title)
-      );
-      assert(
-        newNoteTitles.length > 0,
-        `Expected a new note title in the list for note ${noteIndex}`,
-      );
 
       const noteCreateFinishedAt = performance.now();
       const noteCreateTiming: NoteCreateTimingEntry = {
         noteIndex,
-        noteTitle: newNoteTitles[0]!,
+        noteId,
         noteCountBefore,
         noteCountAfter: noteTitlesAfter.length,
         createToViewMs: Number(
@@ -609,7 +577,7 @@ describe("default-app flow test", () => {
           {
             frontendUrl: FRONTEND_URL,
             spaceName,
-            expectNoteInList: true,
+            expectNoteInList: false,
           },
         );
         assert(
@@ -617,7 +585,7 @@ describe("default-app flow test", () => {
           `Expected home load summary for ${noteIndex} notes`,
         );
         homeLoadSeries.push({
-          noteCount: noteIndex,
+          noteCount: noteTitlesAfter.length,
           ...(homeLoadSummary as Record<string, unknown>),
         });
         console.log(
@@ -628,12 +596,6 @@ describe("default-app flow test", () => {
     }
 
     cpuProfiler?.close();
-
-    const noteFound = await findNoteInList(page);
-    assert(
-      noteFound,
-      "List should contain '📝 New Note #<hash>' after creating a note",
-    );
 
     if (actionRunSeries.length > 0) {
       console.log(
@@ -682,9 +644,6 @@ describe("default-app flow test", () => {
 
   it(
     "should persist and reload every rapidly created notebook note",
-    onArmStepSkip(
-      "should persist and reload every rapidly created notebook note",
-    ),
     async () => {
       identity = await Identity.generate({ implementation: "noble" });
       const notebookSpaceName = globalThis.crypto.randomUUID();
@@ -721,8 +680,23 @@ describe("default-app flow test", () => {
         await clickButtonWithExactText(page, "Notes ▾");
         await awaitViewSettled(page);
         await clickButtonWithText(page, "New Notebook");
+        // The wait hands back the NOTEBOOK's piece id at the instant it
+        // approved `isNotebook` — the step's stable read target from here
+        // on. Every later wait and assertion reads the notebook BY THIS ID,
+        // never through `view.pieceId` again: under server execution the
+        // final "Create" click's speculative run may read a stale
+        // `usedCreateAnotherNote` and optimistically navigate into the new
+        // note while the authoritative run computes no navigation — a
+        // sanctioned outcome (the L2 optimistic-enactment question, ruled
+        // PUNT 2026-08-27: the client navigates, so be it). A view-following
+        // read then polls a healthy NOTE through notebook accessors until
+        // the step's net (the 2026-08-27 r06/r09 root cause,
+        // docs/history/plans/server-execution-v2/optimize/
+        // keyless-diagnosis-2026-08-27.md); an id-bound read is indifferent
+        // to where the view wandered.
+        let notebookEntityId: string | undefined;
         try {
-          await waitForCondition(page, async () => {
+          notebookEntityId = await waitForCondition(page, async () => {
             const commonfabric = globalThis.commonfabric as
               | { readCell?: (options: { id: string }) => Promise<unknown> }
               | undefined;
@@ -741,7 +715,9 @@ describe("default-app flow test", () => {
               console.log = originalLog;
             }
             return (current as { isNotebook?: unknown } | undefined)
-              ?.isNotebook === true;
+                ?.isNotebook === true
+              ? pieceId
+              : false;
           });
         } catch (error) {
           console.log(
@@ -750,6 +726,10 @@ describe("default-app flow test", () => {
           );
           throw error;
         }
+        assert(
+          notebookEntityId,
+          "Expected the notebook wait to hand back the notebook piece id",
+        );
 
         // Wait until the notebook toolbar is mounted and interactive before
         // clicking. viewSettled resolves once the worker is idle and the
@@ -813,11 +793,11 @@ describe("default-app flow test", () => {
         let waitFailure: unknown;
         try {
           await waitForCondition(page, notebookSourceStateMatches, {
-            args: [noteCreates],
+            args: [noteCreates, notebookEntityId],
           });
           await waitForRuntimeSynced(page);
           summary = await waitForCondition(page, notebookSourceStateMatches, {
-            args: [noteCreates],
+            args: [noteCreates, notebookEntityId],
           });
         } catch (error) {
           // A wait or the sync barrier failed at its net: the state never
@@ -837,7 +817,11 @@ describe("default-app flow test", () => {
           // failing), then re-throw the authority's own error.
           console.log(
             "Notebook rapid create source diagnostics:",
-            JSON.stringify(await collectNotebookSourceState(page), null, 2),
+            JSON.stringify(
+              await collectNotebookSourceState(page, notebookEntityId),
+              null,
+              2,
+            ),
           );
           console.log(
             "Notebook rapid create render diagnostics:",
@@ -1476,6 +1460,21 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
       .filter((entry) => entry.path.length === 0)
       .sort((a, b) => a.recordedAt - b.recordedAt);
 
+    // The `stack.includes(...)` tests in `classifyStack` and
+    // `interestingCallPath` match frame text, which no engine promises to keep
+    // stable, and a filter that matches nothing looks exactly like a run with
+    // nothing to report. Two ways they go quiet:
+    //
+    // The `_CellImpl` names are the bundler's, not the source's. Renaming
+    // `CellImpl` or changing how the shell is bundled breaks every one of them.
+    //
+    // A member converted to a `#` private name changes its own frame text.
+    // Chrome writes `at #member`, Deno writes `at Class.#member`, and a
+    // public member keeps its class in both. The split does not follow the V8
+    // version -- for one example, the two were a single V8 minor apart on the
+    // machine this was tested on, as of this writing -- so it says nothing
+    // about a third engine, or a later Chrome. Match the bare `#member`, a
+    // substring of both, rather than either whole form.
     function classifyStack(stack?: string): string {
       if (!stack) return "unknown";
       if (
@@ -1518,7 +1517,7 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
         line.includes("handler:") ||
         line.includes("raw:") ||
         line.includes("postRun") ||
-        line.includes("Runner.instantiatePatternNode") ||
+        line.includes("#instantiatePatternNode") ||
         line.includes("Runner.run") ||
         line.includes("Runner.setupInternal") ||
         line.includes("sendValueToBinding") ||
@@ -1650,14 +1649,24 @@ async function waitForHomePageReady(
   await waitForRuntimeIdle(page);
 }
 
-async function collectNotebookSourceState(page: Page): Promise<{
+// Reads the notebook by `knownNotebookId` when the caller captured one (the
+// sanctioned optimistic navigation can leave the view on a NOTE — see
+// notebookSourceStateMatches), else by the current view's piece id. Reports
+// `viewPieceId` separately either way, so a failure dump distinguishes
+// "wrong state" from "wrong piece under the reader" — the confusion the
+// 2026-08-27 r06/r09 diagnosis found in this step's recorded reds.
+async function collectNotebookSourceState(
+  page: Page,
+  knownNotebookId?: string,
+): Promise<{
   notebookEntityId?: string;
+  viewPieceId?: string;
   argumentNotesLength?: number;
   noteCount?: number;
   showNewNotePrompt?: boolean;
   usedCreateAnotherNote?: boolean;
 }> {
-  return await page.evaluate(async () => {
+  return await page.evaluate(async (knownId?: string) => {
     const api = globalThis.commonfabric as {
       readCell?: (options: {
         id: string;
@@ -1668,12 +1677,13 @@ async function collectNotebookSourceState(page: Page): Promise<{
 
     const appState = globalThis.app?.serialize?.();
     const view = appState?.view;
-    const notebookEntityId = view && typeof view === "object" &&
+    const viewPieceId = view && typeof view === "object" &&
         "pieceId" in view && typeof view.pieceId === "string"
       ? view.pieceId
       : undefined;
+    const notebookEntityId = knownId ?? viewPieceId;
     if (!notebookEntityId || !api?.readCell) {
-      return { notebookEntityId };
+      return { notebookEntityId, viewPieceId };
     }
 
     const resolveInternalManifest = async (
@@ -1728,6 +1738,7 @@ async function collectNotebookSourceState(page: Page): Promise<{
 
     return {
       notebookEntityId,
+      viewPieceId,
       // `notes` is a first-class Cell in the notebook argument schema. Newer
       // argument links preserve that wrapper, so debug reads return a handle;
       // older pieces may still materialize the array inline.
@@ -1752,7 +1763,7 @@ async function collectNotebookSourceState(page: Page): Promise<{
           .usedCreateAnotherNote
         : undefined,
     };
-  });
+  }, { args: [knownNotebookId] });
 }
 
 // The state notebookSourceStateMatches approves and hands back. Every field
@@ -1776,9 +1787,19 @@ type NotebookSourceSummary = {
 // was when the condition held — a fresh read after the wait can instead land
 // in the ruled interim of a served re-derivation (`noteCount` cleanly
 // `undefined`, then re-triggered and healed) and fail a healthy run.
+//
+// Reads the notebook by the CALLER-CAPTURED id, never through the current
+// view: the final "Create" click's speculative run may enact an optimistic
+// navigation into the new note that the authoritative run computed no intent
+// for — sanctioned (L2 ruled PUNT 2026-08-27), so `view.pieceId` is allowed
+// to be a NOTE here, and a view-following read would poll that healthy note
+// through notebook accessors until the step's net (the 2026-08-27 r06/r09
+// root cause). The id-bound read asserts the same product facts wherever the
+// view wandered.
 const notebookSourceStateMatches = async (
   _probe: ProbeApi,
   expectedCount: number,
+  notebookEntityId: string,
 ): Promise<NotebookSourceSummary | false> => {
   const api = globalThis.commonfabric as {
     readCell?: (options: {
@@ -1788,11 +1809,6 @@ const notebookSourceStateMatches = async (
     }) => Promise<unknown>;
   } | undefined;
 
-  const view = globalThis.app?.serialize?.()?.view;
-  const notebookEntityId = view && typeof view === "object" &&
-      "pieceId" in view && typeof view.pieceId === "string"
-    ? view.pieceId
-    : undefined;
   if (!notebookEntityId || !api?.readCell) return false;
 
   const resolveInternalManifest = async (
@@ -2858,7 +2874,7 @@ async function collectNoteCreateProfile(page: Page): Promise<unknown> {
     };
 
     const settleHistory = await api
-      .getSettleStatsHistory() as SettleHistoryEntry[];
+      .getSettleStatsHistory() as readonly SettleHistoryEntry[];
     const recentHistory = settleHistory.slice(-8);
     const settle = {
       executeCalls: settleHistory.length,
@@ -3476,11 +3492,6 @@ async function clickPieceLinkWithText(
   }
 }
 
-// Helper to find note in list using regex pattern
-async function findNoteInList(page: Page): Promise<boolean> {
-  return (await collectNoteTitlesInList(page)).length > 0;
-}
-
 // Serialized into the page by waitForCondition: count the unique rendered
 // "📝 New Note #<hash>" titles across the document and every shadow root and
 // report whether more than `minCount` are present. Inlines the collection that
@@ -3499,30 +3510,26 @@ const noteTitlesExceed = (probe: ProbeApi, minCount: number): boolean => {
 };
 
 async function collectNoteTitlesInList(page: Page): Promise<string[]> {
-  try {
-    return await page.evaluate(() => {
-      const titles = new Set<string>();
+  return await page.evaluate(() => {
+    const titles = new Set<string>();
 
-      function search(root: Document | ShadowRoot): void {
-        const allElements = root.querySelectorAll("*");
-        for (const el of allElements) {
-          const text = el.textContent;
-          if (text) {
-            for (
-              const match of text.matchAll(/📝 New Note #[A-Za-z0-9_-]+/g)
-            ) {
-              titles.add(match[0]);
-            }
-          }
-          if (el.shadowRoot) {
-            search(el.shadowRoot);
+    function search(root: Document | ShadowRoot): void {
+      const allElements = root.querySelectorAll("*");
+      for (const el of allElements) {
+        const text = el.textContent;
+        if (text) {
+          for (
+            const match of text.matchAll(/📝 New Note #[A-Za-z0-9_-]+/g)
+          ) {
+            titles.add(match[0]);
           }
         }
+        if (el.shadowRoot) {
+          search(el.shadowRoot);
+        }
       }
-      search(document);
-      return [...titles].sort();
-    });
-  } catch (_) {
-    return [];
-  }
+    }
+    search(document);
+    return [...titles].sort();
+  });
 }

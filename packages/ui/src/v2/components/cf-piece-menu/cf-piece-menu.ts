@@ -25,16 +25,26 @@ import type {
   PieceSourceRevisionSourceView,
   PieceSourceRevisionView,
   PieceSourceView,
+  RuntimeClient,
   SpaceAclCapability,
   SpaceAclView,
 } from "@commonfabric/runtime-client";
-import { css, html, nothing, type TemplateResult } from "lit";
+import {
+  css,
+  html,
+  nothing,
+  type PropertyValues,
+  type TemplateResult,
+} from "lit";
 import { state } from "lit/decorators.js";
 import { live } from "lit/directives/live.js";
 
 import { BaseElement } from "../../core/base-element.ts";
 import {
+  describeFollowState,
   describeOrigin,
+  describeSourceFailure,
+  type FollowDescription,
   formatTimestamp,
   shortIdentity,
 } from "./origin-view.ts";
@@ -48,8 +58,10 @@ export type Panel = "source" | "origin" | "data" | "actions" | "access";
 /** One entry in the menu, and the panel it opens. */
 interface MenuEntry {
   label: string;
+
   /** Stable hook for tests, exposed as the entry's `test-id`. */
   testId: string;
+
   panel: Panel;
 }
 
@@ -189,13 +201,9 @@ function toDisplay(
   // from enumerable properties it does not have, so a `FabricBytes` in an
   // argument or result renders as `{}`. The guard wants to be a shape test
   // (`isPlainObject`) with the special objects named by
-  // `toCompactDebugString()` instead of descended.
-  //
-  // Note this is the second place such a value is lost, not the first: it
-  // reaches the client through `postMessage`, and structured clone drops the
-  // prototype and private fields on the way. Fixing this alone changes a `{}`
-  // into a `{}` until the wire carries one, which `codec-realm` is the
-  // mechanism for.
+  // `toCompactDebugString()` instead of descended. The value arrives intact --
+  // the connection carries it as a `codec-realm` encoding, class and all -- so
+  // this walk is the only place it is lost.
   if (typeof value === "object" && value !== null) {
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
@@ -212,9 +220,12 @@ function toDisplay(
 /** One dispatchable handler stream found on the piece. */
 export interface PieceAction {
   name: string;
+
   /** Which side of the piece carries it. */
   source: "result" | "argument";
+
   handle: CellHandle;
+
   /**
    * The event schema the handler declares, when one is known: the schema a
    * stream handle read through the piece's schema carries is the handler's
@@ -234,11 +245,16 @@ export function payloadHint(action: PieceAction): string | undefined {
 }
 
 /**
- * CFPieceMenu — the menu a right-click on a piece opens, with the panels for
- * what it can show and do about that piece: its authored source, the origin
- * and history it records, its live argument and result data, and the handler
- * streams an event can be dispatched to. It also shows the containing space's
- * access rights and lets space owners change them.
+ * CFPieceMenu — the menu a right-click opens on a space, and usually on a
+ * piece in it. Its piece entries hold the panels for what it can show and do
+ * about that piece: the authored source, the origin and history it records,
+ * the live argument and result data, and the handler streams an event can be
+ * dispatched to. Below a divider it names the space and shows its access
+ * rights, which space owners can change.
+ *
+ * Opened on a space alone — over a surface no piece loaded into — the first
+ * heading reads "Piece unavailable", every entry needing a piece is disabled,
+ * and the space entries stay live.
  *
  * @element cf-piece-menu
  *
@@ -276,6 +292,18 @@ export class CFPieceMenu extends BaseElement {
       background: rgba(0, 0, 0, 0.32);
     }
 
+    /* A dialog raised over an open panel, and the backdrop that separates the
+      two. Both sit above the panel's own layer so the panel stays visible
+      and inert behind them. */
+    .backdrop.stacked {
+      z-index: 3;
+    }
+
+    .panel.stacked {
+      z-index: 4;
+      width: min(34rem, 92vw);
+    }
+
     .menu {
       position: absolute;
       z-index: 2;
@@ -301,7 +329,12 @@ export class CFPieceMenu extends BaseElement {
       white-space: nowrap;
     }
 
-    .menu-item:hover,
+    .menu-item:disabled {
+      cursor: default;
+      opacity: 0.55;
+    }
+
+    .menu-item:enabled:hover,
     .menu-item:focus-visible {
       background: var(--cf-theme-color-surface-hover, rgba(0, 0, 0, 0.06));
     }
@@ -420,6 +453,16 @@ export class CFPieceMenu extends BaseElement {
 
     .panel-close:hover {
       background: var(--cf-theme-color-surface-hover, rgba(0, 0, 0, 0.06));
+    }
+
+    .panel-foot {
+      display: flex;
+      flex: none;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      padding: 0.875rem 1.25rem;
+      border-top: 1px solid var(--cf-theme-color-border, rgba(0, 0, 0, 0.1));
     }
 
     .panel-body {
@@ -703,6 +746,61 @@ export class CFPieceMenu extends BaseElement {
       font-size: 0.75rem;
     }
 
+    .follow-state {
+      margin: 1rem 0;
+      padding: 0.75rem;
+      border: 1px solid var(--cf-theme-color-error, #b91c1c);
+      border-radius: 8px;
+      font-size: 0.75rem;
+    }
+
+    .follow-state.note-state {
+      border-color: var(--cf-theme-color-border, rgba(0, 0, 0, 0.15));
+    }
+
+    .follow-state p {
+      margin: 0 0 0.625rem;
+    }
+
+    .follow-state p:last-child {
+      margin-bottom: 0;
+    }
+
+    /* A compiler's report arrives with its own line breaks, and keeping them
+      is what makes it readable. Only this line keeps them: elsewhere the
+      template's own indentation would come through with them. */
+    .follow-reason {
+      font-family: var(--cf-theme-font-mono, "SF Mono", monospace);
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    .follow-reason span {
+      font-family: var(--cf-theme-font-family, sans-serif);
+      color: var(--cf-theme-color-text-muted, #6b7280);
+    }
+
+    .source-actions {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin: 1rem 0 0;
+    }
+
+    .origin-entry-label {
+      display: block;
+      font-size: 0.8125rem;
+      color: var(--cf-theme-color-text-muted, #6b7280);
+    }
+
+    .origin-entry-input {
+      display: block;
+      width: 100%;
+      margin-top: 0.75rem;
+      box-sizing: border-box;
+    }
+
     .warning p {
       margin: 0 0 0.625rem;
       white-space: pre-wrap;
@@ -785,14 +883,24 @@ export class CFPieceMenu extends BaseElement {
     }
   `;
 
-  /** The piece the menu addresses. */
+  /** The space the menu addresses. */
+  declare space?: DID;
+
+  /** The runtime the space is read and changed through. */
+  declare runtime?: RuntimeClient;
+
+  /** The piece the menu addresses, when it was opened over one. */
   declare cell?: CellHandle;
 
-  /** Where the click landed, in client coordinates. */
+  /** Client X coordinate of where the click landed. */
   declare x: number;
+
+  /** Client Y coordinate, read the same way. */
   declare y: number;
 
   static override properties = {
+    space: { attribute: false },
+    runtime: { attribute: false },
     cell: { attribute: false },
     x: { attribute: false },
     y: { attribute: false },
@@ -870,6 +978,12 @@ export class CFPieceMenu extends BaseElement {
       confirmationToken: string;
     }
     | undefined = undefined;
+
+  @state()
+  private accessor originEntryOpen = false;
+
+  @state()
+  private accessor originEntryUrl = "";
 
   @state()
   private accessor spaceAccess: SpaceAclView | undefined = undefined;
@@ -969,10 +1083,17 @@ export class CFPieceMenu extends BaseElement {
     super.disconnectedCallback();
   }
 
-  /** Show the menu for `cell` at a click position. */
+  /**
+   * Show the menu at a click position, over `cell` when the click landed on a
+   * piece. A caller with no piece to name — a surface one failed to load into
+   * — passes the space and the runtime instead, and the menu offers what it
+   * can reach without a piece.
+   */
   open(
-    { cell, x, y, highlightedPiece, highlightTarget }: {
-      cell: CellHandle;
+    { cell, space, runtime, x, y, highlightedPiece, highlightTarget }: {
+      cell?: CellHandle;
+      space?: DID;
+      runtime?: RuntimeClient;
       x: number;
       y: number;
       highlightedPiece?: Element;
@@ -980,15 +1101,23 @@ export class CFPieceMenu extends BaseElement {
     },
   ): void {
     if (this.clonePending) return;
+    // The host covers the viewport while the menu is up, so a menu that would
+    // show nothing has to stay down rather than sit over the page unseen.
+    if (!cell && !space) {
+      this.close();
+      return;
+    }
     const target = highlightTarget ?? highlightedPiece;
     if (
-      highlightedPiece && target && target !== highlightedPiece &&
+      cell && highlightedPiece && target && target !== highlightedPiece &&
       !this.#elementRepresentsPiece(target, cell)
     ) {
       this.close();
       return;
     }
     this.cell = cell;
+    this.space = cell ? cell.space() : space;
+    this.runtime = cell ? cell.runtime() : runtime;
     this.#setHighlightedPiece(highlightedPiece, target);
     this.x = x;
     this.y = y;
@@ -1008,16 +1137,18 @@ export class CFPieceMenu extends BaseElement {
     this.sourceActionError = undefined;
     this.sourceExecutionWarning = undefined;
     this.compatibilityWarning = undefined;
+    this.#closeOriginEntry();
     this.#resetAccessState();
     this.sourceActionToken++;
     this.readToken++;
     this.hidden = false;
-    void this.#readSource(cell);
+    if (cell) void this.#readSource(cell);
   }
 
   /**
-   * Hides the menu and forgets its piece. A clone progress dialog remains
-   * mounted until the request settles so it can report failure or navigate.
+   * Hides the menu and forgets what it addressed. A clone progress dialog
+   * remains mounted until the request settles so it can report failure or
+   * navigate.
    */
   close(): void {
     if (this.clonePending) return;
@@ -1025,6 +1156,8 @@ export class CFPieceMenu extends BaseElement {
     this.hidden = true;
     this.panel = undefined;
     this.cell = undefined;
+    this.space = undefined;
+    this.runtime = undefined;
     this.source = undefined;
     this.#resetRevisionSource();
     this.#resetPieceState();
@@ -1037,6 +1170,7 @@ export class CFPieceMenu extends BaseElement {
     this.sourceActionError = undefined;
     this.sourceExecutionWarning = undefined;
     this.compatibilityWarning = undefined;
+    this.#closeOriginEntry();
     this.#resetAccessState();
     this.sourceActionToken++;
     this.readToken++;
@@ -1316,8 +1450,11 @@ export class CFPieceMenu extends BaseElement {
   #onKeyDown = (e: KeyboardEvent) => {
     if (this.hidden || e.key !== "Escape") return;
     e.preventDefault();
-    // Escape steps back from a panel to the menu, then closes.
-    if (this.panel) {
+    // Escape dismisses the topmost thing first: the origin dialog, then a
+    // panel back to the menu, then the menu.
+    if (this.originEntryOpen) {
+      if (!this.sourceActionPending) this.#closeOriginEntry();
+    } else if (this.panel) {
       this.panel = undefined;
       this.#resetRevisionSource();
     } else this.close();
@@ -1347,6 +1484,11 @@ export class CFPieceMenu extends BaseElement {
     this.panel = panel;
     this.selectedFile = 0;
     this.#resetRevisionSource();
+    // The access panel is addressed by space; every other panel by piece.
+    if (panel === "access") {
+      await this.#readSpaceAccess();
+      return;
+    }
     const cell = this.cell;
     if (!cell) return;
     if (panel === "data" || panel === "actions") {
@@ -1355,27 +1497,25 @@ export class CFPieceMenu extends BaseElement {
       await this.#readPieceState(cell);
       return;
     }
-    if (panel === "access") {
-      await this.#readSpaceAccess(cell);
-      return;
-    }
     if (this.source !== undefined) return;
     await this.#readSource(cell);
   }
 
-  #readSpaceAccess(cell: CellHandle): Promise<void> {
-    this.accessRead ??= this.#performSpaceAccessRead(cell);
+  #readSpaceAccess(): Promise<void> {
+    this.accessRead ??= this.#performSpaceAccessRead();
     return this.accessRead;
   }
 
-  async #performSpaceAccessRead(cell: CellHandle): Promise<void> {
+  async #performSpaceAccessRead(): Promise<void> {
+    const { runtime, space } = this;
+    if (!runtime || !space) return;
     const token = this.readToken;
     try {
-      const access = await cell.runtime().getSpaceAcl(cell.space());
+      const access = await runtime.getSpaceAcl(space);
       if (token !== this.readToken) return;
       this.spaceAccess = access;
     } catch (error) {
-      if (token !== this.readToken || cell.runtime().signal.aborted) return;
+      if (token !== this.readToken || runtime.signal.aborted) return;
       this.accessError = error instanceof Error ? error.message : String(error);
     }
   }
@@ -1385,17 +1525,20 @@ export class CFPieceMenu extends BaseElement {
     user: string,
     capability: SpaceAclCapability,
   ): Promise<void> {
-    const cell = this.cell;
+    const { runtime, space } = this;
     const normalizedUser = user.trim();
-    if (!cell || this.accessActionPending || normalizedUser.length === 0) {
+    if (
+      !runtime || !space || this.accessActionPending ||
+      normalizedUser.length === 0
+    ) {
       return;
     }
     const token = this.readToken;
     this.accessActionPending = true;
     this.accessError = undefined;
     try {
-      const access = await cell.runtime().setSpaceAclEntry(
-        cell.space(),
+      const access = await runtime.setSpaceAclEntry(
+        space,
         normalizedUser,
         capability,
       );
@@ -1405,7 +1548,7 @@ export class CFPieceMenu extends BaseElement {
         this.newAccessUser = "";
       }
     } catch (error) {
-      if (token !== this.readToken || cell.runtime().signal.aborted) return;
+      if (token !== this.readToken || runtime.signal.aborted) return;
       this.accessError = error instanceof Error ? error.message : String(error);
     } finally {
       if (token === this.readToken) this.accessActionPending = false;
@@ -1414,25 +1557,61 @@ export class CFPieceMenu extends BaseElement {
 
   /** Remove one explicit entry from the current space's ACL. */
   async removeSpaceAccessEntry(user: string): Promise<void> {
-    const cell = this.cell;
-    if (!cell || this.accessActionPending) return;
+    const { runtime, space } = this;
+    if (!runtime || !space || this.accessActionPending) return;
     const token = this.readToken;
     this.accessActionPending = true;
     this.accessError = undefined;
     try {
-      const access = await cell.runtime().removeSpaceAclEntry(
-        cell.space(),
-        user,
-      );
+      const access = await runtime.removeSpaceAclEntry(space, user);
       if (token !== this.readToken) return;
       this.spaceAccess = access;
     } catch (error) {
-      if (token !== this.readToken || cell.runtime().signal.aborted) return;
+      if (token !== this.readToken || runtime.signal.aborted) return;
       this.accessError = error instanceof Error ? error.message : String(error);
     } finally {
       if (token === this.readToken) this.accessActionPending = false;
     }
   }
+
+  /** Ask for an origin, starting from an empty field and no stale error. */
+  #openOriginEntry(): void {
+    this.originEntryUrl = "";
+    this.sourceActionError = undefined;
+    this.originEntryOpen = true;
+  }
+
+  /**
+   * Put the origin dialog away, discarding what was typed into it and
+   * whatever answer that produced. The failure and the warning belong to the
+   * dialog: surfacing either on the panel behind it, once the question they
+   * answer is gone, reads as a fresh problem with the piece.
+   */
+  #closeOriginEntry(): void {
+    this.originEntryOpen = false;
+    this.originEntryUrl = "";
+    this.sourceActionError = undefined;
+    this.compatibilityWarning = undefined;
+  }
+
+  #onOriginEntryUrl = (event: Event): void => {
+    this.originEntryUrl = (event.currentTarget as HTMLInputElement).value;
+    // Both answers were about the URL that was there before.
+    this.sourceActionError = undefined;
+    this.compatibilityWarning = undefined;
+  };
+
+  #followEnteredOrigin = (event: SubmitEvent): void => {
+    event.preventDefault();
+    const url = this.originEntryUrl.trim();
+    if (url.length === 0) return;
+    const warning = this.compatibilityWarning;
+    if (warning !== undefined) {
+      void this.changeSource(warning.action, warning.confirmationToken);
+      return;
+    }
+    void this.changeSource({ kind: "repoint", url });
+  };
 
   #onNewAccessUser = (event: Event): void => {
     this.newAccessUser = (event.currentTarget as HTMLInputElement).value;
@@ -1789,6 +1968,7 @@ export class CFPieceMenu extends BaseElement {
       } else {
         this.compatibilityWarning = undefined;
         this.sourceExecutionWarning = response.executionWarning;
+        this.#closeOriginEntry();
         this.panel = "origin";
       }
     } catch (error) {
@@ -1799,10 +1979,51 @@ export class CFPieceMenu extends BaseElement {
         ? error.message
         : String(error);
       this.panel = "origin";
+      // A failed attempt still records what it concluded — an origin that
+      // could not be reached is a state of the piece, not just of this
+      // request — so the panel reads the piece again rather than going on
+      // showing what it knew before the attempt.
+      await this.#rereadSource(cell, actionToken);
     } finally {
       if (actionToken === this.sourceActionToken) {
         this.sourceActionPending = false;
       }
+    }
+  }
+
+  /**
+   * Take what the active origin offers now, accepting an incompatible contract
+   * without stopping to ask.
+   *
+   * The check still runs, and what it finds is applied through the same
+   * one-use confirmation a reviewed override uses, so the source that lands is
+   * the exact one the check reviewed. A candidate whose contract the piece's
+   * stored data cannot satisfy is still refused: that is not a warning to
+   * accept, it is source the piece cannot run.
+   */
+  async forceUpdateFromOrigin(): Promise<void> {
+    await this.changeSource({ kind: "adopt" });
+    const warning = this.compatibilityWarning;
+    if (warning === undefined) return;
+    await this.changeSource(warning.action, warning.confirmationToken);
+  }
+
+  /**
+   * Read the piece's source state again, leaving the panel as it was if the
+   * read fails or another action has since started. A refresh that cannot
+   * happen is not worth reporting: the caller is already reporting why the
+   * action did not.
+   */
+  async #rereadSource(cell: CellHandle, actionToken: number): Promise<void> {
+    try {
+      const source = await cell.runtime().getPieceSource(
+        cell.id(),
+        cell.space(),
+      );
+      if (actionToken === this.sourceActionToken) this.source = source;
+    } catch {
+      // Keeping the previous view is the fallback, and the action's own
+      // failure is what the panel is showing.
     }
   }
 
@@ -1849,14 +2070,46 @@ export class CFPieceMenu extends BaseElement {
     }
   }
 
+  protected override updated(changed: PropertyValues): void {
+    super.updated(changed);
+    this.#placeMenu();
+  }
+
+  /**
+   * Put the open menu at the click, pulled back inside the viewport by as much
+   * as it hangs over an edge. The menu is measured at the top left corner,
+   * where the whole viewport is available to it, so the box it reports is the
+   * one it occupies wherever it lands: the clamp never puts it anywhere with
+   * less room than it was measured in.
+   */
+  #placeMenu(): void {
+    const menu = this.shadowRoot?.querySelector<HTMLElement>(".menu");
+    if (!menu) return;
+    menu.style.left = "4px";
+    menu.style.top = "4px";
+    const { width, height } = menu.getBoundingClientRect();
+    const left = Math.max(
+      4,
+      Math.min(this.x, globalThis.innerWidth - width - 4),
+    );
+    const top = Math.max(
+      4,
+      Math.min(this.y, globalThis.innerHeight - height - 4),
+    );
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+
   protected override render() {
-    if (this.hidden || !this.cell) return nothing;
+    if (this.hidden || (!this.cell && !this.space)) return nothing;
     return html`
       ${this.#renderNestedHighlight()} ${this.cloneMode !== undefined
         ? this.#renderCloneDialog()
         : this.panel
         ? this.#renderPanel(this.panel)
-        : this.#renderMenu()}
+        : this.#renderMenu()} ${this.originEntryOpen
+        ? this.#renderOriginEntryDialog()
+        : nothing}
     `;
   }
 
@@ -1878,34 +2131,33 @@ export class CFPieceMenu extends BaseElement {
   }
 
   #renderMenu(): TemplateResult {
-    // Keep the menu inside the viewport: a click near the right or bottom edge
-    // clamps it back into view.
-    const entries = pieceMenuEntries(this.source?.origin !== undefined);
-    const width = 240;
-    const height = 49 + (entries.length + 1) * 34;
-    const left = Math.max(
-      4,
-      Math.min(this.x, globalThis.innerWidth - width - 4),
+    // A piece carrying an origin nothing can follow gets the detach entry too:
+    // detaching is what repairs it.
+    const entries = pieceMenuEntries(
+      this.source?.origin !== undefined ||
+        this.source?.unusableOrigin !== undefined,
     );
-    const top = Math.max(
-      4,
-      Math.min(this.y, globalThis.innerHeight - height - 4),
-    );
+    // The menu renders in the corner, which is where `#placeMenu` measures it.
+    // That measurement and the move to the click both happen within the
+    // update, so the corner is never painted.
     return html`
       <div
         class="backdrop"
         @click="${() => this.close()}"
         @contextmenu="${this._onBackdropContextMenu}"
       ></div>
-      <div class="menu" role="menu" style="left: ${left}px; top: ${top}px">
-        <div class="menu-title">Piece ${this.cell!.id()}</div>
+      <div class="menu" role="menu" style="left: 4px; top: 4px">
+        <div class="menu-title">
+          ${this.cell ? `Piece ${this.cell.id()}` : "Piece unavailable"}
+        </div>
         ${entries.map((entry) =>
           html`
             <button
               class="menu-item"
               role="menuitem"
               test-id="${entry.testId}"
-              ?disabled="${this.sourceActionPending || this.clonePending}"
+              ?disabled="${!this.cell || this.sourceActionPending ||
+                this.clonePending}"
               @click="${() =>
                 "panel" in entry
                   ? this.showPanel(entry.panel)
@@ -1920,10 +2172,14 @@ export class CFPieceMenu extends BaseElement {
           `
         )}
         <div class="menu-divider" role="separator"></div>
+        <div class="menu-title">
+          ${this.space ? `Space ${this.space}` : "Space unavailable"}
+        </div>
         <button
           class="menu-item"
           role="menuitem"
           test-id="${SPACE_ACCESS_ENTRY.testId}"
+          ?disabled="${!this.runtime || !this.space}"
           @click="${() => this.showPanel(SPACE_ACCESS_ENTRY.panel)}"
         >
           ${SPACE_ACCESS_ENTRY.label}
@@ -1992,7 +2248,7 @@ export class CFPieceMenu extends BaseElement {
   #renderPanel(panel: Panel): TemplateResult {
     const title = PANEL_TITLES[panel];
     const subject = panel === "access"
-      ? this.cell?.space() ?? ""
+      ? this.space ?? ""
       : panel !== "source" || this.sourceRevision === undefined
       ? this.source?.name ?? this.cell?.id() ?? ""
       : `Pattern ${this.sourceRevision.pattern.identity} · ${this.sourceRevision.pattern.symbol}`;
@@ -2398,6 +2654,7 @@ export class CFPieceMenu extends BaseElement {
 
   #renderOrigin(source: PieceSourceView): TemplateResult {
     const origin = describeOrigin(source.origin);
+    const follow = describeFollowState(source);
     const originView = source.origin?.kind === "fabric-piece"
       ? fabricPieceNavigation(source.origin.url, source.space)
       : undefined;
@@ -2405,23 +2662,36 @@ export class CFPieceMenu extends BaseElement {
       <dl class="facts">
         <dt>Origin</dt>
         <dd class="prose">
-          ${origin.label}${source.origin
-            ? originView
-              ? html`
-                —
-                <a
-                  class="text-link"
-                  href="${navigationHref(originView)}"
-                  test-id="piece-source-origin-current"
-                  @click="${(event: MouseEvent) =>
-                    this.#navigate(event, originView)}"
-                ><code>${source.origin.url}</code></a>
-              `
-              : html`
-                — <code>${source.origin.url}</code>
-              `
-            : nothing}
-          <div class="note">${origin.detail}</div>
+          ${source.unusableOrigin
+            ? html`
+              Unusable origin —
+              <code>${source.unusableOrigin.recorded}</code>
+            `
+            : html`
+              ${origin.label}${source.origin
+                ? originView
+                  ? html`
+                    —
+                    <a
+                      class="text-link"
+                      href="${navigationHref(originView)}"
+                      test-id="piece-source-origin-current"
+                      @click="${(event: MouseEvent) =>
+                        this.#navigate(event, originView)}"
+                    ><code>${source.origin.url}</code></a>
+                  `
+                  : html`
+                    — <code>${source.origin.url}</code>
+                  `
+                : nothing}
+              <div class="note">${origin.detail}</div>
+            `}
+        </dd>
+        <dt>Source updates</dt>
+        <dd class="prose" test-id="piece-origin-follow-state">
+          ${follow.label}${follow.at === undefined
+            ? nothing
+            : ` · ${formatTimestamp(follow.at)}`}
         </dd>
         ${source.origin?.recorded
           ? html`
@@ -2484,7 +2754,8 @@ export class CFPieceMenu extends BaseElement {
           >${source.space}</a>
         </dd>
       </dl>
-      ${this.sourceActionError
+      ${this.#renderFollowState(follow)} ${this.sourceActionError &&
+          !this.originEntryOpen
         ? html`
           <p class="error">
             Could not change this piece's source: ${this.sourceActionError}
@@ -2497,9 +2768,12 @@ export class CFPieceMenu extends BaseElement {
               .sourceExecutionWarning}
           </p>
         `
-        : nothing} ${this.#renderCompatibilityWarning()} ${source.origin
-        ? html`
-          <p>
+        : nothing} ${this.originEntryOpen
+        ? nothing
+        : this.#renderCompatibilityWarning()}
+      <div class="source-actions">
+        ${source.origin !== undefined || source.unusableOrigin !== undefined
+          ? html`
             <button
               class="source-action"
               test-id="piece-origin-detach-source"
@@ -2508,9 +2782,196 @@ export class CFPieceMenu extends BaseElement {
             >
               Stop following source
             </button>
-          </p>
-        `
-        : nothing} ${this.#renderHistory(source)}
+          `
+          : nothing}
+        ${this.#renderOriginEntryOpener()}
+      </div>
+      ${this.#renderHistory(source)}
+    `;
+  }
+
+  /**
+   * What following the origin last did, and what can be done about it.
+   *
+   * Only the states with something to say get a box. A piece running what its
+   * origin offered has nothing wrong with it, and a piece that records no
+   * origin has nothing to say about one, so both are left to the facts above:
+   * a box with a button in it reads as a problem to fix. The states that may
+   * still come good on their own read as notes rather than as errors.
+   */
+  #renderFollowState(follow: FollowDescription) {
+    if (follow.state === "detached" || follow.state === "following") {
+      return nothing;
+    }
+    const offered = follow.offered;
+    const settled = follow.state === "refused" || follow.state === "unusable";
+    return html`
+      <div
+        class="follow-state ${settled ? "" : "note-state"}"
+        role="status"
+        test-id="piece-origin-follow-detail"
+      >
+        <p><strong>${follow.summary}</strong> ${follow.detail}</p>
+        ${follow.reason
+          // Written on one line: this paragraph keeps its whitespace, so the
+          // template's indentation would otherwise be rendered with it.
+          ? html`<p class="follow-reason"><span>Reason:</span> ${follow.reason}</p>`
+          : nothing} ${offered
+          ? html`
+            <p title="${offered.identity}">
+              The origin is offering ${shortIdentity(offered.identity)} ·
+              ${offered.symbol}.
+            </p>
+          `
+          : nothing}
+        ${follow.canUpdate
+          ? html`
+            <div class="warning-actions">
+              <button
+                test-id="piece-origin-update-now"
+                ?disabled="${this.sourceActionPending}"
+                @click="${() => this.changeSource({ kind: "adopt" })}"
+              >
+                Update from the origin now
+              </button>
+              ${follow.canForce
+                ? html`
+                  <button
+                    test-id="piece-origin-force-update"
+                    ?disabled="${this.sourceActionPending}"
+                    @click="${() => this.forceUpdateFromOrigin()}"
+                  >
+                    Update, ignoring the compatibility check
+                  </button>
+                `
+                : nothing}
+            </div>
+          `
+          : nothing}
+      </div>
+    `;
+  }
+
+  /**
+   * The control that asks for an origin. A piece with no origin gets it too:
+   * gaining one is the same operation as moving to another.
+   */
+  #renderOriginEntryOpener() {
+    return html`
+      <button
+        class="source-action"
+        test-id="piece-origin-enter-source"
+        ?disabled="${this.sourceActionPending}"
+        @click="${() => this.#openOriginEntry()}"
+      >
+        Follow another source...
+      </button>
+    `;
+  }
+
+  /**
+   * The dialog that moves a piece to an origin it has never followed. It sits
+   * over the origin panel rather than opening inside it: asking for a URL
+   * neither displaces the panel's own content nor puts a second Cancel beside
+   * the one an incompatibility warning offers.
+   *
+   * The origin is resolved and adopted when the dialog is submitted, so a URL
+   * nothing answers is reported here, with what was typed still in the field,
+   * rather than recorded on the piece.
+   */
+  #renderOriginEntryDialog(): TemplateResult {
+    const pending = this.sourceActionPending;
+    // A warning is an answer about the URL in the field, so the same submit
+    // accepts it. What the reader confirms is the candidate the check
+    // reviewed, not a fresh resolution of the origin.
+    const warning = this.compatibilityWarning;
+    const failure = this.sourceActionError === undefined
+      ? undefined
+      : describeSourceFailure(this.sourceActionError);
+    return html`
+      <div
+        class="backdrop dimmed stacked"
+        @click="${() => {
+          if (!pending) this.#closeOriginEntry();
+        }}"
+      ></div>
+      <form
+        class="panel stacked"
+        role="dialog"
+        aria-label="Follow another source"
+        test-id="piece-origin-entry"
+        @submit="${this.#followEnteredOrigin}"
+      >
+        <div class="panel-head">
+          <h2>Follow another source</h2>
+          <span class="subject">${this.source?.name ?? this.cell?.id() ??
+            ""}</span>
+        </div>
+        <div class="panel-body">
+          <label class="origin-entry-label" for="piece-origin-url">
+            The web or fabric URL this piece should follow. It is fetched when
+            you confirm, and this piece adopts the source found there.
+          </label>
+          <input
+            id="piece-origin-url"
+            class="access-input origin-entry-input"
+            test-id="piece-origin-url"
+            placeholder="https://... or cf:..."
+            .value="${this.originEntryUrl}"
+            ?disabled="${pending}"
+            @input="${this.#onOriginEntryUrl}"
+          />
+          ${failure
+            ? html`
+              <div class="warning" role="alert" test-id="piece-origin-failure">
+                <p>${failure.summary}</p>
+                <p class="follow-reason"><span>Reason:</span> ${failure
+                  .reason}</p>
+              </div>
+            `
+            : nothing} ${warning
+            ? html`
+              <div
+                class="warning"
+                role="alert"
+                test-id="piece-origin-entry-warning"
+              >
+                <p>
+                  This source changes the piece's data contract: ${warning
+                    .message}
+                </p>
+                <p>
+                  Following it anyway keeps the piece's data as it stands. The
+                  piece may not read all of it.
+                </p>
+              </div>
+            `
+            : nothing}
+        </div>
+        <div class="panel-foot">
+          <button
+            class="source-action"
+            type="button"
+            test-id="piece-origin-entry-cancel"
+            ?disabled="${pending}"
+            @click="${() => this.#closeOriginEntry()}"
+          >
+            Cancel
+          </button>
+          <button
+            class="source-action"
+            type="submit"
+            test-id="piece-origin-follow-entered"
+            ?disabled="${pending || this.originEntryUrl.trim().length === 0}"
+          >
+            ${pending
+              ? "Following…"
+              : warning
+              ? "Follow this source anyway"
+              : "Follow this source"}
+          </button>
+        </div>
+      </form>
     `;
   }
 
@@ -2524,26 +2985,26 @@ export class CFPieceMenu extends BaseElement {
             .message}
         </p>
         <div class="warning-actions">
-          <button
-            test-id="piece-source-warning-confirm"
-            ?disabled="${this.sourceActionPending}"
-            @click="${() =>
-              this.changeSource(
-                warning.action,
-                warning.confirmationToken,
-              )}"
-          >
-            Use it anyway
-          </button>
-          <button
-            test-id="piece-source-warning-cancel"
-            ?disabled="${this.sourceActionPending}"
-            @click="${() => {
-              this.compatibilityWarning = undefined;
-            }}"
-          >
-            Cancel
-          </button>
+          ${html`
+            <button
+              test-id="piece-source-warning-confirm"
+              ?disabled="${this.sourceActionPending}"
+              @click="${() =>
+                this.changeSource(warning.action, warning.confirmationToken)}"
+            >
+              Use it anyway
+            </button>
+          `} ${html`
+            <button
+              test-id="piece-source-warning-cancel"
+              ?disabled="${this.sourceActionPending}"
+              @click="${() => {
+                this.compatibilityWarning = undefined;
+              }}"
+            >
+              Cancel
+            </button>
+          `}
         </div>
       </div>
     `;
@@ -2765,26 +3226,50 @@ function copyThemeVariables(from: Element, to: HTMLElement): void {
  */
 let shared: CFPieceMenu | undefined;
 
-/** Show the piece menu for `cell` at a click position. */
+/**
+ * Show the menu at a click position, mounting it on `document.body` the first
+ * time. It addresses either a piece — `cell`, which the space and runtime are
+ * read from — or a space with no piece, named by `space` and reached through
+ * `runtime`. A call carrying neither leaves the menu closed.
+ */
 export function openPieceMenu(
-  { cell, x, y, themeFrom, highlightedPiece, highlightTarget }: {
-    cell: CellHandle;
-    x: number;
-    y: number;
-    /** The element the click came from, whose theme the menu adopts. */
-    themeFrom?: Element;
-    /** The rendered piece to highlight while the menu remains open. */
-    highlightedPiece?: Element;
-    /** A nested pattern root to highlight within the rendered piece. */
-    highlightTarget?: Element;
-  },
+  { cell, space, runtime, x, y, themeFrom, highlightedPiece, highlightTarget }:
+    {
+      cell?: CellHandle;
+
+      /** The space to address when the click landed on no piece. */
+      space?: DID;
+
+      /** The runtime that space is reached through, alongside `space`. */
+      runtime?: RuntimeClient;
+
+      x: number;
+      y: number;
+
+      /** The element the click came from, whose theme the menu adopts. */
+      themeFrom?: Element;
+
+      /** The rendered piece to highlight while the menu remains open. */
+      highlightedPiece?: Element;
+
+      /** A nested pattern root to highlight within the rendered piece. */
+      highlightTarget?: Element;
+    },
 ): CFPieceMenu {
   if (!shared || !shared.isConnected) {
     shared = globalThis.document.createElement("cf-piece-menu") as CFPieceMenu;
     globalThis.document.body.appendChild(shared);
   }
   if (themeFrom) copyThemeVariables(themeFrom, shared);
-  shared.open({ cell, x, y, highlightedPiece, highlightTarget });
+  shared.open({
+    cell,
+    space,
+    runtime,
+    x,
+    y,
+    highlightedPiece,
+    highlightTarget,
+  });
   return shared;
 }
 

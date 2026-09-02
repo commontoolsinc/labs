@@ -220,12 +220,27 @@ The strict-only delta is:
   instead of the join and are outside the check, as is the pure-link-structure
   shape channel; grown existence atoms (SC-4) are historical and deliberately
   never measured — only the current join is; `Space` is the only principal
-  form residency admits, because `PersonalSpace`, `User`, and the bare
-  DID-string spelling all gate by equality against one acting reader, making
-  their audience a person rather than the container and so narrower than the
-  set of principals a space grants reader roles to; and the ungrantable
+  form residency admits, because `User` and the bare DID-string spelling gate
+  by equality against one acting reader, making their audience narrower than
+  the set of principals a space grants reader roles to, while
+  `PersonalSpace(<owner>)` names a space whose clause the measurement cannot
+  build from a target address (SC-39); and the ungrantable
   read-failed marker sits outside every ceiling, the residency clause
-  included, so a poisoned measurement never proves fit. Implementation in
+  included, so a poisoned measurement never proves fit. The reserved policy
+  namespaces are outside the check too: the durable policy manifests
+  (`of:cfc-policy-manifest:<digest>`) and the release grants and single-use
+  consumption receipts (`grant:cfc:<digest>`) hold policy state the runtime
+  persists through its own privileged writers, gated at the transaction write
+  chokepoint, so they are not value-write targets any of the write-side checks
+  measure. The spec settles this rather than leaving it to implementation
+  taste. A grant record is "a content-addressed record at a reserved location
+  in the granting owner's space, written only by a trusted policy writer",
+  whose "stored label never changes" (spec §4.3.5, and §8.12.7 route 2a).
+  Policy manifests live in "a separate immutable store" and are "public
+  artifacts", and a transaction MUST NOT persist a module-policy reference
+  unless that same transaction create-only installs the byte-verified manifest
+  (spec §4.4.2) — which the writer-fit reject would otherwise make impossible
+  at this level. Implementation in
   [prepare.ts](../../packages/runner/src/cfc/prepare.ts) (`prepareBoundaryCommit`
   flow-persist stamping), asserted both ways in
   [cfc-writer-fit.test.ts](../../packages/runner/test/cfc-writer-fit.test.ts).
@@ -233,6 +248,214 @@ The strict-only delta is:
   transaction with recorded reasons CFC-relevant (`prepare-reasons`), so a
   reasoned tx whose reads never tripped an eager relevance mark cannot slip the
   ladder ([extended-storage-transaction.ts](../../packages/runner/src/storage/extended-storage-transaction.ts)).
+
+  One of the forms residency excludes is readable in the DECLARED half of the
+  ceiling, in one direction. A `PersonalSpace(owner)` LABEL clause answers a
+  declared ceiling naming that owner, because §3.6.2's role order makes an
+  owner a reader and §3.6.4 makes that principal the space's sole owner, and
+  the fit test asks only that everyone the ceiling admits is entitled to the
+  data. The reverse does not hold: a store DECLARING the atom is not read by
+  that person alone, because adding a member converts the space and §3.6.5
+  rewrites no labels, so a stamped clause outlives the conversion. `Space` gains nothing either way, for the reason residency lets
+  it in — its readers are derived through verified `HasRole` exchange, and
+  residency already joins the target's own space onto every ceiling, so
+  covering it here would admit that data space-wide. The kernel owns the
+  reading, so it holds at the egress, display, observation, and
+  declared-monotonicity gates too. Recorded in
+  [`cfc-spec-changes.md`](./cfc-spec-changes.md) SC-39.
+
+  The raw meta seam is outside the check at EVERY rung, so a meta path
+  raises neither a strict reject nor a persist-and-flag diagnostic. The
+  measurement quantifies over paths a schema could have declared a policy
+  at, and no value schema describes the document-root siblings of `value`
+  that `setMetaRaw` addresses. One route does reach a ceiling there: a
+  document-root declared entry resolves at every meta path by longest
+  prefix. It is skipped anyway. That entry sits at logical `[]`, the
+  payload root, and reaches the seam only because canonicalization strips a
+  leading `value` — so it is not a declaration about the seam, and honoring
+  it would make a piece updatable or not according to whether its pattern
+  carries a root `ifc`. Declaring on a single result field, which is how a
+  pattern normally labels one, leaves the seam's ceiling empty, and the
+  piece is then un-updatable under strict because the pattern updater,
+  `setsrc`, and setup over an existing piece all stamp meta.
+
+  Computed cells are outside the check at every rung too, and it is the same
+  rule over a document rather than over a path. A computed cell is the
+  derived internal cell the runtime materializes to hold a derivation's
+  result, under its own URI scheme (`computed:fid1:<hash>`; see
+  [`computed-cell-identity.md`](./computed-cell-identity.md)). A pattern
+  names the data it declares policy on, and it does not name the
+  intermediates the reactive graph materializes for it, so their ceiling is
+  the empty one and measuring them refuses every derivation that reads
+  labeled data and writes its result — ordinary reactive computation, not an
+  edge case. One predicate covers both surfaces (`isDeclarablePolicyPath` in
+  `prepare.ts`), because they answer one question: could a schema have
+  declared a policy here.
+
+  The skip is scoped to a join the target's own space produced. Every clause
+  the join carries comes from a document some read resolved, and the join
+  records which space each of those lived in; where any of them lived
+  elsewhere, a computed target is measured like any other document. So the
+  residency half of the ceiling still holds for the direction it was written
+  for — a derivation cannot carry another space's labeled value into a local
+  document by materializing it — while a derivation over its own space's data
+  proceeds. Within one space the source and the computed cell share a replica
+  set, so the value reaches no reader it had not reached already, and what
+  follows it is the stamp.
+
+  A declared entry can still reach a computed document, from a
+  schema-carrying write to it, and the skip is unconditional over that route
+  as it is over the meta seam's document-root route. Honoring it would make a
+  derivation admit its own inputs' taint or refuse it according to whether
+  the schema behind it happens to carry an `ifc`, while the atoms arriving in
+  the join come from what the transaction read rather than from anything that
+  schema describes. The residual is that a declaration which did reach such a
+  document stops being a write ceiling; it stays a read floor, and the
+  persisted stamp is unaffected.
+
+  What the skip does NOT do is release the value. A derivation's result
+  leaves the fabric only through a sink, and a sink measures the join it is
+  handed. Where the host is the one releasing — the `run_pattern` tool
+  answering a model with what a piece computed — there is no request to
+  record and no commit to gate, so that tool measures the release itself,
+  against a public ceiling, through `describeSinkReleaseRefusal`
+  ([run-pattern.ts](../../packages/cf-harness/src/tools/run-pattern.ts)).
+  The two routes fit their joins with one membership predicate, so a clause
+  outside a ceiling on one is outside it on the other. They differ in what
+  reaches the join: the host route measures what releasing the answer
+  resolved, and applies no exchange-rule rewriting to it, so a clause a
+  policy evaluation would have discharged is refused there. The ladder
+  governs it like any other gate — at `disabled` and `observe` it records
+  nothing that rejects.
+
+  The exemption is not a hole. A path counts as meta only while no payload
+  write landed on it too, so a transaction writing both leaves the path
+  measured. The collapse of a deeper path against a covering ancestor runs
+  over the measured paths only, so an exempt meta path cannot shadow a value
+  write beneath it. Meta paths remain flow stamp targets, so the join still
+  persists there and the egress, display, and observation gates read the
+  unchanged label. And the seam sits in the same document, space, and
+  replica set as the value surface beside it, so it reaches no reader that
+  surface did not. One residual comes with it: where a payload field carries
+  a `MetaField` name, an exempt meta write can raise the stored derived
+  label at their shared logical path past what that field declares. The
+  direction is over-taint, so reads stay protected; giving the envelope seam
+  a path space of its own is what removes the collision.
+
+- **Piece-substrate declaration (§8.12.5 route 2) — implemented.** The
+  runtime writes a small set of documents while it sets a piece up: the
+  piece's argument document, and the internal documents and streams its
+  result projects to. It fills them with whatever the setup transaction
+  read. An author cannot know which atoms a given transaction will carry, so
+  a declaration written into a schema either misses them or over-declares
+  every instance of the pattern. The transaction declares the policy
+  instead, which is §8.12.5's route 2: the write that puts the join on a
+  path also declares, in that same transaction, a policy covering it. What
+  lands is the ceiling that resolved at the path plus exactly the clauses
+  that had nowhere to go, as an ordinary `declared` entry, so the fit test
+  passes and the store's promise becomes the audience of what it holds.
+
+  Declaring is what makes the route sound where an exemption would not be.
+  The declared clauses persist as store policy, so readers of the substrate
+  consume them, and go on consuming them after an overwrite clears the
+  derived stamp. They are the clauses the ceiling did not already cover
+  rather than the whole join: a clause the residency alternative satisfies
+  lands in the stamp and not in the declaration, because the store already
+  answers for it. The cost is the ratchet §8.12.2 asks for: a substrate
+  document that once held data derived from a labeled read keeps that clause
+  after the read stops. The direction is over-taint.
+
+  The route is the strict rung's, like the reject it replaces. Every rung
+  below keeps its `writer-fit(persist-and-flag)` diagnostic, which is the
+  rollout signal, and stores no declared policy it could never take back —
+  so `enforce-explicit` keeps the shipped posture bit-for-bit here too. At
+  strict, a declaration records a `writer-fit(piece-substrate-declared)`
+  diagnostic naming the document, the path, and the clauses added: a
+  permanent change to a store's policy leaves a trace even at the rung that
+  admits it.
+
+  What bounds the route, and what it declares once inside:
+
+  - **Who recorded the marker.** The recording method is on the public
+    transaction interface, and pattern-authored code reaches the
+    transaction its cells are bound to, so an input's own fields say only
+    what its recorder wrote. The runtime passes an authorization alongside,
+    the way `setMetaRaw` marks a meta write, and a marker without it counts
+    for nothing however it is addressed. This is the difference between a
+    gate that ACTS on an input and one that measures it: the two sibling
+    markers in the same file corroborate against transaction state, which
+    suits a claim about a write that has already happened, while this one
+    is a claim about whose write it is, and a forger supplies the write.
+  - **Which document it names.** The runner records only addresses it
+    MINTS from the piece's result cell — the argument address it would
+    derive, and each derived internal cell's — and only where the address
+    names a whole document rather than a path inside one. It reads the
+    argument address back out of the result cell's stored meta on every
+    setup after the first, and where that stored link names some other
+    document (a nested piece's argument lives in its HOST's) no marker is
+    recorded, so that document keeps its own ceiling. Every document the
+    route does not reach keeps the ceiling it resolves to, and a misfit
+    there is refused as before, with the §8.12.5 remedy in the reason.
+  - **How far it reaches inside that document.** Every path the
+    transaction writes there, not only the paths setup wrote: the marker
+    names the store, and the declaration is a statement about the store.
+  - **No schema declaration at that path.** A schema that declares at the
+    written path owns the store's policy there. Widening it from the join
+    would make the walk's own re-mint non-monotone on the next write, and
+    would brick the path under the declared-monotonicity gate. That store's
+    route 2 is the author's, in the schema. The reverse order stays
+    reachable, and is §8.12.1 rather than a defect of the route: a pattern
+    that later adds an `ifc` at a path the route already declared has to
+    name what the store already promises, or the monotonicity gate rejects
+    the write for dropping a stored clause. The gate ships `off`, so this is
+    latent until it is turned on.
+  - **No poisoned measurement.** The ungrantable read-failed marker is
+    outside every ceiling, so it is outside what the route may declare: a
+    measurement the runtime could not take proves nothing about the
+    audience, and declaring it would write a clause no reader can satisfy.
+  - **No foreign container clause.** A container clause is honored by a
+    replica set rather than by a reader check — §4.9.3 resolves it against
+    that space's ACL, the document that also decides who holds the bytes —
+    so a store in this space cannot keep a promise made to another space's
+    readers. That is why residency admits only the target's own space
+    clause, and the route declares no container clause naming another.
+    `PersonalSpace(owner)` is the second spelling of one: §4.9.4 calls the
+    two forms "the two `Space(...)` atoms", and §3.6.4 makes the named
+    principal the sole owner of the space whose id it is. The same-space
+    spelling stays admissible, because there the clause names the space the
+    bytes are already in, and if that space stops being personal its
+    audience and its replica set grow together. A person-audience clause is
+    not a container clause: `User(alice)` is honored by the reader check
+    whoever holds the bytes.
+  - **Growth only.** Within the walk, the ceiling the declaration starts
+    from resolves over the entries that walk is about to persist,
+    carried-forward stored declared entries among them, so a later
+    transaction carrying a wider join adds its clauses to what the path
+    already declared rather than replacing them. The entry coalesces with
+    the carried-forward stored entry rather than standing in for it. Adding
+    clauses is the restricting direction, so the monotonicity gate that runs
+    earlier in the same walk cannot be contradicted by what this route
+    pushes. Growth is also what reaches a piece whose substrate was written
+    before any labeled read entered a transaction writing it: that substrate
+    declares nothing, and the write that first carries a join is the one
+    that declares it.
+
+  What the route does NOT reach is the piece's running graph. A lift or
+  handler writing in a later transaction records no setup marker, so its
+  target — commonly a `computed:` document — measures against its own
+  ceiling and a misfit there still refuses. Under strict that turns "the
+  piece will not start" into "the piece starts and drops those writes",
+  which is progress on the setup seam and not a working strict rung.
+
+  Implementation in
+  [prepare.ts](../../packages/runner/src/cfc/prepare.ts)
+  (`prepareBoundaryCommit` writer-fit) and
+  [runner.ts](../../packages/runner/src/runner.ts) (`recordPieceSubstrate`),
+  asserted condition by condition in
+  [cfc-writer-fit.test.ts](../../packages/runner/test/cfc-writer-fit.test.ts),
+  and against the cross-space representation transform in
+  [cfc-label-metadata-protection.test.ts](../../packages/runner/test/cfc-label-metadata-protection.test.ts).
+
 - **Future strict-only fail-closed cases.** Any new check that wants a
   persist-and-flag grace under explicit puts its reject at the strict level,
   same shape.

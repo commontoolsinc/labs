@@ -9,6 +9,11 @@ generated cells are excluded from the fingerprint, what was deliberately not
 built) is in [`../plans/space-clone-rehearsal.md`](../plans/space-clone-rehearsal.md).
 This document is the operating procedure.
 
+A clone runs on your own machine. When the question is about the deployment
+rather than the store — the shell bundle, the sharded server, concurrent human
+traffic — the copy goes on the staging host instead, and that procedure is
+[`staging-space-copy.md`](staging-space-copy.md).
+
 ## When a rehearsal is required
 
 Required when updating a **populated** space and any of:
@@ -76,12 +81,21 @@ not see it, you are pointed at something else — stop and check before writing.
 ```bash
 # 3. Baseline, before touching anything.
 deno task cf space verify $CLONE
-deno task cf inspect churn $DB --bucket 60 --until "$(date -u '+%Y-%m-%d %H:%M:%S')"
+deno task cf inspect churn $DB --bucket 60 \
+  --since '<an hour before now>' --until "$(date -u '+%Y-%m-%d %H:%M:%S')"
 
 # 4. Run every authored test locally. Then update against the CLONE's api-url
 #    once, with one --test flag per entry and one --datafile flag per attached
-#    data file. Children first, board last, serially — the parent's result
-#    recomputation is what storms.
+#    data file. Serially, and usually children first, board last — the parent's
+#    result recomputation is what storms.
+#
+#    CHECK THE PARENT'S STORED DEMAND BEFORE ASSUMING THAT ORDER. It inverts
+#    when the parent cannot read the new child shape: a required path with no
+#    default that the new child stops publishing empties the parent's WHOLE
+#    array, behind a count that still looks right. Then the parent has to move
+#    first, and the storm is the price of not blanking it. Read the demand out
+#    of the parent's latest stored revision rather than recompiling its source
+#    — a deployed parent is whatever generation it was deployed at.
 deno task cf test <pattern.test.tsx>
 deno task cf test <pattern.integration.test.tsx>
 deno task cf piece setsrc <pattern.tsx> \
@@ -151,6 +165,11 @@ is not optional.
   whole-store fingerprint can tell you titles and bodies survived.
 - **`removed` above zero** — durable content was destroyed. Stop and
   investigate before anything else.
+- **`generated N reclassified`** — not a removal, and not an alarm. The
+  baseline hashed cells no pristine manifest listed, and the migrated pieces
+  now call them generated, so they leave the compared set without leaving the
+  store. They are subtracted from `removed` and reported here so the change is
+  visible rather than silent.
 - **`content unchanged`** — nothing moved at all. Correct for a clone that has
   not been migrated yet; suspicious after one that has.
 - **`baseline CORRUPTED`** — the pristine snapshot no longer matches the
@@ -234,6 +253,13 @@ against `observed through`: the gap between them is the evidence. A mistyped
 bound is refused rather than silently matching no commits, which would otherwise
 report the window as quiet.
 
+Pass `--since` as well, including for the baseline. Without one the window opens
+at the store's earliest commit, and a clone of a space that has been live for a
+while carries months of them: every bucket between that commit and `--until` is
+materialized, and past 20,000 of them the run is refused rather than reported.
+At `--bucket 60` that ceiling is about fourteen days. An hour of quiet before
+you start is baseline enough to recognize a plateau against.
+
 ## Driving the migration
 
 Migrate serially, and make the driver **fail loudly when the server goes away**.
@@ -272,6 +298,8 @@ These are all failures that actually happened, not hypotheticals:
   cleaner on a clone than in production.
 - **A clone tests the store and the runtime, not the deployment.** CDN and shell
   versions, and concurrent human traffic, are all absent.
+  [`staging-space-copy.md`](staging-space-copy.md) is what covers that gap, at
+  the price of a copy of real content on a shared host.
 
 ## Before going live
 

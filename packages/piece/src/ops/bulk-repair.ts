@@ -32,10 +32,7 @@
  */
 
 import type { FabricValue } from "@commonfabric/api";
-import {
-  isValidFabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import { isValidFabricValue, valueEqual } from "@commonfabric/data-model";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isLink } from "@commonfabric/runner";
@@ -81,6 +78,7 @@ export interface DocumentChange {
    * escaped `~0`.
    */
   path: string;
+
   kind: "changed" | "added" | "removed";
   before?: unknown;
   after?: unknown;
@@ -107,13 +105,18 @@ export type RepairVerdict =
 /** One piece's row in a repair report. */
 export interface RepairRow {
   piece: string;
+
   /** The plan row's phase label, carried as the survey stamped it. */
   phase?: string;
+
   verdict: RepairVerdict;
+
   /** What a refused, moved, or failed row broke; absent otherwise. */
   problem?: string;
+
   /** The exact changes the fixer would make (or made); absent when none. */
   changes?: readonly DocumentChange[];
+
   /**
    * The hash of the stored document this row's verdict was computed from —
    * the precondition a plan row carries. Absent where no document was read.
@@ -124,14 +127,17 @@ export interface RepairRow {
 /** What one repair run found, and — under `apply` — did. */
 export interface RepairReport {
   rows: readonly RepairRow[];
+
   /**
    * The run as a plan artifact: the survey's header, and one row per
    * evaluated piece carrying its document-hash precondition — with the
    * repair operation stamped when the run was given a fixer name to record.
    */
   plan: PiecePlan;
+
   /** Documents written. Zero on a dry run and on a conforming re-run. */
   applied: number;
+
   /**
    * True when every row is `conforms` or `repaired`: nothing refused,
    * nothing moved, nothing failed, nothing unattempted. A dry run is
@@ -144,12 +150,23 @@ export interface RepairReport {
 export interface RepairOptions {
   selector: PieceSelector;
   fixer: Fixer;
+
+  /**
+   * Called with each row as it settles, in the order the run settles them.
+   *
+   * The same seam the retarget's engine offers, and for the same reason: a
+   * caller watching rows can say where a run that never returned had reached,
+   * and one that is not watching can only say it does not know.
+   */
+  onRow?: (row: RepairRow) => void;
+
   /**
    * The fixer's name as the plan should record it — a module path or a
    * label. With one, the emitted plan's evaluated rows carry the repair
    * operation; without, they carry only the pre-state record.
    */
   fixerName?: string;
+
   /**
    * The content identity of the fixer module's authored closure — the pin
    * the name cannot be. Recorded on every emitted repair op, and held
@@ -158,6 +175,7 @@ export interface RepairOptions {
    * spelled or what it holds today.
    */
   fixerIdentity?: string;
+
   /**
    * A previously emitted plan, which then IS the execution: its rows run
    * in its order, each row's recorded document hash is its precondition,
@@ -169,6 +187,7 @@ export interface RepairOptions {
    * fixer no longer changes is landed, whatever it hashes to now.
    */
   plan?: PiecePlan;
+
   /**
    * Write the documents the fixer produces. Absent, the run is the
    * dry-run report — the exact per-piece diff, and no write at all.
@@ -540,14 +559,17 @@ type RowDecision =
   | {
     kind: "change";
     documentHash: string;
+
     /** The stored document the decision was computed from — what an
      * applied row's changes are measured against, so the write path's own
      * additions show in the report. */
     before: Record<string, unknown>;
+
     /** The evaluated answer — the exact document a write must land, so
      * the report and the write cannot describe two different evaluations
      * of a fixer that lied to the purity probe. */
     document: Record<string, unknown>;
+
     changes: readonly DocumentChange[];
   }
   | { kind: "refused"; documentHash: string; problem: string };
@@ -626,6 +648,7 @@ export async function repairPieces(
     phase?: string;
     expect: PiecePlanRow["expect"];
     expectedHash?: string;
+
     /** The plan row this one executes, carried into the emitted artifact
      * for every verdict short of landed, so a stopped run's artifact can
      * be supplied straight back. */
@@ -732,6 +755,33 @@ export async function repairPieces(
     };
   };
   const rows: RepairRow[] = [];
+
+  /**
+   * Every row this run settles, to the report and to a watching caller.
+   *
+   * A repair writes, so a run that stalls mid-way leaves the same partial
+   * state a retarget does — and the process guard can only name where it
+   * stopped if something told it which rows had settled. Routing every row
+   * through here is what makes the guard's count a fact about the run rather
+   * than an admission that this process cannot see one.
+   */
+  // Set when a caller's `onRow` throws, so the row loop's catch can tell that
+  // error from the operational ones it classifies. The row it was handed has
+  // already settled, and classifying the reporter's failure would put one
+  // piece in the report twice, under two verdicts, the second contradicting
+  // what the caller was just told.
+  let reporterThrew = false;
+
+  const report = (row: RepairRow) => {
+    rows.push(row);
+    if (options.onRow === undefined) return;
+    try {
+      options.onRow(row);
+    } catch (error) {
+      reporterThrew = true;
+      throw error;
+    }
+  };
   const planRows: PiecePlanRow[] = [];
   let applied = 0;
   let stopped = false;
@@ -820,7 +870,7 @@ export async function repairPieces(
       const decision = preflight.get(row.piece);
       emitRow(decision, decision?.kind === "conforms");
       if (decision === undefined || decision.kind === "read-failed") {
-        rows.push({
+        report({
           piece: row.piece,
           ...phase,
           verdict: "failed",
@@ -829,14 +879,14 @@ export async function repairPieces(
             "; the run did not start, so nothing was written.",
         });
       } else if (decision.kind === "not-document") {
-        rows.push({
+        report({
           piece: row.piece,
           ...phase,
           verdict: "refused",
           problem: "The stored input is not a document.",
         });
       } else if (decision.kind === "moved") {
-        rows.push({
+        report({
           piece: row.piece,
           ...phase,
           verdict: "moved",
@@ -845,7 +895,7 @@ export async function repairPieces(
             "recorded: something other than this plan changed it.",
         });
       } else if (decision.kind === "refused") {
-        rows.push({
+        report({
           piece: row.piece,
           ...phase,
           verdict: "refused",
@@ -853,14 +903,14 @@ export async function repairPieces(
           problem: decision.problem,
         });
       } else if (decision.kind === "conforms") {
-        rows.push({
+        report({
           piece: row.piece,
           ...phase,
           verdict: "conforms",
           documentHash: decision.documentHash,
         });
       } else {
-        rows.push({
+        report({
           piece: row.piece,
           ...phase,
           verdict: "would-change",
@@ -871,7 +921,7 @@ export async function repairPieces(
       continue;
     }
     if (stopped) {
-      rows.push({ piece: row.piece, ...phase, verdict: "unattempted" });
+      report({ piece: row.piece, ...phase, verdict: "unattempted" });
       emitRow(preflight.get(row.piece), false);
       continue;
     }
@@ -918,7 +968,7 @@ export async function repairPieces(
         );
       }
       if (decision.kind === "not-document") {
-        rows.push({
+        report({
           piece: row.piece,
           ...phase,
           verdict: "refused",
@@ -929,7 +979,7 @@ export async function repairPieces(
         continue;
       }
       if (decision.kind === "moved") {
-        rows.push({
+        report({
           piece: row.piece,
           ...phase,
           verdict: "moved",
@@ -942,7 +992,7 @@ export async function repairPieces(
         continue;
       }
       if (decision.kind === "refused") {
-        rows.push({
+        report({
           piece: row.piece,
           ...phase,
           verdict: "refused",
@@ -954,7 +1004,7 @@ export async function repairPieces(
         continue;
       }
       if (decision.kind === "conforms") {
-        rows.push({
+        report({
           piece: row.piece,
           ...phase,
           verdict: "conforms",
@@ -964,7 +1014,7 @@ export async function repairPieces(
         continue;
       }
       if (options.apply !== true) {
-        rows.push({
+        report({
           piece: row.piece,
           ...phase,
           verdict: "would-change",
@@ -980,7 +1030,7 @@ export async function repairPieces(
         // was written, and the run stops — plan order is a correctness
         // constraint, so a later row must not land while this one is
         // outstanding. A re-run resumes from here.
-        rows.push({
+        report({
           piece: row.piece,
           ...phase,
           verdict: "would-change",
@@ -1004,7 +1054,7 @@ export async function repairPieces(
         ? evaluateFixer(written, options.fixer)
         : undefined;
       if (verification?.kind === "conforms") {
-        rows.push({
+        report({
           piece: row.piece,
           ...phase,
           verdict: "repaired",
@@ -1018,7 +1068,7 @@ export async function repairPieces(
         emitRow(decision, true);
         continue;
       }
-      rows.push({
+      report({
         piece: row.piece,
         ...phase,
         verdict: "failed",
@@ -1032,6 +1082,10 @@ export async function repairPieces(
       emitRow(decision, false);
       stopped = true;
     } catch (error) {
+      // The reporter's own failure is not this row's outcome. The row it was
+      // handed has settled and the caller has seen it, so this leaves rather
+      // than reporting the same piece again under a contradicting verdict.
+      if (reporterThrew) throw error;
       // An operational failure — an unreachable piece, a write the schema
       // refuses — is this row's outcome, not the report's: the rows that
       // landed stay reported. The state check runs after the failure, so
@@ -1051,7 +1105,7 @@ export async function repairPieces(
       } catch {
         // The re-read failing changes nothing: `state` already says so.
       }
-      rows.push({
+      report({
         piece: row.piece,
         ...phase,
         verdict: "failed",

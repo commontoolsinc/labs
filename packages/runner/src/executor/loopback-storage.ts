@@ -21,7 +21,11 @@ import { createSignedSessionOpenAuth } from "../storage/v2-remote-session.ts";
 class LoopbackSessionFactory implements SessionFactory {
   readonly supportsAclBootstrap = true;
 
-  constructor(private readonly getServer: () => MemoryServer) {}
+  readonly #getServer: () => MemoryServer;
+
+  constructor(getServer: () => MemoryServer) {
+    this.#getServer = getServer;
+  }
 
   async create(
     space: MemorySpace,
@@ -34,7 +38,7 @@ class LoopbackSessionFactory implements SessionFactory {
       );
     }
     const client = await MemoryClient.connect({
-      transport: MemoryClient.loopback(this.getServer()),
+      transport: MemoryClient.loopback(this.#getServer()),
     });
     try {
       const session = await client.mount(

@@ -40,6 +40,7 @@ export interface FuseSupervisorFlags extends FuseMountFlags {
 
 /** How a flag carries its field's value on the command line. */
 type FlagArity =
+
   /** Present with a following value when the field is set. */
   | "value"
   /** Present without a value when the field is true. */
@@ -50,10 +51,13 @@ type FlagArity =
 interface FlagSpec {
   flag: string;
   arity: FlagArity;
+
   /** Single-dash form the supervisor parser also accepts. */
   alias?: string;
+
   /** Placeholder for the value in help output. */
   valueLabel?: string;
+
   help: string;
 }
 

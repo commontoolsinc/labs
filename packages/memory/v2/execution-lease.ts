@@ -83,11 +83,13 @@ export const liveExecutionLeaseHolder = (
 export type ExecutionLeaseWrite = {
   space: string;
   holder: string;
+
   /** The caller's clock. The host and the memory server are co-hosted (one
    *  process — serving-loop.md §1), so this is the same clock admission
    *  judges liveness by. Injectable so tests can construct expiry without
    *  waiting on real time. */
   now?: number;
+
   ttlMs?: number;
 };
 
@@ -179,9 +181,12 @@ export const releaseExecutionLease = (
 export type ExecutionLeaseCycleOptions = {
   engine: Engine;
   space: string;
+
   /** The DR1 per-process holder identity (`executionLeaseHolder`). */
   holder: string;
+
   ttlMs?: number;
+
   /** The cycle's clock; injectable for tests. Defaults to `Date.now`. */
   now?: () => number;
 };

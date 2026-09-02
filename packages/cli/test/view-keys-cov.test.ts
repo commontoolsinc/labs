@@ -12,9 +12,9 @@ function names(input: Uint8Array): string[] {
   return decodeKeys(input).keys.map((k) => k.name);
 }
 
-// SS3 split across reads: `ESC O` with the final byte not yet arrived breaks
-// out of the loop and leaves the whole sequence as leftover (line 50).
 Deno.test("decode: SS3 truncated (ESC O) is buffered as leftover", () => {
+  // SS3 split across reads: `ESC O` with the final byte not yet arrived breaks
+  // out of the loop and leaves the whole sequence as leftover (line 50).
   const r = decodeKeys(raw(0x1b, 0x4f));
   assertEquals(r.keys.length, 0);
   assertEquals(Array.from(r.rest), [0x1b, 0x4f]);
@@ -23,8 +23,8 @@ Deno.test("decode: SS3 truncated (ESC O) is buffered as leftover", () => {
   assertEquals(r2.keys.map((k) => k.name), ["up"]);
 });
 
-// ESC followed by a control byte (n < 0x20): Alt+Ctrl combo (lines 81-89).
 Deno.test("decode: ESC + control byte is ctrl+alt combo", () => {
+  // ESC followed by a control byte (n < 0x20): Alt+Ctrl combo (lines 81-89).
   // ESC then 0x01 (ctrl-a): name ctrl-a, ctrl + alt.
   const k = only(raw(0x1b, 0x01));
   assertEquals(k.name, "ctrl-a");
@@ -37,16 +37,17 @@ Deno.test("decode: ESC + control byte is ctrl+alt combo", () => {
   assertEquals(k2.alt, true);
 });
 
-// ESC + printable byte (n < 0x80) is Alt+letter (lines 90-94, sibling branch).
 Deno.test("decode: ESC + printable byte is alt+letter", () => {
+  // ESC + printable byte (n < 0x80) is Alt+letter (lines 90-94, sibling
+  // branch).
   const k = only(raw(0x1b, 0x62)); // ESC 'b'
   assertEquals(k.name, "b");
   assertEquals(k.alt, true);
   assertEquals(k.char, undefined);
 });
 
-// ESC + DEL / ESC + BS → alt-backspace (lines 76-79, sibling branch).
 Deno.test("decode: ESC + backspace is alt-backspace", () => {
+  // ESC + DEL / ESC + BS → alt-backspace (lines 76-79, sibling branch).
   const k = only(raw(0x1b, 0x7f));
   assertEquals(k.name, "backspace");
   assertEquals(k.alt, true);
@@ -55,9 +56,9 @@ Deno.test("decode: ESC + backspace is alt-backspace", () => {
   assertEquals(k2.alt, true);
 });
 
-// ESC followed by a high byte (n >= 0x80) we do not model: emit Escape and
-// only consume the ESC, leaving the high byte to be decoded next (97-100).
 Deno.test("decode: ESC + high byte emits Escape and keeps the high byte", () => {
+  // ESC followed by a high byte (n >= 0x80) we do not model: emit Escape and
+  // only consume the ESC, leaving the high byte to be decoded next (97-100).
   // ESC then 0xc3 0xa9 ('é' in UTF-8): ESC alone, then the char.
   const { keys } = decodeKeys(raw(0x1b, 0xc3, 0xa9));
   assertEquals(keys.length, 2);
@@ -66,13 +67,16 @@ Deno.test("decode: ESC + high byte emits Escape and keeps the high byte", () => 
   assertEquals(keys[1].char, "é");
 });
 
-// ESC ESC → Escape, consuming a single ESC (lines 68-71, sibling branch).
 Deno.test("decode: ESC ESC emits Escape", () => {
+  // ESC ESC → Escape, consuming a single ESC (lines 68-71, sibling branch).
   const { keys } = decodeKeys(raw(0x1b, 0x1b));
   assertEquals(keys[0].name, "escape");
 });
 
+//
 // CSI modifier param: shift bit (line 147) and ctrl bit (line 149).
+//
+
 Deno.test("decode: CSI shift modifier on arrow", () => {
   // ESC [ 1 ; 2 A → shift+up. bits = 2-1 = 1 → shift.
   const k = only(raw(0x1b, 0x5b, 0x31, 0x3b, 0x32, 0x41));
@@ -100,7 +104,10 @@ Deno.test("decode: CSI shift+alt+ctrl combined modifier", () => {
   assertEquals(k.ctrl, true);
 });
 
+//
 // CSI finals beyond the arrows (lines 168-181).
+//
+
 Deno.test("decode: CSI shift-tab (Z)", () => {
   assertEquals(only(raw(0x1b, 0x5b, 0x5a)).name, "shift-tab");
 });
@@ -117,7 +124,10 @@ Deno.test("decode: CSI unknown final is 'unknown'", () => {
   assertEquals(only(raw(0x1b, 0x5b, 0x58)).name, "unknown");
 });
 
+//
 // Tilde sequences (lines 179, 195-226).
+//
+
 Deno.test("decode: tilde delete (3~)", () => {
   const k = only(raw(0x1b, 0x5b, 0x33, 0x7e));
   assertEquals(k.name, "delete");
@@ -166,7 +176,10 @@ Deno.test("decode: tilde unknown code is 'unknown'", () => {
   assertEquals(k.name, "unknown");
 });
 
+//
 // SS3 sequences (lines 234-253).
+//
+
 Deno.test("decode: SS3 down/right/left", () => {
   assertEquals(only(raw(0x1b, 0x4f, 0x42)).name, "down");
   assertEquals(only(raw(0x1b, 0x4f, 0x43)).name, "right");
@@ -190,8 +203,12 @@ Deno.test("decode: SS3 unknown final is 'unknown'", () => {
   assertEquals(only(raw(0x1b, 0x4f, 0x58)).name, "unknown");
 });
 
-// Sanity: a longer batch threading several of the above branches together.
+//
+// A batch across branches
+//
+
 Deno.test("decode: mixed batch crosses SS3, CSI-mod and tilde branches", () => {
+  // Sanity: a longer batch threading several of the above branches together.
   const input = new Uint8Array([
     0x1b,
     0x4f,

@@ -84,7 +84,13 @@ describe("piece run/step through a value-link slot", () => {
     // "Cannot start: no pattern identity" (R has none). `pieces.get` now
     // canonicalizes R -> K, so start / read / stop operate on the real piece.
     const started = await pieces.get(slotId, true);
-    expect(getPatternIdentityRef(started.getCell())).toBeDefined();
+    // The canonical piece is hand-built (KEYLESS): it carries no durable
+    // pattern pointer (the never-durable contract; L3(a), RULED
+    // 2026-08-27). Canonicalization evidence is the runner's session
+    // pointer naming it — and the canonical piece computing.
+    expect(getPatternIdentityRef(started.getCell())).toBeUndefined();
+    expect(runtime.runner.sessionPatternPointerFor(started.getCell()))
+      .toBeDefined();
     expect(await started.result.get(["output"])).toBe(10);
   });
 });

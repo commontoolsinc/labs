@@ -1,10 +1,12 @@
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 
 import type { CellScope } from "../builder/types.ts";
 import { type Cell } from "../cell.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { effectTargetKey } from "../executor/effect-completion.ts";
+import { settleAbandonedRequest } from "./abandoned-request.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import type { Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
@@ -152,6 +154,11 @@ export function streamData(
 
     const thisRun = ++status.run;
     const requestId = hashOf(requestSnapshot).toString();
+    // The outbox key is the request widened by THIS node's result-cell
+    // identity, so two distinct nodes streaming the same url each keep their
+    // own effect and their own ending, rather than sharing one under the bare
+    // request id.
+    const effectKey = effectTargetKey(`streamData:${requestId}`, result);
 
     enqueueSinkRequestPostCommitEffect(
       tx,
@@ -159,6 +166,10 @@ export function streamData(
       `streamData:${requestId}`,
       requestSnapshot,
       "streamData-start",
+      // The read loop below lives until the stream ends or is aborted, so it
+      // is not handed to `trackAsyncWork`: a barrier waiting on it would never
+      // return while a stream is connected. The abandonment settle below is
+      // separate work with its own completion, and is registered.
       () => {
         if (thisRun !== status.run) {
           return;
@@ -247,6 +258,31 @@ export function streamData(
             // Allow retrying the same request.
             previousCall = "";
           });
+      },
+      {
+        idempotencyKey: effectKey,
+        onRejected: (rejection) => {
+          runtime.trackAsyncWork(
+            settleAbandonedRequest(
+              runtime,
+              "streamData",
+              effectKey,
+              (settleTx) => {
+                // The announcement rode the abandoned transaction, so it is
+                // made again whoever owns the answer now.
+                sendResult(settleTx, { pending, result, error });
+                // Decided here rather than when this callback ran: a newer
+                // request can start in between, and the stream it opens owns
+                // these cells from then on.
+                if (thisRun !== status.run) return;
+                pending.withTx(settleTx).set(false);
+                result.withTx(settleTx).set(undefined);
+                error.withTx(settleTx).set(rejection.message);
+              },
+            ),
+            parentCell,
+          );
+        },
       },
     );
   };

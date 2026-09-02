@@ -364,10 +364,11 @@ describe("fetch builtins: taking over a claim", () => {
     expect(result.key("pending").get()).toBe(false);
   });
 
-  // The takeover itself, driven through `tryClaimMutex` directly: a claim
-  // another replica made is believed until it goes stale, and then taken over.
-  // This is the one branch where the clock decides anything.
   describe("the staleness branch of the mutex", () => {
+    // The takeover itself, driven through `tryClaimMutex` directly: a claim
+    // another replica made is believed until it goes stale, and then taken
+    // over. This is the one branch where the clock decides anything.
+
     const inputs = { url: "http://mock-test-server.local/api/claimed" };
 
     async function claimAgainst(
@@ -448,15 +449,16 @@ describe("fetch builtins: taking over a claim", () => {
     });
   });
 
-  // The claim-time memo guard (server-execution v2 stage G,
-  // serving-loop.md §4): a COMPLETED request — stored hash matching the
-  // expected inputs AND a result (or error-shaped result) present — is
-  // never re-claimed; the stored value IS the value. The serving
-  // posture's deferred flush can re-admit a key whose first effect
-  // already completed, and without this guard the late claim would
-  // clear the result and issue a second egress for inputs that already
-  // have their answer.
   describe("the completed-request guard of the mutex", () => {
+    // The claim-time memo guard (server-execution v2 stage G,
+    // serving-loop.md §4): a COMPLETED request — stored hash matching the
+    // expected inputs AND a result (or error-shaped result) present — is
+    // never re-claimed; the stored value IS the value. The serving
+    // posture's deferred flush can re-admit a key whose first effect
+    // already completed, and without this guard the late claim would
+    // clear the result and issue a second egress for inputs that already
+    // have their answer.
+
     const inputs = { url: "http://mock-test-server.local/api/completed" };
 
     async function claimWithStored(

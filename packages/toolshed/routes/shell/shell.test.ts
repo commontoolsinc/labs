@@ -64,15 +64,16 @@ afterAll(async () => {
   await Deno.remove(sentinelPath);
 });
 
-// The shell document must stay NON-cross-origin-isolated so that untrusted
-// patterns are never handed SharedArrayBuffer / Atomics or a high-resolution
-// clock. A page is cross-origin isolated only when it is served with BOTH
-// `Cross-Origin-Opener-Policy: same-origin` AND a require-corp/credentialless
-// `Cross-Origin-Embedder-Policy`. These tests fail loudly if a future change
-// flips the served document to that isolating combination.
-//
-// See docs/specs/sandboxing/cross-origin-isolation.md.
 describe("Shell cross-origin isolation posture", () => {
+  // The shell document must stay NON-cross-origin-isolated so that untrusted
+  // patterns are never handed SharedArrayBuffer / Atomics or a high-resolution
+  // clock. A page is cross-origin isolated only when it is served with BOTH
+  // `Cross-Origin-Opener-Policy: same-origin` AND a require-corp/credentialless
+  // `Cross-Origin-Embedder-Policy`. These tests fail loudly if a future change
+  // flips the served document to that isolating combination.
+  //
+  // See docs/specs/sandboxing/cross-origin-isolation.md.
+
   it("does not serve the isolating COOP+COEP header combination", async () => {
     const response = await app.request("/");
     // Drain the body so the response does not leak into the test runner.
@@ -111,6 +112,7 @@ describe("Shell cross-origin isolation posture", () => {
     // The posture must hold for every served path, not just the document root,
     // because any same-origin response can establish or reuse the page's agent
     // cluster.
+
     const response = await app.request("/assets/app.js");
     await response.text();
 
@@ -123,10 +125,11 @@ describe("Shell cross-origin isolation posture", () => {
   });
 });
 
-// The shell routes serve read-only content to any origin. These pin that
-// permissive CORS keeps working alongside the isolation headers, so a future
-// change to one does not silently disturb the other.
 describe("Shell route CORS", () => {
+  // The shell routes serve read-only content to any origin. These pin that
+  // permissive CORS keeps working alongside the isolation headers, so a future
+  // change to one does not silently disturb the other.
+
   it("allows a cross-origin GET with a wildcard origin", async () => {
     const response = await app.request("/", {
       headers: { Origin: "https://example.com" },
@@ -151,10 +154,11 @@ describe("Shell route CORS", () => {
   });
 });
 
-// With no compiled frontend and no SHELL_URL proxy target — the unit-test
-// environment — the shell router answers with a 404 that tells an operator how
-// to bring the shell up. This guards that operator hint and its port.
 describe("Shell dev fallback without a compiled build or proxy", () => {
+  // With no compiled frontend and no SHELL_URL proxy target — the unit-test
+  // environment — the shell router answers with a 404 that tells an operator
+  // how to bring the shell up. This guards that operator hint and its port.
+
   it("returns 404 with a hint naming SHELL_URL and the shell port", async () => {
     const response = await app.request("/anything");
     const body = await response.text();
@@ -236,6 +240,7 @@ describe("createShellStaticRouter", () => {
     // The request resolves outside the static root; the traversal guard (and
     // URL normalization) keep it from reaching the sentinel, so the client-side
     // routing fallback serves index.html instead.
+
     const response = await staticApp.request("/../shell-sentinel.txt");
     expect(response.status).toBe(200);
     const body = await response.text();
@@ -255,6 +260,7 @@ describe("createShellStaticRouter behind composed app middleware", () => {
     // Exercises middleware ordering on a real 200 document rather than only on
     // the dev 404 fallback: the served index.html must still carry the
     // cross-origin header the shell wires up ahead of the static router.
+
     const response = await composedApp.request("/");
     expect(response.status).toBe(200);
     expect(await response.text()).toBe(INDEX_HTML);
@@ -265,7 +271,8 @@ describe("createShellStaticRouter behind composed app middleware", () => {
 describe("StaticResponse", () => {
   const encoder = new TextEncoder();
 
-  // In-memory file set so StaticResponse can be exercised without touching disk.
+  // In-memory file set so StaticResponse can be exercised without touching
+  // disk.
   const files: Record<string, Uint8Array> = {
     "/root/index.html": encoder.encode(INDEX_HTML),
     "/root/app.js": encoder.encode(APP_JS),

@@ -60,25 +60,25 @@ export interface VDomRendererOptions {
  */
 export class VDomRenderer {
   /** Instance counter for unique mount IDs across all renderer instances */
-  private static nextMountId = 1;
+  static #nextMountId = 1;
 
-  private readonly applicator: DomApplicator;
-  private readonly session: VDomConnection;
-  private readonly onError?: (error: Error) => void;
+  readonly #applicator: DomApplicator;
+  readonly #session: VDomConnection;
+  readonly #onError?: (error: Error) => void;
 
-  private mountId: number | null = null;
-  private containerElement: HTMLElement | null = null;
-  private rootNodeId: number | null = null;
-  private disposed = false;
+  #mountId: number | null = null;
+  #containerElement: HTMLElement | null = null;
+  #rootNodeId: number | null = null;
+  #disposed = false;
 
   constructor(options: VDomRendererOptions) {
-    this.onError = options.onError;
+    this.#onError = options.onError;
 
     // Create the DOM applicator
-    this.applicator = new DomApplicator({
+    this.#applicator = new DomApplicator({
       document: options.document,
       runtimeClient: options.runtimeClient,
-      onEvent: (message) => this.handleDomEvent(message),
+      onEvent: (message) => this.#handleDomEvent(message),
       onError: options.onError,
       setProp: options.setProp,
     });
@@ -88,11 +88,11 @@ export class VDomRenderer {
     // and DOM without a per-mount unmount round-trip), and is the only way to
     // obtain VDOM capability — so a renderer cannot exist without being torn
     // down on disposal.
-    this.session = options.connection.attachVDom(() => this.disposeLocal());
+    this.#session = options.connection.attachVDom(() => this.#disposeLocal());
     // If the connection is already disposed, attachVDom runs the teardown
     // synchronously, so `disposed` is set before `session` is assigned above.
     // Subscribe to batches only while still live.
-    if (!this.disposed) this.session.onBatch(this.handleVDomBatch);
+    if (!this.#disposed) this.#session.onBatch(this.#handleVDomBatch);
   }
 
   /**
@@ -106,39 +106,39 @@ export class VDomRenderer {
     container: HTMLElement,
     cellRef: CellRef,
   ): Promise<() => Promise<void>> {
-    if (this.disposed) {
+    if (this.#disposed) {
       // The connection was disposed before this render began (its teardown ran
       // during construction). A torn-down renderer does not mount.
       return async () => {};
     }
-    if (this.mountId !== null) {
+    if (this.#mountId !== null) {
       throw new Error(
         "VDomRenderer already has an active mount. Call cancel first.",
       );
     }
 
-    this.containerElement = container;
-    this.mountId = VDomRenderer.nextMountId++;
+    this.#containerElement = container;
+    this.#mountId = VDomRenderer.#nextMountId++;
 
     // Register container so the worker can insert children directly into it
-    this.applicator.setContainer(container);
+    this.#applicator.setContainer(container);
 
     // Request the worker to start rendering
-    logger.timeStart("mount", String(this.mountId));
+    logger.timeStart("mount", String(this.#mountId));
     try {
-      const response = await this.session.mount(this.mountId, cellRef);
-      this.rootNodeId = response.rootId > 0 ? response.rootId : null;
+      const response = await this.#session.mount(this.#mountId, cellRef);
+      this.#rootNodeId = response.rootId;
 
-      const elapsed = logger.timeEnd("mount", String(this.mountId));
+      const elapsed = logger.timeEnd("mount", String(this.#mountId));
       logger.debug("render-mount", () => [
-        `Mounted VDOM ${this.mountId} in ${elapsed?.toFixed(2)}ms`,
+        `Mounted VDOM ${this.#mountId} in ${elapsed?.toFixed(2)}ms`,
         `rootId=${response.rootId}`,
       ]);
     } catch (error) {
       // Reset state on failure so the renderer can be reused
-      logger.timeEnd("mount", String(this.mountId));
-      this.mountId = null;
-      this.containerElement = null;
+      logger.timeEnd("mount", String(this.#mountId));
+      this.#mountId = null;
+      this.#containerElement = null;
       throw error;
     }
 
@@ -152,31 +152,31 @@ export class VDomRenderer {
    * Stop rendering and clean up.
    */
   async stopRendering(): Promise<void> {
-    if (this.mountId === null) {
+    if (this.#mountId === null) {
       return;
     }
 
-    const mountId = this.mountId;
+    const mountId = this.#mountId;
     logger.timeStart("unmount", String(mountId));
-    this.mountId = null;
+    this.#mountId = null;
 
     // Request the worker to stop rendering
-    await this.session.unmount(mountId);
+    await this.#session.unmount(mountId);
 
     // Remove the root node from DOM
-    if (this.rootNodeId !== null) {
-      const rootNode = this.applicator.getNode(this.rootNodeId);
+    if (this.#rootNodeId !== null) {
+      const rootNode = this.#applicator.getNode(this.#rootNodeId);
       if (
         rootNode &&
-        rootNode !== this.containerElement &&
+        rootNode !== this.#containerElement &&
         rootNode.parentNode
       ) {
         rootNode.parentNode.removeChild(rootNode);
       }
-      this.rootNodeId = null;
+      this.#rootNodeId = null;
     }
 
-    this.containerElement = null;
+    this.#containerElement = null;
 
     const elapsed = logger.timeEnd("unmount", String(mountId));
     logger.debug("stop-rendering", () => [
@@ -190,14 +190,14 @@ export class VDomRenderer {
    * change), so it unmounts the worker-side mount before tearing down locally.
    */
   async dispose(): Promise<void> {
-    if (this.disposed) return;
+    if (this.#disposed) return;
     // We are tearing ourselves down, so detach from the connection's disposal.
-    this.session.detach();
+    this.#session.detach();
     try {
       await this.stopRendering();
     } finally {
       // Detach listeners and drop DOM even if the unmount round-trip failed.
-      this.disposeLocal();
+      this.#disposeLocal();
     }
   }
 
@@ -206,24 +206,24 @@ export class VDomRenderer {
    * an unmount round-trip. Safe to call during connection disposal, and run
    * directly from the connection's disposal hook.
    */
-  private disposeLocal = (): void => {
-    if (this.disposed) return;
-    this.disposed = true;
-    this.mountId = null;
-    this.rootNodeId = null;
-    this.containerElement = null;
+  #disposeLocal = (): void => {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.#mountId = null;
+    this.#rootNodeId = null;
+    this.#containerElement = null;
     // `session` is still unassigned when this runs as the synchronous teardown
     // during attachVDom against an already-disposed connection.
-    this.session?.offBatch(this.handleVDomBatch);
-    this.applicator.dispose();
+    this.#session?.offBatch(this.#handleVDomBatch);
+    this.#applicator.dispose();
   };
 
   /**
    * Get the root DOM node if available.
    */
   getRootNode(): Node | null {
-    return this.rootNodeId !== null
-      ? this.applicator.getNode(this.rootNodeId) ?? null
+    return this.#rootNodeId !== null
+      ? this.#applicator.getNode(this.#rootNodeId) ?? null
       : null;
   }
 
@@ -231,25 +231,27 @@ export class VDomRenderer {
    * Get the underlying DomApplicator for debug inspection.
    */
   getApplicator(): DomApplicator {
-    return this.applicator;
+    return this.#applicator;
   }
 
   /**
    * Get the current mount ID, or null if not mounted.
    */
   getMountId(): number | null {
-    return this.mountId;
+    return this.#mountId;
   }
 
-  // ============== Private Methods ==============
+  //
+  // Private Methods
+  //
 
-  private handleVDomBatch = (notification: VDomBatchNotification): void => {
-    if (this.disposed) return;
+  #handleVDomBatch = (notification: VDomBatchNotification): void => {
+    if (this.#disposed) return;
 
     // Filter for our mount ID
     if (
       notification.mountId !== undefined &&
-      notification.mountId !== this.mountId
+      notification.mountId !== this.#mountId
     ) {
       return;
     }
@@ -258,7 +260,7 @@ export class VDomRenderer {
     try {
       // Apply the batch to the DOM
       // Children are inserted directly into the container (CONTAINER_NODE_ID)
-      this.applicator.applyBatch({
+      this.#applicator.applyBatch({
         batchId: notification.batchId,
         ops: notification.ops,
         rootId: notification.rootId,
@@ -268,11 +270,11 @@ export class VDomRenderer {
       // about the root and leaves the tracked one standing; `null` is the
       // reconciler reporting a tree with no root child, and clears it.
       if (notification.rootId !== undefined) {
-        this.rootNodeId = notification.rootId;
+        this.#rootNodeId = notification.rootId;
       }
 
       if (notification.mountId !== undefined) {
-        this.session.ackBatch(
+        this.#session.ackBatch(
           notification.mountId,
           notification.batchId,
         );
@@ -286,18 +288,18 @@ export class VDomRenderer {
       ]);
     } catch (error) {
       logger.timeEnd("batch", String(notification.batchId));
-      this.onError?.(
+      this.#onError?.(
         error instanceof Error ? error : new Error(String(error)),
       );
     }
   };
 
-  private handleDomEvent(message: DomEventMessage): void {
-    if (this.disposed || this.mountId === null) return;
+  #handleDomEvent(message: DomEventMessage): void {
+    if (this.#disposed || this.#mountId === null) return;
 
     // Send the event to the worker via the VDOM session
-    this.session.sendEvent(
-      this.mountId,
+    this.#session.sendEvent(
+      this.#mountId,
       message.handlerId,
       message.event,
       message.nodeId,

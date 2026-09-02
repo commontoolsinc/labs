@@ -1,12 +1,14 @@
+/**
+ * This is the whole of toolshed's rate limiting. The properties worth pinning
+ * are the ones an abuse bound depends on: that a burst is actually capped,
+ * that keys do not share a bucket, that eviction cannot be used as a reset
+ * primitive, and that a caller cannot choose which bucket they land in.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createRateLimiter } from "@/lib/rate-limit.ts";
 import { clientKey } from "@/middlewares/rate-limit.ts";
-
-// Toolshed had no rate limiting before self-serve minting, so this is the whole
-// of it. The properties worth pinning are the ones an abuse bound depends on:
-// that a burst is actually capped, that keys do not share a bucket, and that
-// eviction cannot be used as a reset primitive.
 
 describe("token bucket", () => {
   it("allows a burst up to capacity, then refuses", () => {
@@ -40,18 +42,20 @@ describe("token bucket", () => {
     expect(limiter.take("a")).toBe(true);
   });
 
-  // Refill is elapsed-time arithmetic, so a clock that steps BACKWARDS — an NTP
-  // correction, an operator setting the date — used to refill a spent bucket by
-  // a negative amount and drive it below empty, leaving it denied for longer
-  // than the configured interval. Clamping the elapsed value alone then left
-  // the opposite hole: the stored timestamp had been rewound, so the catch-up
-  // back to real time counted as elapsed and refunded the bucket.
-  //
-  // A backward excursion must cost the caller nothing and earn them nothing.
-  // The bucket this most matters for is revoke's, where a false denial leaves
-  // live the credential the caller is trying to kill, and a false refund is the
-  // abuse bound not existing.
   it("neither penalises nor refunds a backward clock excursion", () => {
+    // Refill is elapsed-time arithmetic, so a clock that steps BACKWARDS — an
+    // NTP correction, an operator setting the date — used to refill a spent
+    // bucket by a negative amount and drive it below empty, leaving it denied
+    // for longer than the configured interval. Clamping the elapsed value alone
+    // then left the opposite hole: the stored timestamp had been rewound, so
+    // the catch-up back to real time counted as elapsed and refunded the
+    // bucket.
+    //
+    // A backward excursion must cost the caller nothing and earn them nothing.
+    // The bucket this most matters for is revoke's, where a false denial leaves
+    // live the credential the caller is trying to kill, and a false refund is
+    // the abuse bound not existing.
+
     const start = 1_000_000;
     let clock = start;
     const limiter = createRateLimiter({
@@ -91,11 +95,13 @@ describe("token bucket", () => {
     expect(limiter.take("a")).toBe(false);
   });
 
-  // The LRU exists so the limiter cannot become the memory exhaustion it
-  // prevents. It has a sharp edge: an evicted key gets a fresh full bucket, so
-  // a flood of distinct keys is a reset primitive against a throttled one. The
-  // defense is the size of maxKeys, and this pins that the eviction is real.
   it("evicts the least recently used key once maxKeys is exceeded", () => {
+    // The LRU exists so the limiter cannot become the memory exhaustion it
+    // prevents. It has a sharp edge: an evicted key gets a fresh full bucket,
+    // so a flood of distinct keys is a reset primitive against a throttled one.
+    // The defense is the size of maxKeys, and this pins that the eviction is
+    // real.
+
     const limiter = createRateLimiter({
       capacity: 1,
       refillPerSecond: 0,
@@ -113,10 +119,11 @@ describe("token bucket", () => {
 });
 
 describe("clientKey", () => {
-  // `getConnInfo` throws when there is no Deno connection behind the request,
-  // which is exactly the case under `app.request`; it must not take the route
-  // down with it.
   it("survives a context with no connection info", () => {
+    // `getConnInfo` throws when there is no Deno connection behind the request,
+    // which is exactly the case under `app.request`; it must not take the route
+    // down with it.
+
     expect(clientKey({ req: { header: () => undefined } })).toBe("unknown");
   });
 
@@ -124,20 +131,22 @@ describe("clientKey", () => {
     req: { header: (name: string) => headers[name.toLowerCase()] },
   });
 
-  // .env.test sets RATE_LIMIT_TRUST_FORWARDED_FOR=true, so this exercises the
-  // trusted-proxy branch.
-  // The RIGHTMOST entry. A proxy appends what it saw to whatever the request
-  // already carried, so everything to its left is client-authored.
   it("takes the rightmost X-Forwarded-For entry when a proxy is trusted", () => {
+    // .env.test sets RATE_LIMIT_TRUST_FORWARDED_FOR=true, so this exercises the
+    // trusted-proxy branch.
+    // The RIGHTMOST entry. A proxy appends what it saw to whatever the request
+    // already carried, so everything to its left is client-authored.
+
     expect(
       clientKey(req({ "x-forwarded-for": "203.0.113.7, 10.0.0.1, 10.0.0.2" })),
     ).toBe("10.0.0.2");
   });
 
-  // The property that matters: a caller cannot choose their own bucket. Taking
-  // the leftmost entry made every request from one client look like a different
-  // one, which is the limiter not existing.
   it("gives a client no way to pick its own bucket by forging the header", () => {
+    // The property that matters: a caller cannot choose their own bucket.
+    // Taking the leftmost entry made every request from one client look like a
+    // different one, which is the limiter not existing.
+
     const proxySaw = "10.0.0.2";
     const forged = ["evil-1", "evil-2", "evil-3"].map((spoof) =>
       clientKey(req({ "x-forwarded-for": `${spoof}, ${proxySaw}` }))

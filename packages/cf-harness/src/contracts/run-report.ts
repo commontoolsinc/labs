@@ -9,6 +9,7 @@ import type {
 } from "./policy-trace.ts";
 import { countHarnessPolicyDecisions } from "./policy-trace.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
+import type { HarnessFabricSessionCfcPosture } from "../run-state.ts";
 import type { HarnessSubagentRunRef } from "./subagent.ts";
 import type { HarnessToolEffectClass } from "./tool-descriptor.ts";
 import type { HarnessTranscriptMessage } from "./transcript.ts";
@@ -42,8 +43,10 @@ export interface HarnessToolActivity {
   endedAt: string;
   toolCallId: string;
   toolId: string;
+
   /** Absent when the call named a tool the run offers no descriptor for. */
   effectClass?: HarnessToolEffectClass;
+
   cfcEnforcementMode: CfcEnforcementMode;
   policyDecision: HarnessToolPolicyDecision;
   executionStatus: HarnessToolExecutionStatus;
@@ -102,8 +105,10 @@ export interface HarnessRunReport {
   generatedAt: string;
   status: string;
   model: string;
+
   /** Requested effort; provider clients reject routes that cannot apply it. */
   reasoningEffort?: string;
+
   promptCacheMode?: "implicit" | "explicit";
   cacheAffinity?: "run" | "custom";
   modelProvider?: HarnessModelProviderId;
@@ -111,12 +116,19 @@ export interface HarnessRunReport {
   credentialOwner?: HarnessCredentialOwnerRef;
   harnessHomeIdentity?: string;
   modelTurns: number;
+
   /** Usage from model turns executed directly by this run. */
   usage?: HarnessModelUsage;
+
   /** Direct usage plus usage reported by completed descendant runs. */
   totalUsage?: HarnessModelUsage;
+
   modelUsage?: HarnessModelTurnUsage[];
   cfcEnforcementMode: CfcEnforcementMode;
+
+  /** The fabric session's resolved CFC posture, when the run had a session. */
+  fabricSessionCfc?: HarnessFabricSessionCfcPosture;
+
   createdAt?: string;
   updatedAt?: string;
   endedAt?: string;
@@ -154,6 +166,7 @@ export interface CreateHarnessRunReportOptions {
     endedAt?: string;
     terminalReason?: string;
     cfcEnforcementMode: CfcEnforcementMode;
+    fabricSessionCfc?: HarnessFabricSessionCfcPosture;
     artifactRoot?: string;
     transcriptPath?: string;
     promptSlotBinding?: PromptSlotBinding;
@@ -331,6 +344,9 @@ export const createHarnessRunReport = (
       ? { modelUsage: [...(options.modelUsage ?? [])] }
       : {}),
     cfcEnforcementMode: options.runState.cfcEnforcementMode,
+    ...(options.runState.fabricSessionCfc !== undefined
+      ? { fabricSessionCfc: options.runState.fabricSessionCfc }
+      : {}),
     ...(options.runState.createdAt !== undefined
       ? { createdAt: options.runState.createdAt }
       : {}),

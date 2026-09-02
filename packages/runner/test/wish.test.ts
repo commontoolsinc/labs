@@ -6,18 +6,23 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import type { Cell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { entityIdFrom } from "../src/create-ref.ts";
 import { NAME, UI } from "../src/builder/types.ts";
+import { acquireSchemaRegistryLease } from "../src/schema-registry.ts";
 import {
-  createSidecarPatternCache,
+  openedSidecarSurface,
+  openSidecarSurface,
   parseWishTarget,
+  type SidecarSurfaceState,
   tagMatchesHashtag,
 } from "../src/builtins/wish.ts";
 import {
   getPatternEnvironment,
   setPatternEnvironment,
 } from "../src/builder/env.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
@@ -258,52 +263,6 @@ describe("wish built-in", () => {
     expect(result.key("firstMentionable").get()?.result).toEqual("Alpha");
   });
 
-  it("resolves recent pieces via #recent", async () => {
-    const spaceCell = runtime.getCell(space, space).withTx(tx);
-    const recentPiecesCell = runtime.getCell(space, "recent-pieces", {
-      type: "array",
-      items: { type: "object" },
-    }).withTx(tx);
-    const recentData = [{ name: "Piece A" }, { name: "Piece B" }];
-    recentPiecesCell.set(recentData);
-
-    // Set up defaultPattern to own recentPieces
-    const defaultPatternCell = runtime.getCell(space, "default-pattern").withTx(
-      tx,
-    );
-    (defaultPatternCell as any).key("recentPieces").set(recentPiecesCell);
-    (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
-
-    await tx.commit();
-    await runtime.idle();
-    tx = runtime.edit();
-
-    const wishPattern = pattern(() => {
-      return {
-        recent: wish({ query: "#recent" }),
-        recentFirst: wish({ query: "#recent/0/name" }),
-      };
-    });
-
-    const resultCell = runtime.getCell<{
-      recent?: { result?: unknown[] };
-      recentFirst?: { result?: string };
-    }>(
-      space,
-      "wish recent pieces result",
-      undefined,
-      tx,
-    );
-    const result = runtime.run(tx, wishPattern, {}, resultCell);
-    await tx.commit();
-    tx = runtime.edit();
-
-    await result.pull();
-
-    expect(result.key("recent").get()?.result).toEqual(recentData);
-    expect(result.key("recentFirst").get()?.result).toEqual("Piece A");
-  });
-
   it("returns current timestamp via #now", async () => {
     const wishPattern = pattern(() => {
       return { nowValue: wish({ query: "#now" }) };
@@ -432,7 +391,7 @@ describe("wish built-in", () => {
   });
 
   describe("object-based wish syntax", () => {
-    it("resolves only the canonical registry target", async () => {
+    it("resolves the piece registry through a sourced default root", async () => {
       const canonicalRegistryCell = runtime.getCellFromEntityId<unknown[]>(
         space,
         pieceRegistryEntityId,
@@ -452,8 +411,14 @@ describe("wish built-in", () => {
       (defaultPatternCell as any).key("pieceRegistry").set(
         canonicalRegistryCell.withTx(tx),
       );
-      (defaultPatternCell as any).key("allPieces").set(
-        canonicalRegistryCell.withTx(tx),
+      defaultPatternCell.setMetaRaw("patternIdentity", {
+        identity: "stored-default-app",
+        symbol: "default",
+      }, rawMetaWriteAuthorization);
+      defaultPatternCell.setMetaRaw(
+        "patternSource",
+        "/api/patterns/system/default-app.tsx",
+        rawMetaWriteAuthorization,
       );
       (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
@@ -463,11 +428,9 @@ describe("wish built-in", () => {
 
       const wishPattern = pattern(() => ({
         pieceRegistry: wish<unknown[]>({ query: "#pieceRegistry" }),
-        retiredTarget: wish<unknown[]>({ query: "#allPieces" }),
       }));
       const resultCell = runtime.getCell<{
         pieceRegistry?: { result?: unknown[] };
-        retiredTarget?: { result?: unknown[]; error?: string };
       }>(space, "wish canonical registry result", undefined, tx);
       const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
@@ -477,10 +440,6 @@ describe("wish built-in", () => {
       await result.pull();
 
       expect(result.key("pieceRegistry").get()?.result).toEqual(piecesData);
-      expect(result.key("retiredTarget").get()?.result).toBeUndefined();
-      expect(result.key("retiredTarget").get()?.error).toMatch(
-        /No favorites found matching/,
-      );
 
       const canonicalResult = result.key("pieceRegistry").key("result")
         .resolveAsCell();
@@ -492,115 +451,6 @@ describe("wish built-in", () => {
         ...piecesData,
         { name: "Beta", title: "Beta" },
       ]);
-    });
-
-    it("resolves pieceRegistry through a sourced legacy default root", async () => {
-      const legacyRegistryCell = runtime.getCellFromEntityId<unknown[]>(
-        space,
-        pieceRegistryEntityId,
-        [],
-        undefined,
-        tx,
-      );
-      const piecesData = [{ name: "Alpha", title: "Alpha" }];
-      legacyRegistryCell.withTx(tx).set(piecesData);
-
-      const spaceCell = runtime.getCell<{ allPieces?: unknown[] }>(space, space)
-        .withTx(tx);
-      const defaultPatternCell = runtime.getCell(space, "default-pattern")
-        .withTx(tx);
-      (defaultPatternCell as any).key("allPieces").set(
-        legacyRegistryCell.withTx(tx),
-      );
-      (defaultPatternCell as any).key("addPiece").setRaw({ $stream: true });
-      defaultPatternCell.setMetaRaw("patternIdentity", {
-        identity: "legacy-default-app",
-        symbol: "default",
-      });
-      defaultPatternCell.setMetaRaw(
-        "patternSource",
-        "/api/patterns/system/default-app.tsx",
-      );
-      (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
-
-      await tx.commit();
-      await runtime.idle();
-      tx = runtime.edit();
-
-      const wishPattern = pattern(() => ({
-        pieceRegistry: wish<unknown[]>({ query: "#pieceRegistry" }),
-      }));
-      const resultCell = runtime.getCell<{
-        pieceRegistry?: { result?: unknown[] };
-      }>(space, "wish legacy registry result", undefined, tx);
-      const result = runtime.run(tx, wishPattern, {}, resultCell);
-      await tx.commit();
-      tx = runtime.edit();
-
-      await runtime.idle();
-      await result.pull();
-
-      expect(result.key("pieceRegistry").get()?.result).toEqual(piecesData);
-
-      const registryResult = result.key("pieceRegistry").key("result")
-        .resolveAsCell();
-      registryResult.withTx(tx).push({ name: "Beta", title: "Beta" });
-      await tx.commit();
-      tx = runtime.edit();
-      await runtime.idle();
-      expect(legacyRegistryCell.get()).toEqual([
-        ...piecesData,
-        { name: "Beta", title: "Beta" },
-      ]);
-    });
-
-    it("does not treat a custom allPieces output as the registry", async () => {
-      const customListCell = runtime.getCellFromEntityId<unknown[]>(
-        space,
-        pieceRegistryEntityId,
-        [],
-        undefined,
-        tx,
-      );
-      const customData = [{ name: "Unrelated", title: "Unrelated" }];
-      customListCell.withTx(tx).set(customData);
-
-      const spaceCell = runtime.getCell(space, space).withTx(tx);
-      const defaultPatternCell = runtime.getCell(
-        space,
-        "custom-default-pattern",
-      )
-        .withTx(tx);
-      (defaultPatternCell as any).key("allPieces").set(
-        customListCell.withTx(tx),
-      );
-      (defaultPatternCell as any).key("addPiece").setRaw({ $stream: true });
-      defaultPatternCell.setMetaRaw("patternIdentity", {
-        identity: "custom-app",
-        symbol: "default",
-      });
-      defaultPatternCell.setMetaRaw("patternSource", "/custom-app.tsx");
-      (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
-
-      await tx.commit();
-      await runtime.idle();
-      tx = runtime.edit();
-
-      const wishPattern = pattern(() => ({
-        pieceRegistry: wish<unknown[]>({ query: "#pieceRegistry" }),
-      }));
-      const resultCell = runtime.getCell<{
-        pieceRegistry?: { result?: unknown[] };
-      }>(space, "wish custom registry result", undefined, tx);
-      const result = runtime.run(tx, wishPattern, {}, resultCell);
-      await tx.commit();
-      tx = runtime.edit();
-
-      await runtime.idle();
-      await result.pull();
-
-      expect(result.key("pieceRegistry").get()?.result).toBeUndefined();
-      expect(customListCell.get()).toEqual(customData);
     });
 
     it("resolves nested paths using tag and path parameters", async () => {
@@ -3090,13 +2940,13 @@ describe("wish built-in", () => {
       );
     });
 
-    it("fetches the profile-create pattern from the pattern environment apiUrl set after module load", async () => {
-      // Regression test: the sidecar pattern URLs (profile-create / picker /
-      // suggestion) must be resolved when the fetch happens, not at module
-      // import. In the browser worker, wish.ts is imported before the runtime
-      // calls setPatternEnvironment with the real API URL; a module-load-time
-      // const captures the default (the worker's own origin, i.e. the frontend
-      // server), whose SPA fallback serves index.html instead of the pattern.
+    it("asks the host serving the surface's space for the profile-create source", async () => {
+      // A surface records a `system:` origin, which is host-relative on
+      // purpose: it resolves against whichever host serves the space its piece
+      // is in. The process-global pattern environment does not decide that,
+      // and a worker that has not been handed one still reaches the right
+      // host. The identity route is asked first, so an unchanged surface costs
+      // one conditional request and no source download.
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
       const homeDefaultCell = runtime.getCell(
         userIdentity.did(),
@@ -3137,14 +2987,16 @@ describe("wish built-in", () => {
 
         await result.pull();
 
-        // The missing-profile UI kicks off a deferred profile-create fetch,
-        // which the wish registers as scheduler background work — so one idle
-        // covers it and `recordedUrls`, a plain array with no sink to wait on,
-        // is already written by the time idle resolves.
+        // The missing-profile UI kicks off a deferred open of the create
+        // surface, which the wish registers as scheduler background work — so
+        // one idle covers it and `recordedUrls`, a plain array with no sink to
+        // wait on, is already written by the time idle resolves.
         await runtime.idle();
         expect(recordedUrls).toContain(
-          "https://pattern-env.test/api/patterns/system/profile-create.tsx",
+          "https://example.com/api/patterns/system/profile-create.tsx?identity=",
         );
+        expect(recordedUrls.some((url) => url.includes("pattern-env.test")))
+          .toBe(false);
       } finally {
         globalThis.fetch = originalFetch;
         setPatternEnvironment(originalEnvironment);
@@ -3717,12 +3569,13 @@ describe("wish built-in", () => {
       expect(pieceData).toHaveProperty("count");
     });
 
-    // Host-embedding contract seam 1 (docs/features/host-embedding.md §1):
-    // the well-known profile wish targets an embedder binds to, and the
-    // zero-profile `result ?? fallback` idiom. This describe pins the
-    // load-bearing embedder guarantees in one place; the broader profile suite
-    // above covers ordering/picker/headless behavior in depth.
     describe("host embedding contract: profile wish targets", () => {
+      // Host-embedding contract seam 1 (docs/features/host-embedding.md §1):
+      // the well-known profile wish targets an embedder binds to, and the
+      // zero-profile `result ?? fallback` idiom. This describe pins the
+      // load-bearing embedder guarantees in one place; the broader profile
+      // suite above covers ordering/picker/headless behavior in depth.
+
       it("resolves all five well-known targets from the default profile", async () => {
         const profileSpaceDid = (await Identity.fromPassphrase(
           "host-embedding-wish-profile-space",
@@ -3868,13 +3721,14 @@ describe("wish built-in", () => {
       });
     });
 
-    // CT-1829: `wish("#profile").result` is ALWAYS the single best profile
-    // (ordered default → MRU → first) in every mode. The picker no longer owns
-    // `.result`; it is only the `[UI]` switching affordance. These tests pin the
-    // decided contract that Loom (loom PR #3627) binds to. This is a distinct
-    // describe from the "host embedding contract" block landing in PR #4502 — do
-    // not depend on that one.
     describe("single-result #profile contract (CT-1829)", () => {
+      // CT-1829: `wish("#profile").result` is ALWAYS the single best profile
+      // (ordered default → MRU → first) in every mode. The picker no longer
+      // owns `.result`; it is only the `[UI]` switching affordance. These tests
+      // pin the decided contract that Loom (loom PR #3627) binds to. This is a
+      // distinct describe from the "host embedding contract" block landing in
+      // PR #4502 — do not depend on that one.
+
       // Stand up N profiles in one profile space, wire the home default-pattern
       // `profiles` list (and optionally `defaultProfile` / `mru`), run a
       // `#profile` wish (interactive unless `headless`), and return the wish
@@ -4153,16 +4007,12 @@ describe("wish built-in", () => {
       });
 
       it("picker sidecar fetch failure → result still resolves; error surfaced in picker UI", async () => {
-        // Point the pattern environment at a host whose fetch fails, so the
-        // picker sidecar fetch rejects/404s. Under CT-1829 `.result` no longer
-        // rides the sidecar cell, so it must still resolve to ordered[0]; the
-        // fetch failure is surfaced as an error inside the picker `[UI]` cell,
-        // not as an unhandled rejection.
+        // Fail every request for the picker's source, so opening its surface
+        // cannot answer. Under CT-1829 `.result` no longer rides the sidecar
+        // cell, so it must still resolve to ordered[0]; the failure is
+        // surfaced as an error inside the picker `[UI]` cell, not as an
+        // unhandled rejection.
         const originalFetch = globalThis.fetch;
-        const originalEnvironment = getPatternEnvironment();
-        setPatternEnvironment({
-          apiUrl: new URL("https://ct1829-picker-fail.test/"),
-        });
         globalThis.fetch = ((input: Request | URL | string) => {
           const url = input instanceof Request ? input.url : String(input);
           if (url.includes("profile-picker.tsx")) {
@@ -4178,37 +4028,37 @@ describe("wish built-in", () => {
           // `.result` still resolves to the single best profile.
           expect(result.key("profile").get()?.result?.name).toBe("Ada");
 
-          // The picker sidecar cell surfaces the fetch error: the sidecar cache
-          // swallows the fetch rejection and resolves to undefined, so the new
+          // The picker sidecar cell surfaces the failure: opening the surface
+          // reports the rejection and resolves to undefined, so the
           // undefined-pattern branch commits an error UI into the picker cell.
-          // Give the deferred fetch a moment to route through and commit.
           const pickerCell = result.key("profile").key(UI).key("props")
             .key("$cell").resolveAsCell();
           // The picker launch is scheduler background work, so one settle
-          // covers the rejected fetch and the error UI it commits.
+          // covers the rejected request and the error UI it commits.
           await runtime.settled();
           expect(pickerCell.key(UI).get()).toBeDefined();
         } finally {
           globalThis.fetch = originalFetch;
-          setPatternEnvironment(originalEnvironment);
           await runtime.idle();
         }
       });
 
-      // CT-1842: In real deployments each profile lives in its OWN space (an
-      // anonymous `ProfileHome.inSpace()`), and the `mru` / `defaultProfile` link
-      // and the `profiles` candidate for the SAME profile point at DIFFERENT
-      // cells WITHIN that profile's space — same space, DIFFERENT entity id (the
-      // picker stores the profile pattern's result cell; the list stores the
-      // pattern cell). So neither `Cell.equals` nor an id-based comparison matches
-      // them; the MRU/default match returned false for every candidate and the
-      // ordering silently collapsed to `profiles`-list (creation) order — the
-      // switcher was a no-op cross-space. The builtin now matches by the profile's
-      // own SPACE (the stable per-profile identity), so the id difference no
-      // longer defeats the match. Verified against live data (switchtest
-      // identity): mru[0].space == profiles[1].space for the same profile, while
-      // the ids differ.
       describe("cross-space id skew (CT-1842)", () => {
+        // CT-1842: In real deployments each profile lives in its OWN space (an
+        // anonymous `ProfileHome.inSpace()`), and the `mru` / `defaultProfile`
+        // link and the `profiles` candidate for the SAME profile point at
+        // DIFFERENT cells WITHIN that profile's space — same space, DIFFERENT
+        // entity id (the picker stores the profile pattern's result cell; the
+        // list stores the pattern cell). So neither `Cell.equals` nor an
+        // id-based comparison matches them; the MRU/default match returned
+        // false for every candidate and the ordering silently collapsed to
+        // `profiles`-list (creation) order — the switcher was a no-op
+        // cross-space. The builtin now matches by the profile's own SPACE (the
+        // stable per-profile identity), so the id difference no longer defeats
+        // the match. Verified against live data (switchtest identity):
+        // mru[0].space == profiles[1].space for the same profile, while the ids
+        // differ.
+
         // Stand up N profiles, each in its OWN space (real cross-space), wire the
         // home `profiles` list from the profiles' CANONICAL cells, and write
         // `mru` / `defaultProfile` as links pointing at a DIFFERENT cell in the
@@ -4903,140 +4753,185 @@ describe("tagMatchesHashtag", () => {
   });
 });
 
-describe("createSidecarPatternCache", () => {
-  let originalFetch: typeof globalThis.fetch;
-  let originalEnvironment: ReturnType<typeof getPatternEnvironment>;
+describe("openSidecarSurface", () => {
+  // A surface whose piece the runtime opens through a stubbed reconciler: what
+  // is under test here is when a slot opens its surface and what it does with
+  // the answer, not how a source origin resolves.
+  const SURFACE = { name: "profile-create.tsx", origin: "system:x.tsx" };
 
-  beforeEach(() => {
-    originalFetch = globalThis.fetch;
-    originalEnvironment = getPatternEnvironment();
+  const makeFakeRuntime = (
+    open: (piece: unknown, origin: string) => Promise<unknown>,
+  ) => ({ sourceReconciler: { open } }) as unknown as Runtime;
+
+  const piece = {} as Cell<unknown>;
+
+  it("opens a surface once and reuses what that answered", async () => {
+    const opened: string[] = [];
+    const runtime = makeFakeRuntime((_piece, origin) => {
+      opened.push(origin);
+      return Promise.resolve({ marker: "surface" });
+    });
+    const slot: SidecarSurfaceState = {};
+
+    expect(await openSidecarSurface(runtime, slot, piece, SURFACE))
+      .toEqual({ marker: "surface" });
+    expect(openedSidecarSurface(slot)).toEqual({ marker: "surface" });
+    expect(await openSidecarSurface(runtime, slot, piece, SURFACE))
+      .toEqual({ marker: "surface" });
+    expect(opened).toEqual(["system:x.tsx"]);
   });
 
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    setPatternEnvironment(originalEnvironment);
-  });
-
-  // Fake runtime whose harness.resolve hands back the resolver's main() source
-  // and whose compilePattern echoes that source, so the compiled result names
-  // the URL it came from.
-  const makeFakeRuntime = () =>
-    ({
-      harness: {
-        resolve: (resolver: { main(): Promise<{ contents: string }> }) =>
-          resolver.main(),
-      },
-      patternManager: {
-        compilePattern: (program: { contents: string }) =>
-          Promise.resolve({ source: program.contents }),
-      },
-      userIdentityDID: "did:key:sidecar-cache-test",
-    }) as unknown as Runtime;
-
-  // fetch mock that 200s with a body naming the host. Hosts in `failFirst` 404
-  // on their first request and succeed afterward. The `gate` host's requests
-  // stay pending until the returned `release` is called.
-  const installFetchMock = (
-    options: { gate?: string; failFirst?: string[] } = {},
-  ) => {
+  it("joins an open already in flight", async () => {
     let release = () => {};
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const failFirst = new Set(options.failFirst ?? []);
-    const calls: string[] = [];
-    globalThis.fetch = (async (input: Request | URL | string) => {
-      const url = new URL(input instanceof Request ? input.url : String(input));
-      calls.push(url.host);
-      if (url.host === options.gate) await gate;
-      // delete returns true once per host, so only the first request 404s.
-      return failFirst.delete(url.host)
-        ? new Response("not found", { status: 404 })
-        : new Response(`source from ${url.host}`, { status: 200 });
-    }) as typeof fetch;
-    return { release, calls };
-  };
-
-  it("resolves a superseded fetch to undefined and keeps the newer fetch's pattern", async () => {
-    // The fetch for env-a.test stays pending until released, so the fetch for
-    // env-b.test supersedes it and settles first.
-    const { release } = installFetchMock({ gate: "env-a.test" });
-    const fakeRuntime = makeFakeRuntime();
-    const cache = createSidecarPatternCache({
-      name: "profile-create.tsx",
-      retryOnFailure: true,
+    let opens = 0;
+    const runtime = makeFakeRuntime(() => {
+      opens += 1;
+      return gate.then(() => ({ marker: "surface" }));
     });
+    const slot: SidecarSurfaceState = {};
 
-    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
-    const firstFetch = cache.fetch(fakeRuntime);
+    const first = openSidecarSurface(runtime, slot, piece, SURFACE);
+    const second = openSidecarSurface(runtime, slot, piece, SURFACE);
+    // Nothing is opened yet, so the second launch has no answer to reuse and
+    // must wait on the one already asking.
+    expect(openedSidecarSurface(slot)).toBeUndefined();
+    release();
 
-    setPatternEnvironment({ apiUrl: new URL("https://env-b.test/") });
-    const secondFetch = cache.fetch(fakeRuntime);
+    expect(await first).toEqual({ marker: "surface" });
+    expect(await second).toEqual({ marker: "surface" });
+    expect(opens).toBe(1);
+  });
 
-    expect(await secondFetch).toEqual({ source: "source from env-b.test" });
-    expect(cache.cached()).toEqual({ source: "source from env-b.test" });
+  it("opens again after a failure when the surface retries", async () => {
+    let opens = 0;
+    const runtime = makeFakeRuntime(() => {
+      opens += 1;
+      return Promise.resolve(opens === 1 ? undefined : { marker: "surface" });
+    });
+    const slot: SidecarSurfaceState = {};
+
+    expect(
+      await openSidecarSurface(runtime, slot, piece, SURFACE, {
+        retryOnFailure: true,
+      }),
+    ).toBeUndefined();
+    expect(
+      await openSidecarSurface(runtime, slot, piece, SURFACE, {
+        retryOnFailure: true,
+      }),
+    ).toEqual({ marker: "surface" });
+    expect(opens).toBe(2);
+  });
+
+  it("keeps a failure for a surface that does not retry", async () => {
+    // The suggestion surface's policy: it is an addition to a view that
+    // already works, so a launch that could not open it does not ask again.
+    let opens = 0;
+    const runtime = makeFakeRuntime(() => {
+      opens += 1;
+      return Promise.resolve(undefined);
+    });
+    const slot: SidecarSurfaceState = {};
+
+    expect(await openSidecarSurface(runtime, slot, piece, SURFACE))
+      .toBeUndefined();
+    expect(await openSidecarSurface(runtime, slot, piece, SURFACE))
+      .toBeUndefined();
+    expect(opens).toBe(1);
+  });
+
+  it("answers with the replacement when the epoch ends mid-open", async () => {
+    // The pattern an open answers with is minted in the registry epoch that
+    // compiled it. An open still in flight when that epoch ends is answering
+    // about a dead one, so its caller is handed what the open that replaced
+    // it says — not a pattern whose schema references nothing can resolve,
+    // and not a failure over a surface still on its way.
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let opens = 0;
+    const runtime = makeFakeRuntime(() => {
+      opens += 1;
+      return opens === 1
+        ? gate.then(() => ({ marker: "stale" }))
+        : Promise.resolve({ marker: "fresh" });
+    });
+    const slot: SidecarSurfaceState = {};
+
+    const lease = acquireSchemaRegistryLease();
+    const stale = openSidecarSurface(runtime, slot, piece, SURFACE);
+    lease();
+
+    const fresh = openSidecarSurface(runtime, slot, piece, SURFACE);
+    expect(await fresh).toEqual({ marker: "fresh" });
 
     release();
-    expect(await firstFetch).toBeUndefined();
-    expect(cache.cached()).toEqual({ source: "source from env-b.test" });
+    expect(await stale).toEqual({ marker: "fresh" });
+    expect(openedSidecarSurface(slot)).toEqual({ marker: "fresh" });
+    expect(opens).toBe(2);
   });
 
-  it("retries after a failed fetch when retryOnFailure is set", async () => {
-    // First fetch 404s, the rest succeed.
-    const { calls } = installFetchMock({ failFirst: ["env-a.test"] });
-    const fakeRuntime = makeFakeRuntime();
-    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
-    const cache = createSidecarPatternCache({
-      name: "profile-create.tsx",
-      retryOnFailure: true,
+  it("asks again when the epoch ends under an open nobody replaced", async () => {
+    // The epoch can end with no second launch behind it — a lease released
+    // while the only open is still in flight. Nothing has replaced that open,
+    // and its pattern is dead all the same, so what makes it ask again is the
+    // epoch rather than another open having taken its place.
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
     });
+    let opens = 0;
+    const runtime = makeFakeRuntime(() => {
+      opens += 1;
+      return opens === 1
+        ? gate.then(() => ({ marker: "stale" }))
+        : Promise.resolve({ marker: "fresh" });
+    });
+    const slot: SidecarSurfaceState = {};
 
-    expect(await cache.fetch(fakeRuntime)).toBeUndefined();
-    expect(cache.cached()).toBeUndefined();
-    // The cleared memoization lets a later launch re-fetch the same URL.
-    expect(await cache.fetch(fakeRuntime)).toEqual({
-      source: "source from env-a.test",
-    });
-    expect(calls).toEqual(["env-a.test", "env-a.test"]);
+    const lease = acquireSchemaRegistryLease();
+    const opening = openSidecarSurface(runtime, slot, piece, SURFACE);
+    lease();
+    release();
+
+    expect(await opening).toEqual({ marker: "fresh" });
+    expect(openedSidecarSurface(slot)).toEqual({ marker: "fresh" });
+    expect(opens).toBe(2);
   });
 
-  it("keeps a failed fetch without retrying when retryOnFailure is not set", async () => {
-    const { calls } = installFetchMock({ failFirst: ["env-a.test"] });
-    const fakeRuntime = makeFakeRuntime();
-    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
-    // suggestion.tsx's policy: a failed fetch is kept, not retried.
-    const cache = createSidecarPatternCache({ name: "suggestion.tsx" });
-
-    expect(await cache.fetch(fakeRuntime)).toBeUndefined();
-    expect(await cache.fetch(fakeRuntime)).toBeUndefined();
-    expect(cache.cached()).toBeUndefined();
-    expect(calls).toEqual(["env-a.test"]);
-  });
-
-  it("invokes onSuccess only for the fetch that records its pattern", async () => {
-    const { release } = installFetchMock({ gate: "env-a.test" });
-    const fakeRuntime = makeFakeRuntime();
-    const cache = createSidecarPatternCache({
-      name: "profile-create.tsx",
-      retryOnFailure: true,
+  it("drops an opened pattern when the schema registry epoch clears", async () => {
+    // A compiled pattern's serialized graph embeds `cid:` schema references
+    // minted in the registry epoch that compiled it, and both backings die
+    // with the epoch — the registry clears on last-lease-out, and the compile
+    // context's space belongs to that session. A pattern handed across the
+    // clear would stage links whose references nothing can resolve (the
+    // emission gate throws on exactly that), so the surface is opened again
+    // and its pattern minted into the epoch that will use it.
+    let opens = 0;
+    const runtime = makeFakeRuntime(() => {
+      opens += 1;
+      return Promise.resolve({ marker: `surface-${opens}` });
     });
+    const slot: SidecarSurfaceState = {};
 
-    const recorded: unknown[] = [];
-    const record = (pattern: unknown) => recorded.push(pattern);
-
-    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
-    const firstFetch = cache.fetch(fakeRuntime, record);
-
-    setPatternEnvironment({ apiUrl: new URL("https://env-b.test/") });
-    const secondFetch = cache.fetch(fakeRuntime, record);
-
-    expect(await secondFetch).toEqual({ source: "source from env-b.test" });
+    const release = acquireSchemaRegistryLease();
+    expect(await openSidecarSurface(runtime, slot, piece, SURFACE))
+      .toEqual({ marker: "surface-1" });
+    expect(openedSidecarSurface(slot)).toEqual({ marker: "surface-1" });
 
     release();
-    await firstFetch;
+    expect(
+      openedSidecarSurface(slot),
+      "a compiled pattern outlived the registry epoch that minted its " +
+        "schema references",
+    ).toBeUndefined();
 
-    // The winning env-b fetch reports through onSuccess; the superseded env-a
-    // fetch does not.
-    expect(recorded).toEqual([{ source: "source from env-b.test" }]);
+    expect(await openSidecarSurface(runtime, slot, piece, SURFACE))
+      .toEqual({ marker: "surface-2" });
+    expect(opens).toBe(2);
   });
 });

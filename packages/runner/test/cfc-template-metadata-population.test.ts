@@ -3,8 +3,8 @@ import { afterEach, describe, it } from "@std/testing/bdd";
 
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import type { FabricValue } from "@commonfabric/data-model";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 
 import {
@@ -86,6 +86,7 @@ const templateEntry = (
   observes: "labelMetadata",
 });
 
+//
 // Stage B of docs/specs/cfc-template-population.md (§5/§6; spec §4.6.4.1-.2):
 // the §4.6.4.2 field-precise label-metadata population profile, carried as
 // multi-`*` templates under /cfc/labels/<target-envelope-path>/... — minted at
@@ -94,6 +95,7 @@ const templateEntry = (
 // them at concrete clause/alternative paths through the wildcard machinery,
 // falling back to the computed-in-hand interim rule for pre-Stage-B
 // envelopes).
+//
 
 describe("CFC template metadata population (Stage B): persist-seam mints", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
@@ -173,12 +175,13 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     return out.getAsNormalizedFullLink().id;
   };
 
-  // The spec's example shape (§4.6.4.2): a derived entry whose clause list
-  // carries Caveat(kind, source=S). The persist seam mints the whole-atom
-  // projection template and the per-field `source` template at the multi-`*`
-  // metadata paths, both carrying the interim-rule label (the entry's own
-  // effective confidentiality), confidentiality-only.
   it("mints the multi-`*` templates for a derived entry with Caveat.source", async () => {
+    // The spec's example shape (§4.6.4.2): a derived entry whose clause list
+    // carries Caveat(kind, source=S). The persist seam mints the whole-atom
+    // projection template and the per-field `source` template at the multi-`*`
+    // metadata paths, both carrying the interim-rule label (the entry's own
+    // effective confidentiality), confidentiality-only.
+
     const rt = makeRuntime();
     const criteriaId = await seedDoc(rt, "mp-criteria", { keep: true }, [
       { path: [], label: { confidentiality: [caveatAtom()] } },
@@ -208,11 +211,12 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     expect(templates.some((e) => e.path.at(-1) === "kind")).toBe(false);
   });
 
-  // Declared/authored entries carry no containment guarantee: their
-  // source-bearing fields are fail-closed UNOBSERVABLE under the interim
-  // rule, so the mint materializes nothing for them (a template would imply
-  // an observation label exists).
   it("mints nothing for declared source-bearing entries", async () => {
+    // Declared/authored entries carry no containment guarantee: their
+    // source-bearing fields are fail-closed UNOBSERVABLE under the interim
+    // rule, so the mint materializes nothing for them (a template would imply
+    // an observation label exists).
+
     const rt = makeRuntime();
     const guarded = internSchema(
       {
@@ -233,10 +237,11 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     expect(stored.some((e) => e.origin === "label-metadata")).toBe(false);
   });
 
-  // All-public atoms (string tags; authored-attribution claims whose every
-  // field is table-public) have nothing source-protected to label: no
-  // templates.
   it("mints nothing when the derived label has no protected fields", async () => {
+    // All-public atoms (string tags; authored-attribution claims whose every
+    // field is table-public) have nothing source-protected to label: no
+    // templates.
+
     const rt = makeRuntime();
     const criteriaId = await seedDoc(rt, "mp-criteria-pub", { keep: true }, [
       {
@@ -256,10 +261,11 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     expect(stored.some((e) => e.origin === "label-metadata")).toBe(false);
   });
 
-  // Replace-on-overwrite alongside the payload entry they describe: a
-  // re-derivation under a new J replaces the derived value entry AND its
-  // templates — the departed J's atoms leave the templates entirely.
   it("overwrite replaces the templates with the payload entry they describe", async () => {
+    // Replace-on-overwrite alongside the payload entry they describe: a
+    // re-derivation under a new J replaces the derived value entry AND its
+    // templates — the departed J's atoms leave the templates entirely.
+
     const rt = makeRuntime();
     // Creation under a NON-source-bearing J so the frozen shape entry never
     // contributes template atoms of its own.
@@ -330,9 +336,10 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     }
   });
 
-  // SC-11 with metadata templates present: an identical re-derivation is
-  // canonically equal to the stored envelope and must not write ["cfc"].
   it("recompute with metadata templates present is a no-op (SC-11)", async () => {
+    // SC-11 with metadata templates present: an identical re-derivation is
+    // canonically equal to the stored envelope and must not write ["cfc"].
+
     const rt = makeRuntime();
     const criteriaId = await seedDoc(rt, "mp-criteria-i", { keep: true }, [
       { path: [], label: { confidentiality: [caveatAtom()] } },
@@ -367,11 +374,12 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     expect(JSON.stringify(entriesOf(outId))).toEqual(before);
   });
 
-  // Stage-A composition: the membership templates a declared list
-  // coordinator mints at [...container,"*"] are derived-containment payload
-  // entries with `*` in their TARGET path — their metadata templates nest
-  // wildcards three deep and still resolve for concrete slot queries.
   it("mints metadata templates for `*`-path membership entries and resolves them at slots", async () => {
+    // Stage-A composition: the membership templates a declared list
+    // coordinator mints at [...container,"*"] are derived-containment payload
+    // entries with `*` in their TARGET path — their metadata templates nest
+    // wildcards three deep and still resolve for concrete slot queries.
+
     const rt = makeRuntime();
     await seedDoc(rt, "mp-el", { n: 1 }, []);
     const criteriaId = await seedDoc(rt, "mp-criteria-list", { keep: true }, [
@@ -435,11 +443,12 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     await inspect.commit();
   });
 
-  // Inv-12 Stage 1 rides along: templates derive from the FINAL (post
-  // representation transform) payload labels, so a cross-space J persists in
-  // commitment form in the templates too — and digest-matching still
-  // consumes the right template.
   it("commitment-form templates: digest-matched source queries consume the committed template", async () => {
+    // Inv-12 Stage 1 rides along: templates derive from the FINAL (post
+    // representation transform) payload labels, so a cross-space J persists in
+    // commitment form in the templates too — and digest-matching still
+    // consumes the right template.
+
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -526,11 +535,12 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     await inspect.commit();
   });
 
-  // Guardrail: metadata templates are NOT payload labels. Payload reads —
-  // recursive value reads, shape probes — never consume them (pinned with a
-  // template carrying a DISTINCT atom, which runtime mints never produce),
-  // and raw ["cfc"] envelope reads stay flow-excluded entirely.
   it("payload reads never consume metadata templates; raw cfc reads stay excluded", async () => {
+    // Guardrail: metadata templates are NOT payload labels. Payload reads —
+    // recursive value reads, shape probes — never consume them (pinned with a
+    // template carrying a DISTINCT atom, which runtime mints never produce),
+    // and raw ["cfc"] envelope reads stay flow-excluded entirely.
+
     const rt = makeRuntime();
     const seededId = await seedDoc(rt, "mp-guard", { x: 1 }, [
       {
@@ -616,13 +626,14 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     );
   });
 
-  // Mixed-version healing, the template-ONLY arm (cubic P2 on this PR): an
-  // envelope whose only surviving entries are stale templates (an older
-  // runtime cleared the payload entries while carrying the unknown-origin
-  // templates forward) must heal to an EMPTY label map on the next Stage-B
-  // persist — dropping the templates counts as a clear, so the empty final
-  // map is written rather than short-circuited into keeping the stale bytes.
   it("heals a stale template-only envelope to an empty label map", async () => {
+    // Mixed-version healing, the template-ONLY arm (cubic P2 on this PR): an
+    // envelope whose only surviving entries are stale templates (an older
+    // runtime cleared the payload entries while carrying the unknown-origin
+    // templates forward) must heal to an EMPTY label map on the next Stage-B
+    // persist — dropping the templates counts as a clear, so the empty final
+    // map is written rather than short-circuited into keeping the stale bytes.
+
     const rt = makeRuntime();
     // Seed the stale state with a RESOLVABLE schema document (a real
     // mixed-version envelope always references a stored cid: schema).
@@ -668,10 +679,11 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     expect(entriesOf(seededId)).toEqual([]);
   });
 
-  // The recorded labelMetadata observations reference the CONCRETE metadata
-  // paths the evaluation consulted (clause/alternative indices), not the
-  // subtree root.
   it("records observations at concrete clause/alternative metadata paths", async () => {
+    // The recorded labelMetadata observations reference the CONCRETE metadata
+    // paths the evaluation consulted (clause/alternative indices), not the
+    // subtree root.
+
     const rt = makeRuntime();
     const criteriaId = await seedDoc(rt, "mp-criteria-obs", { keep: true }, [
       { path: [], label: { confidentiality: [caveatAtom()] } },

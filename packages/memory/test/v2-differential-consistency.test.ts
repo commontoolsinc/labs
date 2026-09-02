@@ -46,7 +46,9 @@ import {
   toNaiveOps,
 } from "./naive-admission.ts";
 
-// --- Deterministic PRNG (mulberry32) -------------------------------------
+//
+// Deterministic PRNG (mulberry32)
+//
 
 const mulberry32 = (seed: number) => {
   let a = seed >>> 0;
@@ -64,7 +66,9 @@ const pick = <T>(rng: Rng, items: readonly T[]): T =>
   items[Math.floor(rng() * items.length)];
 const chance = (rng: Rng, p: number): boolean => rng() < p;
 
-// --- Schedule vocabulary --------------------------------------------------
+//
+// Schedule vocabulary
+//
 
 const ENTITIES = ["entity:A", "entity:B"] as const;
 const SESSIONS = [
@@ -91,8 +95,10 @@ interface SessionState {
   sessionId: string;
   principal: string;
   nextLocalSeq: number;
+
   /** Simulated integration watermark: the read basis this client would use. */
   integratedSeq: number;
+
   /** Own prior localSeqs per entity, newest last (for pending-read stacks). */
   stacks: Map<string, number[]>;
 }
@@ -103,7 +109,9 @@ interface AcceptedRecord {
   commit: ClientCommit;
 }
 
-// --- One schedule ----------------------------------------------------------
+//
+// One schedule
+//
 
 const STEPS = 25;
 
@@ -111,10 +119,14 @@ interface ScheduleStats {
   accepted: number;
   rejected: number;
   pendingReadAccepts: number;
-  /** Commits whose pending read was sparsely mutated, split by verdict —
-   * both sides must stay exercised for the declared-set exclusion to keep
-   * differential coverage (see the vacuity guard). */
+
+  /** Sparsely-mutated pending reads the schedule accepted. Summed across
+   * seeds, this and `sparseRejects` must each reach five for the declared-set
+   * exclusion to keep differential coverage — the floor the vacuity guard
+   * enforces on the run-wide totals, not on any one schedule. */
   sparseAccepts: number;
+
+  /** The same, for the ones it rejected. */
   sparseRejects: number;
 }
 

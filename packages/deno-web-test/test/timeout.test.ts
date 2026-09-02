@@ -3,12 +3,12 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 import { applyDefaults, DEFAULT_TEST_TIMEOUT_MS } from "../config.ts";
 import { runDenoWebTest } from "./utils.ts";
 
-// A test that waits on something which never arrives used to take the whole run
-// down: astral's own deadline on `page.evaluate` eventually threw a `RetryError`
-// that named no test, printed no summary, and skipped every test file after it.
-// The harness now stops waiting on a test of its own accord, so a stuck test is
-// one named failure among otherwise normal results.
 Deno.test("a stuck test fails by name and the run continues", async function () {
+  // A test that waits on something which never arrives used to take the whole
+  // run down: astral's own deadline on `page.evaluate` eventually threw a
+  // `RetryError` that named no test, printed no summary, and skipped every test
+  // file after it. The harness now stops waiting on a test of its own accord,
+  // so a stuck test is one named failure among otherwise normal results.
   const run = await runDenoWebTest("timeout-project");
 
   run.assert(!run.success, "the run fails");
@@ -42,13 +42,14 @@ Deno.test("a stuck test fails by name and the run continues", async function () 
   );
 });
 
-// The detector is only worth having while it fires before astral does. Astral
-// gives each `page.evaluate` five retried 10-second deadlines and throws a
-// `RetryError` once they run out, measured at 53 to 57 seconds; past that the
-// run dies without naming the test. Raising the default above that would put
-// the diagnostic back out of reach, so the relationship is pinned here rather
-// than left in a comment.
 Deno.test("the default fires before astral's retries run out", function () {
+  // The detector is only worth having while it fires before astral does. Astral
+  // gives each `page.evaluate` five retried 10-second deadlines and throws a
+  // `RetryError` once they run out, measured at 53 to 57 seconds; past that the
+  // run dies without naming the test. Raising the default above that would put
+  // the diagnostic back out of reach, so the relationship is pinned here rather
+  // than left in a comment.
+
   assert(
     DEFAULT_TEST_TIMEOUT_MS < 50_000,
     `${DEFAULT_TEST_TIMEOUT_MS}ms leaves no room before astral's RetryError`,

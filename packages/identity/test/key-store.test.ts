@@ -16,10 +16,35 @@ Deno.test("KeyStore can store and recover keys", async () => {
   assert(recovered && did === recovered.verifier.did());
 });
 
+Deno.test("KeyStore.open() with no name opens `common-key-store`", async () => {
+  // The database name is persisted browser state, so it is pinned to its
+  // literal here rather than to the constant: reading the constant on both
+  // sides of the comparison would agree with itself no matter what the name
+  // became, and a silent change to it would orphan every key a user has already
+  // stored.
+
+  assert(KeyStore.DEFAULT_DB_NAME === "common-key-store");
+
+  const defaulted = await KeyStore.open();
+  await defaulted.clear();
+
+  const key = await Identity.generate();
+  await defaulted.set("key", key);
+
+  const named = await KeyStore.open("common-key-store");
+  const recovered = await named.get("key");
+  assert(recovered && key.did() === recovered.did());
+
+  await named.clear();
+});
+
+//
 // The two arms are stored differently -- bytes for one, `CryptoKey` handles
 // for the other -- and each names its own implementation, so a recovered key
 // that arrived through the wrong arm would sign as a different implementation
 // than it was stored as.
+//
+
 Deno.test("KeyStore recovers a key pair holding material as one", async () => {
   const store = await KeyStore.open("test-key-store-material");
   await store.clear();

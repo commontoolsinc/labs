@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
@@ -47,12 +47,19 @@ class ScriptedOpenTransport implements Transport {
   #receiver: (payload: string) => void = () => {};
   #openCount = 0;
 
+  readonly #openResponse: (
+    count: number,
+    requestId: string,
+  ) => FabricValue;
+
   constructor(
-    private readonly openResponse: (
+    openResponse: (
       count: number,
       requestId: string,
     ) => FabricValue,
-  ) {}
+  ) {
+    this.#openResponse = openResponse;
+  }
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -71,7 +78,7 @@ class ScriptedOpenTransport implements Transport {
         return Promise.resolve();
       case "session.open":
         this.#openCount += 1;
-        this.#respond(this.openResponse(this.#openCount, message.requestId!));
+        this.#respond(this.#openResponse(this.#openCount, message.requestId!));
         return Promise.resolve();
       default:
         throw new Error(`Unhandled scripted message: ${message.type}`);

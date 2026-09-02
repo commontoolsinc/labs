@@ -193,12 +193,16 @@ export interface RegressedSourceLines {
 
 export interface RegressedLinesOptions {
   rootDir: string;
+
   /** LCOV from the run being gated. */
   lcov: string;
+
   /** LCOV from the `main` run its ratchet baseline came from. */
   baselineLcov: string;
+
   /** Metric groups to inspect; every other group is left alone. */
   groups: Set<string>;
+
   /** Repository-relative POSIX paths the pull request changed. */
   changedFiles: Set<string>;
 }

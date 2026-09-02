@@ -97,7 +97,7 @@ Deno.test("parseCfHarnessCliArgs resolves defaults from cwd and positional promp
   }
   assertEquals(parsed.workspace, "/tmp/project");
   assertEquals(parsed.prompt, "Summarize this workspace");
-  assertEquals(parsed.model, "gpt-5.6-terra");
+  assertEquals(parsed.model, "gpt-5.6-sol");
   assertEquals(parsed.gatewayAuthMode, "bearer");
   assertEquals(parsed.outputMode, "operator");
   assertEquals(parsed.streamEvents, false);
@@ -549,6 +549,131 @@ Deno.test("parseCfHarnessCliArgs rejects an unknown fabric CFC flow-labels mode"
   );
 });
 
+Deno.test("parseCfHarnessCliArgs carries the fabric CFC posture into the session config", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--fabric-cfc-posture",
+      "max-enforcement",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/tmp/project/keys/agent.pkcs8",
+    space: "my-space",
+    cfcPosture: "max-enforcement",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs accepts the fabric CFC posture from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_FABRIC_API_URL: "https://toolshed.example/",
+        CF_HARNESS_FABRIC_IDENTITY: "/keys/agent.pkcs8",
+        CF_HARNESS_FABRIC_SPACE: "my-space",
+        CF_HARNESS_FABRIC_CFC_POSTURE: "max-enforcement",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    cfcPosture: "max-enforcement",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs reads the fabric CFC posture from the process environment", async () => {
+  // Through the DEFAULT env projection (no injected `deps.env`), the path a
+  // real invocation takes: a key missing from that projection reads as unset
+  // even when the process environment carries it.
+  const names = [
+    "CF_HARNESS_FABRIC_API_URL",
+    "CF_HARNESS_FABRIC_IDENTITY",
+    "CF_HARNESS_FABRIC_SPACE",
+    "CF_HARNESS_FABRIC_CFC_POSTURE",
+  ] as const;
+  const previous = new Map(names.map((name) => [name, Deno.env.get(name)]));
+  Deno.env.set("CF_HARNESS_FABRIC_API_URL", "https://toolshed.example/");
+  Deno.env.set("CF_HARNESS_FABRIC_IDENTITY", "/keys/agent.pkcs8");
+  Deno.env.set("CF_HARNESS_FABRIC_SPACE", "my-space");
+  Deno.env.set("CF_HARNESS_FABRIC_CFC_POSTURE", "max-enforcement");
+  try {
+    const parsed = await parseCfHarnessCliArgs(
+      ["--prompt", "hi"],
+      { cwd: "/tmp/project" },
+    );
+    if ("help" in parsed) {
+      throw new Error("expected config result");
+    }
+    assertEquals(parsed.fabricSession?.cfcPosture, "max-enforcement");
+  } finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) Deno.env.delete(name);
+      else Deno.env.set(name, value);
+    }
+  }
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an unknown fabric CFC posture", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+          "--fabric-cfc-posture",
+          "maximum",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--fabric-cfc-posture must be max-enforcement",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects the fabric CFC posture without a fabric session", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-cfc-posture",
+          "max-enforcement",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "need --fabric-api-url, --fabric-identity, and --fabric-space",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs rejects fabric CFC dials without a fabric session", async () => {
   await assertRejects(
     () =>
@@ -792,7 +917,7 @@ Deno.test("parseCfHarnessCliArgs ignores blank gateway environment values", asyn
   }
   assertEquals(parsed.gatewayBaseUrl, "https://llm.stage.commontools.dev/");
   assertEquals(parsed.gatewayAuthMode, "bearer");
-  assertEquals(parsed.model, "gpt-5.6-terra");
+  assertEquals(parsed.model, "gpt-5.6-sol");
 });
 
 Deno.test("parseCfHarnessCliArgs supports batch output mode override", async () => {
@@ -1370,6 +1495,54 @@ Deno.test("parseCfHarnessCliArgs rejects a handle-value origin that is not one",
   }
 });
 
+Deno.test("parseCfHarnessCliArgs collects operator input cells", async () => {
+  const cellRef = `/of:fid1:${"A".repeat(43)}/travellerName`;
+  const citiesRef = `/of:fid1:${"B".repeat(43)}/cities`;
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--input-cell",
+      `travellerName=${cellRef}`,
+      "--input-cell",
+      `cities=${citiesRef}`,
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.inputCells, [
+    { name: "travellerName", ref: cellRef },
+    { name: "cities", ref: citiesRef },
+  ]);
+});
+
+Deno.test("parseCfHarnessCliArgs passes no input cells by default", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.inputCells, []);
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an input cell that does not fit the grammar", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--input-cell", "no-reference-here"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--input-cell must be <name>=<link>",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs rejects malformed Browser Access leases", async () => {
   await assertRejects(
     () =>
@@ -1923,6 +2096,8 @@ Deno.test("runCfHarnessCli prints machine-readable capabilities", async () => {
   assertEquals(capabilities.parentToolIds.includes("run_pattern"), true);
   assertEquals(capabilities.parentToolIds.includes("browser"), false);
   assertEquals(capabilities.builtinToolIds.includes("run_pattern"), true);
+  assertEquals(capabilities.builtinToolIds.includes("search_skills"), true);
+  assertEquals(capabilities.builtinToolIds.includes("acquire_skill"), true);
   assertEquals(capabilities.features.runPattern, true);
   assertEquals(capabilities.builtinToolIds.includes("browser"), true);
   assertEquals(capabilities.subagentProfiles.includes("web_search"), true);
@@ -2072,6 +2247,63 @@ Deno.test("runCfHarnessCli registers and disposes signal handlers around a run",
       },
     }),
   ]);
+});
+
+Deno.test("runCfHarnessCli prints the fabric-session posture bundle in the operator summary", async () => {
+  const { io, stdout } = createIoBuffers();
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--prompt",
+      "hello",
+      "--gateway-auth-mode",
+      "none",
+    ],
+    {
+      io,
+      env: {},
+      createPromptLoop: () => ({
+        runPrompt: () =>
+          Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Done.",
+              transcript: [],
+              modelTurns: 1,
+              runState: {
+                runId: "run-postured-summary",
+                status: "completed",
+                createdAt: "2026-04-16T20:10:00.000Z",
+                updatedAt: "2026-04-16T20:10:01.000Z",
+                cfcEnforcementMode: "enforce-explicit",
+                fabricSessionCfc: {
+                  enforcementMode: "enforce-explicit",
+                  enforcementModeSource: "preset-pin",
+                  flowLabels: "persist",
+                  flowLabelsSource: "posture",
+                  posture: "max-enforcement",
+                },
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          ),
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  const summary = stdout.join("");
+  assertEquals(
+    summary.includes(
+      "fabricSessionCfc: enforce-explicit (preset-pin), flow-labels persist (posture), posture max-enforcement",
+    ),
+    true,
+  );
 });
 
 Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata", async () => {
@@ -2285,6 +2517,158 @@ Deno.test("runCfHarnessCli announces well-known grants to the model and the oper
     true,
   );
   assertEquals(stderr, []);
+});
+
+Deno.test("runCfHarnessCli announces operator input cells to the model and the operator", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  const cellSpace = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+  const cellId = `of:fid1:${"E".repeat(43)}`;
+  const cellRef = `/${cellId}/travellerName`;
+  // The input cell persists run state, so the workspace must really be writable.
+  const workspace = await Deno.makeTempDir();
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--workspace",
+      workspace,
+      "--prompt",
+      "Plan the trip",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "/keys/agent.pkcs8",
+      "--fabric-space",
+      "demo-space",
+      "--input-cell",
+      `travellerName=${cellRef}`,
+    ],
+    {
+      io,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      fabricSessionFactory: () =>
+        Promise.resolve(
+          {
+            pieces: {
+              getSpace: () => cellSpace,
+              getDefaultPattern: (_runIt: boolean) =>
+                Promise.resolve(undefined),
+            },
+            // deno-lint-ignore no-explicit-any
+          } as any,
+        ),
+      createPromptLoop: () => ({
+        runPrompt: (options) => {
+          runPromptOptions = options;
+          return Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Done.",
+              transcript: [],
+              modelTurns: 1,
+              runState: {
+                runId: "run-input-cells",
+                status: "completed",
+                createdAt: "2026-04-15T22:00:00.000Z",
+                updatedAt: "2026-04-15T22:00:01.000Z",
+                cfcEnforcementMode: "enforce-explicit",
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+                inputCells: [{
+                  name: "travellerName",
+                  token: "cfh:a:cell0001",
+                  ref: cellRef,
+                }],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          );
+        },
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  const cellMessages = (runPromptOptions?.contextMessages ?? []).filter((
+    message,
+  ) => message.includes("Input cells"));
+  assertEquals(cellMessages.length, 1);
+  assertEquals(cellMessages[0]!.includes("travellerName"), true);
+  assertEquals(cellMessages[0]!.includes("cfh:a:"), true);
+  assertEquals(cellMessages[0]!.includes(cellId), false);
+  assertEquals(
+    stdout.join("").includes("inputCells: travellerName cfh:a:cell0001"),
+    true,
+  );
+  // The grants failed to resolve (no default pattern), which is said on
+  // stderr; the input cells must still be established and announced.
+  assertEquals(
+    stderr.some((line) => line.includes("fabric grants: unavailable")),
+    true,
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an input cell alongside --resume-run", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--resume-run",
+          "/tmp/project/.cf-harness-artifacts/run-1",
+          "--prompt",
+          "hi",
+          "--input-cell",
+          `travellerName=/of:fid1:${"A".repeat(43)}/travellerName`,
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--input-cell is not supported with --resume-run",
+  );
+});
+
+Deno.test("runCfHarnessCli refuses duplicate input-cell names before any run setup", async () => {
+  const { io, stderr } = createIoBuffers();
+  const cellRef = `/of:fid1:${"A".repeat(43)}/travellerName`;
+  let startupWorkReached = false;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "Plan the trip",
+      "--input-cell",
+      `travellerName=${cellRef}`,
+      "--input-cell",
+      `travellerName=${cellRef}`,
+    ],
+    {
+      io,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      fabricSessionFactory: () => {
+        startupWorkReached = true;
+        return Promise.reject(new Error("must not be reached"));
+      },
+      createPromptLoop: () => {
+        startupWorkReached = true;
+        throw new Error("must not be reached");
+      },
+    },
+  );
+
+  assertEquals(exitCode, 1);
+  assertEquals(startupWorkReached, false);
+  assertEquals(
+    stderr.some((line) =>
+      line.includes("--input-cell names `travellerName` twice")
+    ),
+    true,
+  );
 });
 
 Deno.test("runCfHarnessCli says so when the well-known grants cannot be established", async () => {
@@ -3705,6 +4089,58 @@ Deno.test("formatCfHarnessTranscriptEvent formats assistant tool calls and tool 
         role: "assistant",
         content: "",
         toolCalls: [{
+          id: "call-acquire-1",
+          type: "function",
+          function: {
+            name: "acquire_skill",
+            arguments: '{"id":"membranedev/application-skills/plaid"}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: acquire_skill(id="membranedev/application-skills/plaid")\n',
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-acquire-2",
+          type: "function",
+          function: { name: "acquire_skill", arguments: '{"id":42}' },
+        }],
+      },
+      transcript: [],
+    }),
+    "assistant -> tools: acquire_skill\n",
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-skills-1",
+          type: "function",
+          function: {
+            name: "search_skills",
+            arguments:
+              '{"query":"react native","owner":"vercel-labs","limit":3}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: search_skills(query="react native" owner="vercel-labs" limit=3)\n',
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
           id: "call-1",
           type: "function",
           function: { name: "bash", arguments: '{"command":"ls"}' },
@@ -4792,6 +5228,71 @@ Deno.test("runCfHarnessCli threads sandbox-image into engine sandbox config", as
     engine?.sandbox.describe().cfc?.image,
     "registry.example/cf:deno2",
   );
+});
+
+Deno.test("runCfHarnessCli routes skills.sh discovery through its injected fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  let defaultFetchCalls = 0;
+  const injectedUrls: string[] = [];
+  let toolStatus: string | undefined;
+  globalThis.fetch = (() => {
+    defaultFetchCalls += 1;
+    return Promise.resolve(Response.json({ skills: [] }));
+  }) as typeof globalThis.fetch;
+
+  let exitCode: number;
+  try {
+    exitCode = await runCfHarnessCli(
+      [
+        "--model-provider",
+        "openai-compatible-gateway",
+        "--gateway-auth-mode",
+        "none",
+        "--cfc-enforcement-mode",
+        "disabled",
+        "--workspace",
+        "/tmp/project",
+        "--skills-registry-url",
+        "https://registry.example",
+        "--prompt",
+        "Find a skill",
+      ],
+      {
+        env: {},
+        fetchFn: (input) => {
+          injectedUrls.push(String(input));
+          return Promise.resolve(Response.json({ skills: [] }));
+        },
+        createPromptLoop: (options) => {
+          if (options.engine === undefined) {
+            throw new Error("expected CLI-created engine");
+          }
+          const engine = options.engine;
+          return {
+            runPrompt: async () => {
+              const result = await engine.invokeBuiltinTool(
+                "search_skills",
+                { query: "react native" },
+              );
+              toolStatus = (result.output as { status?: string }).status;
+              return completedCliResult("run-skills-sh-fetch");
+            },
+            runTranscript: () =>
+              Promise.reject(new Error("unexpected resume path")),
+          };
+        },
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assertEquals(exitCode, 0);
+  assertEquals(defaultFetchCalls, 0);
+  assertEquals(injectedUrls, [
+    "https://registry.example/api/search?q=react+native&limit=20",
+  ]);
+  assertEquals(toolStatus, "ok");
 });
 
 Deno.test("parseCfHarnessCliArgs selects openai-codex without an API key", async () => {
@@ -6097,4 +6598,347 @@ Deno.test("a resume reads a missing run as bad argv and an unreadable one as int
   const unreadable = await run(new Deno.errors.PermissionDenied("run-state"));
   assertEquals(unreadable.code, "internal-error");
   assertEquals(unreadable.message.includes("run-state"), false);
+});
+
+Deno.test("parseCfHarnessCliArgs parses --pattern-index-url alongside the fabric session flags", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--pattern-index-url",
+      "https://index.example/api",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.patternIndex, { baseUrl: "https://index.example/api" });
+});
+
+Deno.test("parseCfHarnessCliArgs parses --skills-registry-url", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--skills-registry-url",
+      "https://registry.example",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.skillsSh, { baseUrl: "https://registry.example" });
+});
+
+Deno.test("parseCfHarnessCliArgs reads the skills registry URL from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_SKILLS_REGISTRY_URL: "https://registry.example" },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.skillsSh, { baseUrl: "https://registry.example" });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a skills registry URL that does not parse", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--skills-registry-url", "not a url"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--skills-registry-url must be a valid URL",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an empty skills registry flag", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--skills-registry-url", "   "],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--skills-registry-url requires a non-empty value",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects --allow-tool search_skills without a skills registry", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--allow-tool", "search_skills"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "missing --skills-registry-url",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects --allow-tool acquire_skill without both backings", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--allow-tool", "acquire_skill"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "requires a fabric session",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--allow-tool",
+          "acquire_skill",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "missing --skills-registry-url",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs accepts --allow-tool acquire_skill with both backings", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--allow-tool",
+      "acquire_skill",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--skills-registry-url",
+      "https://registry.example",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(parsed.allowedToolIds, ["acquire_skill"]);
+});
+
+Deno.test("parseCfHarnessCliArgs reads the pattern index URL from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_PATTERN_INDEX_URL: "https://index.example/api" },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.patternIndex, { baseUrl: "https://index.example/api" });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects --pattern-index-url without the fabric session flags", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--pattern-index-url",
+          "https://index.example/api",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--pattern-index-url needs a fabric session",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a pattern index URL that does not parse", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+          "--pattern-index-url",
+          "not a url",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--pattern-index-url must be a valid URL",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects --allow-tool search_patterns without a pattern index", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+          "--allow-tool",
+          "search_patterns",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "missing --pattern-index-url",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs records the publish opt-out from --no-pattern-index-publish", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--pattern-index-url",
+      "https://index.example/api",
+      "--no-pattern-index-publish",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.patternIndex, {
+    baseUrl: "https://index.example/api",
+    publish: false,
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs reads the pattern index publish opt-out from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_PATTERN_INDEX_URL: "https://index.example/api",
+        CF_HARNESS_PATTERN_INDEX_PUBLISH: "0",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.patternIndex, {
+    baseUrl: "https://index.example/api",
+    publish: false,
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs reads deliberate discoverable publishing from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_PATTERN_INDEX_URL: "https://index.example/api",
+        CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE: "1",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.patternIndex, {
+    baseUrl: "https://index.example/api",
+    publishDiscoverable: true,
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects --allow-tool record_feedback without a pattern index", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+          "--allow-tool",
+          "record_feedback",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "missing --pattern-index-url",
+  );
 });

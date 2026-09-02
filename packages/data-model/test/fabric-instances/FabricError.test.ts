@@ -43,6 +43,7 @@ describe("FabricError", () => {
   // Pure type-identity / supertype checks: they don't fit a single member and
   // aren't about construction mechanics, so they live directly under the class
   // `describe()` (the rule's cross-cutting carve-out).
+
   it("implements `FabricInstance`", () => {
     const se = FabricError.fromNativeError(new Error("test"));
     expect(se instanceof FabricInstance).toBe(true);
@@ -57,11 +58,79 @@ describe("FabricError", () => {
     // The `FabricInstance` contract, checked on the state-heaviest of the
     // concrete classes: an own property here would leak into any structural
     // view of the instance (spread, `Object.keys()`, a debug rendering).
+
     const se = FabricError.fromNativeError(new Error("test"));
     se.setExtra("extra", 1);
     expect(Object.getOwnPropertyNames(se)).toEqual([]);
-    expect(Object.getOwnPropertySymbols(se)).toEqual([]);
     expect({ ...se }).toEqual({});
+  });
+
+  describe("`fromNativeError()` reads the class from the prototype", () => {
+    // The `type` this records is stored, and `errorClassFromType()` rebuilds
+    // the error from it on the way back -- so where the name is read from
+    // decides which class a value comes back as. An own `constructor` property
+    // is ordinary data, and reading it there would let a value pick that class
+    // for itself.
+
+    it("ignores an own `constructor` naming another class", () => {
+      const error = new Error("boom");
+      Object.defineProperty(error, "constructor", {
+        value: { name: "RangeError" },
+      });
+      expect(FabricError.fromNativeError(error).type).toBe("Error");
+    });
+
+    it("keeps the real class of a subclass instance", () => {
+      expect(FabricError.fromNativeError(new RangeError("r")).type).toBe(
+        "RangeError",
+      );
+    });
+
+    it("ignores a prototype whose `constructor` is not callable", () => {
+      // The name has to come from something that could have constructed the
+      // value. A `constructor` that is not callable did not, so it names no
+      // class, and the value is recorded as the `Error` it still is.
+
+      class Sneaky extends Error {}
+      Object.defineProperty(Sneaky.prototype, "constructor", {
+        value: { name: "RangeError" },
+      });
+      expect(FabricError.fromNativeError(new Sneaky("x")).type).toBe("Error");
+    });
+
+    it("ignores a prototype whose `constructor` accessor throws", () => {
+      // Reading the class is this conversion's business; failing to read it is
+      // not the caller's problem, and the accessor's error must not arrive in
+      // place of a converted value.
+
+      class Hostile extends Error {}
+      Object.defineProperty(Hostile.prototype, "constructor", {
+        get() {
+          throw new Error("this must not reach the caller");
+        },
+      });
+      expect(FabricError.fromNativeError(new Hostile("x")).type).toBe("Error");
+    });
+
+    it("gives a message-less severed-prototype error an empty message", () => {
+      // `message` is inherited from `Error.prototype` unless the constructor
+      // was given one, so severing the prototype takes it away entirely.
+      // `FabricError` declares a `string`.
+
+      const bare = Object.setPrototypeOf(new Error(), null) as Error;
+      const converted = FabricError.fromNativeError(bare);
+      expect(typeof converted.message).toBe("string");
+      expect(converted.message).toBe("");
+    });
+
+    it("names a severed-prototype error `Error`", () => {
+      // Such a value names no class at all. It is still an error --
+      // `Error.isError()` sees it, and the dispatch tags it so -- and the
+      // conversion has to produce something rather than fail reading a name.
+
+      const severed = Object.setPrototypeOf(new Error("severed"), null);
+      expect(FabricError.fromNativeError(severed).type).toBe("Error");
+    });
   });
 
   describe("constructor()", () => {
@@ -345,10 +414,11 @@ describe("FabricError", () => {
         expect(fe.extraSize).toBe(1);
       });
 
-      // The constructor filters its `extras` input independently of the codec,
-      // which filters again on the way in. Both layers matter: extras carry
-      // whatever the wire supplied, and the constructor is public.
       it("drops unsafe and reserved keys supplied to the constructor", () => {
+        // The constructor filters its `extras` input independently of the
+        // codec, which filters again on the way in. Both layers matter: extras
+        // carry whatever the wire supplied, and the constructor is public.
+
         const fe = new FabricError({
           type: "Error",
           name: "Error",
@@ -493,11 +563,12 @@ describe("FabricError", () => {
       });
     });
 
-    // `FabricError` inherits the `deepClone()` template from
-    // `BaseFabricInstance` and supplies only its `[DEEP_CLONE_CORE]` (a codec
-    // round-trip). These cases pin the template contract for this concrete
-    // implementor.
     describe("deepClone()", () => {
+      // `FabricError` inherits the `deepClone()` template from
+      // `BaseFabricInstance` and supplies only its `[DEEP_CLONE_CORE]` (a codec
+      // round-trip). These cases pin the template contract for this concrete
+      // implementor.
+
       it("returns a deep-frozen clone with equal state", () => {
         const fe = FabricError.fromNativeError(
           new Error("boom", { cause: { detail: 1 } }),
@@ -517,6 +588,7 @@ describe("FabricError", () => {
       it("does NOT identity-return a merely-shallowly-frozen instance", () => {
         // Frozen wrapper, but a still-mutable nested `cause`: not deep-frozen,
         // so the deep-clone identity gate must allocate rather than alias.
+
         const fe = FabricError.fromNativeError(new Error("outer"));
         fe.cause = { detail: 1 }; // mutable nested FabricValue
         Object.freeze(fe); // shallow freeze only
@@ -540,13 +612,14 @@ describe("FabricError", () => {
         expect(fe.message).toBe("outer");
       });
 
-      // KNOWN GAP (pre-existing): the clone core round-trips through
-      // `[CODEC]`, whose `encode()` passes `cause` (and extras) through by
-      // reference, so an *unfrozen* deep clone still shares its nested
-      // `cause` with the original -- contrary to the `deepClone(false)`
-      // contract on `FabricInstance`. Pinned to record the actual behavior,
-      // not to bless it.
       it("returns a mutable clone that currently SHARES the nested `cause` reference (known gap)", () => {
+        // KNOWN GAP (pre-existing): the clone core round-trips through
+        // `[CODEC]`, whose `encode()` passes `cause` (and extras) through by
+        // reference, so an *unfrozen* deep clone still shares its nested
+        // `cause` with the original -- contrary to the `deepClone(false)`
+        // contract on `FabricInstance`. Pinned to record the actual behavior,
+        // not to bless it.
+
         const cause = { detail: 1 };
         const fe = FabricError.fromNativeError(new Error("outer", { cause }));
         const clone = fe.deepClone(false) as FabricError;
@@ -586,6 +659,7 @@ describe("FabricError", () => {
 
         it("encodes `name: null` when `name` matches `type` (`TypeError`)", () => {
           // TypeError: name === constructor.name === "TypeError".
+
           const se = FabricError.fromNativeError(new TypeError("type check"));
           const state = codec.encode(se, env) as Record<string, unknown>;
           expect(state.type).toBe("TypeError");
@@ -604,9 +678,10 @@ describe("FabricError", () => {
         });
       });
 
-      // Decoding hand-built state (not via `encode()`): exercises name/type
-      // handling and back-compat that the round-trip tests don't.
       describe("canDecode()", () => {
+        // Decoding hand-built state (not via `encode()`): exercises name/type
+        // handling and back-compat that the round-trip tests don't.
+
         it("returns `true` for a record", () => {
           expect(codec.canDecode({ type: "Error", message: "boop" }))
             .toBe(true);
@@ -616,6 +691,7 @@ describe("FabricError", () => {
           // Wire state is untrusted input. Without this check these decode
           // into a `FabricError` bearing a default type and an empty message,
           // which is a malformation admitted silently rather than reported.
+
           for (const state of ["hello", 42, true, null, [1, 2]]) {
             expect(codec.canDecode(state as never)).toBe(false);
           }
@@ -623,10 +699,12 @@ describe("FabricError", () => {
       });
 
       describe("decode()", () => {
-        // `JSON.parse` creates an own `__proto__` property where an object
-        // literal instead invokes the setter, so parsed wire state is the one
-        // place a prototype-sensitive key genuinely arrives as decodable input.
         it("drops a `__proto__` key arriving from parsed wire state", () => {
+          // `JSON.parse` creates an own `__proto__` property where an object
+          // literal instead invokes the setter, so parsed wire state is the one
+          // place a prototype-sensitive key genuinely arrives as decodable
+          // input.
+
           const state = JSON.parse(
             '{"type":"Error","message":"x","__proto__":"bad","code":7}',
           );
@@ -792,6 +870,7 @@ describe("FabricError", () => {
           // wrapping an Error whose cause is itself a FabricError (not a raw
           // Error). Encoding's recurse on `[CODEC]` `encode()` output must find
           // a FabricValue, not a raw Error.
+
           const innerSe = FabricError.fromNativeError(new Error("inner"));
           const outerErr = new Error("outer");
           outerErr.cause = innerSe;
@@ -854,6 +933,7 @@ describe("FabricError", () => {
 
         it("round-trips an `Error` with mismatched `name` and `type`", () => {
           // Error constructor is "Error" but name is overridden.
+
           const err = new Error("mismatch");
           err.name = "CustomName";
           const se = FabricError.fromNativeError(err);

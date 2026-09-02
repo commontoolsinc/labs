@@ -21,6 +21,7 @@
 
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { parseLink } from "../link-utils.ts";
+import { settleAbandonedRequest } from "./abandoned-request.ts";
 import {
   computeRowLabelRead,
   resolveCeilingPlaceholders,
@@ -38,22 +39,29 @@ import {
   effectTargetKey,
   markEffectCompletion,
 } from "../executor/effect-completion.ts";
-import { waveRunContextOf } from "../executor/wave.ts";
+import { waveRunContextOf, waveSettlementOf } from "../executor/wave.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
+import {
+  fabricFromNativeValue,
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
-import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import {
   columnDeclaresIfc,
   type SqliteDbRef as WireSqliteDbRef,
   type SqliteParamsWire,
+  sqliteRowToWire,
 } from "@commonfabric/memory/v2";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 import { type Cell, createCell, encodeSqliteParams } from "../cell.ts";
 import type { CfcConfClause } from "../cfc/clause.ts";
+import { createRef } from "../create-ref.ts";
 import { stripEntityUriScheme } from "../entity-kind.ts";
+import { toURI } from "../uri-utils.ts";
 // The wire shape (`id`, `tables`, `scope`, `owner`) is the memory protocol's
 // own `SqliteDbRef`; only `rev` is added here.
 type SqliteDbRef = WireSqliteDbRef & {
@@ -502,7 +510,12 @@ export function labelResultSchema(
       // No single source → conservative join/meet of the db's labeled columns.
       const derived = deriveNullOriginIfc(tables);
       if (derived) {
-        itemProps[c.output] = { ifc: derived };
+        Object.defineProperty(itemProps, c.output, {
+          value: { ifc: derived },
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
         anyLabeled = true;
       }
       continue;
@@ -514,11 +527,17 @@ export function labelResultSchema(
       // by reference makes the schema-policy walk proxy a non-extensible object
       // ("ownKeys … non-extensible"). `cloneIfNecessary(_, { frozen: false })`
       // reads through the proxy and returns plain, mutable data.
-      itemProps[c.output] = {
-        ifc: cloneIfNecessary(ifc as Parameters<typeof cloneIfNecessary>[0], {
-          frozen: false,
-        }),
-      };
+      Object.defineProperty(itemProps, c.output, {
+        value: {
+          ifc: cloneIfNecessary(
+            ifc as Parameters<typeof cloneIfNecessary>[0],
+            { frozen: false },
+          ),
+        },
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
       anyLabeled = true;
     }
   }
@@ -543,6 +562,36 @@ export function labelResultSchema(
         },
       },
     },
+  };
+}
+
+/** Schema for one SQLite row after unsafe column names have selected the
+ * entry-list wire representation. Column labels move from object properties to
+ * each entry tuple's value slot; ordinary rows keep their object schema. */
+function sqliteWireRowSchema(
+  row: unknown,
+  objectSchema: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (!Array.isArray(row)) {
+    return objectSchema ?? {
+      type: "object",
+      additionalProperties: true,
+    };
+  }
+  const properties = objectSchema?.properties as
+    | Record<string, unknown>
+    | undefined;
+  return {
+    type: "array",
+    prefixItems: (row as Array<[string, unknown]>).map(([name]) => ({
+      type: "array",
+      prefixItems: [
+        { type: "string" },
+        Object.getOwnPropertyDescriptor(properties ?? {}, name)?.value ?? true,
+      ],
+      items: false,
+    })),
+    items: false,
   };
 }
 
@@ -652,7 +701,26 @@ export function sqliteDatabase(
         );
       }
       sendResult(tx, handle);
-      initialized = true;
+      // The scheduler retries this same action closure after a stale-basis
+      // rejection. In a serving runtime, a successful transaction commit only
+      // seals the write into its wave; the wave can still withdraw it. Advance
+      // the one-shot guard only when the handle is durable at the destination.
+      // Failed older attempts never reset it, so a later durable attempt wins.
+      tx.addCommitCallback((settledTx, result) => {
+        if (result.error) {
+          return;
+        }
+        const waveSettlement = waveSettlementOf(settledTx);
+        if (waveSettlement === undefined) {
+          initialized = true;
+          return;
+        }
+        void waveSettlement.then((waveResult) => {
+          if (!waveResult.error) {
+            initialized = true;
+          }
+        });
+      });
     }
   };
   return { action };
@@ -663,6 +731,7 @@ type QueryState = {
   result?: unknown[];
   error?: unknown;
   requestHash?: string;
+
   /** CFC Phase 3.b read-time clearance audit: how many rows the acting reader
    *  could not read were withheld (a declared existence release). Absent when
    *  no clearance was requested. */
@@ -699,8 +768,10 @@ type QueryState = {
 export function sqliteQueryMemoDecision(options: {
   stored: { pending?: boolean; requestHash?: string } | undefined;
   hash: string;
+
   /** This node instance holds the RPC in flight right now. */
   inFlightHere: boolean;
+
   /** The evaluation runs as a stamped serving run (a wave run context
    * is present — the serving loop's signature; ON-arm client
    * speculation and the OFF arm are unstamped). */
@@ -725,12 +796,27 @@ export function sqliteQuery(
   let initialized = false;
   let result: Cell<QueryState>;
   let resultScope: CellScope | undefined;
+
   /** Hashes whose RPC this node instance currently has in flight — the
    * in-process half of the memo decision above. */
   const inFlightIssues = new Set<string>();
+
+  /**
+   * The query this node staged on its most recent run, if that run staged one.
+   * A token rather than the request's hash: two stagings of the same statement
+   * are still two queries, and the ending of the first must not be read as the
+   * ending of the second.
+   */
+  let currentStaging: symbol | undefined;
+
   const space = parentCell.space;
 
   const action: Action = (tx: IExtendedStorageTransaction) => {
+    // Cleared for the whole run and set again only by the arm that stages a
+    // query, so every way this run can end without staging one — inputs it
+    // cannot read, a result already stored, a query already in flight — leaves
+    // the ending of an earlier query with nothing of this node's to write to.
+    currentStaging = undefined;
     const inputs = inputsCell.withTx(tx).get() as {
       db?: unknown;
       sql?: string;
@@ -856,8 +942,11 @@ export function sqliteQuery(
     // posture a dropped effect leaves it orphaned, and only re-issuing
     // heals that (sqliteQueryMemoDecision above; serving-loop.md §4,
     // §6 step 3).
+    // The claim as it stands before this request writes its own, for the
+    // abandonment ending below to compare against.
+    const storedBeforeClaim = result.withTx(tx).get();
     const decision = sqliteQueryMemoDecision({
-      stored: result.withTx(tx).get(),
+      stored: storedBeforeClaim,
       hash,
       inFlightHere: inFlightIssues.has(hash),
       servedRun,
@@ -870,6 +959,8 @@ export function sqliteQuery(
       return;
     }
     if (decision === "dedupe") return;
+    const staging = Symbol(hash);
+    currentStaging = staging;
     result.withTx(tx).set({ pending: true, requestHash: hash });
 
     const sql = inputs.sql;
@@ -882,6 +973,77 @@ export function sqliteQuery(
       id: `sqliteQuery:${hash}`,
       idempotencyKey: effectKey,
       kind: "sqlite-query",
+      // The claim above rides this transaction, and so does this effect. When
+      // the scheduler stops attempting the commit neither landed and no read
+      // is coming, so a reader of the claim would wait on a query nobody is
+      // running.
+      abandon: () => {
+        runtime.trackAsyncWork(
+          settleAbandonedRequest(
+            runtime,
+            "sqliteQuery",
+            effectKey,
+            (settleTx) => {
+              sendResult(settleTx, result);
+              // Read the stored claim at write time. Another query holds
+              // this result in either of two ways, and the ending steps around
+              // both. One is running: the pending flag is up under a hash that
+              // is not this query's, and from then on the result is that
+              // query's to write, exactly as `failQuery` decides it. Or one
+              // has committed here since this query was staged, whatever state
+              // it left — a later query that already answered leaves its own
+              // hash with the flag down, and that answer is its own to keep.
+              //
+              // What is left over from before this query was staged is neither.
+              // A query that finished leaves its hash standing with the flag
+              // down, so every query after the first one finds a hash here that
+              // belongs to nobody, and reading that as a takeover would leave
+              // the pattern holding the finished query's rows under a statement
+              // it no longer runs.
+              const stored = result.withTx(settleTx).get();
+              // This node has moved on if its latest run staged something
+              // else, or staged nothing at all. The store can say nothing about
+              // that: a run whose statement returns to one already answered
+              // reads that answer and writes nothing, so the two durable tests
+              // below both see exactly what this query left behind.
+              if (currentStaging !== staging) return;
+              const running = stored?.pending === true &&
+                stored.requestHash !== undefined && stored.requestHash !== hash;
+              // Whole value, not one field of it: a query that answers
+              // records rows without moving the hash, and one that takes over
+              // moves the hash without recording rows.
+              // `valueEqual` rather than a structural walk: a decoded row can
+              // carry a `FabricValue` whose contents live in private fields
+              // that such a walk cannot see, and every distinct instance of one
+              // compares equal to every other.
+              const writtenSinceStaged = !valueEqual(
+                storedBeforeClaim as FabricValue,
+                stored as FabricValue,
+              );
+              if (running || writtenSinceStaged) {
+                return;
+              }
+              // What the pattern reads is that the query was refused, and
+              // nothing more. The refusal names the document the rule matched
+              // on and the source of each caveat — the principal that
+              // introduced it — which is what the pattern-facing surface
+              // withholds. That detail reaches the operator through the
+              // scheduler's report of the dropped write.
+              result.withTx(settleTx).set({
+                pending: false,
+                error: "sqliteQuery request was refused before it started",
+                requestHash: hash,
+              });
+            },
+          ),
+          parentCell,
+        );
+      },
+      // The flush awaits the query and its writeback, so the transaction's own
+      // commit promise spans them and the scheduler registers that promise for
+      // every commit carrying post-commit effects. Nothing here is handed to
+      // `trackAsyncWork` for that reason; the abandonment settle above is
+      // separate work with its own completion, and is registered.
       async flush() {
         inFlightIssues.add(hash);
         // The requesting RUN's identity, applied to every writeback
@@ -1022,49 +1184,101 @@ export function sqliteQuery(
               ? rowLabels.labels.filter((_, i) => keep[i])
               : rowLabels.labels;
             const anyPerRow = perRow.some((l) => l !== undefined);
-            // On the labeled path, write the rows UNDER the label schema: the
-            // schema-aware write is what attaches the per-path `ifc` to each row's
-            // entity doc (recording the policy alone does not). The provider rows
-            // are deep-frozen and reach this write through a proxy; the
-            // schema-aware diff would trip "ownKeys … non-extensible", so write a
-            // plain extensible JSON copy. `editWithRetry` runs
-            // `prepareTxForCommit`, so the CFC-relevant labeled write commits and
-            // the label persists.
-            const resultRows = ((labelSchema || anyPerRow)
-              ? cloneIfNecessary(
-                keptRows as Parameters<typeof cloneIfNecessary>[0],
-                { frozen: false },
-              )
-              : keptRows) as unknown[];
+            // Convert before the Fabric write: SQLite aliases are arbitrary,
+            // while Fabric records reserve prototype-pollution keys. Unsafe
+            // rows use the memory protocol's entry-list representation. On the
+            // labeled path, clone that Fabric-safe form to an extensible value
+            // before the schema-aware diff attaches per-path labels.
+            const resultRows = keptRows.map((row) => {
+              const wireRow = sqliteRowToWire(
+                row as Parameters<typeof sqliteRowToWire>[0],
+              );
+              return labelSchema || anyPerRow
+                ? cloneIfNecessary(
+                  wireRow as Parameters<typeof cloneIfNecessary>[0],
+                  { frozen: false },
+                )
+                : wireRow;
+            }) as unknown[];
+            const objectRowSchema = (labelSchema?.properties as {
+              result?: { items?: Record<string, unknown> };
+            } | undefined)?.result?.items;
+            const rowSchemas = resultRows.map((row) =>
+              sqliteWireRowSchema(row, objectRowSchema)
+            );
+            const needsEntryRowSchema = resultRows.some(Array.isArray) &&
+              (labelSchema !== undefined || anyPerRow);
+            const writeSchema = needsEntryRowSchema
+              ? {
+                type: "object",
+                additionalProperties: true,
+                properties: {
+                  result: {
+                    type: "array",
+                    prefixItems: rowSchemas,
+                    items: false,
+                  },
+                },
+              }
+              : labelSchema;
             const wrote = await runtime.editWithRetry((wtx) => {
               markEffectCompletion(wtx, effectKey);
               applyRunIdentity(wtx);
               // Stale-writeback guard: a newer query (different inputs -> different
               // hash) may have superseded this one while the RPC was in flight.
               // Only write back if the result cell still records THIS request.
-              if (result.withTx(wtx).get()?.requestHash !== hash) return;
-              const target = labelSchema
-                ? result.asSchema(labelSchema).withTx(wtx)
+              if (result.withTx(wtx).get()?.requestHash !== hash) {
+                return;
+              }
+              const base = result.getAsNormalizedFullLink();
+              const storedRows = resultRows.map((row, i) => {
+                if (
+                  !Array.isArray(row) ||
+                  (labelSchema === undefined && perRow[i] === undefined)
+                ) {
+                  return row;
+                }
+                const rowLink = {
+                  ...base,
+                  id: toURI(createRef({ id: i }, {
+                    parent: { id: base.id, space: base.space },
+                    path: [...base.path, "result"],
+                    context: "sqlite-entry-row",
+                  })),
+                  path: [],
+                  schema: {
+                    ...rowSchemas[i],
+                    ...(perRow[i] !== undefined && { ifc: perRow[i] }),
+                  },
+                };
+                const rowCell = createCell(runtime, rowLink, wtx).asSchema(
+                  rowLink.schema as Parameters<Cell<unknown>["asSchema"]>[0],
+                ).withTx(wtx);
+                rowCell.set(row);
+                return rowCell;
+              });
+              const target = writeSchema
+                ? result.asSchema(writeSchema).withTx(wtx)
                 : result.withTx(wtx);
               target.set({
                 pending: false,
-                result: resultRows,
+                result: storedRows,
                 requestHash: hash,
                 ...(withheld !== undefined ? { withheld } : {}),
               });
-              // Per-row label attachment (CFC Phase 3): each row split into its
-              // own entity doc above; write each labeled row doc DIRECTLY (its
-              // own id, root path) under a root-`ifc` schema. Keyed by the row
-              // doc's id, so there is no collision with the array write's items
-              // schema, and the per-row root label coexists with the per-column
-              // field labels on the same doc (06-cfc.md "Read — re-derive per
-              // row, attach, ceiling").
+              // Per-row label attachment (CFC Phase 3): object rows split into
+              // entity docs. Labeled entry-list rows are anchored explicitly
+              // because arrays otherwise remain inline. Both forms attach the
+              // row label at the entity root and retain the per-column labels
+              // in `rowSchemas`.
               if (anyPerRow) {
-                const base = result.getAsNormalizedFullLink();
                 for (let i = 0; i < resultRows.length; i++) {
                   const ifc = perRow[i];
-                  if (!ifc) continue;
-                  const raw = result.key("result").key(i).withTx(wtx).getRaw();
+                  if (!ifc) {
+                    continue;
+                  }
+                  const rowCell = result.key("result").key(i).withTx(wtx);
+                  const raw = rowCell.getRaw();
                   const link = parseLink(raw);
                   if (!link?.id) {
                     // Fail closed: a labeled row MUST carry its label; aborting
@@ -1085,11 +1299,11 @@ export function sqliteQuery(
                     wtx,
                   ).asSchema(
                     {
-                      type: "object",
-                      additionalProperties: true,
+                      ...rowSchemas[i],
                       ifc,
                     } as Parameters<Cell<unknown>["asSchema"]>[0],
-                  ).withTx(wtx).set(resultRows[i]);
+                  ).withTx(wtx)
+                    .set(resultRows[i]);
                 }
               }
             });

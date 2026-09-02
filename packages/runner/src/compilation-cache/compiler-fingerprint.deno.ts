@@ -97,6 +97,7 @@ const FINGERPRINT_LENGTH = 16;
 interface FingerprintFile {
   /** Path relative to the repo root, with forward slashes. */
   readonly path: string;
+
   /** File contents with line endings normalized to `\n`. */
   readonly content: string;
 }

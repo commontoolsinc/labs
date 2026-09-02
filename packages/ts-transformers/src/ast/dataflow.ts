@@ -131,8 +131,9 @@ export function createDataFlowAnalyzer(
   hooks: DataFlowAnalyzerHooks = {},
 ): (expression: ts.Expression) => DataFlowAnalysis {
   // Per-expression memoization for `analyze()`. Lives inside this closure;
-  // invalidated as a unit when `TransformationContext.invalidateReactiveAnalysisCaches`
-  // drops the analyzer instance (see core/mod.ts cache-invalidation contract).
+  // invalidated as a unit when
+  // `TransformationContext.#invalidateReactiveAnalysisCaches` drops the
+  // analyzer instance (see core/mod.ts cache-invalidation contract).
   const analysisCache = new WeakMap<ts.Expression, DataFlowAnalysis>();
   const resolvingConstAliases = new Set<ts.Symbol>();
   const isArrayMethodElementBindingReference =
@@ -157,10 +158,10 @@ export function createDataFlowAnalyzer(
       isArrayMethodElementBindingReference(current);
   };
 
-  // === Synthetic node helpers ===
-  // These enable unified handling of both synthetic (transformer-created) and
-  // non-synthetic (original source) nodes by gracefully handling cases where
-  // the TypeChecker can't resolve symbols or types.
+  // Synthetic node helpers: These enable unified handling of both synthetic
+  // (transformer-created) and non-synthetic (original source) nodes by
+  // gracefully handling cases where the TypeChecker can't resolve symbols or
+  // types.
 
   const isSynthetic = (node: ts.Node): boolean => !node.getSourceFile();
 
@@ -632,7 +633,7 @@ export function createDataFlowAnalyzer(
       setParentPointers(expression);
     }
 
-    // === Helper functions (available for both synthetic and non-synthetic paths) ===
+    // Helper functions (available for both synthetic and non-synthetic paths)
 
     const recordDataFlow = (
       expr: ts.Expression,
@@ -708,7 +709,7 @@ export function createDataFlowAnalyzer(
       return false;
     };
 
-    // === Expression type handlers ===
+    // Expression type handlers
 
     if (ts.isIdentifier(expression)) {
       // Skip property names in property access expressions - they're not data flows.
@@ -1064,20 +1065,13 @@ export function createDataFlowAnalyzer(
       };
     }
 
-    if (ts.isParenthesizedExpression(expression)) {
-      return analyzeExpression(expression.expression, scope, context);
-    }
-
-    if (ts.isAsExpression(expression)) {
-      return analyzeExpression(expression.expression, scope, context);
-    }
-
-    if (ts.isTypeAssertionExpression(expression)) {
-      return analyzeExpression(expression.expression, scope, context);
-    }
-
-    if (ts.isNonNullExpression(expression)) {
-      return analyzeExpression(expression.expression, scope, context);
+    // A transparent wrapper is analyzed as the expression it wraps. This has to
+    // name the whole set: an unlisted spelling falls to the generic child walk
+    // below, which reaches the same operands but merges them through
+    // `mergeAnalyses` and so drops the inner `rewriteHint`.
+    const unwrappedTarget = unwrapTransparentWrapperOnce(expression);
+    if (unwrappedTarget) {
+      return analyzeExpression(unwrappedTarget, scope, context);
     }
 
     if (ts.isConditionalExpression(expression)) {
@@ -1248,11 +1242,10 @@ export function createDataFlowAnalyzer(
       return mergeAnalyses(...analyses);
     }
 
-    // === JSX Expression Handling ===
-    // The analyzer provides complete data flow analysis for JSX elements,
-    // including both attributes (like `value={expr}`) and children.
-    // This makes the analyzer self-contained - callers get correct results
-    // regardless of how they traverse the AST.
+    // JSX Expression Handling: The analyzer provides complete data flow
+    // analysis for JSX elements, including both attributes (like
+    // `value={expr}`) and children. This makes the analyzer self-contained -
+    // callers get correct results regardless of how they traverse the AST.
 
     // Helper: analyze JSX attributes (JsxAttribute and JsxSpreadAttribute)
     const analyzeJsxAttributes = (

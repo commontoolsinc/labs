@@ -45,6 +45,7 @@ export interface CapabilityAnalysisOptions {
   readonly includeNestedCallbacks?: boolean;
   readonly summaryCache?: WeakMap<ts.Node, FunctionCapabilitySummary>;
   readonly inProgress?: WeakSet<ts.Node>;
+
   /**
    * Transformer-known types for nodes the checker can't resolve. Required for
    * synthetic callbacks (e.g. the destructure-lowered lift-applied param, whose
@@ -53,6 +54,7 @@ export interface CapabilityAnalysisOptions {
    * capability summary mis-shapes or drops inputs. Consulted before the checker.
    */
   readonly typeRegistry?: WeakMap<ts.Node, ts.Type>;
+
   /**
    * Optional sink for the read-then-mergeable-`push` misuse check. When set,
    * the analysis reports each `Cell.push` whose receiver collection path the
@@ -79,14 +81,17 @@ interface MutableCapabilityState {
   readonly rawOpaquePaths: Set<string>;
   passthrough: boolean;
   wildcard: boolean;
+
   /** Static path prefixes at which unknown (wildcard) accesses occurred.
    * `[]` means the whole root. Lets the identity-path filter erase only
    * identity paths the unknown access can actually cover, instead of
    * blanket-erasing every capture sharing this root state (#4714). */
   readonly wildcardPaths: Set<string>;
+
   hasIdentityUse: boolean;
   hasNonIdentityUse: boolean;
   hasNonIdentityRootUse: boolean;
+
   /**
    * Write-exhaustiveness is unverifiable for this parameter. Set by an
    * unrecognized or dynamic (`cell[m]()`) method call on a cell-like

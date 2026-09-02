@@ -1,7 +1,11 @@
 /**
  * Membership in the `FabricValue` type, asked one level deep and asked all the
  * way down, plus the plain-record question asked as membership and as a
- * narrowing.
+ * narrowing. The one-level question also has a throwing form, whose group is
+ * mostly about the reasons it gives, what it accepts being what the predicate
+ * accepts -- and which is cross-checked, value for value, against the refusal
+ * `shallowFabricFromNativeValue()` performs today, that being the refusal it
+ * is there to stand in for.
  *
  * The two depths ask the same question at different scopes, and the cases are
  * arranged around where that difference tells.
@@ -15,12 +19,20 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  assertValidFabricValueLayer,
+  isFabricContainerValue,
   isFabricPlainObject,
+  isValidFabricNativeObject,
   isValidFabricPlainObject,
   isValidFabricValue,
   isValidFabricValueLayer,
 } from "@/type-check.ts";
 import type { FabricValue } from "@/interface.ts";
+import { VALUE_TAGS } from "@/VALUE_TAGS.ts";
+import { tagFromNativeValue } from "@/native-type-tags.ts";
+import { codecClasses } from "@/fabric-primitives/index.ts";
+import { shallowFabricFromNativeValue } from "@/native-conversion.ts";
+import { LAYER_CORPUS, PlainClass } from "./fabric-value-corpus.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
@@ -116,6 +128,7 @@ describe("type-check", () => {
         // validation is `isValidFabricConvertibleValue()`'s job. A nested
         // value that is not a `FabricValue` does not make the container itself
         // fail the per-se check.
+
         expect(isValidFabricValueLayer({ a: Symbol("x") })).toBe(true);
         expect(isValidFabricValueLayer([Symbol("x")])).toBe(true);
       });
@@ -147,6 +160,7 @@ describe("type-check", () => {
       it("returns `false` for an accessor-backed property", () => {
         // An accessor is live code, not inert data: a read executes it and can
         // return a different value every time. Freezing does not change that.
+
         const obj = { a: 1 };
         Object.defineProperty(obj, "g", { get: () => 2, enumerable: true });
         expect(isValidFabricValueLayer(obj)).toBe(false);
@@ -169,6 +183,7 @@ describe("type-check", () => {
         // inert, and a runtime that does not route assignment through a
         // prototype chain would carry it fine. It is refused because in this
         // host the name cannot survive the copy that every boundary performs.
+
         expect(isValidFabricValueLayer({ ["__proto__"]: 1, other: 2 })).toBe(
           false,
         );
@@ -180,6 +195,7 @@ describe("type-check", () => {
         // is not part of what a value says as data and would not survive
         // encoding, so a value carrying a different one is refused rather than
         // accepted and quietly changed.
+
         const obj = Object.create(null) as Record<string, unknown>;
         obj.a = 1;
         expect(isValidFabricValueLayer(obj)).toBe(false);
@@ -203,6 +219,7 @@ describe("type-check", () => {
       it("returns `false` for an array with an accessor-backed index", () => {
         // An accessor is live code, not inert data: a read executes it and can
         // return a different value every time. Freezing does not change that.
+
         const arr = [1, 2, 3];
         Object.defineProperty(arr, 1, {
           get: () => 22,
@@ -222,6 +239,7 @@ describe("type-check", () => {
       it("returns `false` for an `Array` subclass instance", () => {
         // A subclass prototype is live code just as an accessor is, and
         // freezing the instance does not change that.
+
         class Sub extends Array {}
         const sub = new Sub();
         sub.push(1, 2);
@@ -238,6 +256,7 @@ describe("type-check", () => {
       it("returns `false` for a sparse array with extra named properties", () => {
         // Length 3, hole at index 1, plus a named property "foo": still
         // `false` because the named property isn't a valid array index.
+
         const sparse = [] as unknown[] & { foo?: string };
         sparse[0] = 1;
         sparse[2] = 3;
@@ -273,6 +292,7 @@ describe("type-check", () => {
       // stop an ordinary schema being a `FabricValue` at all. That hazard is
       // handled where a property can become callable, in the value proxies,
       // rather than by refusing the name here.
+
       expect(isValidFabricValue({
         type: "object",
         if: { properties: { kind: { const: "a" } } },
@@ -313,6 +333,7 @@ describe("type-check", () => {
       it("returns `true` for an interned symbol", () => {
         // Registry-interned symbols are portable and are members, matching
         // `isValidFabricValueLayer()`.
+
         expect(isValidFabricValue(Symbol.for("k"))).toBe(true);
       });
 
@@ -403,6 +424,7 @@ describe("type-check", () => {
       it("returns `true` for an unfrozen plain object and array", () => {
         // Structurally valid but not frozen: still a `FabricValue`. This is the
         // deliberate difference from `isValidDeepFrozenFabricValue()`.
+
         const obj = { a: 1, nested: { b: 2 } };
         expect(Object.isFrozen(obj)).toBe(false);
         expect(isValidFabricValue(obj)).toBe(true);
@@ -413,6 +435,7 @@ describe("type-check", () => {
         // A `FabricInstance` is a member by type. Membership does not require
         // it to be deep-frozen, and does not recurse into its private
         // interior.
+
         const fe = FabricError.fromNativeError(new Error("test"));
         expect(Object.isFrozen(fe)).toBe(false);
         expect(isValidFabricValue(fe)).toBe(true);
@@ -448,6 +471,7 @@ describe("type-check", () => {
       it("returns `false` for an accessor-backed property, at any depth", () => {
         // An accessor is live code, not inert data: a read executes it and can
         // return a different value every time. Freezing does not change that.
+
         const top = { a: 1 };
         Object.defineProperty(top, "g", { get: () => 2, enumerable: true });
         expect(isValidFabricValue(top)).toBe(false);
@@ -486,6 +510,7 @@ describe("type-check", () => {
       it("returns `false` for an accessor-backed array index, at any depth", () => {
         // An accessor is live code, not inert data, no matter the container:
         // an array index reaches it just as a plain-object key does.
+
         const top = [1, 2, 3];
         Object.defineProperty(top, 1, {
           get: () => 22,
@@ -511,6 +536,7 @@ describe("type-check", () => {
         // A subclass prototype is live code no matter the container: an
         // overridden `Symbol.iterator` makes iteration yield content the
         // indices never show, and freezing does not reach the prototype.
+
         class Sub extends Array {}
         const top = new Sub();
         top.push(1, 2);
@@ -591,6 +617,7 @@ describe("type-check", () => {
       it("returns `false` for a null-prototype object", () => {
         // The narrowing `isFabricPlainObject()` accepts this one; membership
         // requires an `Object.prototype`-rooted record.
+
         const obj = Object.create(null) as Record<string, never>;
 
         expect(isFabricPlainObject(obj as FabricValue)).toBe(true);
@@ -626,6 +653,55 @@ describe("type-check", () => {
       it("returns `false` for a `FabricSpecialObject`", () => {
         expect(isValidFabricPlainObject(new FabricBytes(new Uint8Array([1]))))
           .toBe(false);
+      });
+    });
+  });
+
+  describe("isFabricContainerValue()", () => {
+    describe("given a container arm of `FabricValue`", () => {
+      it("returns `true` for a plain object", () => {
+        expect(isFabricContainerValue({})).toBe(true);
+        expect(isFabricContainerValue({ a: 1, b: "two" })).toBe(true);
+      });
+
+      it("returns `true` for an array", () => {
+        expect(isFabricContainerValue([])).toBe(true);
+        expect(isFabricContainerValue([1, 2, 3])).toBe(true);
+      });
+
+      it("returns `true` for a `FabricInstance`", () => {
+        expect(
+          isFabricContainerValue(FabricError.fromNativeError(new Error("x"))),
+        )
+          .toBe(true);
+      });
+    });
+
+    describe("given a non-container `FabricValue`", () => {
+      it("returns `false` for a `FabricPrimitive`", () => {
+        // The whole of the difference from `isFabricObjectOrArray()`, which
+        // accepts these: a `FabricPrimitive` self-freezes at construction and
+        // exposes no `FabricValue` for a walk to descend into, whatever it
+        // holds privately.
+
+        expect(isFabricContainerValue(new FabricBytes(new Uint8Array([1]))))
+          .toBe(false);
+        expect(isFabricContainerValue(new FabricEpochNsec(1n))).toBe(false);
+      });
+
+      it("returns `false` for `null`", () => {
+        expect(isFabricContainerValue(null)).toBe(false);
+      });
+
+      it("returns `false` for `undefined`", () => {
+        expect(isFabricContainerValue(undefined)).toBe(false);
+      });
+
+      it("returns `false` for a scalar", () => {
+        expect(isFabricContainerValue(1)).toBe(false);
+        expect(isFabricContainerValue("a")).toBe(false);
+        expect(isFabricContainerValue(true)).toBe(false);
+        expect(isFabricContainerValue(42n)).toBe(false);
       });
     });
   });
@@ -674,6 +750,7 @@ describe("type-check", () => {
       it("returns `false` for a non-plain class instance (`Date`, `Map`, …)", () => {
         // Not representable as a `FabricPlainObject`, and reachable only via
         // an unsound cast, so the guard is fed them as `unknown`.
+
         expect(isFabricPlainObject(new Date() as unknown as FabricValue))
           .toBe(false);
         expect(isFabricPlainObject(new Map() as unknown as FabricValue))
@@ -681,6 +758,366 @@ describe("type-check", () => {
         expect(isFabricPlainObject(/regex/ as unknown as FabricValue))
           .toBe(false);
       });
+    });
+  });
+
+  describe("isValidFabricNativeObject()", () => {
+    it("returns `true` for all convertible types", () => {
+      expect(isValidFabricNativeObject(new Error("e"))).toBe(true);
+      expect(isValidFabricNativeObject(new TypeError("e"))).toBe(true);
+      expect(isValidFabricNativeObject(new Map())).toBe(true);
+      expect(isValidFabricNativeObject(new Set())).toBe(true);
+      expect(isValidFabricNativeObject(new Date())).toBe(true);
+      expect(isValidFabricNativeObject(new Uint8Array())).toBe(true);
+    });
+
+    it("returns `true` for exotic `Error` subclass", () => {
+      class WeirdError extends RangeError {}
+      expect(isValidFabricNativeObject(new WeirdError("weird"))).toBe(true);
+    });
+
+    it("returns `true` for `RegExp`", () => {
+      expect(isValidFabricNativeObject(/abc/)).toBe(true);
+    });
+
+    it("returns `false` for non-convertible types", () => {
+      expect(isValidFabricNativeObject({})).toBe(false);
+      expect(isValidFabricNativeObject([])).toBe(false);
+      expect(isValidFabricNativeObject(new WeakMap())).toBe(false);
+    });
+
+    it("returns `false` for a plain object carrying `toJSON()`", () => {
+      // `toJSON()` is not consulted, and carrying one decides nothing: what
+      // rejects this value is being a plain object. The `Date` below carries
+      // one too and is accepted, which is what holds the two apart.
+
+      expect(isValidFabricNativeObject({ toJSON: () => "x" })).toBe(false);
+      expect(typeof Date.prototype.toJSON).toBe("function");
+      expect(isValidFabricNativeObject(new Date())).toBe(true);
+    });
+
+    it("returns `false` for a non-object", () => {
+      expect(isValidFabricNativeObject(null)).toBe(false);
+      expect(isValidFabricNativeObject(undefined)).toBe(false);
+      expect(isValidFabricNativeObject(1)).toBe(false);
+      expect(isValidFabricNativeObject("a")).toBe(false);
+      expect(isValidFabricNativeObject(() => {})).toBe(false);
+    });
+  });
+
+  describe("`isValidFabricNativeObject()` over the corpus", () => {
+    // The predicate answers by a narrow route -- the array rule, the builtin
+    // class lookup, and an `Error` test -- while the full dispatch reaches the
+    // same values through the fabric classes as well. Deciding a subset of one
+    // answer by a different road is only correct if the two agree on every arm,
+    // which is what the corpus is for.
+
+    const nativeObjectTags: ReadonlyArray<string> = [
+      VALUE_TAGS.Error,
+      VALUE_TAGS.Map,
+      VALUE_TAGS.Set,
+      VALUE_TAGS.Date,
+      VALUE_TAGS.Uint8Array,
+      VALUE_TAGS.RegExp,
+    ];
+
+    for (const [label, value] of LAYER_CORPUS) {
+      it(`agrees with the full dispatch about ${label}`, () => {
+        const tag = tagFromNativeValue(value);
+        const viaDispatch = (tag !== null) && nativeObjectTags.includes(tag);
+        expect(isValidFabricNativeObject(value)).toBe(viaDispatch);
+      });
+    }
+
+    it("is checked against both answers", () => {
+      // Agreement is free for a predicate that has drifted to one side, so that
+      // the corpus lands on both answers is asserted rather than assumed.
+
+      const answers = LAYER_CORPUS.map(([, value]) =>
+        isValidFabricNativeObject(value)
+      );
+      expect(answers).toContain(true);
+      expect(answers).toContain(false);
+    });
+  });
+
+  describe("assertValidFabricValueLayer()", () => {
+    /** Whether the vet refuses the given value. */
+    function refuses(value: unknown): boolean {
+      try {
+        assertValidFabricValueLayer(value);
+        return false;
+      } catch {
+        return true;
+      }
+    }
+
+    /** The message the vet refuses the given value with, or `null`. */
+    function refusalOf(value: unknown): string | null {
+      try {
+        assertValidFabricValueLayer(value);
+        return null;
+      } catch (e) {
+        return (e as Error).message;
+      }
+    }
+
+    /** The message the shallow conversion refuses the value with, or `null`. */
+    function conversionRefusalOf(value: unknown): string | null {
+      try {
+        shallowFabricFromNativeValue(value);
+        return null;
+      } catch (e) {
+        return (e as Error).message;
+      }
+    }
+
+    describe("agrees with `isValidFabricValueLayer()`", () => {
+      // The vet decides exactly what the predicate decides. That the corpus
+      // lands on both answers is asserted rather than assumed, agreement being
+      // free for one that has drifted to a side.
+
+      const accepted: string[] = [];
+      const refused: string[] = [];
+
+      for (const [label, value] of LAYER_CORPUS) {
+        (isValidFabricValueLayer(value) ? accepted : refused).push(label);
+        it(`treats ${label} the same way`, () => {
+          expect(refuses(value)).toBe(!isValidFabricValueLayer(value));
+        });
+      }
+
+      it("is checked against both answers", () => {
+        expect(accepted.length).toBeGreaterThan(0);
+        expect(refused.length).toBeGreaterThan(0);
+      });
+
+      it("carries every registered primitive class", () => {
+        // The predicate's accepting side is a chain of shape tests, so a class
+        // the corpus never carries is a branch no cross-check above reaches.
+
+        const carried = new Set(
+          LAYER_CORPUS.map(([, value]) =>
+            (value as object)?.constructor as unknown
+          ),
+        );
+        for (const cls of codecClasses()) {
+          expect([cls.name, carried.has(cls)]).toEqual([cls.name, true]);
+        }
+      });
+    });
+
+    describe("says what the shallow conversion says", () => {
+      // What this vet is FOR: standing in for the refusal that
+      // `shallowFabricFromNativeValue()` performs today, so that a caller can
+      // vet without converting. Its verdict and its wording therefore have to be
+      // that function's, value for value -- which is what this pins, over the
+      // whole corpus rather than over a chosen case.
+      //
+      // The agreement is bounded to values whose class can be read at all. A
+      // value whose prototype has a throwing `constructor` accessor cannot be
+      // classified, so conversion fails on it outright, while the vet still
+      // names a reason -- its outcome having been settled before the probe
+      // that fails. The corpus carries no such value, and that bound is why.
+      //
+      // Bounded the same way to a class that reads the SAME each time. Each of
+      // these two reads the constructor for itself, so a `constructor`
+      // accessor answering differently on successive reads can be named
+      // differently by each. Neither contradicts itself -- one refusal reads
+      // once -- and a value that answers differently each time it is asked is
+      // not one this agreement is for.
+      //
+      // The exception is a `FabricNativeObject`, and it is the whole of the
+      // exception: conversion has a say over one, and either mints its fabric
+      // form or refuses it there. The vet has no say and does not pretend to,
+      // which its own group below covers.
+
+      for (const [label, value] of LAYER_CORPUS) {
+        if (isValidFabricNativeObject(value)) continue;
+        it(`gives ${label} the same verdict, in the same words`, () => {
+          expect(refusalOf(value)).toBe(conversionRefusalOf(value));
+        });
+      }
+
+      it("is checked against both verdicts", () => {
+        const outcomes = LAYER_CORPUS
+          .filter(([, value]) => !isValidFabricNativeObject(value))
+          .map(([, value]) => refusalOf(value) === null);
+        expect(outcomes).toContain(true);
+        expect(outcomes).toContain(false);
+      });
+    });
+
+    describe("refusals", () => {
+      it("names an array that is not inert", () => {
+        expect(() => assertValidFabricValueLayer(Object.assign([1], { z: 1 })))
+          .toThrow(
+            "Not representable as a `FabricValue`: array that is not an " +
+              "inert array",
+          );
+      });
+
+      it("names an object that is not an inert plain object", () => {
+        expect(() =>
+          assertValidFabricValueLayer({ a: 1, [Symbol.for("k")]: 2 })
+        ).toThrow(
+          "Not representable as a `FabricValue`: object that is not an " +
+            "inert plain object",
+        );
+      });
+
+      it("names the property name this runtime reserves", () => {
+        expect(() => assertValidFabricValueLayer({ ["__proto__"]: 1 })).toThrow(
+          "Not representable as a `FabricValue`: object with a property " +
+            "name this runtime reserves (`__proto__`)",
+        );
+      });
+
+      it("names a function", () => {
+        expect(() => assertValidFabricValueLayer(() => {})).toThrow(
+          "Not representable as a `FabricValue`: function",
+        );
+      });
+
+      it("names a unique symbol", () => {
+        expect(() => assertValidFabricValueLayer(Symbol("nope"))).toThrow(
+          "Not representable as a `FabricValue`: unique (uninterned) symbol",
+        );
+      });
+
+      describe("names the class from the prototype, not from the value", () => {
+        // The refusal message is built from the class name, and an own
+        // `constructor` property is ordinary data -- so reading it off the
+        // value would let a value choose the name it is refused under, and
+        // would let it make the refusal fail instead of report. Each case
+        // below is refused as `Widget`, which is what its prototype says.
+
+        class Widget {}
+
+        function widgetWith(descriptor: PropertyDescriptor): unknown {
+          const widget = new Widget();
+          Object.defineProperty(widget, "constructor", descriptor);
+          return widget;
+        }
+
+        for (
+          const [label, value] of [
+            [
+              "an own `constructor` naming another class",
+              widgetWith({ value: Date }),
+            ],
+            [
+              "a `constructor.name` that is not a string",
+              widgetWith({ value: { name: 123 } }),
+            ],
+            [
+              "a `constructor` whose getter throws",
+              widgetWith({
+                get() {
+                  throw new Error("the diagnostic must not propagate this");
+                },
+              }),
+            ],
+            ["a `constructor` of `null`", widgetWith({ value: null })],
+          ] as ReadonlyArray<[string, unknown]>
+        ) {
+          it(`refuses ${label} as \`Widget\``, () => {
+            expect(() => assertValidFabricValueLayer(value)).toThrow(
+              "Not representable as a `FabricValue`: `Widget` (not a " +
+                "recognized fabric type)",
+            );
+          });
+        }
+
+        it("refuses a value whose class will not say its name", () => {
+          // `name` is an accessor too, so guarding the constructor read alone
+          // leaves the next read out in the open.
+
+          class NameThrows {}
+          Object.defineProperty(NameThrows.prototype, "constructor", {
+            value: Object.defineProperty(function () {}, "name", {
+              get() {
+                throw new Error("this must not reach the caller");
+              },
+            }),
+          });
+
+          expect(() => assertValidFabricValueLayer(new NameThrows())).toThrow(
+            "Not representable as a `FabricValue`: `object` (not a " +
+              "recognized fabric type)",
+          );
+        });
+
+        it("refuses a value whose constructor traps `prototype`", () => {
+          // A callable `Proxy` can throw from any read, `.prototype` included,
+          // which is what the class lookup would otherwise ask it for.
+
+          const trapped = new Proxy(function () {}, {
+            get(target, key) {
+              if (key === "prototype") {
+                throw new Error("this must not reach the caller");
+              }
+              return Reflect.get(target, key);
+            },
+          });
+          class ProxyCtor {}
+          Object.defineProperty(ProxyCtor.prototype, "constructor", {
+            value: trapped,
+          });
+
+          expect(() => assertValidFabricValueLayer(new ProxyCtor())).toThrow(
+            "Not representable as a `FabricValue`: `object` (not a " +
+              "recognized fabric type)",
+          );
+        });
+
+        it("refuses a value whose class cannot be read, without propagating", () => {
+          // The one shape that defeats the prototype read as well. Both the
+          // reason-picking probe and the name lookup fail on it, and the
+          // refusal has to survive each: an error raised while explaining a
+          // refusal would arrive in place of the refusal.
+
+          class Unreadable {}
+          Object.defineProperty(Unreadable.prototype, "constructor", {
+            get() {
+              throw new Error("this must not reach the caller");
+            },
+          });
+
+          expect(() => assertValidFabricValueLayer(new Unreadable())).toThrow(
+            "Not representable as a `FabricValue`: `object` (not a " +
+              "recognized fabric type)",
+          );
+        });
+      });
+
+      it("names a class instance as an unrecognized type", () => {
+        expect(() => assertValidFabricValueLayer(new PlainClass())).toThrow(
+          "Not representable as a `FabricValue`: `PlainClass` (not a " +
+            "recognized fabric type)",
+        );
+      });
+
+      // A `FabricNativeObject` is in a different position from a value with no
+      // fabric form at all: conversion is what settles it, and settles it
+      // either way -- a `Date` gets a fabric form, a `Map` is refused there
+      // too, its form not being built. Both are told to go and ask.
+      for (
+        const [label, value] of [
+          ["a `Date`", new Date(0)],
+          ["a `Uint8Array`", new Uint8Array([1])],
+          ["a `RegExp`", /x/],
+          ["an `Error`", new Error("x")],
+          ["a `Map`", new Map()],
+          ["a `Set`", new Set()],
+        ] as ReadonlyArray<[string, unknown]>
+      ) {
+        it(`sends ${label} to the conversion`, () => {
+          expect(() => assertValidFabricValueLayer(value)).toThrow(
+            "(a `FabricNativeObject`, so conversion is what decides it)",
+          );
+        });
+      }
     });
   });
 });

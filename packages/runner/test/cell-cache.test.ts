@@ -2285,15 +2285,16 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     ).toBe(true);
   });
 
-  // Regression: before bd98e01a4, compiled docs were stamped with a per-user
-  // `cf-compiled-by:<did>` atom. A second user's cold-compile writeback of the
-  // SAME content into the same space was rejected by the CFC label merge
-  // ("addIntegrity cannot be weakened at /") because the deployer's per-DID
-  // atom was already present and could not be merged with a different user's
-  // atom. The constant system-compiler atom (COMPILED_INTEGRITY_ATOM) makes
-  // the cache shared: a re-write of the same content by any user merges
-  // cleanly because both sides carry the identical atom.
   it("second user's writeback of the same content commits cleanly (per-user DID collision regression)", async () => {
+    // Regression: before bd98e01a4, compiled docs were stamped with a per-user
+    // `cf-compiled-by:<did>` atom. A second user's cold-compile writeback of
+    // the SAME content into the same space was rejected by the CFC label merge
+    // ("addIntegrity cannot be weakened at /") because the deployer's per-DID
+    // atom was already present and could not be merged with a different user's
+    // atom. The constant system-compiler atom (COMPILED_INTEGRITY_ATOM) makes
+    // the cache shared: a re-write of the same content by any user merges
+    // cleanly because both sides carry the identical atom.
+
     const { modules, entryIdentity } = toModules(PROGRAM);
 
     // First writer (the deployer) populates the cache.
@@ -2340,9 +2341,9 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // End-to-end: two runtimes with DISTINCT user identities over shared storage
-// ---------------------------------------------------------------------------
+//
 
 // Two distinct signers for the two "users" in the e2e describe.
 // Declared at module level so top-level await applies.
@@ -2410,7 +2411,7 @@ describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
   });
 
   it("runtime B warms from A's cache write and B's cold-compile writeback commits without error", async () => {
-    // --- Session A: cold compile + write-back ---
+    // Session A: cold compile + write-back
     const pmA = rtA.patternManager;
     const txA = rtA.edit();
     await pmA.compilePattern(E2E_PROGRAM, { space: sharedSpace, tx: txA });
@@ -2425,7 +2426,7 @@ describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
       byIdentityHits: 0,
     });
 
-    // --- Session B: should warm-hit A's committed cache ---
+    // Session B: should warm-hit A's committed cache
     // smB has its own per-space client replicas, so it must fetch from the
     // shared server. compilePattern drives the storage read-through internally.
     const pmB = rtB.patternManager;

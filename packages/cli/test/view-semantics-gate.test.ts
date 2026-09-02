@@ -32,12 +32,15 @@ function nameOffsetOf(doc: Document, name: string): number {
   return node.nameOffset;
 }
 
-// --- createSemantics: build success path that the !program guard backstops ----
+//
+// createSemantics: build's own isolation, which the !program guard backstops
+//
 
 Deno.test("semantics: a healthy build returns a Program (the !program guard is a backstop)", () => {
   // build() runs createLanguageService + getProgram and returns a real Program,
   // so the subsequent query answers a concrete type. The `if (!program)` latch
   // exists only for a host that yields no Program, which this one never does.
+
   const blob = `// transformed: /m.ts
 const x: number = 1;
 const y = x;`;
@@ -51,6 +54,7 @@ Deno.test("semantics: prewarm never sees a throw because build isolates its own"
   // A hostile cwd makes build()'s own try/catch latch `failed`; the throw is
   // swallowed inside build(), so prewarm()'s surrounding try/catch observes
   // nothing. The service stays silent on every later query.
+
   const blob = `// transformed: /m.ts
 const x = 1;
 const y = x;`;
@@ -62,12 +66,15 @@ const y = x;`;
   assertEquals(sem.definitionOf(nameOffsetOf(doc, "y")), []);
 });
 
-// --- createSemantics: the host file cache (populated once, never re-hit) -------
+//
+// createSemantics: the host file cache (populated once, never re-hit)
+//
 
 Deno.test("semantics: the host reads each real file once (cache populated, not re-hit)", () => {
   // Under Bundler resolution the host loads each resolved file a single time;
   // the file cache is filled on that read. The cache-hit return is a backstop
   // for resolution modes that probe the same path repeatedly.
+
   const root = Deno.makeTempDirSync();
   try {
     Deno.writeTextFileSync(
@@ -98,12 +105,15 @@ const b = ext();`;
   }
 });
 
-// --- within()/realDir: a child resolves => its ancestor root resolves too ------
+//
+// within()/realDir: the child resolves first, and the root only after
+//
 
 Deno.test("semantics: within() resolves a real child under a real root (realDir succeeds)", () => {
   // realDir(root) is only reached after the child's realPathSync succeeds; the
   // child sits under the root, so the root resolves too and realDir's catch is
   // never taken. The read therefore succeeds.
+
   const root = Deno.makeTempDirSync();
   try {
     Deno.writeTextFileSync(join(root, "deno.json"), JSON.stringify({}));
@@ -122,6 +132,7 @@ Deno.test("semantics: a child whose realpath fails is rejected before realDir ru
   // When the child itself cannot be realpath-resolved, within() throws on the
   // child read and is caught before realDir(root) is consulted — the read
   // degrades to null. (This is the path that pre-empts realDir's own catch.)
+
   const root = Deno.makeTempDirSync();
   try {
     Deno.writeTextFileSync(join(root, "deno.json"), JSON.stringify({}));
@@ -136,7 +147,9 @@ const x = 1;`;
   }
 });
 
-// --- createDiffSemantics: build success path the failure guards backstop ------
+//
+// createDiffSemantics: where the failure guards are backstops
+//
 
 const FILE_TEXT = `export function double(n: number): number {
     return n * 2;
@@ -153,10 +166,11 @@ function diffMapsFor(file: string): DiffMaps {
 }
 
 Deno.test("diff semantics: build succeeds over real root files, so typeAt's !prog guard is a backstop", () => {
-  // The diff factory passes its containment check, build() makes a host over the
-  // real root file and returns a Program. typeAt's `if (!prog) return null`
+  // The diff factory passes its containment check, build() makes a host over
+  // the real root file and returns a Program. typeAt's `if (!prog) return null`
   // never triggers on the build itself; a null here comes from the offset map,
   // not a failed build.
+
   const root = Deno.makeTempDirSync();
   try {
     Deno.writeTextFileSync(join(root, "deno.json"), "{}");
@@ -181,6 +195,7 @@ Deno.test("diff semantics: a hostile cwd is rejected by containment before build
   // The diff factory filters root files through the workspace-containment check
   // first; a cwd the path helpers reject makes that check throw out of the
   // factory, so build()'s own failure arms are never the thing that fires.
+
   const root = Deno.makeTempDirSync();
   try {
     Deno.writeTextFileSync(join(root, "m.ts"), "export const a = 1;\n");
@@ -199,8 +214,10 @@ Deno.test("diff semantics: a hostile cwd is rejected by containment before build
 });
 
 Deno.test("diff semantics: no in-workspace root file means no service (not a failed build)", () => {
-  // With every root file filtered out, the factory returns undefined up front — the
-  // service is never constructed, so build()'s failure guards are not in play.
+  // With every root file filtered out, the factory returns undefined up front —
+  // the service is never constructed, so build()'s failure guards are not in
+  // play.
+
   const sem = createDiffSemantics(
     "difftext",
     { rootFiles: [], toFile: () => null, fromFile: () => null },
@@ -209,11 +226,16 @@ Deno.test("diff semantics: no in-workspace root file means no service (not a fai
   assertEquals(sem, undefined);
 });
 
-// lazyProgram is the shared build/cache/latch both factories use. The
-// configured host never makes it fail, so its failure isolation is exercised
-// directly: a build is cached after the first success, and a throwing or
-// program-less build latches so it is not retried.
+//
+// lazyProgram: the shared build, cache and latch
+//
+
 Deno.test("lazyProgram: caches a success and latches a failed build", () => {
+  // lazyProgram is the shared build/cache/latch both factories use. The
+  // configured host never makes it fail, so its failure isolation is exercised
+  // directly: a build is cached after the first success, and a throwing or
+  // program-less build latches so it is not retried.
+
   const fake = {} as unknown as ts.Program;
 
   let okCalls = 0;
@@ -244,10 +266,15 @@ Deno.test("lazyProgram: caches a success and latches a failed build", () => {
   assertEquals(nullCalls, 1, "a program-less build latches and is not retried");
 });
 
-// makeHost's readReal memoizes real-file reads. Under the pager's module
-// resolution TypeScript reads each file once, so the cache hit never fires
-// there; reading the same path twice through the host exercises it directly.
+//
+// makeHost: the readReal memo
+//
+
 Deno.test("makeHost: a repeated read of the same file is served from the cache", () => {
+  // makeHost's readReal memoizes real-file reads. Under the pager's module
+  // resolution TypeScript reads each file once, so the cache hit never fires
+  // there; reading the same path twice through the host exercises it directly.
+
   const dir = Deno.makeTempDirSync();
   try {
     const file = join(dir, "dep.ts");
@@ -263,6 +290,10 @@ Deno.test("makeHost: a repeated read of the same file is served from the cache",
     Deno.removeSync(dir, { recursive: true });
   }
 });
+
+//
+// signedNumericElementDefinitions: which positions name a key
+//
 
 Deno.test("signed numeric definitions reject positions that do not name a supported key", () => {
   const fileName = "/signed-numeric.ts";

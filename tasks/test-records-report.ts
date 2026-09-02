@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env --allow-net
+
 /**
  * The reader-side reports over the record store: name collisions,
  * high-churn identities, and tests over the sixty-second rule. Reads only
@@ -20,6 +21,8 @@ import {
   loadAliasResolver,
   readObject,
   type StoredReport,
+  type TestIdentity,
+  testIdentityKey,
 } from "@commonfabric/test-support/records";
 import { ciSubmissionsPrefix, storeBucket } from "./test-records-config.ts";
 
@@ -32,15 +35,19 @@ export interface IdentityAggregate {
   maxDurationMs: number;
 }
 
-export function identityKey(test: { k: string; s: string; n: string }): string {
-  // A JSON array: unambiguous however many spaces the name contains, and
-  // printable everywhere the key surfaces.
-  return JSON.stringify([test.k, test.s, test.n]);
+export function identityKey(test: TestIdentity): string {
+  return testIdentityKey(test);
 }
 
 export function formatIdentity(key: string): string {
-  const [k, s, n] = JSON.parse(key) as [string, string, string];
-  return `[${k}] ${s}: ${n}`;
+  const [k, s, n, variant] = JSON.parse(key) as [
+    string,
+    string,
+    string,
+    string?,
+  ];
+  const suffix = variant === undefined ? "" : ` (variant: ${variant})`;
+  return `[${k}] ${s}: ${n}${suffix}`;
 }
 
 /**

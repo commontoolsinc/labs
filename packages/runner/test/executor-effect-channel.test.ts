@@ -65,6 +65,7 @@ import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { WaveAccumulator, waveRunContextOf } from "../src/executor/wave.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 /** The settle-gate seam (see executor-events-down.test.ts): holds the
  * serving loop's settle so a test can dispose a client INSIDE the
@@ -98,20 +99,6 @@ const sidecarIdsIn = (engine: Engine.Engine): string[] =>
   (engine.database.prepare(
     `SELECT id FROM head WHERE id LIKE 'of:stream-events:%' AND op != 'delete'`,
   ).all() as Array<{ id: string }>).map((row) => row.id);
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 20_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 /** The highest AUTHORED seq that wrote `docId` — the only seq class a
  * kick-and-await-W barrier may target (protocol.md §4: settled for a
@@ -241,7 +228,6 @@ describe("Phase 4 client-effect channel", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         servingManager = manager;
@@ -279,6 +265,7 @@ describe("Phase 4 client-effect channel", () => {
     options: {
       navigations?: string[];
       sessionId?: string;
+
       /** Custom navigate callback (wins over `navigations`) — the
        * enactment-failure tests inject throwing callbacks here. */
       navigate?: (
@@ -393,10 +380,14 @@ describe("Phase 4 client-effect channel", () => {
   };
 
   it("the served intent (T2 hops 1–4): fire → wave computes navigateTo → the §5 entry lands in the FIRING session's instance, issuedIn stamped, annotations addressing + acting", async () => {
-    const navigations: string[] = [];
+    // HEADLESS (no navigate callback): the §5 entry these assertions
+    // read stays unacked and durable. A client that CAN enact acks the
+    // nonce and the next wave retires the entry, so the state hops 1–4
+    // name is one an enacting client races to clear. Hops 5–6 are the
+    // client half's own test.
+
     ({ manager: clientManager, runtime: clientRuntime } = openClient(
       aliceSigner,
-      { navigations },
     ));
     const engine = await server.engineForSpace(space);
     const { argument, result } = await standUp(

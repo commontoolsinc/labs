@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { dirname, fromFileUrl, join } from "@std/path";
 import { acceptedBreakKey } from "./pattern-compat-lib.ts";
-import { PATTERNS_DIR } from "./pattern-files.ts";
+import { patternPath, PATTERNS_DIR } from "./pattern-files.ts";
 import { ACCEPTED_CONTRACT_BREAKS } from "./pattern-compat-accepted-breaks.ts";
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
@@ -18,17 +18,18 @@ const exists = async (path: string): Promise<boolean> => {
   }
 };
 
-// The compatibility run reaches these entries only after compiling every
-// authored pattern, and it reads each one under the shard that examined its
-// pattern. So the shape of an entry — a pattern that exists, a baseline that
-// exists, a pair named once, a path spelled the way the proof spells it — is
-// worth settling here, in milliseconds, against the files on disk.
 describe("pattern-compat-accepted-breaks", () => {
+  // The compatibility run reaches these entries only after compiling every
+  // authored pattern, and it reads each one under the shard that examined its
+  // pattern. So the shape of an entry — a pattern that exists, a baseline that
+  // exists, a pair named once, a path spelled the way the proof spells it — is
+  // worth settling here, in milliseconds, against the files on disk.
+
   describe("ACCEPTED_CONTRACT_BREAKS", () => {
     it("names a pattern file that exists for every entry", async () => {
       for (const accepted of ACCEPTED_CONTRACT_BREAKS) {
         expect(
-          await exists(join(REPO_ROOT, PATTERNS_DIR, accepted.pattern)),
+          await exists(join(REPO_ROOT, patternPath(accepted.pattern))),
           `${accepted.pattern} does not exist`,
         ).toBe(true);
       }
@@ -48,10 +49,11 @@ describe("pattern-compat-accepted-breaks", () => {
       }
     });
 
-    // The run indexes entries into one map keyed by pattern and baseline, so a
-    // pair named twice keeps only the later entry's paths and silently drops
-    // the earlier one's.
     it("names each pattern and baseline pair once", () => {
+      // The run indexes entries into one map keyed by pattern and baseline, so
+      // a pair named twice keeps only the later entry's paths and silently
+      // drops the earlier one's.
+
       const seen = new Set<string>();
       const repeated: string[] = [];
       for (const accepted of ACCEPTED_CONTRACT_BREAKS) {
@@ -64,10 +66,11 @@ describe("pattern-compat-accepted-breaks", () => {
       expect(repeated).toEqual([]);
     });
 
-    // A finding is forgiven only when every path it blames is one the entry
-    // named, and the proof spells a path as its role followed by the schema
-    // pointer. A path under any other name forgives nothing.
     it("spells every path as an argument or result path", () => {
+      // A finding is forgiven only when every path it blames is one the entry
+      // named, and the proof spells a path as its role followed by the schema
+      // pointer. A path under any other name forgives nothing.
+
       for (const accepted of ACCEPTED_CONTRACT_BREAKS) {
         expect(accepted.paths.length).toBeGreaterThan(0);
         for (const path of accepted.paths) {

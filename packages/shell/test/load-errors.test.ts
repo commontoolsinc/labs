@@ -89,6 +89,33 @@ function templateText(value: unknown): string {
   return text;
 }
 
+/**
+ * The value bound right after a template part ending in `marker`, which is how
+ * an event handler is reached without a DOM to dispatch into.
+ */
+function findBinding(value: unknown, marker: string): unknown {
+  if (value == null || typeof value !== "object") return undefined;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findBinding(item, marker);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  const template = value as {
+    strings?: readonly string[];
+    values?: readonly unknown[];
+  };
+  if (!template.strings || !template.values) return undefined;
+  const at = template.strings.findIndex((part) => part.endsWith(marker));
+  if (at >= 0) return template.values[at];
+  for (const item of template.values) {
+    const found = findBinding(item, marker);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 /** Find the load-error value passed through a nested Lit template. */
 function findLoadError(value: unknown): unknown {
   if (value == null || typeof value !== "object") return undefined;
@@ -188,6 +215,92 @@ describe("load-errors", () => {
           } finally {
             RuntimeInternals.create = originalCreate;
             console.error = originalError;
+            restore();
+          }
+        });
+      });
+    });
+  });
+
+  describe("XBodyView", () => {
+    describe("instance members", () => {
+      describe("render()", () => {
+        it("opens the piece menu over the surface a piece failed to load into", async () => {
+          const openings: unknown[] = [];
+          const panel = {
+            isConnected: false,
+            style: { setProperty() {}, removeProperty() {} },
+            open(opening: unknown) {
+              openings.push(opening);
+            },
+          };
+          const restore = installBrowserGlobals({
+            getComputedStyle: () => ({ getPropertyValue: () => "" }),
+          });
+          // The menu mounts itself, so stand in for the document it mounts on.
+          const document = globalThis.document as unknown as Record<
+            string,
+            unknown
+          >;
+          document.createElement = () => panel;
+          document.body = {
+            appendChild(node: { isConnected: boolean }) {
+              node.isConnected = true;
+            },
+          };
+          try {
+            const { XBodyView } = await import("../src/views/BodyView.ts");
+            const space = "did:key:z6Mk-shell-body-space" as DID;
+            const runtime = { name: "runtime-client" };
+            const view = new XBodyView();
+            view.space = space;
+            view.rt = { runtime: () => runtime } as never;
+            view.loadError = { kind: "piece", error: new Error("no piece") };
+
+            let prevented = false;
+            const handler = findBinding(view.render(), '@contextmenu="') as (
+              event: MouseEvent,
+            ) => void;
+            handler(
+              {
+                preventDefault: () => {
+                  prevented = true;
+                },
+                clientX: 12,
+                clientY: 34,
+              } as unknown as MouseEvent,
+            );
+
+            expect(prevented).toBe(true);
+            expect(openings).toEqual([{
+              cell: undefined,
+              space,
+              runtime,
+              x: 12,
+              y: 34,
+              highlightedPiece: undefined,
+              highlightTarget: undefined,
+            }]);
+
+            // Shift is how the browser's own menu is reached over piece
+            // content, and the error text under this surface is copied
+            // through it.
+            let shiftPrevented = false;
+            handler(
+              {
+                preventDefault: () => {
+                  shiftPrevented = true;
+                },
+                shiftKey: true,
+                clientX: 12,
+                clientY: 34,
+              } as unknown as MouseEvent,
+            );
+
+            expect(shiftPrevented).toBe(false);
+            expect(openings).toHaveLength(1);
+          } finally {
+            panel.isConnected = false;
             restore();
           }
         });
@@ -392,7 +505,6 @@ describe("load-errors", () => {
                 calls.push(args);
                 return Promise.resolve({ id: () => "fid1:slug-target" });
               },
-              trackRecentPiece: () => {},
             } as never;
 
             view._selectedPattern.run();

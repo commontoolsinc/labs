@@ -8,8 +8,8 @@
  *   patterns directory, addressed RELATIVE to that route:
  *   `system:system/default-app.tsx` → `/api/patterns/system/default-app.tsx`.
  *
- * Why a scheme rather than the bare route path it expands to. The updater's
- * rule has to be a whitelist, because the alternative — "any same-origin path
+ * Why a scheme rather than the bare route path it expands to. The rule for
+ * what may be fetched has to be a whitelist, because the alternative — "any same-origin path
  * may be fetched" — cannot distinguish a route from an author-controlled module
  * filename that merely looks like one. A pattern deployed from a local file
  * tree names its modules by their path under the compile root (`/main.tsx`,
@@ -74,8 +74,8 @@ export function resolveSystemPatternSource(
  * The URL parser normalizes `..` but never decodes `%2f`, so `..%2f..%2fx`
  * survives normalization as a single opaque segment and passes a bare prefix
  * check. The server rejects that before it reads a file, but the layer belongs
- * here too: `systemPatternSourceForModuleName` is fed author-controlled strings.
- * Decoding is checked separately because a malformed escape throws.
+ * here too, because a ref is author-controlled. Decoding is checked separately
+ * because a malformed escape throws.
  */
 function staysInPatternsRoute(pathname: string): boolean {
   if (!pathname.startsWith(PATTERNS_ROUTE_PREFIX)) return false;
@@ -91,26 +91,6 @@ function staysInPatternsRoute(pathname: string): boolean {
 }
 
 /**
- * The `system:` ref a compiled module name denotes, or `undefined` when the
- * name says nothing about a route.
- *
- * A module's name is a URL pathname only for a program the worker compiled over
- * HTTP, where `HttpProgramResolver` names every module by its pathname. A
- * program compiled from a file tree names each module by its path under the
- * compile root instead — `/main.tsx`, `/participant-identity-card.tsx` — and
- * such a name is not a claim about anything the host serves. Admitting only
- * patterns-route names keeps recovered provenance to the one representation
- * where a name and a route are the same string.
- */
-export function systemPatternSourceForModuleName(
-  name: string,
-): string | undefined {
-  if (!name.startsWith(PATTERNS_ROUTE_PREFIX)) return undefined;
-  const source = systemPatternSource(name.slice(PATTERNS_ROUTE_PREFIX.length));
-  return resolveSystemPatternSource(source) === undefined ? undefined : source;
-}
-
-/**
  * Rewrite a pre-scheme provenance string into its `system:` ref, leaving
  * everything else untouched.
  *
@@ -120,7 +100,8 @@ export function systemPatternSourceForModuleName(
  * host once a source transition records it. The absolute form is rewritten only
  * when it names the space's own host, so a locator pointing somewhere else is
  * not silently re-pointed at the local toolshed — that would be a change of
- * source, not of spelling.
+ * source, not of spelling. A piece carrying either spelling is re-stamped with
+ * the ref when a user next opens it.
  *
  * A query or fragment on a legacy locator is dropped: it selects nothing on the
  * patterns route, which serves a file by path, and revalidation is the
@@ -130,12 +111,9 @@ export function systemPatternSourceForModuleName(
  * The result either resolves as a ref or is the input unchanged; nothing here
  * can mint a ref the resolver rejects.
  *
- * TODO(seefeldb) 2026-08-31: revisit — do NOT delete on sight. Removal needs
- * two things this change does not do. Durable pre-existing provenance has to be
- * migrated, which only happens on a successful check and therefore never on a
- * deployment running with `systemPatternAutoUpdate` off. And
- * `isLegacyPieceRegistryRoot` reads this to recognize a root that tracks the
- * official default app, on a path with no flag gate at all.
+ * TODO(seefeldb) 2026-08-31: revisit — do NOT delete on sight. Durable
+ * pre-existing provenance has to be migrated first, and a piece nobody opens
+ * is never re-stamped.
  */
 export function normalizePatternSource(
   source: string,

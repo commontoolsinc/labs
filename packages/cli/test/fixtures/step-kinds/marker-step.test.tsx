@@ -3,6 +3,7 @@
  * `{ await }` synchronize participants; a single-user run has none, so they
  * are inert and the run reports only the assertion.
  */
+
 import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {

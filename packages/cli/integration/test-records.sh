@@ -24,9 +24,10 @@ cf_test_now_ms() {
 }
 
 cf_test_record_line() {
-  # Arguments: name, outcome, duration in ms. Names here are script and
-  # section labels — no quotes or backslashes — so fixed-shape printf is a
-  # faithful JSON encoder for them.
+  # Arguments: name, outcome, duration in ms. A step's name is a sentence
+  # somebody wrote beside the phase it describes, so the two characters
+  # that would tear the JSON line are escaped rather than assumed absent;
+  # a torn line is one the reader drops without saying why.
   if [ -z "${CF_TEST_RECORDS_DIR:-}" ]; then
     return 0
   fi
@@ -34,8 +35,17 @@ cf_test_record_line() {
     mkdir -p "$CF_TEST_RECORDS_DIR" 2>/dev/null || return 0
     CF_TEST_RECORD_FRAGMENT="$CF_TEST_RECORDS_DIR/fragment-sh-$$-${RANDOM}${RANDOM}.ndjson"
   fi
+  # A step name is a sentence somebody wrote beside the phase it
+  # describes. The two characters that would tear the line are escaped
+  # here, and a control character — a newline above all — is replaced
+  # rather than escaped, because a raw one splits the record into two
+  # lines and the reader drops both.
+  local name="$1"
+  name="${name//\\/\\\\}"
+  name="${name//\"/\\\"}"
+  name=$(printf '%s' "$name" | tr '\000-\037' ' ')
   printf '{"line":"record","test":{"k":"integration","s":"cli","n":"%s"},"outcome":"%s","durationMs":%d}\n' \
-    "$1" "$2" "$3" >> "$CF_TEST_RECORD_FRAGMENT" 2>/dev/null || true
+    "$name" "$2" "$3" >> "$CF_TEST_RECORD_FRAGMENT" 2>/dev/null || true
 }
 
 # Records the script's one test with the given exit status. For a script
@@ -71,10 +81,10 @@ cf_test_step_begin() {
     return 0
   fi
   cf_test_step_close 0
-  # The step's identity carries no section: which section scheduled a step
-  # is run context, and the same step must join across a CI section leg
-  # and a local `all` run.
-  CF_TEST_STEP_NAME="integration.sh $1"
+  # The step's identity is the script's name and the step's, and carries
+  # no section: which section scheduled a step is run context, and the
+  # same step must join across a CI section leg and a local `all` run.
+  CF_TEST_STEP_NAME="$CF_TEST_RECORD_NAME $1"
   CF_TEST_STEP_START_MS=$(cf_test_now_ms || echo 0)
 }
 

@@ -1,11 +1,11 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import type { FabricValue } from "@commonfabric/data-model";
 import {
   entityRefToString,
   linkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { createSession, Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
@@ -19,6 +19,7 @@ import {
   KeepAsCell,
   NAME,
   Pattern,
+  PatternSetupPostCommitError,
   Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
@@ -54,6 +55,7 @@ import {
 } from "../src/ops/piece-controller.ts";
 import { readPieceSourceState } from "../src/ops/piece-origin.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 const signer = await Identity.fromPassphrase("piece pull materialization");
 
@@ -1345,7 +1347,11 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     await runtime.editWithRetry((tx) => {
-      producer.withTx(tx).setMetaRaw("schema", argumentSchema);
+      producer.withTx(tx).setMetaRaw(
+        "schema",
+        argumentSchema,
+        rawMetaWriteAuthorization,
+      );
     });
 
     const base = runtime.getCell(
@@ -1460,7 +1466,11 @@ describe("piece pull materialization", () => {
         { start: true },
       );
       await runtime.editWithRetry((tx) => {
-        source.withTx(tx).setMetaRaw("schema", schema);
+        source.withTx(tx).setMetaRaw(
+          "schema",
+          schema,
+          rawMetaWriteAuthorization,
+        );
       });
       return source;
     };
@@ -1566,7 +1576,11 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     await runtime.editWithRetry((tx) => {
-      source.withTx(tx).setMetaRaw("schema", scalarAncestorSchema);
+      source.withTx(tx).setMetaRaw(
+        "schema",
+        scalarAncestorSchema,
+        rawMetaWriteAuthorization,
+      );
     });
     const base = runtime.getCell(
       pieces.getSpace(),
@@ -1617,13 +1631,14 @@ describe("piece pull materialization", () => {
           }),
         },
         ...(originalInternal as FabricValue[]),
-      ]);
+      ], rawMetaWriteAuthorization);
       orphan.withTx(tx).setMetaRaw(
         "result",
         piece.withTx(tx).getAsWriteRedirectLink({
           base: orphan.withTx(tx),
           includeSchema: true,
         }),
+        rawMetaWriteAuthorization,
       );
     });
 
@@ -1823,7 +1838,7 @@ describe("piece pull materialization", () => {
       unknownPiece.withTx(tx).setMetaRaw("patternIdentity", {
         identity: "Z".repeat(43),
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
 
     await expect(runtime.setup(undefined, undefined, {}, unknownPiece))
@@ -5922,7 +5937,11 @@ describe("piece pull materialization", () => {
       "source-less-set-pattern-" + crypto.randomUUID(),
       { start: true },
     );
-    const previous = getPatternIdentityRef(piece)!;
+    // A hand-built (keyless) piece writes no durable pattern pointer (the
+    // never-durable contract; L3(a), RULED 2026-08-27); its session
+    // identity lives on the runner.
+    expect(getPatternIdentityRef(piece)).toBeUndefined();
+    expect(runtime.runner.sessionPatternPointerFor(piece)).toBeDefined();
     expect(getPieceSourceRevisions(piece)).toEqual([]);
 
     const controller = new PieceController(pieces, piece);
@@ -5933,16 +5952,47 @@ describe("piece pull materialization", () => {
     expect(
       getPieceSourceRevisions(piece).map((revision) => revision.operation),
     ).toEqual(["edit"]);
+    // The displaced executable was a session-built value no session can
+    // reload: a keyless identity never lands durably, so no
+    // `displacedPattern` record is stamped — the history's absent baseline
+    // is the record that the pre-edit past was programmatic.
     expect((await readPieceSourceState(runtime, piece)).displacedPattern)
-      .toEqual({
-        identity: previous.identity,
-        symbol: previous.symbol,
-        displacedAt: expect.any(Number),
-      });
+      .toBeUndefined();
     expect(await controller.result.get()).toEqual({
       version: "source-backed",
       output: 15,
     });
+  });
+
+  it("syncPattern prefers the live session pointer over a legacy keyless durable pointer", async () => {
+    const piece = await pieces.runPersistent(
+      trustPattern(
+        runtime,
+        sourceLessMultiplierPattern("sync-legacy-keyless", 2),
+      ),
+      { input: 5 },
+      "sync-legacy-keyless-" + crypto.randomUUID(),
+      { start: true },
+    );
+    expect(getPatternIdentityRef(piece)).toBeUndefined();
+    expect(runtime.runner.sessionPatternPointerFor(piece)).toBeDefined();
+
+    // A legacy pre-guard durable `keyless:` orphan landing AFTER this
+    // session's keyless setup — the remote-sync-lag interleaving (the
+    // in-session setup cleared the metas transactionally; a lagging sync
+    // can still deliver the old record afterwards). Such a pointer is
+    // unloadable everywhere except the session that MINTED it — never this
+    // one — so it must not shadow the live session pointer.
+    const { error } = await runtime.editWithRetry((tx) => {
+      piece.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: "keyless:fid1:legacy-orphan-from-a-pre-guard-session",
+        symbol: "default",
+      }, rawMetaWriteAuthorization);
+    });
+    expect(error).toBeUndefined();
+
+    const pattern = await pieces.syncPattern(piece);
+    expect(pattern).toBeDefined();
   });
 
   it("persists setPattern replacement by identity for fresh runtime reloads", async () => {
@@ -7082,11 +7132,31 @@ describe("piece pull materialization", () => {
       await winnerPostCommitSync.promise;
 
       releaseWinner.resolve();
-      await winnerUpdate;
+      const winnerReceipt = await winnerUpdate;
       releaseFirst.resolve();
-      await firstUpdate;
+      const firstReceipt = await firstUpdate;
       await runtime.idle();
 
+      // Each receipt answers whether that caller's transaction committed; it
+      // is not a later snapshot of the row. The winner assertion below is the
+      // independent current-state check, just as it would be after two
+      // successful database updates to the same row.
+      expect(firstReceipt.ref).toEqual(
+        runtime.patternManager.getArtifactEntryRef(firstPattern),
+      );
+      expect(winnerReceipt.ref).toEqual(
+        runtime.patternManager.getArtifactEntryRef(winnerPattern),
+      );
+      // Each revision names its own caller's transaction too. This is the
+      // field that would drift first if a receipt ever started reporting the
+      // history's last entry rather than what the caller committed: both
+      // revisions are in the history, and only their order distinguishes
+      // them.
+      const revisions = getPieceSourceRevisions(piece);
+      const revisionIds = revisions.map((revision) => revision.revisionId);
+      expect(firstReceipt.revisionId).not.toBe(winnerReceipt.revisionId);
+      expect(revisionIds).toContain(firstReceipt.revisionId);
+      expect(revisions.at(-1)?.revisionId).toBe(winnerReceipt.revisionId);
       expect(getPatternIdentityRef(piece)).toEqual(
         runtime.patternManager.getArtifactEntryRef(winnerPattern),
       );
@@ -7109,7 +7179,7 @@ describe("piece pull materialization", () => {
     }
   });
 
-  it("does not install an older controller mutation after a newer one", async () => {
+  it("keeps the newer mutation's schema when an older one fails after it", async () => {
     const initialProgram = compiledResultNarrowingProgram(
       "string | number | boolean",
     );
@@ -7133,11 +7203,21 @@ describe("piece pull materialization", () => {
       "controller-update-race-" + crypto.randomUUID(),
       { start: false },
     );
+    const winnerRef = runtime.patternManager.getArtifactEntryRef(winnerPattern);
+    if (!winnerRef) {
+      throw new Error("missing compiled pattern ref");
+    }
     const controller = new PieceController(pieces, piece);
     const firstRunEntered = defer<void>();
     const releaseFirstRun = defer<void>();
-    const originalRunWithPattern = pieces.runWithPattern;
-    pieces.runWithPattern = async (
+    // Only the losing update is intercepted: it is held until the winner has
+    // finished, then fails, which is what an update superseded before it
+    // commits does — the identity precondition inside the setup transaction
+    // refuses it. The winner runs the real update path, so the pointer it
+    // commits and the receipt it returns are the ones production would
+    // produce rather than values this fixture invented.
+    const originalRunPatternUpdate = pieces.runPatternUpdate.bind(pieces);
+    pieces.runPatternUpdate = async (
       pattern,
       pieceId,
       inputs,
@@ -7146,13 +7226,11 @@ describe("piece pull materialization", () => {
       if (pattern === firstPattern) {
         firstRunEntered.resolve();
         await releaseFirstRun.promise;
-        return piece.asSchema(firstPattern.resultSchema);
+        throw new Error(
+          "piece pattern changed while the source update was compiling",
+        );
       }
-      if (pattern === winnerPattern) {
-        return piece.asSchema(winnerPattern.resultSchema);
-      }
-      return await originalRunWithPattern.call(
-        pieces,
+      return await originalRunPatternUpdate(
         pattern,
         pieceId,
         inputs,
@@ -7169,18 +7247,24 @@ describe("piece pull materialization", () => {
     }) as typeof runtime.patternManager.compilePattern;
 
     try {
-      const firstUpdate = controller.setPattern(firstProgram);
+      const firstUpdate = expect(controller.setPattern(firstProgram)).rejects
+        .toThrow(/pattern changed while the source update was compiling/);
       await firstRunEntered.promise;
-      await controller.setPattern(winnerProgram);
+      const winnerReceipt = await controller.setPattern(winnerProgram);
       releaseFirstRun.resolve();
       await firstUpdate;
 
+      // The loser's failure is handled after the winner installed its schema,
+      // and must leave that schema in place rather than reconciling back to
+      // the version it was carrying.
       expect(controller.getCell().getAsNormalizedFullLink().schema).toEqual(
         winnerPattern.resultSchema,
       );
+      expect(winnerReceipt.ref).toEqual(winnerRef);
+      expect(getPatternIdentityRef(piece)).toEqual(winnerRef);
     } finally {
       releaseFirstRun.resolve();
-      pieces.runWithPattern = originalRunWithPattern;
+      pieces.runPatternUpdate = originalRunPatternUpdate;
       runtime.patternManager.compilePattern = originalCompile;
     }
   });
@@ -7212,15 +7296,14 @@ describe("piece pull materialization", () => {
     const controller = new PieceController(pieces, piece);
     const firstRunReturned = defer<void>();
     const releaseFirstRun = defer<void>();
-    const originalRunWithPattern = pieces.runWithPattern;
-    pieces.runWithPattern = async (
+    const originalRunPatternUpdate = pieces.runPatternUpdate.bind(pieces);
+    pieces.runPatternUpdate = async (
       pattern,
       pieceId,
       inputs,
       options,
     ) => {
-      const cell = await originalRunWithPattern.call(
-        pieces,
+      const result = await originalRunPatternUpdate(
         pattern,
         pieceId,
         inputs,
@@ -7230,9 +7313,12 @@ describe("piece pull materialization", () => {
         firstRunReturned.resolve();
         await releaseFirstRun.promise;
       } else if (pattern === winnerPattern) {
-        throw new Error("injected post-commit failure");
+        throw new PatternSetupPostCommitError(
+          result.commit,
+          new Error("injected post-commit failure"),
+        );
       }
-      return cell;
+      return result;
     };
     const originalCompile = runtime.patternManager.compilePattern.bind(
       runtime.patternManager,
@@ -7246,21 +7332,36 @@ describe("piece pull materialization", () => {
     try {
       const firstUpdate = controller.setPattern(firstProgram);
       await firstRunReturned.promise;
-      await expect(controller.setPattern(winnerProgram)).resolves
-        .toBeUndefined();
+      // Resolves rather than rejects: the transition committed, so the
+      // injected post-commit failure is not this call's failure. The receipt
+      // names what that committed transition wrote, reports the refresh as
+      // failed, and says what it detached — for a piece following no origin,
+      // nothing.
+      const winnerReceipt = await controller.setPattern(winnerProgram);
+      expect(winnerReceipt.ref).toEqual(
+        runtime.patternManager.getArtifactEntryRef(winnerPattern),
+      );
+      expect(winnerReceipt.refresh).toEqual({
+        status: "failed",
+        warning: "injected post-commit failure",
+      });
+      expect(winnerReceipt.detachedOrigin).toBeNull();
       expect(getPatternIdentityRef(piece)).toEqual(
         runtime.patternManager.getArtifactEntryRef(winnerPattern),
       );
 
       releaseFirstRun.resolve();
-      await firstUpdate;
+      const firstReceipt = await firstUpdate;
+      expect(firstReceipt.ref).toEqual(
+        runtime.patternManager.getArtifactEntryRef(firstPattern),
+      );
 
       expect(controller.getCell().getAsNormalizedFullLink().schema).toEqual(
         winnerPattern.resultSchema,
       );
     } finally {
       releaseFirstRun.resolve();
-      pieces.runWithPattern = originalRunWithPattern;
+      pieces.runPatternUpdate = originalRunPatternUpdate;
       runtime.patternManager.compilePattern = originalCompile;
     }
   });
@@ -7712,17 +7813,18 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
     }
   });
 
-  // The narrow read reaches a path below an asCell slot with a plain `key()`
-  // chain, letting link resolution follow the handle mid-path rather than
-  // dereferencing it by hand. This pins the two properties that choice has to
-  // keep: the terminal handle still applies the scoped-link relaxation (so a
-  // scoped child voids only itself, not its whole object), and a path THROUGH
-  // the handle still lands on the right document.
-  // #5231 moved the asCell scope cap into the runner's own projection, which
-  // let the narrow read drop its resolveAsCell() routing. That routing was the
-  // only thing keeping a capped handle capped here, so pin the behavior at
-  // this layer rather than trusting the runner test to stand in for it.
   it("keeps a capped asCell handle capped through the narrow read", async () => {
+    // The narrow read reaches a path below an asCell slot with a plain `key()`
+    // chain, letting link resolution follow the handle mid-path rather than
+    // dereferencing it by hand. This pins the two properties that choice has to
+    // keep: the terminal handle still applies the scoped-link relaxation (so a
+    // scoped child voids only itself, not its whole object), and a path THROUGH
+    // the handle still lands on the right document. #5231 moved the asCell
+    // scope cap into the runner's own projection, which let the narrow read
+    // drop its resolveAsCell() routing. That routing was the only thing keeping
+    // a capped handle capped here, so pin the behavior at this layer rather
+    // than trusting the runner test to stand in for it.
+
     const tx = writerRuntime.edit();
     const target = writerRuntime.getCell(
       writerPieces.getSpace(),

@@ -178,12 +178,13 @@ Deno.test("readBuildInfoFrom", async (t) => {
   }
 });
 
-// The shell's baked server-execution posture rides the same COMPILED marker
-// (tasks/build-binaries.ts writes it from the build environment — the value
-// packages/shell/felt.config.ts bakes as the shell's define). CI's
-// server-execution lanes read it back through /api/meta to verify the
-// posture the binary actually carries; a missing/unset value reads null.
 Deno.test("readShellServerExecutionDefineFrom", async (t) => {
+  // The shell's baked server-execution posture rides the same COMPILED marker
+  // (tasks/build-binaries.ts writes it from the build environment — the value
+  // packages/shell/felt.config.ts bakes as the shell's define). CI's
+  // server-execution lanes read it back through /api/meta to verify the posture
+  // the binary actually carries; a missing/unset value reads null.
+
   const tempDir = await Deno.makeTempDir({ prefix: "build-info-sx-test-" });
   const pathFor = (name: string) => `${tempDir}/${name}`;
   try {

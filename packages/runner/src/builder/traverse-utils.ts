@@ -1,8 +1,5 @@
 import { isObjectOrArray } from "@commonfabric/utils/types";
-import {
-  FabricInstance,
-  FabricPrimitive,
-} from "@commonfabric/data-model/fabric-value";
+import { FabricInstance, FabricPrimitive } from "@commonfabric/data-model";
 import { refuseFabricInstance } from "../fabric-special-object.ts";
 import { type FactoryInput, isPattern, isReactive } from "./types.ts";
 import { noteDerivedCopy } from "./pattern-metadata.ts";

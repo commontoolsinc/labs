@@ -69,10 +69,11 @@ Deno.test("findProblems reports nothing when each package resolves once", () => 
   assertEquals(findProblems(singleCopyLock()), []);
 });
 
-// The shape of the bug this check exists for: rolling the arizeai packages
-// alone leaves the AI SDK resolved twice, once for toolshed and once for
-// @ai-sdk/otel.
 Deno.test("findProblems reports a package resolved twice", () => {
+  // The shape of the bug this check exists for: rolling the arizeai packages
+  // alone leaves the AI SDK resolved twice, once for toolshed and once for
+  // @ai-sdk/otel.
+
   const lock = singleCopyLock();
   lock.npm["ai@5.0.27_zod@3.25.76"] = {};
 
@@ -83,9 +84,10 @@ Deno.test("findProblems reports a package resolved twice", () => {
   assertStringIncludes(problems[0], "ai@7.0.30_zod@3.25.76");
 });
 
-// A package that disappears from the lockfile would otherwise pass silently,
-// which would make this check quietly stop covering it.
 Deno.test("findProblems reports a package missing from the lockfile", () => {
+  // A package that disappears from the lockfile would otherwise pass silently,
+  // which would make this check quietly stop covering it.
+
   const problems = findProblems({ npm: {} }, { ai: "the AI SDK" });
   assertEquals(problems.length, 1);
   assertStringIncludes(problems[0], "not in deno.lock at all");
@@ -99,10 +101,11 @@ Deno.test("the repository's own lockfile passes", async () => {
   assertEquals(await main(REPO_ROOT), 0);
 });
 
-// main() reads deno.lock from the root it is given, so a temp tree with a
-// duplicated lockfile drives the reporting path the passing repo never does:
-// the message, the per-copy listing, and the non-zero exit.
 Deno.test("main reports the duplicate and returns 1", async () => {
+  // main() reads deno.lock from the root it is given, so a temp tree with a
+  // duplicated lockfile drives the reporting path the passing repo never does:
+  // the message, the per-copy listing, and the non-zero exit.
+
   const root = await Deno.makeTempDir({ prefix: "check-single-copy-deps-" });
   try {
     const lock = singleCopyLock();
@@ -124,11 +127,12 @@ Deno.test("main reports the duplicate and returns 1", async () => {
   }
 });
 
-// Runs the script the way `deno task check-single-copy-deps` does, which the
-// calls to main() above do not: they would still pass if the entry point never
-// ran it, or if the task's declared permissions were too narrow to read the
-// lockfile.
 Deno.test("running the script as a command reports single copies", async () => {
+  // Runs the script the way `deno task check-single-copy-deps` does, which the
+  // calls to main() above do not: they would still pass if the entry point
+  // never ran it, or if the task's declared permissions were too narrow to read
+  // the lockfile.
+
   const output = await runDenoCommandWithTemporaryLock({
     root: REPO_ROOT,
     args: (lockPath) => [

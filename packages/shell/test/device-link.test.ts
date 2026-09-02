@@ -415,7 +415,8 @@ describe("runDeviceLinkLogin", () => {
   });
 });
 
-// ── the confirm gate itself ────────────────────────────────────────────────
+//
+// the confirm gate itself
 //
 // Previously uncovered: every test above injects its own `confirm`, so the
 // production path and the whole view were unexercised. Two mutations passed the
@@ -425,6 +426,7 @@ describe("runDeviceLinkLogin", () => {
 //
 // Follows the repo's view-test idiom (see login-view.test.ts): install fake
 // browser globals, instantiate the element, and inspect what render() produces.
+//
 
 function installBrowserGlobals(): () => void {
   const originals = new Map<string, PropertyDescriptor | undefined>();
@@ -710,7 +712,8 @@ describe("confirmWithUser (the production confirm path)", () => {
   });
 });
 
-// ── the modal activation seam ──────────────────────────────────────────────
+//
+// the modal activation seam
 //
 // firstUpdated's imperative DOM work runs only against a real DOM, so the
 // browser-behavior mutations (Escape rewired to accept, showModal never
@@ -718,6 +721,7 @@ describe("confirmWithUser (the production confirm path)", () => {
 // tests stub document.body.appendChild to a no-op, so the element never
 // connects and firstUpdated never fires. `activateModalDialog` is extracted so
 // exactly those rules can be pinned against a fake dialog, no browser needed.
+//
 
 /** Records what the component does to a dialog. */
 function fakeDialog(
@@ -873,12 +877,14 @@ describe("firstUpdated wiring (component-level, via a stubbed shadow root)", () 
   });
 });
 
-// ── failure reporting + fallback paths ─────────────────────────────────────
+//
+// failure reporting + fallback paths
 //
 // These cover the error/degradation paths the coverage ratchet flagged as
 // uncovered. They are not padding: `reportDeviceLinkFailure` is the whole
 // reason a failed scan isn't silent, and the two `catch` arms are what keep a
 // hostile or exotic environment from turning a failure into a hang.
+//
 
 describe("reportDeviceLinkFailure", () => {
   /** Install a document whose createElement yields drivable fake views. */
@@ -1090,12 +1096,14 @@ describe("the tap-through guard actually releases", () => {
   });
 });
 
-// ── handleDeviceLink: the whole per-scan decision ──────────────────────────
+//
+// handleDeviceLink: the whole per-scan decision
 //
 // This logic used to live in index.ts — an entry module with a top-level await
 // that no unit test can import, so every branch here was uncoverable by
 // construction. Moving it into a real module is what makes these assertions
 // possible at all; the coverage ratchet was pointing at a genuine design smell.
+//
 
 describe("handleDeviceLink", () => {
   it("reports a malformed fragment and never attempts a login", async () => {

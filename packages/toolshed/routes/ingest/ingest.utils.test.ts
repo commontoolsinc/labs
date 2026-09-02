@@ -27,13 +27,15 @@ const GOLDEN_ID = "of:fid1:d7_RmD4fNpTUheithVm0Q1Vha0Rn32c06qA_hOHE8x8";
 
 // Golden channel id — rotate-in-place is a security property, so pin the exact
 // derivation: a drift means "rotation" mints a NEW registration and leaves the
-// old token live. A failure = coordinate a change, never just update the literal.
+// old token live. A failure = coordinate a change, never just update the
+// literal.
 const GOLDEN_CHANNEL_ID = "ing_jMjaGfRO0Kg0BUegs9mzwImZ-CKcmlVw-wDbmV41_bs";
 
-// The journal sink is the security-critical write path (durable, marked, into a
-// caller-provided space). These exercise it directly against an emulated store
-// (no ACL layer — see the cross-space test's caveat).
 describe("ingest journal sink", () => {
+  // The journal sink is the security-critical write path (durable, marked, into
+  // a caller-provided space). These exercise it directly against an emulated
+  // store (no ACL layer — see the cross-space test's caveat).
+
   let signer: Identity;
   let space: ReturnType<Identity["did"]>;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -130,6 +132,7 @@ describe("ingest journal sink", () => {
   it("a never-written partition cell reads back ABSENT (undefined), not []", async () => {
     // The load-bearing tri-state invariant: absent (never captured) must be
     // distinguishable from empty. The schema must not inject a [] default.
+
     const cell = journalCell(runtime, reg(), "1999-01-01");
     await cell.sync();
     expect(cell.get()).toBeUndefined();
@@ -157,6 +160,7 @@ describe("ingest journal sink", () => {
     // space and mints there. CAVEAT: emulate has NO ACL layer, so this does NOT
     // prove a production memory server AUTHORIZES the cross-space commit — that
     // is the deploy-time probe (MEMORY_ACL_MODE), not a unit test.
+
     const other = await Identity.fromPassphrase("some-other-user");
     const otherSpace = other.did();
     const r = reg({ space: otherSpace, installId: "install-2" });
@@ -228,12 +232,19 @@ describe("ingest journal sink", () => {
     // loom READS by recomputing this exact id from the cause string. If the
     // `FabricHash` format changes, this literal breaks CI loudly instead of
     // silently orphaning loom's reader.
+
     const cell = journalCell(runtime, reg(), "2026-07-01");
     await cell.sync();
     expect(cell.getAsNormalizedFullLink().id).toBe(GOLDEN_ID);
   });
 
-  // --- processIngest: the full auth + validation contract ---
+  //
+  // processIngest: the auth and validation contract
+  //
+  // Over the two helpers below. The claim on a request id that its writes
+  // rest on is pinned in its own block within this region.
+  //
+
   const savedReg = async (
     overrides: Partial<IngestRegistration> = {},
   ): Promise<{ r: IngestRegistration; secret: string }> => {
@@ -349,12 +360,13 @@ describe("ingest journal sink", () => {
     expect(res.status).toBe(413);
   });
 
-  // A link sigil is a non-null, non-array object, so it satisfies the entire
-  // record contract — and the runtime interprets it on WRITE, storing a live
-  // reference instead of the text. That would make journal entries mutable
-  // after the fact and leave the ExternalIngest mark attesting to a digest of
-  // the sigil rather than to anything a reader resolves through it.
   it("processIngest: a link sigil anywhere in a record -> 400, nothing written", async () => {
+    // A link sigil is a non-null, non-array object, so it satisfies the entire
+    // record contract — and the runtime interprets it on WRITE, storing a live
+    // reference instead of the text. That would make journal entries mutable
+    // after the fact and leave the ExternalIngest mark attesting to a digest of
+    // the sigil rather than to anything a reader resolves through it.
+
     const { secret } = await savedReg({ id: "ing_sigil" });
     const link = {
       "/": {
@@ -427,61 +439,68 @@ describe("ingest journal sink", () => {
     expect(res.status).toBe(400);
   });
 
-  // The one deliberate departure from blanket 401 equalization. It is reachable
-  // ONLY with a correct token, so it leaks nothing to a guesser — and it is what
-  // lets a beacon that was offline across a rotation know to re-pair instead of
-  // dropping its buffer or retrying a "broken server" forever.
   const REPAIR_BODY = { partition: "2026-07-01", records: [{ x: 1 }] };
 
-  it("processIngest: VALID token + disabled -> 403 re-pair, no write", async () => {
-    const { secret, r } = await savedReg({ id: "ing_dis" });
-    await saveRegistration(runtime, space, { ...r, enabled: false });
+  describe("the 403 re-pair departure", () => {
+    // The one deliberate departure from blanket 401 equalization. It is
+    // reachable ONLY with a correct token, so it leaks nothing to a guesser —
+    // and it is what lets a beacon that was offline across a rotation know to
+    // re-pair instead of dropping its buffer or retrying a "broken server"
+    // forever.
 
-    const res = await call("ing_dis", secret, REPAIR_BODY);
-    expect(res.status).toBe(403);
-    expect(JSON.stringify(res.body)).toContain("re-pair");
+    it("processIngest: VALID token + disabled -> 403 re-pair, no write", async () => {
+      const { secret, r } = await savedReg({ id: "ing_dis" });
+      await saveRegistration(runtime, space, { ...r, enabled: false });
 
-    const cell = journalCell(runtime, r, "2026-07-01");
-    await cell.sync();
-    expect(cell.get()).toBeUndefined();
-  });
+      const res = await call("ing_dis", secret, REPAIR_BODY);
+      expect(res.status).toBe(403);
+      expect(JSON.stringify(res.body)).toContain("re-pair");
 
-  it("processIngest: VALID token + revoked -> 403 re-pair", async () => {
-    const { secret, r } = await savedReg({ id: "ing_rev" });
-    await saveRegistration(runtime, space, {
-      ...r,
-      enabled: false,
-      revoked: { at: new Date().toISOString(), by: "did:key:zOwner" },
-    });
-    expect((await call("ing_rev", secret, REPAIR_BODY)).status).toBe(403);
-  });
-
-  it("processIngest: VALID token + past expiresAt -> 403, no write", async () => {
-    const { secret, r } = await savedReg({ id: "ing_exp" });
-    await saveRegistration(runtime, space, {
-      ...r,
-      expiresAt: new Date(Date.now() - 1000).toISOString(),
+      const cell = journalCell(runtime, r, "2026-07-01");
+      await cell.sync();
+      expect(cell.get()).toBeUndefined();
     });
 
-    const res = await call("ing_exp", secret, REPAIR_BODY);
-    expect(res.status).toBe(403);
+    it("processIngest: VALID token + revoked -> 403 re-pair", async () => {
+      const { secret, r } = await savedReg({ id: "ing_rev" });
+      await saveRegistration(runtime, space, {
+        ...r,
+        enabled: false,
+        revoked: { at: new Date().toISOString(), by: "did:key:zOwner" },
+      });
+      expect((await call("ing_rev", secret, REPAIR_BODY)).status).toBe(403);
+    });
 
-    const cell = journalCell(runtime, r, "2026-07-01");
-    await cell.sync();
-    expect(cell.get()).toBeUndefined();
+    it("processIngest: VALID token + past expiresAt -> 403, no write", async () => {
+      const { secret, r } = await savedReg({ id: "ing_exp" });
+      await saveRegistration(runtime, space, {
+        ...r,
+        expiresAt: new Date(Date.now() - 1000).toISOString(),
+      });
+
+      const res = await call("ing_exp", secret, REPAIR_BODY);
+      expect(res.status).toBe(403);
+
+      const cell = journalCell(runtime, r, "2026-07-01");
+      await cell.sync();
+      expect(cell.get()).toBeUndefined();
+    });
+
+    it("processIngest: VALID token + unparseable expiresAt -> 403 (fails closed)", async () => {
+      // A corrupted expiry must not silently become "no expiry": Date.parse
+      // yields NaN and every NaN comparison is false, so the naive check fails
+      // OPEN.
+
+      const { secret, r } = await savedReg({ id: "ing_nan" });
+      await saveRegistration(runtime, space, { ...r, expiresAt: "not-a-date" });
+      expect((await call("ing_nan", secret, REPAIR_BODY)).status).toBe(403);
+    });
   });
 
-  // A corrupted expiry must not silently become "no expiry": Date.parse yields
-  // NaN and every NaN comparison is false, so the naive check fails OPEN.
-  it("processIngest: VALID token + unparseable expiresAt -> 403 (fails closed)", async () => {
-    const { secret, r } = await savedReg({ id: "ing_nan" });
-    await saveRegistration(runtime, space, { ...r, expiresAt: "not-a-date" });
-    expect((await call("ing_nan", secret, REPAIR_BODY)).status).toBe(403);
-  });
-
-  // A request id is consumed by the transaction that writes the registration,
-  // so it is spent only by a write that actually landed.
   describe("request claims", () => {
+    // A request id is consumed by the transaction that writes the registration,
+    // so it is spent only by a write that actually landed.
+
     // A fixed clock: `peekMintRequest` defaults to real time, so a claim
     // written at this instant would otherwise read as long expired and the
     // assertions would pass for the wrong reason.
@@ -528,10 +547,12 @@ describe("ingest journal sink", () => {
         .toBe("ing_a");
     });
 
-    // The point of doing this inside the transaction: a write that loses its
-    // precondition must not consume the id, or the idempotency key becomes the
-    // one thing that does not survive the failure it exists to make retryable.
     it("does not consume the id when the write is refused", async () => {
+      // The point of doing this inside the transaction: a write that loses its
+      // precondition must not consume the id, or the idempotency key becomes
+      // the one thing that does not survive the failure it exists to make
+      // retryable.
+
       await saveRegistration(runtime, space, reg({ id: "ing_x", revision: 1 }));
 
       // Precondition says "must not exist", but it does — so this loses.
@@ -566,9 +587,10 @@ describe("ingest journal sink", () => {
     expect((await call("ing_live", secret, REPAIR_BODY)).status).toBe(200);
   });
 
-  // The equalization that MUST survive: a guesser probing a disabled channel
-  // still cannot distinguish it from an unknown one.
   it("processIngest: WRONG token + disabled -> still an equalized 401", async () => {
+    // The equalization that MUST survive: a guesser probing a disabled channel
+    // still cannot distinguish it from an unknown one.
+
     const { r } = await savedReg({ id: "ing_dis2" });
     await saveRegistration(runtime, space, { ...r, enabled: false });
 
@@ -595,6 +617,10 @@ describe("ingest journal sink", () => {
     await cell.sync();
     expect(cell.get()).toBeUndefined();
   });
+
+  //
+  // Registration and last-seen bookkeeping
+  //
 
   it("saveRegistration indexes ids exactly once", async () => {
     await saveRegistration(runtime, space, reg({ id: "ing_i1" }));

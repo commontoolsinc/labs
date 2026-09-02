@@ -11,6 +11,8 @@ import { decode, encode } from "@commonfabric/utils/encoding";
 import {
   FragmentWriter,
   ingestJUnit,
+  preloadArgument,
+  readNameMaps,
   recordsDir,
 } from "@commonfabric/test-support/records";
 import { parseShard, type Shard } from "./shard-utils.ts";
@@ -53,6 +55,7 @@ export async function testPackage(
   coverageRoot: string | undefined,
   extraEnv?: Record<string, string>,
   junitPath?: string,
+  preload = true,
 ): Promise<{
   memberPath: string;
   packageName: string;
@@ -72,10 +75,15 @@ export async function testPackage(
     }
 
     // Trailing arguments to `deno task` append to the task's command line,
-    // which is what threads the flag down to the leaf `deno test`.
-    const args = junitPath !== undefined
-      ? ["task", "test", `--junit-path=${junitPath}`]
-      : ["task", "test"];
+    // which is what threads the flags down to the leaf `deno test`. The
+    // preload travels with the JUnit path because both reach the leaf the
+    // same way and the report is what the preload's map is joined onto; a
+    // member whose task cannot take one cannot take the other.
+    const args = ["task", "test"];
+    if (junitPath !== undefined) {
+      args.push(`--junit-path=${junitPath}`);
+      if (preload) args.push(preloadArgument());
+    }
     result = await new Deno.Command(Deno.execPath(), {
       args,
       cwd: packagePath,
@@ -118,9 +126,13 @@ function reportPackageFailure(result: PackageResult): void {
 // Reads one leaf's JUnit XML and appends its cases to the spool. A leaf
 // that wrote no XML — it crashed before the end, since deno test writes
 // the file only at process exit — contributes nothing, and a malformed
-// file warns without failing anything.
+// file warns without failing anything. The name maps the leaf's preload
+// left in the spool are what give each case its file; they are read here
+// rather than once for the suite so that a run killed part way through
+// keeps the attribution of every package that finished.
 async function ingestLeafJUnit(
   fragment: FragmentWriter,
+  spoolDir: string,
   junitPath: string,
   scope: string,
   memberPath: string,
@@ -138,6 +150,7 @@ async function ingestLeafJUnit(
         kind: "unit",
         scope,
         filePrefix: prefix,
+        fileByName: await readNameMaps(spoolDir, { within: prefix }),
       })
     ) {
       fragment.append(record);
@@ -185,7 +198,10 @@ const INTERNALLY_SHARDED_PACKAGES: Record<
   { total: number; envVar: string }
 > = {
   // packages/cli/test/run-tests.ts reads CLI_TEST_SHARD.
-  "agents-host": { total: 3, envVar: "AGENTS_HOST_TEST_SHARD" },
+  "connectors/agents/host": {
+    total: 3,
+    envVar: "AGENTS_HOST_TEST_SHARD",
+  },
   cli: { total: 10, envVar: "CLI_TEST_SHARD" },
   piece: { total: 3, envVar: "PIECE_TEST_SHARD" },
   tasks: { total: 3, envVar: "TASK_TEST_SHARD" },
@@ -210,7 +226,7 @@ const INTERNALLY_SHARDED_PACKAGES: Record<
 // and `iframe-sandbox` drive browser harnesses that record through the
 // deno-web-test reporter instead.
 const FLAG_FORWARDING_RUNNERS = new Set([
-  "./packages/agents-host",
+  "./packages/connectors/agents/host",
   "./packages/piece",
   "./tasks",
 ]);
@@ -267,6 +283,38 @@ export function acceptsJUnitPath(
   if (task === undefined) return false;
   if (/[&;|<>]/.test(task)) return false;
   return /(^|\s)deno test(\s|$)/.test(task);
+}
+
+/**
+ * Whether an appended `--preload` reaches this member's `deno test` and
+ * loads once it gets there. A member naming its own import map is the one
+ * that cannot: that map governs every module of the invocation, the
+ * preload included, so a specifier the preload needs and the map does not
+ * carry fails the whole run rather than the preload alone. What that
+ * member gives up is the preload's name map, and it loses nothing by it —
+ * with no wrapper installed, the report keeps its own class names and
+ * ingestion reads the file from those instead.
+ */
+export function acceptsPreload(
+  member: string,
+  task: string | undefined,
+): boolean {
+  if (!acceptsJUnitPath(member, task)) return false;
+  return task === undefined || !/--import-map[= ]/.test(task);
+}
+
+/** The members whose leaves also take the preload. */
+export async function preloadCapableMembers(
+  members: readonly string[],
+  root: string | URL = Deno.cwd(),
+): Promise<Set<string>> {
+  const capable = new Set<string>();
+  for (const member of members) {
+    if (acceptsPreload(member, await memberTestTask(member, root))) {
+      capable.add(member);
+    }
+  }
+  return capable;
 }
 
 /** The members whose leaves take the flag, read from their manifests. */
@@ -406,11 +454,13 @@ export async function runTests(
     : undefined;
   // Read once here rather than per unit: an internally sharded package
   // appears as several units that share one manifest.
+  const memberPaths = units.map((unit) => unit.memberPath);
+  const workspaceUrl = new URL(`file://${path.resolve(workspaceCwd)}/`);
   const capable = junitRoot !== undefined
-    ? await junitCapableMembers(
-      units.map((unit) => unit.memberPath),
-      new URL(`file://${path.resolve(workspaceCwd)}/`),
-    )
+    ? await junitCapableMembers(memberPaths, workspaceUrl)
+    : new Set<string>();
+  const preloadable = junitRoot !== undefined
+    ? await preloadCapableMembers(memberPaths, workspaceUrl)
     : new Set<string>();
 
   const results: PackageResult[] = [];
@@ -432,11 +482,16 @@ export async function runTests(
         coverageRoot,
         unit.env,
         junitPath,
+        preloadable.has(unit.memberPath),
       );
       results.push(result);
-      if (junitPath !== undefined && fragment !== undefined) {
+      if (
+        junitPath !== undefined && fragment !== undefined &&
+        spoolDir !== undefined
+      ) {
         await ingestLeafJUnit(
           fragment,
+          spoolDir,
           junitPath,
           unitScope(unit.packageName),
           unit.memberPath,

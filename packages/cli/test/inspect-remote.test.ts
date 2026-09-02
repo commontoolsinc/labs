@@ -11,8 +11,8 @@ import { Database } from "@db/sqlite";
 import { ValidationError } from "@cliffy/command";
 import { Identity } from "@commonfabric/identity";
 import { defaultCacheDir } from "@commonfabric/state-inspector";
+import type { FabricValue } from "@commonfabric/data-model";
 import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { inspect } from "../commands/inspect.ts";
 
 const DUMP_BASE = "/api/storage/memory/dump";

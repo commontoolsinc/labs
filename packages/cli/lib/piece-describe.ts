@@ -39,12 +39,15 @@ import type { PieceCallableListing, PieceCallablesListing } from "./piece.ts";
  * caller-supplied input. */
 export interface PieceFieldDescription {
   name: string;
+
   /** A compact label for the declared type: a named type keeps its name
    * (`ItemOutput`), an array is its element's label suffixed `[]`, a union
    * joins its members with ` | `. See `schemaTypeLabel`. */
   type: string;
+
   /** Present, and true, only on an input the argument schema requires. */
   required?: boolean;
+
   /** The author's doc comment on the field, verbatim. */
   description?: string;
 }
@@ -55,19 +58,25 @@ export interface PieceDescription {
   /** The piece's display name — its NAME cell. Advisory the way the pattern
    * identity is: absent when the piece is unnamed or the cell unreadable. */
   name?: string;
+
   pattern: PiecePatternRef | null;
+
   /** What the pattern is FOR: the result schema's root description. */
   purpose?: string;
+
   /** Pattern-owned state, in declaration order — the author ordered these
    * fields, and that order is part of the documentation. Absent (never
    * empty-by-default) when the compiled pattern could not be read, so a
    * missing section cannot be mistaken for a pattern that declares none. */
   state?: PieceFieldDescription[];
+
   /** Caller-supplied inputs, in declaration order. Absent on the same terms
    * as `state`. */
   inputs?: PieceFieldDescription[];
+
   /** The callable surface, exactly as `listPieceCallables` returned it. */
   verbs: PieceCallableListing[];
+
   incomplete?: "pattern-unavailable";
 }
 

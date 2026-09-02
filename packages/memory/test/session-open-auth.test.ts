@@ -123,7 +123,9 @@ describe("verifySessionOpenAuthorization", () => {
     );
   });
 
-  // --- expiry ---
+  //
+  // Expiry
+  //
 
   it("accepts an unexpired open", async () => {
     const msg = await buildOpen(signedFields({ iat: now, exp: now + 300 }));
@@ -196,7 +198,9 @@ describe("verifySessionOpenAuthorization", () => {
     );
   });
 
-  // --- challenge binding ---
+  //
+  // Challenge binding
+  //
 
   it("accepts a challenged open with the matching challenge", async () => {
     const msg = await buildOpen(signedFields());
@@ -243,7 +247,9 @@ describe("verifySessionOpenAuthorization", () => {
     );
   });
 
-  // --- audience binding ---
+  //
+  // Audience binding
+  //
 
   it("accepts an audience-bound open at the matching host", async () => {
     assertEquals(

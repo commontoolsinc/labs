@@ -11,12 +11,13 @@ import { llmDialogTestHelpers } from "../src/builtins/llm-dialog.ts";
 
 const { serializeForLLMObservation } = llmDialogTestHelpers;
 
-// Epic C stage C4 — consumer precision (C0 §7): the observation ceiling and
-// label views consume entries per observation class. A public value read of
-// a child under a secret container `shape` no longer inherits the
-// container's shape label (the flat model took the max), and an opaque link
-// handle is a followRef observation consuming the pointer's label only.
 describe("CFC observation precision (C4)", () => {
+  // Epic C stage C4 — consumer precision (C0 §7): the observation ceiling and
+  // label views consume entries per observation class. A public value read of a
+  // child under a secret container `shape` no longer inherits the container's
+  // shape label (the flat model took the max), and an opaque link handle is a
+  // followRef observation consuming the pointer's label only.
+
   const view = (entries: CfcLabelView["entries"]): CfcLabelView => ({
     version: 1,
     entries,
@@ -58,10 +59,11 @@ describe("CFC observation precision (C4)", () => {
     });
   });
 
-  // The C4 precision win: the container's membership label surfaces at the
-  // container node (enumerating it reveals membership) but an ADDRESSED
-  // child does not inherit it — the caller named the path.
   it("container shape labels apply at the container node, not at addressed children", () => {
+    // The C4 precision win: the container's membership label surfaces at the
+    // container node (enumerating it reveals membership) but an ADDRESSED
+    // child does not inherit it — the caller named the path.
+
     const labelView = view([
       {
         path: ["items"],
@@ -88,9 +90,10 @@ describe("CFC observation precision (C4)", () => {
     ).toEqual(["members-secret"]);
   });
 
-  // Value observations never consume pointer labels; covering entries stay
-  // byte-identical to the pre-C4 join (parity for legacy views).
   it("value observations skip followRef entries and keep covering parity", () => {
+    // Value observations never consume pointer labels; covering entries stay
+    // byte-identical to the pre-C4 join (parity for legacy views).
+
     const labelView = view([
       { path: [], label: { confidentiality: ["covering-root"] } },
       {
@@ -145,9 +148,10 @@ describe("CFC observation precision (C4)", () => {
     ]);
   });
 
-  // Slicing a view below a container: content labels inherit down;
-  // node-anchored channels (shape/enumerate/followRef) do not.
   it("rebase drops ancestor shape/enumerate/followRef, keeps content", () => {
+    // Slicing a view below a container: content labels inherit down;
+    // node-anchored channels (shape/enumerate/followRef) do not.
+
     const sliced = rebaseCfcLabelView(
       view([
         { path: [], label: { confidentiality: ["covering-root"] } },
@@ -191,11 +195,12 @@ describe("CFC observation precision (C4)", () => {
     ).toBe("shape");
   });
 
-  // LLM serialization end-to-end: the ceiling forces an opaque handle; the
-  // handle is a followRef observation reporting the POINTER's label — not
-  // the empty observation it used to be (an SC-8 under-report at the LLM
-  // boundary), and not the target content label that forced the redaction.
   it("opaque handles report the pointer label as their observation", () => {
+    // LLM serialization end-to-end: the ceiling forces an opaque handle; the
+    // handle is a followRef observation reporting the POINTER's label — not
+    // the empty observation it used to be (an SC-8 under-report at the LLM
+    // boundary), and not the target content label that forced the redaction.
+
     const labelView = view([
       {
         path: [],
@@ -226,11 +231,12 @@ describe("CFC observation precision (C4)", () => {
     expect(result.observedConfidentiality).toEqual(["pointer-label"]);
   });
 
-  // When even the pointer label exceeds the ceiling, the handle would leak
-  // which-document — and falling through would serialize the over-ceiling
-  // CONTENT into paths with no downstream gate (post-commit context/pinned
-  // docs). Redact entirely: no content, no handle, no observation.
   it("redacts entirely when the pointer label also exceeds the ceiling", () => {
+    // When even the pointer label exceeds the ceiling, the handle would leak
+    // which-document — and falling through would serialize the over-ceiling
+    // CONTENT into paths with no downstream gate (post-commit context/pinned
+    // docs). Redact entirely: no content, no handle, no observation.
+
     const labelView = view([
       {
         path: [],
@@ -262,9 +268,10 @@ describe("CFC observation precision (C4)", () => {
     expect(result.observedConfidentiality).toEqual([]);
   });
 
-  // The child-shedding applies through the serializer walk: a public child
-  // of a shape-labeled container serializes with only its own labels.
   it("serializing an addressed child sheds the container shape label", () => {
+    // The child-shedding applies through the serializer walk: a public child
+    // of a shape-labeled container serializes with only its own labels.
+
     const labelView = view([
       {
         path: ["items"],

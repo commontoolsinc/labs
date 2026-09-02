@@ -63,10 +63,11 @@ Deno.test("parseMisePins returns every pin in order", () => {
   );
 });
 
-// TOML rejects a key defined twice even when both values agree, so mise fails
-// to load the file. Reading only the first pin would report the toolchain as
-// aligned while `mise install` — the documented way to get it — is broken.
 Deno.test("findProblems flags a Deno pin defined twice", () => {
+  // TOML rejects a key defined twice even when both values agree, so mise fails
+  // to load the file. Reading only the first pin would report the toolchain as
+  // aligned while `mise install` — the documented way to get it — is broken.
+
   for (
     const miseToml of [
       '[tools]\ndeno = "2.8.1"\ndeno = "2.8.1"\n',
@@ -128,9 +129,10 @@ Deno.test("compareVersions compares components numerically", () => {
   assertEquals(compareVersions("2.8.1", "2.8.1"), 0);
 });
 
-// Reading only the leading components would compare "2.8.0.1" as "2.8.0" and
-// answer as though the trailing component were not there.
 Deno.test("compareVersions rejects a version that is not exact", () => {
+  // Reading only the leading components would compare "2.8.0.1" as "2.8.0" and
+  // answer as though the trailing component were not there.
+
   for (const bad of ["2.8.0.1", "2.8", "abc", "", "v2.8.0"]) {
     assertThrows(
       () => compareVersions(bad, "2.8.0"),
@@ -202,10 +204,12 @@ Deno.test("findProblems flags a Dockerfile without deno images", () => {
   assertEquals(findProblems(files).length, 1);
 });
 
-// check.sh reads the bounds with shell arithmetic, which aborts on a bound
-// carrying anything beyond MAJOR.MINOR.PATCH. Comparing such a bound loosely
-// would report "aligned" for a range that makes check.sh fail for everyone.
 Deno.test("findProblems flags a range bound that is not exact", () => {
+  // check.sh reads the bounds with shell arithmetic, which aborts on a bound
+  // carrying anything beyond MAJOR.MINOR.PATCH. Comparing such a bound
+  // loosely would report "aligned" for a range that makes check.sh fail for
+  // everyone.
+
   for (const bad of ["2.8.0.1", "2.8", "abc"]) {
     const withMin = findProblems({
       ...alignedFiles(),
@@ -252,10 +256,11 @@ Deno.test("findProblems flags a range that excludes the pin", () => {
   assert(problems[0].includes("range"));
 });
 
-// The name mise.toml stays in the action's description and comments after the
-// read is replaced by a literal, so this fixture is what a "just inline the
-// version" refactor actually leaves behind.
 Deno.test("findProblems flags an action that stops reading mise.toml", () => {
+  // The name mise.toml stays in the action's description and comments after the
+  // read is replaced by a literal, so this fixture is what a "just inline the
+  // version" refactor actually leaves behind.
+
   const files = {
     ...alignedFiles(),
     denoSetupAction: '    description: "Defaults to the pin in mise.toml."\n' +
@@ -418,16 +423,17 @@ Deno.test("main reports each problem and returns 1 when misaligned", async () =>
   }
 });
 
-// The repository's actual files must be aligned; this is the same check CI
-// runs via `deno task check-deno-pins`.
 Deno.test("the repository's pins are aligned", async () => {
+  // The repository's actual files must be aligned; this is the same check CI
+  // runs via `deno task check-deno-pins`.
   assertEquals(await main(), 0);
 });
 
-// Runs the script the way `deno task check-deno-pins` does, which the calls to
-// main() above do not: they would still pass if the entry point never ran it,
-// or if the task's declared permissions were too narrow to read the files.
 Deno.test("running the script as a command reports the aligned pin", async () => {
+  // Runs the script the way `deno task check-deno-pins` does, which the calls
+  // to main() above do not: they would still pass if the entry point never ran
+  // it, or if the task's declared permissions were too narrow to read the
+  // files.
   const output = await runDenoCommandWithTemporaryLock({
     root: REPO_ROOT,
     args: (lockPath) => [

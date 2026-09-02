@@ -5,12 +5,17 @@
 import type { CommitRow, SpaceDb } from "./db.ts";
 import { hasSchedulerBasisTable } from "./db.ts";
 import { decodeStored } from "./decode.ts";
+import { rowLimit } from "./model.ts";
+import { branchReadChain, owningLink } from "./reconstruct.ts";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 
 export interface SpaceSummary {
   path: string;
   hasSchedulerBasisTable: boolean;
+
   /** Scheduler basis rows (0 even when the table exists empty). */
   schedulerBasisRows: number;
+
   commits: number;
   commitSeqRange: [number, number] | null;
   sessions: number;
@@ -136,7 +141,15 @@ export interface WriteEvent {
   createdAt: string;
 }
 
-/** Every write that touched an entity, in order — the "who wrote this" answer. */
+/**
+ * Every write that touched an entity, in order — the "who wrote this" answer.
+ *
+ * Read from the branch that OWNS the entity's visible row, not the branch
+ * asked about. A child branch inherits its parent's entities, so reading local
+ * rows only would answer "no history" for an entity the same branch reads
+ * fine; and for one the child overrode, the parent's writes produced nothing
+ * the reader can see, so they are not this entity's history from here.
+ */
 export function entityHistory(
   space: SpaceDb,
   opts: { id: string; scope?: string; branch?: string; limit?: number },
@@ -144,12 +157,14 @@ export function entityHistory(
   const scope = opts.scope ?? "space";
   const branch = opts.branch ?? "";
   const limit = opts.limit ?? 200;
+  const owner = owningLink(space, { branch, scope, id: opts.id });
+  if (owner === undefined) return [];
   return space.db
     .prepare(
       `SELECT r.seq, r.commit_seq, r.op_index, r.op,
               c.session_id, c.local_seq, c.created_at
        FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
-       WHERE r.branch = ? AND r.id = ? AND r.scope_key = ?
+       WHERE r.branch = ? AND r.id = ? AND r.scope_key = ? AND r.seq <= ?
        ORDER BY r.seq ASC, r.op_index ASC LIMIT ?`,
     )
     .all<{
@@ -160,7 +175,7 @@ export function entityHistory(
       session_id: string;
       local_seq: number;
       created_at: string;
-    }>(branch, opts.id, scope, limit)
+    }>(owner.branch, opts.id, scope, owner.atSeq, limit)
     .map((r) => ({
       seq: r.seq,
       commitSeq: r.commit_seq,
@@ -179,32 +194,59 @@ export interface HotEntity {
   sessions: number;
 }
 
-/** Entities ranked by write count — a contention/hot-path proxy. */
+/**
+ * Entities ranked by write count — a contention/hot-path proxy.
+ *
+ * Counted per entity on the branch that OWNS its visible row, so an entity a
+ * child branch inherited is ranked by the history the child can reach rather
+ * than dropped for having no local rows.
+ */
 export function hotEntities(
   space: SpaceDb,
   opts: { branch?: string; limit?: number } = {},
 ): HotEntity[] {
   const branch = opts.branch ?? "";
-  const limit = opts.limit ?? 20;
-  return space.db
-    .prepare(
-      `SELECT r.id, r.scope_key,
-              count(*) writes, count(DISTINCT c.session_id) sessions
-       FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
-       WHERE r.branch = ?
-       GROUP BY r.id, r.scope_key
-       ORDER BY writes DESC LIMIT ?`,
+  // Resolved at ENTRY, not at the terminal slice: the SQL this replaced refused
+  // a bad limit before reading a row, and evaluating it last would make a
+  // library caller pay the whole chain walk, group-bys and sort before the
+  // refusal landed.
+  const end = rowLimit(opts.limit ?? 20);
+  const perBranch = space.db.prepare(
+    `SELECT r.id, r.scope_key,
+            count(*) writes, count(DISTINCT c.session_id) sessions
+     FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
+     WHERE r.branch = ? AND r.seq <= ?
+     GROUP BY r.id, r.scope_key`,
+  );
+  const out: HotEntity[] = [];
+  const claimed = new Set<string>();
+  for (const link of branchReadChain(space, branch)) {
+    for (
+      const r of perBranch.all<
+        { id: string; scope_key: string; writes: number; sessions: number }
+      >(link.branch, link.atSeq)
+    ) {
+      // Nearest link wins, as a read resolves it.
+      const key = `${r.scope_key}\u0000${r.id}`;
+      if (claimed.has(key)) continue;
+      claimed.add(key);
+      out.push({
+        id: r.id,
+        scope: r.scope_key,
+        writes: r.writes,
+        sessions: r.sessions,
+      });
+    }
+  }
+  return out
+    // Scope breaks the last tie: the same id can be held in several scopes, so
+    // id alone leaves equal-write rows in whatever order the walk produced, and
+    // a limited result would return an arbitrary one of them.
+    .sort((a, b) =>
+      b.writes - a.writes || utf8Compare(a.id, b.id) ||
+      utf8Compare(a.scope, b.scope)
     )
-    .all<{ id: string; scope_key: string; writes: number; sessions: number }>(
-      branch,
-      limit,
-    )
-    .map((r) => ({
-      id: r.id,
-      scope: r.scope_key,
-      writes: r.writes,
-      sessions: r.sessions,
-    }));
+    .slice(0, end);
 }
 
 // Entity classification / listing moved to model.ts (`listEntityModels`),

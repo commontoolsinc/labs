@@ -34,20 +34,28 @@ import type { ModuleMetadata } from "./container-protocol.ts";
 export interface LocationPoint {
   /** Unique ID for this point */
   id: string;
+
   /** Latitude in decimal degrees */
   latitude: number;
+
   /** Longitude in decimal degrees */
   longitude: number;
+
   /** Accuracy in meters */
   accuracy: number;
+
   /** Altitude in meters (if available) */
   altitude?: number;
+
   /** Altitude accuracy in meters (if available) */
   altitudeAccuracy?: number;
+
   /** Heading in degrees 0-360 (if available) */
   heading?: number;
+
   /** Speed in m/s (if available) */
   speed?: number;
+
   /** Unix timestamp in milliseconds */
   timestamp: number;
 }
@@ -82,6 +90,7 @@ export const MODULE_METADATA: ModuleMetadata = {
 export interface LocationTrackModuleInput {
   /** Array of captured location points */
   locations: LocationPoint[] | Default<[]>;
+
   /** Optional label for this track (e.g., "Morning run", "Commute") */
   label: string | Default<"">;
 }

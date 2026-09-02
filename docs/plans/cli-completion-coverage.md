@@ -80,36 +80,43 @@ read before picking one up; this table is the roll-up.
 | 1 | Inline `--option=value` drops every live candidate | correctness | done |
 | 2 | Flags offered past a `stopEarly()` boundary | correctness | done |
 | 3 | Target resolution lags the reference grammar | correctness | done |
-| 4 | Verb flags do not complete | pattern vocabulary | shaper done, wiring after step 10 |
-| 5 | Result field paths for `get` and `wish` | pattern vocabulary | `get` done, `wish` refused |
-| 6 | Result field paths for `call` and `exec` | pattern vocabulary | needs step 10 |
+| 4 | Verb flags do not complete | pattern vocabulary | shaper done, wiring open |
+| 5 | Result field paths for `get` and `wish` | pattern vocabulary | `get` done, `wish` declined |
+| 6 | Result field paths for `call` and `exec` | pattern vocabulary | open |
 | 7 | Slugs never complete | pattern vocabulary | done |
 | 8 | `--space` has no source a caller recognizes | first link | partly settled |
 | 9 | A verb's annotation is its kind, not its prose | comprehension | done |
 | 10 | Wrapper and deprecated verbs are offered unmarked | comprehension | done |
 | 11 | Every Tab costs two process starts | felt cost | needs a decision |
-| 12 | `nospace` is inert on the stock macOS bash | felt cost | not started |
-| 13 | Space and entity positionals across `inspect` | operator surface | not started |
-| 14 | `wish` targets and scopes | CLI vocabulary | not started |
-| 15 | Remaining path-shaped and enumerable values | CLI vocabulary | not started |
-| 16 | Two provider entries that can never fire | hygiene | not started |
+| 12 | `nospace` is inert on the stock macOS bash | felt cost | done |
+| 13 | Space and entity positionals across `inspect` | operator surface | done |
+| 14 | `wish` targets and scopes | CLI vocabulary | done |
+| 15 | Remaining path-shaped and enumerable values | CLI vocabulary | done |
+| 16 | Two provider entries that can never fire | hygiene | done |
 | 17 | The README table omits the top-level spellings | hygiene | done |
 | 18 | A live-provider test seam | mechanism | done |
-| 19 | A gate that fails when a new slot has no decision | mechanism | not started |
+| 19 | A gate that fails when a new slot has no decision | mechanism | done |
 
-**What can be picked up today.** Items 12, 13, 14, 15 and 16 are mechanical and
-can be taken at any time. Item 19 is the other half of the mechanism item 18
-landed.
+**What can be picked up today.** Items 4 and 6. Step 10 of
+[CLI surface shape](cli-surface-shape.md) has landed, so the position each of
+them fills is settled and neither is waiting on anything. Items 8 and 11 hold
+decisions; item 5's `wish` half is declined, because resolving a wish writes.
 
-Item 4's candidates are built and its wiring waits: step 10 decides whether a
-verb's fields are written before the `--` marker or after it, and the position
-offers nothing until then. That is the honest state for one whose vocabulary the
-command cannot yet name.
+One defect this list does not enumerate is open and unranked: the cell-path slot
+offers a piece's callables, which `cf get` refuses and redirects to `cf call`.
+It is asserted in `completion-over-the-cli.sh` as what happens today. Telling a
+callable from a value at a path needs the verbs listing, which that provider
+does not fetch — so it is a round trip rather than a filter, and that is the
+decision it waits on.
 
-Item 6 is the one to leave alone. Under the current grammar it needs the whole
-line read for context, since a projection precedes the verb it shapes; after
-step 10 the verb is already before the cursor and it needs nothing. Building it
-now means building the machinery that step 10 makes unnecessary.
+Item 4's candidates are built and its wiring is what is left: the verb opens
+the callable's section, so its fields fill the `tail` argument directly after
+the verb name, and `liveCandidates` does not dispatch on that slot yet.
+
+Item 6 is the same shape one boundary later. A projection now follows the verb
+it shapes rather than preceding it, so the verb is already before the cursor
+and the slot needs no whole-line read to find it — which is the machinery this
+item was waiting to be spared.
 
 Items 8 and 11 hold open decisions and are not work yet. Item 5's `wish` half is
 closed rather than open: resolving a wish writes, so the slot cannot be
@@ -121,13 +128,14 @@ Two of the four ways completion can be wrong are enumerated here exhaustively,
 and two are not. Knowing which is which is the difference between working the
 list and trusting it.
 
-**Enumerated exhaustively.** A slot with no provider entry: the keys of both
-provider tables are derivable from the same command tree the resolver walks, so
-walking the tree and subtracting the tables names every one. That is items 13
-to 16, and item 19 is the same walk made permanent.
+**Enumerated exhaustively, and now gated.** A slot with no provider entry: the
+keys of both provider tables are derivable from the same command tree the
+resolver walks, so walking the tree and subtracting the tables names every one.
+That is items 13 to 16, and `deno task check-completion-slots` is the same walk
+made permanent.
 
-**Enumerated exhaustively.** A provider entry with no slot: the same
-subtraction run the other way. That is item 16.
+**Enumerated exhaustively, and now gated.** A provider entry with no slot: the
+same subtraction run the other way. That is item 16, and the same gate.
 
 **Not enumerated.** A provider that returns the *wrong set* rather than an
 empty one. This is invisible at the prompt — plausible candidates look like
@@ -207,12 +215,12 @@ field, so past the callable name on `cf call` and past the mounted file on
 positional index. That keeps the property where the command declares it: a
 third command becoming `stopEarly()` needs no edit in the completion layer.
 
-This holds under either grammar. A `cf` flag past the verb is refused today, and
-after step 10 of [Naming the target](cli-surface-shape.md#naming-the-target) the
-position belongs to the callable — so declining to offer one there is correct
-now and stays correct. It leaves the position offering nothing until item 4
-fills it, which is what a position whose vocabulary the command cannot yet name
-should offer.
+The position belongs to the callable: the verb opens its section, and a `cf`
+flag written there is refused with the section it belongs to named — see
+[Naming the target](cli-surface-shape.md#naming-the-target). So declining to
+offer one there is correct. It leaves the position offering nothing until item
+4 fills it, which is what a position whose vocabulary the command cannot yet
+name should offer.
 
 ### 3. Target resolution lags the reference grammar
 
@@ -250,16 +258,15 @@ A verb's own fields are the pattern author's vocabulary rather than the CLI's,
 so this is the position where a caller has least to go on and completion has
 most to give. Nothing is offered there.
 
-Where "there" is depends on step 10. Today the fields are written after `--`;
-afterwards the verb opens the callable's section and they are written directly
-after the verb, with `--` closing that section and opening the read step's:
+Where "there" is, step 10 settled: the verb opens the callable's section and
+its fields are written directly after the verb, with `--` closing that section
+and opening the read step's.
 
 ```text
-cf call --piece <piece> addItem --ti<TAB>        # after step 10
-cf call --piece <piece> addItem -- --ti<TAB>     # before it
+cf call --piece <piece> addItem --ti<TAB>
 ```
 
-**The candidates and their slot are separable, and only the slot waits.**
+**The candidates and their slot are separable, and only the wiring is left.**
 `shapeVerbFlagCandidates` in `lib/completion/verb-flags.ts` turns a listing
 row's `inputSchema` into the flags the parser accepts: one per declared field,
 kebab-cased, both spellings of a boolean, the value flags of a non-object input,
@@ -275,10 +282,9 @@ The module sits beside the providers rather than inside `providers.ts` because
 reading a declared input resolves `callable.ts`, which costs about a third of a
 whole static completion — and `providers.ts` is resolved on every Tab.
 
-The wiring is what waits. `liveCandidates` dispatches on `option-value` and
-`argument` slots only, so neither position reaches a provider, and routing it to
-the current position would teach the spelling step 10 retires while the
-retirement is being taught.
+The wiring is what is left. `liveCandidates` dispatches on `option-value` and
+`argument` slots only, so the position — the `tail` argument, past the callable
+name — reaches no provider.
 
 The slot past the marker is not this one. It belongs to the read options, and
 completing it from the verb's declared result is item 6.
@@ -286,8 +292,8 @@ completing it from the verb's declared result is item 6.
 ### 5. Result field paths for `get`, and why not for `wish`
 
 `--select` takes comma-separated, dot-separated field paths into the value a
-read returns, and `--schema` accepts the same spelling. On `cf get` and
-`cf piece get` both complete, in the projection's own grammar rather than the
+read returns, and `--schema` accepts the same spelling. On `cf get` both
+complete, in the projection's own grammar rather than the
 cell-path one: a list splits on `,` and a path on `.`, where `cellPathCandidates`
 walks `/`. A segment ending in `@` asks for that position's address rather than
 its value, and a bare `@` asks the read for its own, so both spellings of a
@@ -310,9 +316,11 @@ query adds nothing, because the cell is keyed by the query; a caller editing a
 query writes once per spelling they pass through.
 
 That is a keystroke with a side effect, which is the bar this item said to clear
-before building it, and it is not cleared. Completing `wish --select` needs a
-resolution that reads without committing, which is a change to `resolveWish`
-rather than to completion.
+before building it. **It is not cleared, and that is decided rather than
+deferred: a durable write per distinct query is not acceptable at a keystroke.**
+The slot stays empty. Completing it would need a resolution that reads without
+committing — a change to `resolveWish`, and a question for whoever owns the
+wish builtin rather than for this plan.
 
 `call` and `exec` are the other two commands carrying these flags, and their
 projection names positions in a verb's result rather than in the piece's root.
@@ -324,41 +332,30 @@ which is item 6's subject and not this one.
 The same flags on a call shape the verb's result, whose vocabulary is the verb's
 `outputSchema` — carried by the same listing item 4 reads.
 
-This one is not really a completion item, and the surface work dissolves most
-of it. `stopEarly()` requires a projection before the callable name today, and a
-caller who writes it after gets one of three outcomes with no rule connecting
-them:
+This one is not really a completion item, because the surface settles most of
+it. [Naming the target](cli-surface-shape.md#naming-the-target) puts a
+projection past the `--` that closes the callable's section, and therefore
+always after the verb it shapes:
 
 ```text
-call <verb> --select item.title '{...}'   Use a single inline JSON argument or
-                                          "--" before schema-derived flags.
-call <verb> -- --title x --select y       "--select" at <event> is not a field
-                                          this verb declares.
-call <verb> --json '{...}'                works
+cf call --piece <piece> addItem --title x -- --select it<TAB>
 ```
 
-The first message names a rule the caller did not break: they passed a single
-inline JSON argument, and `--select` is not a schema-derived flag. It is what
-`--invocation` and `--show-links` say too. The second is a good message about
-the wrong subject. The third succeeds, because `--json` is a token the
-callable's parser accepts — so the surface is not "a `cf` flag never works after
-the verb", it is "some do", which is not a rule anyone can infer from using it.
+The verb is on the line ahead of the cursor, so the candidates come from the
+`outputSchema` the listing in item 4 already carries, read from the words before
+the cursor like every other slot. The slot itself is the one `--` opens, which
+`resolveCompletionLine` reports as `passthrough` and `liveCandidates` does not
+dispatch on.
 
-[Naming the target](cli-surface-shape.md#naming-the-target) settles this: the
-verb opens the callable's section and `--` closes it, so a projection is written
-after the marker and therefore always after the verb. That ordering is what this
-item was waiting on, and it arrives with the verb already on the line ahead of
-the cursor — so the candidates come from the `outputSchema` the listing in item
-4 already carries, read from the words before the cursor like every other slot.
-
-What survives is one improvement completion wants on its own account.
-`resolveCompletionLine` derives two different things from `words.slice(1,
-cursor)` — which slot the cursor is in, and which piece and verb the line names
-— and only the first needs the prefix. Resolving the slot from the prefix while
-gathering context from the whole line is what makes mid-line editing complete
-against the position being edited rather than against the end of the line. It is
-no longer load-bearing for this item, and it is still the difference between a
-line that completes as it is typed and one that completes however it is edited.
+What is left beyond that wiring is one improvement completion wants on its own
+account. `resolveCompletionLine` derives two different things from
+`words.slice(1, cursor)` — which slot the cursor is in, and which piece and verb
+the line names — and only the first needs the prefix. Resolving the slot from
+the prefix while gathering context from the whole line is what makes mid-line
+editing complete against the position being edited rather than against the end
+of the line. It is not load-bearing for this item, and it is still the
+difference between a line that completes as it is typed and one that completes
+however it is edited.
 
 ### 7. Slugs never complete
 
@@ -469,61 +466,100 @@ where state lives rather than about how fast a process starts.
 Worth sizing before it is scheduled: it may be that the correctness and
 vocabulary items above change the experience more than a faster Tab would.
 
-### 12. `nospace` is inert on the stock macOS bash
+### 12. The trailing space is inverted, not suppressed
 
-Cell paths and link endpoints complete one segment at a time and emit a
-`nospace` directive so the cursor stays attached for the next `/`. The bash
-function applies it through `compopt`, which is bash 4 and later; macOS ships
-bash 3.2. The script comments note the cost as a keystroke. It is a keystroke
-*per segment*, on the default shell of the platform most of this repository is
-developed on, and it lands on the deepest and most useful completion there is.
+Cell paths, link endpoints and projection paths complete one segment at a time
+and emit a `nospace` directive so the cursor stays attached for the next
+separator. `compopt` is the per-completion switch and it is bash 4 and later;
+macOS ships bash 3.2, where the directive was simply inert. It cost a keystroke
+*per segment*, on the deepest and most useful completion there is.
 
-A candidate that carries its own trailing separator is one way around it, since
-the shell's added space then falls after a `/` rather than inside a path.
+The space is now taken away by default and given back instead. The binding is
+registered `complete -o nospace`, and a candidate that should END the word
+carries its own trailing space, which bash inserts verbatim. One mechanism
+serves bash 3.2 and bash 4 alike.
+
+Three measurements against bash 3.2 through a pty decided the shape, and the
+first two are why it is not the shape this item first proposed:
+
+- A candidate carrying its own trailing **separator** does not help. `items/`
+  inserts `items/ `, so the space falls after the separator rather than inside
+  the path and the caller still deletes it. `complete -o filenames` does not
+  change that — it suppresses the space only where the candidate names a
+  directory that exists on disk — and it adds filename escaping to every
+  candidate, so `#profile` reaches the line as `\#profile`.
+- Re-registering the compspec from inside the completion function, the usual
+  stand-in for `compopt`, takes effect one completion LATE. The first Tab gets
+  a space and the second does not, which puts the option on the wrong slot.
+- A candidate carrying its own trailing **space** under `-o nospace` inserts
+  verbatim, colons and all, and an ambiguous set still inserts only the common
+  prefix.
+
+`$1` is the command word the compspec fired for, and it decides who gets the
+space: the `deno` binding is registered without `-o nospace` and adds nothing,
+because a line handed back to another completion has to keep that completion's
+spacing. `compopt` is still called where it exists, since it is the only thing
+that reaches that binding.
 
 ## Operator surface and CLI vocabulary
 
 ### 13. Space and entity positionals across `inspect`
 
-Every `cf inspect` subcommand that reads a space takes it positionally, and none
-of the eighteen have a provider — while `space clone` and `space fingerprint`,
-which take the same thing the same way, do. `inspect` reads local stores
-directly, so the provider it wants is the one `space clone` already uses, and
-item 8's disposition applies unchanged.
+Every `cf inspect` subcommand that reads a space completes it from the same
+local stores `space clone` and `space fingerprint` read, and item 8's
+disposition applies unchanged. The `<entity>` positional beside them completes
+from `listEntityModels` — the listing `inspect entities` prints — annotated
+with the label it reconstructs, so an opaque id reads.
 
-The `<entity>` positional beside them is a piece id within the named space, and
-`inspect entities` is what enumerates them.
+The two sets are generated from a list of subcommand names rather than written
+out as thirty-odd table entries, because which subcommands open a space is one
+fact and repeating it is somewhere for the next one to be forgotten. Item 19's
+gate is what names a subcommand the list has missed.
+
+The entity provider reads local stores only. `--remote` fetches a snapshot over
+the network before it can list anything, which is a round trip a keystroke
+should not start.
 
 ### 14. `wish` targets and scopes
 
-`cf wish <target>` takes a documented vocabulary — the profile targets and the
-space-relative ones its help enumerates — and completes nothing. `--scope`
-accepts exactly `~`, `.`, `profile`, or a space DID, which is an enumerated set
-plus the space provider.
+`cf wish <target>` completes the vocabulary its help enumerates — the profile
+targets and the space-relative ones — and `--scope` completes `~`, `.`,
+`profile` and the space provider's DIDs.
 
-Both sets are in the command's own help, which is what puts this below the
-pattern-owned slots rather than beside them.
+The target list is hand-maintained, because the vocabulary is the wish
+builtin's rather than the command tree's and nothing on the tree carries it.
+The command's help text is where it is documented and where it is kept in step.
+
+`--scope` means something else on `cf inspect`, where it is a scope key. An
+option provider is keyed by long name alone, so this one says which commands it
+applies to — the same scoping `--from` needs, being a file on `space clone` and
+a sequence number on `inspect diff`.
 
 ### 15. Remaining path-shaped and enumerable values
 
-The mechanical remainder, each one an entry in an existing table:
+The mechanical remainder, each one an entry in an existing table: pattern files
+for `piece set-home <main>`; files and directories for `piece getsrc <outpath>`,
+`deps update <file>`, `fuse mount|unmount <mountpoint>`, `--dir`, `--out`,
+`--output` and `space clone --from`; `--api-url`'s candidates for `--remote`;
+and `piece map --format` and `inspect entities --kind` beside the four already
+in `ENUMERATED_OPTION_VALUES`.
 
-- Pattern files: `piece set-home <main>`.
-- Files and directories: `piece getsrc <outpath>`, `deps update <file>`,
-  `fuse mount|unmount <mountpoint>`, `--dir`, `--out`, `--output`, `--from`.
-- API URLs: `--remote`, which takes what `--api-url` takes.
-- Enumerated values, which belong beside the four already in
-  `ENUMERATED_OPTION_VALUES`: `piece map --format` (`ascii`, `dot`),
-  `inspect entities --kind` (seven values its help lists).
+`--remote` is reachable only as `--remote=<value>`. Its value is optional
+(`[url:string]`), so a bare `--remote` is legal and the word after it is a
+positional rather than the flag's value — which is what the resolver reads it
+as, and what the command reads it as too.
+
+`piece set-slug <source>` is not in that enumeration and is completed with it:
+it takes what `--piece` takes, which is the same table entry.
 
 ## Hygiene
 
 ### 16. Two provider entries that can never fire
 
-`OPTION_VALUE_PROVIDERS` carries `log-file` and `state-path`. Both belong to
-`fuse-supervisor` and `fuse-daemon`, which take raw arguments and declare no
-Cliffy options, and which completion drops from its subcommand candidates as
-internal. Neither entry is reachable.
+`log-file` and `state-path` are gone from `OPTION_VALUE_PROVIDERS`. Both
+belonged to `fuse-supervisor` and `fuse-daemon`, which take raw arguments and
+declare no Cliffy options, and which completion drops from its subcommand
+candidates as internal. Item 19's gate is the same subtraction made permanent.
 
 ### 17. The README table omits the top-level spellings
 
@@ -539,9 +575,11 @@ lands, which is the obligation rather than the one edit.
 `packages/cli/integration/completion-over-the-cli.sh` is where every provider
 that reads state is exercised — the four that reach a fabric, the one that
 reads local stores, the one that reads the environment, and the pattern-file
-glob. The rest of the table hands the shell a constant directive that a fabric
-cannot change, and those are asserted one by one — kind and glob — in
-`test/completion-providers.test.ts`. Item 19 adds the other half: whether a
+glob — at one of the slots it answers. The rest of the table hands the shell a
+constant directive that a fabric cannot change, and those are asserted one by
+one — kind and glob — in `test/completion-providers.test.ts`, over a set that
+file derives from the tree rather than remembers: a slot handing the shell a
+directive that no case pins fails there. Item 19 adds the other half: whether a
 slot has an entry at all.
 
 `--space` is the one whose candidates depend on the machine, since it reads
@@ -584,17 +622,38 @@ It is asserted there as what happens today.
 
 ### 19. A gate that fails when a new slot has no decision
 
-Completion falling behind the command surface is the mechanism this whole plan
-is a list of instances of. The tables are keyed by option long name and by
-`<command path>:<argument name>`, and both keys are derivable from the tree that
-`resolveCompletionLine` already walks, so the drift is machine-detectable: walk
-the tree, and name every value-taking option and every positional with no
-provider entry and no enumerated set.
+`deno task check-completion-slots` walks the same tree `resolveCompletionLine`
+walks and subtracts the two provider tables from it, in three directions:
 
-The check cannot decide that a slot *should* complete — plenty should not. It
-can require that every slot has been decided about, which is what an allowlist
-of deliberate omissions records. That turns the next command's completion from
-something remembered into something the gate asks for.
+- A slot with no provider, no enumerated set, and no allowlist entry.
+- A provider entry matching no slot — item 16's subtraction, made permanent.
+- An allowlist entry that decides no slot, so the record of a decision cannot
+  outlive the thing it was about.
 
-Item 16 is what the same walk finds in the other direction, so both fall out of
-one implementation.
+A slot is one option on one command, not one option name. The scoped providers
+carry the commands they answer on, and the gate asks about each command the
+name is declared on separately: a `--from` answered on `space clone` says
+nothing about the `--from` on `inspect diff`, and reading the key alone would
+report the second as decided when what it offers is silence. The allowlist
+takes the same two shapes — a bare long name where nothing provides the option
+anywhere, and `<command path>:<long name>` for the commands where an option
+that is provided elsewhere means something else.
+
+It cannot decide that a slot *should* complete, and does not try. It requires
+that every slot has been decided about, and the allowlist is where a decision
+not to complete one is written down with its reason — what the candidates would
+have been, and why there are none.
+
+Its first run named thirty-six options and no positionals. Three of them turned
+out to be path-shaped and got directives rather than an allowance
+(`--pattern-coverage-dir`, `--timing-measures-out`, `--cfc-writeback-state`);
+the rest are counts, timestamps, pasted identifiers, coined words, and
+expressions with their own grammar.
+
+Asking per command named twenty more. One took candidates — `piece repair
+--list` names a piece, exactly as the `--list` on `piece survey` does. The rest
+are recorded: the two sequence numbers `inspect diff` spells `--from` and
+`--to`; the raw scope keys nine `inspect` subcommands take, which are read out
+of the data being inspected the way `--session` already is; and the eight
+projections that shape something other than the value at a target, which are
+items 6 and 5's `wish` half rather than an omission.

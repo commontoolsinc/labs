@@ -64,6 +64,14 @@ export type SubtopicKey<T extends TopicKey> =
  * Presented as a resizable drawer.
  */
 export class XDebuggerView extends LitElement {
+  // The members below stay TypeScript-private rather than becoming `#` names,
+  // which is the convention elsewhere. `test/disposal-handling.test.ts` calls
+  // this view's handlers off `XDebuggerView.prototype` against a stand-in
+  // receiver: a plain object supplying `getLoggerRegistry`,
+  // `debuggerController`, and the rest as ordinary properties. A `#` name is
+  // scoped to real instances, so each of those calls would throw. Converting
+  // the class means rewriting that suite to build real views.
+
   static override styles = css`
     :host {
       position: fixed;
@@ -1356,9 +1364,9 @@ export class XDebuggerView extends LitElement {
     return String(value);
   }
 
-  // ============================================================
+  //
   // Logger stats methods
-  // ============================================================
+  //
 
   private getLoggerRegistry(): Record<string, Logger> {
     const global = globalThis as unknown as {

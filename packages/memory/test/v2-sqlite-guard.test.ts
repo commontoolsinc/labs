@@ -17,14 +17,15 @@ import {
 } from "../v2/sqlite/guard.ts";
 import { open } from "../v2/engine.ts";
 
-// S4: the guard's core-table denylist is hand-maintained, but unqualified
-// pattern-SQL names resolve to the attached cell-db ONLY because `main` (the
-// core store) has no table of that name. If the engine ever adds a `main` table
-// whose name a pattern also uses and that name is NOT in CORE_TABLE_NAMES, a
-// pattern write could silently hit core storage. This asserts the denylist
-// covers every real `main` table, so adding an engine table without updating the
-// guard fails CI.
 describe("CORE_TABLE_NAMES vs the engine schema", () => {
+  // S4: the guard's core-table denylist is hand-maintained, but unqualified
+  // pattern-SQL names resolve to the attached cell-db ONLY because `main` (the
+  // core store) has no table of that name. If the engine ever adds a `main`
+  // table whose name a pattern also uses and that name is NOT in
+  // CORE_TABLE_NAMES, a pattern write could silently hit core storage. This
+  // asserts the denylist covers every real `main` table, so adding an engine
+  // table without updating the guard fails CI.
+
   it("covers every table the engine creates in `main`", async () => {
     const path = await Deno.makeTempFile({ suffix: ".sqlite" });
     const engine = await open({ url: toFileUrl(path) });
@@ -141,8 +142,9 @@ describe("assertWriteSafe", () => {
   });
 });
 
-// Regression tests for guard bypasses found in code review.
 describe("guard hardening (review findings)", () => {
+  // Regression tests for guard bypasses found in code review.
+
   it("rejects quoted/bracketed core-table identifiers (read + write)", () => {
     expect(() => assertReadOnly('SELECT * FROM "commit"')).toThrow(GuardError);
     expect(() => assertReadOnly("SELECT * FROM [commit]")).toThrow(GuardError);

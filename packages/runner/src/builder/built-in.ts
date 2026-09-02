@@ -1,5 +1,5 @@
 import { BuiltInLLMDialogState } from "@commonfabric/api";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import type {
   BuiltInCompileAndRunParams,
@@ -481,9 +481,13 @@ export function wish<T = unknown>(
   })(param);
 }
 
-let strFactory:
-  | NodeFactory<{ strings: string[]; values: unknown[] }, string>
-  | undefined;
+const strFactory = createNodeFactory<
+  { strings: string[]; values: unknown[] },
+  string
+>({
+  type: "ref",
+  implementation: "str",
+});
 
 // Example:
 // str`Hello, ${name}!`
@@ -492,15 +496,10 @@ export function str(
   strings: TemplateStringsArray,
   ...values: unknown[]
 ): Reactive<string> {
-  strFactory ||= createNodeFactory({
-    type: "ref",
-    implementation: "str",
-  });
-
   // Spread the template strings into a plain array: a `TemplateStringsArray`
   // carries a `raw` property that the binding walk does not preserve, and the
   // interpolation reads only the indexed chunks.
-  return strFactory({ strings: [...strings], values }) as Reactive<string>;
+  return strFactory({ strings: [...strings], values });
 }
 
 /**

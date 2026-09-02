@@ -15,6 +15,8 @@ import {
   type HarnessFabricSessionConfig,
   type HarnessGatewayAuthMode,
   type HarnessModelProviderId,
+  type HarnessPatternIndexConfig,
+  type HarnessSkillsShConfig,
   isHarnessModelProviderId,
   parseCfcEnforcementMode,
   parseHarnessGatewayAuthMode,
@@ -84,10 +86,12 @@ import {
   type CreateHarnessPromptLoopOptions,
   type HarnessPromptLoopResult,
 } from "./prompt-loop.ts";
+import { loadHarnessSkillContext } from "./skills/registry.ts";
+import { persistHarnessRunSkillRegistry } from "./skills/run-registry.ts";
+import { createHarnessSkillsShAcquisitionClientFactory } from "./skills-sh/acquisition.ts";
 import {
-  discoverHarnessSkills,
-  loadHarnessSkillContext,
-} from "./skills/registry.ts";
+  createHarnessSkillsShSearchClientFactory,
+} from "./skills-sh/search-client.ts";
 import {
   parseAllowedSkillScriptSpec,
   uniqueAllowedSkillScripts,
@@ -135,17 +139,23 @@ import {
   setCurrentProvenance,
   setProvenanceCommand,
 } from "./provenance.ts";
+import type { HarnessInputCellSpec } from "./contracts/input-cells.ts";
+import {
+  inputCellsContextMessage,
+  parseInputCellArgument,
+} from "./input-cells.ts";
 import {
   HarnessControlError,
   type HarnessControlErrorCode,
 } from "./control-errors.ts";
 
-const DEFAULT_MODEL = "gpt-5.6-terra";
+const DEFAULT_MODEL = "gpt-5.6-sol";
 const DEFAULT_MAX_MODEL_TURNS = 8;
 const DEFAULT_ARTIFACT_DIRNAME = ".cf-harness-artifacts";
 const CLI_OUTPUT_MODES = ["operator", "batch"] as const;
 const CLI_STRING_FLAGS = [
   "handle-value-origin",
+  "input-cell",
   "workspace",
   "cwd",
   "focus-root",
@@ -165,6 +175,7 @@ const CLI_STRING_FLAGS = [
   "compact-threshold",
   "prompt-cache-mode",
   "skills-root",
+  "skills-registry-url",
   "skill",
   "skill-script-execution-target",
   "gateway-base-url",
@@ -187,6 +198,8 @@ const CLI_STRING_FLAGS = [
   "fabric-space",
   "fabric-cfc-enforcement-mode",
   "fabric-cfc-flow-labels",
+  "fabric-cfc-posture",
+  "pattern-index-url",
   "host-mount",
   "browser-access-lease-id",
   "browser-access-cdp-url",
@@ -201,6 +214,7 @@ const CLI_BOOLEAN_FLAGS = [
   "print-transcript",
   "stream-events",
   "no-skill-catalog",
+  "no-pattern-index-publish",
 ] as const;
 const CLI_COLLECT_FLAGS = [
   "allow-tool",
@@ -210,6 +224,7 @@ const CLI_COLLECT_FLAGS = [
   "image",
   "host-mount",
   "handle-value-origin",
+  "input-cell",
 ] as const;
 
 export type CfHarnessCliOutputMode = (typeof CLI_OUTPUT_MODES)[number];
@@ -251,6 +266,7 @@ export interface CfHarnessCliConfig {
   cfcInvocationContextDir?: string;
   browserAccess?: HarnessBrowserAccessLease;
   handleValueOrigins: readonly string[];
+  inputCells: readonly HarnessInputCellSpec[];
   maxModelTurns: number;
   printTranscript: boolean;
   apiKey?: string;
@@ -259,6 +275,8 @@ export interface CfHarnessCliConfig {
   sandboxDockerRuntime?: string;
   fabricMount?: string;
   fabricSession?: HarnessFabricSessionConfig;
+  patternIndex?: HarnessPatternIndexConfig;
+  skillsSh?: HarnessSkillsShConfig;
   hostMounts: readonly CfHarnessHostMountConfig[];
 }
 
@@ -343,15 +361,19 @@ export type CfHarnessCliSignalHandler = (
 export interface RunCfHarnessCliDependencies {
   cwd?: string;
   env?: Record<string, string | undefined>;
+
   /** Trusted, fixed binding supplied only by the dedicated local Loom host. */
   loomLocalHostBinding?: LoomLocalHostBinding;
+
   fetchFn?: HarnessFetch;
   structuredHostFailures?: boolean;
+
   /**
    * What caused this run, reported on every gateway request it makes.
    * Resolved from the process when absent.
    */
   provenance?: HarnessProvenance;
+
   io?: CfHarnessCliIO;
   readTextFile?: (path: string) => Promise<string>;
   writeTextFile?: (path: string, text: string) => Promise<void>;
@@ -382,6 +404,7 @@ export interface RunCfHarnessCliDependencies {
     handler: CfHarnessCliSignalHandler,
   ) => () => void;
   exit?: (code: number) => never | void;
+
   /**
    * Replaces the Fabric session the engine would build from `--fabric-*`
    * configuration. Tests grant well-known handles without a deployed API.
@@ -474,8 +497,10 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug);
-                                run_pattern and assign_slug additionally require the three --fabric-* session flags
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback | search_skills | acquire_skill);
+                                run_pattern, assign_slug, and acquire_skill additionally require the three --fabric-* session flags,
+                                search_patterns and record_feedback require --pattern-index-url,
+                                and search_skills and acquire_skill require --skills-registry-url
   --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
@@ -487,6 +512,7 @@ Options:
   --resume-run <path>           Resume from a run root or run-state.json path
   --system-prompt <text>        Optional system prompt
   --skills-root <path>          Skill root containing <name>/SKILL.md
+  --skills-registry-url <url>  Registry origin enabling search_skills discovery and pinned acquire_skill
   --skill <name>                Preload a skill for this run (repeatable)
   --skill-script-execution-target <target>
                                 Execute skill scripts in sandbox or host (default: sandbox)
@@ -514,6 +540,7 @@ Options:
   --browser-access-profile-mode <mode> persistent | transient
   --browser-access-account-access <access> available | none
   --handle-value-origin <origin> Origin a handle's value may be sent to (repeatable; none by default)
+  --input-cell <name>=<link>       Pass a cell in the fabric space into the run by reference, announced to the model as a handle under the operator-authored <name>; its shape and labels live on the cell's declared schema (repeatable; requires --fabric-space)
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
   --cfc-result-dir <path>       Host dir where runsc writes the CFC result sidecar (required for enforce-* modes)
   --cfc-invocation-context-dir <path> Host dir where the harness writes the CFC invocation-context sidecar (required for enforce-* modes)
@@ -529,6 +556,16 @@ Options:
                                 --cfc-enforcement-mode, which governs the harness)
   --fabric-cfc-flow-labels <mode> off | observe | persist flow-label propagation on
                                 the fabric session's runtime
+  --fabric-cfc-posture <name>   max-enforcement: opt the fabric session's runtime
+                                into the named CFC posture bundle (every staged
+                                enforcement dial on); the two dials above still
+                                apply over the bundle
+  --pattern-index-url <url>     Base URL of the pattern index for search_patterns,
+                                record_feedback, and run_pattern's patternId argument;
+                                signs with the fabric session identity, so it needs the
+                                three --fabric-* flags
+  --no-pattern-index-publish    Read the pattern index without contributing to it: a
+                                pattern the model authors and runs is not published back
   --host-mount <spec>           Extra host bind mount (repeatable: name=<id>,source=<host>,target=<sandbox>,mode=readonly|writable)
   --max-model-turns <n>         Maximum model turns before aborting
   --print-transcript            Print the final transcript JSON after the response
@@ -546,12 +583,18 @@ Environment:
   CF_HARNESS_COMPACT_THRESHOLD  Default value for --compact-threshold
   CF_HARNESS_PROMPT_CACHE_MODE  Default value for --prompt-cache-mode
   CF_HARNESS_HOME               Local cf-harness credential/config directory
+  CF_HARNESS_SKILLS_REGISTRY_URL Default value for --skills-registry-url
   CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
   CF_HARNESS_FABRIC_API_URL     Default value for --fabric-api-url
   CF_HARNESS_FABRIC_IDENTITY    Default value for --fabric-identity
   CF_HARNESS_FABRIC_SPACE       Default value for --fabric-space
   CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE Default value for --fabric-cfc-enforcement-mode
   CF_HARNESS_FABRIC_CFC_FLOW_LABELS Default value for --fabric-cfc-flow-labels
+  CF_HARNESS_FABRIC_CFC_POSTURE Default value for --fabric-cfc-posture
+  CF_HARNESS_PATTERN_INDEX_URL  Default value for --pattern-index-url
+  CF_HARNESS_PATTERN_INDEX_PUBLISH 0 applies --no-pattern-index-publish
+  CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE 1 offers successful authored
+                                patterns to search immediately (default: recorded only)
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
   CF_HARNESS_SANDBOX_DOCKER_RUNTIME Default value for --sandbox-docker-runtime
   ${CFC_RESULT_DIR_ENV} Fallback for --cfc-result-dir
@@ -608,6 +651,10 @@ const CLI_PARENT_TOOL_IDS = [
   "describe_handle",
   "run_pattern",
   "assign_slug",
+  "search_patterns",
+  "record_feedback",
+  "search_skills",
+  "acquire_skill",
 ] as const satisfies readonly BuiltinToolId[];
 
 const uniqueStrings = <T extends string>(
@@ -827,6 +874,36 @@ const parseHandleValueOrigins = (
     origins.push(origin);
   }
   return uniqueStrings(origins);
+};
+
+/**
+ * The input cells `--input-cell` names. Grammar defects are refused at
+ * parse: an input cell is explicit operator configuration, and a run must
+ * not start without what it asked for. No shape is stated here — a cell's
+ * schema and labels live on its declaration in the fabric. The references
+ * themselves are validated against the session space later, at mint time,
+ * where the space is known.
+ */
+const parseInputCells = (
+  raw: string | readonly string[] | undefined,
+): readonly HarnessInputCellSpec[] => {
+  const values = raw === undefined
+    ? []
+    : (typeof raw === "string" ? [raw] : raw);
+  const specs: HarnessInputCellSpec[] = [];
+  const names = new Set<string>();
+  for (const value of values) {
+    const parsed = parseInputCellArgument(value);
+    // Refused here, at parse, so the defect is classified as the invalid
+    // request it is and no model client, session, or run setup is reached;
+    // `mintInputCellHandles` keeps its own check for non-CLI callers.
+    if (names.has(parsed.name)) {
+      throw new Error(`--input-cell names \`${parsed.name}\` twice`);
+    }
+    names.add(parsed.name);
+    specs.push({ name: parsed.name, ref: parsed.ref });
+  }
+  return specs;
 };
 
 const parseBrowserAccessLease = (
@@ -1309,6 +1386,9 @@ export const parseCfHarnessCliArgs = async (
         "CF_HARNESS_COMPACT_THRESHOLD",
       ),
       CF_HARNESS_HOME: Deno.env.get("CF_HARNESS_HOME"),
+      CF_HARNESS_SKILLS_REGISTRY_URL: Deno.env.get(
+        "CF_HARNESS_SKILLS_REGISTRY_URL",
+      ),
       HOME: Deno.env.get("HOME"),
       CF_HARNESS_CFC_ENFORCEMENT_MODE: Deno.env.get(
         "CF_HARNESS_CFC_ENFORCEMENT_MODE",
@@ -1322,6 +1402,18 @@ export const parseCfHarnessCliArgs = async (
       ),
       CF_HARNESS_FABRIC_CFC_FLOW_LABELS: Deno.env.get(
         "CF_HARNESS_FABRIC_CFC_FLOW_LABELS",
+      ),
+      CF_HARNESS_FABRIC_CFC_POSTURE: Deno.env.get(
+        "CF_HARNESS_FABRIC_CFC_POSTURE",
+      ),
+      CF_HARNESS_PATTERN_INDEX_URL: Deno.env.get(
+        "CF_HARNESS_PATTERN_INDEX_URL",
+      ),
+      CF_HARNESS_PATTERN_INDEX_PUBLISH: Deno.env.get(
+        "CF_HARNESS_PATTERN_INDEX_PUBLISH",
+      ),
+      CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE: Deno.env.get(
+        "CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE",
       ),
       CF_HARNESS_SANDBOX_IMAGE: Deno.env.get("CF_HARNESS_SANDBOX_IMAGE"),
       CF_HARNESS_SANDBOX_DOCKER_RUNTIME: Deno.env.get(
@@ -1421,6 +1513,15 @@ export const parseCfHarnessCliArgs = async (
     );
   }
   const readTextFile = deps.readTextFile ?? Deno.readTextFile;
+  const inputCells = parseInputCells(
+    args["input-cell"] as string | readonly string[] | undefined,
+  );
+  // A resumed run replays the input cells its run state recorded; a new
+  // one on resume would be silently ignored, so it is refused like --skill
+  // and --image are.
+  if (resumeRun !== undefined && inputCells.length > 0) {
+    throw new Error("--input-cell is not supported with --resume-run");
+  }
   const structuredResult = await parseStructuredResultConfig(args, {
     cwd,
     workspace,
@@ -1505,7 +1606,8 @@ export const parseCfHarnessCliArgs = async (
       | "fabric-identity"
       | "fabric-space"
       | "fabric-cfc-enforcement-mode"
-      | "fabric-cfc-flow-labels",
+      | "fabric-cfc-flow-labels"
+      | "fabric-cfc-posture",
     envValue: string | undefined,
   ): string | undefined => {
     const raw = typeof args[flag] === "string"
@@ -1555,6 +1657,17 @@ export const parseCfHarnessCliArgs = async (
       `--fabric-cfc-flow-labels must be off, observe, or persist: ${fabricCfcFlowLabels}`,
     );
   }
+  const fabricCfcPosture = fabricSessionFlagValue(
+    "fabric-cfc-posture",
+    env.CF_HARNESS_FABRIC_CFC_POSTURE,
+  );
+  if (
+    fabricCfcPosture !== undefined && fabricCfcPosture !== "max-enforcement"
+  ) {
+    throw new Error(
+      `--fabric-cfc-posture must be max-enforcement: ${fabricCfcPosture}`,
+    );
+  }
   let fabricSession: HarnessFabricSessionConfig | undefined;
   if (
     fabricApiUrl !== undefined || fabricIdentity !== undefined ||
@@ -1587,23 +1700,105 @@ export const parseCfHarnessCliArgs = async (
       ...(fabricCfcFlowLabels !== undefined
         ? { cfcFlowLabels: fabricCfcFlowLabels }
         : {}),
+      ...(fabricCfcPosture !== undefined
+        ? { cfcPosture: fabricCfcPosture }
+        : {}),
     };
   } else if (
-    fabricCfcEnforcementMode !== undefined || fabricCfcFlowLabels !== undefined
+    fabricCfcEnforcementMode !== undefined ||
+    fabricCfcFlowLabels !== undefined || fabricCfcPosture !== undefined
   ) {
     throw new Error(
-      "--fabric-cfc-enforcement-mode and --fabric-cfc-flow-labels configure the fabric session's runtime and need --fabric-api-url, --fabric-identity, and --fabric-space",
+      "--fabric-cfc-enforcement-mode, --fabric-cfc-flow-labels, and --fabric-cfc-posture configure the fabric session's runtime and need --fabric-api-url, --fabric-identity, and --fabric-space",
     );
+  }
+  const rawPatternIndexUrl = typeof args["pattern-index-url"] === "string"
+    ? args["pattern-index-url"].trim()
+    : nonEmptyEnvValue(env.CF_HARNESS_PATTERN_INDEX_URL);
+  if (rawPatternIndexUrl === "") {
+    throw new Error("--pattern-index-url requires a non-empty value");
+  }
+  let patternIndex: HarnessPatternIndexConfig | undefined;
+  if (rawPatternIndexUrl !== undefined) {
+    try {
+      new URL(rawPatternIndexUrl);
+    } catch {
+      throw new Error(
+        `--pattern-index-url must be a valid URL: ${rawPatternIndexUrl}`,
+      );
+    }
+    if (fabricSession === undefined) {
+      // Index requests carry the fabric session's identity, and a pattern
+      // taken from the index runs in the session's space.
+      throw new Error(
+        "--pattern-index-url needs a fabric session; missing --fabric-api-url, --fabric-identity, and --fabric-space",
+      );
+    }
+    // Publishing is on unless the operator turns it off, on the flag or in
+    // the environment; `0` is the only value the environment disables on, so
+    // an unset or unrecognized value leaves a run publishing.
+    const publish = args["no-pattern-index-publish"] !== true &&
+      nonEmptyEnvValue(env.CF_HARNESS_PATTERN_INDEX_PUBLISH) !== "0";
+    const publishDiscoverable = nonEmptyEnvValue(
+      env.CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE,
+    ) === "1";
+    patternIndex = {
+      baseUrl: rawPatternIndexUrl,
+      ...(publish ? {} : { publish: false }),
+      ...(publishDiscoverable ? { publishDiscoverable: true } : {}),
+    };
+  }
+  const rawSkillsRegistryUrl = typeof args["skills-registry-url"] === "string"
+    ? args["skills-registry-url"].trim()
+    : nonEmptyEnvValue(env.CF_HARNESS_SKILLS_REGISTRY_URL);
+  if (rawSkillsRegistryUrl === "") {
+    throw new Error("--skills-registry-url requires a non-empty value");
+  }
+  let skillsSh: HarnessSkillsShConfig | undefined;
+  if (rawSkillsRegistryUrl !== undefined) {
+    try {
+      new URL(rawSkillsRegistryUrl);
+    } catch {
+      throw new Error(
+        `--skills-registry-url must be a valid URL: ${rawSkillsRegistryUrl}`,
+      );
+    }
+    skillsSh = { baseUrl: rawSkillsRegistryUrl };
   }
   // An allowlisted fabric-session tool with no session to run it against is
   // a configuration contradiction, surfaced here rather than as a tool that
   // is silently absent from the run.
-  const sessionTool = (["run_pattern", "assign_slug"] as const).find(
-    (toolId) => allowedToolIds?.includes(toolId) === true,
-  );
+  const sessionTool = (["run_pattern", "assign_slug", "acquire_skill"] as const)
+    .find(
+      (toolId) => allowedToolIds?.includes(toolId) === true,
+    );
   if (sessionTool !== undefined && fabricSession === undefined) {
     throw new Error(
       `--allow-tool ${sessionTool} requires a fabric session; missing --fabric-api-url, --fabric-identity, and --fabric-space`,
+    );
+  }
+  const indexTool = (["search_patterns", "record_feedback"] as const).find(
+    (toolId) => allowedToolIds?.includes(toolId) === true,
+  );
+  if (indexTool !== undefined && patternIndex === undefined) {
+    throw new Error(
+      `--allow-tool ${indexTool} requires a pattern index; missing --pattern-index-url`,
+    );
+  }
+  if (
+    allowedToolIds?.includes("search_skills") === true &&
+    skillsSh === undefined
+  ) {
+    throw new Error(
+      "--allow-tool search_skills requires a skills registry; missing --skills-registry-url",
+    );
+  }
+  if (
+    allowedToolIds?.includes("acquire_skill") === true &&
+    skillsSh === undefined
+  ) {
+    throw new Error(
+      "--allow-tool acquire_skill requires a skills registry; missing --skills-registry-url",
     );
   }
   const apiKey = env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY;
@@ -1659,6 +1854,7 @@ export const parseCfHarnessCliArgs = async (
       : {}),
     ...(browserAccess !== undefined ? { browserAccess } : {}),
     handleValueOrigins,
+    inputCells,
     maxModelTurns: parsePositiveInteger(
       typeof args["max-model-turns"] === "string"
         ? args["max-model-turns"]
@@ -1672,6 +1868,8 @@ export const parseCfHarnessCliArgs = async (
     ...(sandboxDockerRuntime !== undefined ? { sandboxDockerRuntime } : {}),
     ...(fabricMount !== undefined ? { fabricMount } : {}),
     ...(fabricSession !== undefined ? { fabricSession } : {}),
+    ...(patternIndex !== undefined ? { patternIndex } : {}),
+    ...(skillsSh !== undefined ? { skillsSh } : {}),
     hostMounts,
   };
 };
@@ -2254,6 +2452,56 @@ const summarizeToolCallArguments = (
         )
           .join(" ");
       }
+      case "search_patterns": {
+        const tags = Array.isArray(parsed.tags)
+          ? `tags=${JSON.stringify(parsed.tags)}`
+          : undefined;
+        const text = typeof parsed.text === "string"
+          ? `text=${JSON.stringify(parsed.text)}`
+          : undefined;
+        const joined = [tags, text].filter((value): value is string =>
+          value !== undefined
+        ).join(" ");
+        return joined === "" ? undefined : joined;
+      }
+      case "search_skills": {
+        const query = typeof parsed.query === "string"
+          ? `query=${JSON.stringify(parsed.query)}`
+          : undefined;
+        const owner = typeof parsed.owner === "string"
+          ? `owner=${JSON.stringify(parsed.owner)}`
+          : undefined;
+        const limit = typeof parsed.limit === "number"
+          ? `limit=${parsed.limit}`
+          : undefined;
+        const joined = [query, owner, limit].filter((value): value is string =>
+          value !== undefined
+        ).join(" ");
+        return joined === "" ? undefined : joined;
+      }
+      case "acquire_skill":
+        return typeof parsed.id === "string"
+          ? `id=${JSON.stringify(parsed.id)}`
+          : undefined;
+      case "record_feedback": {
+        // The note is the model's prose about a run and can quote what the
+        // pattern produced, so the line names the verdict and the pattern
+        // and leaves the note to the transcript.
+        const patternId = typeof parsed.patternId === "string"
+          ? `patternId=${JSON.stringify(parsed.patternId)}`
+          : undefined;
+        const verdict = typeof parsed.verdict === "string"
+          ? `verdict=${JSON.stringify(parsed.verdict)}`
+          : undefined;
+        const joined = [patternId, verdict].filter((value): value is string =>
+          value !== undefined
+        ).join(" ");
+        return joined === "" ? undefined : joined;
+      }
+      case "run_pattern":
+        return typeof parsed.patternId === "string"
+          ? `patternId=${JSON.stringify(parsed.patternId)}`
+          : undefined;
       case "delegate_task":
         return "subagent";
       case "describe_handle":
@@ -2326,7 +2574,9 @@ export const formatCfHarnessCliResult = (
   if (result.runState.fabricSessionCfc !== undefined) {
     const posture = result.runState.fabricSessionCfc;
     lines.push(
-      `fabricSessionCfc: ${posture.enforcementMode} (${posture.enforcementModeSource}), flow-labels ${posture.flowLabels} (${posture.flowLabelsSource})`,
+      `fabricSessionCfc: ${posture.enforcementMode} (${posture.enforcementModeSource}), flow-labels ${posture.flowLabels} (${posture.flowLabelsSource})${
+        posture.posture !== undefined ? `, posture ${posture.posture}` : ""
+      }`,
     );
   }
   if (
@@ -2338,6 +2588,17 @@ export const formatCfHarnessCliResult = (
         result.runState.wellKnownGrants.map((grant) =>
           `${grant.name} ${grant.token}`
         ).join(", ")
+      }`,
+    );
+  }
+  if (
+    result.runState.inputCells !== undefined &&
+    result.runState.inputCells.length > 0
+  ) {
+    lines.push(
+      `inputCells: ${
+        result.runState.inputCells.map((cell) => `${cell.name} ${cell.token}`)
+          .join(", ")
       }`,
     );
   }
@@ -2876,17 +3137,29 @@ export const runCfHarnessCli = async (
       }
       : undefined;
     const additionalMounts = createAdditionalMountConfigs(parsed);
+    const skillsShSearchClientFactory = parsed.skillsSh !== undefined &&
+        deps.fetchFn !== undefined
+      ? createHarnessSkillsShSearchClientFactory(
+        parsed.skillsSh.baseUrl,
+        deps.fetchFn,
+      )
+      : undefined;
+    const skillsShAcquisitionClientFactory =
+      parsed.skillsSh !== undefined && deps.fetchFn !== undefined
+        ? createHarnessSkillsShAcquisitionClientFactory(deps.fetchFn)
+        : undefined;
     const prepareSkillContextMessages = async (
       engine: CfHarnessEngine,
     ): Promise<string[]> => {
       if (parsed.skillsRoot === undefined) {
         return [];
       }
-      const registry = await discoverHarnessSkills({
+      const registry = await persistHarnessRunSkillRegistry(engine, {
         skillsRoot: parsed.skillsRoot,
-        sandboxSkillsRoot: parsed.skillsRootSandboxPath,
+        ...(parsed.skillsRootSandboxPath !== undefined
+          ? { sandboxSkillsRoot: parsed.skillsRootSandboxPath }
+          : {}),
       });
-      await engine.persistSkillRegistry(registry);
       if (parsed.skillNames.length === 0) {
         return [];
       }
@@ -3026,6 +3299,19 @@ export const runCfHarnessCli = async (
         ...(parsed.fabricSession !== undefined
           ? { fabricSession: parsed.fabricSession }
           : {}),
+        ...(parsed.patternIndex !== undefined
+          ? { patternIndex: parsed.patternIndex }
+          : {}),
+        ...(parsed.skillsSh !== undefined ? { skillsSh: parsed.skillsSh } : {}),
+        ...(skillsShSearchClientFactory !== undefined
+          ? { skillsShSearchClientFactory }
+          : {}),
+        ...(skillsShAcquisitionClientFactory !== undefined
+          ? { skillsShAcquisitionClientFactory }
+          : {}),
+        // What the run was asked to do, in the operator's words. A pattern
+        // the run publishes carries it as the request it answers.
+        ...(parsed.prompt !== undefined ? { taskText: parsed.prompt } : {}),
         ...(deps.fabricSessionFactory !== undefined
           ? { fabricSessionFactory: deps.fabricSessionFactory }
           : {}),
@@ -3199,6 +3485,19 @@ export const runCfHarnessCli = async (
         ...(parsed.fabricSession !== undefined
           ? { fabricSession: parsed.fabricSession }
           : {}),
+        ...(parsed.patternIndex !== undefined
+          ? { patternIndex: parsed.patternIndex }
+          : {}),
+        ...(parsed.skillsSh !== undefined ? { skillsSh: parsed.skillsSh } : {}),
+        ...(skillsShSearchClientFactory !== undefined
+          ? { skillsShSearchClientFactory }
+          : {}),
+        ...(skillsShAcquisitionClientFactory !== undefined
+          ? { skillsShAcquisitionClientFactory }
+          : {}),
+        // What the run was asked to do, in the operator's words. A pattern
+        // the run publishes carries it as the request it answers.
+        ...(parsed.prompt !== undefined ? { taskText: parsed.prompt } : {}),
         ...(deps.fabricSessionFactory !== undefined
           ? { fabricSessionFactory: deps.fabricSessionFactory }
           : {}),
@@ -3207,6 +3506,9 @@ export const runCfHarnessCli = async (
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
         ...(additionalMounts.length > 0 ? { additionalMounts } : {}),
+        ...(parsed.inputCells.length > 0
+          ? { inputCells: parsed.inputCells }
+          : {}),
       });
       activateEngine(engine);
       const loop = createPromptLoop({
@@ -3282,6 +3584,14 @@ export const runCfHarnessCli = async (
           );
         }
       }
+      // Operator input cells are explicit configuration, so unlike the
+      // grants a failure here fails the run rather than proceeding without
+      // what the operator asked for.
+      const inputCells = await engine.establishInputCells();
+      const inputCellsMessage = inputCellsContextMessage(inputCells);
+      if (inputCellsMessage !== undefined) {
+        contextMessages.push(inputCellsMessage);
+      }
       result = await loop.runPrompt({
         prompt: parsed.prompt!,
         imageAttachments: parsed.imageAttachments,
@@ -3297,6 +3607,20 @@ export const runCfHarnessCli = async (
         promptSlotBinding,
         onTranscriptEvent,
       });
+    }
+    // A run's own artifacts say which cells it made and read; the space says
+    // what each of them is labelled, and nothing else joins the two. The
+    // cells are settled once the loop is, so the space is read here — and a
+    // snapshot that cannot be written leaves a finished run finished, since
+    // the record of what the run did is already on disk.
+    try {
+      await activeEngine?.snapshotCellLabels();
+    } catch (error) {
+      io.stderr(
+        `cell label snapshot failed: ${
+          error instanceof Error ? error.message : String(error)
+        }\n`,
+      );
     }
     const durationMs = Date.now() - startedAt;
     const structuredResultValidation = parsed.structuredResult === undefined

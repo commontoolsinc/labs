@@ -1,5 +1,5 @@
 /**
- * The set of authored pattern entry files under `packages/patterns`.
+ * The set of authored pattern entry files in the repository.
  *
  * Shared by `cfcheck.ts` (type-checks them) and `pattern-compat.ts` (proves
  * each one can still be applied over its deployed predecessors). The two must
@@ -7,7 +7,30 @@
  * pattern that can ship without an updatability proof.
  */
 
+import { CONNECTOR_PATTERN_SOURCES } from "../packages/connectors/pattern-sources.ts";
+
 export const PATTERNS_DIR = "packages/patterns";
+
+/** A source tree whose authored modules are checked as patterns. */
+export interface PatternTree {
+  /** Repository-relative directory containing the source modules. */
+  readonly directory: string;
+
+  /** Baseline-key prefix when the source tree is outside `PATTERNS_DIR`. */
+  readonly keyPrefix?: string;
+
+  /** Program root allowed to resolve the tree's local imports. */
+  readonly programRoot?: string;
+}
+
+/** Every source tree covered by the pattern type and compatibility checks. */
+export const PATTERN_TREES: readonly PatternTree[] = [
+  { directory: PATTERNS_DIR },
+  ...CONNECTOR_PATTERN_SOURCES.map((source) => ({
+    ...source,
+    programRoot: ".",
+  })),
+];
 
 /**
  * Exclusions are expressed relative to the patterns root, not to the repo
@@ -20,10 +43,21 @@ const NON_PATTERN_FILES = new Set([
   "mod.ts",
 ]);
 
+const NON_PATTERN_BASENAMES = new Set([
+  "contract.ts",
+  "guest.ts",
+  "guest.tsx",
+]);
+
 const NON_PATTERN_PREFIXES = [
   "integration/",
   "tools/",
 ];
+
+/** Use repository separators for keys shared across operating systems. */
+export function normalizePatternPath(path: string): string {
+  return path.replaceAll("\\", "/");
+}
 
 /**
  * A pattern's identity in the baseline tree: its path relative to the patterns
@@ -32,9 +66,52 @@ const NON_PATTERN_PREFIXES = [
  * resolves against — so a baseline directory is named by the same string the
  * update mechanism keys on.
  */
-export function patternKey(path: string, patternsDir = PATTERNS_DIR): string {
-  const prefix = `${patternsDir}/`;
-  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
+export function patternKey(path: string, patternsDir?: string): string {
+  const normalizedPath = normalizePatternPath(path);
+  if (patternsDir !== undefined) {
+    const prefix = `${normalizePatternPath(patternsDir)}/`;
+    return normalizedPath.startsWith(prefix)
+      ? normalizedPath.slice(prefix.length)
+      : normalizedPath;
+  }
+  for (const tree of PATTERN_TREES) {
+    const prefix = `${tree.directory}/`;
+    if (!normalizedPath.startsWith(prefix)) continue;
+    const relative = normalizedPath.slice(prefix.length);
+    return tree.keyPrefix === undefined
+      ? relative
+      : `${tree.keyPrefix}/${relative}`;
+  }
+  return normalizedPath;
+}
+
+/** Whether a pattern path or its deployed key contains a filter. */
+export function matchesPatternFilter(path: string, filter: string): boolean {
+  const normalizedPath = normalizePatternPath(path);
+  const normalizedFilter = normalizePatternPath(filter);
+  return normalizedPath.includes(normalizedFilter) ||
+    patternKey(normalizedPath).includes(normalizedFilter);
+}
+
+/** Repository-relative source path for a compatibility-baseline key. */
+export function patternPath(key: string): string {
+  for (const tree of PATTERN_TREES) {
+    if (tree.keyPrefix === undefined) continue;
+    const prefix = `${tree.keyPrefix}/`;
+    if (key.startsWith(prefix)) {
+      return `${tree.directory}/${key.slice(prefix.length)}`;
+    }
+  }
+  return `${PATTERNS_DIR}/${key}`;
+}
+
+/** Source root containing a repository-relative pattern path. */
+export function patternRoot(path: string): string {
+  const normalizedPath = normalizePatternPath(path);
+  return PATTERN_TREES.find((tree) =>
+    normalizedPath === tree.directory ||
+    normalizedPath.startsWith(`${tree.directory}/`)
+  )?.programRoot ?? PATTERNS_DIR;
 }
 
 /** Whether a path under the patterns root is an authored pattern entry. */
@@ -46,6 +123,11 @@ export function isPatternSource(
   if (path.endsWith(".test.ts") || path.endsWith(".test.tsx")) return false;
   const key = patternKey(path, patternsDir);
   if (NON_PATTERN_FILES.has(key)) return false;
+  const segments = key.split("/");
+  if (
+    segments[0].startsWith("iframe-") &&
+    NON_PATTERN_BASENAMES.has(segments.at(-1)!)
+  ) return false;
   return !NON_PATTERN_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 
@@ -69,4 +151,12 @@ export async function collectPatternFiles(
 
   await walk(dir);
   return files.sort();
+}
+
+/** Every authored pattern source across all registered source trees. */
+export async function collectAllPatternFiles(): Promise<string[]> {
+  const files = await Promise.all(
+    PATTERN_TREES.map((tree) => collectPatternFiles(tree.directory)),
+  );
+  return files.flat().sort();
 }

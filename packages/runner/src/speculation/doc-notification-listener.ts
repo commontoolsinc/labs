@@ -44,6 +44,7 @@ export type DocNotificationConsumer = {
    * change at notification time — cheap (a map lookup). `scope` is the
    * change address's normalized scope name (`"space"`, `"session"`, …). */
   wants(space: MemorySpace, id: string, scope: string | undefined): boolean;
+
   /** Called in a microtask, once per (space, id) per burst, with every
    * change path recorded since the previous call. `id === undefined` is
    * a storage RESET for the space: everything the consumer tracks there
@@ -68,9 +69,11 @@ export class CoalescedDocListener {
   readonly #pending = new Map<PendingKey, PendingRecord>();
   #subscription: IStorageNotification | undefined;
   #released = false;
+
   /** DIAGNOSTIC: notifications that touched a wanted doc; microtask
    * checks dispatched. */
   #relevantNotifications = 0;
+
   #dispatches = 0;
 
   constructor(

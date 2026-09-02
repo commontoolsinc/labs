@@ -1,10 +1,12 @@
 import { assertEquals } from "@std/assert";
 import { parseDiff } from "../lib/view/diff.ts";
 
+//
 // Coverage-focused tests for lib/view/diff.ts, exercising body-loop branches
 // the canonical suite does not reach: a `\ No newline` marker *inside* a hunk
 // body, a malformed body line that stops the hunk, the empty trailing-context
 // fallback, and a quoted file path in the `---`/`+++` headers.
+//
 
 Deno.test("diff: a `\\ No newline` marker mid-body is metadata, the body continues", () => {
   // git emits the no-newline marker for the OLD side between the removal and

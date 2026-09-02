@@ -87,8 +87,10 @@ import { radioGroupStyles } from "./styles.ts";
 export interface RadioItem {
   /** Text shown to the user */
   label: string;
+
   /** Value returned when this option is selected */
   value: unknown;
+
   /** Disabled state for this option */
   disabled?: boolean;
 }
@@ -98,7 +100,7 @@ export type RadioGroupOrientation = "vertical" | "horizontal";
 export class CFRadioGroup extends BaseElement {
   static override styles = unsafeCSS(radioGroupStyles);
 
-  /* ---------- Cell controller for value binding ---------- */
+  /** Cell controller for value binding */
   private _cellController = createCellController<unknown>(this, {
     timing: { strategy: "immediate" }, // Radio changes should be immediate
     onChange: (newValue, oldValue) => {

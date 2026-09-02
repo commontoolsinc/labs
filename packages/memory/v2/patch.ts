@@ -1,11 +1,12 @@
 import type { FabricValue } from "@commonfabric/api";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   cloneForMutation,
   CloneForMutationError,
   cloneIfNecessary,
+  type MutableFabricContainerValueLayer,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { isInstance, isObjectNotArray } from "@commonfabric/utils/types";
 import { type EntityDocument, isEntityDocument, type PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
@@ -126,7 +127,7 @@ const thawSpine = (
   options?: { createMissing?: boolean; nextKeyAfterPath?: string },
 ): { root: FabricValue; container: PatchContainer } => {
   let value: FabricValue;
-  let pathValue: FabricValue;
+  let pathValue: MutableFabricContainerValueLayer;
   try {
     ({ value, pathValue } = cloneForMutation(root, thawPath, options));
   } catch (e) {

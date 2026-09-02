@@ -23,6 +23,11 @@ import type {
 } from "./scheduler-test-utils.ts";
 import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
 import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
+import {
+  isExplicitTransactionAbort,
+  reportServedEventFailure,
+} from "../src/scheduler/events.ts";
+import { TransactionAborted } from "../src/storage/transaction-errors.ts";
 
 async function waitForSchedulerCondition(
   runtime: Runtime,
@@ -74,6 +79,31 @@ describe("event handling", () => {
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
     ));
+  });
+
+  it("isolates served failure observers from scheduler control flow", () => {
+    const outcomes: unknown[] = [];
+    reportServedEventFailure({
+      onFailure: (outcome) => outcomes.push(outcome),
+    }, { kind: "dropped", message: "terminal" });
+    expect(outcomes).toEqual([{ kind: "dropped", message: "terminal" }]);
+
+    expect(() =>
+      reportServedEventFailure({
+        onFailure: () => {
+          throw new Error("observer failed");
+        },
+      }, { kind: "error", message: "handler failed" })
+    ).not.toThrow();
+  });
+
+  it("recognizes explicit aborts from typed producer evidence only", () => {
+    expect(isExplicitTransactionAbort(TransactionAborted("custom reason")))
+      .toBe(true);
+    expect(isExplicitTransactionAbort({
+      name: "StorageTransactionAborted",
+      message: "Transaction was aborted",
+    })).toBe(false);
   });
 
   afterEach(async () => {
@@ -840,6 +870,45 @@ describe("event handling", () => {
     expect(errors).toBe(1);
   });
 
+  it("stringifies non-Error handler failures for served observers", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "stringifies non-Error handler failures",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    await tx.commit();
+
+    runtime.scheduler.onError(() => undefined);
+    runtime.scheduler.addEventHandler(
+      () => Promise.reject("primitive failure"),
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    const outcomes: unknown[] = [];
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      1,
+      false,
+      undefined,
+      false,
+      {
+        eventId: "served-non-error-handler-failure",
+        served: {
+          onFailure: (outcome) => outcomes.push(outcome),
+        },
+      },
+    );
+
+    await runtime.idle();
+
+    expect(outcomes).toEqual([{
+      kind: "error",
+      message: "primitive failure",
+    }]);
+  });
+
   it("settles the commit callback when populateDependencies throws", async () => {
     const eventCell = runtime.getCell<number>(
       space,
@@ -1128,6 +1197,69 @@ describe("event handling", () => {
       // The one-shot ran once and dropped without re-running to resolve names.
       expect(attempts).toBe(1);
       expect(onCommitStatus).toBeDefined();
+    },
+  );
+
+  it(
+    "reruns a served event after inSpace-name resolution even when commit retries are disabled",
+    async () => {
+      const eventCell = runtime.getCell<number>(
+        space,
+        "served-inspace-resolution-event",
+        undefined,
+        tx,
+      );
+      eventCell.set(0);
+      await tx.commit();
+
+      let attempts = 0;
+      let commits = 0;
+      const presyncIdentities: unknown[] = [];
+      const handler: EventHandler = () => {
+        attempts++;
+        if (attempts === 1) {
+          throw new RetryImmediately();
+        }
+      };
+      handler.presyncInputs = (_event, identity) => {
+        presyncIdentities.push(identity);
+        return Promise.resolve();
+      };
+
+      runtime.scheduler.addEventHandler(
+        handler,
+        eventCell.getAsNormalizedFullLink(),
+      );
+      runtime.scheduler.queueEvent(
+        eventCell.getAsNormalizedFullLink(),
+        1,
+        false,
+        () => {
+          commits++;
+        },
+        false,
+        {
+          eventId: "served-inspace-resolution",
+          served: {
+            firedAt: { user: "did:key:served-user", session: "served-session" },
+          },
+        },
+      );
+
+      await runtime.idle();
+
+      expect(attempts).toBe(2);
+      expect(commits).toBe(1);
+      expect(presyncIdentities).toEqual([
+        {
+          principal: "did:key:served-user",
+          sessionId: "served-session",
+        },
+        {
+          principal: "did:key:served-user",
+          sessionId: "served-session",
+        },
+      ]);
     },
   );
 });

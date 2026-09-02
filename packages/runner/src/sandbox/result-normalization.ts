@@ -1,14 +1,13 @@
+import {
+  fabricFromNativeValue,
+  type FabricValue,
+} from "@commonfabric/data-model";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
   FabricEpochNsec,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
-import {
-  fabricFromNativeValue,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
-import { isNativeError } from "@commonfabric/data-model/native-type-tags";
 
 import { isReactive } from "../builder/types.ts";
 import { hasEncodableForm } from "../encodable-form.ts";
@@ -17,6 +16,7 @@ import { isCellLink } from "../link-utils.ts";
 export interface NormalizedSandboxResult {
   /** The host/Fabric graph that may safely leave the sandbox boundary. */
   value: unknown;
+
   /** Whether the result graph contains a Reactive leaf. */
   hasReactive: boolean;
 }
@@ -111,7 +111,7 @@ function normalizeSandboxNativeLeaf(value: unknown): unknown {
     return new FabricBytes(value as Uint8Array);
   }
 
-  if (isNativeError(value)) {
+  if (Error.isError(value)) {
     return FabricError.fromNativeError(value as Error);
   }
 
@@ -145,7 +145,7 @@ function formatActionResultError(
   const actionStr = actionName ? `\n  in action: ${actionName}` : "";
   const hint = hintForActionResult(value);
   const hintStr = hint ? ` ${hint}` : "";
-  const causeIsError = isNativeError(cause);
+  const causeIsError = Error.isError(cause);
   const causeStr = causeIsError ? `\n${(cause as Error).message}` : "";
   return new Error(
     `Action returned a ${typeNameForActionResult(value)}${pathStr}.` +

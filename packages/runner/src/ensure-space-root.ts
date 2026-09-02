@@ -19,6 +19,11 @@
 //   stage 2's gate: the ON client's creation retirement must not ship
 //   until the repair pair moves (design §2; this stage's report records
 //   the gate);
+// - FRESHNESS. Following a root's origin is the ordinary piece
+//   reconciliation, and that runs when a USER opens the piece
+//   (`SourceReconciler.reconcile`, called from `PiecesController`). A
+//   serving tenure opens nothing, so it owes the space existence and
+//   nothing more;
 // - the custom `defaultAppUrl` read — the opening user's home-config read
 //   is client identity through and through, and the server-side
 //   owner-scoped fetch is an UNRULED fork (design §3, open question 3):
@@ -38,7 +43,6 @@ import {
   resolveSystemPatternSource,
   systemPatternSource,
 } from "./pattern-source-scheme.ts";
-import type { PatternUpdateOutcome } from "./pattern-updater.ts";
 import { getPatternIdentityRef, setPatternSource } from "./runner.ts";
 import type { Runtime, RuntimeFetch, SpaceCellContents } from "./runtime.ts";
 import { type NameSchema, nameSchema } from "./schemas.ts";
@@ -77,15 +81,6 @@ export function patternSourceUrl(source: string, base: string | URL): URL {
 }
 
 /**
- * The run options every space-root setup/start uses: the root is
- * reconciled by the AWAITED default-root check before it starts, so the
- * lazy per-instantiation update check would be a redundant probe.
- */
-export const DEFAULT_ROOT_RUN_OPTIONS = {
-  schedulePatternUpdate: false,
-} as const;
-
-/**
  * The source ref and creation cause for a space's root, by space type.
  * The CAUSE is identity-bearing: it derives the piece cell's entity id,
  * so every creator (client controller, server ensure) MUST mint the same
@@ -119,13 +114,16 @@ export type SpaceRootCreationHooks = {
    * extraction.
    */
   stampCreationTx?: (tx: IExtendedStorageTransaction) => void;
+
   /** Phase timing (the controller's `timePiecePhase`); defaults to a
    * pass-through so the serving seat pays nothing. */
   timePhase?: <T>(name: string, fn: () => Promise<T>) => Promise<T>;
+
   /** The fetch the program resolve uses. The client passes nothing (the
    * platform fetch, its historical behavior); the serving seat passes
    * `runtime.fetch` so tests can serve pattern sources in-process. */
   fetch?: RuntimeFetch;
+
   /** The space-cell handle the creation transaction's re-check reads
    * through. The controller passes its OWN synced instance (its
    * historical read source — and the piece suite's creation-race test
@@ -211,7 +209,7 @@ export async function createSpaceRootIfAbsent(
           tx,
         );
         // Run pattern setup within the same transaction.
-        runtime.run(tx, pattern, {}, pieceCell, DEFAULT_ROOT_RUN_OPTIONS);
+        runtime.run(tx, pattern, {}, pieceCell);
         // Stamp the provenance the piece tracks for updates (the source it
         // was born from) — same transaction, one extra meta write.
         setPatternSource(pieceCell, tx, config.source);
@@ -258,22 +256,18 @@ export type EnsureSpaceRootResult = {
    * root; this call created it; or this call's creation lost the OCC
    * race and resolved the winner's root. */
   outcome: "resolved-existing" | "created" | "raced-existing";
-  /** The freshness half's verdict. A root this call created was compiled
-   * from the current source moments ago — reconciling it would probe the
-   * route to learn what we just compiled — so it is "skipped-fresh"; a
-   * persisted root gets the awaited default-root reconcile
-   * (`PatternUpdater.checkDefaultPattern`), which replaces an obsolete —
-   * possibly unloadable — patternIdentity BEFORE anything tries to load
-   * it (the ordering the owner asked to keep). */
-  reconcile: PatternUpdateOutcome | "skipped-fresh";
 };
 
 /**
- * The server-side space-root ensure (stage 1): existence + freshness, no
- * start. The SpaceServer runs this once per tenure as a lease-guarded
- * owed step — under the lease there is no second server-side
- * materializer, and the creation transaction's OCC invariant converges
- * the remaining client-vs-server race whichever side wins.
+ * The server-side space-root ensure: existence, no start. The SpaceServer
+ * runs this once per tenure as a lease-guarded owed step — under the lease
+ * there is no second server-side materializer, and the creation
+ * transaction's OCC invariant converges the remaining client-vs-server
+ * race whichever side wins.
+ *
+ * A persisted root is resolved and left alone. Following its origin is the
+ * ordinary piece reconciliation, which belongs to the user who opens the
+ * piece, not to a tenure that opens nothing.
  *
  * `isHomeSpace` is the ACL-derived predicate (self-owned = home),
  * resolved by the caller through the memory server's
@@ -289,37 +283,10 @@ export async function ensureSpaceRootPattern(
   options: {
     isHomeSpace: boolean;
     stampCreationTx?: (tx: IExtendedStorageTransaction) => void;
-    /** Per-attempt hook for the freshness half's write arms (threaded
-     * into `checkDefaultPattern`): the serving seat passes its
-     * owner-snapshot setter so the reconcile's transactions — the
-     * update arm runs `runtime.setup` on the root, the label-minting
-     * class — carry the OWNER, matching the creation arm (F1 of this
-     * stage's adversarial review; without it the reconcile commits
-     * under the ambient SERVICE snapshot). */
-    stampReconcileTx?: (tx: IExtendedStorageTransaction) => void;
   },
 ): Promise<EnsureSpaceRootResult> {
-  const officialSource = options.isHomeSpace
-    ? HOME_PATTERN_SOURCE
-    : DEFAULT_APP_PATTERN_SOURCE;
-
-  // Fast path: a persisted root only needs the freshness half. The
-  // reconcile runs BEFORE anything loads the root (the serving loop's
-  // demand passes run after the ensure), preserving the
-  // replace-obsolete-identity-before-load ordering.
   const existing = await resolveSpaceRootPattern(runtime, space);
-  if (existing !== undefined) {
-    return {
-      outcome: "resolved-existing",
-      reconcile: await reconcileSpaceRoot(
-        runtime,
-        space,
-        existing,
-        officialSource,
-        options.stampReconcileTx,
-      ),
-    };
-  }
+  if (existing !== undefined) return { outcome: "resolved-existing" };
 
   if (!options.isHomeSpace) {
     // The custom `defaultAppUrl` interim (design §3, open question 3 —
@@ -358,52 +325,7 @@ export async function ensureSpaceRootPattern(
       created.error !== undefined ? { cause: created.error } : undefined,
     );
   }
-  if (created.createdByThisCall) {
-    // Fresh from the current source — reconciling would re-probe what was
-    // compiled moments ago (the client's `!createdByThisCall` posture).
-    return { outcome: "created", reconcile: "skipped-fresh" };
-  }
   return {
-    outcome: "raced-existing",
-    reconcile: await reconcileSpaceRoot(
-      runtime,
-      space,
-      root,
-      officialSource,
-      options.stampReconcileTx,
-    ),
+    outcome: created.createdByThisCall ? "created" : "raced-existing",
   };
-}
-
-/** The freshness half: the awaited default-root reconcile. Best-effort —
- * a failed reconcile logs and reports "current" (the updater's own
- * posture for resolution failures), never blocks the ensure. */
-async function reconcileSpaceRoot(
-  runtime: Runtime,
-  space: MemorySpace,
-  root: Cell<NameSchema>,
-  officialSource: string,
-  stampTx?: (tx: IExtendedStorageTransaction) => void,
-): Promise<PatternUpdateOutcome> {
-  try {
-    // Gated on `experimental.systemPatternAutoUpdate` inside
-    // `checkDefaultPattern` (the serving-runtime factory enables it —
-    // serving-loop.md §3e); its two `editWithRetry` writes stamp
-    // themselves `bookkeeping` (pattern-updater.ts, the 2026-08-05
-    // ruling), and the caller's snapshot hook rides every attempt so
-    // the reconcile's writes carry the same acting snapshot as the
-    // creation arm.
-    return await runtime.patternUpdater.checkDefaultPattern(
-      root,
-      officialSource,
-      stampTx !== undefined ? { stampTx } : undefined,
-    );
-  } catch (error) {
-    logger.warn("space-root-reconcile-failed", () => [
-      `space ${space}: default-root reconcile failed; the root stays as ` +
-      "persisted (best-effort, matching the updater's own posture)",
-      error,
-    ]);
-    return "current";
-  }
 }

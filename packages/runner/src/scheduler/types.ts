@@ -7,6 +7,7 @@ import type {
   IMemorySpaceAddress,
   MediaType,
 } from "../storage/interface.ts";
+import type { ReplicaLoadFailure } from "../storage/interface.ts";
 import type {
   SchedulerEventPreflightActionSummary,
   SchedulerEventPreflightStats,
@@ -19,6 +20,7 @@ export type TelemetryAnnotations = {
   writes: NormalizedFullLink[];
   materializerWriteEnvelopes?: NormalizedFullLink[];
   ignoredSchedulingWrites?: NormalizedFullLink[];
+
   /**
    * Concrete structural surface for a transformer-proven complete source lift.
    * This is runner-owned metadata; raw modules, handlers, and unresolved
@@ -32,6 +34,7 @@ export type TelemetryAnnotations = {
     materializerWriteEnvelopes: NormalizedFullLink[];
     directOutputs: NormalizedFullLink[];
   };
+
   schedulerObservationIdentity?: SchedulerObservationIdentity;
 };
 
@@ -40,12 +43,14 @@ export type SchedulerObservationIdentity = {
   branch?: string;
   pieceId: string;
   processGeneration?: number;
+
   /** The piece root's RAW doc id (no scope-key prefix — `pieceId` above
    * is instance-keyed for shaper buckets). The per-(action × instance)
    * run supply (server-execution v2 stage P2-F) resolves an action's
    * demanded instances through this id at the reactive-action choke
    * point. */
   pieceRootId?: string;
+
   /** The DEMAND roots this action's instances resolve through (Phase 7):
    * `pieceRootId` plus every ANCESTOR piece root that instantiated it —
    * a nested pattern node's or a result-as-pattern child's actions are
@@ -76,6 +81,7 @@ export type EventHandler =
       tx: IExtendedStorageTransaction,
       event: any,
     ) => void;
+
     /**
      * Optional callback to ensure the handler's input docs are locally
      * available before the handler body runs. A handler reads its asCell
@@ -106,8 +112,10 @@ export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
  */
 export type ReactivityLog = {
   reads: IMemorySpaceAddress[];
+
   /** Reads that should not invalidate on child writes unless they add a new key */
   shallowReads: IMemorySpaceAddress[];
+
   writes: IMemorySpaceAddress[];
 };
 
@@ -122,6 +130,7 @@ export type EventPreflightTraceContext = SchedulerEventPreflightStats & {
  * `entityKey` — see `keys.ts` for the identity-threading contract.
  */
 export type SpaceScopeAndURI = `${MemorySpace}/${ScopeKey}/${URI}`;
+
 export type SpaceScopeURIAndType =
   `${MemorySpace}/${ScopeKey}/${URI}/${MediaType}`;
 
@@ -130,8 +139,10 @@ export type SettleIterationStats = {
   workSetSize: number;
   orderSize: number;
   actionsRun: number;
+
   /** Action IDs in the work set (truncated to top entries) */
   actions: { id: string; type: "effect" | "computation" }[];
+
   durationMs: number;
 };
 
@@ -157,6 +168,7 @@ export type ActionRunTraceEntry = {
   durationMs: number;
   declaredWrites: ActionRunTraceAddress[];
   actualWrites: ActionRunTraceAddress[];
+
   /** Server-execution v2 fan-out stage B: the instance key a fanned-out
    * run was stamped with (`space` for the probe, `user:…`/`session:…`
    * otherwise); absent on every other run. */
@@ -223,10 +235,52 @@ export type TriggerTraceEntry = {
  * durable entry is the truth and the drain delivers it. */
 export const LT1_LATE_SEAL_REFUSED = "lt1-late-seal-refused";
 
+export type ServedEventFailureOutcome =
+  | {
+    kind: "error" | "dropped";
+    message: string;
+  }
+  | {
+    kind: "deferred";
+    message: string;
+  }
+  | {
+    kind: "deferred";
+    cause: "load-park";
+    role: "failed-head";
+    failure: ReplicaLoadFailure;
+  }
+  | {
+    kind: "deferred";
+    cause: "arrival-barrier";
+    blockedBy: string;
+  }
+  | {
+    /** Mark/effects atomicity (events.md §4, RULED 2026-08-27): the
+     * dispatched handler's BODY did not run (the runner's
+     * argument-did-not-resolve skip), so the transaction — carrying the
+     * pre-stamped `consequenced` mark and nothing else — was WITHDRAWN
+     * instead of sealed. No consequence: the entry stays pending and the
+     * drain re-delivers it; the deferral threshold hardens a permanently
+     * unresolvable argument into the visible §5 DROP notice. */
+    kind: "deferred";
+
+    cause: "handler-not-run";
+    message: string;
+  }
+  | {
+    kind: "deferred";
+    cause: "delivery-failure";
+    role: "failed-head";
+    phase: "commit-preparation" | "commit-finalization";
+    failure: ReplicaLoadFailure;
+  };
+
 /** The serving drain's per-event carriage (see QueuedEvent.served). */
 export type ServedEventDispatch = {
   firedAt?: { user?: string; session?: string };
   streamEntry?: { sidecarId: string; index: number; seq: number };
+
   /** The EMITTING run's durable event id for a same-wave cascade
    * (C8d; review 2026-08-11 M2): cell.ts's LT1 same-space emission
    * queues the emitted event in-process with the emitter's own
@@ -237,6 +291,7 @@ export type ServedEventDispatch = {
    * eventId to fold on; a requeued derivation withdraws the entry
    * with its own contribution). */
   parentEventId?: string;
+
   /** The LT1 same-space in-process copy's APPENDING-WAVE identity
    * (server-execution v2 stage C build W3, (α); events.md §4's RULED
    * one-entry-one-completed-run sentence): the EMITTING run's
@@ -249,28 +304,16 @@ export type ServedEventDispatch = {
    * `streamEntry`-less served copy); absent on the drain's copies and
    * everywhere client-side. */
   lt1?: { emitterTx: IExtendedStorageTransaction };
-  onFailure?: (
-    outcome: {
-      /** `error`: the handler THREW, or its commit was refused
-       * PRE-STORAGE by deterministic CFC enforcement (the served
-       * give-up arm's discriminated call, scheduler/events.ts) —
-       * either way the error is the consequence (events.md §5).
-       * `dropped`: no runnable handler exists — §5's
-       * drop predicate, the notice is the consequence. `deferred`: the
-       * handler could not be REACHED yet (a cold-view piece load — the
-       * creation-race shape OW19 warns about): no consequence is
-       * written, the entry stays pending, and a later wave re-drains
-       * it. Deferral is NOT the drop predicate — "the test is 'no
-       * runnable handler', never 'the run raced'". */
-      kind: "error" | "dropped" | "deferred";
-      message: string;
-    },
-  ) => void;
+
+  /** The outcome is discriminated so an arrival-barrier follower can never
+   * inherit the failing head's checkpoint or typed failure evidence. */
+  onFailure?: (outcome: ServedEventFailureOutcome) => void;
 };
 
 export type QueuedEvent = {
   /** Durable event id minted at send (spec §7.5). */
   readonly id: string;
+
   /** The EMITTING run's event id for a CLIENT-side same-wave cascade
    * echo (independent review M1, 2026-08-11): cell.ts's plain
    * queueEvent threads it when the send came from within a
@@ -282,6 +325,7 @@ export type QueuedEvent = {
    * deferred-vs-dropped (the drain's cold-view deferral), and a
    * client echo must keep today's dropped shape. */
   readonly parentEventId?: string;
+
   /**
    * Whether `id` was supplied by the caller rather than minted at enqueue. A
    * caller-supplied id is a durable delivery id: the handling's receipt
@@ -291,6 +335,7 @@ export type QueuedEvent = {
    * (spec §7.6, the backlog-cap exclusions).
    */
   readonly callerSuppliedId?: boolean;
+
   /**
    * Monotonic stamp minted at first enqueue and carried unchanged across
    * requeues (backoff, name-resolution). Commits are not awaited, so several
@@ -300,6 +345,7 @@ export type QueuedEvent = {
    * before it.
    */
   readonly enqueueSeq: number;
+
   /**
    * The wall-clock instant (ms) bound to this event, captured at its causal
    * origin: carried forward unchanged from the emitting handler's frame, or a
@@ -310,12 +356,15 @@ export type QueuedEvent = {
    * reads the instant of the event that actually dispatches.
    */
   time?: number;
+
   /** The transaction whose handler sent this event, when transactional. */
   readonly originTx?: IExtendedStorageTransaction;
+
   eventLink: NormalizedFullLink;
   action: Action;
   handler: EventHandler;
   event: any;
+
   /**
    * Payload keys the RUNTIME itself injected into `event`'s value (send's
    * internal `runtimeInjectedEventKeys` option — the LLM tool-call path's
@@ -326,26 +375,32 @@ export type QueuedEvent = {
    * newest event's payload, and the marker must describe THAT payload.
    */
   runtimeInjectedEventKeys?: readonly string[];
+
   /**
    * The FIFO slot was reserved before its handler's piece finished loading.
    * A loading head parks the whole event queue so later, already-registered
    * handlers cannot overtake it.
    */
   handlerLoadPending?: boolean;
+
   /** Internal exactly-once guard for terminal pre-dispatch drops. */
   finalOutcomeNotified?: boolean;
+
   /**
    * Whether a transient failure for this event should be retried. `true` routes
    * a transient commit failure through the exponential-backoff window and lets
    * the inSpace-name resolution path (RetryImmediately) re-run the handler;
-   * `false` makes both drop on the first failure (a speculative lineage origin or
-   * an internal one-shot opts out this way). There is no retry count: a windowed
-   * commit failure is bounded by the retry window, and RetryImmediately is
+   * `false` drops an unserved one-shot on either failure. A served event still
+   * re-runs RetryImmediately in its current wave: the server owns the result,
+   * while transient commit retries remain disabled and belong to the drain's
+   * wave cadence. There is no name-resolution retry count: RetryImmediately is
    * bounded by the monotonic space-name cache (each re-run resolves at least one
    * previously-unresolved name, and a resolved name never becomes pending again).
    */
   retry: boolean;
+
   onCommit?: (tx: IExtendedStorageTransaction) => void;
+
   /**
    * Server-execution v2 Phase 3 (events-down): the serving drain's
    * per-event carriage. `firedAt` is the server-stamped acting identity
@@ -360,13 +415,16 @@ export type QueuedEvent = {
    * callback: the mark rode the tx. Absent on every client-side event.
    */
   served?: ServedEventDispatch;
+
   notBefore?: number;
+
   /**
    * Number of transient commit failures this intent has hit. Drives the
    * exponential backoff exponent; carried across backoff retries. Covers every
    * transient commit failure, not only conflicts.
    */
   retryAttempts?: number;
+
   /**
    * Wall-clock deadline (performance.now()) after which a still-failing intent
    * surfaces a terminal error instead of retrying. Set from the first transient

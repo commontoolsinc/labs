@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 
+import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 import { Identity } from "@commonfabric/identity";
 import { env } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
@@ -52,8 +53,11 @@ describe("shell worker runtime", () => {
       );
     }
 
+    // Decoded as the client's transport decodes it: the worker posts the
+    // encoded envelope, so what a raw `message` event carries is the encoding.
     const message = probe as { type: "message"; data: unknown };
-    if (!isWorkerReadyNotification(message.data)) {
+    const notification = fabricFromRealmValue(message.data as never);
+    if (!isWorkerReadyNotification(notification)) {
       throw new Error(
         `Expected a ready notification, got ${JSON.stringify(message.data)}`,
       );

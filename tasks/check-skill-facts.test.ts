@@ -108,6 +108,7 @@ Deno.test("Tree knows files, directories, and their ancestors", () => {
 Deno.test("Tree.has resolves a path below a symlinked directory", () => {
   // git cannot say what is under .claude/skills/lit-component, so a citation
   // through it must not be reported as missing when it reads fine on disk.
+
   assert(TREE.has(".claude/skills/lit-component/SKILL.md"));
   assert(TREE.has(".claude/skills/lit-component/references/theme-system.md"));
   // A sibling that is not below a symlink is still judged normally.
@@ -118,6 +119,7 @@ Deno.test("Tree.has rejects a path below an ordinary file", () => {
   // The exception above is for symlinks only. Where a directory has since been
   // collapsed into a file, a citation that still points inside it is stale, and
   // git can say so — `docs/common/concepts/computed` is a file, not a symlink.
+
   assert(TREE.has("docs/common/concepts/computed"));
   assertEquals(TREE.has("docs/common/concepts/computed/computed.md"), false);
   assertEquals(TREE.has("packages/runner/src/cell.ts/nested.ts"), false);
@@ -154,6 +156,7 @@ Deno.test("citedPath strips a leading ./ or /, a #fragment, and trailing slashes
 
 Deno.test("citedPath rejects command lines", () => {
   // Skills backtick whole commands; the path inside one is not the citation.
+
   assertEquals(citedPath("./scripts/restart-local-dev.sh --force"), null);
   assertEquals(citedPath("deno run -A packages/cli/mod.ts"), null);
   assertEquals(citedPath("cat ~/code/labs/packages/patterns/index.md"), null);
@@ -192,6 +195,7 @@ Deno.test("isRooted accepts a directory inside the citing skill", () => {
 Deno.test("isRooted rejects prose, flags, specifiers, and mount paths", () => {
   // The conservative half of the heuristic: none of these start with a real
   // directory, so none are treated as repo paths.
+
   assertEquals(isRooted("async/await", "skills/cf-review", TREE), false);
   assertEquals(isRooted("-s/--space", "skills/cf", TREE), false);
   assertEquals(
@@ -214,6 +218,7 @@ Deno.test("resolvesInTree accepts a repo-root-relative citation", () => {
 Deno.test("resolvesInTree accepts a skill-relative citation", () => {
   // skills/agent-browser names scripts/form-automation.sh, which lives in the
   // skill, not in the repo-root scripts/ directory.
+
   assert(
     resolvesInTree("scripts/form-automation.sh", "skills/agent-browser", TREE),
   );
@@ -302,6 +307,7 @@ Deno.test("collectDrift reports a package that left the workspace", () => {
 Deno.test("collectDrift resolves each doc against its own skill", () => {
   // The same token, cited by two skills, resolves for the one that carries the
   // script and fails for the one that does not.
+
   const docs = [
     {
       path: "skills/agent-browser/SKILL.md",
@@ -317,6 +323,7 @@ Deno.test("collectDrift resolves each doc against its own skill", () => {
 Deno.test("collectDrift reports a package that declares no exports", () => {
   // A workspace member with no `exports` key: nothing resolves against it, not
   // even the root.
+
   const docs = [{
     path: "skills/cf-review/SKILL.md",
     text: 'Import "@commonfabric/bare".\n',
@@ -330,8 +337,12 @@ Deno.test("collectDrift reports a package that declares no exports", () => {
   assert(drift[0].message.includes("has no root export"));
 });
 
-// The tests below drive the command entry point over temp git fixtures, so they
-// cover the clean and drift paths without depending on the real tree.
+//
+// The entry point over temp git fixtures
+//
+// These drive the command over fixtures, so they cover the clean and drift
+// paths without depending on the real tree.
+//
 
 Deno.test("main reports success and returns 0 on a clean repo", async () => {
   const root = await fixtureRepo(fixtureFiles(
@@ -384,6 +395,13 @@ Deno.test("main reports an unresolvable specifier", async () => {
     await Deno.remove(root, { recursive: true });
   }
 });
+
+//
+// Reading the tree and the workspace exports
+//
+// The two readers on their own, over fixtures: what each drops, marks, and
+// surfaces when the input is not what it expects.
+//
 
 Deno.test("readTree drops a file the working tree has lost", async () => {
   const root = await fixtureRepo(
@@ -459,6 +477,7 @@ Deno.test("readWorkspaceExports rejects invalid JSONC", async () => {
 Deno.test("readWorkspaceExports surfaces an unreadable member config", async () => {
   // A deno.jsonc that is a directory: not NotFound, so it is config breakage
   // rather than an absent member, and must not be skipped silently.
+
   const root = await fixtureRepo({
     "deno.jsonc": '{ "workspace": ["./packages/ui"] }',
     "packages/ui/deno.jsonc/placeholder": "",
@@ -469,6 +488,13 @@ Deno.test("readWorkspaceExports surfaces an unreadable member config", async () 
     await Deno.remove(root, { recursive: true });
   }
 });
+
+//
+// The real repository
+//
+// The two runs that read this tree rather than a fixture, which is what makes
+// the gate answer for the repository as it stands.
+//
 
 /**
  * Runs the script as `deno task check-skill-facts` does. This is what exercises
@@ -503,9 +529,10 @@ Deno.test("the script runs as a command over the real repo", async () => {
   );
 });
 
-// Runs against the real repository: every fact every covered document cites
-// must resolve.
 Deno.test("every cited path and specifier resolves", async () => {
+  // Runs against the real repository: every fact every covered document cites
+  // must resolve.
+
   const root = fromFileUrl(new URL("..", import.meta.url));
   const tree = await readTree(root);
   const docs = await readSkillDocs(root, tree);
@@ -520,9 +547,14 @@ Deno.test("every cited path and specifier resolves", async () => {
   );
 });
 
-// The three kinds of document this covers are named by different conventions,
+//
+// The three kinds of document the scan reaches
+//
+// They are named by different conventions,
 // so each is pinned: a rename that drops one from the scan would otherwise be
 // invisible.
+//
+
 Deno.test("the scan covers skills, AGENTS.md guides, and rules", async () => {
   const root = fromFileUrl(new URL("..", import.meta.url));
   const tree = await readTree(root);
@@ -545,6 +577,7 @@ Deno.test("a rule resolves its citations against the repo root", async () => {
   // A rule lives in .claude/rules/, which holds no code, so every path it names
   // is repo-relative. Both cases are pinned here because skillDirOf hands the
   // resolver ".claude/rules" as the doc's own directory.
+
   const root = await fixtureRepo({
     "deno.jsonc": '{ "workspace": [] }',
     "packages/ui/src/index.ts": "",
@@ -564,6 +597,7 @@ Deno.test("a package AGENTS.md resolves paths inside its own package", async () 
   // packages/shell/AGENTS.md cites `shared/app/state.ts`, meaning the file in
   // that package. The same token cited by a package that has a `shared/` of its
   // own, without that file in it, is drift.
+
   const root = await fixtureRepo({
     "deno.jsonc": '{ "workspace": [] }',
     "packages/shell/shared/app/state.ts": "",
@@ -584,12 +618,17 @@ Deno.test("a package AGENTS.md resolves paths inside its own package", async () 
   }
 });
 
+//
+// The conservative half of the heuristic
+//
+
 Deno.test("a relative citation with no matching directory is left alone", async () => {
   // The conservative half of the heuristic, which the widened scan leans on
   // more than the skills-only one did: a backticked token whose first segment
   // names no real directory is prose or a shell fragment, not a path, so it is
   // skipped rather than reported. Without this, every `src/index.ts` written as
   // an illustration would fail the build.
+
   const root = await fixtureRepo({
     "deno.jsonc": '{ "workspace": [] }',
     "packages/other/mod.ts": "",

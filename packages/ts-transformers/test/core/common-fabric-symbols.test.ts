@@ -19,9 +19,9 @@ import {
   symbolDeclaresCommonFabricDefault,
 } from "../../src/core/common-fabric-symbols.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Test infrastructure
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Build a minimal TypeScript program from an in-memory file map.
@@ -117,9 +117,9 @@ function findFirstNode<T extends ts.Node>(
   return found;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Tests
-// ---------------------------------------------------------------------------
+//
 
 describe("isCommonFabricModuleName", () => {
   it("matches Common Fabric module names", () => {
@@ -333,6 +333,24 @@ describe("symbolDeclaresCommonFabricDefault", () => {
         symbolDeclaresCommonFabricDefault(themeSymbol, checker),
         "Optional property with user-defined Default must NOT be treated as Common Fabric Default",
       );
+    });
+
+    it("returns false for a cycle of referenced types", () => {
+      const { program, checker } = createProgram({
+        "/test.ts": `
+          type First = Second;
+          type Second = First;
+
+          interface Config {
+            theme: First;
+          }
+        `,
+      });
+
+      const sf = program.getSourceFile("/test.ts")!;
+      const themeSymbol = getPropertySymbol(checker, sf, "Config", "theme");
+
+      assertFalse(symbolDeclaresCommonFabricDefault(themeSymbol, checker));
     });
   });
 

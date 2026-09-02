@@ -165,6 +165,16 @@ wish surfaces have arrived, not one that is about to grow them. A launch that
 cannot load its pattern writes that into the same slot rather than leaving it
 blank.
 
+Each surface is an ordinary piece in the space of the piece that wished, and it
+records the `system:` ref naming the file it was made from — the same kind of
+origin a space root records. So the piece menu shows where its code came from,
+its history holds the source it was created with, and it follows that origin
+through the ordinary source lifecycle: the launch opens the piece, which
+resolves the ref against the host serving its space and adopts the source it
+names when the deployment has shipped a new version. Opening happens once per
+surface per process, not on every re-run of the wish behind it.
+`docs/specs/piece-source-lifecycle.md` is the design of record.
+
 When rendering profile data from a shared piece, use a user-scoped result schema
 for the rendered output so each viewer sees their own home profile projection.
 
@@ -247,7 +257,6 @@ The `scope` parameter can redirect or fan the others out across other spaces.
 | `#default`          | Default pattern of the current space                    |
 | `#mentionable`      | Mentionable pieces in the current space                 |
 | `#pieceRegistry`    | All pieces registered in the current space              |
-| `#recent`           | Recently-used pieces in the current space               |
 | `#suggestions`      | Suggestion history of the current space                 |
 | `#summaryIndex`     | Summary index of the current space                      |
 | `#knowledgeGraph`   | Knowledge graph of the current space                    |

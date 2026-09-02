@@ -72,9 +72,34 @@ Deno.test("collectDay aggregates runs, failures, and durations per identity", as
   assertEquals(isDayAggregate(aggregates[0]), true);
 });
 
-// A body holding two reports, the second fork-authored: its records must
-// not reach the decision-feeding aggregates.
+Deno.test("collectDay separates variant records from default history", async () => {
+  const variant = JSON.stringify({
+    line: "record",
+    test: {
+      k: "unit",
+      s: "bakery",
+      n: "glaze",
+      v: "wood-fired",
+    },
+    outcome: "pass",
+    durationMs: 200,
+  });
+  const aggregates = await collectDay("2026/08/16", {
+    fetchImpl: storeFetch([PASS, variant]),
+  });
+  assertEquals(aggregates.map(({ key, runs }) => ({ key, runs })), [{
+    key: '["unit","bakery","glaze","wood-fired"]',
+    runs: 1,
+  }, {
+    key: '["unit","bakery","glaze"]',
+    runs: 1,
+  }]);
+});
+
 Deno.test("collectDay excludes fork-authored reports", async () => {
+  // A body holding two reports, the second fork-authored: its records must not
+  // reach the decision-feeding aggregates.
+
   const forkContext = JSON.stringify({
     schema: 1,
     line: "context",
@@ -147,12 +172,23 @@ Deno.test("isDayAggregate rejects inconsistent aggregates", () => {
     maxDurationMs: 300,
   };
   assertEquals(isDayAggregate(sound), true);
+  assertEquals(
+    isDayAggregate({
+      ...sound,
+      key: '["unit","bakery","glaze","wood-fired"]',
+    }),
+    true,
+  );
   assertEquals(isDayAggregate({ ...sound, failures: 2, skips: 1 }), false);
   assertEquals(isDayAggregate({ ...sound, runs: 1.5 }), false);
   assertEquals(isDayAggregate({ ...sound, totalDurationMs: NaN }), false);
   assertEquals(isDayAggregate({ ...sound, maxDurationMs: -1 }), false);
   assertEquals(isDayAggregate({ ...sound, key: "not a triple" }), false);
   assertEquals(isDayAggregate({ ...sound, key: '["unit","bakery"]' }), false);
+  assertEquals(
+    isDayAggregate({ ...sound, key: '["unit","bakery","glaze",""]' }),
+    false,
+  );
 });
 
 Deno.test("the store refreshes missing days, persists, and reloads", async () => {

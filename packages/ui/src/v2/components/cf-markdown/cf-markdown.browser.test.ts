@@ -6,6 +6,7 @@
  * arguments, so the BDD functions the rest of the repository uses are not
  * available here.
  */
+
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 
 import { CFMarkdown } from "./index.ts";

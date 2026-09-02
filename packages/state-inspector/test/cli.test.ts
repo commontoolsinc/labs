@@ -6,8 +6,15 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { expect } from "@std/expect";
 import { Database } from "@db/sqlite";
+import type { FabricValue } from "@commonfabric/data-model";
 import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { applyCommit, close, open } from "@commonfabric/memory/v2/engine";
+import {
+  CODEMIRROR_CHANGESET_CODEC,
+  operationBaselineHash,
+} from "@commonfabric/memory/v2/operation-codec";
+import { toValuePath } from "@commonfabric/memory/v2";
+import { toFileUrl } from "@std/path";
 
 import { main } from "../cli.ts";
 
@@ -105,6 +112,86 @@ Deno.test("cli: single-space commands dispatch over a seeded DB", async (t) => {
       const s = JSON.parse(out);
       assertEquals(s.entities, 1);
       assertEquals(s.commits, 2);
+    });
+
+    await t.step(
+      "operations reports older stores without operation tables",
+      () => {
+        const { code, out } = run(["operations", db, "--json"]);
+        assertEquals(code, 0);
+        assertEquals(JSON.parse(out), {
+          available: false,
+          fieldLimit: 50,
+          fieldsTruncated: false,
+          fields: [],
+        });
+        const human = run(["operations", db]);
+        assertStringIncludes(human.out, "operation tables are absent");
+      },
+    );
+
+    await t.step(
+      "operations renders active fields and truncation",
+      async () => {
+        const operationDb = `${dir}/operations.sqlite`;
+        const engine = await open({ url: toFileUrl(operationDb) });
+        try {
+          applyCommit(engine, {
+            sessionId: "session:setup",
+            commit: {
+              localSeq: 1,
+              reads: { confirmed: [], pending: [] },
+              operations: ["a", "b"].map((id) => ({
+                op: "set" as const,
+                id: `of:${id}`,
+                value: { value: { body: "x" } },
+              })),
+            },
+          });
+          applyCommit(engine, {
+            sessionId: "session:writer",
+            commit: {
+              localSeq: 1,
+              reads: { confirmed: [], pending: [] },
+              operations: ["a", "b"].map((id) => ({
+                op: "apply-op" as const,
+                id: `of:${id}`,
+                path: toValuePath(["body"]),
+                codec: CODEMIRROR_CHANGESET_CODEC,
+                submissionId: `${id}:1`,
+                base: null,
+                baselineHash: operationBaselineHash("x"),
+                payload: {
+                  updates: [{ clientId: id, changes: [1, [0, "y"]] }],
+                },
+              })),
+            },
+          });
+        } finally {
+          close(engine);
+        }
+
+        const result = run(["operations", operationDb, "--limit", "1"]);
+        assertEquals(result.code, 0);
+        assertStringIncludes(result.out, "active\tof:a");
+        assertStringIncludes(result.out, "submissions=1 integrated=1");
+        assertStringIncludes(result.out, "field list truncated at 1");
+      },
+    );
+
+    await t.step("operations rejects zero and oversized limits", () => {
+      const zero = run(["operations", db, "--limit", "0"]);
+      assertEquals(zero.code, 1);
+      assert(zero.err.includes("integer from 1 to 1000"));
+
+      const oversized = run([
+        "operations",
+        db,
+        "--history-limit",
+        "1001",
+      ]);
+      assertEquals(oversized.code, 1);
+      assert(oversized.err.includes("integer from 1 to 1000"));
     });
 
     await t.step("--json BEFORE <db> still works (flag-order fix)", () => {

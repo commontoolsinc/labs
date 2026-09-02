@@ -13,6 +13,7 @@ import type {
   LabelObservationClass,
 } from "./label-view-core.ts";
 import type { PolicySnapshot } from "./policy.ts";
+import type { CfcRefusalDetail } from "./refusal-detail.ts";
 import type { SinkMaxConfidentiality } from "./sink-inventory.ts";
 import type { CfcTrustConfig } from "./trust.ts";
 
@@ -34,6 +35,60 @@ export const CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION =
 // fully enforced.
 export const CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION =
   "runtime.setup.seed-materialization";
+
+// A document a piece is being set up in: its argument document, or an
+// internal document or stream its result projects to. `target` is the
+// document, minted from the piece's result cell; `sources` is that result
+// document. The prepare gate reads it for the §8.12.5 route-2 declaration
+// described in `docs/specs/cfc-enforcement-matrix.md` §4, and takes it only
+// where `target` names a whole document AND the input was recorded under
+// {@link runtimeWritePolicyAuthorization}.
+export const CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE =
+  "runtime.setup.piece-substrate";
+
+/**
+ * Marks a write-policy input as one the runtime itself recorded.
+ *
+ * `recordCfcWritePolicyInput` is on the public transaction interface, and
+ * pattern-authored code runs in the runtime's own realm holding runtime cells,
+ * so it reaches `cell.tx` and can record an input naming whatever it likes.
+ * An input a gate ACTS on — rather than one a gate measures — therefore has to
+ * say who recorded it. This is the mark, and it works the way
+ * `rawMetaWriteAuthorization` does: a symbol cannot be named by a module that
+ * did not import it, and the sandbox hands pattern code the builder namespace
+ * rather than the runner's modules.
+ */
+export const RUNTIME_WRITE_POLICY_INPUT: unique symbol = Symbol(
+  "runtime-write-policy-input",
+);
+
+/** The authorization a runtime-recorded write-policy input carries. */
+export interface RuntimeWritePolicyAuthorization {
+  readonly [RUNTIME_WRITE_POLICY_INPUT]: true;
+}
+
+/**
+ * The authorization the runtime passes beside an input a gate acts on.
+ *
+ * It travels as an argument of the one call that carries it, so it marks that
+ * input and no other — including no input recorded on the same transaction in
+ * the meantime.
+ *
+ * In-package callers only: `cfc/mod.ts` re-exports the type and not this
+ * value, so it stays out of the package's public entry points, and holding it
+ * is what naming a piece's substrate takes.
+ */
+export const runtimeWritePolicyAuthorization: RuntimeWritePolicyAuthorization =
+  Object.freeze(
+    { [RUNTIME_WRITE_POLICY_INPUT]: true } as RuntimeWritePolicyAuthorization,
+  );
+
+/** Whether an authorization argument carries the runtime's mark. */
+export const runtimeWritePolicyAuthorized = (value: unknown): boolean =>
+  typeof value === "object" && value !== null &&
+  (value as Partial<RuntimeWritePolicyAuthorization>)[
+      RUNTIME_WRITE_POLICY_INPUT
+    ] === true;
 
 export type CfcEnforcementMode =
   | "disabled"
@@ -254,6 +309,7 @@ export type LabelMapEntry = {
   path: readonly string[];
   label: IFCLabel;
   origin?: LabelEntryOrigin;
+
   /**
    * Payload consumption classes, or — on `origin:"label-metadata"`
    * population templates only (Stage B) — the `labelMetadata` class, which
@@ -308,6 +364,7 @@ export type ConsumedRead =
   & Immutable<{
     meta?: Metadata;
     nonRecursive?: boolean;
+
     /**
      * Position on the transaction's activity clock (shared with write
      * attempts — see `OrderedWriteAttempt`). Part of the prepared digest:
@@ -375,14 +432,17 @@ export type ImplementationIdentity =
   | { kind: "builtin"; builtinId: string }
   | {
     kind: "verified";
+
     /**
      * Content-addressed module identity (prefix-free `cf:module/<hash>`
      * hash) — reload-stable and robust to unrelated module changes in the
      * same program.
      */
     moduleIdentity?: string;
+
     /** Export/`__cfReg` symbol of the registered factory, when module-scope. */
     symbol?: string;
+
     sourceFile?: string;
     bindingPath?: string[];
     codeHash?: string;
@@ -415,6 +475,7 @@ export type WritePolicyInput =
     readonly target: CfcAddress;
     readonly schemaHash?: string;
     readonly schema?: JSONSchema;
+
     /**
      * Present only when this schema describes a generated output of the
      * running module. Such outputs may introduce required fields without
@@ -490,6 +551,7 @@ export type PreparedDigestInput = {
   readonly consumedReads: readonly ConsumedRead[];
   readonly attemptedWrites: readonly AttemptedWrite[];
   readonly writes: readonly AttemptedWrite[];
+
   /**
    * The ordered write-attempt log (see `OrderedWriteAttempt`). Mandatory in
    * the digest: `consumedReads`/`writes` are canonicalized by address-sort,
@@ -500,13 +562,16 @@ export type PreparedDigestInput = {
    * shape; docs/specs/cfc-write-prefix-provenance.md §6).
    */
   readonly writeAttemptLog: readonly OrderedWriteAttempt[];
+
   readonly dereferenceTraces: readonly CfcDereferenceTrace[];
   readonly triggerReads: readonly CfcAddress[];
   readonly writePolicyInputs: readonly WritePolicyInput[];
   readonly implementationIdentity?: ImplementationIdentity;
   readonly trustSnapshot?: TrustSnapshot;
+
   /** Update-authority aliases consulted by writeAuthorizedBy verification. */
   readonly moduleDelegations?: readonly ModuleDelegationSnapshotEntry[];
+
   // Digest of the policy snapshot the boundary decisions evaluated under
   // (Epic B5): anything that can change a boundary decision must be in the
   // digest, so a decision made under one rule set cannot be committed under
@@ -530,13 +595,27 @@ export type PostCommitSideEffect = {
   id: string;
   kind: string;
   idempotencyKey?: string;
+
   /** The client-effect nonce this enactment carries (server-execution v2
    * Phase 4, protocol.md §5) — set by `navigateTo` under the flag so the
    * speculation overlay's OPTIMISTIC enactment records the SAME nonce the
    * authoritative intent arrives with, and the effects channel converges
    * on it instead of re-enacting (T2.Q7). Absent everywhere else. */
   nonce?: string;
+
   flush(tx: unknown): void | Promise<void>;
+
+  /**
+   * Called instead of {@link flush} when the work this effect stands for will
+   * not happen: the transaction carrying it was rejected and whoever owns its
+   * retries has stopped. Exactly one of the two runs, so this is where a
+   * builtin ends a request that was staged and never sent.
+   *
+   * Not called when the effect is handed to a seal destination, which runs it
+   * elsewhere — that clears the outbox too, and it is a handover rather than
+   * an ending.
+   */
+  abandon?(error: unknown): void;
 };
 
 export type CfcPrepareState =
@@ -783,4 +862,12 @@ export type CfcTxState = {
   // PreparedDigestInput. Only labeled observations are recorded (empty =
   // public = nothing to derive, gate, or bind).
   labelMetadataObservations: CfcLabelMetadataObservation[];
+  // Structured descriptions of the refusals this transaction's gates
+  // recorded (`cfc/refusal-detail.ts`): which boundary refused, which atoms
+  // it refused, and which reads carried them. Recorded in every enforcement
+  // mode; the commit boundary keeps only the ones whose reason survived into
+  // the refusal, so an observe-mode diagnostic never rides out as a verdict.
+  // Never folded into the prepared digest — a description of a decision is
+  // not an input to it.
+  refusalDetails: CfcRefusalDetail[];
 };

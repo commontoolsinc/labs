@@ -181,6 +181,7 @@ export function parseWorkspaceMembers(rootConfigText: string): string[] {
 interface SourceFile {
   /** The owning workspace member, or undefined when under none. */
   owner: string | undefined;
+
   content: string;
 }
 
@@ -258,8 +259,10 @@ async function readSourceFiles(
 interface Entry {
   /** Repo-relative path of the declaring deno.jsonc. */
   config: string;
+
   /** The declaring member, or undefined for the root config. */
   member: string | undefined;
+
   alias: string;
   specifier: string;
 }
@@ -272,6 +275,7 @@ export interface UnusedEntry extends Entry {
 export interface ScanResult {
   /** Unused entries that are not allowlisted. */
   unused: UnusedEntry[];
+
   /** Unused entries that are allowlisted, with their reasons. */
   allowlisted: UnusedEntry[];
 }

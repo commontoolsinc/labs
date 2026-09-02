@@ -1,4 +1,4 @@
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { getLogger } from "@commonfabric/utils/logger";
 
 import { type Pattern } from "../builder/types.ts";
@@ -242,7 +242,7 @@ export function map(
     // aliases in the pattern. The raw value is either a compact
     // `{ $patternRef }` sentinel (resolved to the live canonical pattern by
     // identity) or, on the legacy path, the embedded pattern graph itself.
-    const opPattern = resolveOpPattern(runtime, op.getRaw(), "map");
+    const opPattern = resolveOpPattern(runtime, op.getRaw(), "map", inputsCell);
     const argumentUsage = inferListOpArgumentUsage(opPattern);
 
     // Whether this reconcile issues the container's links: a container it

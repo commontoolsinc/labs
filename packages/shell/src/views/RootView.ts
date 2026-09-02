@@ -2,15 +2,21 @@ import { type DID, type Identity, KeyStore } from "@commonfabric/identity";
 import { resolveSpaceDid, RuntimeInternals } from "@commonfabric/lib-shell";
 import {
   AppView,
+  isAppViewEqual,
   isViewingDefaultPatternView,
   navigate,
 } from "@commonfabric/navigation";
 import {
   type ErrorNotification,
+  type EventAttentionNotice,
   type RuntimeClient,
   RuntimeErrorCode,
 } from "@commonfabric/runtime-client";
-import { runtimeContext, spaceContext } from "@commonfabric/ui";
+import {
+  presenceUrlContext,
+  runtimeContext,
+  spaceContext,
+} from "@commonfabric/ui";
 import { provide } from "@lit/context";
 import { Task, TaskStatus } from "@lit/task";
 import { css, html, PropertyValues } from "lit";
@@ -33,7 +39,12 @@ import {
   type CommonfabricDebugState,
   exposeCommonfabricGlobals,
 } from "../lib/debug-utils.ts";
-import { COMMIT_SHA, ENVIRONMENT, EXPERIMENTAL } from "../lib/env.ts";
+import {
+  COMMIT_SHA,
+  ENVIRONMENT,
+  EXPERIMENTAL,
+  PRESENCE_URL,
+} from "../lib/env.ts";
 import { runtimeHostFlags } from "../lib/host-toggles.ts";
 import { type BrowserTelemetry, initBrowserOtel } from "../lib/otel.ts";
 import { shouldRecreateRuntime } from "../lib/runtime-lifecycle.ts";
@@ -57,6 +68,11 @@ function getCommonfabricGlobal(): typeof globalThis & {
   };
 }
 
+const eventAttentionNoticeKey = (
+  notice: Pick<EventAttentionNotice, "space" | "sidecarId" | "eventId" | "seq">,
+): string =>
+  JSON.stringify([notice.space, notice.sidecarId, notice.eventId, notice.seq]);
+
 // The root element for the shell application.
 //
 // Derives `RuntimeInternals` for the application from its `AppState`, and owns
@@ -76,6 +92,46 @@ export class XRootView extends BaseView implements ShellApp {
       height: 100%;
       width: 100%;
     }
+
+    #event-attention {
+      position: fixed;
+      z-index: 1000;
+      right: 1rem;
+      bottom: 1rem;
+      display: grid;
+      gap: 0.75rem;
+      width: min(24rem, calc(100vw - 2rem));
+      max-height: calc(100dvh - 2rem);
+      overflow-y: auto;
+      pointer-events: none;
+    }
+
+    .attention-card {
+      pointer-events: auto;
+      padding: 1rem;
+      border: 1px solid
+        var(--shell-divider, var(--cf-theme-color-border, #111));
+      border-radius: 0.75rem;
+      color: var(--font-color, var(--cf-theme-color-text, #111));
+      background: var(--shell-surface, var(--cf-theme-color-surface, #fff));
+      box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 18%);
+    }
+
+    .attention-card h2 {
+      margin: 0 0 0.375rem;
+      font-size: 1rem;
+    }
+
+    .attention-card p {
+      margin: 0 0 0.75rem;
+      line-height: 1.35;
+    }
+
+    .attention-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+    }
   `;
 
   @state()
@@ -90,14 +146,29 @@ export class XRootView extends BaseView implements ShellApp {
   @state()
   private accessor _runtimeLoadErrors: readonly ErrorNotification[] = [];
 
+  @state()
+  private accessor _eventAttention: readonly EventAttentionNotice[] = [];
+
+  @state()
+  private accessor _resolvingAttention = new Map<string, symbol>();
+
+  #eventAttentionMutation = 0;
+  #eventAttentionMutationVersions = new Map<
+    DID,
+    Map<string, number>
+  >();
+  #eventAttentionRefreshOwners = new Map<DID, symbol>();
+
   // Invalidates callbacks from replaced workers. A coded compiler-load error
   // can arrive through either a request reply or an asynchronous runtime error;
   // only the currently-owned worker may trigger one replacement.
+  // TypeScript-private rather than a `#` name, because `test/root-view.test.ts`
+  // drives this member directly.
   private _runtimeGeneration = 0;
-  private _preserveRuntimeErrorsForNextViewChange = false;
+  #preserveRuntimeErrorsForNextViewChange = false;
 
   readonly preserveRuntimeErrorsForNextViewChange = (): void => {
-    this._preserveRuntimeErrorsForNextViewChange = true;
+    this.#preserveRuntimeErrorsForNextViewChange = true;
   };
 
   readonly _handleRuntimeError = (
@@ -144,12 +215,17 @@ export class XRootView extends BaseView implements ShellApp {
   @state()
   private accessor space: DID | undefined = undefined;
 
-  // The runtime task runs when AppState changes, and determines if a
-  // new RuntimeInternals must be created — only when identity or host
-  // (apiUrl) change; one runtime serves every space. This is manually
-  // run in `updated()` because we want to compare to previous values,
-  // leaving this function responsible for cleaning up previous
-  // runtimes, and creating a new one.
+  @provide({ context: presenceUrlContext })
+  @state()
+  private accessor presenceUrl: string | undefined = PRESENCE_URL?.href;
+
+  // The runtime task runs when AppState changes, and determines if a new
+  // RuntimeInternals must be created — only when identity or host (apiUrl)
+  // change; one runtime serves every space. This is manually run in `updated()`
+  // because we want to compare to previous values, leaving this function
+  // responsible for cleaning up previous runtimes, and creating a new one.
+  // TypeScript-private rather than a `#` name, because `test/root-view.test.ts`
+  // drives this member directly.
   private _rt = new Task<[AppState | undefined], RuntimeInternals | undefined>(
     this,
     {
@@ -163,8 +239,15 @@ export class XRootView extends BaseView implements ShellApp {
         this._runtimeLoadErrors = [];
         const previous = this._rt.value;
         if (previous) {
+          this.runtime?.off(
+            "eventneedsattention",
+            this._handleEventNeedsAttention,
+          );
           previous.dispose().catch(console.error);
         }
+        this._eventAttention = [];
+        this.#eventAttentionMutationVersions.clear();
+        this.#eventAttentionRefreshOwners.clear();
 
         if (!app || !app.identity) {
           // Clear the runtime when no app state. The space belongs to the
@@ -228,6 +311,13 @@ export class XRootView extends BaseView implements ShellApp {
         // Update the provided runtime; `space` is view state, resolved
         // from app.view in willUpdate() independent of the runtime's life.
         this.runtime = rt.runtime();
+        this.runtime.on(
+          "eventneedsattention",
+          this._handleEventNeedsAttention,
+        );
+        if (this.space !== undefined) {
+          void this.#refreshEventAttention(this.space, generation);
+        }
 
         // Expose the runtime and cell debug utilities for console use
         // (e.g. commonfabric.rt.setLoggerLevel("debug")).
@@ -245,19 +335,25 @@ export class XRootView extends BaseView implements ShellApp {
 
   override connectedCallback(): void {
     super.connectedCallback();
+    // A Lit element can be detached and reattached without rebuilding its
+    // worker runtime. Reinstall the live notice listener that disconnect
+    // removes; off-first keeps repeated connects idempotent.
+    this.runtime?.off("eventneedsattention", this._handleEventNeedsAttention);
+    this.runtime?.on("eventneedsattention", this._handleEventNeedsAttention);
     this.addEventListener(SHELL_COMMAND, this.onCommand);
     document.addEventListener(
       "theme-preference-changed",
-      this._onThemeChanged,
+      this.#onThemeChanged,
     );
     globalThis.addEventListener("beforeunload", this._onBeforeUnload);
   }
 
   override disconnectedCallback(): void {
+    this.runtime?.off("eventneedsattention", this._handleEventNeedsAttention);
     this.removeEventListener(SHELL_COMMAND, this.onCommand);
     document.removeEventListener(
       "theme-preference-changed",
-      this._onThemeChanged,
+      this.#onThemeChanged,
     );
     globalThis.removeEventListener("beforeunload", this._onBeforeUnload);
     super.disconnectedCallback();
@@ -270,6 +366,8 @@ export class XRootView extends BaseView implements ShellApp {
   // unconfirmed, ask the browser to confirm leaving instead of silently losing
   // them. Commits confirm quickly (typically well under a second), so the
   // prompt only appears in the narrow window a reload would actually lose data.
+  // TypeScript-private rather than a `#` name, because `test/root-view.test.ts`
+  // drives this member directly.
   private _onBeforeUnload = (event: BeforeUnloadEvent): void => {
     if (this.runtime?.hasPendingWrites()) {
       event.preventDefault();
@@ -282,12 +380,12 @@ export class XRootView extends BaseView implements ShellApp {
   // and treats a space name that disagrees with a space DID as an error.
   protected override willUpdate(changedProperties: PropertyValues<this>): void {
     if (changedProperties.has("app")) {
-      const previous = changedProperties.get("app");
-      if (JSON.stringify(previous?.view) !== JSON.stringify(this.app?.view)) {
-        if (!this._preserveRuntimeErrorsForNextViewChange) {
+      const previousView = changedProperties.get("app")?.view;
+      if (!previousView || !isAppViewEqual(previousView, this.app.view)) {
+        if (!this.#preserveRuntimeErrorsForNextViewChange) {
           this._runtimeLoadErrors = [];
         }
-        this._preserveRuntimeErrorsForNextViewChange = false;
+        this.#preserveRuntimeErrorsForNextViewChange = false;
       }
       this.#syncViewSpace(this.app);
     }
@@ -384,13 +482,125 @@ export class XRootView extends BaseView implements ShellApp {
 
   #setSpace(space: DID | undefined, token: number): void {
     if (token !== this.#resolveSpaceToken || space === this.space) return;
+    const previousSpace = this.space;
     this.space = space;
+    this._eventAttention = [];
+    if (previousSpace !== undefined) {
+      this.#eventAttentionMutationVersions.delete(previousSpace);
+      this.#eventAttentionRefreshOwners.delete(previousSpace);
+    }
     // Keep browser OTel span attribution in sync with the resolved space —
     // the telemetry sink lives across navigations.
     this.#telemetry?.setSpace(space);
+    if (space !== undefined) {
+      void this.#refreshEventAttention(space, this._runtimeGeneration);
+    }
   }
 
-  private _onThemeChanged = (e: Event) => {
+  readonly _handleEventNeedsAttention = (
+    notice: EventAttentionNotice,
+  ): void => {
+    if (notice.space !== this.space) return;
+    const key = eventAttentionNoticeKey(notice);
+    this.#noteEventAttentionMutation(notice.space, key);
+    this._eventAttention = [
+      ...this._eventAttention.filter((candidate) =>
+        eventAttentionNoticeKey(candidate) !== key
+      ),
+      notice,
+    ];
+  };
+
+  #noteEventAttentionMutation(space: DID, key: string): void {
+    const versions = this.#eventAttentionMutationVersions.get(space) ??
+      new Map<string, number>();
+    versions.set(key, ++this.#eventAttentionMutation);
+    this.#eventAttentionMutationVersions.set(space, versions);
+  }
+
+  async #refreshEventAttention(space: DID, generation: number): Promise<void> {
+    const runtime = this.runtime;
+    if (runtime === undefined) return;
+    const owner = Symbol(space);
+    const startedAt = this.#eventAttentionMutation;
+    this.#eventAttentionRefreshOwners.set(space, owner);
+    try {
+      const notices = await runtime.listEventAttention(space);
+      if (
+        generation !== this._runtimeGeneration || runtime !== this.runtime ||
+        space !== this.space ||
+        this.#eventAttentionRefreshOwners.get(space) !== owner
+      ) return;
+      const currentByKey = new Map(
+        this._eventAttention.filter((notice) => notice.space === space).map(
+          (notice) => [eventAttentionNoticeKey(notice), notice] as const,
+        ),
+      );
+      const reconciled = new Map(
+        notices.map((notice) =>
+          [eventAttentionNoticeKey(notice), notice] as const
+        ),
+      );
+      for (
+        const [key, version]
+          of this.#eventAttentionMutationVersions.get(space) ?? []
+      ) {
+        if (version <= startedAt) continue;
+        const current = currentByKey.get(key);
+        if (current === undefined) reconciled.delete(key);
+        else reconciled.set(key, current);
+      }
+      this._eventAttention = [
+        ...this._eventAttention.filter((notice) => notice.space !== space),
+        ...reconciled.values(),
+      ];
+    } catch (error) {
+      if (
+        generation === this._runtimeGeneration && runtime === this.runtime &&
+        space === this.space &&
+        this.#eventAttentionRefreshOwners.get(space) === owner
+      ) {
+        console.error("[RootView] Failed to load event attention:", error);
+      }
+    } finally {
+      if (this.#eventAttentionRefreshOwners.get(space) === owner) {
+        this.#eventAttentionRefreshOwners.delete(space);
+        this.#eventAttentionMutationVersions.delete(space);
+      }
+    }
+  }
+
+  readonly _resolveEventAttention = async (
+    notice: EventAttentionNotice,
+    action: "retry" | "dismiss",
+  ): Promise<void> => {
+    const runtime = this.runtime;
+    if (runtime === undefined) return;
+    const key = eventAttentionNoticeKey(notice);
+    if (this._resolvingAttention.has(key)) return;
+    const request = Symbol(key);
+    this._resolvingAttention = new Map(this._resolvingAttention).set(
+      key,
+      request,
+    );
+    try {
+      await runtime.resolveEventAttention(notice, action);
+      this._eventAttention = this._eventAttention.filter((candidate) =>
+        eventAttentionNoticeKey(candidate) !== key
+      );
+      this.#noteEventAttentionMutation(notice.space, key);
+    } catch (error) {
+      console.error(`[RootView] Failed to ${action} event:`, error);
+    } finally {
+      if (this._resolvingAttention.get(key) === request) {
+        const resolving = new Map(this._resolvingAttention);
+        resolving.delete(key);
+        this._resolvingAttention = resolving;
+      }
+    }
+  };
+
+  #onThemeChanged = (e: Event) => {
     this._themePreference = (e as CustomEvent).detail;
   };
 
@@ -484,6 +694,43 @@ export class XRootView extends BaseView implements ShellApp {
           .preserveRuntimeErrorsForNextViewChange="${this
             .preserveRuntimeErrorsForNextViewChange}"
         ></x-app-view>
+        ${this._eventAttention.length === 0 ? undefined : html`
+          <aside
+            id="event-attention"
+            role="status"
+            aria-live="polite"
+            aria-relevant="additions"
+            aria-label="Events needing attention"
+          >
+            ${this._eventAttention.map((notice) => {
+              const key = eventAttentionNoticeKey(notice);
+              const resolving = this._resolvingAttention.has(key);
+              return html`
+                <section class="attention-card">
+                  <h2>Event needs attention</h2>
+                  <p>${notice.reason}</p>
+                  <div class="attention-actions">
+                    <cf-button
+                      variant="outline"
+                      ?disabled="${resolving}"
+                      @click="${() =>
+                        this._resolveEventAttention(notice, "dismiss")}"
+                    >Dismiss</cf-button>
+                    ${notice.retryable !== false
+                      ? html`
+                        <cf-button
+                          ?disabled="${resolving}"
+                          @click="${() =>
+                            this._resolveEventAttention(notice, "retry")}"
+                        >Retry</cf-button>
+                      `
+                      : undefined}
+                  </div>
+                </section>
+              `;
+            })}
+          </aside>
+        `}
       </cf-theme>
     `;
   }

@@ -11,18 +11,16 @@
  * what the protocol module is for.
  */
 
+import { type FabricValue, isValidFabricValue } from "@commonfabric/data-model";
 import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import type { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
-import {
-  type FabricValue,
-  isValidFabricValue,
-} from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type { Cell } from "@commonfabric/runner";
 import {
+  convertCellsToLinks,
   markUiInputBlindWriteTx,
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
@@ -355,6 +353,22 @@ const handlers: Record<
     };
   },
 
+  /**
+   * Read the value of the cell reached from the piece result by `path`,
+   * through the result schema.
+   *
+   * A schema-aware read hands back a live `Cell` wherever the schema says
+   * `asCell`, and a pattern's result schema says that all over its `[UI]`
+   * tree: every view node's props and children are cells. A live cell belongs
+   * to this realm and cannot cross to the harness, so each one becomes the
+   * link that reaches it — the sigil form `readRaw` leaves nested links in.
+   * Read a path below such a cell, or `readRaw`, to get its contents.
+   *
+   * `doNotConvertCellResults` limits the conversion to the cells the schema
+   * asked for. The same read annotates each container it returns with the cell
+   * it came from, and that annotation is machinery rather than content: the
+   * container's own entries are what the reader asked for.
+   */
   async read({ path }) {
     const target = result();
     await target.pull();
@@ -362,7 +376,7 @@ const handlers: Record<
     for (const segment of (path ?? []) as (string | number)[]) {
       cell = cell.key(segment as never);
     }
-    return cell.get();
+    return convertCellsToLinks(cell.get(), { doNotConvertCellResults: true });
   },
 
   /**
@@ -379,6 +393,31 @@ const handlers: Record<
       cell = cell.key(segment as never);
     }
     return cell.resolveAsCell().getRaw();
+  },
+
+  /**
+   * Mint a cell in this runtime's space holding `value`, and answer with the
+   * link that reaches it.
+   *
+   * `cause` names the cell, so two sessions asking for the same cause in the
+   * same space get the same cell and two causes get two cells. The answer is
+   * ordinary fabric data, so a later `send` can carry it into a handler input
+   * declared `asCell` — which is how a headless caller hands a pattern a cell
+   * it did not create, the way a browser viewer's resolved `#profile` reaches
+   * one.
+   */
+  async createCell({ cause, value }) {
+    const runtime = controller().runtime;
+    const space = currentPiece().getCell().getAsNormalizedFullLink().space;
+    const cell = runtime.getCell<FabricValue>(space, cause);
+    const { error } = await runtime.editWithRetry((tx) => {
+      cell.withTx(tx).set(value as never);
+    });
+    if (error) {
+      throw new Error(`createCell failed: ${error.message}`);
+    }
+    await idle();
+    return cell.getAsLink();
   },
 
   /**

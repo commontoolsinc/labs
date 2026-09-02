@@ -177,6 +177,7 @@ const readClaimValue = async (
 
 interface LabelViewResult {
   readonly view: CfcLabelView | undefined;
+
   /**
    * True when the fallback `resolveAsCell()` path read a resolved cell's label
    * and got nothing back. `getCfcLabel` is a pure, non-blocking store read, so

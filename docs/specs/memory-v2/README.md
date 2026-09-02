@@ -28,7 +28,9 @@ session-scoped catch-up sync.
 8. **Session-scoped catch-up sync** — The server tracks what a session has
    already integrated and pushes catch-up frames for the union of the session's
    active interests, rather than routing updates through individual
-   subscriptions.
+   subscriptions. On a reconnect the client's own statement of what it holds
+   takes that tracking's place as the diff base, so the catch-up re-delivers
+   exactly what the client lacks.
 9. **Schema-based traversal** — Graph queries follow JSON Schema-defined
    references, reusing `traverse.ts` patterns (cycle detection, schema
    narrowing).
@@ -107,7 +109,7 @@ session-scoped catch-up sync.
 | 4       | [04-protocol.md](./04-protocol.md)                                 | WebSocket transport, session open/resume, session sync effects, commands (transact/query/watch/branch), UCAN auth, and client API |
 | 5       | [05-queries.md](./05-queries.md)                                   | One-shot queries, schema traversal, point-in-time reads, watch sets, and session-scoped catch-up sync                             |
 | 6       | [06-branching.md](./06-branching.md)                               | Branch lifecycle, isolation, merging, conflict resolution, point-in-time reads on branches, and branch diffs                      |
-| 7       | [07-op-views-and-annotations.md](./07-op-views-and-annotations.md) | Future work for collaborative field projections, storage-derived side-data, and user-level anchored annotations                   |
+| 7       | [07-op-views-and-annotations.md](./07-op-views-and-annotations.md) | Live contract for atomic collaborative operations, submitted/integrated/materialized projections, cursors, and anchors           |
 | 8       | [08-conflict-granularity.md](./08-conflict-granularity.md)         | How commit-time conflict detection decides read/write overlap, and the granularity refinements                                    |
 | 9       | [09-invariants.md](./09-invariants.md)                             | Normative catalog of end-to-end consistency invariants (INV-1..INV-11), soundness directions, and the checkers that guard them    |
 
@@ -124,6 +126,7 @@ broader target sections.
 | ---------------------------------------------------------------- | ------------------------------------------------------------------ |
 | [implementation-plan.md](./implementation-plan.md)               | Current implementation status, shipped scope, deferred items, and focused test coverage |
 | [10-implementation-guidance.md](./10-implementation-guidance.md) | Architectural guidance, known pitfalls, phasing, and anti-patterns |
+| [../../plans/memory-apply-op.md](../../plans/memory-apply-op.md)  | In-progress implementation sequence for `apply-op`, the CodeMirror codec, and editor-neutral operation sessions |
 
 ## Key Type Summary
 

@@ -82,6 +82,7 @@ Deno.test("coverage baseline files round-trip stable metric samples", () => {
 Deno.test("coverage baseline files read a file the performance gate wrote", () => {
   // Written when the artifact also carried CI timing metrics: the file names
   // the run's page, and the uncovered-line count sits under `durationSeconds`.
+
   const legacy = JSON.stringify({
     version: 1,
     generatedAt: "2026-01-01T00:00:00Z",
@@ -207,6 +208,7 @@ Deno.test("cache state parsing poisons the collection on any bad record", () => 
   // A record that fails to parse could be the cold shard; surviving records
   // must not tag its family warm, so the whole parse degrades to null
   // (unknown) — same policy as an artifact download failure.
+
   const originalWarn = console.warn;
   const warnings: string[] = [];
   try {
@@ -232,6 +234,7 @@ Deno.test("cache state parsing poisons the collection on any bad record", () => 
 Deno.test("cache state parsing keeps valid unknown-family records inert", () => {
   // An unknown family name is forward-compatible data, not corruption: it
   // parses cleanly and aggregation simply never assigns it a state.
+
   const records = parseCacheStateFiles([
     '{"family":"runner","shard":"1","matchedKey":"","exactHit":false}',
     '{"family":"pattern-integration","shard":"2","matchedKey":"compile-abc","exactHit":false}',
@@ -283,6 +286,7 @@ Deno.test("baseline override parser rejects a total in place of an increment", (
   // An acceptance naming a total says nothing about how much debt the pull
   // request adds, and means something different against every baseline, so it
   // is rejected rather than read as though it were an increment.
+
   assertThrows(
     () =>
       parseBaselineOverrides(
@@ -424,6 +428,7 @@ Deno.test("legacy override parsing ignores the defunct timing form", () => {
   // NEW_PERF_BASELINE once accepted timing regressions too; those gate nothing
   // now, so a legacy timing line is ignored rather than rejected — a merged PR
   // that carried one must still yield its coverage-debt acceptance.
+
   const overrides = parseBaselineOverrides(
     "NEW_PERF_BASELINE: job: Check = 7s\n" +
       "NEW_PERF_BASELINE: coverage-debt: packages/runner uncovered lines = 9 lines",
@@ -749,6 +754,7 @@ Deno.test("buildCoverageResolvedComment reports a group that gained uncovered li
   // than `main` when the regression was accepted with a per-group acceptance or
   // the coverage reset marker. The table reports the increase rather than
   // hiding it.
+
   const resolved = buildCoverageResolvedComment(0, [
     { group: "packages/runner", baseline: 12, current: 15 },
   ]);
@@ -762,6 +768,7 @@ Deno.test("buildCoverageResolvedComment reports a group that gained uncovered li
 Deno.test("buildCoverageResolvedComment says the debt was overridden, not improved", () => {
   // The gate passed because the debt was accepted, so the summary must not
   // imply the new code is covered, even when a group also improved.
+
   const resolved = buildCoverageResolvedComment(
     4,
     [{ group: "packages/runner", baseline: 12, current: 15 }],
@@ -783,6 +790,40 @@ Deno.test("buildCoverageResolvedComment says the debt was overridden, not improv
     resolved,
     "| `packages/runner` | 12 | 15 | 3 lines more |",
   );
+  // Nothing was named, so the section that names files is left out entirely.
+  assertFalse(resolved.includes("### Files with new uncovered lines"));
+});
+
+Deno.test("buildCoverageResolvedComment names the files an accepted debt stands in for", () => {
+  const resolved = buildCoverageResolvedComment(
+    0,
+    [{ group: "tasks", baseline: 1846, current: 1857 }],
+    true,
+    [
+      { relativePath: "tasks/one.ts", group: "tasks", uncoveredCount: 11 },
+      { relativePath: "tasks/two.ts", group: "tasks", uncoveredCount: 1 },
+    ],
+  );
+
+  assertStringIncludes(resolved, "### Files with new uncovered lines");
+  assertStringIncludes(resolved, "- `tasks/one.ts` — 11 lines");
+  // A single line reads as a line, the same as it does in the regression body.
+  assertStringIncludes(resolved, "- `tasks/two.ts` — 1 line");
+});
+
+Deno.test("buildCoverageResolvedComment names no files when the debt was covered", () => {
+  // Coverage that improved has no acceptance to account for, so a file list
+  // would be describing debt that is not there.
+
+  const resolved = buildCoverageResolvedComment(
+    5,
+    [{ group: "tasks", baseline: 1857, current: 1852 }],
+    false,
+    [{ relativePath: "tasks/one.ts", group: "tasks", uncoveredCount: 11 }],
+  );
+
+  assertFalse(resolved.includes("### Files with new uncovered lines"));
+  assertFalse(resolved.includes("tasks/one.ts"));
 });
 
 Deno.test("buildCoverageResolvedComment falls back to a sentence with no groups", () => {
@@ -1291,6 +1332,7 @@ Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip 
 Deno.test("buildCoverageDebtUnattributedComment omits run identity it does not have", () => {
   // A local run of the checker has no workflow run behind it, and a group can
   // reach the comment without a baseline run to name.
+
   const local = buildCoverageDebtUnattributedComment({
     groups: [{ group: "tasks", target: 0, current: 1 }],
     files: [{ relativePath: "tasks/test-records.ts", lines: [90] }],

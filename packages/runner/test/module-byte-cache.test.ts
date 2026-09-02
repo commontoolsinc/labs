@@ -33,7 +33,7 @@ const runtimeVersion = resolvedRuntimeVersion;
 class FakeByteCache implements ModuleByteCache {
   gets = 0;
   puts = 0;
-  private readonly m = new Map<string, CompiledModuleArtifact>();
+  readonly #m = new Map<string, CompiledModuleArtifact>();
   getCompleteSet(
     rt: string,
     ids: readonly string[],
@@ -41,7 +41,7 @@ class FakeByteCache implements ModuleByteCache {
     this.gets++;
     const out = new Map<string, CompiledModuleArtifact>();
     for (const id of ids) {
-      const a = this.m.get(`${rt}\0${id}`);
+      const a = this.#m.get(`${rt}\0${id}`);
       if (a === undefined) return undefined;
       out.set(id, a);
     }
@@ -53,7 +53,7 @@ class FakeByteCache implements ModuleByteCache {
   ): void {
     this.puts++;
     for (const x of mods) {
-      this.m.set(`${rt}\0${x.identity}`, {
+      this.#m.set(`${rt}\0${x.identity}`, {
         js: x.js,
         ...(x.sourceMap === undefined ? {} : { sourceMap: x.sourceMap }),
         ...(x.patternCoverageSpans === undefined
@@ -70,9 +70,11 @@ class FakeByteCache implements ModuleByteCache {
   }
 }
 
-// A shared module-byte cache lets a fresh runtime compiling into a fresh space
-// reuse another runtime's compiled module bytes (cross-runtime, cross-space).
 describe("ModuleByteCache cross-runtime reuse", () => {
+  // A shared module-byte cache lets a fresh runtime compiling into a fresh
+  // space reuse another runtime's compiled module bytes (cross-runtime,
+  // cross-space).
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
   const PROGRAM: RuntimeProgram = {

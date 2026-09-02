@@ -41,6 +41,7 @@ export class TransformationContext {
   readonly factory: ts.NodeFactory;
   readonly sourceFile: ts.SourceFile;
   readonly options: TransformationOptions;
+
   /**
    * The cross-transformer communication registries every stage in this run
    * shares. Either injected through `options.state` or created here; the same
@@ -48,6 +49,7 @@ export class TransformationContext {
    * `TransformationContext` built from these options joins the same run.
    */
   readonly state: CrossStageState;
+
   readonly cfHelpers: CFHelpers;
   readonly diagnostics: TransformationDiagnostic[] = [];
   readonly tsContext: ts.TransformationContext;
@@ -70,7 +72,7 @@ export class TransformationContext {
   }
 
   reportDiagnostic(input: DiagnosticInput): void {
-    const { start, length } = this.resolveDiagnosticRange(input.node);
+    const { start, length } = this.#resolveDiagnosticRange(input.node);
     const location = this.sourceFile.getLineAndCharacterOfPosition(start);
     const diagnostic: TransformationDiagnostic = {
       severity: input.severity ?? "error",
@@ -101,7 +103,7 @@ export class TransformationContext {
    * collide between files.
    */
   reportDiagnosticOnce(input: DiagnosticInput): void {
-    const { start, length } = this.resolveDiagnosticRange(input.node);
+    const { start, length } = this.#resolveDiagnosticRange(input.node);
     const key = `${this.sourceFile.fileName}:${input.type}:${start}:${length}`;
     if (!this.state.markDiagnosticReported(key)) {
       return;
@@ -109,7 +111,7 @@ export class TransformationContext {
     this.reportDiagnostic(input);
   }
 
-  private resolveDiagnosticRange(
+  #resolveDiagnosticRange(
     node: ts.Node,
   ): { start: number; length: number } {
     let current: ts.Node | undefined = node;
@@ -157,7 +159,7 @@ export class TransformationContext {
    */
   markAsArrayMethodCallback(node: ts.Node): void {
     this.state.markArrayMethodCallback(node);
-    this.invalidateReactiveAnalysisCaches();
+    this.#invalidateReactiveAnalysisCaches();
   }
 
   /**
@@ -179,7 +181,7 @@ export class TransformationContext {
    */
   markAsSyntheticComputeCallback(node: ts.Node): void {
     this.state.markSyntheticComputeCallback(node);
-    this.invalidateReactiveAnalysisCaches();
+    this.#invalidateReactiveAnalysisCaches();
   }
 
   /**
@@ -191,7 +193,7 @@ export class TransformationContext {
 
   markSyntheticComputeOwnedSubtree(node: ts.Node): void {
     this.state.markSyntheticComputeOwnedSubtree(node);
-    this.invalidateReactiveAnalysisCaches();
+    this.#invalidateReactiveAnalysisCaches();
   }
 
   isSyntheticComputeOwnedNode(node: ts.Node): boolean {
@@ -269,7 +271,7 @@ export class TransformationContext {
       return;
     }
     this.state.markSyntheticReactiveCollection(symbol);
-    this.invalidateReactiveAnalysisCaches();
+    this.#invalidateReactiveAnalysisCaches();
   }
 
   /**
@@ -362,7 +364,7 @@ export class TransformationContext {
     return info;
   }
 
-  private invalidateReactiveAnalysisCaches(): void {
+  #invalidateReactiveAnalysisCaches(): void {
     this.#reactiveContextCache = new WeakMap<ts.Node, ReactiveContextInfo>();
     this.#relevantDataFlowCache = new WeakMap<
       DataFlowAnalysis,

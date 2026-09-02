@@ -5,13 +5,20 @@
  * token that is not a piece, a position inside one, another space's
  * reference.
  */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
 import { assignSlug, resolvePieceAddress } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { entityIdFrom, Runtime, slugIdForSpace } from "@commonfabric/runner";
+import {
+  entityIdFrom,
+  getEntityId,
+  Runtime,
+  slugIdForSpace,
+} from "@commonfabric/runner";
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CfHarnessEngine } from "../src/engine.ts";
@@ -91,12 +98,22 @@ describe("assign-slug", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let pieces: PiecesController;
+  let originalFetch: typeof globalThis.fetch;
 
   beforeEach(async () => {
+    originalFetch = globalThis.fetch;
+    const patternFetch: typeof globalThis.fetch = () =>
+      Promise.resolve(
+        new Response(DEFAULT_PATTERN_SOURCE, {
+          headers: { "content-type": "text/typescript-jsx" },
+        }),
+      );
+    globalThis.fetch = patternFetch;
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
+      fetch: patternFetch,
     });
     pieces = new PiecesController(
       await createSession({
@@ -111,6 +128,7 @@ describe("assign-slug", () => {
   afterEach(async () => {
     await runtime?.dispose();
     await storageManager?.close();
+    globalThis.fetch = originalFetch;
   });
 
   function createEngine() {
@@ -243,10 +261,7 @@ describe("assign-slug", () => {
       expect(registered.map((piece) => piece.id)).toEqual([created.pieceId]);
     });
 
-    it("reports the listing failure when an already-named piece cannot join a missing registry", async () => {
-      // Same pre-state as above, but the space has no default pattern, so
-      // ensuring membership has no registry to join. Both halves of the
-      // contract cannot hold, and the answer says which one failed.
+    it("initializes the space when an already-named piece has no registry to join", async () => {
       const engine = createEngine();
       const created = await createPiece(engine);
       const cell = pieces.runtime.getCellFromLink(
@@ -259,9 +274,35 @@ describe("assign-slug", () => {
         token: created.resultRef,
         slug: "doubling-report",
       });
+      const output = result.output as AssignSlugToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(await pieces.getDefaultPattern(false)).toBeDefined();
+      const registered = await pieces.getRegisteredPieces();
+      expect(registered.map((piece) => piece.id)).toEqual([created.pieceId]);
+    });
+
+    it("reports an initialization failure while listing an already-named piece", async () => {
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      const cell = pieces.runtime.getCellFromLink(
+        parseLLMFriendlyLink(created.resultRef, pieces.getSpace()),
+      );
+      await cell.sync();
+      await assignSlug(pieces, cell, "doubling-report");
+      const originalEnsureDefaultPattern = pieces.ensureDefaultPattern;
+      pieces.ensureDefaultPattern = () =>
+        Promise.reject(new Error("space root unavailable"));
+
+      const result = await engine.invokeBuiltinTool("assign_slug", {
+        token: created.resultRef,
+        slug: "doubling-report",
+      });
+      pieces.ensureDefaultPattern = originalEnsureDefaultPattern;
+
       const output = result.output as AssignSlugToolErrorOutput;
       expect(output.status).toBe("error");
       expect(output.message).toContain("failed while listing");
+      expect(output.message).toContain("space root unavailable");
     });
 
     it("does not list the piece twice when retried after a failed assignment", async () => {
@@ -538,20 +579,82 @@ describe("assign-slug", () => {
       expect(output.message).toContain("requires a token");
     });
 
-    it("reports the naming failure when the space has no piece registry to join", async () => {
-      // No default pattern linked, so `pieces.add` has nothing to register
-      // through. The piece stays reachable by its handle; only the naming
-      // failed, and the message says which step.
+    it("initializes a fresh space before registering and naming the piece", async () => {
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      expect(await pieces.getDefaultPattern(false)).toBeUndefined();
+
+      const result = await engine.invokeBuiltinTool("assign_slug", {
+        token: created.resultRef,
+        slug: "doubling-report",
+      });
+      const output = result.output as AssignSlugToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(await pieces.getDefaultPattern(false)).toBeDefined();
+      const registered = await pieces.getRegisteredPieces();
+      expect(registered.map((piece) => piece.id)).toEqual([created.pieceId]);
+      expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
+        created.pieceId,
+      );
+    });
+
+    it("reports the naming failure when the space root cannot be initialized", async () => {
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      const originalEnsureDefaultPattern = pieces.ensureDefaultPattern;
+      pieces.ensureDefaultPattern = () =>
+        Promise.reject(new Error("space root unavailable"));
+
+      const result = await engine.invokeBuiltinTool("assign_slug", {
+        token: created.resultRef,
+        slug: "doubling-report",
+      });
+      pieces.ensureDefaultPattern = originalEnsureDefaultPattern;
+
+      const output = result.output as AssignSlugToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("failed while naming");
+      expect(output.message).toContain("space root unavailable");
+    });
+
+    it("leaves an initialized space root untouched while assigning the slug", async () => {
+      await linkDefaultPattern();
+      const existingRoot = await pieces.getDefaultPattern(false);
+      expect(existingRoot).toBeDefined();
+      const existingRootId = getEntityId(existingRoot!);
+      const originalEnsureDefaultPattern = pieces.ensureDefaultPattern.bind(
+        pieces,
+      );
+      const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+      let ensureCalls = 0;
+      let rootWriteAttempts = 0;
+      pieces.ensureDefaultPattern = async () => {
+        ensureCalls++;
+        runtime.editWithRetry = ((fn, maxRetries) => {
+          rootWriteAttempts++;
+          return originalEditWithRetry(fn, maxRetries);
+        }) as typeof runtime.editWithRetry;
+        try {
+          return await originalEnsureDefaultPattern();
+        } finally {
+          runtime.editWithRetry = originalEditWithRetry;
+        }
+      };
+
       const engine = createEngine();
       const created = await createPiece(engine);
       const result = await engine.invokeBuiltinTool("assign_slug", {
         token: created.resultRef,
         slug: "doubling-report",
       });
-      const output = result.output as AssignSlugToolErrorOutput;
-      expect(output.status).toBe("error");
-      expect(output.message).toContain("failed while naming");
-      expect(output.message).toContain("default pattern");
+      pieces.ensureDefaultPattern = originalEnsureDefaultPattern;
+
+      const output = result.output as AssignSlugToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(ensureCalls).toBe(1);
+      expect(rootWriteAttempts).toBe(0);
+      const rootAfterAssignment = await pieces.getDefaultPattern(false);
+      expect(getEntityId(rootAfterAssignment!)).toEqual(existingRootId);
     });
 
     it("surfaces a rejected session construction as a structured error", async () => {

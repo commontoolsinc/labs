@@ -4,13 +4,19 @@ import type {
   SchemaPathSelector,
 } from "@commonfabric/api";
 import type {
+  ApplyOpOperation,
+  ApplyOpResolution,
   ClientCommit,
   CommitClass,
   CommitPrecondition,
   EntityDocument,
   EntityIdListOptions,
   EntityIdListResult,
+  EventAttentionResolveResult,
+  OperationFieldQuery,
+  OperationFieldSnapshot,
   PatchOp,
+  ReleaseOpFieldOperation,
   ScopeKey,
   ScopeKeyIdentity,
   SqliteDbRef,
@@ -19,7 +25,9 @@ import type {
   SqliteQueryResult,
   SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
+import type { DeliveryFailureClass } from "@commonfabric/memory/v2";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
+import type { Cancel } from "../cancel.ts";
 import type { EntityId } from "../create-ref.ts";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
@@ -55,6 +63,7 @@ import type {
   CfcLabelMetadataObservation,
   CfcLabelMetadataProtectionMode,
   CfcPolicyEvaluationMode,
+  CfcRefusalDetail,
   CfcTriggerReadGating,
   CfcTxState,
   CfcWriteFloorMode,
@@ -62,10 +71,12 @@ import type {
   ConsultedPolicyManifest,
   ImplementationIdentity,
   PostCommitSideEffect,
+  RuntimeWritePolicyAuthorization,
   TrustSnapshot,
   WritePolicyInput,
 } from "../cfc/mod.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
+import { RAW_META_WRITE } from "../meta-seam.ts";
 export type { DID, MediaType, MemorySpace, Result, Signer, State, Unit, URI };
 export type ChangeGroup = unknown;
 
@@ -81,6 +92,66 @@ export interface IStorageError {
   readonly message: string;
 }
 
+/** Typed producer evidence for a required replica load that failed before an
+ * at-most-once handler could dispatch. The scheduler receives typed failure
+ * evidence; an error name may inform `failureClass`, but diagnostic text never
+ * constitutes policy evidence or durable `permanentEvidence`. */
+export type ReplicaLoadFailure = {
+  failureClass: DeliveryFailureClass;
+  recoveryEpoch: string;
+  permanentEvidence: boolean;
+};
+
+export class ReplicaLoadFailureError extends Error {
+  override readonly name = "ReplicaLoadFailureError";
+
+  constructor(
+    readonly failure: ReplicaLoadFailure,
+    cause: unknown,
+  ) {
+    super(
+      cause instanceof Error ? cause.message : String(cause),
+      { cause },
+    );
+  }
+}
+
+export const toReplicaLoadFailureError = (
+  cause: unknown,
+  recoveryEpoch: string,
+): ReplicaLoadFailureError => {
+  if (cause instanceof ReplicaLoadFailureError) return cause;
+  const named = cause as {
+    name?: unknown;
+    message?: unknown;
+    permanentEvidence?: unknown;
+    aclRevision?: unknown;
+  } | undefined;
+  const name = typeof named?.name === "string" ? named.name : "";
+  const failureClass: DeliveryFailureClass = name === "SessionRevokedError"
+    ? "session-revoked"
+    : name === "ConnectionError"
+    ? "connection"
+    : name === "AuthorizationError"
+    ? "authorization"
+    : name === "ProtocolError"
+    ? "protocol"
+    : name === "TimeoutError"
+    ? "timeout"
+    : "unknown";
+  const aclRevision = named?.aclRevision;
+  const permanentAclEvidence = failureClass === "authorization" &&
+    named?.permanentEvidence === true && typeof aclRevision === "number";
+  return new ReplicaLoadFailureError({
+    failureClass,
+    recoveryEpoch: permanentAclEvidence ? `acl:${aclRevision}` : recoveryEpoch,
+    // A name is not durable evidence. Authorization becomes permanent only
+    // when the memory server supplies the current ACL revision. Versioned
+    // protocol validators construct ReplicaLoadFailureError directly.
+    permanentEvidence: permanentAclEvidence,
+  }, cause);
+};
+
 /**
  * Metadata that can be attached to read operations
  */
@@ -91,12 +162,14 @@ export interface Metadata extends Record<PropertyKey, unknown> {}
  */
 export interface IReadOptions {
   meta?: Metadata;
+
   /**
    * When true, register the read in transaction activity but skip loading
    * from storage. Use when caller already has the value and only needs
    * dependency tracking.
    */
   trackReadWithoutLoad?: boolean;
+
   /**
    * When true, the read is tracked as non-recursive for scheduler invalidation:
    * parent/same-path writes invalidate, child writes invalidate only on key
@@ -143,6 +216,7 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * space.
    */
   open(space: MemorySpace): IStorageProvider;
+
   /**
    * Whether SPACE's replica holds server-confirmed verified content for
    * `cid:<hash>` — the write-side elision seam for schema-document
@@ -181,6 +255,9 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * through the provisional route.
    */
   registerSpaceHost?(space: MemorySpace, host: string): boolean;
+
+  /** Changes memory-message compression for live and later remote sessions. */
+  setMessageCompressionEnabled?(enabled: boolean): Promise<void>;
 
   /**
    * Register a derived space identity for fresh-space ACL genesis. Optional:
@@ -231,6 +308,7 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * @returns Promise that resolves when all pending syncs are complete.
    */
   synced(): Promise<void>;
+
   /** INBOUND settlement only (server-execution v2 stage F): outstanding
    * watch refreshes/pulls, EXCLUDING commit settlement AND update
    * processing — the serving loop's wave-settle barrier. Both exclusions
@@ -405,6 +483,36 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    */
   loadsSettled?(keys: readonly string[]): Promise<void>;
 
+  /** A new generation of the SAME required load is a causal recovery wake.
+   * `failedEpoch` is stable for the document across manager recreation;
+   * `recoveryEpoch` uniquely names the replacement generation. Carrying both
+   * prevents an unrelated document recovery from authorizing a retry. */
+  loadRecoveryObserver?:
+    | ((recovery: {
+      failedEpoch: string;
+      recoveryEpoch: string;
+    }) => void)
+    | undefined;
+
+  /** Authenticated current-session recovery for one OW54 terminal notice. */
+  resolveEventAttention?(
+    space: MemorySpace,
+    eventId: string,
+    seq: number,
+    sidecarId: string,
+    action: "retry" | "dismiss",
+  ): Promise<EventAttentionResolveResult>;
+
+  /**
+   * THE SESSION REMOUNT's trigger: an admitted commit touched `space`'s ACL
+   * document. A space session this manager holds — revoked or denied by an
+   * EARLIER ACL verdict — is dropped so the next load re-opens it, because
+   * the ACL is the only input that decision has. Never widens authority: a
+   * genuine de-authorization is refused again at `session.open`. Implemented
+   * by the v2 StorageManager; the serving loop's host is its only caller.
+   */
+  noteSpaceAclChanged?(space: MemorySpace): void;
+
   /**
    * Load cell from storage. Will also subscribe to new changes.
    *
@@ -485,6 +593,28 @@ export interface IStorageProvider {
    * @returns Promise that resolves when all pending syncs are complete.
    */
   synced(): Promise<void>;
+
+  /**
+   * Load the documents `source` read as absent without this replica ever
+   * having examined them (no local record; session-scoped instances
+   * excluded, since a fresh session instance cannot exist server-side), and
+   * resolve with how many turned out to exist.
+   *
+   * An unexamined absence becomes a `seq: 0` confirmed read in the
+   * transaction's commit — the claim that no such document exists — which
+   * the server rejects whenever one does. `Runtime.editWithRetry` consults
+   * this before committing: a non-zero count means the transaction's reads
+   * ran against documents it did not hold, so the attempt is re-run locally
+   * against the now-loaded documents instead of being rejected on the wire.
+   * Returns `0` synchronously when the transaction holds no unexamined
+   * absences, so commit paths that are synchronous stay synchronous.
+   * Optional: a provider without it simply leaves that convergence to the
+   * server's rejection and the retry gate, exactly as before.
+   */
+  loadUnexaminedAbsences?(
+    source: IStorageTransaction | undefined,
+  ): number | Promise<number>;
+
   /** INBOUND settlement only (server-execution v2 stage F): outstanding
    * watch refreshes/pulls, EXCLUDING commit settlement AND update
    * processing — the serving loop's wave-settle barrier. Both exclusions
@@ -554,6 +684,34 @@ export interface IStorageProvider {
     path: string,
   ): Promise<SqliteRegisterDiskSourceResult>;
 }
+
+export interface IOperationStorageCapability {
+  operationCodecs(): Promise<readonly string[]>;
+
+  queryOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+  ): Promise<OperationFieldSnapshot>;
+
+  applyOperation(operation: ApplyOpOperation): Promise<ApplyOpResolution>;
+
+  releaseOperationField(operation: ReleaseOpFieldOperation): Promise<void>;
+
+  subscribeOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+    callback: (snapshot: OperationFieldSnapshot) => void,
+  ): Promise<Cancel>;
+}
+
+export const hasOperationStorageCapability = (
+  value: unknown,
+): value is IOperationStorageCapability => {
+  const candidate = value as Partial<IOperationStorageCapability>;
+  return typeof candidate.operationCodecs === "function" &&
+    typeof candidate.queryOperationField === "function" &&
+    typeof candidate.applyOperation === "function" &&
+    typeof candidate.releaseOperationField === "function" &&
+    typeof candidate.subscribeOperationField === "function";
+};
 
 /**
  * Extension of {@link IStorageManager} which is supposed to merge into
@@ -651,10 +809,12 @@ export interface ICommitNotification {
    * The space into which changes were made.
    */
   space: MemorySpace;
+
   /**
    * Set of changes merged.
    */
   changes: IMergedChanges;
+
   /**
    * Transaction that committed changes. If legacy API is used it will not have
    * a source transaction.
@@ -673,6 +833,7 @@ export interface IRevertNotification {
    * The space into which changes were made.
    */
   space: MemorySpace;
+
   /**
    * Set of changes merged. Note that this is not necessary resetting every
    * change commit made to a state it had pre-commit as things may have changed
@@ -725,6 +886,7 @@ export interface IIntegrateNotification {
   type: "integrate";
   space: MemorySpace;
   changes: IMergedChanges;
+
   /**
    * Present ONLY on the flip a SPECULATION retirement produces
    * (server-execution v2, speculation.md §4's arrival-gated retirement,
@@ -770,29 +932,48 @@ export interface IWriteOptions {
    * from absent. A root-path delete retracts the document.
    */
   delete?: boolean;
+
+  /**
+   * Marks the write as one the runtime makes on a document's meta seam. See
+   * {@link RAW_META_WRITE}: the write chokepoint accepts a write that reaches
+   * a meta field on this mark and refuses one that arrives without it.
+   */
+  readonly [RAW_META_WRITE]?: true;
 }
 
 export interface ITransactionWriteRequest {
   address: IMemorySpaceAddress;
   value: FabricValue;
+
   /** See {@link IWriteOptions.delete}. */
   delete?: boolean;
 }
 
-export interface IMemoryChange {
+/**
+ * One address's before-and-after across a change.
+ *
+ * A type alias rather than an `interface`, and it has to stay one: its members
+ * are `FabricValue`s and it rides the IPC envelope inside a telemetry marker,
+ * so it must be able to satisfy `FabricPlainObject`. An `interface` never can,
+ * however plain its members -- TypeScript grants the implicit index signature
+ * that requires to an anonymous object type and not to an interface.
+ */
+export type IMemoryChange = {
   /**
    * Memory address that was changed.
    */
   address: IMemoryAddress;
+
   /**
    * Value memory address had before change.
    */
   before: FabricValue;
+
   /**
    * Value memory address has after change.
    */
   after: FabricValue;
-}
+};
 
 export type StorageTransactionStatus =
   | { status: "ready"; journal: ITransactionJournal }
@@ -846,11 +1027,13 @@ export interface IStorageTransaction {
    * Optional change group used to associate commits with scheduler actions.
    */
   changeGroup?: ChangeGroup;
+
   /**
    * When true, the transaction bypasses batch-signing debounce and flushes
    * immediately. Set for user-interactive paths (editWithRetry, events).
    */
   immediate?: boolean;
+
   /**
    * The scheduler action whose run opened this transaction (spec scheduler-v2
    * P5). Change records derived from this transaction must not re-trigger this
@@ -858,6 +1041,7 @@ export interface IStorageTransaction {
    * across instances.
    */
   sourceAction?: object;
+
   /**
    * The scope INSTANCE identity this transaction's scoped reads and writes
    * resolve against when it is NOT the storage manager's own session
@@ -872,6 +1056,7 @@ export interface IStorageTransaction {
    * transaction per instance run — `runOnce`).
    */
   scopeKeyIdentity?: ScopeKeyIdentity;
+
   /**
    * Opt the transaction into writing to more than one memory space. By default
    * a transaction may write to a single space only. When enabled, commit()
@@ -900,6 +1085,7 @@ export interface IStorageTransaction {
    * failures are logged).
    */
   enableMultiSpaceWrites?(order?: readonly MemorySpace[]): void;
+
   /**
    * Confirm that every replica supplying this transaction's read basis is
    * still the active replica for its space. Storage calls this immediately
@@ -907,13 +1093,16 @@ export interface IStorageTransaction {
    * computed from the old replica into another space.
    */
   validateReplicaRoutes?(): Result<Unit, IStorageTransactionInconsistent>;
+
   /**
    * Optional read-only mode hook used by runtime-generated fallback read
    * transactions.
    */
   setReadOnly?(reason?: string): void;
+
   clearReadOnly?(): void;
   isReadOnly?(): boolean;
+
   /**
    * The transaction journal containing all read and write activities.
    * Provides access to transaction operations and dependency tracking.
@@ -943,6 +1132,7 @@ export interface IStorageTransaction {
     space: MemorySpace,
     precondition: CommitPrecondition,
   ): void;
+
   getCommitPreconditions?(
     space: MemorySpace,
   ): readonly CommitPrecondition[] | undefined;
@@ -960,8 +1150,10 @@ export interface IStorageTransaction {
    * Make this transaction's writes AUTHORITATIVE: every value write is
    * recorded and committed even when it equals the currently-visible
    * state, instead of being elided as a no-op (deletes of absent slots
-   * stay no-ops — there is nothing to assert). One-way; there is no
-   * un-mark.
+   * stay no-ops — there is nothing to assert). Implies
+   * {@link markWholeDocumentWrites}, so the writes also commit as
+   * whole-document set/delete and the mergeable intents they recorded are
+   * abandoned. One-way; there is no un-mark.
    *
    * Exists for effect-COMPLETION writebacks under the serving posture
    * (server-execution v2 stage G, serving-loop.md §4): the ordinary
@@ -984,6 +1176,30 @@ export interface IStorageTransaction {
    * (`normalizeAndDiff`), whose equal-leaf elision sits ABOVE the
    * transaction layer and must yield for the same reason. */
   isAuthoritativeWrites?(): boolean;
+
+  /**
+   * Emit this transaction's document writes as WHOLE-DOCUMENT set/delete
+   * operations rather than as patches or mergeable collection ops, while
+   * leaving the no-op elision alone. Recorded mergeable intents are
+   * abandoned with the ops they would have produced, so the reads
+   * incidental to those ops stay in the commit's read set — the
+   * whole-document write is the value the run computed from what it read.
+   * One-way; there is no un-mark. {@link markAuthoritativeWrites} implies
+   * this and additionally disables the elision.
+   *
+   * Exists for the client speculation overlay (server-execution v2 Phase 2,
+   * speculation.md §1): an overlay entry's operations are layered above the
+   * confirmed value and materialized over it on every read. A patch is
+   * relative to the layer beneath it, and that layer moves — the space's
+   * serving runtime commits the authoritative derivation for the same
+   * document, and it arrives before the entry's watermark coverage retires
+   * the entry. A positional array splice re-applied over an array that
+   * already carries what it inserts duplicates that element; one that
+   * removed elements drops one, and a mergeable append double-applies. A
+   * whole-document set says what the run computed, so the entry renders
+   * that value over whatever lies beneath it.
+   */
+  markWholeDocumentWrites?(): void;
 
   /**
    * Record one mergeable-write delta against the document at `address` (see
@@ -1092,6 +1308,7 @@ export interface IStorageTransaction {
    * instead of materializing novelty/history attestations.
    */
   getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
+
   /**
    * The manager's `isSchemaDocPersisted`, reachable from the transaction
    * (the staging scan runs inside one). Optional the same way; absent
@@ -1288,6 +1505,7 @@ export interface ITransactionSealSink {
     native: NativeStorageCommit,
     source: IStorageTransaction,
   ): Promise<Result<Unit, CommitError>>;
+
   /**
    * The read set of a space this transaction READ but wrote nothing to
    * (stage F, discharging a stage-D bound): a tx seals only spaces it
@@ -1373,6 +1591,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * a caller writing documents itself.
    */
   stageSchemaDocClosure(space: MemorySpace, rootHash: string): void;
+
   tx: IStorageTransaction;
 
   /**
@@ -1414,6 +1633,20 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   dispatchedEventTime?: number;
 
   /**
+   * The dispatched handler's BODY did not run (the runner's stream-path
+   * argument-did-not-resolve skip: `isValidArgument === false`, runner.ts).
+   * Set by the runner on the skip; consumed by the scheduler's event
+   * finalize for mark/effects atomicity (events.md §4, RULED 2026-08-27):
+   * a SERVED dispatch's transaction carries the entry's pre-stamped
+   * `consequenced` mark, so sealing a skipped run would commit the mark
+   * with ZERO effects and permanently consume the event (the a04 1-op
+   * shape). The finalize withdraws the whole transaction instead — the
+   * entry stays pending-unconsequenced and the drain re-delivers it.
+   * Client/OFF dispatches carry no mark and keep the silent skip.
+   */
+  dispatchedHandlerNotRun?: { reason: string };
+
+  /**
    * Commit-time preconditions attached to this transaction's commit in
    * the given space (scheduler-v2 §7.6). Violations surface as
    * IPreconditionFailedError (permanent — never retried).
@@ -1422,6 +1655,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
     space: MemorySpace,
     precondition: CommitPrecondition,
   ): void;
+
   getCommitPreconditions?(
     space: MemorySpace,
   ): readonly CommitPrecondition[] | undefined;
@@ -1452,8 +1686,10 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   getCfcState(): Readonly<CfcTxState>;
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;
   setCfcFlowLabelsMode(mode: CfcFlowLabelsMode): void;
+
   /** Set the write-side `requiredIntegrity` floor dial (§8.12.4.1 / SC-18). */
   setCfcWriteFloorMode(mode: CfcWriteFloorMode): void;
+
   /**
    * Enable trigger-read gating on the enforcement side (§8.9.2 / SC-3).
    * Anti-downgrade pinned: once enabled, disabling throws.
@@ -1461,11 +1697,13 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void;
 
   setCfcDecomposedEnvelopes(enabled: CfcDecomposedEnvelopes): void;
+
   /**
    * Set the exchange-rule policy evaluation dial (Epic B5, spec §4.4.5).
    * Anti-downgrade pinned: once `enforce`, weakening throws.
    */
   setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void;
+
   /**
    * Set the cross-space label-metadata representation dial (inv-12 Stage 1 /
    * SC-25, spec §4.6.4.1). Anti-downgrade pinned: once `enforce`, weakening
@@ -1474,11 +1712,13 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   setCfcLabelMetadataProtectionMode(
     mode: CfcLabelMetadataProtectionMode,
   ): void;
+
   /**
    * Set the declared-component monotonicity gate dial (WP5, §8.12.1).
    * Anti-downgrade pinned: once `enforce`, weakening throws.
    */
   setCfcDeclaredMonotonicityMode(mode: CfcDeclaredMonotonicityMode): void;
+
   /**
    * Exempt exactly one (doc, path, clauseDigest) triple from the
    * declared-monotonicity gate for this transaction — the §8.12.7 route 2b
@@ -1489,12 +1729,14 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   setCfcDeclaredWideningExemption(
     exemption: CfcDeclaredWideningExemption,
   ): void;
+
   /**
    * Record the addresses whose invalidating writes scheduled this run
    * (§8.9.2 trigger reads). Their labels join the flow-label derivation
    * even when the run never re-reads them.
    */
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void;
+
   /**
    * The flow-label relevance probe (`cfc/prepare.ts`'s
    * `flowLabelWorkExists`) evaluated ONCE per transaction activity epoch
@@ -1511,12 +1753,14 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * caller falls back to the free function.
    */
   probeFlowLabelWork?(): boolean;
+
   /**
    * Run `fn` with `meta` merged into every read issued within (explicit
    * per-read meta wins). Lets scheduling machinery tag its reads without
    * threading metadata through intermediate APIs.
    */
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T;
+
   markCfcRelevant(reason?: string): void;
   invalidateCfc(reason: string): void;
 
@@ -1540,6 +1784,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * after the transaction it was made against has finished.
    */
   markLazyMaterialize(enabled?: boolean): void;
+
   isLazyMaterialize(): boolean;
 
   /**
@@ -1575,6 +1820,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * of the run the same way either way.
    */
   noteSchemaRefusal(refusal: unknown): void;
+
   takeSchemaRefusal(): unknown;
 
   /**
@@ -1666,7 +1912,21 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * contract and to enable the within-sort tiebreaker cache in
    * `compareWritePolicyInput`.
    */
-  recordCfcWritePolicyInput(input: WritePolicyInput): void;
+  recordCfcWritePolicyInput(
+    input: WritePolicyInput,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): void;
+
+  /**
+   * Whether `input` was recorded by the runtime, under
+   * `runtimeWritePolicyAuthorization`.
+   *
+   * `recordCfcWritePolicyInput` is on this interface, and pattern-authored
+   * code reaches the transaction its cells are bound to, so an input's own
+   * fields say only what its recorder wrote. A gate that ACTS on an input
+   * asks this; a gate that measures one does not need to.
+   */
+  isRuntimeWritePolicyInput(input: WritePolicyInput): boolean;
 
   /**
    * Records a grant document consulted by policyState-guarded boundary
@@ -1713,6 +1973,18 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   recordCfcLabelMetadataObservation(
     observation: CfcLabelMetadataObservation,
   ): void;
+
+  /**
+   * Records a structured description of a refusal one of this transaction's
+   * CFC gates just decided (`cfc/refusal-detail.ts`): the boundary, the atoms
+   * outside it, and the reads that carried them.
+   *
+   * The prose reason remains the enforcement channel — a detail never decides
+   * anything, and recording one neither marks the transaction relevant nor
+   * invalidates a preparation. It exists so a refused caller can act: the
+   * detail names the INPUT to drop, which the reason alone cannot.
+   */
+  recordCfcRefusalDetail(detail: CfcRefusalDetail): void;
 
   /**
    * The trusted policy-writer path for CFC grant documents (§8.12.7 route
@@ -1821,6 +2093,21 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
       result: Result<Unit, CommitError>,
     ) => void,
   ): void;
+
+  /**
+   * Tell the post-commit effects this transaction staged and lost that no
+   * further attempt at its commit is coming, by calling each one's `abandon`.
+   * Exactly one of an effect's `flush` and `abandon` runs.
+   *
+   * Called by whoever owns the retries for this transaction, because a commit
+   * rejection does not say whether another attempt would fare better and the
+   * effect cannot tell. CFC enforcement refuses a commit both for a verdict on
+   * the data — a shape its rules do not support — and for metadata this replica
+   * has not read yet, and only the second converges when a later attempt sees
+   * more. Dispatched at most once, and never after a commit of this
+   * transaction succeeded.
+   */
+  abandonStagedWork(error: CommitError): void;
 
   /**
    * Reads a value from a (local) memory address and throws on error, except for
@@ -1985,6 +2272,12 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
  */
 export interface IStorageTransactionAborted extends IStorageError {
   readonly name: "StorageTransactionAborted";
+
+  /** Positive evidence that `abort()` discarded the transaction before a
+   * storage attempt. Commit-promise failures use the same error family but do
+   * not carry this marker because their storage outcome may be ambiguous. */
+  readonly abortedBeforeStorage?: true;
+
   /**
    * Reason provided when transaction was aborted.
    */
@@ -2016,6 +2309,40 @@ export interface IPreconditionFailedError extends Error {
 }
 
 /**
+ * The CFC boundary refused to hand the transaction to storage: policy
+ * evaluated the transaction's own reads and writes and rejected them
+ * (`rejectCommitBeforeStorage` in extended-storage-transaction.ts). A
+ * terminal rejection in the spec scheduler-v2 §7.6 taxonomy: the refusal is
+ * deterministic — re-running the identical computation recomputes the
+ * identical refused write — so the client must not retry. `reasons` carries
+ * the prepare refusal reasons verbatim (writer-fit misfits and the rest of
+ * what `prepareBoundaryCommit` collects); empty when the transaction reached
+ * commit relevant but never prepared, which is a caller bug with the same
+ * deterministic character.
+ */
+export interface ICfcCommitRefusalError extends IStorageError {
+  readonly name: "CfcCommitRefusalError";
+  readonly reasons: readonly string[];
+
+  /**
+   * Structured descriptions of the reasons whose producers could describe
+   * themselves (`cfc/refusal-detail.ts`), paired to `reasons` by their
+   * `reason` text. A refusal every producer left undescribed carries an
+   * empty list — the reasons still stand on their own.
+   */
+  readonly refusals: readonly CfcRefusalDetail[];
+}
+
+/** Commit preparation crashed before any storage attempt. This is typed apart
+ * from a deterministic CFC policy verdict so served delivery can apply OW54's
+ * bounded recovery policy without misreporting a handler error. */
+export interface ICommitPreparationError extends IStorageError {
+  readonly name: "CommitPreparationError";
+  readonly failureClass: "unknown";
+  readonly permanentEvidence: false;
+}
+
+/**
  * Error that indicating that no change could be made to a transaction is it is
  * no longer active.
  */
@@ -2032,6 +2359,8 @@ export type StorageTransactionRejected =
   | IStorageTransactionInconsistent
   | IConflictError
   | IPreconditionFailedError
+  | ICfcCommitRefusalError
+  | ICommitPreparationError
   | IStoreError
   | TransactionError
   | IConnectionError
@@ -2062,8 +2391,10 @@ export interface INotFoundError extends IStorageError {
   readonly name: "NotFoundError";
   readonly source: IAttestation;
   readonly address: IMemoryAddress;
+
   /** Path to the non-existent key, or `[]` if the document doesn't exist. */
   readonly path: readonly MemoryAddressPathComponent[];
+
   from(space: MemorySpace): INotFoundError;
 }
 
@@ -2118,15 +2449,18 @@ export type IMemoryAddress = {
    * URI to an entity. It corresponds to `of` field in the memory protocol.
    */
   id: URI;
+
   /**
    * Media type of the addressed value. Document addresses omit this; storage
    * boundaries use application/json.
    */
   type?: MediaType;
+
   /**
    * Declared scoped cell instance. Storage defaults omitted scope to `space`.
    */
   scope?: CellScope;
+
   /**
    * The explicit scope INSTANCE this address names (server-execution v2
    * stage A — OW17's instance-keyed replica and wire; key-vocabulary.md
@@ -2147,6 +2481,7 @@ export type IMemoryAddress = {
    * scope NAMES; instances resolve at the reader).
    */
   scopeKey?: ScopeKey;
+
   /**
    * Intra-value path to the {@link FabricValue} being referenced by this
    * address. It is a path within the `is` field of the state in the memory
@@ -2194,19 +2529,25 @@ export interface ISpace {
 export type EventAppendRequest = {
   /** The stream's sidecar doc id (`streamEntriesDocId`). */
   sidecarId: string;
+
   /** The stream link the entry self-describes (events.md §1). */
   stream: { id: string; path: readonly string[]; scope?: CellScope };
+
   /** The durable client-minted event id (event-identity). */
   eventId: string;
+
   /** The event payload — a FabricValue (round-2 thread T23): the type
    * is the admission boundary's own domain, so a payload the memory
    * protocol cannot represent is refused at the CALL SITE'S type check
    * instead of failing (or endlessly retrying) at delivery. */
   payload?: FabricValue;
+
   /** Client-minted append order within this session; allocated by the
    * queue when absent. */
   clientSeq?: number;
+
   runtimeInjectedEventKeys?: string[];
+
   /** The runtime's attestation that the sent event was renderer-trusted
    * (server-execution v2 fan-out stage B; the sister of
    * `runtimeInjectedEventKeys` — see `StreamEventEntry.rendererTrusted`).
@@ -2296,6 +2637,7 @@ export interface ISpaceReplica extends ISpace {
        * (reset sweeps and origin-drop cascades reach it) — is the
        * ordinary sealed-commit machinery. */
       readonly speculative?: boolean;
+
       /** Server-execution v2 stage A (OW17's tx→replica identity seam):
        * the sealing run's identity when it is not the replica's own. Its
        * operations apply to — and its verdict promotes or rolls back —
@@ -2334,6 +2676,13 @@ export interface ISpaceReplica extends ISpace {
   enqueueEventAppend?(
     append: EventAppendRequest,
   ): Promise<EventAppendDeliveryOutcome>;
+
+  resolveEventAttention?(
+    eventId: string,
+    seq: number,
+    sidecarId: string,
+    action: "retry" | "dismiss",
+  ): Promise<EventAttentionResolveResult>;
 
   /** Pending (undischarged) event intents — the offline event queue's
    * live content (speculation.md §5), bounded by pending-intent count. */
@@ -2474,11 +2823,13 @@ export type SealedCommitVerdict =
 export interface SealedNativeCommit {
   /** The replica-local seq the sealed pending writes are keyed by. */
   localSeq: number;
+
   /** The built commit — operations plus the read set (confirmed reads carry
    * the store versions the wave's per-doc CAS and basis rows are computed
    * from; pending reads name earlier sealed commits by localSeq, the
    * in-wave read edges). */
   commit: ClientCommit;
+
   /** Resolves when the verdict has been applied locally (promotion or
    * rollback complete). */
   settled: Promise<Result<Unit, StorageTransactionRejected>>;
@@ -2491,6 +2842,8 @@ export type PushError =
   | IStorageTransactionInconsistent
   | IConflictError
   | IPreconditionFailedError
+  | ICfcCommitRefusalError
+  | ICommitPreparationError
   | TransactionError
   | IAuthorizationError;
 
@@ -2523,6 +2876,7 @@ export interface TransactionWriteDetail {
   address: IMemorySpaceAddress;
   value?: FabricValue;
   previousValue?: FabricValue;
+
   /**
    * Pre-transaction slot presence at `address.path` — distinguishes an
    * absent slot from a present slot holding `undefined`, which
@@ -2564,6 +2918,7 @@ export type NativeStorageCommitOperation =
 export interface NativeStorageCommit {
   operations: readonly NativeStorageCommitOperation[];
   preconditions?: readonly CommitPrecondition[];
+
   /**
    * Folded SQLite write ops, applied in the same wire commit as `operations`
    * (appended last). They are NOT entity revisions and stay out of the
@@ -2580,6 +2935,7 @@ export type Activity = Variant<{
 export interface IReadActivity extends IMemorySpaceAddress {
   meta: Metadata;
   nonRecursive?: boolean;
+
   /**
    * Position of this read on the transaction's activity clock — a single
    * per-transaction monotonic counter shared with write attempts

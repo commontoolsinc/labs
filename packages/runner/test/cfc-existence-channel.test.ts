@@ -2,8 +2,8 @@ import { expect } from "@std/expect";
 import { afterEach, describe, it } from "@std/testing/bdd";
 
 import type { FabricPlainObject } from "@commonfabric/api";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import type { FabricValue } from "@commonfabric/data-model";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 
 import {
@@ -28,17 +28,18 @@ type StoredEntry = {
   observes?: string;
 };
 
-// Epic C stage C3 + follow-up — the existence channel (C0 §5, SC-4) and
-// the slot-pointer channel (C0 §4 row 3, SC-8).
-//
-// SC-4, settled with the spec (freeze-at-creation, §8.12.8 as amended on
-// specs branch cfc/existence-freeze-at-creation): the existence (shape)
-// entry is minted at the path's CREATION carrying the creating attempt's
-// join, is never cleared and never grown by overwrites of a still-existing
-// path (a writer conditional on existence journals that observation
-// itself), and legacy pre-class entries are absorbed once at migration.
-// C3's interim grow-on-overwrite is superseded by this discipline.
 describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
+  // Epic C stage C3 + follow-up — the existence channel (C0 §5, SC-4) and
+  // the slot-pointer channel (C0 §4 row 3, SC-8).
+  //
+  // SC-4, settled with the spec (freeze-at-creation, §8.12.8 as amended on
+  // specs branch cfc/existence-freeze-at-creation): the existence (shape)
+  // entry is minted at the path's CREATION carrying the creating attempt's
+  // join, is never cleared and never grown by overwrites of a still-existing
+  // path (a writer conditional on existence journals that observation
+  // itself), and legacy pre-class entries are absorbed once at migration.
+  // C3's interim grow-on-overwrite is superseded by this discipline.
+
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
@@ -131,10 +132,11 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
       e.observes === "shape" && e.path.join("/") === path.join("/")
     );
 
-  // The SC-4 red case: a clean overwrite (nothing labeled read) previously
-  // erased the whole derived pair — the existence bit went public. The
-  // existence entry must survive, still carrying the old writer's J.
   it("clean overwrite keeps the existence label (today it vanishes)", async () => {
+    // The SC-4 red case: a clean overwrite (nothing labeled read) previously
+    // erased the whole derived pair — the existence bit went public. The
+    // existence entry must survive, still carrying the old writer's J.
+
     const rt = makeRuntime();
     const sourceId = await seedDoc(rt, "ec-source", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret"] } },
@@ -166,10 +168,11 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     }
   });
 
-  // A labeled overwrite of a still-existing path: value replaces
-  // (§8.12.8), existence stays FROZEN at the creation join — the second
-  // writer adds no existence information.
   it("labeled overwrite: value replaces, existence stays frozen at creation", async () => {
+    // A labeled overwrite of a still-existing path: value replaces
+    // (§8.12.8), existence stays FROZEN at the creation join — the second
+    // writer adds no existence information.
+
     const rt = makeRuntime();
     const secretId = await seedDoc(rt, "ec-secret", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret"] } },
@@ -197,11 +200,12 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     expect(shape[0].label.confidentiality).toEqual(["secret"]);
   });
 
-  // An ancestor overwrite clears derived VALUE descendants (§8.12.8) —
-  // but a descendant's frozen existence entry survives at its own path
-  // (never cleared), and the root mints no entry of its own from a clean
-  // overwrite.
   it("ancestor overwrite leaves descendant existence frozen in place", async () => {
+    // An ancestor overwrite clears derived VALUE descendants (§8.12.8) —
+    // but a descendant's frozen existence entry survives at its own path
+    // (never cleared), and the root mints no entry of its own from a clean
+    // overwrite.
+
     const rt = makeRuntime();
     const sourceId = await seedDoc(rt, "ec-child-source", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret"] } },
@@ -245,13 +249,14 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     }
   });
 
-  // §8.12.8 (freeze-at-creation, normative since the 2026-07-10 spec
-  // landing): deleting a path and re-creating it is a FRESH creation event —
-  // the existence entry re-mints at the re-creating attempt's join, and the
-  // new entry REPLACES the frozen one. Carrying the stale creation join
-  // would UNDERSTATE the re-created path's existence channel, the direction
-  // the spec forbids (the deletion arm above merely over-taints).
   it("re-creation after deletion re-mints existence at the re-creating join", async () => {
+    // §8.12.8 (freeze-at-creation, normative since the 2026-07-10 spec
+    // landing): deleting a path and re-creating it is a FRESH creation event —
+    // the existence entry re-mints at the re-creating attempt's join, and the
+    // new entry REPLACES the frozen one. Carrying the stale creation join
+    // would UNDERSTATE the re-created path's existence channel, the direction
+    // the spec forbids (the deletion arm above merely over-taints).
+
     const rt = makeRuntime();
     const secretOne = await seedDoc(rt, "ec-remint-one", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret-one"] } },
@@ -304,11 +309,12 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     expect(shape[0].label.confidentiality).toEqual(["secret-two"]);
   });
 
-  // The same fresh-creation event reached through a DEEPER write: writing
-  // below the deleted child records at its materialization point (the
-  // highest missing node — the child itself), so the stale frozen entry
-  // there re-mints at the re-creating join, at creation granularity.
   it("re-creation via a deeper write re-mints at the materialization point", async () => {
+    // The same fresh-creation event reached through a DEEPER write: writing
+    // below the deleted child records at its materialization point (the
+    // highest missing node — the child itself), so the stale frozen entry
+    // there re-mints at the re-creating join, at creation granularity.
+
     const rt = makeRuntime();
     const secretOne = await seedDoc(rt, "ec-remint-deep-one", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret-one"] } },
@@ -356,13 +362,14 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     expect(shape[0].label.confidentiality).toEqual(["secret-two"]);
   });
 
-  // Presence is distinct from value (storage patch-layer contract: a slot
-  // holding `undefined` is present): overwriting a slot that HELD
-  // `undefined` is an ordinary still-existing overwrite, not a
-  // re-creation — the frozen entry must carry, not be replaced at the
-  // overwriting join (review on this PR: replacing here could LOWER the
-  // existence label, an under-taint).
   it("overwriting a slot that held undefined keeps the frozen entry", async () => {
+    // Presence is distinct from value (storage patch-layer contract: a slot
+    // holding `undefined` is present): overwriting a slot that HELD
+    // `undefined` is an ordinary still-existing overwrite, not a
+    // re-creation — the frozen entry must carry, not be replaced at the
+    // overwriting join (review on this PR: replacing here could LOWER the
+    // existence label, an under-taint).
+
     const rt = makeRuntime();
     const secretOne = await seedDoc(rt, "ec-undef-one", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret-one"] } },
@@ -414,13 +421,14 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     expect(shape[0].label.confidentiality).toEqual(["secret-one"]);
   });
 
-  // The same presence contract at an EXACTLY-recorded path: the write
-  // detail's `previousPresent` flag (not `previousValue` definedness)
-  // decides absent-vs-present when the overwrite lands at the entry's own
-  // path, where there is no covering snapshot to walk (review on this PR,
-  // round 2 — without the flag the frozen root/slot label is replaced at
-  // the overwrite join and prior confidentiality is lost).
   it("exact-path overwrite of a slot that held undefined keeps the frozen entry", async () => {
+    // The same presence contract at an EXACTLY-recorded path: the write
+    // detail's `previousPresent` flag (not `previousValue` definedness)
+    // decides absent-vs-present when the overwrite lands at the entry's own
+    // path, where there is no covering snapshot to walk (review on this PR,
+    // round 2 — without the flag the frozen root/slot label is replaced at
+    // the overwrite join and prior confidentiality is lost).
+
     const rt = makeRuntime();
     const secretOne = await seedDoc(rt, "ec-undef-exact-one", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret-one"] } },
@@ -467,12 +475,13 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     expect(shape[0].label.confidentiality).toEqual(["secret-one"]);
   });
 
-  // A CLEAN re-creation (nothing labeled read) is a fresh creation event
-  // under an empty join: the stale frozen entry must not survive it, and
-  // with nothing to record the confidentiality-only encoding mints no
-  // replacement — pre-deletion observations stay protected by the reads
-  // journaled while the path existed (§8.12.8).
   it("clean re-creation replaces the frozen entry with the empty creating join", async () => {
+    // A CLEAN re-creation (nothing labeled read) is a fresh creation event
+    // under an empty join: the stale frozen entry must not survive it, and
+    // with nothing to record the confidentiality-only encoding mints no
+    // replacement — pre-deletion observations stay protected by the reads
+    // journaled while the path existed (§8.12.8).
+
     const rt = makeRuntime();
     const secretOne = await seedDoc(rt, "ec-remint-clean-one", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret-one"] } },
@@ -509,10 +518,11 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     expect(shapeEntriesAt(outId, ["child"])).toEqual([]);
   });
 
-  // Pre-C2 covering derived entries carried the existence channel too; a
-  // clean overwrite must fold their confidentiality into the new existence
-  // entry, not erase it (the same SC-4 leak on legacy data).
   it("legacy covering derived entries freeze into the migrated existence entry", async () => {
+    // Pre-C2 covering derived entries carried the existence channel too; a
+    // clean overwrite must fold their confidentiality into the new existence
+    // entry, not erase it (the same SC-4 leak on legacy data).
+
     const rt = makeRuntime();
     // Seed via a real flow write on a pre-C2-shaped doc: seed the covering
     // entry raw, with a loadable schema (the persist region skips docs
@@ -561,10 +571,11 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     expect(shape[0].label.confidentiality).toContainEqual("old-secret");
   });
 
-  // Structure stamps are the container-shape half of the same channel: an
-  // overwrite that replaces a labeled pure-link container with plain
-  // content must keep the membership history on the existence entry.
   it("cleared legacy structure stamps freeze into the container existence entry", async () => {
+    // Structure stamps are the container-shape half of the same channel: an
+    // overwrite that replaces a labeled pure-link container with plain
+    // content must keep the membership history on the existence entry.
+
     const rt = makeRuntime();
     const el0 = await seedDoc(rt, "ec-el-0", { n: 1 }, [
       { path: [], label: { confidentiality: ["alice"] } },
@@ -597,10 +608,11 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     expect(shape[0].label.confidentiality).toContainEqual("alice");
   });
 
-  // A link write replacing a labeled slot is skipped by the stamp loops
-  // (the link machinery owns that path), so the cleared existence lands as
-  // a bare shape entry at the written path — the leftover branch.
   it("link overwrite of a labeled slot keeps existence as a bare shape entry", async () => {
+    // A link write replacing a labeled slot is skipped by the stamp loops
+    // (the link machinery owns that path), so the cleared existence lands as
+    // a bare shape entry at the written path — the leftover branch.
+
     const rt = makeRuntime();
     const sourceId = await seedDoc(rt, "ec-link-source", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret"] } },
@@ -634,11 +646,12 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     expect(shape[0].label.confidentiality).toContainEqual("secret");
   });
 
-  // A declared entry re-minting at the same path (a schema policy input
-  // covering the write) drops the old derived pair through a different
-  // carry-forward skip than the flow-clear — its existence must fold into
-  // the pool all the same (review finding on this PR).
   it("declared re-mint at the same path still folds existence", async () => {
+    // A declared entry re-minting at the same path (a schema policy input
+    // covering the write) drops the old derived pair through a different
+    // carry-forward skip than the flow-clear — its existence must fold into
+    // the pool all the same (review finding on this PR).
+
     const rt = makeRuntime();
     const sourceId = await seedDoc(rt, "ec-declared-source", { n: 1 }, [
       { path: [], label: { confidentiality: ["old-secret"] } },
@@ -702,11 +715,12 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     expect(shapeConf).toContainEqual("old-secret");
   });
 
-  // A declared re-mint can cover a path the transaction never wrote (the
-  // schema policy input names it while the write lands elsewhere): with no
-  // covering written path, the fold anchors at the cleared entry's OWN
-  // path instead of dropping the history.
   it("declared re-mint without a covering write anchors existence at the entry's path", async () => {
+    // A declared re-mint can cover a path the transaction never wrote (the
+    // schema policy input names it while the write lands elsewhere): with no
+    // covering written path, the fold anchors at the cleared entry's OWN
+    // path instead of dropping the history.
+
     const rt = makeRuntime();
     const sourceId = await seedDoc(rt, "ec-anchor-source", { n: 1 }, [
       { path: [], label: { confidentiality: ["old-secret"] } },
@@ -760,11 +774,12 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     expect(shape[0].label.confidentiality).toContainEqual("old-secret");
   });
 
-  // SC-11, clause-aware: a stored existence clause in a byte-permuted form
-  // (a peer wrote {anyOf:["B","A"]}) meeting this tx's normalized
-  // derivation ({anyOf:["A","B"]}) must collapse to ONE clause — deepEqual
-  // dedup alone doubles the clause list and rewrites the envelope once.
   it("folds byte-permuted clause forms without doubling (SC-11)", async () => {
+    // SC-11, clause-aware: a stored existence clause in a byte-permuted form
+    // (a peer wrote {anyOf:["B","A"]}) meeting this tx's normalized
+    // derivation ({anyOf:["A","B"]}) must collapse to ONE clause — deepEqual
+    // dedup alone doubles the clause list and rewrites the envelope once.
+
     const rt = makeRuntime();
     const orClause = { anyOf: ["reader-a", "reader-b"] };
     const sourceId = await seedDoc(rt, "ec-clause-source", { n: 1 }, [
@@ -832,13 +847,14 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     expect(JSON.stringify(entriesOf(outId))).toEqual(before);
   });
 
-  // The A3 cross-scenario shape from the #4525 probe: membership changes
-  // across labeled re-stamps of a pure-link container. The MEMBERSHIP
-  // (enumerate) stamp is replaced from the current criteria each time —
-  // bob's atom does not survive his element leaving (§8.12.8 normative,
-  // no accumulate-forever) — while the frozen existence (shape) entry
-  // keeps the CREATION join only, untouched by later re-stamps.
   it("membership replaces per criteria while frozen existence keeps the creation join (A3)", async () => {
+    // The A3 cross-scenario shape from the #4525 probe: membership changes
+    // across labeled re-stamps of a pure-link container. The MEMBERSHIP
+    // (enumerate) stamp is replaced from the current criteria each time —
+    // bob's atom does not survive his element leaving (§8.12.8 normative,
+    // no accumulate-forever) — while the frozen existence (shape) entry
+    // keeps the CREATION join only, untouched by later re-stamps.
+
     const rt = makeRuntime();
     const alice = await seedDoc(rt, "ec-a3-alice", { n: 1 }, [
       { path: [], label: { confidentiality: ["alice"] } },
@@ -894,11 +910,12 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     expect([...new Set(templateConf)]).toEqual(["alice"]);
   });
 
-  // Legacy migration through the OTHER carry-forward skips: a pre-class
-  // covering entry at a slot replaced by a LINK write pools through the
-  // link-path skip and lands as a frozen shape entry at its own path (the
-  // leftover anchor — link-covered paths get no stamps).
   it("legacy entry at a link-replaced slot freezes via the leftover anchor", async () => {
+    // Legacy migration through the OTHER carry-forward skips: a pre-class
+    // covering entry at a slot replaced by a LINK write pools through the
+    // link-path skip and lands as a frozen shape entry at its own path (the
+    // leftover anchor — link-covered paths get no stamps).
+
     const rt = makeRuntime();
     const sourceId = await seedDoc(rt, "ec-legacy-link-source", { n: 1 }, [
       { path: [], label: { confidentiality: ["old-secret"] } },
@@ -957,11 +974,12 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     expect(shape[0].label.confidentiality).toContainEqual("old-secret");
   });
 
-  // A mixed write — plain content at the root and a pure-link container in
-  // the same transaction — collapses the container's membership stamp
-  // against the covering derived ancestor (exact-path structure stamps
-  // only collapse against derived ancestors-or-equal).
   it("structure stamps collapse under a derived ancestor stamp", async () => {
+    // A mixed write — plain content at the root and a pure-link container in
+    // the same transaction — collapses the container's membership stamp
+    // against the covering derived ancestor (exact-path structure stamps
+    // only collapse against derived ancestors-or-equal).
+
     const rt = makeRuntime();
     const sourceId = await seedDoc(rt, "ec-mixed-source", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret"] } },
@@ -992,10 +1010,11 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     ).toEqual([]);
   });
 
-  // Idempotence stays per-class (SC-11): repeating the same clean overwrite
-  // must not churn the metadata — the grown existence entry re-derives
-  // identically.
   it("the frozen existence entry re-derives idempotently", async () => {
+    // Idempotence stays per-class (SC-11): repeating the same clean overwrite
+    // must not churn the metadata — the grown existence entry re-derives
+    // identically.
+
     const rt = makeRuntime();
     const sourceId = await seedDoc(rt, "ec-idem-source", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret"] } },
@@ -1020,12 +1039,13 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
   });
 });
 
-// SC-8, the pointer-identity channel (C0 §4 row 3). The consumption
-// mechanism landed with C1 (probes classified followRef, standalone probes
-// consume link-origin labels); this pins the channel end-to-end at the
-// resolution seam: observing WHICH reference sits at a slot — without
-// following it — taints the observer's flow join with the pointer's label.
 describe("CFC slot-pointer channel (C3, SC-8 end-to-end)", () => {
+  // SC-8, the pointer-identity channel (C0 §4 row 3). The consumption
+  // mechanism landed with C1 (probes classified followRef, standalone probes
+  // consume link-origin labels); this pins the channel end-to-end at the
+  // resolution seam: observing WHICH reference sits at a slot — without
+  // following it — taints the observer's flow join with the pointer's label.
+
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 

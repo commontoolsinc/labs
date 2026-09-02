@@ -90,6 +90,7 @@ export type LLMToolResult = {
  * drops such a key, so it never crosses the boundary and is not checked.
  */
 export type LLMRequestMetadata = Record<string, JSONValue | undefined>;
+
 export type LLMRequest = {
   cache?: boolean;
   messages: readonly BuiltInLLMMessage[];

@@ -19,9 +19,13 @@ import {
 // promise never settles on its own.
 class WithheldCommitSessionFactory implements SessionFactory {
   withhold = false;
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  readonly #server: MemoryV2Server.Server;
+
+  constructor(server: MemoryV2Server.Server) {
+    this.#server = server;
+  }
   async create(id: string, signer?: Signer) {
-    const base = MemoryV2Client.loopback(this.server);
+    const base = MemoryV2Client.loopback(this.#server);
     const transport: MemoryV2Client.Transport = {
       send: (payload: string) =>
         this.withhold && payload.includes('"transact"')
@@ -51,13 +55,14 @@ function makeServer(): MemoryV2Server.Server {
   });
 }
 
-// runtime.dispose() tears down storage as part of shutdown. Storage teardown
-// used to flush in-flight commits — awaiting their confirmation — BEFORE closing
-// the client that would settle them. A commit whose response is withheld past
-// dispose never confirms on its own, so that pre-teardown flush deadlocked, and
-// dispose() hung. Teardown must reject in-flight commits (the way it already
-// rejects in-flight reads) rather than wait on a response that may never come.
 Deno.test("runtime.dispose() resolves while a commit is withheld in flight", async () => {
+  // runtime.dispose() tears down storage as part of shutdown, and teardown
+  // rejects in-flight commits the way it already rejects in-flight reads,
+  // rather than awaiting a confirmation that may never arrive. A commit whose
+  // response is withheld past dispose never confirms on its own, so a teardown
+  // that flushed before closing the client that settles them would wait for
+  // this one forever.
+
   const signer = await Identity.fromPassphrase(
     "runtime-dispose-withheld-commit",
   );

@@ -26,7 +26,7 @@
  */
 
 import type { Status, Tile, TileView } from "../types.ts";
-import { budgetStatus, readBudget, usd } from "../lib.ts";
+import { budgetStatus, escapeHtml, readBudget, usd } from "../lib.ts";
 import {
   DAY_MS,
   newestReportedDay,
@@ -210,7 +210,6 @@ export const modelSpend: Tile = {
         chartSource(anMap, ANTHROPIC_COLOR, an ? usd(an.mtd) : undefined),
       ],
       now,
-      status,
     );
 
     // The key line. Charted providers show a swatch (their own MTD sits at the line
@@ -226,15 +225,24 @@ export const modelSpend: Tile = {
     if (oaKey) seg.push(charted(oa, "OpenAI", OPENAI_COLOR));
     if (anKey) seg.push(charted(an, "Anthropic", ANTHROPIC_COLOR));
     if (orKey) seg.push(or ? `OR ${usd(or.mtd)}` : "OR $???");
-    const legend = `<p class="sub">${seg.join(" • ")}</p>`;
+    const legendText = seg.join(" • ").replaceAll(/<[^>]+>/g, "").replaceAll(
+      /\s+/g,
+      " ",
+    ).trim();
+    const legend = `<p class="sub" title="${escapeHtml(legendText)}">${
+      seg.join(" • ")
+    }</p>`;
+    const value = `${complete ? "~" : "≥"}${usd(totalProjected)}/mo`;
+    const mtd = `${usd(totalMtd)} MTD`;
 
     return {
       label,
       status,
       // Complete -> a projection (~); missing a provider -> the total is only a
       // lower bound, since the absent provider would add to it (≥).
-      value: `${complete ? "~" : "≥"}${usd(totalProjected)}/mo`,
-      aside: `<span class="hmtd">${usd(totalMtd)} MTD</span>`,
+      value,
+      valueLabel: value,
+      aside: `<span class="hmtd" title="${mtd}">${mtd}</span>`,
       extra: legend + chart.chart,
       duration: chart.duration,
     };

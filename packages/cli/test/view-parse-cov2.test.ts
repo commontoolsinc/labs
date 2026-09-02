@@ -1,8 +1,8 @@
 /**
- * Second-round coverage tests for `lib/view/languages/typescript/parse.ts`, extending
- * `view-parse.test.ts` and `view-parse-cov.test.ts`. The dead and duplicate
- * branches these originally documented were removed or folded away at the
- * source; the tests here exercise the reachable behavior around them:
+ * Second-round coverage tests for `lib/view/languages/typescript/parse.ts`,
+ * extending `view-parse.test.ts` and `view-parse-cov.test.ts`. The dead and
+ * duplicate branches these originally documented were removed or folded away at
+ * the source; the tests here exercise the reachable behavior around them:
  * identifier classification, type-position resolution (qualified names,
  * `typeof`, heritage types), comment merging, definition registration, control
  * labels, and metadata extraction on malformed input, plus `safe`'s
@@ -41,12 +41,15 @@ function labelsOf(doc: Document): string[] {
   return doc.flatStructure.map((n) => n.label);
 }
 
-// --- isTypePosition: qualified names in type position (neighbor of 913) ---
+//
+// isTypePosition: qualified names in type position (neighbor of 913)
+//
 
 Deno.test("qualified name in a type annotation resolves as a type name", () => {
   // `a.b.c.D` in type position climbs the qualified-name chain in
   // isTypePosition and resolves via ts.isTypeNode on the TypeReference, so the
   // final identifier `D` is a typeName, not a plain reference.
+
   const doc = parseDocument("let x: a.b.c.D = null as never;");
   const classes = classesOf(doc, "D");
   assert(
@@ -55,12 +58,15 @@ Deno.test("qualified name in a type annotation resolves as a type name", () => {
   );
 });
 
-// --- isTypePosition: typeof type (neighbor of 916) ---
+//
+// isTypePosition: typeof type (neighbor of 916)
+//
 
 Deno.test("typeof in a type annotation resolves the operand as a type name", () => {
   // `typeof foo` as a type produces a TypeQueryNode parent for `foo`. Because a
   // TypeQueryNode is itself a TypeNode, isTypePosition returns at the
   // ts.isTypeNode check before the more-specific TypeQuery branch.
+
   const doc = parseDocument("const foo = 1;\nlet y: typeof foo = foo;");
   // The `foo` inside the type query is a typeName; the value `foo` references
   // remain non-type classes, so both classifications appear for the token.
@@ -71,12 +77,16 @@ Deno.test("typeof in a type annotation resolves the operand as a type name", () 
   );
 });
 
-// --- isTypePosition: heritage clause (neighbor of 917, 919, 920) ---
+//
+// isTypePosition: heritage clause (neighbor of 917, 919, 920)
+//
 
 Deno.test("class heritage type resolves as a type name", () => {
   // `extends Base<number>` produces an ExpressionWithTypeArguments whose
   // expression is `Base`. That node is also a TypeNode, so `Base` resolves as a
-  // typeName at line 914, never reaching the ExpressionWithTypeArguments branch.
+  // typeName at line 914, never reaching the ExpressionWithTypeArguments
+  // branch.
+
   const doc = parseDocument("class A extends Base<number> {}");
   const classes = classesOf(doc, "Base");
   assert(
@@ -94,7 +104,9 @@ Deno.test("interface heritage type resolves as a type name", () => {
   );
 });
 
-// --- classifyIdentifier neighbors of 836: the full reachable classification ---
+//
+// classifyIdentifier neighbors of 836: the full reachable classification
+//
 
 Deno.test("identifier classifications across declaration and use sites", () => {
   const src = [
@@ -121,7 +133,9 @@ Deno.test("identifier classifications across declaration and use sites", () => {
   assert(sideClasses.has("propertyName") || sideClasses.has("binding"));
 });
 
-// --- mergeByStart neighbor of 1215: non-empty comment batches merge in ---
+//
+// mergeByStart neighbor of 1215: non-empty comment batches merge in
+//
 
 Deno.test("comments are threaded into the structure tree", () => {
   const src = [
@@ -146,7 +160,9 @@ Deno.test("comments are threaded into the structure tree", () => {
   );
 });
 
-// --- registerDefinition neighbor of 1260: named declarations register ---
+//
+// registerDefinition neighbor of 1260: named declarations register
+//
 
 Deno.test("named declarations are registered as definitions", () => {
   const src = [
@@ -168,7 +184,9 @@ Deno.test("named declarations are registered as definitions", () => {
   assertEquals(alpha[0].name, "alpha");
 });
 
-// --- controlLabel neighbors of 1674: all eight control-statement labels ---
+//
+// controlLabel neighbors of 1674: all eight control-statement labels
+//
 
 Deno.test("every control statement gets its dedicated label", () => {
   const src = [
@@ -194,12 +212,15 @@ Deno.test("every control statement gets its dedicated label", () => {
   assert(has(/^try$/), "missing try label");
 });
 
-// --- safe() neighbors of 1725-1727: extractors never throw on parseable input ---
+//
+// safe() neighbors of 1725-1727: extractors never throw on parseable input
+//
 
 Deno.test("metadata extraction survives malformed but parseable input", () => {
   // These all parse (via TypeScript error recovery) into nodes with valid
   // ranges, so the metadata extractors run their bodies without throwing and
   // the safe() catch is never taken.
+
   const cases = [
     "type Bad = ;",
     "interface Q extends { }",
@@ -225,11 +246,14 @@ Deno.test("import metadata is extracted without error", () => {
   assertEquals(imp!.meta!.kind, "import");
 });
 
-// --- describeInitializer neighbors of 2051-2053 ---
+//
+// describeInitializer neighbors of 2051-2053
+//
 
 Deno.test("a raw arrow initializer becomes a closure node, not a variable", () => {
   // bindingDesc routes the arrow to a closure before variableMeta /
   // describeInitializer would run, so describeInitializer never sees an arrow.
+
   const doc = parseDocument("const handler = () => 1;");
   const node = findNode(doc, (n) => n.name === "handler");
   assert(node, "expected a node bound to `handler`");
@@ -239,6 +263,7 @@ Deno.test("a raw arrow initializer becomes a closure node, not a variable", () =
 Deno.test("a parenthesised arrow initializer also becomes a closure node", () => {
   // peelExpr strips the parentheses before the arrow check, so this too is a
   // closure and bypasses describeInitializer.
+
   const doc = parseDocument("const wrapped = (() => 2);");
   const node = findNode(doc, (n) => n.name === "wrapped");
   assert(node, "expected a node bound to `wrapped`");
@@ -248,6 +273,7 @@ Deno.test("a parenthesised arrow initializer also becomes a closure node", () =>
 Deno.test("describeInitializer reports non-closure initializers", () => {
   // The reachable describeInitializer outputs: the no-initializer case and the
   // nodeFirstLine fall-through. These run for the variable-kind nodes below.
+
   const doc = parseDocument(
     "let pending;\nconst result = computeValue();\nconst total = a + b;",
   );
@@ -271,7 +297,9 @@ Deno.test("describeInitializer reports non-closure initializers", () => {
   );
 });
 
-// --- incremental highlighter still re-highlights an edited closure line ---
+//
+// incremental highlighter still re-highlights an edited closure line
+//
 
 Deno.test("incremental highlighter updates a line that adds a closure", () => {
   const h = createHighlighter("const a = 1;\nconst b = 2;\n");
@@ -284,11 +312,16 @@ Deno.test("incremental highlighter updates a line that adds a closure", () => {
   assert(/=>/.test(joined), "updated text should contain the arrow");
 });
 
-// safe() wraps the best-effort metadata extractors. The public API never feeds
-// them a node that throws, so the catch is exercised directly through the
-// test-only handle: a throwing extractor degrades to undefined, a succeeding
-// one returns its value.
+//
+// safe(): both arms, reached through the test-only handle
+//
+
 Deno.test("safe(): a throwing extractor degrades to undefined", () => {
+  // safe() wraps the best-effort metadata extractors. The public API never
+  // feeds them a node that throws, so the catch is exercised directly through
+  // the test-only handle: a throwing extractor degrades to undefined, a
+  // succeeding one returns its value.
+
   assertEquals(
     _internal.safe(() => {
       throw new Error("boom");

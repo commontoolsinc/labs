@@ -10,6 +10,7 @@ import {
 import type { Runtime } from "../runtime.ts";
 import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type {
+  CommitError,
   IExtendedStorageTransaction,
   IPreconditionFailedError,
   MemorySpace,
@@ -42,12 +43,17 @@ import {
   txToReactivityLog,
 } from "./reactivity.ts";
 import {
+  isCfcRejectedCommitError,
+  reportDroppedCfcRejectedWrite,
+} from "./cfc-rejection-report.ts";
+import {
   type Action,
   type EventHandler,
   type EventPreflightTraceContext,
   LT1_LATE_SEAL_REFUSED,
   type QueuedEvent,
   type ReactivityLog,
+  type ServedEventFailureOutcome,
 } from "./types.ts";
 
 const logger = getLogger("scheduler", {
@@ -61,6 +67,20 @@ type EventCommitError = {
   readonly message: string;
   readonly precondition?: IPreconditionFailedError["precondition"];
 };
+
+/**
+ * The error handed to work staged on an event's transaction when the event ends
+ * without a commit verdict at all — the handler threw, the caller opted out of
+ * retrying, or the seal was refused. There is no rejection to pass on in those
+ * cases, and the staged work needs to hear that none is coming.
+ */
+function eventAbandonError(reason: string): CommitError {
+  return {
+    name: "StorageTransactionAborted",
+    message: `event abandoned before it committed: ${reason}`,
+    reason: new Error(reason),
+  } as CommitError;
+}
 
 function normalizeEventCommitRejection(reason: unknown): EventCommitError {
   if (reason instanceof Error) {
@@ -87,39 +107,39 @@ function normalizeEventCommitRejection(reason: unknown): EventCommitError {
   );
 }
 
-/**
- * Whether a commit error is CFC enforcement's DETERMINISTIC pre-storage
- * rejection (`rejectCommitBeforeStorage` in extended-storage-transaction.ts):
- * the transaction was refused before it reached storage, and re-running
- * recomputes the identical refused write. The served give-up arm and
- * {@link reportDroppedCfcRejectedWrite} key on this one predicate, so the
- * sealed error consequence and the loss report cover exactly the same class.
- */
-export function isCfcRejectedCommitError(
-  error: { message?: string } | undefined,
-): error is { message: string } {
-  return error?.message?.startsWith("CFC enforcement rejected commit") === true;
+/** Report a served event's durable outcome without letting an observer failure
+ * escape into scheduler control flow. The callback is notification-only: a
+ * broken observer must neither change the event disposition nor skip later
+ * settlement work. */
+export function reportServedEventFailure(
+  served: Pick<NonNullable<QueuedEvent["served"]>, "onFailure"> | undefined,
+  outcome: ServedEventFailureOutcome,
+): void {
+  try {
+    served?.onFailure?.(outcome);
+  } catch (callbackError) {
+    logger.error(
+      "schedule-error",
+      "Error in served event failure callback:",
+      callbackError,
+    );
+  }
 }
 
-/**
- * A CFC-enforcement-rejected commit on a give-up disposition is silent data
- * loss of user intent — the UI's write simply never lands (labs#4772 shipped
- * that way for weeks behind the opt-in scheduler logger, which is disabled in
- * deployed workers). Report it unconditionally; the opt-in `logger.warn`
- * alongside still carries the full disposition detail.
- */
-export function reportDroppedCfcRejectedWrite(
-  error: { message?: string } | undefined,
-  handlerId: unknown,
-): void {
-  if (!isCfcRejectedCommitError(error)) {
-    return;
-  }
-  console.error(
-    "[cfc] Owner-protected write dropped: CFC enforcement rejected the " +
-      "commit and re-running cannot resolve it.",
-    { error: error.message, handlerId },
-  );
+/** Whether a failed event transaction carries positive producer evidence that
+ * an explicit local abort discarded it before storage. Other errors in the
+ * same family can describe ambiguous commit failures and are not terminal
+ * evidence. */
+export function isExplicitTransactionAbort(
+  error:
+    | { name?: string; message?: string; abortedBeforeStorage?: unknown }
+    | undefined,
+): error is {
+  name: "StorageTransactionAborted";
+  abortedBeforeStorage: true;
+} {
+  return error?.name === "StorageTransactionAborted" &&
+    error.abortedBeforeStorage === true;
 }
 
 export function isHeadEventParked(
@@ -184,7 +204,10 @@ function notifyEventDropped(
   },
   reason: string,
   servedKind: "dropped" | "deferred" = "dropped",
-  options: { quiet?: boolean } = {},
+  options: {
+    quiet?: boolean;
+    servedOutcome?: ServedEventFailureOutcome;
+  } = {},
 ): void {
   if (options.quiet === true) {
     // A routine, counted pre-dispatch removal (the serving loop's LT1
@@ -196,17 +219,16 @@ function notifyEventDropped(
   // The serving drain's terminal arms (events.md §5): `dropped` — no
   // runnable handler, the drain writes the dropped-event notice as the
   // event's consequence and advances the stream past it (non-wedging);
-  // `deferred` — the handler was UNREACHABLE (a cold-view load), no
-  // consequence is written and a later wave re-drains the entry.
-  try {
-    args.served?.onFailure?.({ kind: servedKind, message: reason });
-  } catch (callbackError) {
-    logger.error(
-      "schedule-error",
-      "Error in served event drop callback:",
-      callbackError,
-    );
-  }
+  // `deferred` — the handler was UNREACHABLE (a cold-view load, or a
+  // required replica load that failed at the dispatch preflight's
+  // park), no consequence is written and a later wave re-drains the
+  // entry. `cause` tells the two deferrals apart for the drain's retry
+  // budget (see ServedEventDispatch.onFailure).
+  const outcome: ServedEventFailureOutcome = options.servedOutcome ??
+    (servedKind === "dropped"
+      ? { kind: "dropped", message: reason }
+      : { kind: "deferred", message: reason });
+  reportServedEventFailure(args.served, outcome);
   if (!args.onCommit) return;
   const tx = state.runtime.edit();
   tx.abort(new Error(reason));
@@ -234,7 +256,10 @@ export function dropQueuedEvent(
   event: QueuedEvent,
   reason: string,
   servedKind: "dropped" | "deferred" = "dropped",
-  options: { quiet?: boolean } = {},
+  options: {
+    quiet?: boolean;
+    servedOutcome?: ServedEventFailureOutcome;
+  } = {},
 ): void {
   const index = state.eventQueue.indexOf(event);
   if (index >= 0) state.eventQueue.splice(index, 1);
@@ -244,6 +269,60 @@ export function dropQueuedEvent(
   if (event.finalOutcomeNotified) return;
   event.finalOutcomeNotified = true;
   notifyEventDropped(state, event, reason, servedKind, options);
+}
+
+/**
+ * events.md §2's per-space ARRIVAL-ORDER BARRIER, carried by a deferral
+ * (the in-queue sweep `failHeadEventLoadPark` performs in facade.ts,
+ * shared here by the deferral arms that live in this module — the
+ * handler-not-run withdrawal and the piece-start deferral): when a
+ * served event DEFERS — its durable entry left pending for a later
+ * drain — every later-arrived durable served entry queued behind it in
+ * the SAME SPACE defers with it, or a later arrival's consequence lands
+ * ahead of an earlier one (the b01 register class, re-demonstrated on
+ * the handler-not-run withdrawal as review-6459 F1: the drain queues a
+ * pass's pending entries together, so a healthy follower dispatches —
+ * and SEALS — right behind the deferred head). The exclusions mirror
+ * the load-park arm's, deliberately: cross-space queue neighbours
+ * (§2's order is per-space) and LT1 in-process copies (`served` with
+ * no `streamEntry`) — a running event's same-wave cascade children,
+ * not later arrivals. The enqueueSeq guard scopes the sweep to LATER
+ * arrivals, which the facade arm gets implicitly (its failing event is
+ * the un-dispatched queue head, so everything queued is later): these
+ * arms run after the deferring event left the queue (dispatch) or off
+ * the head slot (piece load), and an earlier event requeued by a
+ * concurrent commit verdict must not be barred behind an event that
+ * arrived after it. Sweeping is order-safe by construction — a swept
+ * entry re-drains in arrival order on a later pass — so a spurious
+ * sweep costs one deferral round, never disorder.
+ */
+export function deferLaterSameSpaceServedEvents(
+  state:
+    & Pick<SchedulerEventQueueState, "runtime" | "eventQueue">
+    & Partial<Pick<SchedulerEventQueueState, "releaseLineageEvent">>,
+  behind: Pick<QueuedEvent, "id" | "eventLink" | "enqueueSeq">,
+  deferralReason: string,
+): void {
+  for (const later of [...state.eventQueue]) {
+    if (later.eventLink.space !== behind.eventLink.space) continue;
+    if (later.served?.streamEntry === undefined) continue;
+    if (later.enqueueSeq <= behind.enqueueSeq) continue;
+    dropQueuedEvent(
+      state,
+      later,
+      `Event deferred: held behind ${behind.id}, ${deferralReason}; ` +
+        `later-arrived events wait behind it`,
+      "deferred",
+      {
+        quiet: true,
+        servedOutcome: {
+          kind: "deferred",
+          cause: "arrival-barrier",
+          blockedBy: behind.id,
+        },
+      },
+    );
+  }
 }
 
 function findEventHandler(
@@ -553,8 +632,25 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
             `Event dropped: no handler registered for ${args.eventLink.id} and its piece could not be started`,
             queuedEvent.served !== undefined ? "deferred" : "dropped",
           );
+          if (queuedEvent.served !== undefined) {
+            // A deferral carries the drain's arrival-order barrier
+            // (events.md §2; review-6459 F1's sibling arm), exactly as
+            // the handler-not-run withdrawal and the facade's load-park
+            // arm do.
+            deferLaterSameSpaceServedEvents(
+              state,
+              queuedEvent,
+              "whose piece could not be started",
+            );
+          }
         }
       } catch (error) {
+        // Unlike the arms above, this one is reachable with the event
+        // ALREADY SETTLED: the finalOutcomeNotified/queue-membership
+        // recheck runs after the load await resolves, and a rejection
+        // never crosses it. A settled head holds no barrier — its
+        // disposition was someone else's (e.g. a lineage drop mid-load).
+        const alreadySettled = queuedEvent.finalOutcomeNotified === true;
         dropQueuedEvent(
           state,
           queuedEvent,
@@ -563,6 +659,14 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           }`,
           queuedEvent.served !== undefined ? "deferred" : "dropped",
         );
+        if (!alreadySettled && queuedEvent.served !== undefined) {
+          // Same deferral disposition as the arm above — same barrier.
+          deferLaterSameSpaceServedEvents(
+            state,
+            queuedEvent,
+            "whose piece failed to start",
+          );
+        }
       } finally {
         state.queueExecution();
       }
@@ -650,6 +754,7 @@ export interface SchedulerEventExecutionState {
     deps: ReactivityLog,
     invalidDeps: Set<Action>,
   ) => boolean;
+
   /** The transient-demander preflight (fan-out stage B, review F2):
    * re-arm the fanned-out nodes in a served handler's closure whose
    * instance for the actor is not current. Undefined off the serving
@@ -658,6 +763,7 @@ export interface SchedulerEventExecutionState {
     deps: ReactivityLog,
     actor: ScopeKeyIdentity,
   ) => Action[];
+
   readonly setEventPassDemandRefresh: (
     refresh: ((demand: Set<Action>) => void) | undefined,
   ) => void;
@@ -701,6 +807,7 @@ export function preflightQueuedEventDependencies(state: {
     deps: ReactivityLog,
     invalidDeps: Set<Action>,
   ) => boolean;
+
   /** The transient-demander preflight (server-execution v2 fan-out
    * stage B, review F2): re-arm the fanned-out nodes in a served
    * handler's closure whose instance for the ACTOR is not current, so
@@ -711,6 +818,7 @@ export function preflightQueuedEventDependencies(state: {
     deps: ReactivityLog,
     actor: ScopeKeyIdentity,
   ) => Action[];
+
   readonly collectPendingLoadParkKeys: (
     event: QueuedEvent,
     deps: ReactivityLog,
@@ -893,8 +1001,13 @@ export function preflightQueuedEventDependencies(state: {
   // no instance of that node — the node is node-level CLEAN (it ran for
   // the watchers), so the invalid-upstream pass above found nothing, and
   // the handler would read the actor's MISSING instance (its argument
-  // fails the schema, the run is silently skipped, the entry marked
-  // consequenced with no error — silent event loss). B7 made cleanliness
+  // fails the schema and the run is skipped — which, until the
+  // mark/effects-atomicity fix below in `finalize`, sealed the entry
+  // consequenced with no error: silent event loss. The finalize now
+  // withdraws a skipped served dispatch, so the residual cost of a miss
+  // here is a deferral-and-re-drain cycle, not a lost event — this
+  // preflight remains what makes the FIRST delivery succeed). B7 made
+  // cleanliness
   // per instance: re-arm the fanned-out nodes in the handler's closure
   // whose instance for THIS actor is not current, materializing her own
   // instance (as her transient demand) before the handler runs. The
@@ -1332,20 +1445,14 @@ export async function dispatchQueuedEvent(state: {
   // originStatus() fallback ("confirmed") would let a descendant of a failed
   // origin run.
   const requeueForNameResolution = () => {
-    // The rebuilt entry does NOT carry `served`, and no served copy may
-    // reach this path: both served constructors (the drain's and cell.ts's
-    // LT1 emission) queue with retries: false, whose RetryImmediately
-    // branch drops instead of requeueing. Requeueing one anyway would
-    // silently shed the acting identity and the failure hook — and what a
-    // served RETRY even means (which wave owns it, who re-seals) is
-    // UNSTATED semantics that must be decided, not defaulted, if this
-    // assert ever fires.
-    if (queuedEvent.served !== undefined) {
-      throw new Error(
-        "requeueForNameResolution reached with a served event; served " +
-          "retry semantics are undecided (see the comment at this assert)",
-      );
-    }
+    // A served name-resolution retry re-enters this scheduler settle. If it
+    // runs before the flush deadline, the installed destination seals its
+    // warmed-cache run into the current wave; a cut instead leaves the
+    // existing LT1-purge/durable-drain cadence in charge. The retry keeps the
+    // served carriage: acting identity, stream-entry consequence mark, LT1
+    // ownership, and failure hook. This does not opt the event into commit
+    // retries; `retry` remains false and a failed commit still belongs to the
+    // wave/drain cadence.
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
       // The flag rides every requeue with the id it describes: dropping it
@@ -1362,6 +1469,9 @@ export async function dispatchQueuedEvent(state: {
       runtimeInjectedEventKeys: queuedEvent.runtimeInjectedEventKeys,
       retry,
       onCommit,
+      ...(queuedEvent.served !== undefined
+        ? { served: queuedEvent.served }
+        : {}),
     };
     insertInEnqueueOrder(state.eventQueue, requeued);
     if (requeued.originTx !== undefined) {
@@ -1444,10 +1554,12 @@ export async function dispatchQueuedEvent(state: {
       if (tx.status().status === "ready") {
         tx.abort(error);
       }
-      if (retry) {
+      if (retry || served !== undefined) {
         requeueForNameResolution();
       } else {
-        // retries: false is a one-shot; it does not re-run to resolve names.
+        // An unserved retries:false event is a one-shot; it does not re-run to
+        // resolve names. Served events take the same-wave arm above because
+        // the server, not a later client speculation, owns their result.
         logger.warn(
           "scheduler",
           "Event handler needed inSpace-name resolution but opted out of " +
@@ -1455,38 +1567,80 @@ export async function dispatchQueuedEvent(state: {
           { handlerId },
         );
         runFinalCommitCallback();
+        tx.abandonStagedWork(eventAbandonError("retry opted out"));
       }
       return;
     }
 
     if (error) {
+      const handlerError = error instanceof Error
+        ? error
+        : new Error(String(error));
       try {
-        state.handleError(error as Error, action);
+        state.handleError(handlerError, action);
       } finally {
         if (tx.status().status === "ready") {
-          tx.abort(error);
+          tx.abort(handlerError);
         }
         // The serving drain's ERROR arm (events.md §5): the handler
         // threw server-side — the error IS the consequence. The
         // handler tx (with its consequenced mark) aborted above; the
         // drain seals the error consequence in its own transaction.
-        try {
-          served?.onFailure?.({
-            kind: "error",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        } catch (callbackError) {
-          logger.error(
-            "schedule-error",
-            "Error in served event failure callback:",
-            callbackError,
-          );
-        }
+        reportServedEventFailure(served, {
+          kind: "error",
+          message: handlerError.message,
+        });
         // A throwing handler is a final outcome for this event — settle the
         // commit callback (with the aborted tx) instead of leaving callers
         // that await it hanging.
         runFinalCommitCallback();
+        tx.abandonStagedWork(eventAbandonError("handler threw"));
       }
+      return;
+    }
+
+    // Mark/effects atomicity (events.md §4, RULED 2026-08-27 — the a04
+    // write-side member): a SERVED dispatch whose handler body DID NOT
+    // RUN must not seal. The dispatch stamper wrote the entry's
+    // `consequenced` mark into this tx BEFORE the body ran
+    // (space-server.ts), so sealing the skipped run would commit a 1-op
+    // mark-only consequence — the entry permanently consumed with zero
+    // effects and no error (a04's seqs 53/56: two Create clicks lost to
+    // a transient argument-resolution failure). Withdraw the whole tx
+    // instead: the entry stays pending-unconsequenced, the drain
+    // re-delivers it (a drain copy's plain-deferral arm releases the
+    // in-flight guard and arms the rescan; the 8-deferral threshold
+    // hardens a permanently unresolvable argument into the visible §5
+    // DROP notice), and the retried handler's cause-derived idempotent
+    // writes converge. An LT1 in-process copy carries no onFailure —
+    // its abort alone leaves the durable entry unmarked and the next
+    // wave's drain delivers it once, WITH a streamEntry (C8b).
+    // Client/OFF dispatches carry no mark and keep the silent skip.
+    if (served !== undefined && tx.dispatchedHandlerNotRun !== undefined) {
+      const reason = tx.dispatchedHandlerNotRun.reason;
+      if (tx.status().status === "ready") {
+        tx.abort(
+          new Error(`served handler did not run: ${reason}`),
+        );
+      }
+      reportServedEventFailure(served, {
+        kind: "deferred",
+        cause: "handler-not-run",
+        message: reason,
+      });
+      // The withdrawal is a deferral, and a deferral carries the
+      // drain's arrival-order BARRIER (events.md §2; review-6459 F1):
+      // the drain queues a pass's pending entries together, so
+      // same-space followers already sit behind this head and would
+      // dispatch — and SEAL — next, landing a later arrival's
+      // consequence ahead of the withdrawn entry's re-drain (the b01
+      // overtake: durable log ["B","A"] against arrival [a1, b1]).
+      deferLaterSameSpaceServedEvents(
+        state,
+        queuedEvent,
+        `whose served handler did not run (${reason})`,
+      );
+      runFinalCommitCallback();
       return;
     }
 
@@ -1525,6 +1679,9 @@ export async function dispatchQueuedEvent(state: {
           `LT1 in-process copy of ${queuedEvent.id} sealed outside its ` +
           "appending wave and was refused; the drain delivers the entry",
         ]);
+        // No abandonment: the durable entry is still the truth and the drain
+        // delivers it, so a further attempt at this event is coming and work
+        // staged on it is waiting for something rather than nothing.
         runFinalCommitCallback();
         return;
       }
@@ -1581,38 +1738,87 @@ export async function dispatchQueuedEvent(state: {
         telemetryFailure = { error };
       }
 
+      // A served event's DETERMINISTIC CFC pre-storage refusal seals an
+      // error consequence (events.md §5: the error IS the consequence — the
+      // same honesty as the throw arm in `finalize` above). Without one the
+      // durable entry stays unconsequenced and every wave re-drains it into
+      // the identical refusal. Scoped to exactly the class
+      // `reportDroppedCfcRejectedWrite` reports: every other non-retried
+      // outcome has its own explicit routing below: typed delivery failures
+      // checkpoint, proven-no-commit failures terminalize, and a handler abort
+      // seals a safe error consequence. Called before the commit callback on
+      // both paths that carry a refusal, so the drain's in-flight guard sees
+      // the staged notice ("marked") rather than releasing the still-"queued"
+      // copy.
+      const sealCfcRefusalConsequence = (): void => {
+        if (served === undefined || !isCfcRejectedCommitError(error)) return;
+        reportServedEventFailure(served, {
+          kind: "error",
+          message: error.message,
+        });
+      };
+      const deferCommitPreparationFailure = (): void => {
+        if (served === undefined || error?.name !== "CommitPreparationError") {
+          return;
+        }
+        reportServedEventFailure(served, {
+          kind: "deferred",
+          cause: "delivery-failure",
+          role: "failed-head",
+          phase: "commit-preparation",
+          failure: {
+            failureClass: "unknown",
+            recoveryEpoch: "commit-preparation",
+            permanentEvidence: false,
+          },
+        });
+      };
+      const routeProvenNoCommitFailure = (): void => {
+        if (served === undefined || error === undefined) return;
+        const rowLabelRefusal = error.name === "RowLabelCommitError";
+        const aclRevision = (error as { aclRevision?: unknown }).aclRevision;
+        const authorizationRefusal = error.name === "AuthorizationError" &&
+          (error as { permanentEvidence?: unknown }).permanentEvidence ===
+            true &&
+          typeof aclRevision === "number";
+        if (!rowLabelRefusal && !authorizationRefusal) return;
+        reportServedEventFailure(served, {
+          kind: "deferred",
+          cause: "delivery-failure",
+          role: "failed-head",
+          phase: "commit-finalization",
+          failure: {
+            failureClass: rowLabelRefusal ? "protocol" : "authorization",
+            recoveryEpoch: rowLabelRefusal
+              ? "row-label-verdict"
+              : `acl:${aclRevision}`,
+            permanentEvidence: true,
+          },
+        });
+      };
+      const sealExplicitHandlerAbort = (): void => {
+        if (served === undefined || !isExplicitTransactionAbort(error)) return;
+        reportServedEventFailure(served, {
+          kind: "error",
+          message: "Event handler aborted its transaction",
+        });
+      };
+
       switch (disposition.kind) {
         case "success":
           runFinalCommitCallback();
           break;
         case "give-up":
-          // A served event's DETERMINISTIC CFC pre-storage refusal seals an
-          // error consequence (events.md §5: the error IS the consequence —
-          // the same honesty as the throw arm in `finalize` above). Without
-          // one the durable entry stays unconsequenced and every wave
-          // re-drains it into the identical refusal. Scoped to exactly the
-          // class `reportDroppedCfcRejectedWrite` reports below: every other
-          // give-up (transport, authorization, a handler abort, opt-out)
-          // leaves the entry pending for the wave cadence to re-drain.
-          // Ordered before the commit callback so the drain's in-flight
-          // guard sees the staged notice ("marked") rather than releasing
-          // the still-"queued" copy.
-          if (served !== undefined && isCfcRejectedCommitError(error)) {
-            try {
-              served.onFailure?.({
-                kind: "error",
-                message: error.message,
-              });
-            } catch (callbackError) {
-              logger.error(
-                "schedule-error",
-                "Error in served event failure callback:",
-                callbackError,
-              );
-            }
-          }
+          deferCommitPreparationFailure();
+          routeProvenNoCommitFailure();
+          sealExplicitHandlerAbort();
+          sealCfcRefusalConsequence();
           runFinalCommitCallback();
           reportDroppedCfcRejectedWrite(error, handlerId);
+          // No further attempt at this event is coming, so anything staged on
+          // the transaction and waiting for it to commit is waiting for
+          // nothing.
+          tx.abandonStagedWork(error as CommitError);
           logger.warn(
             "scheduler",
             disposition.reason === "non-retryable"
@@ -1643,7 +1849,19 @@ export async function dispatchQueuedEvent(state: {
           // handleError — the rejection is observable via the commit telemetry
           // marker (`terminal: "rule"`), mirroring the permanent path; surfacing
           // a scheduler error here is reserved for non-deterministic failures.
+          // A CFC boundary refusal is classified terminal rather than
+          // give-up, so both of the give-up path's CFC obligations have to
+          // hold here too: seal the served entry's error consequence, and
+          // report the dropped write. Neither is optional — see
+          // `sealCfcRefusalConsequence` for what an unconsequenced entry
+          // costs, and `reportDroppedCfcRejectedWrite` for why the
+          // `logger.warn` below is not enough on its own.
+          deferCommitPreparationFailure();
+          routeProvenNoCommitFailure();
+          sealCfcRefusalConsequence();
           runFinalCommitCallback();
+          reportDroppedCfcRejectedWrite(error, handlerId);
+          tx.abandonStagedWork(error as CommitError);
           logger.warn(
             "scheduler",
             "Event handler commit terminally rejected (deterministic refusal); " +
@@ -1653,6 +1871,7 @@ export async function dispatchQueuedEvent(state: {
           break;
         case "permanent":
           runFinalCommitCallback();
+          tx.abandonStagedWork(error as CommitError);
           if (permanentRejection === "receipt-exists") {
             logger.warn(
               "event-lost-race",
@@ -1670,6 +1889,7 @@ export async function dispatchQueuedEvent(state: {
           break;
         case "convergence-failed": {
           runFinalCommitCallback();
+          tx.abandonStagedWork(error as CommitError);
           logger.error(
             "commit-convergence-failed",
             () => [
@@ -1790,8 +2010,9 @@ type CommitDisposition =
  *  - permanent: a commit-time precondition failure (receipt-exists,
  *    origin-committed). Re-running can never succeed and would double-handle the
  *    event, so it is never retried.
- *  - terminal: a deterministic server-side refusal of the committed data (a CFC
- *    row-label commit-rule violation, `isTerminalRejection`); never retried —
+ *  - terminal: a deterministic refusal of the committed data on its own merits
+ *    (`isTerminalRejection`) — the server's CFC row-label commit rule, or the
+ *    client's CFC boundary refusing before storage; never retried —
  *    re-running recomputes the identical refused write, and the doomed re-runs'
  *    speculative rev bumps would starve concurrent siblings. Surfaced as a
  *    terminal outcome (telemetry `terminal: "rule"`) rather than a silent drop.
@@ -1826,6 +2047,7 @@ type CommitDisposition =
  * way — a stale basis is bounded by the retry window, and a non-stale-basis
  * rejection drops on the first attempt.
  */
+
 /** Whether a served event's commit error is the serving loop's
  * LT1-late-seal refusal (stage C build W3, (α)) — carried as the
  * `reason` Error's message, the sentinel `LT1_LATE_SEAL_REFUSED`. */

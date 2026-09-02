@@ -6,10 +6,12 @@
 import type { FuseProvider } from "./platform.ts";
 
 /**
- * Bounds for --attrcache-timeout: zero (leave the NFS client's default
- * caching untouched) or one second to one day.
+ * Lowest `--attrcache-timeout` accepted: zero, which leaves the NFS client's
+ * default caching untouched.
  */
 export const ATTRCACHE_TIMEOUT_MIN_SECONDS = 0;
+
+/** Highest `--attrcache-timeout` accepted: one day. */
 export const ATTRCACHE_TIMEOUT_MAX_SECONDS = 86_400;
 
 /**

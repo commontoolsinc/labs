@@ -203,7 +203,7 @@ const trace = await commonfabric.getWriteStackTrace()
 
 Interpreting the captured stacks:
 
-- `Runner.setupInternal` / `Runner.instantiatePatternNode` frames mean piece
+- `Runner.setupInternal` / `#instantiatePatternNode` frames mean piece
   instantiation/setup writes — usually noise, not churn
 - `diffAndUpdate`, `applyChangeSet`, or pattern handler frames point to runtime
   state updates after setup — usually the more interesting targets
@@ -219,7 +219,7 @@ Prefer the structured traces above. When you need log output, use the focused
 loggers before raising the whole `scheduler` module:
 
 - `runner.trigger-flow` — which source action id re-enters `Runner.run()`,
-  `setupInternal()`, `instantiatePatternNode()`
+  `setupInternal()`, `#instantiatePatternNode()`
 - `runner.wish-flow` — is `wish()` launching suggestion patterns or just
   reading hot indexes?
 - `scheduler` — settle-loop internals (broad — last resort)
@@ -260,7 +260,7 @@ Start with these locations when traces or logs point to worker churn:
   (`events.ts`), action execution/resubscribe timing (`run.ts`), and trigger
   matching (`invalidation.ts`, `trigger-index.ts`, `scheduling-writes.ts`,
   `dependency-graph.ts`)
-- `packages/runtime-client/backends/web-worker/index.ts` — worker message
+- `packages/runtime-client/src/backends/web-worker/index.ts` — worker message
   entrypoint — and `runtime-processor.ts` — console-facing scheduler IPC
 - `packages/runner/src/storage/cache.ts` — socket event dispatch
 - `packages/html/src/worker/reconciler.ts` — worker flush scheduling

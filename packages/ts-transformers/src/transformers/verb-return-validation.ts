@@ -35,6 +35,11 @@
  */
 
 import ts from "typescript";
+
+import {
+  unwrapExpression,
+  unwrapTransparentWrapperOnce,
+} from "../utils/expression.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import {
   declaredVerbResultTypeNode,
@@ -60,7 +65,7 @@ export class VerbReturnValidationTransformer extends HelpersOnlyTransformer {
           (callKind.builderName === "action" ||
             callKind.builderName === "handler")
         ) {
-          this.validateVoidDeclaredBody(node, callKind.builderName, context);
+          this.#validateVoidDeclaredBody(node, callKind.builderName, context);
         }
       }
       // JSX-aware: the stock visitor skips `JsxExpression.expression`, which
@@ -71,7 +76,7 @@ export class VerbReturnValidationTransformer extends HelpersOnlyTransformer {
     return ts.visitNode(context.sourceFile, visit) as ts.SourceFile;
   }
 
-  private validateVoidDeclaredBody(
+  #validateVoidDeclaredBody(
     call: ts.CallExpression,
     builderName: VerbBuilderName,
     context: TransformationContext,
@@ -110,10 +115,15 @@ export class VerbReturnValidationTransformer extends HelpersOnlyTransformer {
 function verbCallback(
   call: ts.CallExpression,
 ): ts.ArrowFunction | ts.FunctionExpression | undefined {
-  const fns = call.arguments.filter(
-    (arg): arg is ts.ArrowFunction | ts.FunctionExpression =>
-      ts.isArrowFunction(arg) || ts.isFunctionExpression(arg),
-  );
+  // Each argument is resolved through the transparent wrapper set first: a
+  // wrapped callback is still the verb body, and leaving it unresolved hides
+  // the body from this validator entirely rather than judging it differently.
+  const fns = call.arguments
+    .map((arg) => unwrapExpression(arg))
+    .filter(
+      (arg): arg is ts.ArrowFunction | ts.FunctionExpression =>
+        ts.isArrowFunction(arg) || ts.isFunctionExpression(arg),
+    );
   return fns.length === 1 ? fns[0] : undefined;
 }
 
@@ -125,12 +135,19 @@ function verbCallback(
  * An `any` assertion anywhere below opts the expression out.
  */
 function isDefinitelyPlainShaped(expr: ts.Expression): boolean {
-  if (ts.isParenthesizedExpression(expr)) {
-    return isDefinitelyPlainShaped(expr.expression);
+  // An assertion to `any` opts the expression out, whichever form carries it.
+  // That rule is stated once, before the wrapper set is stepped through, so a
+  // wrapper spelling added later cannot slip past it.
+  if (
+    (ts.isAsExpression(expr) || ts.isSatisfiesExpression(expr) ||
+      ts.isTypeAssertionExpression(expr)) &&
+    expr.type.kind === ts.SyntaxKind.AnyKeyword
+  ) {
+    return false;
   }
-  if (ts.isAsExpression(expr) || ts.isSatisfiesExpression(expr)) {
-    if (expr.type.kind === ts.SyntaxKind.AnyKeyword) return false;
-    return isDefinitelyPlainShaped(expr.expression);
+  const unwrappedExpr = unwrapTransparentWrapperOnce(expr);
+  if (unwrappedExpr) {
+    return isDefinitelyPlainShaped(unwrappedExpr);
   }
   if (ts.isConditionalExpression(expr)) {
     return isDefinitelyPlainShaped(expr.whenTrue) &&

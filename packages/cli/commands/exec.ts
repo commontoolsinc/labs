@@ -15,17 +15,26 @@ import {
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
 import type { ExecutedMountedCallableFile } from "../lib/exec.ts";
+import {
+  parseReadSection,
+  readSectionAsksVerbHelp,
+  refuseProjectionBeforeSection,
+  sectionWithVerbHelp,
+} from "../lib/verb-section.ts";
 
 /**
  * `cf exec` runs no verbose in-flight span, so the failure exit it shares with
- * `cf piece call` is handed a span that closes to nothing. The exit's own
+ * `cf call` is handed a span that closes to nothing. The exit's own
  * contract is what is being reused here — the message, the id and the phase —
  * and that part is span-independent.
  */
 const NO_SPAN = { finish: () => {} };
 
-/** The `cf exec` flags cliffy parses before the mounted file. Everything
- * after it belongs to the callable's own schema-derived interface. */
+/** The read options `cf exec` shapes a result with. They are declared on the
+ * command so its page names them, and read from the words past the `--` that
+ * closes the callable's section — the mounted file opens that section, and
+ * everything between the two belongs to the callable's own schema-derived
+ * interface. */
 export interface ExecCommandOptions {
   filter?: string;
   select?: string;
@@ -44,14 +53,19 @@ export interface ExecCommandOptions {
  *
  * **The result cell's address goes to stderr, written the way the next command
  * takes it.** An address has three parts, and `canonicalAddress` renders all
- * three as the one token `--piece` parses, the space embedded as its
- * `/@did:.../` prefix. Naming the space is not decoration — `cf exec` takes
+ * three as one reference, the space embedded as its `/@did:.../` prefix. A
+ * reference is written positionally, so the address is printed into the
+ * position the next command reads it from rather than behind a flag. Naming
+ * the space is not decoration — `cf exec` takes
  * its space from the mount, while `cf get` falls back to whatever space
  * the caller has configured, so a token that omitted it would suggest a
  * command that reads a different cell.
  *
- * Extracted from the action body so it is unit-coverable: command action
- * bodies never execute under the unit suite (docs/development/COVERAGE.md).
+ * Standing apart from the action is what lets a test state a result of each
+ * shape and read what came out of the two sinks, rather than mounting a file
+ * and dispatching to it three times. The action body does run under the unit
+ * suite, so what the separation buys is reaching the three outcomes, not
+ * reaching the lines.
  */
 export function renderExecOutcome(
   result: ExecutedMountedCallableFile,
@@ -71,8 +85,8 @@ export function renderExecOutcome(
     if (result.resultRef) {
       const address = canonicalAddress(result.resultRef);
       writeError(
-        `Tool result cell: ${address} (read it back with \`cf get ` +
-          `--piece ${address}\`)`,
+        `Tool result cell: ${address} (read it back with ` +
+          `\`cf get ${address}\`)`,
       );
     }
     return;
@@ -86,15 +100,16 @@ export function renderExecOutcome(
  * The caller's read options, read before anything is resolved or dispatched.
  *
  * A malformed selection is a fact about the flags: it costs no mount lookup and
- * runs no verb, so it is reported as the data error `cf piece get` reports for
+ * runs no verb, so it is reported as the data error `cf get` reports for
  * the same mistake. Routing it through {@link exitExecFailure} instead would
  * name an invocation and a phase to retry from for a call that was never made.
  * A selection that fails against a RESULT is the other case, and that one does
  * name them.
  *
- * Extracted from the action body for the same reason `renderExecOutcome` is:
- * command action bodies never execute under the unit suite
- * (docs/development/COVERAGE.md).
+ * A named export with a `deps` seam rather than a `try` inside the action:
+ * the exit ends the process, so a malformed selection reached through argv
+ * is read off a stubbed `Deno.exit`, while a direct call reads the report
+ * off the seam the exit contract is written against.
  */
 export async function parseExecSelection(
   options: ExecCommandOptions,
@@ -119,16 +134,18 @@ export async function parseExecSelection(
  * same one a missing mount or an unreadable callable has always printed.
  *
  * From `dispatched` onward the handling may have committed, and the report
- * becomes the one `cf piece call` makes: the message, then the id beside the
+ * becomes the one `cf call` makes: the message, then the id beside the
  * furthest phase reached. That phase is the difference between a retry that
  * deduplicates and one that commits a second time — and `cf exec` accepts no
  * `--invocation`, so a retry can only be a fresh pair. Saying so is what lets
  * a caller decide rather than guess. The session completing the pair is
  * already on stderr, announced at dispatch.
  *
- * A named export rather than catch-block prose because the action body only
- * runs under Cliffy and is unreachable from a unit test; the seams let a test
- * observe the exact exit contract, and the action's catch calls THIS function.
+ * A named export rather than catch-block prose because the phase is what
+ * chooses between those two reports, and as a parameter a test names it —
+ * reaching the second one through the action would take a mounted callable
+ * that fails after it has dispatched. The seams let a test observe the exact
+ * exit contract, and the action's catch calls THIS function.
  */
 export function exitExecFailure(
   error: unknown,
@@ -168,33 +185,66 @@ export const exec = new Command()
   )
   .example(
     cliText(
-      "cf exec --select id,title /tmp/cf/home/pieces/notes/result/search.tool --query milk",
+      "cf exec /tmp/cf/home/pieces/notes/result/search.tool --query milk -- --select id,title",
     ),
-    "Project the result to selected fields (read options precede the file).",
+    'Project the result to selected fields (read options follow the "--" ' +
+      "that closes the callable's section).",
   )
+  // The three read options are declared so this page names them and a caller
+  // who writes one before the mounted file meets a refusal that can say where
+  // it belongs. They are READ from the words past `--`, which is the one
+  // position the grammar accepts them in; see lib/verb-section.ts.
   .option(
     "--filter <predicate:string>",
-    "Filter an array with a jq-inspired predicate (before the mounted file)",
+    'Filter an array with a jq-inspired predicate (past the "--" that ' +
+      "closes the callable's section)",
   )
   .option(
     "--select <fields:string>",
-    "Project output to comma-separated field paths (before the mounted " +
-      "file); a trailing @ asks for a position's address",
+    'Project output to comma-separated field paths (past the "--" that ' +
+      "closes the callable's section); a trailing @ asks for a position's " +
+      "address",
   )
   .option(
     "--schema <schema:string>",
     "Project output with an inline JSON Schema, @file, or the --select " +
-      "field list (before the mounted file)",
+      'field list (past the "--" that closes the callable\'s section)',
     // Both flags carry the one projection, so a command naming both has not
     // said which shape it wants. Refuse before the call rather than pick.
     { conflicts: ["select"] },
   )
   .stopEarly()
   .arguments("<mountedFile:string> [tail...:string]")
-  .action(async (options: ExecCommandOptions, mountedFile, ...tail) => {
+  .action(async function (
+    options: ExecCommandOptions,
+    mountedFile: string,
+    ...tail: string[]
+  ) {
+    // The grammar is a fact about the argv alone, settled before a mount is
+    // looked up or an invocation minted: a projection written before the
+    // mounted file names positions in a result nothing has produced.
+    refuseProjectionBeforeSection(
+      "exec",
+      "the mounted file",
+      this.getRawArgs(),
+      options,
+    );
+    const literalArgs = this.getLiteralArgs();
+    // `-- --help` reaches the callable's own page rather than this command's,
+    // so those words rejoin the section rather than being read here.
+    const asksVerbHelp = readSectionAsksVerbHelp(literalArgs);
+    const readSection = asksVerbHelp ? {} : await parseReadSection(
+      "exec",
+      this.getRawArgs(),
+      literalArgs,
+    );
+    // Into the section, at the position the callable's parser reads `--help`.
+    const sectionArgs = asksVerbHelp
+      ? sectionWithVerbHelp(tail, literalArgs)
+      : tail;
     // Outside the failure wrapper below, and refusing before a mount is even
     // looked up: see {@link parseExecSelection}.
-    const selection = await parseExecSelection(options);
+    const selection = await parseExecSelection(readSection);
 
     // Minted here rather than inside the dispatch so this frame can both
     // announce it and name it again if the call fails. `cf exec` accepts no
@@ -212,7 +262,7 @@ export const exec = new Command()
     try {
       const result = await executeMountedCallableFile(
         mountedFile,
-        tail,
+        sectionArgs,
         { onPhase },
         {
           invocation,

@@ -53,6 +53,7 @@ export function encodeULEB128(value: number): Uint8Array {
 export interface DecodeResult {
   /** The decoded value. */
   value: number;
+
   /** The index of the first byte after the encoded value. */
   nextIndex: number;
 }

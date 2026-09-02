@@ -761,7 +761,12 @@ identity (§7.5) and a **rejection taxonomy**: commit rejections split into
 StorageTransactionInconsistent guard — re-running against fresher confirmed
 state can succeed, so it retries with capped exponential backoff within a
 bounded window, then surfaces a terminal CommitConvergenceError),
-*terminal* (a deterministic commit-rule refusal — never retried, surfaced),
+*terminal* (a deterministic commit-rule refusal — the server's commit-time
+evaluation or the client's CFC boundary refusing the committed data itself —
+never retried, surfaced; a terminal reactive-commit rejection reaches the
+scheduler's error channel carrying the refusal, both its reason texts and the
+structured refusal details their producers recorded, so a consumer can name
+the offending input rather than only the offending label — see §10),
 *non-retryable* (every other non-permanent rejection — deterministic with
 respect to confirmed state, drops on the first attempt), and
 *permanent* (a commit-time precondition failed — drop, never retry).
@@ -983,8 +988,10 @@ work order is archived with the migration records.
   `status = invalid` and receive an escalating backoff gate
   (`gate.backoffUntil`, ×2 per consecutive exhaustion, capped); one wake is
   scheduled; a `scheduler.non-settling` telemetry marker fires for every such
-  episode, carrying the busy-window summary along with `deferredActions` (the
-  labels of the actions the pass held back, first ten) and
+  episode, carrying the busy-window summary along with `deferredActions`
+  (the first ten actions the pass held back, each as its label plus the
+  piece the action serves when its scheduler observation identity says —
+  the attribution a builtin's `raw:` label cannot provide) and
   `deferredActionCount`, observable through `runtime.telemetry`. A marker says
   a pass exhausted its budget, which a wave that needs several passes to
   converge also does; it is not on its own a report that the graph will never
@@ -1118,6 +1125,22 @@ What remains live here:
   gating (unchanged).
 - The implementation-identity stamping on run transactions
   (`setCfcImplementationIdentity`) is runner-level and unchanged.
+- **Refusal surfacing.** A CFC prepare refusal carries two channels. The
+  *reasons* are prose, one per rule that refused. The *refusal details*
+  (`cfc/refusal-detail.ts`) are the structured form: the boundary that
+  refused, the label atoms outside it, the reads that carried each one, and
+  whether those reads account for every offending atom. A consumer reads the
+  details to state a remedy — dropping the named inputs — which the reasons
+  alone cannot support. Details are recorded by the gates that can describe
+  themselves; a refusal whose producers recorded none carries an empty list
+  and its reasons still stand.
+- **`cfc.prepare-reject` telemetry.** Only a refusal every one of whose
+  reasons is a verdict is terminal, so only that one reaches the error
+  channel; a refusal mixing a verdict with an input prepare could not
+  evaluate is retried, and upstream it looks like a graph that stopped
+  converging. The marker fires on every refusal, terminal or not, carrying
+  the reasons, the details, and which arm the commit boundary took. It
+  reports and decides nothing.
 
 ---
 

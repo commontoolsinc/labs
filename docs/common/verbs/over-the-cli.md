@@ -1,16 +1,15 @@
 # Verbs over the CLI
 
 A **verb** is a pattern's callable surface: a `Stream` property a caller invokes
-with `cf call` — or `cf piece call`, the same command mounted under `piece`,
-which still works and warns as a deprecated spelling. This document is about
-what a caller gets *back*.
+with `cf call`. This document is about what a caller gets *back*.
 
 A verb can declare a result, and the caller reads it off the call. That turns a
 sequence of "mutate, then go looking for what happened" into a single
 exchange — and the thing a verb hands back can be a **piece**, so a create tells
 you where the thing it created lives.
 
-Every command here takes a `--piece` the caller already holds. Reaching one
+Every command here takes a target the caller already holds — written as a
+reference in the first positional, or on `--cell`. Reaching one
 without an id in hand is [an agent over the CLI](agents-over-the-cli.md).
 
 For the authoring side, see [concepts/action.md](../concepts/action.md) and
@@ -80,7 +79,7 @@ pattern's source identity — so you can tell which version you are talking to
 before relying on any of its behavior.
 
 ```bash
-cf piece verbs --piece <piece> --json
+cf piece verbs --cell <piece> --json
 ```
 
 Each row carries the verb's input schema and, when the verb declares a result,
@@ -142,7 +141,7 @@ One verb at a time, `--help` answers the same question from the callable
 itself:
 
 ```bash
-cf call --piece <piece> <verb> --help
+cf call --cell <piece> <verb> --help
 ```
 
 ```text
@@ -163,7 +162,7 @@ all, for a client that wants the schema rather than the summary.
 `cf call` prints one settled **Invocation JSON** object on stdout:
 
 ```bash
-cf call --piece <board> addTopic \
+cf call --cell <board> addTopic \
   '{"title":"Ship the thing","body":"the initial document","agentName":"Sol"}'
 ```
 
@@ -186,12 +185,12 @@ or derives structured authorship from the event returns those in its record;
 the caller could not have computed them.
 
 The `receipt` is where that outcome lives: the address of the cell this
-handling wrote it to, written as one string in the canonical reference syntax
-`--piece` reads. Keep it and the result is re-readable without calling anything
+handling wrote it to, written as one string in the reference syntax
+`--cell` reads. Keep it and the result is re-readable without calling anything
 again —
 
 ```bash
-cf get --piece "$(echo "$RESULT" | jq -r .receipt)"
+cf get --cell "$(echo "$RESULT" | jq -r .receipt)"
 ```
 
 — which is an ordinary read, so the verb's body does not run a second time.
@@ -204,11 +203,41 @@ receipt to name.
 A verb decides what it returns; the caller decides how much of it to look at.
 `--filter`, `--select`, and `--schema` — the same three flags `cf get`,
 `cf wish` and `cf exec` take, with the same grammar — shape the `result` before
-it reaches stdout, and go before the callable name:
+it reaches stdout, and come after the thing they shape.
+
+One rule covers all four commands, and it turns on whether a callable's own
+vocabulary stands between the command and the read options. `cf get` and
+`cf wish` have none, so nothing separates their read options from the rest of
+the line. `cf call` and `cf exec` have one, so a marker closes it:
+
+```text
+cf get  <addr> [path]           --select …
+cf wish <target>                --select …
+cf call <target> <verb> <input> -- --select …
+cf exec <mountedFile> <input>   -- --select …
+```
+
+The name that opens the callable's section — the verb on `call`, the mounted
+file on `exec` — needs no marker of its own, the same boundary `docker run`
+draws at an image name and `ssh` at a host. `--` is spent on the boundary no
+positional draws: where the callable's section ends and the read step's begins.
+
+A projection written before the verb is refused rather than accepted quietly,
+because it would name positions in a result nothing has identified yet; so is
+one written inside the callable's section, where the verb's own fields are
+read and either vocabulary may grow a name the other already has. Each refusal
+names the section the flag belongs to and prints the line that works.
+`--help` is the one word that crosses the marker on purpose: written past it,
+it still reaches the callable and prints that verb's page, since a caller
+wanting the command's own page writes it with no verb at all.
+
+Where a command has no callable section at all, `--` closes nothing: it is
+refused on `cf get`, `cf set` and `cf wish` rather than silently setting aside
+words that nothing reads.
 
 ```bash
-cf call --piece <topic> --select comment.writtenAt addComment \
-  '{"body":"first","agentName":"Sol"}'
+cf call --cell <topic> addComment '{"body":"first","agentName":"Sol"}' \
+  -- --select comment.writtenAt
 ```
 
 ```json
@@ -237,22 +266,22 @@ every name is read as written. A JSON `--schema` states a shape of its own and
 is held to none of this.
 
 **A verb reached through a filesystem mount is the same call.** `cf exec` takes
-the three flags too, written before the mounted file, since everything after it
-belongs to the callable's own schema-derived interface. It settles the handling
-under an invocation of its own and prints the same Invocation JSON this section
-shows, so a mounted handler's outcome has an address and a shape rather than
-being unreported:
+the three flags too, past the marker that closes the section the mounted file
+opened — everything between the two belongs to the callable's own
+schema-derived interface. It settles the handling under an invocation of its
+own and prints the same Invocation JSON this section shows, so a mounted
+handler's outcome has an address and a shape rather than being unreported:
 
 ```bash
-cf exec --select comment.writtenAt \
-  /tmp/cf/<space>/pieces/<piece>/result/addComment.handler \
-  --body first --agent-name Sol
+cf exec /tmp/cf/<space>/pieces/<piece>/result/addComment.handler \
+  --body first --agent-name Sol \
+  -- --select comment.writtenAt
 ```
 
 A tool prints its result on stdout as it always did, with the result cell's
 address on stderr. The line spells out the whole command that reads it back,
 and the address is one token that carries all three parts — space, id, and
-scope — as the canonical `/@did:.../of:...` reference `--piece` takes whole.
+scope — as the `/@space/piece` reference a target position takes whole.
 Naming the space inside the token is what makes the command portable: `cf exec`
 gets its space from the mount it ran through, while the suggested read falls
 back to whichever space the caller has configured, so an address that named
@@ -276,7 +305,7 @@ the circle, so that position renders its address and the rest reads as it
 always did:
 
 ```bash
-cf call --piece "$EPIC" addChild -- --title "Session cookie handling"
+cf call --cell "$EPIC" addChild --title "Session cookie handling"
 ```
 
 ```json
@@ -295,24 +324,64 @@ cf call --piece "$EPIC" addChild -- --title "Session cookie handling"
 ```
 
 That address is the one a `$link` marker would have produced by hand, so the
-derived answer and a written one agree. A shape you asked for wins wherever it
-renders: `--filter`, `--select` and `--schema` are applied to the receipt first,
-and one that narrows past the circle — `--select item.title` — comes back
-exactly as written, with nothing derived added to it. One that keeps the circle
-— `--select item`, which names the re-entering subtree whole — is bounded on the
-way out, and the bound is a cut into what you selected rather than a shape that
-replaces it: the closing position renders its address, and no position you did
-not name comes back beside it. `--select item.parent` names the closing position
-itself, and answers with that one address alone.
+derived answer and a written one agree.
 
-Where nothing bounds it — the verb declares no result, the declaration leaves
-the closing position wide, or a `--filter` is in play, whose surviving elements
-no longer say which positions they came from and so cannot carry an address —
-the call names the position the circle closes at and the receipt to collect the
-outcome from, and exits nonzero. Read that as the result being unrenderable,
-never as the mutation having failed: **the write landed**, and the message says
-so. A `--filter` reaches a renderable answer by naming a projection beside it
-that narrows past the circle.
+A verb whose declared result is narrower than the value behind it is bounded a
+second way. `addTopic` is the case: it hands back the topic it created and
+declares a compact row over it, so a create does not expand that topic's prose,
+its thread, and every sibling it references. The row re-enters nowhere, and the
+circle a readback of the topic closes — through its view, into a profile, into
+that profile's own view — is at no position the row names. There is nothing
+there for a recursion cut to land on, and the bound is the declared shape
+itself: every object position the declaration closes is held to the fields it
+declares, and what comes back is the row its author wrote. A position the
+declaration leaves open — an index signature beside its named members — still
+reads every key stored at it, because those keys are declared too.
+
+```bash
+cf call --cell "$BOARD" addTopic --title "Session cookie handling" \
+  --agent-name b7
+```
+
+```json
+{
+  "invocation": "9a71…",
+  "status": "settled",
+  "result": {
+    "topic": {
+      "title": "Session cookie handling",
+      "createdAt": 1756400000000,
+      "createdBy": { "kind": "agent", "name": "b7" },
+      "commentCount": 0
+    }
+  }
+}
+```
+
+The two bounds are tried weakest first, so neither narrows anything it does not
+have to: a result the recursion cut renders is never held to the declared shape
+as well.
+
+A shape you asked for wins wherever it renders: `--filter`, `--select` and
+`--schema` are applied to the receipt first, and one that narrows past the
+circle — `--select item.title` — comes back exactly as written, with nothing
+derived added to it. One that keeps the circle — `--select item`, which names
+the re-entering subtree whole — is bounded on the way out, and the bound is a
+cut into what you selected rather than a shape that replaces it: the closing
+position renders its address, and no position you did not name comes back
+beside it. A position you asked for the address of — `--select
+'item@,item.parent'` — still answers with that address, which was your whole
+answer there rather than a field of what sits behind it. `--select item.parent`
+names the closing position itself, and answers with that one address alone.
+
+Where nothing bounds it — the verb declares no result, the declaration
+describes no less than the value does, or a `--filter` is in play, whose
+surviving elements no longer say which positions they came from and so cannot
+carry an address — the call names the position the circle closes at and the
+receipt to collect the outcome from, and exits nonzero. Read that as the result
+being unrenderable, never as the mutation having failed: **the write landed**,
+and the message says so. A `--filter` reaches a renderable answer by naming a
+projection beside it that narrows past the circle.
 
 ### Retries are safe, and cheap to reason about
 
@@ -336,12 +405,12 @@ that chose it** hands back the **original** result, and nothing is written a
 second time:
 
 ```bash
-cf call --piece <topic> --invocation add-comment-1 \
+cf call --cell <topic> --invocation add-comment-1 \
   addComment '{"body":"first","agentName":"Sol"}'
 
 # Same id, same session, different payload: the original result comes back,
 # and no second comment is recorded.
-cf call --piece <topic> --invocation add-comment-1 \
+cf call --cell <topic> --invocation add-comment-1 \
   addComment '{"body":"different","agentName":"Sol"}'
 ```
 
@@ -376,12 +445,12 @@ a verb refuses the payload, correct it and retry under the same id.
 ```bash
 # Refused: nonzero exit, nothing written — and `add-1` is NOT spent, because
 # the payload never became an event.
-cf call --piece <board> --invocation add-1 \
+cf call --cell <board> --invocation add-1 \
   addTopic '{"title":"","agentName":"Sol"}'
 
 # The same id, corrected. This one executes; a settled id would have replayed
 # instead.
-cf call --piece <board> --invocation add-1 \
+cf call --cell <board> --invocation add-1 \
   addTopic '{"title":"Corrected","agentName":"Sol"}'
 ```
 
@@ -398,7 +467,7 @@ settled. The refusal names the field, the position it sat at, the vocabulary
 that position takes, and the declared name it is one edit from:
 
 ```bash
-cf call --piece <board> addTopic '{"titel":"Ship it","agentName":"Sol"}'
+cf call --cell <board> addTopic '{"titel":"Ship it","agentName":"Sol"}'
 ```
 
 ```
@@ -422,7 +491,7 @@ payload need satisfy only one branch, so a field missing from one branch may be
 named by another. And a position marked as a cell or a stream may hold a link
 rather than a value, whose `"/"` is nothing anybody declared.
 
-The declared vocabulary is what `cf call --piece <id> <verb> --help`
+The declared vocabulary is what `cf call --cell <id> <verb> --help`
 prints, and it names the fields the verb's handler **reads**. That can be fewer
 than the TypeScript event type declares: a field the body never touches is one
 the runtime would have dropped, so the call is refused rather than accepted and
@@ -468,7 +537,7 @@ durable, and only the readback is skipped. The envelope still carries the
 }
 ```
 
-— and collecting the outcome later is `cf get --piece <that string>`.
+— and collecting the outcome later is `cf get --cell <that string>`.
 Replaying the same id and session recovers it too, but that re-runs the handler
 body: a verb that sends mail or spends a model call does it again. Reading the
 address does not.
@@ -547,7 +616,7 @@ that piece needs its address, and `--show-links` supplies it: a dictionary of
 RFC 6901 pointers into the result, each naming the document behind that path.
 
 ```bash
-cf call --show-links --piece <board> createNote '{"title":"Notes"}'
+cf call --show-links --cell <board> createNote '{"title":"Notes"}'
 ```
 
 ```json
@@ -562,11 +631,11 @@ cf call --show-links --piece <board> createNote '{"title":"Notes"}'
 ```
 
 `/note` is the created piece's own document, and each entry is written in the
-canonical reference syntax `--piece` reads — taken exactly as emitted, `of:`
+reference syntax the target positional reads — taken exactly as emitted, `of:`
 prefix included — so it addresses directly:
 
 ```bash
-cf call --piece "$(echo "$RESULT" | jq -r '.links["/note"]')" \
+cf call "$(echo "$RESULT" | jq -r '.links["/note"]')" \
   append '{"text":"second line"}'
 ```
 
@@ -603,7 +672,7 @@ its contents. A field list marks with a trailing `@`, and a JSON Schema marks
 with `{"$link": true}`.
 
 ```bash
-cf get --piece <board> notes \
+cf get --cell <board> notes \
   --schema '{"type":"array","items":{"$link":true}}'
 ```
 
@@ -613,9 +682,9 @@ cf get --piece <board> notes \
 ]
 ```
 
-The address is one string in the fabric's canonical reference syntax —
-`/[@did/]<id>[@scope][/path]` — the same form `--piece` reads, so an address a
-read hands you is passed onward as it stands. The space rides in front only
+The address is one string in the fabric's reference syntax —
+`/[@space/]<piece>[@scope][/path]` — the same form the target positional reads,
+so an address a read hands you is passed onward as it stands. The space rides in front only
 when it differs from the space the command targeted, and the scope follows the
 id only when it is not the default. No schema is inlined: a stored link can
 carry an entire one, and what was asked for is where the value lives.
@@ -644,7 +713,7 @@ The marker sits beside a projection when both are wanted, and the answer
 carries both:
 
 ```bash
-cf get --piece <board> notes --schema \
+cf get --cell <board> notes --schema \
   '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}'
 ```
 
@@ -656,7 +725,7 @@ A field list unions the same way, and its two paths meet at the one position.
 `noteCount` is computed, so the read steps the piece to bring it up to date:
 
 ```bash
-cf get --piece <board> --step --select 'notes@,noteCount'
+cf get --cell <board> --step --select 'notes@,noteCount'
 ```
 
 ```json

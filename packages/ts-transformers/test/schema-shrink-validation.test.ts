@@ -709,9 +709,13 @@ Deno.test("Schema Shrink Validation", async (t) => {
     },
   );
 
-  // =========================================================================
-  // Type-arg form vs inline form: schemas must be identical
-  // =========================================================================
+  //
+  // Type-arg form against inline form
+  //
+  // The two spellings of a signature — a type argument, or an annotated
+  // callback parameter — should produce the same schemas. Optional-property
+  // encoding is a known remaining divergence, noted where it bites.
+  //
 
   await t.step(
     "handler<E, T> generates same schemas as handler((e: E, t: T) => ...)",
@@ -1144,6 +1148,15 @@ Deno.test("Schema Shrink Validation", async (t) => {
       );
     },
   );
+
+  //
+  // What shrinking keeps
+  //
+  // The shrinker follows a value through the callback and drops what nothing
+  // reads. These pin the reads it must follow — through loops, fallbacks,
+  // aliases, chained array methods, and cell wrappers — so that a field in use
+  // survives.
+  //
 
   await t.step(
     "lift object-literal input preserves property schemas",
@@ -1943,6 +1956,13 @@ Deno.test("Schema Shrink Validation", async (t) => {
     },
   );
 
+  //
+  // When usage is a wildcard
+  //
+  // Usage the analysis cannot narrow, where the honest answer is to keep the
+  // whole shape.
+  //
+
   await t.step(
     "lift wildcard usage keeps conservative full-shape input schema",
     async () => {
@@ -2007,6 +2027,14 @@ Deno.test("Schema Shrink Validation", async (t) => {
       assert(names.has("bar"));
     },
   );
+
+  //
+  // Validating array item reads
+  //
+  // Reading an item property the element type does not have is an error,
+  // whether or not the array is readonly, and whether the read stands alone
+  // or sits beside a read of the array root.
+  //
 
   await t.step(
     "errors when an array item access names a property the element type lacks",
@@ -2073,6 +2101,13 @@ Deno.test("Schema Shrink Validation", async (t) => {
       assertGreater(shrinkErrors.length, 0);
     },
   );
+
+  //
+  // Cell arguments across a call boundary
+  //
+  // What a cell argument's shape becomes once it is handed to a callee whose
+  // own signature declares how it will be used.
+  //
 
   await t.step(
     "keeps auth writable when handlers pass it to provider clients that refresh tokens",

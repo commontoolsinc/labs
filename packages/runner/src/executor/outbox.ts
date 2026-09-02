@@ -75,9 +75,11 @@ export type OutboxBudgetPolicy = {
    * path never produces it (the toolshed bootstrap maps a literal env
    * `0` to ABSENT — `serverExecutionPolicyFromEnv`). */
   maxOutstandingEffects?: number;
+
   /** Egress pacing: network-effect dispatches per second (token bucket
    * with burst = one second's tokens, minimum 1). */
   egressRatePerSecond?: number;
+
   /** Test clock (defaults to Date.now). */
   now?: () => number;
 };
@@ -96,6 +98,7 @@ export class SpaceOutbox {
   readonly #sessionId: string;
   readonly #space?: string;
   readonly #localSeqRef: { value: number };
+
   /** In-flight effect entries per effect key — §4's in-flight dedupe,
    * scoped per (memo key, result target): a second admit of a live key
    * is the SAME node's request re-issued (a wave re-run, a
@@ -108,6 +111,7 @@ export class SpaceOutbox {
    * completion commit readable — see #retireBarriers), which is what
    * `settle()` awaits. */
   readonly #inflight = new Map<string, Promise<void>>();
+
   /** Run-context carriage per in-flight effect id (§4's miss rule),
    * consumed by the completion committer; retired with the entry
    * (every completion write of an effect happens inside its tracked
@@ -115,6 +119,7 @@ export class SpaceOutbox {
    * back to the wave-level identity, which is the same identity in
    * Phase 1). */
   readonly #carriage = new Map<string, WaveRunContext>();
+
   /** Read-consistency barriers per in-flight effect id (serving-loop.md
    * §4; the stage-G review's B-1): each completion commit of a served
    * effect registers a promise that resolves when its writes are
@@ -127,40 +132,51 @@ export class SpaceOutbox {
    * reads — not yet showing the completion — pass the hash guard and
    * egress a second time. */
   readonly #retireBarriers = new Map<string, Array<Promise<unknown>>>();
+
   /** Sync-span capture target for the runtime's async-work observer:
    * while an effect's flush runs its SYNCHRONOUS prefix, work the
    * builtin registers via trackAsyncWork lands here — that work IS the
    * effect (fetch/llm callbacks return synchronously after starting
    * it), and outbox.completed counts only when it settles. */
   #capturing: Array<Promise<unknown>> | undefined;
+
   // Per-space egress budgets (Phase 6, serving-loop.md §5).
   readonly #budget: OutboxBudgetPolicy | undefined;
   readonly #now: () => number;
+
   /** DISPATCHED-but-unsettled network effects (the outstanding cap's
    * subject; local kinds bypass the gate and are never counted). */
   #outstanding = 0;
+
   /** FIFO of admitted-but-held dispatch starters, woken one per freed
    * slot (and drained wholesale on close — the park path). */
   readonly #dispatchWaiters: Array<() => void> = [];
+
   /** Token bucket for the egress rate (burst = one second's tokens). */
   #egressTokens = 0;
+
   #egressRefilledAt = 0;
   #closed = false;
 
   constructor(options: {
     stats: ServingLoopStats;
     server: MemoryServer;
+
     /** The HOME space's engine — where the durable append rows live. */
     engine: Engine;
+
     /** The HOME space did — the OW14 failure notice commits into it as
      * a derived-class commit, whose lease admission needs the space. */
     space?: string;
+
     /** The delivering service session (LT5's envelope) — the DR1
      * holder, same as the wave sink's. */
     sessionId: string;
+
     /** The host's process-lifetime localSeq counter, shared with the
      * wave sink (the replay-keying discipline — engine-wave-sink.ts). */
     localSeqRef: { value: number };
+
     /** Per-space egress budgets (Phase 6); absent = unbounded. */
     budget?: OutboxBudgetPolicy;
   }) {

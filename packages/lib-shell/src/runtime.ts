@@ -1,13 +1,14 @@
 import { createSession, DID, Identity, Session } from "@commonfabric/identity";
 import { CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc";
+import type { FabricPlainObject } from "@commonfabric/data-model";
 import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
 import { navigate } from "@commonfabric/navigation";
 import { slugIdForSpace } from "@commonfabric/runner/slugs";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import {
+  attachOptionsFrom,
   CellHandle,
   FavoritesManager,
-  JSONValue,
   PageHandle,
   type PieceSourceView,
   Program,
@@ -15,6 +16,7 @@ import {
   RuntimeClientEvents,
   RuntimeClientOptions,
   RuntimeTelemetryMarkerResult,
+  type RuntimeTransport,
 } from "@commonfabric/runtime-client";
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -29,11 +31,15 @@ const identityLogger = getLogger("lib-shell.identity", {
   level: "debug",
 });
 
-export type ExperimentalRuntimeFlags = {
-  modernCellRep?: boolean;
-  systemPatternAutoUpdate?: boolean;
-  contentAddressedSchemas?: boolean;
-};
+/**
+ * The worker's experimental-flag declaration — the runtime-client protocol's
+ * own record, not a copy: a host-side copy that lagged the protocol silently
+ * dropped whichever flag it omitted, reverting the worker to that flag's
+ * default while the host ran the other arm.
+ */
+export type ExperimentalRuntimeFlags = NonNullable<
+  RuntimeClientOptions["experimental"]
+>;
 
 export type RuntimeCfcEnforcementMode = NonNullable<
   RuntimeClientOptions["cfcEnforcementMode"]
@@ -117,19 +123,23 @@ export interface RuntimeTelemetrySink {
 export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   identity: Identity;
   apiUrl: URL;
+
   /**
    * Optional map from space DIDs to HTTP or HTTPS origins, forwarded to the
    * worker. Spaces absent from the map resolve to `apiUrl`, the default host.
    */
   spaceHostMap?: Record<string, string>;
+
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
+
   /**
    * Flow-label propagation dial (S16). Shell hosts default to "observe"
    * (Epic H1): derive the per-tx conservative join and emit diagnostics,
    * persisting nothing — the measurement stage before "persist".
    */
   cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
+
   /**
    * Populate the default render confidentiality ceiling (Epic H3a). When
    * true, the worker's display sinks gate labeled values against the
@@ -139,24 +149,29 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    * (H3b) is not implemented.
    */
   cfcRenderCeiling?: boolean;
+
   trustSnapshot?: RuntimeTrustSnapshot | null;
+
   /**
    * This shell build's identifier (normally `COMMIT_SHA`). Deployed builds use
    * it to select the immutable `/builds/<clientVersion>/` worker asset graph.
    */
   clientVersion?: string;
+
   /**
    * When true, forward the worker runtime's console output to the main
    * thread so it reaches devtools and integration-test console capture.
    * Off by default.
    */
   forwardWorkerConsole?: boolean;
+
   /**
    * When true, the worker runtime instruments pattern compiles for statement
    * coverage; the integration harness pulls the accumulated hits at teardown.
    * Test/CI only, off by default. See docs/development/COVERAGE.md.
    */
   patternCoverage?: boolean;
+
   /**
    * When true, the worker's remote storage overlaps watch-refresh round trips
    * up to a bounded window instead of strict single-flight
@@ -164,13 +179,42 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    * StorageManager.open time so it takes effect on the next runtime (reload).
    */
   concurrentWatchRefresh?: boolean;
+
   /**
    * Override the runtime worker URL. By default, deployed builds use the
    * immutable `/builds/<clientVersion>/` asset namespace while local builds
    * fall back to `/scripts/worker-runtime.js`.
+   *
+   * Ignored when `transport` supplies the connection, there being no worker to
+   * address.
    */
   workerUrl?: URL;
+
+  /**
+   * The connection to the runtime's worker. Absent, this page spawns a
+   * dedicated worker of its own and connects to that, which is what a page
+   * with no runtime around it does.
+   *
+   * Supplied, the embedder has already made the connection and this page
+   * speaks over it. How -- a port a family root's page transferred, a channel
+   * a native shell relays -- is the embedder's to know and nothing here reads.
+   */
+  transport?: RuntimeTransport;
+
+  /**
+   * Join the runtime already running behind `transport` rather than standing
+   * one up. It says which client this page is: the one whose initialization
+   * settles the runtime's identity and security posture, or one attaching to a
+   * runtime whose posture is already settled and which it asserts rather than
+   * declares.
+   *
+   * Only meaningful with `transport`: a worker this page spawned has no
+   * runtime to attach to.
+   */
+  attach?: boolean;
+
   getBuildHash?: () => Promise<string | undefined>;
+
   /**
    * Optional telemetry sink (browser OTel bridge). Purely additive and gated by
    * the embedder: when omitted, no telemetry work happens.
@@ -178,14 +222,17 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   telemetry?: RuntimeTelemetrySink;
 };
 
+/** {@link fetchBuildHash}'s module-level memo. */
+let buildHashPromise: Promise<string | undefined> | undefined;
+
 /**
  * Fetch the worker bundle hash from the build manifest. This cache-busts the
  * mutable root worker URL used by local/legacy builds. Deployed shell builds
  * use their immutable `/builds/<sha>/` namespace instead.
  *
- * Cached at module level — the hash doesn't change within a page session.
+ * Cached — the hash doesn't change within a page session, so the manifest is
+ * fetched at most once.
  */
-let buildHashPromise: Promise<string | undefined> | undefined;
 export function fetchBuildHash(): Promise<string | undefined> {
   if (!buildHashPromise) {
     buildHashPromise = (async () => {
@@ -206,6 +253,46 @@ export function fetchBuildHash(): Promise<string | undefined> {
     })();
   }
   return buildHashPromise;
+}
+
+/**
+ * The URL this page's runtime worker is loaded from.
+ *
+ * Production deploys retain each complete module graph under its commit SHA.
+ * Keeping the entry and all of its relative split chunks in that same
+ * immutable namespace prevents a later root deployment from deleting a chunk
+ * that a long-lived page still needs. An explicit `workerUrl` (local
+ * development) or an absent `clientVersion` retains the mutable root URL and
+ * its manifest cache-buster.
+ *
+ * {@link RuntimeInternals.create} calls this for the worker it spawns. It is
+ * exported for the page that spawns one and then hands ports to it: such a
+ * page holds the transport itself, and must reach the same URL doing so.
+ */
+export async function resolveWorkerUrl(
+  options: {
+    workerUrl?: URL;
+    clientVersion?: string;
+    getBuildHash?: () => Promise<string | undefined>;
+  } = {},
+): Promise<URL> {
+  const { workerUrl, clientVersion, getBuildHash = fetchBuildHash } = options;
+  const immutableBuildId = workerUrl === undefined && clientVersion
+    ? clientVersion
+    : undefined;
+  const resolved = workerUrl ?? new URL(
+    immutableBuildId
+      ? `/builds/${
+        encodeURIComponent(immutableBuildId)
+      }/scripts/worker-runtime.js`
+      : "/scripts/worker-runtime.js",
+    globalThis.location.origin,
+  );
+  if (!immutableBuildId) {
+    const buildHash = await getBuildHash();
+    if (buildHash) resolved.searchParams.set("v", buildHash);
+  }
+  return resolved;
 }
 
 export function createRuntimeClientOptions({
@@ -297,7 +384,15 @@ export class RuntimeInternals extends EventTarget {
   #disposed = false;
   #favorites: FavoritesManager;
   #callbacks: RuntimeInternalsCallbacks;
-  #spaceRootPatterns: Map<DID, Promise<PageHandle<NameSchema>>> = new Map();
+
+  /** Cached space roots, with whether the cached one was STARTED: a
+   * started root also answers a caller that only reads its exports, while
+   * one resolved without starting does not answer a caller that needs it
+   * running. */
+  #spaceRootPatterns: Map<
+    DID,
+    { pattern: Promise<PageHandle<NameSchema>>; started: boolean }
+  > = new Map();
   #patternCache: Map<
     string,
     { promise: Promise<PageHandle<NameSchema>>; started: boolean }
@@ -336,10 +431,14 @@ export class RuntimeInternals extends EventTarget {
     return this.#favorites;
   }
 
+  /**
+   * Creates a piece in the given space, `options.argument` being the record of
+   * inputs it is created with.
+   */
   async createPiece<T>(
     space: DID,
     source: URL | Program | string,
-    options?: { argument?: JSONValue; run?: boolean },
+    options?: { argument?: FabricPlainObject; run?: boolean },
   ): Promise<PageHandle<T>> {
     this.#check();
     const page = await this.#client.createPage<T>(source, space, options);
@@ -363,16 +462,26 @@ export class RuntimeInternals extends EventTarget {
     return this.#client.getPiecesListCell<T>(space);
   }
 
-  getSpaceRootPattern(space: DID): Promise<PageHandle<NameSchema>> {
+  /**
+   * The space's root pattern. `start` defaults to true, which a view that
+   * renders the root needs; pass false to read its exports without running
+   * it.
+   */
+  getSpaceRootPattern(
+    space: DID,
+    options: { start?: boolean } = {},
+  ): Promise<PageHandle<NameSchema>> {
     this.#check();
+    const start = options.start ?? true;
     const cached = this.#spaceRootPatterns.get(space);
-    if (cached) return cached;
-    const pattern = this.#client.getSpaceRootPattern(space);
-    this.#spaceRootPatterns.set(space, pattern);
+    if (cached && (cached.started || !start)) return cached.pattern;
+    const pattern = this.#client.getSpaceRootPattern(space, { start });
+    const entry = { pattern, started: start };
+    this.#spaceRootPatterns.set(space, entry);
     // Evict on rejection: a transient failure (unreachable host, authz)
     // must not poison the space for the runtime's lifetime.
     pattern.catch(() => {
-      if (this.#spaceRootPatterns.get(space) === pattern) {
+      if (this.#spaceRootPatterns.get(space) === entry) {
         this.#spaceRootPatterns.delete(space);
       }
     });
@@ -389,7 +498,10 @@ export class RuntimeInternals extends EventTarget {
     // Clear cached pattern since we're recreating it
     this.#spaceRootPatterns.delete(space);
     const pattern = await this.#client.recreateSpaceRootPattern(space);
-    this.#spaceRootPatterns.set(space, Promise.resolve(pattern));
+    this.#spaceRootPatterns.set(space, {
+      pattern: Promise.resolve(pattern),
+      started: true,
+    });
     return pattern;
   }
 
@@ -517,41 +629,6 @@ export class RuntimeInternals extends EventTarget {
     await this.#client.dispose();
   }
 
-  async trackRecentPiece(space: DID, pieceId: string): Promise<void> {
-    this.#check();
-    try {
-      // Shell compatibility: assumes the space-root pattern exposes a
-      // `trackRecent` handler accepting `{ piece }`.
-      const spaceRoot = await this.getSpaceRootPattern(space);
-      const trackRecent = spaceRoot.cell().key("trackRecent" as any);
-      const page = await this.#client.getPage(pieceId, space);
-      if (!page) return;
-      await (trackRecent as any).send({ piece: page.cell() });
-    } catch (e) {
-      if (this.#disposed) return;
-      console.error("[RuntimeInternals] Failed to track recent piece:", e);
-    }
-  }
-
-  /** Register a navigated piece in ITS OWN space's root pattern. */
-  async registerNavigatedPiece(cell: CellHandle<unknown>): Promise<void> {
-    this.#check();
-    try {
-      // Shell compatibility: assumes the space-root pattern exposes an
-      // `addPiece` handler accepting `{ piece }`.
-      const spaceRoot = await this.getSpaceRootPattern(cell.space());
-      const addPiece = spaceRoot.cell().key("addPiece" as any);
-      await (addPiece as any).send({ piece: cell });
-      await spaceRoot.cell().sync();
-    } catch (e) {
-      if (this.#disposed) return;
-      console.error(
-        "[RuntimeInternals] Failed to register navigated piece:",
-        e,
-      );
-    }
-  }
-
   async #waitForNavigationConvergence(space: DID): Promise<void> {
     this.#check();
     await this.#client.idle();
@@ -587,7 +664,6 @@ export class RuntimeInternals extends EventTarget {
     const pieceId = cell.id().replace(/^of:/, "");
     logger.log("navigate", `Navigating to piece: ${pieceId}`);
 
-    void this.registerNavigatedPiece(cell);
     try {
       await this.#waitForNavigationConvergence(cell.space());
     } catch (error) {
@@ -659,11 +735,20 @@ export class RuntimeInternals extends EventTarget {
     concurrentWatchRefresh,
     getBuildHash = fetchBuildHash,
     workerUrl,
+    transport,
+    attach = false,
     navigate,
     onConsole,
     onError,
     telemetry,
   }: RuntimeInternalsCreateOptions): Promise<RuntimeInternals> {
+    if (attach && !transport) {
+      throw new Error(
+        "`attach` needs a `transport`: a worker this page spawns has no " +
+          "runtime to attach to.",
+      );
+    }
+
     // One runtime per identity: the worker session is always the
     // identity's home session. Spaces — including derived named spaces —
     // are addressed per call; nothing is bound at creation.
@@ -678,46 +763,34 @@ export class RuntimeInternals extends EventTarget {
       `[Identity] User DID: ${identity.did()}`,
     );
 
-    // Production deploys retain each complete module graph under its commit
-    // SHA. Keeping the entry and all of its relative split chunks in that same
-    // immutable namespace prevents a later root deployment from deleting a
-    // chunk that a long-lived page still needs. An explicit worker URL (local
-    // development) or an absent clientVersion retains the mutable root URL and
-    // its manifest cache-buster.
-    const immutableBuildId = workerUrl === undefined && clientVersion
-      ? clientVersion
-      : undefined;
-    const resolvedWorkerUrl = workerUrl ?? new URL(
-      immutableBuildId
-        ? `/builds/${
-          encodeURIComponent(immutableBuildId)
-        }/scripts/worker-runtime.js`
-        : "/scripts/worker-runtime.js",
-      globalThis.location.origin,
-    );
-    if (!immutableBuildId) {
-      const buildHash = await getBuildHash();
-      if (buildHash) resolvedWorkerUrl.searchParams.set("v", buildHash);
-    }
-    const transport = await WebWorkerRuntimeTransport.connect({
-      workerUrl: resolvedWorkerUrl,
+    const connection = transport ??
+      await WebWorkerRuntimeTransport.connect({
+        workerUrl: await resolveWorkerUrl({
+          workerUrl,
+          clientVersion,
+          getBuildHash,
+        }),
+      });
+
+    const clientOptions = createRuntimeClientOptions({
+      session,
+      apiUrl,
+      spaceHostMap,
+      experimental,
+      cfcEnforcementMode,
+      cfcFlowLabels,
+      cfcRenderCeiling,
+      trustSnapshot,
+      forwardWorkerConsole,
+      patternCoverage,
+      concurrentWatchRefresh,
     });
-    const client = await RuntimeClient.initialize(
-      transport,
-      createRuntimeClientOptions({
-        session,
-        apiUrl,
-        spaceHostMap,
-        experimental,
-        cfcEnforcementMode,
-        cfcFlowLabels,
-        cfcRenderCeiling,
-        trustSnapshot,
-        forwardWorkerConsole,
-        patternCoverage,
-        concurrentWatchRefresh,
-      }),
-    );
+    const client = attach
+      ? await RuntimeClient.attach(
+        connection,
+        attachOptionsFrom(clientOptions),
+      )
+      : await RuntimeClient.initialize(connection, clientOptions);
 
     // Expose a usable RuntimeInternals immediately. Callers that need
     // storage/piece-manager convergence should await `rt.synced(space)`

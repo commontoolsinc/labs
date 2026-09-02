@@ -107,6 +107,7 @@ describe("RealmCodecEngine", () => {
       // cycle that is not there -- and says so, naming a circular reference
       // where the real fault was the child. The differential is the message:
       // both attempts must fail the same way the first did.
+
       const engine = newDefaultRealmCodecEngine();
       const act = new RealmEncodeAct(engine, NULL_LIVE_ENVIRONMENT);
       // A function is no kind of `FabricValue`, so encoding the element throws
@@ -125,6 +126,7 @@ describe("RealmCodecEngine", () => {
       // calls, which is what lets a peer's payload decode here at all.
       // Distinct: each call mints its own, which is what makes an earlier
       // encoding's marker ordinary data when it turns up inside a later one.
+
       const first = realmFromFabricValue(null)[0];
       const second = realmFromFabricValue(null)[0];
 
@@ -183,6 +185,7 @@ describe("RealmCodecEngine", () => {
     it("encodes a `FabricBytes` to a buffer covering exactly its bytes", () => {
       // A transfer hands over the whole buffer, so a state covering more than
       // the value would cede bytes that are not part of it.
+
       const payload = payloadOf(realmFromFabricValue(
         new FabricBytes(new Uint8Array([1, 2, 250])),
       ));
@@ -236,6 +239,7 @@ describe("RealmCodecEngine", () => {
     it("encodes an interned symbol to its registry key", () => {
       // Cloning refuses every symbol, so this is the one JavaScript primitive
       // the format has to encode at all.
+
       const payload = payloadOf(
         realmFromFabricValue(Symbol.for("k") as FabricValue),
       );
@@ -247,6 +251,7 @@ describe("RealmCodecEngine", () => {
       // A unique symbol has no key to carry, so there is nothing to encode
       // that would decode back to it. Coercing one to a registry symbol would
       // hand the far side a different symbol wearing its description.
+
       expect(() => realmFromFabricValue(Symbol("d") as FabricValue))
         .toThrow(/no applicable codec/);
       expect(() => realmFromFabricValue(Symbol() as FabricValue))
@@ -317,12 +322,14 @@ describe("RealmCodecEngine", () => {
     it("returns a plain payload as it stands", () => {
       // With no tagged form anywhere in it, an ordinary value decodes to
       // itself once the outer envelope is stripped.
+
       expect(fabricFromRealmValue(wire({ a: 1 }))).toEqual({ a: 1 });
     });
 
     it("throws when given a form this format never emits", () => {
       // Cloning carries a `Date`; this format has no codec that produces one,
       // so it can only have come from something other than an `encode()`.
+
       expect(() => fabricFromRealmValue(wire(new Date()))).toThrow(
         /not a form this format emits/,
       );
@@ -333,6 +340,7 @@ describe("RealmCodecEngine", () => {
       // one such type this format's own value union contains, legitimate only
       // as the state under a byte-carrying tag and never on its own. Cloning
       // carries each of these, so a peer can send one.
+
       for (
         const bad of [
           new Uint8Array([1, 2]).buffer,
@@ -351,6 +359,7 @@ describe("RealmCodecEngine", () => {
       // the cycle rule of Section 4 -- both of which refuse these outright in
       // a walked container -- never reach inside one. `Hash@1` reads `tag`
       // and `hash` and never looks at the rest.
+
       const state: Record<string, unknown> = {
         tag: "fid1",
         hash: new Uint8Array([1, 2, 3]).buffer,
@@ -375,6 +384,7 @@ describe("RealmCodecEngine", () => {
       // The control for the case above, and what bounds it: the same key in a
       // position the walk reaches IS refused. Without this pair, the opacity
       // case alone would read as the rule not existing.
+
       const walked: Record<string, unknown> = { a: 1 };
 
       Object.defineProperty(walked, "constructor", {
@@ -391,6 +401,7 @@ describe("RealmCodecEngine", () => {
       // Section 7.1: every field of this codec's state defaults when absent,
       // which is what lets a narrower encoder omit what it has nothing to say
       // about.
+
       const decoded = fabricFromRealmValue(wire(tagged("RegExp@1", {})));
 
       expect(decoded).toBeInstanceOf(FabricRegExp);
@@ -404,6 +415,7 @@ describe("RealmCodecEngine", () => {
       // where the difference can arise: cloning carries `undefined` directly,
       // so a peer can send one on purpose, and defaulting it would answer a
       // question the wire did ask.
+
       const engine = newDefaultRealmCodecEngine({ lenient: true });
       const decoded = engine.decode(
         wire(tagged("RegExp@1", { source: undefined })),
@@ -418,6 +430,7 @@ describe("RealmCodecEngine", () => {
     it("throws when given a `Map`, which is no form this format emits", () => {
       // Cloning carries one faithfully, so a peer can send one; nothing here
       // makes one, so finding one is a malformation like any other.
+
       expect(() => fabricFromRealmValue(wire(new Map([["a", 1]]))))
         .toThrow(/not a form this format emits/);
     });
@@ -430,6 +443,7 @@ describe("RealmCodecEngine", () => {
       // refuses them. The empty array reaches the same clause, having no
       // second slot rather than a bad marker; only `"nope"` and `42` are
       // refused for not being arrays at all.
+
       for (
         const bad of [
           [],
@@ -452,6 +466,7 @@ describe("RealmCodecEngine", () => {
       // `undefined` is a value this format carries directly, so a payload can
       // put one in slot zero for free, and identity against an absent marker
       // would match it and read the array as a tagged form.
+
       class Exposed extends RealmCodecEngine {
         decodeWithoutMarker(data: unknown): FabricValue {
           const act = new RealmDecodeAct(this, NULL_LIVE_ENVIRONMENT);
@@ -481,6 +496,7 @@ describe("RealmCodecEngine", () => {
       // requirement rather than an observation. Lenient, because the report is
       // what is under test -- strictly these raise, which the cases above
       // already cover.
+
       const engine = newDefaultRealmCodecEngine({ lenient: true });
       const bad = (tag: string, state: unknown) => {
         const result = engine.decode(
@@ -533,6 +549,7 @@ describe("RealmCodecEngine", () => {
       // -- but `decode()` is callable in the realm that built its argument,
       // and passing them through would leave a value in the result that this
       // format cannot emit and `encode()` will not take.
+
       expect(() => fabricFromRealmValue(wire(Symbol("u"))))
         .toThrow(/Cannot decode symbol/);
       expect(() => fabricFromRealmValue(wire(() => 1)))
@@ -548,6 +565,7 @@ describe("RealmCodecEngine", () => {
       // same primitive would reproduce the marker. The rest are refused
       // because a marker this build did not write is one whose encoding it
       // cannot claim to understand.
+
       const bad = [
         // Primitives, which cannot mark anything.
         "fvr1",
@@ -575,6 +593,7 @@ describe("RealmCodecEngine", () => {
     it("refuses an envelope that is not exactly two slots", () => {
       // Without the slot count, a tagged form arriving here would be read as
       // an envelope and its tag handed back as the tree.
+
       const marker = ["fvr1"];
 
       for (
@@ -593,6 +612,7 @@ describe("RealmCodecEngine", () => {
       // The control for the case above, and the property that lets a peer
       // send a well-formed payload at all: what is checked is the marker's
       // shape and version, never its identity against one this realm minted.
+
       expect(fabricFromRealmValue([["fvr1"], { a: 1 }] as never))
         .toEqual({ a: 1 });
     });
@@ -601,6 +621,7 @@ describe("RealmCodecEngine", () => {
       // A genuine payload cannot hold the current marker at all, but a peer
       // can send anything. Slot count is checked before identity, so this is
       // an array and not a tagged form missing its state.
+
       const marker = realmFromFabricValue(null)[0];
       const decoded = fabricFromRealmValue(
         [marker, { a: [marker, "EpochDay@1"] }] as never,
@@ -613,6 +634,7 @@ describe("RealmCodecEngine", () => {
     it("throws when given an outer envelope nested as its own payload", () => {
       // `E = [m, E]`. The walk visits `E` again beneath itself, where the guard
       // has it, so this is a cycle rather than an unbounded descent.
+
       const envelope: unknown[] = [["fvr1"], null];
       envelope[1] = envelope;
 
@@ -624,6 +646,7 @@ describe("RealmCodecEngine", () => {
       // Three elements and a lookalike marker in slot zero, and still data:
       // recognition is identity, and this array's slot zero is some other
       // object however equal it looks.
+
       const lookalike = ["fvr1"];
       const decoded = fabricFromRealmValue(
         wire({ a: [lookalike, "EpochDay@1", 7n] }),
@@ -641,6 +664,7 @@ describe("RealmCodecEngine", () => {
       // non-string in tag position where JSON never can. The engine hands it
       // over as it found it, and the shared tag check judges it, so what is
       // refused here is refused the same way under any format.
+
       expect(() => fabricFromRealmValue(wire(tagged(42, "x"))))
         .toThrow(/malformed tag/);
       expect(() => fabricFromRealmValue(wire(tagged(Symbol("s"), "x"))))
@@ -667,6 +691,7 @@ describe("RealmCodecEngine", () => {
       // A codec's own rejection rather than the walk's: the tag is claimed,
       // and `FabricBytes` wants an `ArrayBuffer` where this carries a string.
       // The default engine is strict, so this throws.
+
       try {
         fabricFromRealmValue(wire(tagged("Bytes@1", "nope")));
         throw new Error("Should have thrown.");
@@ -684,6 +709,7 @@ describe("RealmCodecEngine", () => {
     it("returns that same rejection as a `ProblematicValue` when lenient", () => {
       // Every realm codec reports by returning one, as its JSON
       // counterpart does; `lenient` is what decides which a caller sees.
+
       const engine = newDefaultRealmCodecEngine({ lenient: true });
       const decoded = engine.decode(
         wire(tagged("Bytes@1", "nope")),
@@ -701,6 +727,7 @@ describe("RealmCodecEngine", () => {
       // of this format's codecs do. The tag rides on the error whichever way a
       // codec reports, so one throwing an `Error` of its own that named the
       // tag would have the message say it a second time.
+
       try {
         fabricFromRealmValue(wire(tagged("Symbol@1", 42)));
         throw new Error("Should have thrown.");
@@ -716,6 +743,7 @@ describe("RealmCodecEngine", () => {
       // Three slots headed by the marker ARE the tagged form, so this is a
       // well-formed value carrying a tag no codec claims -- a different thing
       // from a malformation.
+
       const decoded = fabricFromRealmValue(wire(tagged("Nope@1", 1)));
 
       expect(decoded).toBeInstanceOf(UnknownValue);
@@ -727,6 +755,7 @@ describe("RealmCodecEngine", () => {
       // `JSON.parse()` cannot produce one -- this format can actually be sent
       // a cycle by a peer. Without a guard the walk recurses until the stack
       // gives out, which is the one refusal `lenient` could not contain.
+
       const object: Record<string, RealmCodecValue> = { a: 1 };
       object.self = object;
       const array: RealmCodecValue[] = [1];
@@ -745,6 +774,7 @@ describe("RealmCodecEngine", () => {
       // again for a nonterminal codec, for a tag no codec claims, and for a
       // tag that is not one. So a graph of tagged forms can close a cycle with no
       // plain container in it at all, and cloning carries one faithfully.
+
       const unknownTag = tagged("Nope@1", null) as unknown as unknown[];
       unknownTag[2] = unknownTag;
 
@@ -779,6 +809,7 @@ describe("RealmCodecEngine", () => {
       // value that holds one instance twice yields two nodes and revisits
       // nothing. A hand-built node is reused directly to get the sharing this
       // needs.
+
       const shared = tagged("EpochDay@1", 7n);
       const decoded = fabricFromRealmValue(
         wire({ x: shared, y: shared }),
@@ -793,6 +824,7 @@ describe("RealmCodecEngine", () => {
       // in-progress set on its way out. Without that, the second position
       // holding the same object would be read as a back-edge and reported as
       // a cycle -- the right refusal for the wrong reason.
+
       const offender = Object.defineProperty({ a: 1 }, "constructor", {
         value: "c",
         enumerable: true,
@@ -832,6 +864,7 @@ describe("RealmCodecEngine", () => {
       // prototype. The key is computed on purpose: in an object literal a
       // `__proto__:` sets the prototype rather than creating a property, so a
       // literal cannot express this shape at all.
+
       const data = Object.defineProperty({ a: 1 }, "__proto__", {
         value: { hostile: true },
         enumerable: true,
@@ -924,6 +957,7 @@ describe("RealmCodecEngine", () => {
       // before a second starts, so per-act and per-engine markers look
       // identical. What discriminates them is a tagged form built AFTER the
       // nested call returns, which must still carry the outer marker.
+
       class Reentrant {}
 
       let nestedMarker: unknown;
@@ -975,6 +1009,7 @@ describe("RealmCodecEngine", () => {
       // asserted is only that: whether the walk passed the subtree through or
       // rebuilt it, the same older marker object lands in slot zero either
       // way, and the point is that it is not this call's.
+
       const earlier = realmFromFabricValue(new FabricEpochDay(7n));
       const value = Object.freeze({
         smuggled: payloadOf(earlier) as FabricValue,
@@ -994,6 +1029,7 @@ describe("RealmCodecEngine", () => {
       // The control for the case above, and what makes the pair a statement
       // about identity rather than about shape: the very same slots, under the
       // marker the outer envelope carries, do decode as the value they name.
+
       const marker = realmFromFabricValue(null)[0];
       const decoded = fabricFromRealmValue(
         [marker, [marker, "EpochDay@1", 7n]] as never,
@@ -1007,6 +1043,7 @@ describe("RealmCodecEngine", () => {
       // it costs. A control sits beside it: a tree with no byte-carrying value
       // decodes as often as it likes, so what the first case pins is the
       // buffer and not decoding in general.
+
       const withBytes = realmFromFabricValue(
         { blob: new FabricBytes(new Uint8Array([1, 2, 250])) },
       );
@@ -1030,6 +1067,7 @@ describe("RealmCodecEngine", () => {
       // The same property, and the reason to state it of both: a `FabricHash`
       // reaches the take-over through a record rather than as a bare buffer,
       // so a change that spared one could miss the other.
+
       const encoded = realmFromFabricValue(
         { digest: new FabricHash(new Uint8Array(32).fill(7), "sha256") },
       );
@@ -1044,6 +1082,7 @@ describe("RealmCodecEngine", () => {
       // which the two cases above pin only on the strict side. The report
       // lands where the bytes would have been, the rest of the value
       // surviving around it.
+
       const encoded = realmFromFabricValue({
         blob: new FabricBytes(new Uint8Array([1, 2, 250])),
         n: 7,
@@ -1102,6 +1141,7 @@ describe("RealmCodecEngine", () => {
       // that element, which the rebuild's copy-the-prefix path must carry; and
       // one sits AFTER it, which the main loop must skip. Either alone leaves
       // the other path unexercised.
+
       const sparse: FabricValue[] = [
         1,
         2,
@@ -1159,6 +1199,7 @@ describe("RealmCodecEngine", () => {
       // bytes down can carry it; cloning carries the key itself, and what has
       // to be shown is that what lands on the far side is still that key
       // rather than a shape resembling it.
+
       const source = await crypto.subtle.generateKey(
         { name: "Ed25519" },
         false,
@@ -1225,6 +1266,7 @@ describe("RealmCodecEngine", () => {
     // record of strings, a walk that descends into it and one that passes it
     // through emit the same thing -- so the declaration is asserted directly,
     // which is also how `CodecRegistry` reads it.
+
     for (
       const [name, cls] of [
         ["FabricBytes", FabricBytes],

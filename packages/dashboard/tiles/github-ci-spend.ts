@@ -29,7 +29,14 @@
  */
 
 import type { Status, Tile, TileView } from "../types.ts";
-import { budgetStatus, daysLabel, friendlyError, github, usd } from "../lib.ts";
+import {
+  budgetStatus,
+  daysLabel,
+  escapeHtml,
+  friendlyError,
+  github,
+  usd,
+} from "../lib.ts";
 import { REPO } from "../config.ts";
 import {
   calendarMonth,
@@ -70,12 +77,14 @@ interface DailySpend {
 interface GitHubDollarSpend extends DailySpend {
   kind: "dollars";
   budget: number;
+
   /**
    * The projected month-end spend of the products the organization has
    * budgeted, which is the figure the budget is a ceiling for. The headline
    * covers every product; this covers the ones the budget speaks to.
    */
   projectedBudgeted: number;
+
   /**
    * The calendar months whose usage report was read, as "YYYY-MM". A month
    * that could not be read is absent, and its days are unknown rather than $0.
@@ -180,6 +189,7 @@ function requireCurrentReport(
 interface OrgBudget {
   /** The product budgets added up, or NaN when none is set. */
   total: number;
+
   /** The products those budgets cover, lowercased. */
   products: Set<string>;
 }
@@ -462,7 +472,7 @@ export const githubCiSpend: Tile = {
           knownMonths: spend.months,
         }],
         now,
-        status,
+        spend.estimateDays,
       );
       const amount = chart.chart ? "" : ` ${usd(spend.mtd)}`;
       // The ceiling shown beside the headline covers the products the headline
@@ -476,15 +486,19 @@ export const githubCiSpend: Tile = {
       const budgetLabel = Number.isFinite(shownBudget)
         ? ` • Budget ${usd(shownBudget)}`
         : "";
+      const legendText = `GitHub${amount}${budgetLabel}`;
       const legend =
-        `<p class="sub">${GITHUB_SWATCH} GitHub${amount}${budgetLabel}</p>`;
+        `<p class="sub" title="${escapeHtml(legendText)}">${GITHUB_SWATCH} ${legendText}</p>`;
+      const value = `~${usd(spend.projected)}/mo`;
+      const mtd = `${usd(spend.mtd)} MTD`;
 
       return {
         ...drill,
         label,
         status,
-        value: `~${usd(spend.projected)}/mo`,
-        aside: `<span class="hmtd">${usd(spend.mtd)} MTD</span>`,
+        value,
+        valueLabel: value,
+        aside: `<span class="hmtd" title="${mtd}">${mtd}</span>`,
         extra: `${legend}${chart.chart}`,
         duration: chart.duration,
       };
@@ -495,7 +509,8 @@ export const githubCiSpend: Tile = {
         status: "unknown",
         value: "—",
         sub: unavailableMessage(error),
-        extra: `<p class="sub">${GITHUB_SWATCH} GitHub $???</p>`,
+        extra:
+          `<p class="sub" title="GitHub $???">${GITHUB_SWATCH} GitHub $???</p>`,
       };
     }
   },

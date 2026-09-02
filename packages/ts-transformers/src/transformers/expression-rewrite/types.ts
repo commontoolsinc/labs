@@ -21,17 +21,21 @@ export interface RewriteParams {
   readonly analysis: DataFlowAnalysis;
   readonly context: TransformationContext;
   readonly analyze: AnalyzeFn;
+
   /**
    * Effective reactive context at the rewrite site.
    */
   readonly reactiveContextKind?: ReactiveContextKind;
+
   readonly containerKind?: ExpressionContainerKind;
+
   /**
    * True when inside a safe callback wrapper (action, handler, computed, etc.)
    * where opaque reading is allowed. In safe contexts, we still need to apply
    * semantic transformations (&&->when, ||->unless) but NOT lift-applied wrappers.
    */
   readonly inSafeContext?: boolean;
+
   /**
    * When true, reactive compute wrappers introduced during rewriting should
    * be emitted as a lift-applied form bound to its captured inputs

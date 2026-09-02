@@ -1,7 +1,7 @@
 import type {
   FabricEpochDay as ApiFabricEpochDay,
   FabricEpochDayConstructor as ApiFabricEpochDayConstructor,
-} from "@commonfabric/api";
+} from "@/api.ts";
 import {
   bigintFromUnpaddedBase64url,
   bigintToUnpaddedBase64url,
@@ -35,7 +35,6 @@ export class FabricEpochDay extends BaseFabricPrimitive
   constructor(value: bigint) {
     super();
     this.#value = value;
-    Object.freeze(this);
   }
 
   /** Days from POSIX Epoch. Negative values represent pre-epoch dates. */
@@ -126,7 +125,10 @@ export class FabricEpochDay extends BaseFabricPrimitive
   }
 }
 
-// Compile-time check that the exported `FabricEpochDay` constructor matches
-// the `FabricEpochDayConstructor` declared in `@commonfabric/api`. This
-// catches drift between the public type contract and this implementation.
+// Compile-time check that the exported `FabricEpochDay` constructor matches the
+// `FabricEpochDayConstructor` declared in `@/api.ts`. This catches a declared member
+// that is missing here or has the wrong type. It does NOT catch the other
+// direction: `satisfies` is an assignability check, so a public member on this
+// class that the declaration omits passes silently. Members added here need
+// adding there by hand.
 FabricEpochDay satisfies ApiFabricEpochDayConstructor;

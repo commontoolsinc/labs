@@ -40,6 +40,7 @@ import {
   groupDiscoveredSpaces,
   type GroupedSpace,
   hotEntities,
+  inspectOperationFields,
   isCompleteScan,
   isEntityKind,
   listCommits,
@@ -54,6 +55,7 @@ import {
   renderInspectorHtml,
   type RequestSigner,
   resolveSpace,
+  rowLimit,
   type ScanExtent,
   type Scope,
   scopeOverlay,
@@ -150,6 +152,29 @@ function validatedLimit(limit: number): number {
     );
   }
   return limit;
+}
+
+/**
+ * The row limit a listing will apply, refusing what its SQL used to refuse.
+ *
+ * Distinct from `validatedLimit`, which governs a reconstruction cap and takes
+ * no negative: these listings were `LIMIT ?` clauses, where SQLite reads a
+ * negative as UNLIMITED and answers a fractional or non-finite one with a
+ * datatype mismatch. Any integer passes; everything else is the typo it looks
+ * like, and rounding it silently is how a listing under-reports.
+ */
+function validatedRowLimit(limit: number): number {
+  try {
+    // `rowLimit` owns the RULE — which limits a row listing accepts, and why.
+    // This owns only how a CLI user hears it: a ValidationError before the
+    // space is opened, rather than the library's stack trace after.
+    rowLimit(limit);
+    return limit;
+  } catch {
+    throw new ValidationError(
+      `\`--limit\` must be a whole number of rows, not ${limit}.`,
+    );
+  }
 }
 
 /** The flag that turns a capped result into a failure. Shared by every scan. */
@@ -272,10 +297,13 @@ function fmtSession(s: string): string {
   return decoded.length > 22 ? `${decoded.slice(0, 21)}…` : decoded;
 }
 
-// ── Remote acquisition (`cf inspect --remote`) ──────────────────────────────
+//
+// Remote acquisition (`cf inspect --remote`)
+//
 // The autopsy stays 100% offline; --remote only changes where the SQLite file
 // comes from: instead of the local on-disk store, fetch a read-only snapshot
 // from a toolshed dump endpoint into the local cache, then open it as usual.
+//
 
 interface RemoteOpts {
   remote?: string | boolean;
@@ -729,6 +757,67 @@ export const inspect = new Command()
       s.close();
     }
   })
+  /* inspect operations */
+  .command(
+    "operations <space:string> [entity:string]",
+    "Collaborative field epochs, cursors, histories, and checkpoint health.",
+  )
+  .option("--branch <branch:string>", "Branch (default: '').")
+  .option("--scope <scope:string>", "Exact resolved scope key.")
+  .option("--limit <limit:integer>", "Maximum fields (default 50).")
+  .option(
+    "--history-limit <limit:integer>",
+    "Maximum submissions and integrated operations per field (default 100).",
+  )
+  .option(
+    "--submission-after-seq <seq:integer>",
+    "Return submitted history after this commit sequence.",
+  )
+  .action(async (options, space, entity) => {
+    const s = await openByToken(space, options);
+    try {
+      const report = inspectOperationFields(s, {
+        id: entity,
+        branch: options.branch,
+        scope: options.scope,
+        fieldLimit: options.limit,
+        historyLimit: options.historyLimit,
+        submissionAfterSeq: options.submissionAfterSeq,
+      });
+      out(!!options.json, report, () => {
+        if (!report.available) {
+          console.log("operation tables are absent");
+          return;
+        }
+        if (report.fields.length === 0) {
+          console.log("no collaborative operation fields");
+          return;
+        }
+        for (const field of report.fields) {
+          console.log(
+            `${field.active ? "active" : "inactive"}\t${field.address.id}` +
+              `\t${field.address.scope}\t${field.address.pathPointer}` +
+              `\t${field.codec}` +
+              `\t${field.cursor.epoch}:${field.cursor.version}` +
+              `\tretained=${field.retainedFrom.version}` +
+              `\t${field.consistency.healthy ? "healthy" : "INCONSISTENT"}`,
+          );
+          console.log(
+            `  submissions=${field.submissions.length}` +
+              `${field.pagination.submissionsTruncated ? "+" : ""}` +
+              ` integrated=${field.integrated.length}` +
+              `${field.pagination.integratedTruncated ? "+" : ""}` +
+              ` checkpoints=${field.checkpoints.length}`,
+          );
+        }
+        if (report.fieldsTruncated) {
+          console.log(`field list truncated at ${report.fieldLimit}`);
+        }
+      });
+    } finally {
+      s.close();
+    }
+  })
   /* inspect scopes */
   .command(
     "scopes <space:string>",
@@ -835,15 +924,15 @@ export const inspect = new Command()
     "hot <space:string>",
     "Entities ranked by write count (contention proxy).",
   )
-  .option("--limit <n:number>", "Max rows.", { default: 20 })
+  .option("--limit <n:number>", "Max rows; a negative returns every row.", {
+    default: 20,
+  })
   .option("--branch <branch:string>", "Branch (default: '').")
   .action(async (options, space) => {
+    const limit = validatedRowLimit(options.limit);
     const s = await openByToken(space, options);
     try {
-      const rows = hotEntities(s, {
-        limit: options.limit,
-        branch: options.branch,
-      });
+      const rows = hotEntities(s, { limit, branch: options.branch });
       out(!!options.json, rows, () => {
         for (const r of rows) {
           console.log(
@@ -943,8 +1032,13 @@ export const inspect = new Command()
   )
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--scope <scope:string>", "Scope key (default: space).")
-  .option("--limit <n:number>", "Max contested entities.", { default: 100 })
+  .option(
+    "--limit <n:number>",
+    "Max contested entities; a negative returns every one.",
+    { default: 100 },
+  )
   .action(async (options, space, entity) => {
+    const limit = validatedRowLimit(options.limit);
     const s = await openByToken(space, options);
     try {
       if (entity) {
@@ -999,7 +1093,7 @@ export const inspect = new Command()
       const rows = contendedEntities(s, {
         branch: options.branch,
         scope: options.scope,
-        limit: options.limit,
+        limit,
       });
       out(!!options.json, rows, () => {
         if (rows.length === 0) {

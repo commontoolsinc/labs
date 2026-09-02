@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
@@ -48,6 +48,7 @@ import {
   TEST_MEMORY_SERVER_AUTH,
   testSessionOpenAuthFactory,
 } from "./memory-v2-test-utils.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
 
@@ -77,11 +78,15 @@ const seedPrivilegedCfc = (
 };
 
 class SharedV2SessionFactory implements V2Storage.SessionFactory {
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  readonly #server: MemoryV2Server.Server;
+
+  constructor(server: MemoryV2Server.Server) {
+    this.#server = server;
+  }
 
   async create(space: MemorySpace) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(space, {}, testSessionOpenAuthFactory);
     return { client, session };
@@ -362,8 +367,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       await runtime.setup(undefined, pattern, {}, resultCell);
 
+      // A hand-built pattern is KEYLESS: setup stamps no durable pattern
+      // pointer for it (the never-durable contract; L3(a), RULED 2026-08-27).
+      // The staged argument link is the setup-completed evidence instead.
       expect(resultCell.getMetaRaw("patternIdentity"))
-        .toBeDefined();
+        .toBeUndefined();
       expect(parseLink(resultCell.getMetaRaw("argument"), resultCell))
         .toBeDefined();
       const savedTitleLink = parseLink(resultCell.key("savedTitle").getRaw());
@@ -451,8 +459,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       await runtime.setup(undefined, pattern, {}, resultCell);
 
       expect(getMetaLink(resultCell, "result")).toBeUndefined();
+      // A hand-built pattern is KEYLESS: setup stamps no durable pattern
+      // pointer for it (the never-durable contract; L3(a), RULED 2026-08-27).
+      // The staged argument link is the setup-completed evidence instead.
       expect(resultCell.getMetaRaw("patternIdentity"))
-        .toBeDefined();
+        .toBeUndefined();
       expect(parseLink(resultCell.getMetaRaw("argument"), resultCell))
         .toBeDefined();
       const savedTitleLink = parseLink(resultCell.key("savedTitle").getRaw());
@@ -534,6 +545,18 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       await expect(runtime.setup(undefined, pattern, {}, resultCell)).rejects
         .toThrow("CFC enforcement rejected commit");
       expect(getMetaLink(resultCell, "result")).toBeUndefined();
+
+      // The setup boundary re-wraps the rejection as a plain Error, so the
+      // refusal reasons survive only if they are carried onto the cause.
+      // The boundary refusal carries every reason as `reasons`; reading the
+      // digest-drift `reason` instead would drop them silently.
+      const rejection = await runtime.setup(undefined, pattern, {}, resultCell)
+        .then(() => undefined, (error: unknown) => error as Error);
+      expect(rejection?.cause).toBeDefined();
+      expect(Array.isArray(rejection?.cause)).toBe(true);
+      expect((rejection?.cause as string[]).join(" ")).toContain(
+        "writeAuthorizedBy requires a trusted verified binding identity",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -2884,7 +2907,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         type: "object",
         ifc: { confidentiality: ["card-space"] },
         properties: { title: { type: "string" } },
-      });
+      }, rawMetaWriteAuthorization);
       const linkedTarget = runtime.getCell(
         signer.did(),
         "cfc-link-setup-schema-target",
@@ -5252,7 +5275,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       );
       expect(getMetaLink(plainTarget2, "result", {
         meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
-        frozen: false,
       })).toBeDefined();
       plainTarget2.set({ bar: "updated" });
       tx2.prepareCfc();

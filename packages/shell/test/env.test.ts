@@ -40,13 +40,42 @@ Deno.test({
 
     expect(mod.EXPERIMENTAL).toEqual({
       modernCellRep: true,
-      // Default ON — one flag covers default-app and home roots alike.
-      systemPatternAutoUpdate: true,
       // Server-execution v2: the first-party default (the landed-dark
       // constant) when the build define is unset.
       serverExecution: SERVER_EXECUTION_DEFAULT_ENABLED,
       contentAddressedSchemas: true,
     });
+  },
+});
+
+Deno.test({
+  name: "shell env rejects a non-WebSocket presence service URL",
+  permissions: { read: true },
+  async fn() {
+    await expect(withPatchedGlobals({
+      $API_URL: "http://shell.test/",
+      $PRESENCE_URL: "https://presence.test",
+    }, importFreshEnvModule)).rejects.toThrow("WebSocket URL");
+  },
+});
+
+Deno.test({
+  name: "shell env reads the optional presence service URL",
+  permissions: { read: true },
+  async fn() {
+    const configured = await withPatchedGlobals({
+      $API_URL: "http://shell.test/",
+      $PRESENCE_URL: "wss://presence.test/socket",
+    }, importFreshEnvModule);
+    expect(configured.PRESENCE_URL?.href).toBe(
+      "wss://presence.test/socket",
+    );
+
+    const disabled = await withPatchedGlobals({
+      $API_URL: "http://shell.test/",
+      $PRESENCE_URL: undefined,
+    }, importFreshEnvModule);
+    expect(disabled.PRESENCE_URL).toBeUndefined();
   },
 });
 

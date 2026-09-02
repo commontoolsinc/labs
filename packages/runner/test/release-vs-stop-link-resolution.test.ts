@@ -11,7 +11,9 @@
  * held start. Only the generic scheduler test runtime is needed, so the pin
  * lives here on its own.
  */
+
 import { expect } from "@std/expect";
+
 import {
   createSchedulerTestRuntime,
   disposeSchedulerTestRuntime,

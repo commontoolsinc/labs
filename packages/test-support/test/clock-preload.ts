@@ -40,6 +40,12 @@
 // the auto-advance pump is paused while it runs, so a test can observe a state
 // partway through a window.
 
+import { registerFrameworkModule } from "../src/records/registration.ts";
+
+// A test registered through this harness is attributed to the file that
+// called `Deno.test`, not to the frame this harness adds between them.
+registerFrameworkModule(import.meta.url);
+
 const realSetTimeout = globalThis.setTimeout;
 const realClearTimeout = globalThis.clearTimeout;
 const realSetInterval = globalThis.setInterval;

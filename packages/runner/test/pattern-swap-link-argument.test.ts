@@ -5,6 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 // CT-1917 (2026-07-28 estuary): a hot-swap to a new pattern version re-runs
 // setup, and setup re-validates the STORED argument against the candidate
@@ -100,7 +101,7 @@ describe("pattern swap with a link-valued argument slot", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v2Ref.identity,
       symbol: v2Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     await rt.idle();
     await cell.pull();
@@ -187,11 +188,12 @@ describe("pattern swap with a link-valued argument slot", () => {
     cell.withTx(tx2).setMetaRaw(
       "argument",
       coldArgument.getAsWriteRedirectLink({ base: cell }),
+      rawMetaWriteAuthorization,
     );
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v2Ref.identity,
       symbol: v2Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     await rt.idle();
     await cell.pull();

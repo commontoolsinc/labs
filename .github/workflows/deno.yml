@@ -8,8 +8,17 @@ on:
     branches:
       - main
 
+# Runs of a pull request are grouped by the pull request, and a new push to the
+# branch cancels the run already going. Runs of a push to main are grouped by
+# the commit that was pushed, and a push run is never cancelled: it may be
+# part-way through deploying that commit to staging. Main can receive the same
+# head commit twice, which starts two runs of one commit, and the commit as the
+# group makes the second of them wait for the first. Each run publishes a
+# release artifact named after the commit, and two runs publishing at once
+# leave one run's tarball beside the other run's checksum. See "One commit, one
+# set of artifacts" in docs/development/deploying.md.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # The bounds the jobs below are built from. They are YAML anchors, used as
@@ -78,7 +87,28 @@ jobs:
 
       - name: 🧹 Lint codebase
         timeout-minutes: *work-timeout
-        run: deno task run-recorded lint repo deno-lint -- deno lint
+        run: |
+          ulimit -c unlimited
+          sudo sysctl -w kernel.core_pattern="$GITHUB_WORKSPACE/deno-core.%p"
+          deno task run-recorded lint repo deno-lint -- deno lint
+
+      - name: 📋 Describe Deno lint core dump
+        if: ${{ failure() }}
+        run: |
+          shopt -s nullglob
+          cores=(deno-core.*)
+          for core in "${cores[@]}"; do
+            file "$core"
+          done
+
+      - name: 📤 Upload Deno lint core dump
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: deno-lint-core-a${{ github.run_attempt }}
+          path: deno-core.*
+          if-no-files-found: ignore
+          retention-days: 14
 
       # This is the only type check for the paths listed in
       # tasks/typecheck.ts: the test jobs in this workflow and the package
@@ -168,12 +198,31 @@ jobs:
           deno task run-recorded gate repo check-local-program --
           deno task check-local-program
 
+      - name: 🚧 Guard against a CLI slot nobody decided about completing
+        timeout-minutes: *work-timeout
+        run: >-
+          deno task run-recorded gate repo check-completion-slots --
+          deno task check-completion-slots
+
+      - name: 🚧 Guard against a CLI command nobody documented
+        timeout-minutes: *work-timeout
+        run: >-
+          deno task run-recorded gate repo check-command-docs --
+          deno task check-command-docs
+
       - name: 🔎 Check generated commonfabric/cfc types are up to date
         timeout-minutes: *work-timeout
         working-directory: packages/static
         run: >-
           deno task run-recorded gate repo check-cfc-types --
           deno task check-cfc-types
+
+      - name: 🔎 Check generated commonfabric types are up to date
+        timeout-minutes: *work-timeout
+        working-directory: packages/static
+        run: >-
+          deno task run-recorded gate repo check-commonfabric-types --
+          deno task check-commonfabric-types
 
       - name: 🔎 Check type libraries declare no withheld globals
         timeout-minutes: *work-timeout
@@ -446,21 +495,26 @@ jobs:
           printf '  %s\n' $TEST_FILES
           mkdir -p ../../test-results
           # --no-check: the Check job type-checks packages/runner
-          # (tasks/check.sh). --preload runs the fake clock before every test
-          # module, the same as the package test task; without it the global
-          # `clock` the converted tests use is undefined. See
-          # test/clock-preload.ts.
+          # (tasks/check.sh). The first --preload runs the fake clock before
+          # every test module, the same as the package test task; without it
+          # the global `clock` the converted tests use is undefined. See
+          # test/clock-preload.ts. The second captures the file each test
+          # registers from, which is what gives the shipped records their
+          # file metadata; it writes that map into the spool, so the spool
+          # is in the write list beside the temporary directories, or the
+          # preload finds nowhere to put it and declines to install.
           # These permissions mirror the `test` task in
           # packages/runner/deno.jsonc; a test that needs a new one needs it
           # in both places, because this shard runs deno test directly.
           ENV=test deno test \
             --no-check \
             --preload=test/clock-preload.ts \
+            --preload=../../packages/test-support/src/records/preload.ts \
             --junit-path=../../test-results/runner-${{ matrix.shard }}.xml \
             --allow-ffi \
             --allow-env \
             --allow-read \
-            --allow-write=/tmp,/var/folders \
+            --allow-write=/tmp,/var/folders,$CF_TEST_RECORDS_DIR \
             --allow-run=git,deno \
             $TEST_FILES
 
@@ -501,9 +555,54 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
+      # The co-presence endpoint the shell EMBEDDED IN THIS BINARY offers to
+      # collaborative editors. `SHELL_PRESENCE_URL` is the repository variable
+      # holding the value; `PRESENCE_URL` is the process variable
+      # packages/shell/felt.config.ts reads and bakes in as the
+      # `$PRESENCE_URL` define — the same mapping deploy-shell-staging makes
+      # for the bucket shell, from its own variable. This binary is the one
+      # both estuary and rapids deploy, so both carry whatever is baked here,
+      # and changing the variable takes a rebuild before it reaches either.
+      # Unset omits the define and co-presence stays disabled, which is why
+      # this does not fail the way an unset API URL does: a shell with no
+      # presence endpoint is a working shell. The job then succeeds either way,
+      # so which of the two shells a binary carries would leave no trace in it;
+      # the step says which, and the log is where that answer is.
+      - name: 🔎 Validate the embedded shell's presence endpoint
+        timeout-minutes: *work-timeout
+        env:
+          PRESENCE_URL: ${{ vars.SHELL_PRESENCE_URL }}
+        run: |
+          if [ -n "$PRESENCE_URL" ]; then
+            # `deno eval` holds every permission implicitly, so the module read
+            # and the environment lookup need no flags; the subcommand takes no
+            # `--allow-read` or `--allow-env` and fails on either as an unknown
+            # argument. What reaches GITHUB_ENV is `URL.href`, so it is the
+            # normalized spelling the bundle carries and the grep below matches.
+            PRESENCE_URL="$(deno eval '
+              import { optionalPresenceUrl } from "./packages/shell/src/lib/presence-url.ts";
+              console.log(optionalPresenceUrl(Deno.env.get("PRESENCE_URL"))?.href ?? "");
+            ')"
+            echo "PRESENCE_URL=$PRESENCE_URL" >> "$GITHUB_ENV"
+            echo "The embedded shell gets presence service $PRESENCE_URL."
+          else
+            echo "SHELL_PRESENCE_URL is unset: the embedded shell gets no presence endpoint, so editor co-presence is off in every deployment of this binary."
+          fi
+
       - name: 🏗️ Build toolshed binary
         timeout-minutes: *work-timeout
-        run: deno task build-binaries toolshed
+        run: |
+          deno task build-binaries toolshed
+
+          # shell-frontend is what the binary serves in production. An endpoint
+          # that was configured but did not reach the bundle would deploy a
+          # shell whose co-presence is silently off, and nothing downstream
+          # looks, so confirm the define landed before the binary is uploaded.
+          if [ -n "$PRESENCE_URL" ] && \
+            ! grep -rqF -e "$PRESENCE_URL" packages/toolshed/shell-frontend/scripts; then
+            echo "::error::The embedded shell does not reference $PRESENCE_URL."
+            exit 1
+          fi
         env:
           COMMIT_SHA: ${{ github.sha }}
 
@@ -904,15 +1003,21 @@ jobs:
           # then returns, so the test steps never race a not-yet-listening
           # server. The server logs to --log-file, which the launcher prints on
           # success and dumps if the server exits before binding.
-          # Space-root ensure OFF for test lanes (OW45 arm-B stage 1,
-          # RULED 2026-08-24: production spaces always get a default
-          # pattern; tests may switch it off — the ensured root's
-          # content-addressed computed cells otherwise land in every
-          # fixture space's subscriptions).
+          # Space-root ensure ON — the production default (unset knob).
+          # The lanes opted out while OW61's crash class was open (the
+          # ensured root's content-addressed computed cells landed in
+          # fixture spaces' plain subscriptions and the arrival throw
+          # killed the consumers); with the arrival containment (#6223)
+          # and the client absorb fix (#6292) merged the lanes run the
+          # production posture again, and these ON lanes ARE the CI
+          # coverage of the ensure at the true topology (the OW45/OW61
+          # rows' flagged gap). `schema-doc-quarantine` log lines are
+          # expected to be ZERO here; a live one is contained (not a
+          # process kill) but is evidence that another client
+          # absorb/ordering defect remains — OW61's residual trigger.
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           EXPERIMENTAL_SERVER_EXECUTION=true \
-          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
           ./common-binaries/toolshed --port="$TOOLSHED_PORT" \
             --background --log-file="$RUNNER_TEMP/toolshed.log"
 
@@ -969,7 +1074,6 @@ jobs:
           SX_ON_IGNORE=$(deno run --allow-read ../../tasks/server-execution-on-skips.ts ${{ matrix.suite_name }})
           API_URL="http://localhost:${TOOLSHED_PORT}/" \
           EXPERIMENTAL_SERVER_EXECUTION=true \
-          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
           INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/${JUNIT_NAME}.xml ${SX_ON_IGNORE}" \
           deno task integration
 
@@ -987,6 +1091,7 @@ jobs:
         uses: ./.github/actions/test-records-ship
         with:
           artifact: package-integration-server-execution-on-${{ matrix.suite_name }}
+          variant: server-execution
           job: >-
             Package Integration Tests / server-execution ON
             (${{ matrix.suite_name }})
@@ -1122,6 +1227,11 @@ jobs:
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
           FUSE_DEEP_ENTITY_PROBE: "0"
+          # The section of fuse-exec.sh's dispatch table this leg runs, which
+          # `all` makes every phase of it. packages/cli/test/fuse-sections.test.ts
+          # reads this line and holds it to naming an arm the script defines and
+          # to covering every selectable phase between the sections named here.
+          CF_FUSE_INTEGRATION_SECTION: all
           # Single source for the outer step bound: 'timeout' enforces it, and the
           # script's waits give up a few minutes before it (see
           # FUSE_EXEC_OVERALL_TIMEOUT_SECONDS in integration/fuse-exec.sh) so a
@@ -1294,7 +1404,18 @@ jobs:
         timeout-minutes: *work-timeout
         working-directory: packages/patterns
         run: |
-          mapfile -t TEST_FILES < <(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          # Command substitution (not a process substitution) so a selector
+          # failure fails this step under `bash -e` instead of reading as an
+          # empty list that runs ZERO test files and exits green. The
+          # selector throws on an empty selection (every shard carries the
+          # internally-sharded files), so an empty result here is only ever
+          # a failure — reject it loudly as the backstop.
+          SELECTED_FILES=$(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          if [ -z "$SELECTED_FILES" ]; then
+            echo "::error::select-pattern-integration-files.ts selected no files for shard ${{ matrix.shard }}/${{ matrix.total }}"
+            exit 1
+          fi
+          mapfile -t TEST_FILES <<< "$SELECTED_FILES"
           printf 'Pattern integration shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
           printf '  %s\n' "${TEST_FILES[@]}"
           mkdir -p ../../test-results
@@ -1353,10 +1474,14 @@ jobs:
   # browser shell (build-toolshed-on) — the FULL ON posture, verified by the
   # probe below before the shard runs. Skips happen only through the explicit
   # per-phase lists in tasks/server-execution-on-skips.ts, printed by the run
-  # step — never by silent filtering (TWO `patterns` entries today, both
-  # OW45 arm B: default-app's reload STEP — the read-side residue — and
-  # the lunch-poll-vote FILE, #5744's client-start re-skip; each with its
-  # loud reason; the flip PR needs every list EMPTY).
+  # step — never by silent filtering (the lists are EMPTY across ALL suites
+  # since the lunch-poll-vote FILE entry's ruled-3b-close lift, 2026-08-28
+  # — the owner ruled the register's 3b fork, "go with (1) plus the (2-D)
+  # kick": failed replications now park under the WANTED identity and the
+  # matching persist RECORD re-issues them, and served sidecar patterns
+  # kick their closure into the demanding space at page-serve time; this
+  # lane now runs the FULL suite. The flip PR's list-EMPTY precondition
+  # is met; its bar remains a green ON lane, not merely the empty list).
   # No coverage collection and no cache save-back: the default lane owns
   # both; the compile byte cache is restored read-only (compiled bytes do not
   # depend on the flag).
@@ -1406,12 +1531,12 @@ jobs:
           chmod +x ./common-binaries/toolshed
           # --background waits until the server has bound its port before it
           # returns, so the test steps never race a not-yet-listening server.
-          # Space-root ensure OFF for test lanes (see the package ON
-          # lane's note; RULED 2026-08-24).
+          # Space-root ensure ON — the production default (see the
+          # package ON lane's note: the opt-out retired with OW61's
+          # arrival containment (#6223) and client absorb fix (#6292)).
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           EXPERIMENTAL_SERVER_EXECUTION=true \
-          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
           ./common-binaries/toolshed \
             --background --log-file="$RUNNER_TEMP/toolshed.log"
 
@@ -1447,7 +1572,19 @@ jobs:
         timeout-minutes: *work-timeout
         working-directory: packages/patterns
         run: |
-          mapfile -t SHARD_FILES < <(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          # Command substitution (not a process substitution) so a selector
+          # failure fails this step under `bash -e` instead of reading as an
+          # empty list that runs ZERO test files and exits green. The
+          # selector throws on an empty selection (every shard carries the
+          # internally-sharded files), so an empty result here is only ever
+          # a failure — reject it loudly as the backstop. The legitimate
+          # empty case lives one stage LATER, after the ON-skip filter.
+          SELECTED_FILES=$(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          if [ -z "$SELECTED_FILES" ]; then
+            echo "::error::select-pattern-integration-files.ts selected no files for shard ${{ matrix.shard }}/${{ matrix.total }}"
+            exit 1
+          fi
+          mapfile -t SHARD_FILES <<< "$SELECTED_FILES"
           printf 'Pattern integration shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
           printf '  %s\n' "${SHARD_FILES[@]}"
           # The explicit ON-arm skip list, applied by FILTERING this shard's
@@ -1470,12 +1607,20 @@ jobs:
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
           EXPERIMENTAL_SERVER_EXECUTION=true \
-          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
           PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \
           CF_COMPILE_CACHE_FILE="${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json" \
           deno test --no-check --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
             --junit-path=../../test-results/patterns-server-execution-on-${{ matrix.shard }}.xml \
             "${TEST_FILES[@]}"
+
+      - name: 📋 Upload toolshed log on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: toolshed-log-pattern-integration-server-execution-on-${{ matrix.shard }}
+          path: ${{ runner.temp }}/toolshed.log
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: 📤 Upload test timing data
         if: always()
@@ -1491,6 +1636,7 @@ jobs:
         uses: ./.github/actions/test-records-ship
         with:
           artifact: pattern-integration-server-execution-on-${{ matrix.shard }}
+          variant: server-execution
           job: >-
             Pattern Integration Tests / server-execution ON
             (${{ matrix.shard }}/${{ matrix.total }})
@@ -1594,7 +1740,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/pattern-unit-coverage-${{ matrix.chunk }}.json
-          key: cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.chunk }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'tasks/integration.ts') }}
+          key: cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.chunk }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'packages/connectors/agents/debug-view/**/*.ts', 'packages/connectors/agents/debug-view/**/*.tsx', 'packages/connectors/github/activity-view/**/*.ts', 'packages/connectors/github/activity-view/**/*.tsx', 'packages/connectors/pattern-sources.ts', 'tasks/integration.ts', 'tasks/pattern-files.ts') }}
           restore-keys: |
             cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.chunk }}-
 
@@ -2023,12 +2169,31 @@ jobs:
       - name: ⚙️ Setup Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
 
+      # A release artifact is named after the commit it was built from, and a
+      # host keeps whatever it has already downloaded under that name. So the
+      # first build of a commit publishes the artifact and a later build of the
+      # same commit leaves it alone. Two builds of one commit do not produce the
+      # same bytes: the binaries are compiled again, and `tar` records
+      # modification times.
+      #
+      # The tarball and its checksum are published as a pair. A commit that has
+      # one of them and not the other was published by a build that stopped
+      # between the two copies, and this publishes both of them again. See "One
+      # commit, one set of artifacts" in docs/development/deploying.md.
       - name: 📤 Upload artifacts to Google Cloud Storage
         run: |
-          gsutil cp release/labs-${{ github.sha }}.tar.gz gs://commontools-build-artifacts/workspace-artifacts/
-          gsutil cp release/labs-${{ github.sha }}.hash.txt gs://commontools-build-artifacts/workspace-artifacts/
+          BUCKET=gs://commontools-build-artifacts/workspace-artifacts
+          TARBALL=labs-${{ github.sha }}.tar.gz
+          CHECKSUM=labs-${{ github.sha }}.hash.txt
 
-          # Print clickable links to the uploaded files
+          if gsutil -q stat "$BUCKET/$TARBALL" && gsutil -q stat "$BUCKET/$CHECKSUM"; then
+            echo "An earlier build of ${{ github.sha }} published its artifacts; leaving them as they are."
+          else
+            gsutil cp "release/$TARBALL" "$BUCKET/"
+            gsutil cp "release/$CHECKSUM" "$BUCKET/"
+          fi
+
+          # Print clickable links to the published files
           echo "::group::📦 Artifact Links"
           echo "Tarball URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.tar.gz"
           echo "Hash URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.hash.txt"
@@ -2037,7 +2202,7 @@ jobs:
           # combine step produced it. To download it for a given commit:
           #   gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-<commit-sha>.lcov .
           if [ -f release/labs-${{ github.sha }}.lcov ]; then
-            gsutil cp release/labs-${{ github.sha }}.lcov gs://commontools-build-artifacts/workspace-artifacts/
+            gsutil cp "release/labs-${{ github.sha }}.lcov" "$BUCKET/"
             echo "Coverage LCOV URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.lcov"
           fi
           echo "::endgroup::"
@@ -2096,9 +2261,10 @@ jobs:
       # the host the deploy-rapids job above keeps current. It is a variable
       # rather than a secret because it is served in plaintext inside the
       # bundle, and because the checks below can then name it when they fail.
-      - name: 🔎 Require a staging API host
+      - name: 🔎 Validate staging shell endpoints
         env:
           API_URL: ${{ vars.STAGING_SHELL_API_URL }}
+          PRESENCE_URL: ${{ vars.STAGING_SHELL_PRESENCE_URL }}
         run: |
           # An empty API_URL builds a shell that falls back to its own origin,
           # which serves static assets and no API. Require a value up front, so
@@ -2106,6 +2272,13 @@ jobs:
           if [ -z "$API_URL" ]; then
             echo "::error::API_URL is empty: the STAGING_SHELL_API_URL variable is unset."
             exit 1
+          fi
+          if [ -n "$PRESENCE_URL" ]; then
+            PRESENCE_URL="$(deno eval '
+              import { optionalPresenceUrl } from "./packages/shell/src/lib/presence-url.ts";
+              console.log(optionalPresenceUrl(Deno.env.get("PRESENCE_URL"))?.href ?? "");
+            ')"
+            echo "PRESENCE_URL=$PRESENCE_URL" >> "$GITHUB_ENV"
           fi
 
       - name: 🏗️ Build shell with staging API URL
@@ -2117,6 +2290,10 @@ jobs:
           # `$API_URL` token. Confirm it landed before anything is uploaded.
           if ! grep -rqF -e "$API_URL" dist/scripts; then
             echo "::error::The built shell does not reference $API_URL."
+            exit 1
+          fi
+          if [ -n "$PRESENCE_URL" ] && ! grep -rqF -e "$PRESENCE_URL" dist/scripts; then
+            echo "::error::The built shell does not reference $PRESENCE_URL."
             exit 1
           fi
         env:
@@ -2156,3 +2333,10 @@ jobs:
             exit 1
           fi
           echo "Published shell targets $API_URL"
+          if [ -n "$PRESENCE_URL" ] && ! grep -qF -e "$PRESENCE_URL" published-scripts.js; then
+            echo "::error::The published shell does not reference $PRESENCE_URL."
+            exit 1
+          fi
+          if [ -n "$PRESENCE_URL" ]; then
+            echo "Published shell targets presence service $PRESENCE_URL"
+          fi

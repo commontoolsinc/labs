@@ -122,10 +122,12 @@ describe("mergeable array appends", () => {
     await server?.close();
   });
 
-  // Two sessions append to the same list against the SAME base, neither having
-  // observed the other's append before committing. Both appends represent real
-  // user intent on disjoint tail slots, so both must survive durably.
   it("two concurrent appends to the same list both survive", async () => {
+    // Two sessions append to the same list against the SAME base, neither
+    // having observed the other's append before committing. Both appends
+    // represent real user intent on disjoint tail slots, so both must survive
+    // durably.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -178,12 +180,14 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A CONDITIONAL push — the handler reads the list explicitly before pushing
-  // (the dedup-then-push shape) — must keep its read in the conflict set, so a
-  // concurrent append makes it conflict (and, in the live system, retry). This
-  // is the opposite of the unconditional case above, which merges. It proves the
-  // read drop is scoped to the op's own reads, not the handler's explicit read.
   it("a conditional push (explicit read before push) conflicts with a concurrent append", async () => {
+    // A CONDITIONAL push — the handler reads the list explicitly before pushing
+    // (the dedup-then-push shape) — must keep its read in the conflict set, so
+    // a concurrent append makes it conflict (and, in the live system, retry).
+    // This is the opposite of the unconditional case above, which merges. It
+    // proves the read drop is scoped to the op's own reads, not the handler's
+    // explicit read.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -226,17 +230,18 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A push whose new element is derived from the array's LENGTH is a conditional
-  // push: its correctness depends on the count it read. The length read is
-  // recorded as the array's own `length` child path — the shape produced by a
-  // `for...of`/spread over the array, a shape-only `length` access, or
-  // `key("length")`. That read must stay in the conflict set: a mergeable append
-  // changes the length, so a concurrent append has to make this commit conflict
-  // (and retry against the new tail) instead of the push merging with a stale
-  // index. Before the length read was kept, session 2 read length 1, both
-  // sessions computed the same index, and the append silently merged with a
-  // duplicate index.
   it("a length-derived push conflicts with a concurrent append", async () => {
+    // A push whose new element is derived from the array's LENGTH is a
+    // conditional push: its correctness depends on the count it read. The
+    // length read is recorded as the array's own `length` child path — the
+    // shape produced by a `for...of`/spread over the array, a shape-only
+    // `length` access, or `key("length")`. That read must stay in the conflict
+    // set: a mergeable append changes the length, so a concurrent append has to
+    // make this commit conflict (and retry against the new tail) instead of the
+    // push merging with a stale index. Before the length read was kept, session
+    // 2 read length 1, both sessions computed the same index, and the append
+    // silently merged with a duplicate index.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -279,10 +284,11 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The same protection through the query-result proxy's iterator: a handler that
-  // counts the array with `for...of` (or a spread) before pushing records the
-  // array's `length` read, so a concurrent append conflicts.
   it("a for...of count before a push conflicts with a concurrent append", async () => {
+    // The same protection through the query-result proxy's iterator: a handler
+    // that counts the array with `for...of` (or a spread) before pushing
+    // records the array's `length` read, so a concurrent append conflicts.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -323,12 +329,13 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The length read stays precise: it conflicts with a change to the element
-  // COUNT (an append), not with an edit to an existing element. A concurrent
-  // edit to an element the length-reading session did not append leaves the
-  // length unchanged, so the append still merges — the length read must not
-  // over-conflict the way a whole-array `.get()` read would.
   it("a length-derived push merges past a concurrent edit to an existing element", async () => {
+    // The length read stays precise: it conflicts with a change to the element
+    // COUNT (an append), not with an edit to an existing element. A concurrent
+    // edit to an element the length-reading session did not append leaves the
+    // length unchanged, so the append still merges — the length read must not
+    // over-conflict the way a whole-array `.get()` read would.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -372,15 +379,16 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // Bare `.length` on the query-result proxy (the get trap) reads the whole
-  // array recursively at the op path, so it is already kept as the handler's
-  // explicit read and conflicts with a concurrent append even without the
-  // length-child carve-out. This pins that end-to-end guarantee for the most
-  // common form: a change that ever recorded bare `.length` as a shape-only read
-  // AT the op path (which `buildReads` drops as the proxy's incidental container
-  // read) would fail here, forcing the count dependency to stay in the conflict
-  // set.
   it("a bare proxy `.length` read before a push conflicts with a concurrent append", async () => {
+    // Bare `.length` on the query-result proxy (the get trap) reads the whole
+    // array recursively at the op path, so it is already kept as the handler's
+    // explicit read and conflicts with a concurrent append even without the
+    // length-child carve-out. This pins that end-to-end guarantee for the most
+    // common form: a change that ever recorded bare `.length` as a shape-only
+    // read AT the op path (which `buildReads` drops as the proxy's incidental
+    // container read) would fail here, forcing the count dependency to stay in
+    // the conflict set.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -420,13 +428,14 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // Enumerating the array's keys (`Object.keys`/`values`/`entries`, or an object
-  // spread) observes the present-key set — the proxy's ownKeys trap records a
-  // recursive read of the array for that. So a push whose new element came from
-  // `Object.keys(arr).length` conflicts with a concurrent append (and, per the
-  // sparse test below, with a concurrent hole edit); an unconditional push, which
-  // never enumerates, still merges.
   it("an Object.keys(proxy).length-derived push conflicts with a concurrent append", async () => {
+    // Enumerating the array's keys (`Object.keys`/`values`/`entries`, or an
+    // object spread) observes the present-key set — the proxy's ownKeys trap
+    // records a recursive read of the array for that. So a push whose new
+    // element came from `Object.keys(arr).length` conflicts with a concurrent
+    // append (and, per the sparse test below, with a concurrent hole edit); an
+    // unconditional push, which never enumerates, still merges.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -466,12 +475,13 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The carve-out is not push-specific: it keeps the length read for every
-  // mergeable op. An addUnique whose added value or decision depended on the
-  // count must conflict with a concurrent count-changing op, even when the added
-  // element is a distinct key that would otherwise merge. A transaction that
-  // reads the length forfeits that transaction's distinct-element merge.
   it("a length-read addUnique conflicts with a concurrent addUnique", async () => {
+    // The carve-out is not push-specific: it keeps the length read for every
+    // mergeable op. An addUnique whose added value or decision depended on the
+    // count must conflict with a concurrent count-changing op, even when the
+    // added element is a distinct key that would otherwise merge. A transaction
+    // that reads the length forfeits that transaction's distinct-element merge.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -510,11 +520,12 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A single session appends to a list whose durable head it has not yet
-  // observed (the rehydration-race shape): it reads the list as shorter/empty
-  // than it durably is, then appends. The append must land at the durable tail,
-  // never clobbering elements it could not see.
   it("an append against a stale-short base does not clobber the durable tail", async () => {
+    // A single session appends to a list whose durable head it has not yet
+    // observed (the rehydration-race shape): it reads the list as shorter/empty
+    // than it durably is, then appends. The append must land at the durable
+    // tail, never clobbering elements it could not see.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -558,10 +569,11 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A single transaction that both edits an existing element and appends must
-  // keep the edit: the append op covers only the appended tail, not the edited
-  // prefix slot.
   it("an edit to an existing element survives alongside a push in the same tx", async () => {
+    // A single transaction that both edits an existing element and appends must
+    // keep the edit: the append op covers only the appended tail, not the
+    // edited prefix slot.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -592,12 +604,13 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // Two different mergeable op kinds on the same array path in one transaction.
-  // The intent map holds one op per path, so the second would replace the first
-  // and the diff-suppression would then drop the first op's element from the
-  // commit. The path is poisoned instead and the whole-array diff carries both
-  // changes.
   it("addUnique then push in one tx commits both (no silent drop)", async () => {
+    // Two different mergeable op kinds on the same array path in one
+    // transaction. The intent map holds one op per path, so the second would
+    // replace the first and the diff-suppression would then drop the first op's
+    // element from the commit. The path is poisoned instead and the whole-array
+    // diff carries both changes.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -621,10 +634,11 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The "update my entry" idiom: remove the old value and add the new one in one
-  // handler. remove-by-value and add-unique are different op kinds, so the path
-  // is poisoned and the whole-array diff commits the correct result.
   it("removeByValue then addUnique in one tx commits both", async () => {
+    // The "update my entry" idiom: remove the old value and add the new one in
+    // one handler. remove-by-value and add-unique are different op kinds, so
+    // the path is poisoned and the whole-array diff commits the correct result.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -649,9 +663,11 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A whole-array Cell.set after a push reshapes the array; the append intent is
-  // poisoned so the commit emits the set's array, not a tail op sliced from it.
   it("push then a whole-array set commits the set array", async () => {
+    // A whole-array Cell.set after a push reshapes the array; the append intent
+    // is poisoned so the commit emits the set's array, not a tail op sliced
+    // from it.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -675,15 +691,17 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A whole-array set that REPLACES every element without changing the length or
-  // the hole layout, then a push. This one is deliberately NOT abandoned, and
-  // pins that: a dense same-length replacement diffs into per-index candidates
-  // that all sit below the tail start, so they survive the op's suppression and
-  // commit alongside the append. (Characterization, not a regression guard — it
-  // holds on the unfixed code too. It is here so a future tightening of the
-  // guard to full prefix VALUE comparison has to justify losing this. Changing
-  // the hole layout is a different matter and is abandoned — see below.)
   it("a same-length whole-array set then a push commits the replaced list", async () => {
+    // A whole-array set that REPLACES every element without changing the length
+    // or the hole layout, then a push. This one is deliberately NOT abandoned,
+    // and pins that: a dense same-length replacement diffs into per-index
+    // candidates that all sit below the tail start, so they survive the op's
+    // suppression and commit alongside the append. (Characterization, not a
+    // regression guard — it holds on the unfixed code too. It is here so a
+    // future tightening of the guard to full prefix VALUE comparison has to
+    // justify losing this. Changing the hole layout is a different matter and
+    // is abandoned — see below.)
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -712,12 +730,14 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A same-length set that changes the array's HOLE LAYOUT, then a push. Length
-  // equality is satisfied, but the diff cannot express a presence change per
-  // index — it falls back to a whole-array replacement, which is the one
-  // candidate the op's suppression drops outright. Sparse arrays are preserved
-  // elsewhere in the runner, so the hole must survive the round trip.
   it("a set that punches a hole then a push commits the hole", async () => {
+    // A same-length set that changes the array's HOLE LAYOUT, then a push.
+    // Length equality is satisfied, but the diff cannot express a presence
+    // change per index — it falls back to a whole-array replacement, which is
+    // the one candidate the op's suppression drops outright. Sparse arrays are
+    // preserved elsewhere in the runner, so the hole must survive the round
+    // trip.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -755,12 +775,13 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // No base at all: a previously absent cell set to a sparse array, then pushed.
-  // With no base the whole working array is the op's payload, so the hole is in
-  // the payload rather than in a prefix the diff would carry — the density check
-  // has to run whether or not there was a base. Without it the write does not
-  // merely flatten the hole, it fails to land at all.
   it("an absent cell set to a sparse array then pushed commits the hole", async () => {
+    // No base at all: a previously absent cell set to a sparse array, then
+    // pushed. With no base the whole working array is the op's payload, so the
+    // hole is in the payload rather than in a prefix the diff would carry — the
+    // density check has to run whether or not there was a base. Without it the
+    // write does not merely flatten the hole, it fails to land at all.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -813,10 +834,11 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The reverse: the base is sparse and the set FILLS the hole, same length.
-  // Without the layout check the fill is dropped and, because the whole-array
-  // candidate carried every element, so is the rest of the replacement.
   it("a set that fills a hole then a push commits the filled value", async () => {
+    // The reverse: the base is sparse and the set FILLS the hole, same length.
+    // Without the layout check the fill is dropped and, because the whole-array
+    // candidate carried every element, so is the rest of the replacement.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -843,13 +865,14 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // An element edit alongside a push is the composition the fallback must NOT
-  // swallow: the edit is a per-index candidate below the tail, it survives
-  // suppression, and the push stays mergeable. This is the case that stops the
-  // guard from being tightened into "the prefix must be untouched", and that
-  // pins the poison's direction — a write BENEATH an array must not reach the
-  // array's own intent.
   it("a push then an element edit keeps the push mergeable and commits both", async () => {
+    // An element edit alongside a push is the composition the fallback must NOT
+    // swallow: the edit is a per-index candidate below the tail, it survives
+    // suppression, and the push stays mergeable. This is the case that stops
+    // the guard from being tightened into "the prefix must be untouched", and
+    // that pins the poison's direction — a write BENEATH an array must not
+    // reach the array's own intent.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -896,11 +919,12 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A whole-array set that SHRINKS the list, then a push. The set removed "b"
-  // and "c"; a tail op cannot express that removal, and its suppression covers
-  // the very diff candidates that would have carried it, so the removal must
-  // keep the path off the mergeable fast path.
   it("a shrinking whole-array set then a push commits the shrunk list", async () => {
+    // A whole-array set that SHRINKS the list, then a push. The set removed "b"
+    // and "c"; a tail op cannot express that removal, and its suppression
+    // covers the very diff candidates that would have carried it, so the
+    // removal must keep the path off the mergeable fast path.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -929,11 +953,13 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The clear-and-reseed idiom: empty the list, then add the replacement members
-  // back with `addUnique`. The replacements are new values, so the server's
-  // add-unique dedup cannot mask the lost clear — the durable list must hold the
-  // reseeded members alone, not the cleared ones plus the additions.
   it("a whole-array set([]) then addUnique commits only the added members", async () => {
+    // The clear-and-reseed idiom: empty the list, then add the replacement
+    // members back with `addUnique`. The replacements are new values, so the
+    // server's add-unique dedup cannot mask the lost clear — the durable list
+    // must hold the reseeded members alone, not the cleared ones plus the
+    // additions.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -962,10 +988,11 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The same reshape reached from a PARENT path, landing BEFORE the op — so no
-  // intent exists yet for the ancestor write to poison, and the tail op's own
-  // prefix check is what has to catch it.
   it("a parent-object set that shrinks a nested list then a push commits the shrunk list", async () => {
+    // The same reshape reached from a PARENT path, landing BEFORE the op — so
+    // no intent exists yet for the ancestor write to poison, and the tail op's
+    // own prefix check is what has to catch it.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1013,13 +1040,14 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // Nested tail ops where one op's PAYLOAD contains the other's target: push a
-  // new inner list onto the outer list, then push into that inner list. A tail
-  // op's payload is read from the working array at commit, so the outer append
-  // already carries the inner list complete with the element the inner append
-  // would add again — the store would apply it twice. Only the durable value
-  // shows it: the writer's own local value is correct throughout.
   it("a push into a just-appended nested list commits its element once", async () => {
+    // Nested tail ops where one op's PAYLOAD contains the other's target: push
+    // a new inner list onto the outer list, then push into that inner list. A
+    // tail op's payload is read from the working array at commit, so the outer
+    // append already carries the inner list complete with the element the inner
+    // append would add again — the store would apply it twice. Only the durable
+    // value shows it: the writer's own local value is correct throughout.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1054,14 +1082,16 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The same two pushes with the inner one landing BEFORE the outer tail: that
-  // element is not in the outer append's payload, so both ops are sent and the
-  // durable value has to come out of the two of them applied together. That
-  // combination is what this pins; that the inner op stays a live intent rather
-  // than falling back is pinned on the intents themselves ("nested tail ops
-  // abandon only the contained one", below) — a durable value cannot show it,
-  // since a concurrent append is add-wins and lands either way.
   it("a push into a pre-existing nested list stays mergeable alongside an outer push", async () => {
+    // The same two pushes with the inner one landing BEFORE the outer tail:
+    // that element is not in the outer append's payload, so both ops are sent
+    // and the durable value has to come out of the two of them applied
+    // together. That combination is what this pins; that the inner op stays a
+    // live intent rather than falling back is pinned on the intents themselves
+    // ("nested tail ops abandon only the contained one", below) — a durable
+    // value cannot show it, since a concurrent append is add-wins and lands
+    // either way.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1119,11 +1149,12 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A poisoned path forfeits merge-friendliness: because it commits as a
-  // whole-array diff whose reads are kept, a mixed-op transaction conflicts with
-  // a concurrent append instead of merging — the intended trade for never losing
-  // data on the mixed-op path.
   it("a mixed-op (poisoned) transaction conflicts with a concurrent append", async () => {
+    // A poisoned path forfeits merge-friendliness: because it commits as a
+    // whole-array diff whose reads are kept, a mixed-op transaction conflicts
+    // with a concurrent append instead of merging — the intended trade for
+    // never losing data on the mixed-op path.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1164,9 +1195,10 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // Probing whether a numeric index exists (`n in arr`) observes the element
-  // count, so an `n in arr`-derived push conflicts with a concurrent append.
   it("an `n in arr`-derived push conflicts with a concurrent append", async () => {
+    // Probing whether a numeric index exists (`n in arr`) observes the element
+    // count, so an `n in arr`-derived push conflicts with a concurrent append.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1204,12 +1236,14 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // Arrays can be sparse (holes below `length`). Filling or punching a hole
-  // changes the present-key set without changing `length`, so an enumeration or
-  // `n in arr` probe that fed a push must conflict with a concurrent same-length
-  // hole edit. A `length`-only dependency would miss it; the ownKeys/has traps
-  // record a recursive read for arrays, which a hole edit invalidates.
   it("an `n in arr`-derived push conflicts with a concurrent same-length hole fill", async () => {
+    // Arrays can be sparse (holes below `length`). Filling or punching a hole
+    // changes the present-key set without changing `length`, so an enumeration
+    // or `n in arr` probe that fed a push must conflict with a concurrent
+    // same-length hole edit. A `length`-only dependency would miss it; the
+    // ownKeys/has traps record a recursive read for arrays, which a hole edit
+    // invalidates.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1254,9 +1288,10 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // Two sessions add distinct elements to the same set against the same base.
-  // Both are real intents on the set, so both must survive.
   it("two concurrent add-uniques of distinct elements both survive", async () => {
+    // Two sessions add distinct elements to the same set against the same base.
+    // Both are real intents on the set, so both must survive.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1297,9 +1332,10 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // Two sessions add the SAME element against the same base. add-unique dedups
-  // against durable state on the server, so the element appears once.
   it("concurrent add-unique of the same element is idempotent", async () => {
+    // Two sessions add the SAME element against the same base. add-unique
+    // dedups against durable state on the server, so the element appears once.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1338,9 +1374,10 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // Two sessions increment the same counter against the same base. Increments
-  // sum against durable state rather than clobber via last-write-wins.
   it("two concurrent increments sum", async () => {
+    // Two sessions increment the same counter against the same base. Increments
+    // sum against durable state rather than clobber via last-write-wins.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1378,9 +1415,10 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // Incrementing a counter that was never set treats the missing value as a
-  // zero default: the durable value becomes the increment amount.
   it("increment on a missing value implies a zero default", async () => {
+    // Incrementing a counter that was never set treats the missing value as a
+    // zero default: the durable value becomes the increment amount.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1397,9 +1435,11 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // Two sessions remove distinct elements concurrently; both removals must land
-  // (they merge against durable state rather than clobber via a whole-array set).
   it("two concurrent removeByValue of distinct elements both land", async () => {
+    // Two sessions remove distinct elements concurrently; both removals must
+    // land (they merge against durable state rather than clobber via a
+    // whole-array set).
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1442,14 +1482,16 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The ordinary "edit one row and delete another in the same handler" shape. A
-  // remove-by-value suppresses the array path AND everything under it, so the
-  // edit's per-index candidate has no surviving carrier: without the builder's
-  // own commit-time check the store applies the removal to the untouched base
-  // and the edit is gone, while the writing session's local value shows it. The
-  // edit writes BENEATH the array, so it deliberately does not poison the
-  // intent — the check at build is the only thing that can catch this.
   it("an element edit before a removeByValue survives the removal", async () => {
+    // The ordinary "edit one row and delete another in the same handler" shape.
+    // A remove-by-value suppresses the array path AND everything under it, so
+    // the edit's per-index candidate has no surviving carrier: without the
+    // builder's own commit-time check the store applies the removal to the
+    // untouched base and the edit is gone, while the writing session's local
+    // value shows it. The edit writes BENEATH the array, so it deliberately
+    // does not poison the intent — the check at build is the only thing that
+    // can catch this.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1478,10 +1520,11 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The same composition in the other order. Recording the op first does not
-  // help: the edit still lands beneath the array and leaves the intent alive, so
-  // the suppression discards it just the same.
   it("an element edit after a removeByValue survives the removal", async () => {
+    // The same composition in the other order. Recording the op first does not
+    // help: the edit still lands beneath the array and leaves the intent alive,
+    // so the suppression discards it just the same.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1510,12 +1553,13 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A whole-array set BEFORE the removal: no intent exists yet for the set's
-  // write to poison, so the op is recorded against an array the transaction had
-  // already replaced. Its suppression then discards the set's entire diff and
-  // only the removals reach the store, leaving the durable list untouched apart
-  // from them.
   it("a whole-array set before a removeByValue commits the set array", async () => {
+    // A whole-array set BEFORE the removal: no intent exists yet for the set's
+    // write to poison, so the op is recorded against an array the transaction
+    // had already replaced. Its suppression then discards the set's entire diff
+    // and only the removals reach the store, leaving the durable list untouched
+    // apart from them.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1544,12 +1588,13 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // Creating the array and removing from it in one transaction: there is no base
-  // array for the op to describe at all. The removals alone say nothing about
-  // the elements the transaction created, and the subtree suppression discards
-  // the diff that carries them — so without the fallback the entity is never
-  // written and the durable value stays absent.
   it("a removeByValue on an array the transaction created commits the array", async () => {
+    // Creating the array and removing from it in one transaction: there is no
+    // base array for the op to describe at all. The removals alone say nothing
+    // about the elements the transaction created, and the subtree suppression
+    // discards the diff that carries them — so without the fallback the entity
+    // is never written and the durable value stays absent.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1594,10 +1639,11 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The same reshape reached from a PARENT path — a `set` on the enclosing
-  // object, landing before the op, so neither the write-time poison (nothing
-  // recorded yet) nor a check scoped to the array's own path would see it.
   it("a parent-object set before a nested removeByValue commits the set list", async () => {
+    // The same reshape reached from a PARENT path — a `set` on the enclosing
+    // object, landing before the op, so neither the write-time poison (nothing
+    // recorded yet) nor a check scoped to the array's own path would see it.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1645,14 +1691,15 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The fallback is scoped: a removal that IS the transaction's only change to
-  // the array stays mergeable, so two sessions removing distinct elements
-  // against the same base still merge. Without this the fix would trade one
-  // silent loss for the clobbering the mergeable op exists to prevent. (The
-  // sibling test above removes concurrently from a shared base; this one pins
-  // that a same-transaction change to a DIFFERENT array leaves the removal
-  // mergeable.)
   it("a removeByValue stays mergeable when the other change is to a sibling field", async () => {
+    // The fallback is scoped: a removal that IS the transaction's only change
+    // to the array stays mergeable, so two sessions removing distinct elements
+    // against the same base still merge. Without this the fix would trade one
+    // silent loss for the clobbering the mergeable op exists to prevent. (The
+    // sibling test above removes concurrently from a shared base; this one pins
+    // that a same-transaction change to a DIFFERENT array leaves the removal
+    // mergeable.)
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1723,8 +1770,9 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A zero increment is a programming no-op and is rejected.
   it("increment(0) throws", async () => {
+    // A zero increment is a programming no-op and is rejected.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1739,13 +1787,14 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A stale framed addUnique must not rewrite the array's existing prefix.
-  // Its base-array read is excluded from the commit's conflict set, which is
-  // only safe while the op writes nothing below the tail: anchoring (or
-  // otherwise rewriting) untouched inline prefix elements would let this
-  // stale commit apply positional replacements over a newer concurrent
-  // element edit without any conflict, silently losing that edit.
   it("a stale framed addUnique does not clobber a concurrent element edit", async () => {
+    // A stale framed addUnique must not rewrite the array's existing prefix.
+    // Its base-array read is excluded from the commit's conflict set, which is
+    // only safe while the op writes nothing below the tail: anchoring (or
+    // otherwise rewriting) untouched inline prefix elements would let this
+    // stale commit apply positional replacements over a newer concurrent
+    // element edit without any conflict, silently losing that edit.
+
     const OBJ_CAUSE = "mergeable-addunique-objects";
     const objListSchema = {
       type: "array",
@@ -1837,10 +1886,11 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A non-finite amount is not a meaningful increment for a concurrent-sum
-  // counter (it would set the counter to an absorbing `NaN`/`±Infinity`), so it
-  // is rejected before any local write or mergeable-op record.
   it("increment(non-finite) throws", async () => {
+    // A non-finite amount is not a meaningful increment for a concurrent-sum
+    // counter (it would set the counter to an absorbing `NaN`/`±Infinity`), so
+    // it is rejected before any local write or mergeable-op record.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1923,9 +1973,11 @@ describe("keyed collections via elementById", () => {
     await server?.close();
   });
 
-  // The key resolves to the same entity in a session that never saw the write,
-  // so a second session can read and then remove the element purely by key.
   it("an element addressed by key is readable and removable from another session", async () => {
+    // The key resolves to the same entity in a session that never saw the
+    // write, so a second session can read and then remove the element purely by
+    // key.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1978,9 +2030,10 @@ describe("keyed collections via elementById", () => {
     }
   });
 
-  // Two sessions cast votes under different keys against the same base; both
-  // memberships merge instead of clobbering.
   it("two sessions add distinct keyed elements concurrently — both survive", async () => {
+    // Two sessions cast votes under different keys against the same base; both
+    // memberships merge instead of clobbering.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -2044,9 +2097,11 @@ describe("keyed collections via elementById", () => {
     }
   });
 
-  // Two sessions cast the same vote (same key) concurrently. The key derives to
-  // the same entity, so add-unique dedups by link to a single membership entry.
   it("two sessions add the same keyed element concurrently — dedups to one", async () => {
+    // Two sessions cast the same vote (same key) concurrently. The key derives
+    // to the same entity, so add-unique dedups by link to a single membership
+    // entry.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -2104,9 +2159,11 @@ describe("keyed collections via elementById", () => {
     }
   });
 
-  // Editing a field of one keyed entity touches that entity's document, not the
-  // list, so a concurrent edit to a different field of the same entity merges.
   it("concurrent edits to different fields of one keyed element both land", async () => {
+    // Editing a field of one keyed entity touches that entity's document, not
+    // the list, so a concurrent edit to a different field of the same entity
+    // merges.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -2162,13 +2219,15 @@ describe("keyed collections via elementById", () => {
   });
 });
 
-// Single-session checks of the mergeable methods' guards and minority branches:
-// the transaction/shape preconditions, the absent-array initialization, the
-// cell-reference (keyed-entity) matching path used by addUnique/removeByValue,
-// the no-op early returns, the element-schema `$defs` carry-through, and the
-// in-transaction accumulation of repeated ops on one path. These do not need
-// concurrency, only the op machinery, so they run against a single runtime.
 describe("mergeable op guards and single-session branches", () => {
+  // Single-session checks of the mergeable methods' guards and minority
+  // branches: the transaction/shape preconditions, the absent-array
+  // initialization, the cell-reference (keyed-entity) matching path used by
+  // addUnique/removeByValue, the no-op early returns, the element-schema
+  // `$defs` carry-through, and the in-transaction accumulation of repeated ops
+  // on one path. These do not need concurrency, only the op machinery, so they
+  // run against a single runtime.
+
   let server: MemoryV2Server.Server;
   let storage1: EmulatedStorageManager;
   let rt: Runtime;
@@ -2399,10 +2458,12 @@ describe("mergeable op guards and single-session branches", () => {
     }
   });
 
-  // A cell whose transaction is a TransactionWrapper (the wrapper Cell.sample()
-  // and Cell.sink() install for child cells) routes its mergeable ops through
-  // the wrapper's record* delegations to the inner transaction.
   it("mergeable ops route through a TransactionWrapper", () => {
+    // A cell whose transaction is a TransactionWrapper (the wrapper
+    // Cell.sample() and Cell.sink() install for child cells) routes its
+    // mergeable ops through the wrapper's record* delegations to the inner
+    // transaction.
+
     const inner = rt.edit();
     const wrapper = new TransactionWrapper(inner, { childCellTx: inner });
 
@@ -2424,17 +2485,19 @@ describe("mergeable op guards and single-session branches", () => {
     expect(counter.get()).toBe(3);
   });
 
-  // A whole-value write reaches the intents BENEATH it, not just the one at the
-  // exact path it wrote. Asserted on the recorded intents rather than on a
-  // commit outcome, because the reshaping `set` also records reads of its own
-  // that conflict independently — a commit-level assertion would pass whether or
-  // not the intent survived.
-  //
-  // The sequence is the one length arithmetic alone cannot catch: push, reshape
-  // the enclosing object, push. The two pushes sum to a `count` that spans the
-  // reshape, so the recorded tail lands back on the base length while covering
-  // an element the reshape supplied rather than one an op appended.
   it("an ancestor write poisons the tail intent beneath it", () => {
+    // A whole-value write reaches the intents BENEATH it, not just the one at
+    // the exact path it wrote. Asserted on the recorded intents rather than on
+    // a commit outcome, because the reshaping `set` also records reads of its
+    // own that conflict independently — a commit-level assertion would pass
+    // whether or not the intent survived.
+    //
+    // The sequence is the one length arithmetic alone cannot catch: push,
+    // reshape the enclosing object, push. The two pushes sum to a `count` that
+    // spans the reshape, so the recorded tail lands back on the base length
+    // while covering an element the reshape supplied rather than one an op
+    // appended.
+
     const docSchema = {
       type: "object",
       properties: { rows: { type: "array", items: { type: "string" } } },
@@ -2462,13 +2525,14 @@ describe("mergeable op guards and single-session branches", () => {
     expect(doc.get()).toEqual({ rows: ["m", "n", "o", "r", "q"] });
   });
 
-  // Abandoning at build time must remove the intent from the transaction, not
-  // just skip the wire op — a surviving intent keeps narrowing reads out of the
-  // conflict set for an op that is no longer being sent. Asserted directly on
-  // the intents after `getNativeCommit`, because the reshaping write happens to
-  // leave an unmarked read at the path anyway, so no commit outcome
-  // distinguishes the two.
   it("a build-time abandon removes the intent from the transaction", async () => {
+    // Abandoning at build time must remove the intent from the transaction, not
+    // just skip the wire op — a surviving intent keeps narrowing reads out of
+    // the conflict set for an op that is no longer being sent. Asserted
+    // directly on the intents after `getNativeCommit`, because the reshaping
+    // write happens to leave an unmarked read at the path anyway, so no commit
+    // outcome distinguishes the two.
+
     // Asserting on the built commit rather than on the committed transaction
     // matters: finishing a commit clears the intents anyway, so a post-commit
     // assertion would pass whether or not the build dropped them.
@@ -2500,16 +2564,73 @@ describe("mergeable op guards and single-session branches", () => {
     );
   });
 
-  // Two tail ops where one op's payload contains the other's target: exactly one
-  // intent — the CONTAINED one — is abandoned, and the containing op survives to
-  // carry the combined value. Which of the two is dropped only shows here: both
-  // choices commit the same durable value in the simple case, but abandoning the
-  // outer would forfeit the outer list's merge-friendliness instead of the inner
-  // one's.
-  //
-  // The same assertion pins the guard's lower edge: a nested push landing BEFORE
-  // the outer tail is in no payload, so both intents survive.
+  it("a whole-document transaction emits a set and drops the push's intent", async () => {
+    // `markWholeDocumentWrites` replaces every op with a whole-document set —
+    // the client speculation overlay's seal, whose entries layer their ops over
+    // a confirmed value that moves under them. The append is not sent, so its
+    // intent must not survive to narrow the array read out of the commit's
+    // reads: that read is a real dependency of the value the set carries, and
+    // for a speculative seal it is what the entry's retirement floor is built
+    // from.
+    const tx0 = rt.edit();
+    rt.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["a", "b"]);
+    await tx0.commit({ resolveAt: "verdict" });
+    await rt.storageManager.synced();
+
+    const tx = rt.edit();
+    const cell = rt.getCell<string[]>(space, CAUSE, stringListSchema, tx);
+    cell.push("c");
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])].length)
+      .toBe(1);
+
+    tx.tx.markWholeDocumentWrites!();
+    const native = getDirectTransactionNativeCommit(tx, space);
+    expect(native?.operations.map((op) => op.op)).toEqual(["set"]);
+    expect(
+      (native?.operations[0] as { value?: { value?: string[] } }).value?.value,
+    ).toEqual(["a", "b", "c"]);
+    // The array read the append would have narrowed away is in the sealed
+    // commit's reads, which is the claim the abandonment is FOR — the
+    // intent count alone cannot show it, and the whole-document write is
+    // the value the run computed from that read. Asserted before the
+    // intent count so a regression names the consequence, not the
+    // mechanism.
+    const replica = rt.storageManager.open(space).replica;
+    const sealed = replica.sealNative!(
+      native!,
+      tx.tx,
+      new Promise(() => {}),
+      { speculative: true },
+    );
+    const readIds = [
+      ...sealed.commit.reads.confirmed,
+      ...sealed.commit.reads.pending,
+    ].map((read) => read.id);
+    expect(readIds).toContain(cell.getAsNormalizedFullLink().id);
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])]).toEqual(
+      [],
+    );
+
+    // Poisoned as well as deleted: a later push on the same transaction
+    // records nothing, so the intent cannot come back after the commit
+    // was built without it.
+    cell.push("d");
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])]).toEqual(
+      [],
+    );
+  });
+
   it("nested tail ops abandon only the contained one", async () => {
+    // Two tail ops where one op's payload contains the other's target: exactly
+    // one intent — the CONTAINED one — is abandoned, and the containing op
+    // survives to carry the combined value. Which of the two is dropped only
+    // shows here: both choices commit the same durable value in the simple
+    // case, but abandoning the outer would forfeit the outer list's
+    // merge-friendliness instead of the inner one's.
+    //
+    // The same assertion pins the guard's lower edge: a nested push landing
+    // BEFORE the outer tail is in no payload, so both intents survive.
+
     const nested = {
       type: "array",
       items: { type: "array", items: { type: "string" } },
@@ -2556,12 +2677,14 @@ describe("mergeable op guards and single-session branches", () => {
     }
   });
 
-  // The other direction, and the one that pins the predicate: a write BENEATH an
-  // array (an element edit) must leave that array's intent alone. Asserted on
-  // the intents, and with the push FIRST — the durable value cannot discriminate
-  // here, because a concurrent append is add-wins and lands either way, and the
-  // reverse order records no intent for a wrongly-widened poison to destroy.
   it("a write beneath an array leaves the array's intent intact", () => {
+    // The other direction, and the one that pins the predicate: a write BENEATH
+    // an array (an element edit) must leave that array's intent alone. Asserted
+    // on the intents, and with the push FIRST — the durable value cannot
+    // discriminate here, because a concurrent append is add-wins and lands
+    // either way, and the reverse order records no intent for a wrongly-widened
+    // poison to destroy.
+
     const docSchema = {
       type: "object",
       properties: { rows: { type: "array", items: { type: "string" } } },
@@ -2582,9 +2705,10 @@ describe("mergeable op guards and single-session branches", () => {
     expect(doc.get()).toEqual({ rows: ["A", "b", "p"] });
   });
 
-  // A sibling write must NOT poison a tail intent: only paths at or beneath the
-  // write are covered, so an unrelated field keeps the push mergeable.
   it("a sibling write leaves the tail intent intact", () => {
+    // A sibling write must NOT poison a tail intent: only paths at or beneath
+    // the write are covered, so an unrelated field keeps the push mergeable.
+
     const docSchema = {
       type: "object",
       properties: {
@@ -2607,10 +2731,11 @@ describe("mergeable op guards and single-session branches", () => {
       .toBe(1);
   });
 
-  // An increment that sums to zero is a no-op the op builder drops. Pairing it
-  // with another change on the same entity forces the entity to commit, so the
-  // builder still visits (and drops) the zero increment.
   it("a net-zero increment alongside another change is dropped", async () => {
+    // An increment that sums to zero is a no-op the op builder drops. Pairing
+    // it with another change on the same entity forces the entity to commit, so
+    // the builder still visits (and drops) the zero increment.
+
     const docSchema = {
       type: "object",
       properties: {
@@ -2652,10 +2777,11 @@ describe("mergeable op guards and single-session branches", () => {
     }
   });
 
-  // A recorded append whose path is overwritten by a whole-value set before
-  // commit is dropped: a non-array (or empty) value at the path produces no
-  // tail-relative op, and the whole-value write stands.
   it("an append superseded by a non-array set is dropped", async () => {
+    // A recorded append whose path is overwritten by a whole-value set before
+    // commit is dropped: a non-array (or empty) value at the path produces no
+    // tail-relative op, and the whole-value write stands.
+
     const cause = "append-then-scalar";
     const tx = rt.edit();
     // deno-lint-ignore no-explicit-any
@@ -2780,9 +2906,10 @@ describe("keyed object list (home spaces shape)", () => {
     await server?.close();
   });
 
-  // Two sessions add spaces with distinct names against the same base; both
-  // memberships merge rather than the second clobbering the first.
   it("two sessions add distinct names concurrently — both survive", async () => {
+    // Two sessions add spaces with distinct names against the same base; both
+    // memberships merge rather than the second clobbering the first.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -2842,9 +2969,10 @@ describe("keyed object list (home spaces shape)", () => {
     }
   });
 
-  // Two sessions add the SAME name against the same base; the key derives to the
-  // same entity, so add-unique dedups by link to one membership entry.
   it("two sessions add the same name concurrently — dedups to one", async () => {
+    // Two sessions add the SAME name against the same base; the key derives to
+    // the same entity, so add-unique dedups by link to one membership entry.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -2903,9 +3031,10 @@ describe("keyed object list (home spaces shape)", () => {
     }
   });
 
-  // Two sessions remove different spaces by key concurrently; both removals land
-  // instead of clobbering through a whole-list rewrite.
   it("two sessions remove distinct names concurrently — both land", async () => {
+    // Two sessions remove different spaces by key concurrently; both removals
+    // land instead of clobbering through a whole-list rewrite.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,

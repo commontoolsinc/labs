@@ -1,6 +1,9 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
+    // `data-model` requires `Error.isError()`, which is introduced in
+    // ES2026. As of this writing, TypeScript does not recognize `es2026`,
+    // so we use `ESNext` instead.
+    "target": "ESNext",
     "module": "NodeNext",
     "moduleResolution": "Node16",
     "strict": true,
@@ -15,6 +18,9 @@
       ],
       "@commonfabric/api": [
         "../index.ts"
+      ],
+      "@commonfabric/data-model/api": [
+        "../../data-model/src/api.ts"
       ],
       "@commonfabric/data-model/deep-freeze": [
         "../../data-model/src/deep-freeze.ts"

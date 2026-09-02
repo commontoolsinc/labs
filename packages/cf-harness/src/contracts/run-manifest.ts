@@ -55,8 +55,10 @@ export interface LoomRunManifest {
     | "owner-bound-oauth"
     | "cf-harness-local-store";
   credentialOwner?: HarnessCredentialOwnerRef;
+
   /** Opaque digest identifying the canonical host-owned credential home. */
   harnessHomeIdentity?: string;
+
   workspace?: LoomRunManifestWorkspace;
   promptSlot?: PromptSlotBinding;
   cfc?: LoomRunManifestCfc;

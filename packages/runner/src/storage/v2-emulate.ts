@@ -17,6 +17,7 @@ export const newLoopbackServer = (options?: {
   audience?: string;
   subscriptionRefreshDelayMs?: number | "manual";
   store?: URL;
+
   /** The session registry's detached-session TTL (tests): how long a
    * closed connection's sessions — and their watches, i.e. their DEMAND
    * — linger before pruning. Default 30 s (the server's resume window). */
@@ -45,16 +46,20 @@ export const newLoopbackServer = (options?: {
   });
 
 class EmulatedSessionFactory implements SessionFactory {
+  readonly #getServer: () => MemoryV2Server.Server;
+
   constructor(
-    private readonly getServer: () => MemoryV2Server.Server,
-  ) {}
+    getServer: () => MemoryV2Server.Server,
+  ) {
+    this.#getServer = getServer;
+  }
 
   async create(
     space: MemorySpace,
     signer?: Signer,
     mountOptions: MemoryV2Client.MountOptions = {},
   ) {
-    const transport = MemoryV2Client.loopback(this.getServer());
+    const transport = MemoryV2Client.loopback(this.#getServer());
     const client = await MemoryV2Client.connect({ transport });
     const session = await client.mount(
       space,

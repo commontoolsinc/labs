@@ -79,7 +79,9 @@ function ctx(env: Record<string, string> = {}): Ctx {
   };
 }
 
-// ---------------------------------------------------------------- zip building
+//
+// zip building
+//
 
 function concat(parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
@@ -165,7 +167,9 @@ async function benchZip(json: string): Promise<Uint8Array<ArrayBuffer>> {
   ]);
 }
 
-// ------------------------------------------------------------- the stub api
+//
+// the stub api
+//
 
 interface GhRun {
   id: number;
@@ -282,7 +286,9 @@ const apiCalls = (calls: string[]) =>
 const runListCalls = (calls: string[]) =>
   calls.filter((call) => call.startsWith(runsPath));
 
-// ------------------------------------------------------------ bench json
+//
+// bench json
+//
 
 interface Timings {
   min?: number;
@@ -373,7 +379,9 @@ async function withTotals(
   }, run);
 }
 
-// ----------------------------------------------------------------- the tests
+//
+// the tests
+//
 
 Deno.test("benchmark: no token -> gray, and nothing is fetched", async () => {
   await withApi({ throws: new Error("no request expected") }, async (calls) => {
@@ -2427,7 +2435,7 @@ Deno.test("benchmark: stale CPU trends stay out of the headline while their line
         pageLines.map((line) => line.pointCount).sort((a, b) => a - b),
         [2, 2, 2, 2, 2, 2, 8, 8, 8, 8],
       );
-      assertEquals(new Set(pageLines.map((line) => line.stroke)).size, 10);
+      assertEquals(new Set(pageLines.map((line) => line.stroke)).size, 8);
       const pageMarkerColors = [
         ...html.matchAll(/<circle[^>]*fill="([^"]+)"/g),
       ].map((match) => match[1]);

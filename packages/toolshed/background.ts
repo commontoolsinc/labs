@@ -41,8 +41,10 @@ export function backgroundLogFile(): string | undefined {
 export interface LaunchMode {
   /** This process should spawn the server as a child and wait for it. */
   background: boolean;
+
   /** Where the child should write its logs, when the caller named a path. */
   logFile: string | undefined;
+
   /** The arguments the server itself consumes (the port, and so on). */
   serverArgs: string[];
 }

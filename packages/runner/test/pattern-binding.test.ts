@@ -40,6 +40,8 @@ import { Runtime } from "../src/runtime.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -111,6 +113,7 @@ describe("pattern-binding", () => {
       testCell.setMetaRaw(
         "argument",
         argumentCell.getAsWriteRedirectLink({ base: testCell }),
+        rawMetaWriteAuthorization,
       );
 
       sendValueToBinding(tx, testCell, undefined, {
@@ -601,6 +604,53 @@ describe("pattern-binding", () => {
       });
     });
 
+    it("binds aliases from a caller-owned circular schema", () => {
+      const circularSchema: JSONSchema & {
+        properties: Record<string, JSONSchema>;
+      } = {
+        type: "object",
+        properties: {},
+      };
+      circularSchema.properties.self = circularSchema;
+      const resultCell = runtime.getCell(
+        space,
+        "circular schema result cell",
+        undefined,
+        tx,
+      );
+      const argumentCell = runtime.getCell(
+        space,
+        "circular schema argument cell",
+        undefined,
+        tx,
+      );
+      const argumentLink = {
+        ...argumentCell.getAsNormalizedFullLink(),
+        schema: circularSchema,
+      };
+
+      const result = unwrapOneLevelAndBindToDoc(
+        { self: { $alias: { cell: "argument", path: ["self"] } } },
+        argumentLink,
+        resultCell,
+      );
+
+      const parsed = parseLink(result.self, resultCell)!;
+      expect(Object.isFrozen(circularSchema)).toBe(false);
+      expect(parsed.path).toEqual(["self"]);
+      expect(resolvedSchema(parsed.schema)).toEqual({
+        $ref: "#/$defs/CircularSchema_0",
+        $defs: {
+          CircularSchema_0: {
+            type: "object",
+            properties: {
+              self: { $ref: "#/$defs/CircularSchema_0" },
+            },
+          },
+        },
+      });
+    });
+
     it("serializes returned local pattern cells as aliases", () => {
       const frame = pushFrame({
         runtime,
@@ -721,6 +771,7 @@ describe("pattern-binding", () => {
         { derivedInternalCells: [{ partialCause: "a" }] },
       ) as T;
     };
+
     const alias = () => ({ $alias: { partialCause: "a", path: [] } });
 
     it("returns a binding with nothing to rebind by identity", () => {

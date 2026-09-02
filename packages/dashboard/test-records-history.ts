@@ -17,6 +17,7 @@ import {
   listObjects,
   loadAliasResolver,
   readObject,
+  testIdentityKey,
 } from "@commonfabric/test-support/records";
 import { dashboardCacheFile } from "./history-files.ts";
 
@@ -34,10 +35,12 @@ export const TEST_RECORDS_REFRESH_TAIL_DAYS = 3;
 
 /** One test's aggregate for one day. */
 export interface DayAggregate {
-  /** JSON-array identity key, ["kind","scope","name"]. */
+  /** JSON-array identity key, with an optional fourth variant part. */
   key: string;
+
   /** "yyyy/mm/dd". */
   day: string;
+
   runs: number;
   failures: number;
   skips: number;
@@ -66,10 +69,11 @@ export function isDayAggregate(value: unknown): value is DayAggregate {
   ) {
     return false;
   }
-  // The key is the JSON form of the [kind, scope, name] identity triple.
+  // The key has three required identity parts and an optional variant.
   try {
     const identity = JSON.parse(aggregate.key);
-    return Array.isArray(identity) && identity.length === 3 &&
+    return Array.isArray(identity) &&
+      (identity.length === 3 || identity.length === 4) &&
       identity.every((part) => typeof part === "string" && part.length > 0);
   } catch {
     return false;
@@ -113,7 +117,7 @@ export async function collectDay(
         const test = options.aliases !== undefined
           ? options.aliases.resolve(record.test, day)
           : record.test;
-        const key = JSON.stringify([test.k, test.s, test.n]);
+        const key = testIdentityKey(test);
         let entry = byKey.get(key);
         if (entry === undefined) {
           entry = {
@@ -140,6 +144,7 @@ export async function collectDay(
 
 interface StoredHistory {
   version: 1;
+
   /** Cached day aggregates; the refresh tail is always refetched. */
   days: Record<string, DayAggregate[]>;
 }
@@ -161,10 +166,13 @@ function isStoredHistory(value: unknown): value is StoredHistory {
 /** The per-test series trend.ts fits: times ascending, one point per day. */
 export interface TestSeries {
   key: string;
+
   /** Milliseconds since epoch, one per day with data, ascending. */
   times: number[];
+
   /** Fraction of runs that passed that day. */
   passRates: number[];
+
   /** Mean duration that day, in milliseconds. */
   meanDurationsMs: number[];
 }

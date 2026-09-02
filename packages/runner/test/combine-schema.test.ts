@@ -1,6 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { combineSchema } from "../src/traverse.ts";
+import { combineSchema, combineSchemaForLink } from "../src/traverse.ts";
+import {
+  resetReaderSchemaPrecedenceConfig,
+  setReaderSchemaPrecedenceConfig,
+} from "../src/reader-schema-precedence-config.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
 describe("combineSchema type handling", () => {
@@ -401,16 +405,16 @@ describe("combineSchema array handling", () => {
   });
 });
 
-// combineSchema builds the pseudo-intersection of the schema a doc was
-// entered with and a schema found on a link inside it. For object schemas,
-// keys defined on only ONE side intersect against the other side's
-// additionalProperties — where JSON Schema's "absent additionalProperties"
-// means UNCONSTRAINED, not `false`. The regression pinned here: absent
-// additionalProperties alongside defined properties used to be coerced to
-// `false`, silently blocking the other side's keys exactly as if the
-// author had written an explicitly closed object.
-
 describe("combineSchema additionalProperties handling", () => {
+  // combineSchema builds the pseudo-intersection of the schema a doc was
+  // entered with and a schema found on a link inside it. For object schemas,
+  // keys defined on only ONE side intersect against the other side's
+  // additionalProperties — where JSON Schema's "absent additionalProperties"
+  // means UNCONSTRAINED, not `false`. The regression pinned here: absent
+  // additionalProperties alongside defined properties used to be coerced to
+  // `false`, silently blocking the other side's keys exactly as if the author
+  // had written an explicitly closed object.
+
   const schemaWithOneSidedProperty = {
     type: "object",
     properties: {
@@ -503,4 +507,265 @@ describe("combineSchema additionalProperties handling", () => {
       );
     });
   }
+
+  it("keeps the first side's additionalProperties across a property-less permissive second side", () => {
+    const constrained = {
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+      additionalProperties: { type: "string" },
+    } as const satisfies JSONSchema;
+    const permissive = {
+      type: "object",
+      additionalProperties: true,
+      required: ["extra"],
+    } as const satisfies JSONSchema;
+
+    expect(combineSchema(constrained, permissive)).toEqual({
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name", "extra"],
+      additionalProperties: { type: "string" },
+    });
+  });
+
+  it("drops a property-less permissive second side against a first side without additionalProperties", () => {
+    const constrained = {
+      type: "object",
+      properties: { name: { type: "string" } },
+    } as const satisfies JSONSchema;
+    const permissive = {
+      type: "object",
+      additionalProperties: true,
+    } as const satisfies JSONSchema;
+
+    expect(combineSchema(constrained, permissive)).toEqual(constrained);
+  });
+});
+
+describe("combineSchemaForLink reader precedence", () => {
+  // combineSchemaForLink decides the schema a traversal continues with after
+  // crossing a link. The reader's schema takes precedence: a link routinely
+  // describes more of its target than the reader asked for, and none of that —
+  // extra properties, extra required entries, a different shape — reaches the
+  // combined schema. The link schema is adopted only where the reader is
+  // agnostic: a true or empty reader takes the link schema (keeping its own
+  // asCell wrapper), and a false reader stays false, so a link's false schema
+  // attenuates only readers that brought no shape of their own.
+
+  const readerSchema = {
+    type: "object",
+    properties: { name: { type: "string" } },
+    required: ["name"],
+  } as const satisfies JSONSchema;
+  const linkContactSchema = {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      phoneNumber: { type: "string" },
+    },
+    required: ["name", "phoneNumber"],
+  } as const satisfies JSONSchema;
+
+  it("returns a shaped reader's schema over a link naming and requiring more", () => {
+    expect(combineSchemaForLink(readerSchema, linkContactSchema)).toEqual({
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+    });
+  });
+
+  it("leaves combineSchema's strict union untouched for the same schemas", () => {
+    expect(combineSchema(readerSchema, linkContactSchema)).toEqual({
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        phoneNumber: { type: "string" },
+      },
+      required: ["name", "phoneNumber"],
+    });
+  });
+
+  it("returns the reader's schema even when it admits extra keys", () => {
+    const openReader = {
+      ...readerSchema,
+      additionalProperties: true,
+    } as const satisfies JSONSchema;
+
+    expect(combineSchemaForLink(openReader, linkContactSchema)).toEqual(
+      openReader,
+    );
+  });
+
+  it("returns a bare object reader's schema without adopting the link's shape", () => {
+    expect(combineSchemaForLink({ type: "object" }, linkContactSchema))
+      .toEqual({ type: "object" });
+  });
+
+  it("adopts the link schema for a true reader", () => {
+    expect(combineSchemaForLink(true, linkContactSchema)).toEqual(
+      linkContactSchema,
+    );
+  });
+
+  it("adopts the link schema for an empty reader", () => {
+    expect(combineSchemaForLink({}, linkContactSchema)).toEqual(
+      linkContactSchema,
+    );
+  });
+
+  it("adopts the link schema under a flag-only reader's asCell wrapper", () => {
+    expect(combineSchemaForLink({ asCell: ["cell"] }, linkContactSchema))
+      .toEqual({
+        ...linkContactSchema,
+        asCell: ["cell"],
+      });
+  });
+
+  it("stays false for a false reader", () => {
+    expect(combineSchemaForLink(false, linkContactSchema)).toBe(false);
+    expect(combineSchemaForLink({ not: true }, linkContactSchema)).toEqual({
+      not: true,
+    });
+  });
+
+  it("ignores a false link schema for a reader with its own shape", () => {
+    expect(combineSchemaForLink(readerSchema, false)).toEqual(readerSchema);
+  });
+
+  it("adopts a false link schema for a true reader", () => {
+    expect(combineSchemaForLink(true, false)).toBe(false);
+  });
+
+  //
+  // `ifc` does not ride the combination
+  //
+  // Write policy consumes declared schemas verbatim
+  // (`recordSchemaWritePolicyInput`), so a clause grafted onto the reader's
+  // schema would read as a declaration nobody authored. The read entry point
+  // marks cfc relevance off the link schema directly instead
+  // (`validateAndTransform`'s `schemaHasIfc` gate).
+  //
+
+  it("leaves a discarded link schema's ifc off a shaped reader", () => {
+    const labeledLink = {
+      ...linkContactSchema,
+      ifc: { confidentiality: ["confidential"] },
+    } as const satisfies JSONSchema;
+
+    expect(combineSchemaForLink(readerSchema, labeledLink)).toEqual(
+      readerSchema,
+    );
+  });
+
+  it("keeps an adopted link schema's own ifc for a true reader", () => {
+    const labeledLink = {
+      ...linkContactSchema,
+      ifc: { confidentiality: ["confidential"] },
+    } as const satisfies JSONSchema;
+
+    expect(combineSchemaForLink(true, labeledLink)).toEqual(labeledLink);
+  });
+
+  //
+  // `default` crosses the precedence line
+  //
+  // A value's default is inherited from the last crossed schema that declares
+  // one, the nearest declaration to the data being the aptest.
+  //
+
+  it("inherits the link's default onto a shaped reader", () => {
+    const defaultedLink = {
+      ...linkContactSchema,
+      default: { name: "someone" },
+    } as const satisfies JSONSchema;
+
+    expect(combineSchemaForLink(readerSchema, defaultedLink)).toEqual({
+      ...readerSchema,
+      default: { name: "someone" },
+    });
+  });
+
+  it("prefers the link's default over the reader's own", () => {
+    const defaultedReader = {
+      ...readerSchema,
+      default: { name: "reader" },
+    } as const satisfies JSONSchema;
+    const defaultedLink = {
+      ...linkContactSchema,
+      default: { name: "link" },
+    } as const satisfies JSONSchema;
+
+    expect(combineSchemaForLink(defaultedReader, defaultedLink)).toEqual({
+      ...readerSchema,
+      default: { name: "link" },
+    });
+  });
+
+  it("keeps the reader's default when the link declares none", () => {
+    const defaultedReader = {
+      ...readerSchema,
+      default: { name: "reader" },
+    } as const satisfies JSONSchema;
+
+    expect(combineSchemaForLink(defaultedReader, linkContactSchema)).toEqual(
+      defaultedReader,
+    );
+  });
+
+  it("keeps a default-only reader's default across a defaultless link", () => {
+    expect(
+      combineSchemaForLink({ default: { name: "seed" } }, linkContactSchema),
+    )
+      .toEqual({
+        ...linkContactSchema,
+        default: { name: "seed" },
+      });
+  });
+
+  it("interns the default-carrying adoption so repeated crossings share one schema", () => {
+    const reader = { default: { name: "seed" } } as const satisfies JSONSchema;
+    const first = combineSchemaForLink(reader, linkContactSchema);
+    expect(combineSchemaForLink(reader, linkContactSchema)).toBe(first);
+  });
+
+  it("takes the later link's default across two hops", () => {
+    const firstLink = {
+      ...linkContactSchema,
+      default: { name: "first" },
+    } as const satisfies JSONSchema;
+    const secondLink = {
+      ...linkContactSchema,
+      default: { name: "second" },
+    } as const satisfies JSONSchema;
+
+    const afterFirst = combineSchemaForLink(readerSchema, firstLink);
+    expect(combineSchemaForLink(afterFirst, secondLink)).toEqual({
+      ...readerSchema,
+      default: { name: "second" },
+    });
+    expect(combineSchemaForLink(afterFirst, linkContactSchema)).toEqual({
+      ...readerSchema,
+      default: { name: "first" },
+    });
+  });
+
+  //
+  // The rollback
+  //
+  // Reader precedence is behind the `readerSchemaPrecedence` experimental flag
+  // (docs/development/EXPERIMENTAL_OPTIONS.md). With the flag off,
+  // combineSchemaForLink must agree with combineSchema exactly.
+  //
+
+  it("restores the strict pseudo-intersection while the rollback is set", () => {
+    setReaderSchemaPrecedenceConfig(false);
+    try {
+      expect(combineSchemaForLink(readerSchema, linkContactSchema)).toEqual(
+        combineSchema(readerSchema, linkContactSchema),
+      );
+    } finally {
+      resetReaderSchemaPrecedenceConfig();
+    }
+  });
 });

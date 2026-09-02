@@ -5,6 +5,7 @@
  * argument list, and the invocation that attaches the Browser Access lease
  * and keeps its endpoint out of everything the model reads.
  */
+
 import type { JSONSchema } from "@commonfabric/api";
 
 import {
@@ -69,8 +70,10 @@ export interface BrowserToolInput {
 export interface BrowserToolSuccessOutput {
   outputId: string;
   status: "ok";
+
   /** What the action printed, truncated to a bounded length. */
   output: string;
+
   /** Diagnostic text the action printed alongside a success, when any. */
   detail?: string;
 }
@@ -527,16 +530,24 @@ type BrowserHandleResolution =
   | { input?: undefined; error: string };
 
 /**
- * `input` with each bound handle replaced by a placeholder standing in for the
- * value it will resolve to, so the action's shape can be checked before
- * anything is read. The placeholders are only ever seen by `planBrowserAction`
- * — the real values are substituted after resolution — and the URL form is
- * well-formed so an `open` passes its scheme check on shape rather than on
- * the destination, which is validated separately once it is known.
+ * Stands in for a bound handle's value while the action's shape is checked.
+ * Only ever seen by `planBrowserAction` — the real value is substituted after
+ * resolution.
  */
 const HANDLE_SHAPE_PLACEHOLDER = "cf-harness-handle-placeholder";
+
+/**
+ * The same, for a handle in URL position. Well-formed, so an `open` passes its
+ * scheme check on shape rather than on the destination, which is validated
+ * separately once it is known.
+ */
 const HANDLE_SHAPE_PLACEHOLDER_URL = "https://handle.placeholder.invalid/";
 
+/**
+ * `input` with each bound handle replaced by a placeholder standing in for the
+ * value it will resolve to, so the action's shape can be checked before
+ * anything is read.
+ */
 const withHandlePlaceholders = (input: BrowserToolInput): BrowserToolInput => ({
   ...input,
   ...(input.valueHandle !== undefined

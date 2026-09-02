@@ -40,6 +40,7 @@ decision is reversed or superseded).
 ### Data, storage, and execution
 
 - [JSON Schema](json_schema.md)
+- [Link-schema precedence](link-schema-precedence.md)
 - [Content-addressed schemas](content-addressed-schemas.md)
 - [Sigil data model](data-model/sigil.md)
 - [Sparse-array preservation](sparse-array-preservation.md)
@@ -54,6 +55,7 @@ decision is reversed or superseded).
 - [Verifiable execution](verifiable-execution/README.md)
 - [Webhook ingress](webhook-ingress/README.md)
 - [Test-run records](test-records.md)
+- [Choosing which tests a change runs](test-selection.md)
 
 ### Contextual flow control and security
 

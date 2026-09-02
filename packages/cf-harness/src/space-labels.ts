@@ -1,0 +1,571 @@
+/**
+ * Reading a space's per-cell CFC labels, offline and read-only.
+ *
+ * The labels a run's cells carry live in the space's own durable store, not in
+ * the run's artifact tree, so a reader working from artifacts alone sees a
+ * cell with no label on it however loudly the run was enforcing. This module
+ * opens the space SQLite the server already wrote — the same read-only lens
+ * `cf inspect` uses — and answers "what is this cell labelled" for the cells a
+ * run held a reference to.
+ *
+ * Nothing here writes: the database is opened read-only, and a failure is
+ * returned as an unavailable snapshot rather than thrown, because a run whose
+ * space cannot be read is still a run to record.
+ */
+
+import {
+  discoverSpaceDbs,
+  linksWithPaths,
+  type LinkWalkBounds,
+  openSpace,
+  reconstructOutcome,
+  resolveSpace,
+  type SpaceDb,
+} from "@commonfabric/state-inspector";
+import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
+import {
+  HARNESS_CELL_LABELS_TYPE,
+  type HarnessCellLabelEntry,
+  type HarnessCellLabelRecord,
+  type HarnessCellLabels,
+  type HarnessCellLabelTruncationReason,
+  type HarnessCellLabelUnreadPath,
+  type HarnessCellLabelUnreadReason,
+  type HarnessCfcAtom,
+} from "./contracts/cell-labels.ts";
+
+/** The atom type whose identity resolves a derived value to its producer. */
+const TRANSFORMED_BY = "https://commonfabric.org/cfc/atom/TransformedBy";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * One stored atom, normalized. A string atom is its own type and its own
+ * name; an object atom names its type by URL and keeps every other field it
+ * carried, so an atom this module has no special reading for still arrives
+ * whole at whoever shows it.
+ *
+ * A disjunctive confidentiality clause — the one record shape whose sole key
+ * is `anyOf` — is one requirement satisfiable several ways, so it arrives as
+ * one atom carrying its alternatives rather than as several atoms, which
+ * would read as several requirements.
+ */
+const atomOf = (value: unknown): HarnessCfcAtom | undefined => {
+  if (typeof value === "string") {
+    return { type: value, name: value };
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const keys = Object.keys(value);
+  if (keys.length === 1 && keys[0] === "anyOf" && Array.isArray(value.anyOf)) {
+    const alternatives = atomsOf(value.anyOf);
+    return {
+      type: "anyOf",
+      name: alternatives.map((atom) => atom.name).join(" or ") || "anyOf",
+      anyOf: alternatives,
+    };
+  }
+  if (typeof value.type !== "string") {
+    return undefined;
+  }
+  const { type, ...fields } = value;
+  const name = type.split("/").pop() ?? type;
+  return Object.keys(fields).length === 0
+    ? { type, name }
+    : { type, name, fields };
+};
+
+const atomsOf = (value: unknown): HarnessCfcAtom[] =>
+  Array.isArray(value)
+    ? value.flatMap((clause) => {
+      const atom = atomOf(clause);
+      return atom === undefined ? [] : [atom];
+    })
+    : [];
+
+/** The labels one stored document holds, and the schema they were cut to. */
+interface StoredCellLabels {
+  entries: HarnessCellLabelEntry[];
+  schemaHash?: string;
+
+  /**
+   * Set when nothing was looked for, naming why. An entry list is otherwise
+   * a positive finding about the opened store, so a lookup that never
+   * reached it says so rather than reading as a document with no label.
+   */
+  unread?: HarnessCellLabelUnreadReason;
+
+  /**
+   * The paths of this document nothing was looked for at, where the document
+   * itself was read: one per link the walk could not follow, and one per path
+   * it sits too deep to descend to. The same distinction as `unread`, held
+   * per path rather than per document.
+   */
+  unreadPaths?: readonly HarnessCellLabelUnreadPath[];
+
+  /**
+   * Set where the walk over this document stopped before the end of it and
+   * cannot say where, naming why. The paths it never reached were never
+   * enumerated, so this states of the document as a whole what an unread path
+   * states of one path: a path carrying no entry may still be one the space
+   * labels.
+   */
+  truncation?: HarnessCellLabelTruncationReason;
+}
+
+/**
+ * The labelled paths of one stored document. The document's `cfc` path holds
+ * a `labelMap` whose entries each name a path and the label sitting at it; a
+ * document with no `cfc` path has no labels, which is a finding rather than a
+ * failure. Several entries may name one path, differing in what produced them
+ * and what they observed, and all of them are kept: the effective label at a
+ * path is the join of its components, so dropping one changes the answer.
+ */
+const labelsOf = (
+  document: Record<string, unknown> | undefined,
+): StoredCellLabels => {
+  const cfc = document?.cfc;
+  if (!isRecord(cfc)) {
+    return { entries: [] };
+  }
+  const labelMap = cfc.labelMap;
+  const stored = isRecord(labelMap) && Array.isArray(labelMap.entries)
+    ? labelMap.entries
+    : [];
+  const entries: HarnessCellLabelEntry[] = [];
+  for (const raw of stored) {
+    if (!isRecord(raw)) {
+      continue;
+    }
+    const label = isRecord(raw.label) ? raw.label : {};
+    const integrity = atomsOf(label.integrity);
+    const transformedBy = integrity.find((atom) =>
+      atom.type === TRANSFORMED_BY
+    );
+    entries.push({
+      path: Array.isArray(raw.path)
+        ? raw.path.filter((segment): segment is string =>
+          typeof segment === "string"
+        )
+        : [],
+      confidentiality: atomsOf(label.confidentiality),
+      integrity,
+      ...(typeof raw.origin === "string" ? { origin: raw.origin } : {}),
+      ...(typeof raw.observes === "string" ? { observes: raw.observes } : {}),
+      ...(transformedBy !== undefined ? { transformedBy } : {}),
+    });
+  }
+  return {
+    entries,
+    ...(typeof cfc.schemaHash === "string"
+      ? { schemaHash: cfc.schemaHash }
+      : {}),
+  };
+};
+
+/** The document and scope a reference names, or `undefined` for a non-link. */
+export interface CellAddress {
+  /** The entity as the store ids it (`of:fid1:…`). */
+  id: string;
+
+  /**
+   * The space the reference named, when it named one. An entity id is only
+   * unique within its space, so a reference that carries a space addresses a
+   * document in that space and nowhere else; one that carries none addresses
+   * the store it was read out of.
+   */
+  space?: string;
+
+  /**
+   * The scope kind the reference names, `space` unless it says otherwise. A
+   * labelMap is written at the same scope as the document it labels, so a
+   * per-user override's labels are not in the space scope.
+   *
+   * A reference names the kind and not the principal, though, while the store
+   * partitions by principal — `user:<did>`, not `user`. So a scoped reference
+   * addresses no row on its own, and the read falls back to the base scope,
+   * whose labels every scope inherits. What that cannot report is a label an
+   * override introduced and the base scope does not carry.
+   */
+  scope: string;
+}
+
+/**
+ * The cell a reference addresses. The harness holds an LLM-friendly link
+ * (`/of:fid1:…/path`, or `/@did:key:…/of:fid1:…` across spaces); labels are
+ * stored per document, so the document is what a lookup keys on and a path
+ * inside one resolves to the document that holds it.
+ */
+export const cellAddressOfRef = (ref: string): CellAddress | undefined => {
+  const trimmed = ref.trim();
+  try {
+    const link = parseLLMFriendlyLink(
+      trimmed.startsWith("/") ? trimmed : `/${trimmed}`,
+    );
+    return link.id === undefined ? undefined : {
+      id: link.id,
+      ...(link.space ? { space: link.space } : {}),
+      scope: link.scope ?? "space",
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+/** A space DID, as a store file is named after one and a reference spells one. */
+const SPACE_DID = /^did:[a-z0-9]+:[A-Za-z0-9._%-]+$/;
+
+/**
+ * The DID of the space a database file holds, from the file's own name: a
+ * space store is named for its space, which is how `discoverSpaceDbs` in
+ * `@commonfabric/state-inspector` reads a DID off one. A file named anything
+ * else — a fixture, a copy taken by hand — proves no DID, and answering
+ * `undefined` is what keeps a cross-space reference from being read against
+ * it.
+ */
+const spaceDidOfDbPath = (dbPath: string): string | undefined => {
+  const name = (dbPath.split("/").pop() ?? dbPath).replace(/\.sqlite$/, "");
+  return SPACE_DID.test(name) ? name : undefined;
+};
+
+/**
+ * Why an address is one the opened store cannot answer, or `undefined` where
+ * it can. A reference naming no space names the store it came from, and is
+ * read. A reference naming a space is read only where the opened store's own
+ * DID is known and is that space: an entity id names a document within its
+ * space, so reading a foreign id here would answer with whatever local
+ * document shares the id and graft its labels onto the foreign cell. An
+ * unknown DID proves nothing, so it fails closed — and says which of the two
+ * it was, because a store that cannot name itself is a fact about this host
+ * rather than about the reference.
+ */
+const unreadReasonOf = (
+  space: string | undefined | null,
+  did: string | undefined,
+): HarnessCellLabelUnreadReason | undefined => {
+  if (space === undefined || space === null) {
+    return undefined;
+  }
+  if (did === undefined) {
+    return "space-unproven";
+  }
+  return space === did ? undefined : "cross-space";
+};
+
+/** One cell a document links to, and the path inside the document it sat at. */
+interface LinkedCell {
+  path: readonly string[];
+  id: string;
+}
+
+// How far into one document's value this reader walks for links. Both bounds
+// sit far above the shape of any document a pattern writes, because this
+// reader buys completeness with work rather than the other way round;
+// `LinkWalkBounds` covers why a node count is needed alongside a depth this
+// large. Where a bound does stop the walk, what it stopped short of is
+// recorded — as an unread path where the walk can name one, and as a
+// truncation of the whole cell where it cannot — so a link never looked at
+// never reads as a cell the space says nothing about.
+const LINK_WALK: LinkWalkBounds = {
+  maxDepth: 64,
+  maxNodes: 100_000,
+};
+
+/**
+ * The cells one document links to, each at the path inside the document it
+ * sits at, the paths whose links were not followed, and whether the walk ran
+ * out before the end of the value. A pattern's results are their own cells
+ * rather than paths inside the piece that names them, so following these one
+ * hop is what puts a derived label where a reader looks for it.
+ *
+ * The walk descends through the objects and arrays of the value — an array
+ * index is a path segment like any other — and stops at each link it meets:
+ * the read is one hop wide, so a linked document's own links are not the
+ * business of this document's labels.
+ *
+ * A link this store cannot answer for is returned as an unread path rather
+ * than dropped, and so is a path the walk sat too shallow to reach. Dropped,
+ * either would leave its path holding no entry, which is how a path the space
+ * holds no label for reads — so the cell nobody looked at and the cell the
+ * space says nothing about would render alike.
+ *
+ * A walk that exhausted its node budget can name no path, because it stopped
+ * before enumerating what was left, so it says so of the whole document
+ * instead. That is the weaker statement, and it is deliberately weaker: the
+ * paths it missed are not knowledge this reader has.
+ */
+const linkedCellsOf = (
+  document: Record<string, unknown> | undefined,
+  space: string | undefined,
+  bounds: LinkWalkBounds,
+): {
+  linked: LinkedCell[];
+  unreadPaths: HarnessCellLabelUnreadPath[];
+  truncation?: HarnessCellLabelTruncationReason;
+} => {
+  const linked: LinkedCell[] = [];
+  const unreadPaths: HarnessCellLabelUnreadPath[] = [];
+  const walk = linksWithPaths(document?.value, bounds);
+  for (const { link, at } of walk.links) {
+    if (link.id === undefined) {
+      continue;
+    }
+    const reason = unreadReasonOf(link.space, space);
+    if (reason === undefined) {
+      linked.push({ path: at, id: link.id });
+    } else {
+      unreadPaths.push({ path: at, reason });
+    }
+  }
+  for (const at of walk.tooDeep) {
+    unreadPaths.push({ path: at, reason: "below-read-depth" });
+  }
+  return {
+    linked,
+    unreadPaths,
+    ...(walk.budgetExhausted
+      ? { truncation: "node-budget-exhausted" as const }
+      : {}),
+  };
+};
+
+/** A space DB opened for reading labels, and the space it was resolved from. */
+export interface SpaceLabelReader {
+  readonly dbPath: string;
+
+  /**
+   * The DID of the space the opened file holds, when the file proves one.
+   * Nothing but this establishes which space an id is being looked up in, so
+   * a reader without it can answer for no reference that names a space.
+   */
+  readonly did?: string;
+
+  /**
+   * The labels stored for one cell, and for the cells it links to one hop
+   * out. A linked cell's entries arrive under the path the link sat at,
+   * however deep inside the value that was, and say which cell they were read
+   * from, so the two are never confused.
+   *
+   * An entity that holds no document — never written, deleted, or
+   * undecodable — reads as no labels, the same as one whose document carries
+   * no `cfc` path: neither is a label this reader can report, and one corrupt
+   * entity does not end the walk.
+   *
+   * An address in another space is not looked up at all: the answer comes
+   * back `unread`, which is a different fact from a document with no labels.
+   * A link into another space is the same fact one level down, and comes
+   * back as an `unreadPaths` entry at the path that held it — as does a path
+   * lying deeper in the value than the walk descends.
+   */
+  read(address: CellAddress): StoredCellLabels & { linked: LinkedCell[] };
+
+  close(): void;
+}
+
+/** What an opened reader may be told, beyond which space to open. */
+export interface SpaceLabelReaderOptions {
+  /** An explicit database file, for a host whose store is not discoverable. */
+  dbPath?: string;
+
+  /**
+   * How far into each document's value the link walk reaches. {@link
+   * LINK_WALK} is what a run records under, and sits far above the shape of
+   * any document a pattern writes; a caller reading a store whose shape it
+   * knows may trade that reach for work. Either way what a bound stopped
+   * short of is reported rather than dropped, so a narrower reach costs
+   * knowledge and never truthfulness.
+   */
+  linkWalk?: LinkWalkBounds;
+}
+
+/**
+ * Opens the space named by a run's fabric session configuration — a space
+ * name, a DID, a DID prefix, or a path to the file itself. Throws when no
+ * database on this host matches, which is the caller's cue to record an
+ * unavailable snapshot rather than a bare one.
+ */
+export const openSpaceLabelReader = async (
+  space: string,
+  options: SpaceLabelReaderOptions = {},
+): Promise<SpaceLabelReader> => {
+  const discovered = options.dbPath === undefined
+    ? discoverSpaceDbs()
+    : undefined;
+  const dbPath = options.dbPath ?? await resolveSpace(space, discovered);
+  const opened: SpaceDb = openSpace(dbPath);
+  const did = spaceDidOfDbPath(dbPath);
+  const bounds = options.linkWalk ?? LINK_WALK;
+  return {
+    dbPath,
+    ...(did !== undefined ? { did } : {}),
+    read: (address) => {
+      const unread = unreadReasonOf(address.space, did);
+      if (unread !== undefined) {
+        return { entries: [], linked: [], unread };
+      }
+      // The named scope, then the base scope it inherits from: a reference
+      // carries a scope kind rather than a principal, so a scoped one
+      // addresses no stored row and would otherwise read as unlabelled.
+      const outcome = [address.scope, "space"]
+        .filter((scope, index, scopes) => scopes.indexOf(scope) === index)
+        .map((scope) => reconstructOutcome(opened, { id: address.id, scope }))
+        .find((candidate) => candidate.status === "present");
+      if (outcome === undefined || outcome.status !== "present") {
+        return { entries: [], linked: [] };
+      }
+      const own = labelsOf(outcome.document);
+      const { linked, unreadPaths, truncation } = linkedCellsOf(
+        outcome.document,
+        did,
+        bounds,
+      );
+      if (truncation !== undefined) {
+        // Said out loud as well as recorded. The budget is what makes a
+        // restored graph with a cycle in it finite, so a document that
+        // reaches it is the shape the budget exists against rather than a
+        // large honest value, and the labels of every cell beneath it are
+        // now unknown.
+        console.warn(
+          `cf-harness read only part of "${address.id}" in ${dbPath}: the ` +
+            `value walk stopped after ${bounds.maxNodes} nodes, so the ` +
+            `labels of the cells it links to below that point are unknown ` +
+            `rather than absent. A value this large is usually a cycle.`,
+        );
+      }
+      const entries = [...own.entries];
+      for (const { path, id } of linked) {
+        const target = reconstructOutcome(opened, { id, scope: "space" });
+        if (target.status !== "present") {
+          continue;
+        }
+        for (const entry of labelsOf(target.document).entries) {
+          entries.push({
+            ...entry,
+            path: [...path, ...entry.path],
+            source: id,
+          });
+        }
+      }
+      return {
+        ...own,
+        entries,
+        linked,
+        ...(unreadPaths.length > 0 ? { unreadPaths } : {}),
+        ...(truncation !== undefined ? { truncation } : {}),
+      };
+    },
+    close: () => opened.close(),
+  };
+};
+
+/** What a snapshot is taken over: the cells a run held a reference to. */
+export interface SpaceLabelSnapshotRequest {
+  /** The space as the run was configured with it. */
+  space: string;
+
+  /** An explicit database file, for a host whose store is not discoverable. */
+  dbPath?: string;
+
+  /** How far into each cell's value the read walks; see {@link LINK_WALK}. */
+  linkWalk?: LinkWalkBounds;
+
+  /** The references the run held, in the order it minted them. */
+  refs: readonly string[];
+
+  generatedAt: string;
+}
+
+/**
+ * The label snapshot for one run: every reference it held, resolved to the
+ * document it names and read against the space.
+ *
+ * A reference that names no document is dropped rather than recorded empty —
+ * it addresses nothing this reader can ask about, and an empty record would
+ * read as a cell the space holds no label for. A reference into another
+ * space does address a cell, so it is recorded and marked unread instead of
+ * dropped: the run held it, and a reader that saw it vanish would take the
+ * snapshot to cover every cell the run touched. A link the walk could not
+ * follow is the same, held as an unread path at the path it sat at, as is a
+ * path it sat too shallow to reach. A walk that ran out of nodes names no
+ * path — it stopped before enumerating what it had left — so it marks the
+ * whole cell truncated instead. Every other failure lands on the snapshot as
+ * a whole, so a reader can tell "no labels" from "not read".
+ */
+export const readSpaceCellLabels = async (
+  request: SpaceLabelSnapshotRequest,
+): Promise<HarnessCellLabels> => {
+  const base = {
+    type: HARNESS_CELL_LABELS_TYPE,
+    version: 1,
+    generatedAt: request.generatedAt,
+  } as const;
+  let reader: SpaceLabelReader;
+  try {
+    reader = await openSpaceLabelReader(request.space, {
+      ...(request.dbPath !== undefined ? { dbPath: request.dbPath } : {}),
+      ...(request.linkWalk !== undefined ? { linkWalk: request.linkWalk } : {}),
+    });
+  } catch (error) {
+    return {
+      ...base,
+      status: "unavailable",
+      unavailableReason: "space-not-found",
+      unavailableDetail: error instanceof Error ? error.message : String(error),
+      space: { configured: request.space },
+      cells: [],
+    };
+  }
+  const space = {
+    configured: request.space,
+    ...(reader.did !== undefined ? { did: reader.did } : {}),
+    dbPath: reader.dbPath,
+  };
+  try {
+    const cells: HarnessCellLabelRecord[] = [];
+    const seen = new Set<string>();
+    for (const ref of request.refs) {
+      const address = cellAddressOfRef(ref);
+      if (address === undefined) {
+        continue;
+      }
+      // Keyed by the space as well as the entity: one id can name a cell in
+      // the opened space and a cell in another, and they are two cells.
+      const key = `${address.space ?? ""}\x00${address.scope}\x00${address.id}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      const read = reader.read(address);
+      cells.push({
+        entityId: address.id,
+        ref,
+        ...(address.space !== undefined ? { space: address.space } : {}),
+        ...(read.schemaHash !== undefined
+          ? { schemaHash: read.schemaHash }
+          : {}),
+        ...(read.unread !== undefined ? { unreadReason: read.unread } : {}),
+        ...(read.unreadPaths !== undefined
+          ? { unreadPaths: read.unreadPaths }
+          : {}),
+        ...(read.truncation !== undefined
+          ? { truncationReason: read.truncation }
+          : {}),
+        entries: read.entries,
+      });
+    }
+    return { ...base, status: "read", space, cells };
+  } catch (error) {
+    return {
+      ...base,
+      status: "unavailable",
+      unavailableReason: "read-failed",
+      unavailableDetail: error instanceof Error ? error.message : String(error),
+      space,
+      cells: [],
+    };
+  } finally {
+    reader.close();
+  }
+};

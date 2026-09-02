@@ -41,25 +41,12 @@ import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { readWatermarkSeq, waitForSettled } from "../src/executor/watermark.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("no-op wave space");
 const space = spaceSigner.did() as MemorySpace;
 const serviceSigner = await Identity.fromPassphrase("no-op wave service");
 const aliceSigner = await Identity.fromPassphrase("no-op wave alice");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 15_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 describe("all-no-op wave (the land-off tx-boundary pin)", () => {
   let server: MemoryV2Server.Server;
@@ -82,7 +69,6 @@ describe("all-no-op wave (the land-off tx-boundary pin)", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         await onServingRuntime?.(runtime);

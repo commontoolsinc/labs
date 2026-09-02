@@ -399,6 +399,7 @@ Deno.test("a merged PR's unreadable acceptance leaves the rest of it standing", 
   // A description that merged before the acceptance form changed cannot be
   // rewritten to suit this parser, so the marker it carries is passed over and
   // the reset marker beside it is still read.
+
   const warnings: string[] = [];
   const overrides = parseMergedBaselineOverrides(
     {
@@ -419,6 +420,7 @@ Deno.test("merged PR legacy coverage-debt acceptance is honored", () => {
   // A baseline PR merged before the marker rename accepted debt with
   // NEW_PERF_BASELINE; its acceptance must still register so it truncates the
   // baseline timeline.
+
   const overrides = parseMergedBaselineOverrides({
     number: 125,
     body:
@@ -508,7 +510,7 @@ Deno.test("writeCoverageResolved omits groups the PR did not change", async () =
   ];
   // No changed files map to a coverage group, so there is no per-group summary.
   const payload = await payloadFrom(() =>
-    writeCoverageResolved(4211, rows, [{ filename: "README.md" }])
+    writeCoverageResolved(4211, rows, [{ filename: "README.md" }], "")
   );
 
   assertEquals(payload?.state, "resolved");
@@ -524,7 +526,7 @@ Deno.test("writeCoverageResolved flags a changed group whose debt was overridden
     coverageRow("coverage-debt: tasks uncovered lines", 15, 12, "ovrd"),
   ];
   const payload = await payloadFrom(() =>
-    writeCoverageResolved(4211, rows, [{ filename: "tasks/foo.ts" }])
+    writeCoverageResolved(4211, rows, [{ filename: "tasks/foo.ts" }], "")
   );
 
   assertEquals(payload?.state, "resolved");
@@ -534,6 +536,89 @@ Deno.test("writeCoverageResolved flags a changed group whose debt was overridden
   assertEquals(payload?.groups, [
     { group: "tasks", baseline: 12, current: 15 },
   ]);
+  // The changed file carries no patch, so no line can be attributed to it.
+  assertEquals(payload?.files, []);
+});
+
+Deno.test("writeCoverageResolved names the files an accepted debt stands in for", async () => {
+  const rows = [
+    coverageRow("coverage-debt: workspace uncovered lines", 2948, 2953, "excl"),
+    coverageRow("coverage-debt: tasks uncovered lines", 15, 12, "ovrd"),
+  ];
+  // Lines 10 and 11 are uncovered and added; 12 is added but covered, and 20 is
+  // uncovered but not added. Only the overlap is the PR's new uncovered debt.
+  const lcov = [
+    `SF:${path.join(Deno.cwd(), "tasks/foo.ts")}`,
+    "DA:10,0",
+    "DA:11,0",
+    "DA:12,4",
+    "DA:20,0",
+    "end_of_record",
+  ].join("\n");
+  const payload = await payloadFrom(() =>
+    writeCoverageResolved(4211, rows, [{
+      filename: "tasks/foo.ts",
+      patch: ["@@ -9,0 +10,3 @@", "+one", "+two", "+three"].join("\n"),
+    }], lcov)
+  );
+
+  assertEquals(payload?.overridden, true);
+  assertEquals(payload?.files, [
+    { relativePath: "tasks/foo.ts", group: "tasks", uncoveredCount: 2 },
+  ]);
+});
+
+Deno.test("writeCoverageResolved preserves an accepted unchanged-file attribution", async () => {
+  await withFlakyLineCheckout(async ({ rootDir, lcov, baselineLcov }) => {
+    const rows: Row[] = [{ ...unattributedFailure(), status: "ovrd" }];
+    const payload = await payloadFrom(() =>
+      writeCoverageResolved(
+        4211,
+        rows,
+        // The PR changed this coverage group, but not the file whose coverage
+        // moved between otherwise comparable runs.
+        [{ filename: "packages/example/src/changed.ts" }],
+        lcov,
+        {
+          rootDir,
+          readBaselineLcov: (runId) => {
+            assertEquals(runId, 900);
+            return Promise.resolve(baselineLcov);
+          },
+        },
+      )
+    );
+
+    assertEquals(payload?.overridden, true);
+    // The resolved payload replaces the detailed failing comment, so it must
+    // carry the unchanged-file diagnosis forward rather than erase it.
+    assertEquals(payload?.files, [{
+      relativePath: "packages/example/src/racy.ts",
+      group: "packages/example",
+      uncoveredCount: 1,
+    }]);
+  });
+});
+
+Deno.test("writeCoverageResolved leaves the file list empty when nothing was overridden", async () => {
+  const rows = [
+    coverageRow("coverage-debt: tasks uncovered lines", 4, 9),
+  ];
+  const lcov = [
+    `SF:${path.join(Deno.cwd(), "tasks/foo.ts")}`,
+    "DA:10,0",
+    "end_of_record",
+  ].join("\n");
+  const payload = await payloadFrom(() =>
+    writeCoverageResolved(4211, rows, [{
+      filename: "tasks/foo.ts",
+      patch: ["@@ -9,0 +10,1 @@", "+one"].join("\n"),
+    }], lcov)
+  );
+
+  // The group passed on its own, so there is no acceptance to account for.
+  assertEquals(payload?.overridden, false);
+  assertEquals(payload?.files, []);
 });
 
 Deno.test("writeCoverageResolved sums gated groups and ignores workspace and overrides", async () => {
@@ -545,7 +630,7 @@ Deno.test("writeCoverageResolved sums gated groups and ignores workspace and ove
     coverageRow("coverage-debt: identity uncovered lines", 50, 60, "ovrd"),
   ];
   const payload = await payloadFrom(() =>
-    writeCoverageResolved(4211, rows, [])
+    writeCoverageResolved(4211, rows, [], "")
   );
 
   assertEquals(payload?.state, "resolved");
@@ -561,7 +646,7 @@ Deno.test("writeCoverageResolved reports zero improvement when gated groups sit 
     coverageRow("coverage-debt: tasks uncovered lines", 4, 4),
   ];
   const payload = await payloadFrom(() =>
-    writeCoverageResolved(4211, rows, [])
+    writeCoverageResolved(4211, rows, [], "")
   );
 
   assertEquals(payload?.state, "resolved");
@@ -572,7 +657,7 @@ Deno.test("writeCoverageResolved reports zero improvement when gated groups sit 
 Deno.test("writeCoverageResolved reports zero improvement without a workspace baseline", async () => {
   const rows = [coverageRow("coverage-debt: workspace uncovered lines", 100)];
   const payload = await payloadFrom(() =>
-    writeCoverageResolved(4211, rows, [])
+    writeCoverageResolved(4211, rows, [], "")
   );
 
   assertEquals(payload?.state, "resolved");
@@ -1407,9 +1492,13 @@ async function walk(
   return { lines, read };
 }
 
-/** Three `main` runs, newest first, along the ancestry `RANKS` describes. */
+/** The newest of three `main` runs along the ancestry `RANKS` describes. */
 const RUN_AT_BASE = makeRun(3, SHA_C, "2026-08-04T10:40:00Z");
+
+/** The one before it. */
 const RUN_ONE_BACK = makeRun(2, SHA_B, "2026-08-04T10:20:00Z");
+
+/** The one before that. */
 const RUN_TWO_BACK = makeRun(1, SHA_A, "2026-08-04T10:00:00Z");
 
 Deno.test("walkBaselineRuns prefers the base-branch commit's own run", async () => {
@@ -1427,6 +1516,7 @@ Deno.test("walkBaselineRuns prefers the base-branch commit's own run", async () 
 Deno.test("walkBaselineRuns falls back to the nearest ancestor with a run", async () => {
   // The base-branch commit's run uploaded no baseline artifact, so its parent
   // stands in rather than the gate giving up.
+
   const walked = await walk([
     [RUN_AT_BASE, reading(RUN_AT_BASE, {})],
     [RUN_ONE_BACK, reading(RUN_ONE_BACK, { [RUNNER_METRIC]: 5746 })],
@@ -1440,6 +1530,7 @@ Deno.test("walkBaselineRuns falls back to the nearest ancestor with a run", asyn
 Deno.test("walkBaselineRuns ranks the ancestry rather than trusting run order", async () => {
   // The nearer ancestor's run arrives second, as a history rewrite or two
   // pushes in one second can leave it. The nearer commit still wins.
+
   const walked = await walk([
     [RUN_TWO_BACK, reading(RUN_TWO_BACK, { [RUNNER_METRIC]: 5740 })],
     [RUN_AT_BASE, reading(RUN_AT_BASE, { [RUNNER_METRIC]: 5760 })],
@@ -1462,6 +1553,7 @@ Deno.test("walkBaselineRuns reads the first of two runs for one commit", async (
 
 Deno.test("walkBaselineRuns ignores a run that is not an ancestor", async () => {
   // Landed after this run started, so it measured code the run lacks.
+
   const sibling = makeRun(4, "dddddddddddddddddddddddddddddddddddddddd");
   const walked = await walk([
     [sibling, reading(sibling, { [RUNNER_METRIC]: 5700 })],
@@ -1502,6 +1594,7 @@ Deno.test("walkBaselineRuns takes a cold ancestor when every ancestor is cold", 
 Deno.test("walkBaselineRuns ignores an acceptance that is not an ancestor", async () => {
   // A reset that merged after this run's base-branch commit is not in this
   // run's code, so it sets no floor here and the ancestry still gates.
+
   const later = makeRun(4, "dddddddddddddddddddddddddddddddddddddddd");
   const walked = await walk([
     [later, reading(later, { [RUNNER_METRIC]: 7000 }, { reset: true })],
@@ -1546,6 +1639,7 @@ Deno.test("walkBaselineRuns stops at the run whose PR accepted the debt", async 
   // what later runs are held to. Every run that measured it is cold, so the
   // accepting run stands as the baseline rather than the metric losing one.
   // The memory group was not accepted, so its walk carries on to the warm run.
+
   const walked = await walk(
     [
       [RUN_AT_BASE, reading(RUN_AT_BASE, {}, { cold: true })],
@@ -1597,6 +1691,7 @@ Deno.test("walkBaselineRuns stops every coverage metric at a merged reset", asyn
 Deno.test("walkBaselineRuns walks past an acceptance that measured nothing", async () => {
   // The accepting run uploaded no baseline artifact, so it has no level to
   // hold later runs to and the search continues past it.
+
   const walked = await walk([
     [RUN_ONE_BACK, reading(RUN_ONE_BACK, {}, { accepts: [RUNNER_METRIC] })],
     [RUN_TWO_BACK, reading(RUN_TWO_BACK, { [RUNNER_METRIC]: 5740 })],
@@ -1796,7 +1891,11 @@ Deno.test("reportBaselineDistance reports an ancestry it could not read", () => 
   );
 });
 
-/** The three-run ancestry above, with one metric measured at each commit. */
+/**
+ * Two of the three runs in the ancestry above, each carrying one metric.
+ * `RUN_ONE_BACK` is deliberately absent: callers derive their run list from
+ * these readings, so leaving it out is what makes a commit unmeasured.
+ */
 function runnerReadings(): [WorkflowRun, BaselineRunReading][] {
   return [
     [RUN_AT_BASE, reading(RUN_AT_BASE, { [RUNNER_METRIC]: 5746 })],
@@ -2045,6 +2144,7 @@ Deno.test("buildCoverageRows stamps every row with where it was measured", () =>
   // The comment for a regression the pull request did not cause reads these
   // back to say which run produced the numbers and which `main` commit that
   // run merged, so every row carries them whatever the gate decides.
+
   const { rows } = rowsFor(
     { [RUNNER_METRIC]: 5747, [MEMORY_METRIC]: 3 },
     {
@@ -2167,6 +2267,7 @@ Deno.test("buildCoverageRows accepts the same rise after the baseline moves", ()
   // What a rebase does: the base branch uncovers 30 lines of its own, so both
   // the baseline and this run's count rise by 30. The pull request still adds
   // the 54 lines it accepted, and the same acceptance line still passes it.
+
   const overrides = {
     metrics: new Map([[RUNNER_METRIC, 54]]),
     coverageBaselineReset: false,
@@ -2464,6 +2565,7 @@ Deno.test("combinedLcovFromArtifacts joins every artifact's uploaded report", as
 Deno.test("combinedLcovFromArtifacts refuses to report on no artifacts at all", async () => {
   // An empty set is not an empty report: it means the run uploaded nothing,
   // which must be an error rather than a workspace scored as uncovered.
+
   await assertRejects(
     () => combinedLcovFromArtifacts([]),
     Error,

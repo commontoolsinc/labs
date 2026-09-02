@@ -61,9 +61,10 @@ export const EnvSchema = z.object({
   DISABLE_LOG_REQ_RES: boolFlag(),
   CACHE_DIR: z.string().default("./cache"),
 
-  // ===========================================================================
+  //
   // OpenTelemetry Configuration
-  // ===========================================================================
+  //
+
   // Strict parse (see boolFlag): only "true"/"1" enable telemetry; "false"/unset
   // disable it. z.coerce.boolean() would wrongly enable on the string "false".
   OTEL_ENABLED: boolFlag(),
@@ -81,11 +82,11 @@ export const EnvSchema = z.object({
   // See docs/features/active-user-counting.md.
   OTEL_TRACES_SAMPLER: z.string().default("always_on"),
   OTEL_TRACES_SAMPLER_ARG: z.string().default("1.0"),
-  // ===========================================================================
 
-  // ===========================================================================
+  //
   // (/routes/ai/llm) Environment variables for LLM Providers
-  // ===========================================================================
+  //
+
   CFTS_AI_LLM_ANTHROPIC_API_KEY: z.string().default(""),
   CFTS_AI_LLM_GROQ_API_KEY: z.string().default(""),
   CFTS_AI_LLM_OPENAI_API_KEY: z.string().default(""),
@@ -95,32 +96,31 @@ export const EnvSchema = z.object({
   // The gateway is reachable only on Tailscale; toolshed falls back cleanly
   // when the URL is unreachable (see `loadGatewayModels` in routes/ai/llm/models.ts).
   CFTS_AI_GATEWAY_URL: z.string().default("https://llm.stage.commontools.dev"),
-  // ===========================================================================
 
-  // ===========================================================================
-  // FAL AI API Key
-  //   * /routes/ai/img
-  //   * /routes/ai/voice
-  // ===========================================================================
+  /**
+   * FAL AI API Key
+   *   * /routes/ai/img
+   *   * /routes/ai/voice
+   */
   FAL_API_KEY: z.string().default(""),
-  // ===========================================================================
 
-  // ===========================================================================
-  // Jina API Key
-  //   * /routes/agent-tools/web-read
-  //   * /routes/link-preview
-  // ===========================================================================
+  /**
+   * Jina API Key
+   *   * /routes/agent-tools/web-read
+   *   * /routes/link-preview
+   */
   JINA_API_KEY: z.string().default(""),
-  // ===========================================================================
 
-  // ===========================================================================
+  //
   // Memory Store
+  //
   //  - MEMORY_DIR is used by toolshed to access sqlite files for common-memory
   //    (directory mode - default, backwards compatible)
   //  - DB_PATH is an optional absolute path to a single SQLite database file
   //    holding every space (single-file mode - takes precedence over MEMORY_DIR)
   //  - MEMORY_URL is used by toolshed to connect to memory endpoint
-  // ===========================================================================
+  //
+
   MEMORY_DIR: z.string().default(
     new URL(`./cache/memory/`, Path.toFileUrl(`${Deno.cwd()}/`)).href,
   ),
@@ -133,59 +133,75 @@ export const EnvSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
 
-  // ===========================================================================
+  //
   // Airtable Integration
+  //
   //   * /routes/integrations/airtable-oauth
-  // ===========================================================================
+  //
+
   AIRTABLE_CLIENT_ID: z.string().default(""),
   AIRTABLE_CLIENT_SECRET: z.string().default(""),
 
-  // ===========================================================================
+  //
   // GitHub Integration
+  //
   //   * /routes/integrations/github-oauth
-  // ===========================================================================
+  //
+
   GITHUB_CLIENT_ID: z.string().default(""),
   GITHUB_CLIENT_SECRET: z.string().default(""),
 
-  // ===========================================================================
+  //
   // Notion Integration
+  //
   //   * /routes/integrations/notion-oauth
-  // ===========================================================================
+  //
+
   NOTION_CLIENT_ID: z.string().default(""),
   NOTION_CLIENT_SECRET: z.string().default(""),
 
-  // ===========================================================================
+  //
   // Linear Integration
+  //
   //   * /routes/integrations/linear-oauth
-  // ===========================================================================
+  //
+
   LINEAR_CLIENT_ID: z.string().default(""),
   LINEAR_CLIENT_SECRET: z.string().default(""),
 
-  // ===========================================================================
+  //
   // Spotify Integration
+  //
   //   * /routes/integrations/spotify-oauth
-  // ===========================================================================
+  //
+
   SPOTIFY_CLIENT_ID: z.string().default(""),
   SPOTIFY_CLIENT_SECRET: z.string().default(""),
 
-  // ===========================================================================
+  //
   // Discord OAuth Integration
+  //
   //   * /routes/integrations/discord-oauth
-  // ===========================================================================
+  //
+
   DISCORD_CLIENT_ID: z.string().default(""),
   DISCORD_CLIENT_SECRET: z.string().default(""),
 
-  // ===========================================================================
+  //
   // Strava Integration
+  //
   //   * /routes/integrations/strava-oauth
-  // ===========================================================================
+  //
+
   STRAVA_CLIENT_ID: z.string().default(""),
   STRAVA_CLIENT_SECRET: z.string().default(""),
 
-  // ===========================================================================
+  //
   // Plaid Integration
+  //
   //   * /routes/integrations/plaid-oauth
-  // ===========================================================================
+  //
+
   PLAID_CLIENT_ID: z.string().default(""),
   PLAID_SECRET: z.string().default(""),
   PLAID_ENV: z.enum(["sandbox", "development", "production"]).default(
@@ -196,7 +212,6 @@ export const EnvSchema = z.object({
   PLAID_REDIRECT_URI: z.string().optional(),
   // Strict parse (see boolFlag); previously z.coerce.boolean() turned "false" into true.
   PLAID_SYNC_ALL_TRANSACTIONS: boolFlag(),
-  // ===========================================================================
 
   // URL of the toolshed API, for self-referring requests
   API_URL: z.string().default("http://localhost:8000"),
@@ -241,8 +256,9 @@ export const EnvSchema = z.object({
   // background service operator identity).
   MEMORY_SERVICE_DIDS: z.string().default(""),
 
-  // ===========================================================================
+  //
   // State-inspector remote dump endpoint (`cf inspect --remote`).
+  //
   // Exposes raw, read-only space SQLite snapshots over HTTP for offline
   // autopsy. This is a STAGING-ONLY debugging tool: it hard-refuses to mount
   // under ENV=production with no override (a productionized form is a separate,
@@ -250,7 +266,8 @@ export const EnvSchema = z.object({
   // entire contents of a space, so access is gated by CF1 first-party signature
   // auth + a DID allowlist, and every dump is audit-logged. See
   // routes/storage/memory/memory-dump.index.ts.
-  // ===========================================================================
+  //
+
   // Master switch. Unset/"false" => the endpoint 404s as if it did not exist.
   // Mounting ALSO requires ENV to be a recognized non-production value
   // (development | test | staging) — unknown/alias envs fail closed. See
@@ -276,10 +293,12 @@ export const EnvSchema = z.object({
   // compiled binary reads from its baked COMPILED file.
   COMMIT_SHA: z.string().optional(),
 
-  // ===========================================================================
+  //
   // Sandbox Service
+  //
   //   * /routes/sandbox/exec
-  // ===========================================================================
+  //
+
   SANDBOX_SERVICE_URL: z.string().default(
     "https://sandbox.stage.commontools.dev",
   ),

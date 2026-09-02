@@ -8,6 +8,7 @@ import {
   resolve,
 } from "@std/path";
 import type { HarnessRunState } from "./run-state.ts";
+import type { HarnessCellLabels } from "./contracts/cell-labels.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessPolicyTrace } from "./contracts/policy-trace.ts";
 import { createHarnessPolicyEvent } from "./contracts/policy.ts";
@@ -79,6 +80,7 @@ const writeJsonFile = async (path: string, value: unknown): Promise<void> => {
 export interface HarnessArtifactStore {
   readonly artifactRoot: string;
   readonly runRoot: string;
+
   /**
    * Host directory where image-attachment snapshots may be written, for
    * stores backed by a writable filesystem. Stores without a writable
@@ -86,6 +88,7 @@ export interface HarnessArtifactStore {
    * source file's bytes instead of snapshotting.
    */
   readonly imageAttachmentSnapshotDir?: string;
+
   persistRunState(state: HarnessRunState): Promise<string>;
   persistTranscript(
     transcript: readonly HarnessTranscriptMessage[],
@@ -99,6 +102,16 @@ export interface HarnessArtifactStore {
   persistPolicyTrace?(
     trace: HarnessPolicyTrace,
   ): Promise<string>;
+
+  /**
+   * Records what the run's space holds for the cells the run touched. A
+   * store that cannot answer omits it, and the run keeps its labels in state
+   * without a file beside them.
+   */
+  persistCellLabels?(
+    labels: HarnessCellLabels,
+  ): Promise<string>;
+
   persistRunReport(
     report: HarnessRunReport,
   ): Promise<string>;
@@ -178,6 +191,15 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
     await ensureDir(this.runRoot);
     const path = join(this.runRoot, "policy-trace.json");
     await writeJsonFile(path, trace);
+    return path;
+  }
+
+  async persistCellLabels(
+    labels: HarnessCellLabels,
+  ): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "cell-labels.json");
+    await writeJsonFile(path, labels);
     return path;
   }
 

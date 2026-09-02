@@ -141,16 +141,20 @@ const unbindableOutputsPattern = {
 type SkipCase = {
   name: string;
   pattern: Pattern;
+
   /**
    * Seed the result cell with a prior run, so the run under test resumes a
    * stored root whose argument meta link is already written.
    */
   seedFirst: boolean;
+
   level: "debug" | "warn";
   message: string;
   node: string;
+
   /** Parts the call carries ahead of the identity payload. */
   leadingParts: number;
+
   /** How the run under test is expected to end. */
   rejectsWith?: RegExp;
 };
@@ -261,13 +265,14 @@ describe("resume owned-cell walk skip logging", () => {
     });
   }
 
-  // The negative half, and the reason the undefined exit is a debug: a healthy
-  // run of the REAL home pattern takes that exit repeatedly. While it was a
-  // warn, this run emitted the warning twice, and CI showed eight occurrences
-  // across passing home tests. This fails if the log goes back to warn — and,
-  // via the "really does take the exit" assertion, also if the branch stops
-  // being reached, so the silence it proves cannot go vacuous.
   it("stays silent at warn level through a healthy home pattern run", async () => {
+    // The negative half, and the reason the undefined exit is a debug: a
+    // healthy run of the REAL home pattern takes that exit repeatedly. While it
+    // was a warn, this run emitted the warning twice, and CI showed eight
+    // occurrences across passing home tests. This fails if the log goes back to
+    // warn — and, via the "really does take the exit" assertion, also if the
+    // branch stops being reached, so the silence it proves cannot go vacuous.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),

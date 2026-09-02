@@ -13,12 +13,15 @@ interface FakeStream extends UpdateStream {
 interface Fixture {
   /** Every stream the page has opened, oldest first. */
   opened: FakeStream[];
+
   current(): FakeStream;
   heard(now: number): void;
   lost(): void;
   check(now: number): boolean;
+
   /** The browser losing the connection and retrying it on its own. */
   connectionDropped(): void;
+
   /** The connection being made, and the first event arriving on it. */
   connectionMade(now: number): void;
 }

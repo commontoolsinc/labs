@@ -122,18 +122,25 @@ type Settings = {
 export interface Output {
   [NAME]: string;
   [UI]: VNode;
+
   /** Array of imported emails */
   emails: Email[];
+
   /** Mentionables — email cards with NAME and summary for search indexing */
   mentionable: { [NAME]: string; summary: string; [UI]: VNode }[];
+
   /** Number of emails imported */
   emailCount: number;
+
   /** Summary of container-level emails for hierarchical indexing */
   summary: string;
+
   /** Auth UI component for managing Google OAuth connection */
   authUI: VNode;
+
   /** Handler to trigger email fetch from external patterns */
   bgUpdater: Stream<void>;
+
   /** Whether auth is ready (has valid token) */
   isReady: boolean;
   // /** Search emails by query string (searches subject, from, snippet) */
@@ -1025,24 +1032,21 @@ const toggleDebugMode = handler<
   { target: { checked: boolean } },
   { settings: Writable<Settings> }
 >(({ target }, { settings }) => {
-  const current = settings.get();
-  settings.set({ ...current, debugMode: target.checked });
+  settings.update({ debugMode: target.checked });
 });
 
 const toggleAutoFetch = handler<
   { target: { checked: boolean } },
   { settings: Writable<Settings> }
 >(({ target }, { settings }) => {
-  const current = settings.get();
-  settings.set({ ...current, autoFetchOnAuth: target.checked });
+  settings.update({ autoFetchOnAuth: target.checked });
 });
 
 const toggleResolveInlineImages = handler<
   { target: { checked: boolean } },
   { settings: Writable<Settings> }
 >(({ target }, { settings }) => {
-  const current = settings.get();
-  settings.set({ ...current, resolveInlineImages: target.checked });
+  settings.update({ resolveInlineImages: target.checked });
 });
 
 const EmailCard = pattern<

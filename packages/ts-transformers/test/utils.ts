@@ -21,8 +21,10 @@ export interface TransformOptions {
   types?: Record<string, string>;
   typeCheck?: boolean;
   precomputedDiagnostics?: ts.Diagnostic[];
+
   /** If provided, pipeline diagnostics will be pushed into this array after transformation. */
   pipelineDiagnostics?: TransformationDiagnostic[];
+
   moduleIdentities?: ReadonlyMap<string, string>;
   policyManifests?: unknown[];
   state?: CrossStageState;
@@ -33,6 +35,7 @@ export interface TransformOptions {
 export interface BatchTypeCheckResult {
   /** Diagnostics grouped by file path */
   diagnosticsByFile: Map<string, ts.Diagnostic[]>;
+
   /** The TypeScript program used for type-checking (for debugging) */
   program: ts.Program;
 }

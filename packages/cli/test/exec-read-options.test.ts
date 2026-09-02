@@ -120,7 +120,10 @@ describe("cf exec read options", () => {
       runtime: {
         [CF_RUNTIME_ERROR_LOG]: [] as Array<{ message: string }>,
         storageManager: { synced: () => Promise.resolve() },
-        edit: () => ({ commit: () => Promise.resolve() }),
+        edit: () => ({
+          commit: () => Promise.resolve(),
+          status: () => ({ status: "done", journal: { novelty: () => [] } }),
+        }),
         prepareTxForCommit: () => {},
         getCell: () => resultCell,
         getCellFromLink: () => receiptCell,
@@ -177,7 +180,7 @@ describe("cf exec read options", () => {
       asSchemaFromLinks: () => cell,
       send: (_value: unknown, onCommit?: (tx: unknown) => void) => {
         onCommit?.({
-          status: () => ({ status: "done" }),
+          status: () => ({ status: "done", journal: { novelty: () => [] } }),
           handlingReceiptLink: {
             id: "of:receipt-cell",
             space: "did:key:test-home",
@@ -339,7 +342,7 @@ describe("cf exec read options", () => {
       { write: (text) => out.push(text), writeError: (text) => err.push(text) },
     );
 
-    // The envelope `cf piece call` declares, not silence and not prose.
+    // The envelope `cf call` declares, not silence and not prose.
     expect(JSON.parse(out[0])).toEqual({
       invocation: "inv-1",
       status: "settled",
@@ -378,7 +381,7 @@ describe("cf exec read options", () => {
     // command name no `--space` at all.
     expect(err[0]).not.toContain("--space");
     expect(err[0]).toContain(
-      "cf get --piece /@did:key:test-home/of:tool-result@user",
+      "cf get /@did:key:test-home/of:tool-result@user",
     );
   });
 
@@ -398,7 +401,7 @@ describe("cf exec read options", () => {
     );
 
     expect(err[0]).toContain(
-      "cf get --piece /@did:key:test-home/of:tool-result`)",
+      "cf get /@did:key:test-home/of:tool-result`)",
     );
     expect(err[0]).not.toContain("@space");
   });
@@ -478,7 +481,7 @@ describe("cf exec read options", () => {
 
     expect(codes).toEqual([1]);
     // The message, then the retry key beside the furthest phase — the shape
-    // `cf piece call` prints, so a script reads one format either way. The
+    // `cf call` prints, so a script reads one format either way. The
     // phase is what says the handling may already have committed, which is
     // the whole reason a caller must not simply run the command again.
     expect(errs).toEqual([

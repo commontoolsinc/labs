@@ -10,9 +10,11 @@ import {
   isStoredArgumentSchemaRefusal,
   STORED_ARGUMENT_SCHEMA_REFUSAL,
 } from "../src/index.ts";
+import { readStoredLinkChainRaw } from "../src/runner.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { getMetaLink } from "../src/link-utils.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 // A pattern update must not leave durable state the new version's argument
 // schema cannot read. `packages/piece/src/schema-compatibility.ts` waives one
@@ -83,6 +85,26 @@ const typedCount = (marker: string): RuntimeProgram =>
     "",
   ].join("\n"));
 
+/**
+ * A candidate that types a NESTED object: `row.name` is required, so a `row`
+ * that materializes without it refuses. The nested-cold cases stand on this —
+ * the argument doc's own slot (`row`) resolves fine, and only a hop past it
+ * dead-ends.
+ */
+const typedRow = (marker: string): RuntimeProgram =>
+  programOf([
+    "import { pattern } from 'commonfabric';",
+    // Open like the argument object above it: the row fixtures carry slots
+    // the candidate never declares (a chained alias, a self-link), the way
+    // stored docs of another vintage routinely do.
+    "interface Row { name: string; other?: string; [key: string]: any }",
+    "interface Args { row?: Row; [key: string]: any }",
+    "export default pattern<Args, { marker: string }>(() => {",
+    `  return { marker: ${JSON.stringify(marker)} };`,
+    "});",
+    "",
+  ].join("\n"));
+
 describe("pattern update validates the stored argument", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let rt: Runtime;
@@ -140,7 +162,7 @@ describe("pattern update validates the stored argument", () => {
       cell.withTx(tx).setMetaRaw("patternIdentity", {
         identity: ref.identity,
         symbol: ref.symbol,
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(stampError?.message).toBeUndefined();
     let error: string | undefined;
@@ -313,7 +335,11 @@ describe("pattern update validates the stored argument", () => {
       "markerless-root",
     );
     const { error: stripError } = await rt.editWithRetry((tx) => {
-      cell.withTx(tx).setMetaRaw("patternSetupIdentity", undefined);
+      cell.withTx(tx).setMetaRaw(
+        "patternSetupIdentity",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(stripError?.message).toBeUndefined();
     await rt.idle();
@@ -411,7 +437,7 @@ describe("pattern update validates the stored argument", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v2Ref.identity,
       symbol: v2Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     await rt.idle();
     await cell.pull();
@@ -503,7 +529,7 @@ describe("pattern update validates the stored argument", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v2Ref.identity,
       symbol: v2Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     await rt.idle();
     await cell.pull();
@@ -572,6 +598,7 @@ describe("pattern update validates the stored argument", () => {
       cell.withTx(wtx).setMetaRaw(
         "argument",
         coldArgument.getAsWriteRedirectLink({ base: cell }),
+        rawMetaWriteAuthorization,
       );
     });
     expect(retargetError?.message).toBeUndefined();
@@ -616,7 +643,11 @@ describe("pattern update validates the stored argument", () => {
       rt.getCellFromLink(getMetaLink(cell, "argument")!, undefined, wtx)
         .asSchema(undefined as never)
         .set({ count: "seven" } as never);
-      cell.withTx(wtx).setMetaRaw("patternSetupIdentity", undefined);
+      cell.withTx(wtx).setMetaRaw(
+        "patternSetupIdentity",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(prepError?.message).toBeUndefined();
     await rt.idle();
@@ -694,7 +725,7 @@ describe("pattern update validates the stored argument", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v2Ref.identity,
       symbol: v2Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     await rt.idle();
     await cell.pull();
@@ -703,7 +734,11 @@ describe("pattern update validates the stored argument", () => {
     // Strip the marker AND repair the argument: now the piece is markerless,
     // running V1, under a pointer naming V2, with nothing left to refuse.
     const { error: prepError } = await rt.editWithRetry((wtx) => {
-      cell.withTx(wtx).setMetaRaw("patternSetupIdentity", undefined);
+      cell.withTx(wtx).setMetaRaw(
+        "patternSetupIdentity",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
       rt.getCellFromLink(getMetaLink(cell, "argument")!, undefined, wtx)
         .asSchema(undefined as never)
         .set({ count: 7 } as never);
@@ -769,7 +804,11 @@ describe("pattern update validates the stored argument", () => {
 
     // Strip it, the state a piece written before the meta existed is in.
     const { error: stripError } = await rt.editWithRetry((tx) => {
-      cell.withTx(tx).setMetaRaw("schema", undefined);
+      cell.withTx(tx).setMetaRaw(
+        "schema",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(stripError?.message).toBeUndefined();
     await rt.idle();
@@ -795,7 +834,11 @@ describe("pattern update validates the stored argument", () => {
     // branch returns from a different place — so a fix applied to only one of
     // them leaves half the callers unrepaired.
     const { error: stripAgain } = await rt.editWithRetry((tx) => {
-      cell.withTx(tx).setMetaRaw("schema", undefined);
+      cell.withTx(tx).setMetaRaw(
+        "schema",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(stripAgain?.message).toBeUndefined();
     await rt.idle();
@@ -879,6 +922,318 @@ describe("pattern update validates the stored argument", () => {
     ).toBeUndefined();
     await cell.pull();
     expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v2");
+  });
+
+  it("rolls forward when the unreadable link sits BEHIND a readable hop", async () => {
+    // The 2026-08-21 fleet incident, in miniature and to its full depth. A
+    // profile's `name` cell stores a LINK to the doc holding its seed value
+    // — a chain, not a slot: the row doc's `name` holds a link to a cell doc
+    // whose whole content is another link, and only THAT target is missing
+    // (cold-start sync delivers the cell doc but not the seed doc). The home
+    // pattern's first identity move in months re-validated every home's
+    // `profiles` argument over that half-replicated graph: `profiles: 0:
+    // name: value does not match type string`, permanently, fleet-wide. The
+    // one-hop case above never covers this: the argument doc's OWN slot
+    // resolves fine (`row` materializes as an object), and the dead end is
+    // hops further down, where an overlay that only reads the argument doc's
+    // raw cannot see it. The deferral has to follow the stored link graph as
+    // deep as the materialization it repairs. The row's `loop` slot links
+    // back to the row doc itself, pinning that a repeated address along one
+    // descent terminates instead of recursing forever.
+    const absent = rt.getCell<string>(space, "nested-cold-target");
+    const mid = rt.getCell<string>(space, "nested-cold-mid");
+    const fine = rt.getCell<string>(space, "nested-cold-fine");
+    const fineHop = rt.getCell<string>(space, "nested-cold-fine-hop");
+    const inner = rt.getCell<Record<string, unknown>>(
+      space,
+      "nested-cold-inner",
+    );
+    const wrap = rt.getCell<Record<string, unknown>>(
+      space,
+      "nested-cold-wrap",
+    );
+    const row = rt.getCell<Record<string, unknown>>(space, "nested-cold-row");
+    const { error: writeError } = await rt.editWithRetry((tx) => {
+      mid.withTx(tx).asSchema(undefined as never).set(absent as never);
+      fine.withTx(tx).asSchema(undefined as never).set("fine" as never);
+      fineHop.withTx(tx).asSchema(undefined as never).set(fine as never);
+      inner.withTx(tx).asSchema(undefined as never).set(
+        { inner: "annotation" } as never,
+      );
+      wrap.withTx(tx).asSchema(undefined as never).set(
+        { wrap: inner } as never,
+      );
+      row.withTx(tx).asSchema(undefined as never).set(
+        {
+          name: mid,
+          // A chain and a mid-path link that RESOLVE, beside the one that
+          // does not: the walk mirrors these to their values and leaves
+          // them untouched while `name` alone defers.
+          other: fineHop,
+          // The note's path crosses the link stored at `wrap` mid-doc.
+          note: wrap.key("wrap").key("inner"),
+          loop: row,
+        } as never,
+      );
+    });
+    expect(writeError?.message).toBeUndefined();
+    await rt.idle();
+    const { cell } = await setupVintage(
+      openArgument("v1"),
+      { row },
+      "nested-cold-link",
+    );
+
+    const { error } = await rollForward(cell, typedRow("v2"));
+
+    expect(
+      error,
+      "a slot whose stored value routes through an unreadable link chain " +
+        "past the argument doc was treated as invalid — the shape that " +
+        "bricked every home space on 2026-08-21",
+    ).toBeUndefined();
+    await cell.pull();
+    expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v2");
+  });
+
+  it("defers a link whose path crosses another link mid-doc", async () => {
+    // A link may address a path inside its target, and the target doc may
+    // hold ANOTHER link partway along that path. A raw read of the full path
+    // would descend into the mid-doc link sigil's own JSON and report a
+    // false absence, so the walk steps segments itself and follows the link
+    // it meets — here to a doc the replica cannot serve, which is the
+    // unreadable case: defer, and the update proceeds.
+    const absent = rt.getCell<Record<string, unknown>>(
+      space,
+      "mid-path-cold-target",
+    );
+    const wrap = rt.getCell<Record<string, unknown>>(space, "mid-path-wrap");
+    const row = rt.getCell<Record<string, unknown>>(space, "mid-path-row");
+    const { error: writeError } = await rt.editWithRetry((tx) => {
+      wrap.withTx(tx).asSchema(undefined as never).set(
+        { wrap: absent } as never,
+      );
+      row.withTx(tx).asSchema(undefined as never).set(
+        { name: wrap.key("wrap").key("inner"), other: "fine" } as never,
+      );
+    });
+    expect(writeError?.message).toBeUndefined();
+    await rt.idle();
+    const { cell } = await setupVintage(
+      openArgument("v1"),
+      { row },
+      "mid-path-cold-link",
+    );
+
+    const { error } = await rollForward(cell, typedRow("v2"));
+
+    expect(
+      error,
+      "a linked path crossing a mid-doc link into an absent doc was judged " +
+        "as a plain absence instead of deferred as unreadable",
+    ).toBeUndefined();
+    await cell.pull();
+    expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v2");
+  });
+
+  it("fails loudly on a stored link CYCLE rather than deferring it", async () => {
+    // Two docs each holding only a link to the other: every doc on the
+    // chain is present and readable, so nothing is unreadable — the chain
+    // just never produces a value. The staging materialization refuses to
+    // resolve such a chain (link resolution throws on the cycle), so the
+    // update fails loudly before any deferral question arises. What this
+    // pins is the boundary: a cycle must never ride the unreadable-link
+    // deferral through to a committed update. The walk's own repeat-address
+    // guard — the backstop that keeps it terminating if a cyclic graph ever
+    // reaches it — is exercised directly below.
+    const cycleA = rt.getCell<unknown>(space, "cycle-a");
+    const cycleB = rt.getCell<unknown>(space, "cycle-b");
+    const row = rt.getCell<Record<string, unknown>>(space, "cycle-row");
+    const { error: writeError } = await rt.editWithRetry((tx) => {
+      cycleA.withTx(tx).asSchema(undefined as never).set(cycleB as never);
+      cycleB.withTx(tx).asSchema(undefined as never).set(cycleA as never);
+      row.withTx(tx).asSchema(undefined as never).set(
+        { name: cycleA, other: "fine" } as never,
+      );
+    });
+    expect(writeError?.message).toBeUndefined();
+    await rt.idle();
+    const { cell } = await setupVintage(
+      openArgument("v1"),
+      { row },
+      "cycle-link",
+    );
+
+    const { error } = await rollForward(cell, typedRow("v2"));
+
+    expect(
+      error,
+      "a stored link cycle slipped through a pattern update silently",
+    ).toContain("cycle");
+    await cell.pull();
+    expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v1");
+  });
+
+  it("terminates the raw walk on a cyclic stored graph", async () => {
+    // Direct exercise of readStoredLinkChainRaw's repeat-address guard: the
+    // staging materialization happens to throw on root-link cycles before
+    // the walk runs today, but the walk must terminate on its own — it
+    // follows raw bytes, and an infinite loop here would hang setup on
+    // whatever cyclic shape some other resolution vintage tolerates. A
+    // cycle resolves to no readable tree, like every other dead end.
+    const cycleA = rt.getCell<unknown>(space, "walk-cycle-a");
+    const cycleB = rt.getCell<unknown>(space, "walk-cycle-b");
+    const prim = rt.getCell<Record<string, unknown>>(space, "walk-primitive");
+    const metaOnly = rt.getCell<unknown>(space, "walk-meta-only");
+    const { error: writeError } = await rt.editWithRetry((tx) => {
+      cycleA.withTx(tx).asSchema(undefined as never).set(cycleB as never);
+      cycleB.withTx(tx).asSchema(undefined as never).set(cycleA as never);
+      prim.withTx(tx).asSchema(undefined as never).set({ p: true } as never);
+      // A doc record a meta-only write leaves behind: present, no value —
+      // the stamped-but-unmaterialized state real vintages hold.
+      metaOnly.withTx(tx).setMetaRaw(
+        "slug",
+        "walk-meta-only",
+        rawMetaWriteAuthorization,
+      );
+    });
+    expect(writeError?.message).toBeUndefined();
+    await rt.idle();
+
+    const tx = rt.edit();
+    try {
+      const reading = readStoredLinkChainRaw(
+        tx,
+        cycleA.getAsNormalizedFullLink(),
+        new Set(),
+      );
+      expect(reading.value).toBeUndefined();
+      // The other no-tree dead ends, exercised at the same seam: a doc the
+      // store has never held, and a path that reads through a primitive.
+      const absent = rt.getCell<unknown>(space, "walk-absent-target");
+      expect(
+        readStoredLinkChainRaw(
+          tx,
+          absent.getAsNormalizedFullLink(),
+          new Set(),
+        ).value,
+      ).toBeUndefined();
+      expect(
+        readStoredLinkChainRaw(
+          tx,
+          absent.key("beyond").getAsNormalizedFullLink(),
+          new Set(),
+        ).value,
+      ).toBeUndefined();
+      expect(
+        readStoredLinkChainRaw(
+          tx,
+          prim.key("p").key("deeper").getAsNormalizedFullLink(),
+          new Set(),
+        ).value,
+      ).toBeUndefined();
+      expect(
+        readStoredLinkChainRaw(
+          tx,
+          metaOnly.getAsNormalizedFullLink(),
+          new Set(),
+        ).value,
+      ).toBeUndefined();
+    } finally {
+      await tx.commit();
+    }
+
+    // Anything other than an absence surfaces instead of reading as a dead
+    // end — the same line readOrThrow draws. A committed transaction is the
+    // reachable member of that class.
+    expect(() =>
+      readStoredLinkChainRaw(tx, cycleA.getAsNormalizedFullLink(), new Set())
+    ).toThrow();
+  });
+
+  it("defers a PRESENT doc's absent value behind the hop", async () => {
+    // Behind a link, an absence defers whatever produced it. This exact
+    // shape argues why: the pattern-vintage stores hold pieces whose
+    // `profiles` argument links a path the target doc does not hold YET —
+    // the slot materializes lazily, on the first profile created — and a
+    // validator that judged "present doc, absent path" as invalid refused
+    // every update over them. Absence at rest is indistinguishable from
+    // absence-so-far, so the slot's check belongs to instantiation-time
+    // reads, which see the write when it comes.
+    const present = rt.getCell<Record<string, unknown>>(
+      space,
+      "nested-absent-slot-target",
+    );
+    const row = rt.getCell<Record<string, unknown>>(
+      space,
+      "nested-absent-slot-row",
+    );
+    const { error: writeError } = await rt.editWithRetry((tx) => {
+      present.withTx(tx).asSchema(undefined as never).set(
+        { unrelated: true } as never,
+      );
+      row.withTx(tx).asSchema(undefined as never).set(
+        {
+          // Two segments, so the walk reads THROUGH the primitive stored at
+          // `unrelated` — the same judged absence as a missing slot.
+          name: present.key("unrelated").key("deeper"),
+          other: "fine",
+        } as never,
+      );
+    });
+    expect(writeError?.message).toBeUndefined();
+    await rt.idle();
+    const { cell } = await setupVintage(
+      openArgument("v1"),
+      { row },
+      "nested-absent-slot-link",
+    );
+
+    const { error } = await rollForward(cell, typedRow("v2"));
+
+    expect(
+      error,
+      "a slot whose link lands on a path its target does not hold yet was " +
+        "treated as invalid — the lazily-materialized-slot shape the " +
+        "pattern-vintage stores hold",
+    ).toBeUndefined();
+    await cell.pull();
+    expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v2");
+  });
+
+  it("still refuses a READABLE wrong-typed value behind the same hop", async () => {
+    // The differential that pins where the deferral ends: identical nesting,
+    // identical candidate, but the value behind the hop is present and simply
+    // wrong. Deferral is for what this context cannot read, never for what it
+    // read and found invalid — widen it to any nested `undefined`-adjacent
+    // shape and the gate stops gating.
+    const row = rt.getCell<Record<string, unknown>>(
+      space,
+      "nested-wrong-type-row",
+    );
+    const { error: writeError } = await rt.editWithRetry((tx) => {
+      row.withTx(tx).asSchema(undefined as never).set(
+        { name: 7, other: "fine" } as never,
+      );
+    });
+    expect(writeError?.message).toBeUndefined();
+    await rt.idle();
+    const { cell } = await setupVintage(
+      openArgument("v1"),
+      { row },
+      "nested-wrong-type-link",
+    );
+
+    const { error, thrown } = await rollForward(cell, typedRow("v2"));
+
+    expect(
+      error,
+      "a readable nested value of the wrong type slipped past validation — " +
+        "the unreadable-link deferral is leaking onto values that were read " +
+        "and judged",
+    ).toContain("updated arguments do not match the candidate schema");
+    expect(error).toContain("name: value does not match type string");
+    expect(isStoredArgumentSchemaRefusal(thrown)).toBe(true);
   });
 
   it("leaves a same-version setup alone over an argument its OWN schema rejects", async () => {
@@ -966,7 +1321,7 @@ describe("pattern update validates the stored argument", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v2Ref.identity,
       symbol: v2Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     await rt.idle();
     await cell.pull();
@@ -1022,7 +1377,7 @@ describe("pattern update validates the stored argument", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v2Ref.identity,
       symbol: v2Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     await rt.idle();
     await cell.pull();

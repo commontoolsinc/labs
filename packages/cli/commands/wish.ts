@@ -2,6 +2,7 @@ import { Command, ValidationError } from "@cliffy/command";
 import { type DID, isDID } from "@commonfabric/identity";
 import { parseCellPath } from "@commonfabric/runner";
 import { cliText } from "../lib/cli-name.ts";
+import { refuseSectionMarker } from "../lib/section-marker.ts";
 import { render } from "../lib/render.ts";
 import { getDidFromFile } from "../lib/identity.ts";
 import { absPath } from "../lib/utils.ts";
@@ -86,7 +87,7 @@ export async function wishAction(
   const scope = parseScopeFlags(options.scope);
   // Read before the wish is issued: a malformed selection is a fact about the
   // flags, so it is reported without a resolution having been attempted. The
-  // same grammar and the same messages `cf piece get` and `cf piece call`
+  // same grammar and the same messages `cf get` and `cf call`
   // report, because it is the same parser.
   // Through the command's own exit seam rather than `exitWithDataError`, whose
   // `exit` is typed `never`: this command's seam returns, because its unit
@@ -165,7 +166,7 @@ PROFILE TARGETS (resolve against the IDENTITY's home space; '--space' optional):
   #profileSpace   Its own space cell
 
 OTHER TARGETS (space-relative; pass '--space'):
-  #favorites  #journal  #learned  #mentionable  #recent  /  #pieceRegistry  …
+  #favorites  #journal  #learned  #mentionable  /  #pieceRegistry  …
 
 ZERO-PROFILE: when no profile exists yet, the wish surfaces an error; this
 command prints it to stderr and exits non-zero (use --allow-empty to instead
@@ -183,10 +184,14 @@ export const wish = new Command()
     prefix: "CF_",
   })
   .option("-i,--identity <path:string>", "Path to an identity keyfile.")
+  .env("CF_SPACE=<space:string>", "The space name or DID.", {
+    prefix: "CF_",
+  })
   .option(
     "-s,--space <space:string>",
-    "Space name or DID to connect to. Defaults to the identity's home space " +
-      "(where profile targets resolve regardless).",
+    "Space name or DID to connect to, overriding CF_SPACE. Falls back to " +
+      "CF_SPACE, then to the identity's home space (where profile targets " +
+      "resolve regardless).",
   )
   .option(
     "-p,--path <path:string>",
@@ -248,6 +253,9 @@ export const wish = new Command()
     "Return the resolved target's address instead of its contents.",
   )
   .arguments("<target:string>")
-  .action(async (options, target) => {
+  .action(async function (options, target) {
+    // `wish` reads a target directly, so it has no callable section and no
+    // marker to close one. See lib/section-marker.ts.
+    refuseSectionMarker("wish", this.getRawArgs());
     await wishAction(options, target);
   });

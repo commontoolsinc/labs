@@ -20,6 +20,8 @@ import {
 } from "@commonfabric/piece/ops/bulk-local";
 
 import { type RepairRunRequest, runRepair, zeroRowFixer } from "../lib/bulk.ts";
+import { resetUnreportedRunGuardsForTest } from "../lib/unreported-run.ts";
+import { guardHarness } from "./unreported-run-helpers.ts";
 import { piece, repairFromCommand, setQuietMode } from "../commands/piece.ts";
 
 function captureStdout(fn: () => Promise<void>): Promise<string> {
@@ -42,7 +44,7 @@ const OPTIONS = {
   apiUrl: "http://localhost:8000",
   identity: "/tmp/test-identity.pem",
   space: "home",
-  piece: "board",
+  cell: "board",
   quiet: true,
   fixer: "fix-seeds.ts",
 };
@@ -83,6 +85,9 @@ const REPORT: RepairReport = {
 describe("piece-repair", () => {
   // The fixtures pass `quiet`, and the action applies it globally.
   afterEach(() => setQuietMode(false));
+  // The process-end hook is installed once per process, by the first run to
+  // arm a guard; a case that injects its own effects starts from none.
+  beforeEach(() => resetUnreportedRunGuardsForTest());
 
   describe("repairFromCommand()", () => {
     it("prints the emitted plan to stdout and the verdict tally as a hint", async () => {
@@ -237,6 +242,121 @@ describe("piece-repair", () => {
         actionHandler?: unknown;
       };
       expect(registered?.actionHandler).toBe(repairFromCommand);
+    });
+
+    it("reports the run and exits nonzero when the process outlives it", async () => {
+      // The repair runs one session rather than the retarget's grouped ones,
+      // and ends the same way if an await stops settling: the fixer's writes
+      // are half-made, the process drains, and code 0 says otherwise.
+      const process = guardHarness();
+      const abandoned = repairFromCommand(
+        { ...OPTIONS, path: "topics", apply: true },
+        {
+          runRepair: () => new Promise<RepairReport>(() => {}),
+          render: () => {},
+          printHint: () => {},
+          guard: process.deps,
+        },
+      );
+      await Promise.resolve();
+      expect(process.endProcess()).toBe(1);
+      expect(process.errors.join("\n")).toContain(
+        "Repair ended before it reported",
+      );
+      // `repairPieces` reports each row as it settles, so this process is
+      // watching and a count of zero is a fact about the run rather than a
+      // blind spot. This run settles none before it is abandoned, and the
+      // line says so — the wording an unwatched run must never use.
+      expect(process.errors.join("\n")).toContain(
+        "No row settled before it ended",
+      );
+      expect(process.errors.join("\n")).not.toContain("is not known here");
+      expect(abandoned).toBeInstanceOf(Promise);
+    });
+
+    it("says the report failed, not that the run never returned, when output throws", async () => {
+      // What this line must get right is that the engine DID return: the
+      // failure is the report's, not a run that never came back.
+      const process = guardHarness();
+      await expect(
+        repairFromCommand(
+          { ...OPTIONS, path: "topics", apply: true, json: true },
+          {
+            runRepair: () => Promise.resolve(REPORT),
+            render: () => {
+              throw new Error("stdout failed");
+            },
+            printHint: () => {},
+            guard: process.deps,
+          },
+        ),
+      ).rejects.toThrow("stdout failed");
+      expect(process.endProcess()).toBe(1);
+      const said = process.errors.join("\n");
+      expect(said).toContain("Repair ran to a report");
+      expect(said).not.toContain("still in flight");
+      expect(said).not.toContain("it did not return");
+      expect(said).not.toContain("this run counts its rows only in the report");
+    });
+
+    it("counts the rows the engine reports, and names them if it is abandoned", async () => {
+      // The guard can only name where an abandoned run reached if something
+      // told it which rows settled. Driving the callback the command hands
+      // over — rather than only asserting that one exists — is what proves a
+      // row travels all the way to the line the operator reads.
+      const process = guardHarness();
+      const abandoned = repairFromCommand(
+        { ...OPTIONS, path: "topics", apply: true },
+        {
+          runRepair: (_config, req) => {
+            req.onRow?.({ piece: "of:fid1:alpha", verdict: "repaired" });
+            req.onRow?.({ piece: "of:fid1:bravo", verdict: "conforms" });
+            return new Promise<RepairReport>(() => {});
+          },
+          render: () => {},
+          printHint: () => {},
+          guard: process.deps,
+        },
+      );
+      await Promise.resolve();
+      expect(process.endProcess()).toBe(1);
+      const said = process.errors.join("\n");
+      expect(said).toContain("2 rows settled");
+      expect(said).toContain("repaired: 1");
+      expect(said).toContain("conforms: 1");
+      expect(said).not.toContain("No row settled");
+      expect(abandoned).toBeInstanceOf(Promise);
+    });
+
+    it("says nothing at process end once the run has reported", async () => {
+      const process = guardHarness();
+      await captureStdout(() =>
+        repairFromCommand({ ...OPTIONS, path: "topics" }, {
+          runRepair: () => Promise.resolve(REPORT),
+          printHint: () => {},
+          guard: process.deps,
+        })
+      );
+      expect(process.endProcess()).toBe(0);
+      expect(process.errors).toEqual([]);
+    });
+
+    it("says nothing at process end when the run threw", async () => {
+      // A plan pinned to another fixer is refused before the module is even
+      // imported. That refusal IS the report, and the CLI prints it on the
+      // way to a nonzero exit; a guard line beside it would be a second
+      // account of a run that already gave one.
+      const process = guardHarness();
+      await expect(
+        repairFromCommand({ ...OPTIONS, path: "topics", apply: true }, {
+          runRepair: () =>
+            Promise.reject(new Error("The plan runs another fixer.")),
+          printHint: () => {},
+          guard: process.deps,
+        }),
+      ).rejects.toThrow("another fixer");
+      expect(process.endProcess()).toBe(0);
+      expect(process.errors).toEqual([]);
     });
   });
 

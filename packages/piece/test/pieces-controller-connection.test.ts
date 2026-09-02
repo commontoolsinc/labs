@@ -2,12 +2,9 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
-import type { Cell } from "@commonfabric/runner";
+import { Runtime } from "@commonfabric/runner";
 
-import {
-  PiecesController,
-  registerNavigatedPiece,
-} from "../src/ops/pieces-controller.ts";
+import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const identity = await Identity.fromPassphrase(
   "pieces controller connection tests",
@@ -69,6 +66,27 @@ describe("pieces-controller", () => {
           })).rejects.toThrow('Could not connect to "http://toolshed.test/".');
         });
 
+        it("does not install a navigation callback", async () => {
+          const originalHealthCheck = Runtime.prototype.healthCheck;
+          let created: Runtime | undefined;
+          Runtime.prototype.healthCheck = function () {
+            created = this;
+            return Promise.resolve(false);
+          };
+          try {
+            await expect(PiecesController.initialize({
+              apiUrl,
+              identity,
+              space: "navigation-without-registration",
+            })).rejects.toThrow(
+              'Could not connect to "http://toolshed.test/".',
+            );
+            expect(created?.navigateCallback).toBeUndefined();
+          } finally {
+            Runtime.prototype.healthCheck = originalHealthCheck;
+          }
+        });
+
         it("throws the connection error for a space given as a `did:key:` DID", async () => {
           const spaceDid = (await Identity.fromPassphrase("a space of its own"))
             .did();
@@ -79,46 +97,6 @@ describe("pieces-controller", () => {
           })).rejects.toThrow('Could not connect to "http://toolshed.test/".');
         });
       });
-    });
-  });
-
-  describe("registerNavigatedPiece()", () => {
-    // A piece cell is identified by its entity id, which `pieceId()` reads
-    // through `cellEntityIdString`.
-    const pieceCell = (id: string): Cell<unknown> =>
-      ({ entityId: { "/": id } }) as unknown as Cell<unknown>;
-
-    const controllerListing = (ids: string[]) => {
-      const added: Cell<unknown>[][] = [];
-      const pieces = {
-        runtime: { storageManager: { synced: () => Promise.resolve() } },
-        getPieceRegistry: () =>
-          Promise.resolve({ get: () => ids.map(pieceCell) }),
-        add: (newPieces: Cell<unknown>[]) => {
-          added.push(newPieces);
-          return Promise.resolve();
-        },
-      } as unknown as PiecesController;
-      return { pieces, added };
-    };
-
-    it("adds a piece the registry does not list", async () => {
-      const { pieces, added } = controllerListing(["already-here"]);
-      const target = pieceCell("brand-new");
-      await registerNavigatedPiece(pieces, target);
-      expect(added).toEqual([[target]]);
-    });
-
-    it("leaves a piece the registry already lists alone", async () => {
-      const { pieces, added } = controllerListing(["already-here"]);
-      await registerNavigatedPiece(pieces, pieceCell("already-here"));
-      expect(added).toEqual([]);
-    });
-
-    it("throws for a target carrying no piece id", async () => {
-      const { pieces } = controllerListing([]);
-      await expect(registerNavigatedPiece(pieces, {} as Cell<unknown>))
-        .rejects.toThrow("navigateTo: the target carries no piece id");
     });
   });
 });

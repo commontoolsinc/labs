@@ -40,12 +40,16 @@ const AutocompleteItemArraySchema = {
 export interface AutocompleteItem {
   /** Value returned when selected */
   value: string;
+
   /** Display text (defaults to value if not provided) */
   label?: string;
+
   /** Category for grouping/disambiguation */
   group?: string;
+
   /** Additional search terms that match this item */
   searchAliases?: string[];
+
   /**
    * Arbitrary data to pass through with cf-select event.
    *
@@ -76,6 +80,7 @@ const _validateAutocompleteItem: _ValidateAutocompleteItem = true;
  */
 interface ProcessedItem {
   item: AutocompleteItem;
+
   /** All searchable words from label, value, group, and aliases - lowercased */
   words: string[];
 }
@@ -865,6 +870,7 @@ export class CFAutocomplete extends BaseElement {
   // Event handlers
   //
   // PERFORMANCE NOTE (Dec 2025):
+  //
   // We use setTimeout(0) here instead of synchronous state updates. This was extensively
   // investigated and verified:
   //
@@ -977,7 +983,10 @@ export class CFAutocomplete extends BaseElement {
     }
   };
 
+  //
   // Selection methods
+  //
+
   private _selectItem(item: AutocompleteItem) {
     // Always emit cf-select for side effects
     // Include data field if present (allows passing arbitrary objects through selection)
@@ -1153,7 +1162,10 @@ export class CFAutocomplete extends BaseElement {
     this._dropdownStyle = `top: ${top}px; left: ${left}px; width: ${width}px`;
   }
 
+  //
   // Public API
+  //
+
   override focus(): void {
     this._input?.focus();
   }

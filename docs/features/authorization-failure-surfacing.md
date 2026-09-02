@@ -44,6 +44,12 @@ is read as permanent — the safe default for an authorization decision.
   denial on one space is not a client-wide failure.
 - A **retriable** authorization race and every transport-level disconnect retry,
   so a transient blip or a fresh-challenge race heals.
+- A **server that cannot take declared holdings** (no `sessionHoldings` in its
+  hello) terminates a session whose consumer installed a holdings provider, the
+  same per-session way: the declaration is what makes skipping the older
+  delivery paths safe, so restoring without it would silently reintroduce the
+  elision those paths permit (04-protocol.md §4.1.1). A session with no
+  provider restores on the declaration-less paths as ever.
 - A **permanent protocol-flag mismatch at `hello`** — the peers disagree on a
   data-model wire contract, so no session can open at all — stops the whole
   reconnect loop and is remembered, so every request on that

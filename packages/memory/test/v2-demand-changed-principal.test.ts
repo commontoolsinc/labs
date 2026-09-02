@@ -8,14 +8,14 @@ import {
   testSessionOpenServerOptions,
 } from "./v2-auth-test-helpers.ts";
 
-// W1 (d′) review MINOR-4: the push-growth / watch `demandChanged` notify
-// carries the CHANGED SESSION's principal, so the ExecutorHost can drop
-// the serving runtime's own loopback (service-principal) session — its
-// tracked-set growth is the serving graph's own reads, not client demand,
-// and must neither wake the loop nor count in `pushGrowthWakes`. Mutation
-// (drop `session.principal` from the notify calls) → principal undefined →
-// the host can no longer distinguish the service session → RED here.
 Deno.test("memory v2 demandChanged carries the session principal (watch + push-growth) so the host can drop the service session", async () => {
+  // W1 (d′) review MINOR-4: the push-growth / watch `demandChanged` notify
+  // carries the CHANGED SESSION's principal, so the ExecutorHost can drop the
+  // serving runtime's own loopback (service-principal) session — its
+  // tracked-set growth is the serving graph's own reads, not client demand, and
+  // must neither wake the loop nor count in `pushGrowthWakes`. Mutation (drop
+  // `session.principal` from the notify calls) → principal undefined → the host
+  // can no longer distinguish the service session → RED here.
   const server = new Server({
     ...testSessionOpenServerOptions,
     store: new URL("memory://memory-v2-demand-principal"),

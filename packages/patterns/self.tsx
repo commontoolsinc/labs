@@ -429,8 +429,7 @@ export const removeValueCardByIndex = handler<
   { selfModel: Writable<SelfModel>; index: number }
 >((_event, { selfModel, index }) => {
   const current = selfModel.get();
-  selfModel.set({
-    ...current,
+  selfModel.update({
     values: current.values.filter((_, i) => i !== index),
   });
 });

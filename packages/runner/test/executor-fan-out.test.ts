@@ -46,6 +46,7 @@ import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("fan-out stage B");
 const space = spaceSigner.did() as MemorySpace;
@@ -54,21 +55,6 @@ const aliceSigner = await Identity.fromPassphrase("fan-out stage B alice");
 const bobSigner = await Identity.fromPassphrase("fan-out stage B bob");
 const carolSigner = await Identity.fromPassphrase("fan-out stage B carol");
 const daveSigner = await Identity.fromPassphrase("fan-out stage B dave");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string | (() => string),
-  timeoutMs = 20_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      const rendered = typeof label === "function" ? label() : label;
-      throw new Error(`timed out waiting for ${rendered}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 /** A piece with a PerUser draft its derivation READS (narrows to user),
  * a PerSession note a second derivation reads (narrows to session), and
@@ -232,7 +218,6 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         runtime.scheduler.setActionRunTraceEnabled(true);

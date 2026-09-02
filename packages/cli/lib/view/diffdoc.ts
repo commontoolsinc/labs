@@ -46,16 +46,22 @@ import { flattenStructure } from "./model.ts";
 export interface DiffWorkspace {
   /** Resolve a diff-relative path to an absolute workspace path, or null. */
   resolve(path: string): string | null;
+
   /** Read an absolute path's current content, or null. */
   read(absPath: string): string | null;
+
   /** Report the UTF-8 BOM state recorded by the latest successful read. */
   hasUtf8Bom?(absPath: string): boolean | undefined;
+
   /** Write decoded text back with the encoding observed by {@link read}. */
   write?(absPath: string, text: string): void;
+
   /** Read a Git blob by object name, or null when it is unavailable. */
   readBlob?(object: string): string | null;
+
   /** Report the UTF-8 BOM state recorded for a successfully read Git blob. */
   blobHasUtf8Bom?(object: string): boolean | undefined;
+
   /** Read available Git blobs in one local Git operation. */
   readBlobs?(
     objects: readonly string[],
@@ -295,18 +301,22 @@ export interface DiffEdit {
    * mappings, so the source text is also what makes their HEAD message
    * editable. */
   readonly sourceText?: string;
+
   /** Diff line → the file line it edits, with its marker width (1, or 0 for a
    * trimmed empty context line). */
   readonly lines: ReadonlyMap<
     number,
     { absPath: string; newLine: number; markerLen: number }
   >;
+
   /** The captured new-side content of each touched file, for splicing edited
    * lines back in on save. */
   readonly fileText: ReadonlyMap<string, string>;
+
   /** Complete highlighted old files, aligned with the parsed diff's files.
    * The live highlighter uses these spans when an edit creates a removed line. */
   readonly oldFileLines: readonly (readonly Line[] | null)[];
+
   /** Every hunk, in document order, with the file and new-side range it covers
    * and whether its new side matched the workspace (so the captured content is
    * known to be the hunk's new side). Save matches the edited diff's hunks to
@@ -318,15 +328,20 @@ export interface DiffEdit {
 export interface DiffHunkInfo {
   /** The workspace file the hunk maps to, or null when it resolves to none. */
   readonly absPath: string | null;
+
   readonly newStart: number;
   readonly newCount: number;
   readonly verified: boolean;
+
   /** Whether the reconstructed old file is encoded with a UTF-8 BOM. */
   readonly oldFileHasUtf8Bom?: boolean;
+
   /** Whether the captured new file is encoded with a UTF-8 BOM. */
   readonly newFileHasUtf8Bom?: boolean;
+
   /** The original diff marks the old side as having no final newline. */
   readonly oldNoTrailingNewline?: boolean;
+
   /** The original diff marks the new side as having no final newline. */
   readonly newNoTrailingNewline?: boolean;
 }
@@ -335,9 +350,11 @@ export interface DiffHunkInfo {
 export interface DiffMaps {
   /** Absolute paths of the diff's files that exist in the workspace. */
   readonly rootFiles: readonly string[];
+
   /** Diff offset → (file, file offset), when the offset sits on code that is
    * present (and unchanged) in the current workspace file. */
   toFile(diffOffset: number): { path: string; offset: number } | null;
+
   /** File offset → diff offset, when that file line is visible in the diff. */
   fromFile(path: string, fileOffset: number): number | null;
 }
@@ -346,6 +363,7 @@ interface FileMapping {
   readonly absPath: string;
   readonly fileText: string;
   readonly fileLineStarts: number[];
+
   /** new-file line → diff line, for content-verified ctx/add lines. */
   readonly newToDiff: Map<number, number>;
 }
@@ -363,10 +381,13 @@ interface LoadedFile {
   fileText: string | null;
   fileDoc: Document | null;
   fileLineStarts: number[];
+
   /** The encoding state kept outside the BOM-stripped parser text. */
   hasUtf8Bom?: boolean;
+
   /** Syntax-only lines used by complete old files. */
   highlightedLines?: readonly Line[] | null;
+
   /** Alternate rendered lines, computed once when that view is opened. */
   renderedLines?: readonly Line[] | null;
 }
@@ -888,7 +909,7 @@ export function buildDiffDocument(
       mappings.set(absPath, mapping);
     }
 
-    // --- file header lines -------------------------------------------------
+    // file header lines
     for (let i = file.headerLine; i <= file.endLine; i++) {
       const kind = model.lines[i]?.kind;
       if (kind !== "meta") continue;
@@ -928,7 +949,7 @@ export function buildDiffDocument(
       }));
     }
 
-    // --- the file's section node -------------------------------------------
+    // the file's section node
     const label = file.newPath ?? file.oldPath ?? "(unknown file)";
     const start = diffLineStarts[file.headerLine];
     const end = lineEndOffset(diffLineStarts, text, file.endLine);
@@ -988,7 +1009,9 @@ function buildEdit(
   return { sourceText, lines, fileText, oldFileLines, hunks };
 }
 
-// --- hunk rendering + structure ------------------------------------------------
+//
+// hunk rendering + structure
+//
 
 interface MutableLine {
   text: string;
@@ -1000,8 +1023,10 @@ interface MutableLine {
 interface FragmentLine {
   diffLine: number;
   code: string;
+
   /** Whether decoding removed a BOM before parsing this source line. */
   omitsUtf8Bom?: boolean;
+
   /** Context can establish old-side state without replacing new-side colors. */
   render?: boolean;
 }
@@ -1023,14 +1048,23 @@ interface HunkCtx {
   mapping: FileMapping | undefined;
   definitions: Map<string, Definition[]>;
   hunks: DiffHunkInfo[];
-  /** The languages of the new and old sides (they differ across a rename that
-   * changes the extension); each colors its side's fragments and, for the new
-   * side, projects the hunk's structure. */
+
+  /** The new side's language. It colors that side's fragments, and it is the
+   * one that projects the hunk's structure. */
   newLanguage: Language;
+
+  /** The old side's language, which colors its own fragments. Differs from
+   * `newLanguage` across a rename that changes the extension. */
   oldLanguage: Language;
-  /** Paths whose extensions the parsers use to pick a script variant. */
+
+  /**
+   * New-side path, whose extension the parsers use to pick a script variant.
+   */
   newFileName: string | undefined;
+
+  /** Old-side path, read the same way. */
   oldFileName: string | undefined;
+
   viewMode: ViewMode;
 }
 
@@ -1258,7 +1292,7 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     restoreLossyRenderedChanges(hunk, ctx, sourceFallbacks);
   }
 
-  // --- structure ---------------------------------------------------------
+  // structure
   // Verified hunks remap the workspace file's own nodes (precise ranges, live
   // semantics). Unverified hunks — drifted workspace, missing file — still get
   // navigable structure from the fragment parse of their new side: the nodes
@@ -1526,7 +1560,9 @@ function shiftFragmentSpans(
   ]);
 }
 
-// --- offset maps for semantics ----------------------------------------------
+//
+// offset maps for semantics
+//
 
 function buildMaps(
   diffLineStarts: number[],
@@ -1574,7 +1610,9 @@ function buildMaps(
   };
 }
 
-// --- small helpers -----------------------------------------------------------
+//
+// small helpers
+//
 
 function lineEndOffset(
   lineStarts: number[],

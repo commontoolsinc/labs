@@ -33,22 +33,28 @@ export class FabricAwareResolver implements ProgramResolver {
   #specifierAliases = new Map<string, string>();
   #resolvedPins: ResolvedFabricPin[] = [];
 
+  readonly #inner: ProgramResolver;
+  readonly #ctx: FabricResolutionContext;
+
   constructor(
-    private readonly inner: ProgramResolver,
-    private readonly ctx: FabricResolutionContext,
-  ) {}
+    inner: ProgramResolver,
+    ctx: FabricResolutionContext,
+  ) {
+    this.#inner = inner;
+    this.#ctx = ctx;
+  }
 
   main(): Promise<Source> {
-    return this.inner.main();
+    return this.#inner.main();
   }
 
   // Forwarded like the rest of the interface. A wrapper that answers for part
   // of a resolver and quietly drops the rest is the shape this whole seam
   // exists to avoid.
   resolveDataFile(name: string): Promise<Source | undefined> {
-    return this.inner.resolveDataFile
-      ? this.inner.resolveDataFile(name)
-      : this.inner.resolveSource(name);
+    return this.#inner.resolveDataFile
+      ? this.#inner.resolveDataFile(name)
+      : this.#inner.resolveSource(name);
   }
 
   async resolveSource(identifier: string): Promise<Source | undefined> {
@@ -58,7 +64,7 @@ export class FabricAwareResolver implements ProgramResolver {
 
     const ref = parseFabricRef(identifier);
     if (ref === undefined) {
-      return await this.inner.resolveSource(identifier);
+      return await this.#inner.resolveSource(identifier);
     }
 
     if (ref.host !== undefined) {
@@ -71,14 +77,14 @@ export class FabricAwareResolver implements ProgramResolver {
     let identity = pinnedIdentity(ref);
     const sourceSpace = this.#sourceSpaceFor(ref.space);
     if (identity === undefined) {
-      if (this.ctx.allowUnpinned !== true) {
+      if (this.#ctx.allowUnpinned !== true) {
         throw new Error(
           `unpinned fabric import '${identifier}'; pin it (cf deps update) or deploy to pin`,
         );
       }
       const resolved = await resolveFabricRefToIdentity(
-        this.ctx.runtime,
-        this.ctx.space,
+        this.#ctx.runtime,
+        this.#ctx.space,
         ref,
       );
       identity = resolved.entryIdentity;
@@ -102,10 +108,10 @@ export class FabricAwareResolver implements ProgramResolver {
       throw new Error("fabric import graph too deep/large");
     }
 
-    if (sourceSpace !== this.ctx.space) {
+    if (sourceSpace !== this.#ctx.space) {
       logger.info("fabric-import-cross-space", () => [
         `source=${sourceSpace}`,
-        `dest=${this.ctx.space}`,
+        `dest=${this.#ctx.space}`,
         `entry=${identity}`,
       ]);
     }
@@ -165,10 +171,10 @@ export class FabricAwareResolver implements ProgramResolver {
     identity: string,
     space: MemorySpace,
   ): Promise<Map<string, SourceDoc> | undefined> {
-    const tx = this.ctx.runtime.edit();
+    const tx = this.#ctx.runtime.edit();
     try {
       return await loadVerifiedSourceClosure(
-        this.ctx.runtime,
+        this.#ctx.runtime,
         space,
         identity,
         tx,
@@ -212,7 +218,7 @@ export class FabricAwareResolver implements ProgramResolver {
   }
 
   #sourceSpaceFor(refSpace: string | undefined): MemorySpace {
-    if (refSpace === undefined) return this.ctx.space;
+    if (refSpace === undefined) return this.#ctx.space;
     if (DID_RE.test(refSpace)) return refSpace as MemorySpace;
     throw new Error(
       "space names are currently unsupported; resolve the name to a DID first",

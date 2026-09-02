@@ -51,13 +51,18 @@ export interface ViewOptions {
   color: ColorWhen;
   plain: boolean;
   lineNumbers: boolean;
+
   /** Start in the rendered representation when one is available. */
   rendered?: boolean;
+
   file?: string;
+
   /** Select piped source with this stable language identifier. */
   language?: string;
+
   /** Select piped source as though it had this filename. */
   filename?: string;
+
   /** Force (true) or suppress (false) diff mode; undefined auto-detects. */
   diff?: boolean;
 }

@@ -1,10 +1,15 @@
 /**
- * Checks that production is up, with a synthetic round trip to the estuary and
- * rapids servers and a name or reachability check for the company hosts they
- * depend on or run beside. Each health request goes to /_health on the
- * configured origin. Successful health-check times stay visible in the healthy
- * and warning states, a red state shows only the hosts that are not good, and
- * a host that answers stays out of the body.
+ * Checks that production is up, with synthetic round trips to the common.tools
+ * site and the estuary and rapids servers, plus a name or reachability check for
+ * the company hosts they depend on or run beside. Each server health request
+ * goes to /_health on the configured origin. Successful server-check times stay
+ * visible in the healthy and warning states. The public site appears only when
+ * it is not good. A red state shows only the hosts that are not good, and a
+ * host that answers stays out of the body.
+ *
+ * The common.tools request runs first until it receives an HTTP response. The
+ * tile does not check the other hosts before that independent signal confirms
+ * the dashboard's own connectivity.
  *
  * Both servers are on the tailnet. PROD_PROXY routes the health requests
  * through a proxy when the dashboard cannot reach the tailnet directly.
@@ -22,6 +27,8 @@ import type { Status, Tile, TileView } from "../types.ts";
 const HEALTH_PATH = "/_health";
 const WARN_LATENCY_MS = 500;
 const BAD_LATENCY_MS = 1000;
+const SITE_WARN_LATENCY_MS = 2500;
+const SITE_FAIL_THRESHOLD = 3;
 const TAILNET_SUFFIX = ".ts.net";
 // A connect that reaches a host opens and closes a session the host records in
 // its own logs, so a host that answers is left alone for this long and counts as
@@ -47,7 +54,6 @@ const STATUS_RANK: Record<Status, number> = {
   bad: 3,
 };
 
-type HealthTargetName = "estuary" | "rapids";
 type CreateHttpClient = typeof Deno.createHttpClient;
 type HttpClientOptions = Parameters<CreateHttpClient>[0];
 type ProxyFetchInit = RequestInit & { client?: Deno.HttpClient };
@@ -55,6 +61,7 @@ type ResolveDns = (
   query: string,
   recordType: "A" | "AAAA",
 ) => Promise<readonly string[]>;
+type ElapsedMs = (targetName: string, startedAt: number) => number;
 
 /** The part of a TCP connection the SOCKS5 exchange below uses. */
 export interface ProxyStream {
@@ -62,17 +69,20 @@ export interface ProxyStream {
   write(buffer: Uint8Array): Promise<number>;
   close(): void;
 }
+
 type OpenProxyStream = (
   options: Deno.ConnectOptions,
 ) => Promise<ProxyStream>;
 
 interface Target {
   name: string;
-  origin?: string;
   href?: string;
   hostname: string;
   port: number;
-  health: HealthTargetName | null;
+  http: {
+    kind: "health" | "site";
+    url: string;
+  } | null;
 }
 
 interface Check {
@@ -99,7 +109,24 @@ let createHttpClient: CreateHttpClient = Deno.createHttpClient;
 let resolveDns: ResolveDns = (query, recordType) =>
   Deno.resolveDns(query, recordType);
 let openProxyStream: OpenProxyStream = Deno.connect;
+let elapsedMs: ElapsedMs = (_targetName, startedAt) => Date.now() - startedAt;
 const reachedAt = new Map<string, number>();
+let connectivityConfirmed = false;
+let siteFailures = 0;
+
+/** Sets the production connectivity state for a test and returns its restorer. */
+export function setProdUptimeConnectivityForTest(
+  value: boolean,
+): () => void {
+  const previousConfirmed = connectivityConfirmed;
+  const previousFailures = siteFailures;
+  connectivityConfirmed = value;
+  siteFailures = 0;
+  return () => {
+    connectivityConfirmed = previousConfirmed;
+    siteFailures = previousFailures;
+  };
+}
 
 export function setProdUptimeHttpClientFactoryForTest(
   factory: CreateHttpClient,
@@ -118,6 +145,16 @@ export function setProdUptimeDnsResolverForTest(
   resolveDns = resolver;
   return () => {
     resolveDns = previous;
+  };
+}
+
+export function setProdUptimeElapsedMsForTest(
+  measure: ElapsedMs,
+): () => void {
+  const previous = elapsedMs;
+  elapsedMs = measure;
+  return () => {
+    elapsedMs = previous;
   };
 }
 
@@ -169,15 +206,25 @@ function portOf(url: URL): number {
   return url.protocol === "http:" ? 80 : 443;
 }
 
-function healthTarget(name: HealthTargetName, value: string): Target {
+function healthTarget(name: string, value: string): Target {
   const url = new URL(value);
   return {
     name,
-    origin: url.origin,
     href: url.origin,
     hostname: url.hostname,
     port: portOf(url),
-    health: name,
+    http: { kind: "health", url: `${url.origin}${HEALTH_PATH}` },
+  };
+}
+
+function siteTarget(name: string, value: string): Target {
+  const url = new URL(value);
+  return {
+    name,
+    href: url.href,
+    hostname: url.hostname,
+    port: portOf(url),
+    http: { kind: "site", url: url.href },
   };
 }
 
@@ -193,7 +240,7 @@ function hostTarget(
     hostname: url.hostname,
     port: url.port === "" ? port : Number(url.port),
     href,
-    health: null,
+    http: null,
   };
 }
 
@@ -308,7 +355,7 @@ async function checkReach(
     return checkDns(target.hostname);
   }
   // The health request travels the same proxy and covers the same ground.
-  if (target.health !== null) return { status: "good", detail: "" };
+  if (target.http !== null) return { status: "good", detail: "" };
   if (!isSocks5(proxy)) {
     return {
       status: "unknown",
@@ -317,7 +364,8 @@ async function checkReach(
     };
   }
 
-  const key = `${proxy.protocol}//${proxy.host}|${target.hostname}:${target.port}`;
+  const key =
+    `${proxy.protocol}//${proxy.host}|${target.hostname}:${target.port}`;
   const now = Date.now();
   const previous = reachedAt.get(key);
   if (previous !== undefined && now - previous < PROBE_INTERVAL_MS) {
@@ -365,10 +413,10 @@ async function checkHttp(
   client: Deno.HttpClient | undefined,
   invalidProxy: boolean,
 ): Promise<Check> {
-  if (target.health === null || target.origin === undefined) {
+  if (target.http === null) {
     return { status: "good", detail: "" };
   }
-  if (invalidProxy) {
+  if (target.http.kind === "health" && invalidProxy) {
     return {
       status: "warn",
       detail: "invalid proxy",
@@ -382,31 +430,74 @@ async function checkHttp(
       signal: AbortSignal.timeout(8000),
       redirect: "manual",
     };
-    if (client !== undefined) init.client = client;
-    const res = await fetch(`${target.origin}${HEALTH_PATH}`, init);
-    const ms = Date.now() - t0;
+    if (target.http.kind === "health" && client !== undefined) {
+      init.client = client;
+    }
+    const res = await fetch(target.http.url, init);
+    if (target.http.kind === "site") {
+      connectivityConfirmed = true;
+      siteFailures = 0;
+    }
+    const ms = elapsedMs(target.name, t0);
     try {
       await res.body?.cancel();
     } catch {
       // A received status establishes reachability when body cleanup fails.
     }
-    const status: Status = res.status !== 200 || ms > BAD_LATENCY_MS
+    const status: Status = target.http.kind === "site"
+      ? res.status >= 500
+        ? "bad"
+        : res.status >= 400 || ms > SITE_WARN_LATENCY_MS
+        ? "warn"
+        : "good"
+      : res.status !== 200 || ms > BAD_LATENCY_MS
       ? "bad"
       : ms > WARN_LATENCY_MS
       ? "warn"
       : "good";
     return {
       status,
-      detail: res.status === 200 ? `${ms} ms` : `HTTP ${res.status} · ${ms} ms`,
-      headline: res.status !== 200
+      detail: target.http.kind === "site" || res.status !== 200
+        ? `HTTP ${res.status} · ${ms} ms`
+        : `${ms} ms`,
+      headline: target.http.kind === "site" && res.status >= 400
         ? { text: `HTTP ${res.status}`, priority: 2, magnitude: res.status }
-        : ms > WARN_LATENCY_MS
+        : target.http.kind === "health" && res.status !== 200
+        ? { text: `HTTP ${res.status}`, priority: 2, magnitude: res.status }
+        : ms >
+            (target.http.kind === "site"
+              ? SITE_WARN_LATENCY_MS
+              : WARN_LATENCY_MS)
         ? { text: `${ms} ms`, priority: 1, magnitude: ms }
         : undefined,
     };
   } catch {
+    if (target.http.kind === "site") {
+      siteFailures++;
+      if (siteFailures < SITE_FAIL_THRESHOLD) {
+        return { status: "unknown", detail: "unreachable" };
+      }
+    }
     return { status: "bad", detail: "unreachable", down: true };
   }
+}
+
+async function checkTarget(
+  target: Target,
+  client: Deno.HttpClient | undefined,
+  invalidProxy: boolean,
+  proxy: URL | undefined,
+): Promise<TargetResult> {
+  const [http, reach] = await Promise.all([
+    checkHttp(target, client, invalidProxy),
+    checkReach(target, proxy),
+  ]);
+  return {
+    target,
+    http,
+    reach,
+    status: worstStatus([http.status, reach.status]),
+  };
 }
 
 function resultRow(result: TargetResult): string {
@@ -434,16 +525,24 @@ function view(results: readonly TargetResult[]): TileView {
   const visible = results.filter(
     (result) =>
       result.status !== "good" ||
-      (status !== "bad" && result.target.health !== null),
+      (status !== "bad" && result.target.http?.kind === "health"),
   );
   const rows = visible.map(resultRow).join("");
+  const listAttributes = visible.length > 1
+    ? ` aria-label="Production target details; scroll for more" title="Scroll for more details"`
+    : ` aria-label="Production target details"`;
+  const value = headline ??
+    `${
+      results.filter((result) => result.status === "good").length
+    }/${results.length} hosts up`;
   return {
     label: "production",
     status,
-    value: headline ?? `${results.length}/${results.length} hosts up`,
+    value,
+    valueLabel: value,
     extra: rows === ""
       ? undefined
-      : `<div style="display:grid;grid-template-columns:auto 1fr;gap:7px 10px;margin-top:11px;font-size:12px;line-height:1.35">${rows}</div>`,
+      : `<div class="tile-detail-list" role="region" tabindex="0"${listAttributes} style="display:grid;grid-template-columns:auto 1fr;gap:7px 10px;margin-top:11px;font-size:12px;line-height:1.35">${rows}</div>`,
   };
 }
 
@@ -451,6 +550,29 @@ export const prodUptime: Tile = {
   id: "prod-uptime",
   intervalMs: 30_000,
   async collect(ctx): Promise<TileView> {
+    const commonTools = siteTarget(
+      "common.tools",
+      ctx.env("COMMON_TOOLS_URL") ?? "https://common.tools/",
+    );
+    let commonToolsResult: TargetResult | undefined;
+    if (!connectivityConfirmed) {
+      commonToolsResult = await checkTarget(
+        commonTools,
+        undefined,
+        false,
+        undefined,
+      );
+      if (!connectivityConfirmed) {
+        return commonToolsResult.status === "bad"
+          ? view([commonToolsResult])
+          : {
+            label: "production",
+            status: "unknown",
+            value: "—",
+            sub: "waiting for connectivity",
+          };
+      }
+    }
     const targets = [
       healthTarget(
         "estuary",
@@ -506,18 +628,13 @@ export const prodUptime: Tile = {
     }
 
     try {
-      const results = await Promise.all(targets.map(async (target) => {
-        const [http, reach] = await Promise.all([
-          checkHttp(target, client, invalidProxy),
-          checkReach(target, parsedProxy),
-        ]);
-        return {
-          target,
-          http,
-          reach,
-          status: worstStatus([http.status, reach.status]),
-        };
-      }));
+      const results = await Promise.all([
+        commonToolsResult ??
+          checkTarget(commonTools, undefined, false, undefined),
+        ...targets.map((target) =>
+          checkTarget(target, client, invalidProxy, parsedProxy)
+        ),
+      ]);
       return view(results);
     } finally {
       client?.close();

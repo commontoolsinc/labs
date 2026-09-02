@@ -7,8 +7,10 @@
  * handed. The link or binding carrying the reference is never rewritten;
  * consumers resolve at their point of use.
  */
+
 import type { JSONSchemaObj } from "@commonfabric/api";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema } from "../src/builder/types.ts";

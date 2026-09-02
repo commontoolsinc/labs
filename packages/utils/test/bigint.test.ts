@@ -66,7 +66,11 @@ function referenceEncode(value: bigint): Uint8Array {
 }
 
 //
-// Fixtures, both main and reference
+// Fixtures, and the check that pins the oracle
+//
+// Both fixture sets — the main ones the per-function loops consume, and the
+// hand-written reference bytes — and then the block that pins
+// `referenceEncode()` against those bytes.
 //
 
 interface Fixture {
@@ -224,15 +228,12 @@ const referenceFixtures: readonly Fixture[] = [
   ),
 ];
 
-//
-// Tests to validate reference encoder
-//
-
-// A small set of explicit byte-level assertions that pin `referenceEncode`
-// against the spec. The rest of the suite trusts it as an oracle, so it
-// matters that these can't both be wrong in the same way.
 describe("`referenceEncode()` (test oracle)", () => {
   it("encodes all reference fixtures as expected", () => {
+    // A small set of explicit byte-level assertions that pin `referenceEncode`
+    // against the spec. The rest of the suite trusts it as an oracle, so it
+    // matters that these can't both be wrong in the same way.
+
     for (const { value, encoded, label } of referenceFixtures) {
       try {
         expect(referenceEncode(value)).toEqual(new Uint8Array(encoded));

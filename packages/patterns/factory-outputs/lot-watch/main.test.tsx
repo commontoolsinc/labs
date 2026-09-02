@@ -774,6 +774,67 @@ export default pattern(() => {
     );
   });
 
+  // --- Second roster change: revoke Alice, then curation is refused again
+  // Every scenario above writes the roster once, from empty. A roster write
+  // made while the roster already holds a role consumes a read of that role,
+  // so it exercises the read-side gate as well as the write-side floor, and
+  // the two have to name one atom for it to land. Toggling Alice off is that
+  // write, and `removeKnownVehicle` failing afterwards is how it is observed:
+  // the roster is not part of `LotWatchOutput`, so a role is visible only
+  // through the curation it gates.
+  const action_s8_toggle_alice_off = action(() => {
+    s8.togglePersonAdmin.send({ name: "Alice" });
+  });
+  const action_s8_remove_x_after_revoke = action(() => {
+    s8.removeKnownVehicle.send({ plateNumber: "X1", plateState: "CA" });
+  });
+  const assert_s8_revoke_blocks_curation = assert(() => {
+    const kvs = [...s8.knownVehicles];
+    return kvs.some((kv) =>
+      kv.plateNumber === "X1" && kv.category === "offender"
+    );
+  });
+
+  // --- S9: the one-click curator round trip
+  // `becomeCurator` and `stepDownCurator` reach the roster through the same
+  // bound handler as `togglePersonAdmin`, in a later turn than the action
+  // that sends them. Drive both and require the role to arrive and to leave:
+  // the round trip is two more roster changes, and the second reads a roster
+  // that already holds the role.
+  const s9 = LotWatch({ people: [{ name: "Bea", vehicles: [] }] });
+  const action_s9_capture = action(() => {
+    s9.captureSighting.send({
+      spotNumber: "1",
+      image: fakeImage as never,
+      description: "Z car",
+      plateNumber: "Z1",
+      plateState: "CA",
+      notes: "",
+    });
+  });
+  const action_s9_set_reporter = action(() => {
+    s9.setReporterName.send({ name: "Bea" });
+  });
+  const action_s9_become_curator = action(() => s9.becomeCurator.send());
+  const action_s9_mark_as_curator = action(() => {
+    s9.markVehicle.send({
+      plateNumber: "Z1",
+      plateState: "CA",
+      category: "offender",
+      org: "Local Butcher Shop",
+    });
+  });
+  const assert_s9_curator_may_curate = assert(() =>
+    [...s9.knownVehicles].some((kv) => kv.plateNumber === "Z1")
+  );
+  const action_s9_step_down = action(() => s9.stepDownCurator.send());
+  const action_s9_remove_after_step_down = action(() => {
+    s9.removeKnownVehicle.send({ plateNumber: "Z1", plateState: "CA" });
+  });
+  const assert_s9_step_down_blocks_curation = assert(() =>
+    [...s9.knownVehicles].some((kv) => kv.plateNumber === "Z1")
+  );
+
   // ============================================================
   // Test sequence
   // ============================================================
@@ -858,12 +919,27 @@ export default pattern(() => {
       { action: action_s8_open_assign_admin },
       { action: action_s8_assign_admin },
       { assertion: assert_s8_assign_succeeds },
+      // Second roster change: the revoke lands, so curation stops
+      { action: action_s8_toggle_alice_off },
+      { action: action_s8_remove_x_after_revoke },
+      { assertion: assert_s8_revoke_blocks_curation },
+
+      // S9: one-click curator round trip
+      { action: action_s9_capture },
+      { action: action_s9_set_reporter },
+      { action: action_s9_become_curator },
+      { action: action_s9_mark_as_curator },
+      { assertion: assert_s9_curator_may_curate },
+      { action: action_s9_step_down },
+      { action: action_s9_remove_after_step_down },
+      { assertion: assert_s9_step_down_blocks_curation },
     ],
     s1,
     s2,
     s3,
     s6,
     s8,
+    s9,
     // TODO(cfc-schema-ref): the CFC schema-ref resolver warns about
     // unsupported/unresolved $ref(s) in this pattern's schemas (logger "cfc",
     // fail-closed). Fix the schema(s), then drop this opt-out.

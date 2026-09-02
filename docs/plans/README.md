@@ -10,6 +10,12 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Acquiring skills from the open internet](external-skill-acquisition.md)
+  splits discovery from acquisition against a public skill registry: the
+  registry answers what exists, a digest-verified `.well-known` entry or a git
+  commit SHA answers for the bytes, the text loads by handle into a child the
+  chooser never reads, and a split-mint provenance mark records where it came
+  from without declassifying anything.
 - [`cf view` language and syntax coverage](cf-view-language-coverage.md)
   orders the remaining language, data, build, and configuration formats needed
   for honest coverage of the active organization repositories.
@@ -19,6 +25,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
   remaining owner decisions and blocked stages for exchange rules.
 - [CFC TypeScript authoring](cfc_typescript_authoring.md) sequences the
   TypeScript and JSX authoring surface for CFC metadata.
+- [`cf-code-editor` co-presence](cf-code-editor-copresence.md) adds an
+  ephemeral Cloudflare WebSocket plane for live participant names, carets, and
+  selections while Memory remains the sole authority for document contents.
 - [First-class serializable factories](first-class-serializable-factories.md)
   sequences the implementation of durable pattern, module, and handler
   factories.
@@ -49,6 +58,19 @@ a record: archive it to `docs/history/plans/` following the procedure in
   and packing rules, and the two things a subset breaks and this replaces:
   coverage becomes a trend rather than a gate, and a regression that only
   `main` catches is reported back to the change that introduced it.
+- [Memory `apply-op`](memory-apply-op.md) sequences the editor-neutral
+  collaborative-field substrate, the first CodeMirror codec and editor
+  integration, and the checkpoints and review gates required before a future
+  WordGard codec.
+- [Seed: pattern verbs as server calls](server-pattern-verbs-seed.md)
+  records the ruled 2026-08-24 serverize direction — upload-pattern /
+  instantiate / setsrc as server calls, client speculative-local with
+  server-state winning, and the thin-CLI end-state — for the arc that picks
+  it up.
+- [Seed: codeless graph rebuild](codeless-graph-rebuild-seed.md) records,
+  for a parked arc, the facts that make a running piece's graph durably
+  reconstructible from scheduler state and module-addressed code — the
+  recovery class the 2026-08-27 keyless close-out ruled out of contract.
 - [Server-primary execution v2](server-execution-v2.md) sequences the
   greenfield rebuild that executes the server-side-execution v2 spec, with
   per-phase task and success-criteria checkboxes. Its
@@ -59,19 +81,31 @@ a record: archive it to `docs/history/plans/` following the procedure in
   intent listener, the ruled double-dispatch implementation, the
   acceptance and the owner ruling set); it archives beside the stage-C
   closeout when that build lands.
+- [Revision-keyed schema memo](revision-keyed-schema-memo.md) designs a
+  cross-evaluation, per-document memo of schema-walk computation on the
+  memory server, keyed by each document's revision so validity needs no
+  invalidation machinery, sitting under the query evaluation cache to make
+  post-commit and cross-shape evaluations cost what changed instead of the
+  whole corpus. Carries the measured baseline and the staged path to a
+  per-revision snapshot cache.
 - [Retention and CFC execution provenance](retention-and-provenance.md)
   sequences how long an invocation record is kept and what the runtime knows
   about who caused it — the `AgentActor` mint, trusted ingress, and metadata
   confidentiality. Gated on a CFC review that has not happened.
 - [CFC runner implementation](runner_cfc_implementation.md) defines the
   commit-boundary enforcement workstreams and rollout.
+- [Finishing the piece source lifecycle](piece-source-lifecycle-completion.md)
+  compares the lifecycle spec against the repository and orders the remainder
+  as five pull requests in two tracks — what a revision records, and where a
+  space lives.
 - [Bulk piece operations](piece-bulk-operations.md) designs retargeting,
   repairing, and rolling back many pieces as one reviewable, resumable
   operation over a shared plan — with batching as an execution strategy
   underneath rather than the subject.
-- [Topics migration rehearsal](topics-migration-rehearsal.md) is the concrete,
-  unexecuted script for `setsrc`-ing the Estuary Topics board against a clone
-  and then live.
+- [The Topics verb surface](topics-verb-surface.md) sequences how the Topics
+  board and topic grow their verbs without breaking the pieces already holding
+  data: the shape the board demands of a stored topic, the one rehearsed break
+  that narrowing it needs, and the items waiting on platform work.
 - [`cf space clone` rehearsal](space-clone-rehearsal.md) records the design for
   rehearsal-grade copies of populated spaces. The tooling has shipped (`cf
   space`, `cf inspect churn`); the operating procedure lives in
@@ -123,6 +157,12 @@ a record: archive it to `docs/history/plans/` following the procedure in
   do one job under two names. Separate from the read-layer plan because it
   renames rather than adds, so its risk is what breaks for a caller who already
   learned the current spelling.
+- [Shuttle — a place-aware fabric shell](shuttle/README.md) is the working design
+  state for an interactive terminal tool: a REPL whose prompt carries a
+  mutable current place — the context that fills in the omitted levels of the
+  fabric's right-anchored references — plus full-screen live views, for
+  inspecting and editing space and piece state. Decisions so far and open
+  questions; nothing is built yet.
 - [Shell completion coverage](cli-completion-coverage.md) sequences the work
   that makes `cf completion` answer correctly across the surface it claims and
   reach the verb surface it does not: the slots that offer a wrong candidate,

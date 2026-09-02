@@ -1,5 +1,17 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import {
+  autocompletion,
+  CompletionContext,
+  type CompletionResult,
+  completionStatus,
+} from "@codemirror/autocomplete";
+import { EditorState, type TransactionSpec } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
+import { NAME } from "@commonfabric/runner/shared";
+import { type CellHandle, type CellRef } from "@commonfabric/runtime-client";
+import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
+import type { Mentionable, MentionableArray } from "../../core/mentionable.ts";
 import { CFCodeEditor, MimeType } from "./index.ts";
 
 describe("CFCodeEditor", () => {
@@ -19,6 +31,7 @@ describe("CFCodeEditor", () => {
     expect(element.timingDelay).toBe(500);
     expect(element.autofocus).toBe(false);
     expect(element.cursorPosition).toBe("start");
+    expect(element.collaborative).toBe(false);
     // No reference map, so mentions are minted as wiki-links.
     expect(element.references).toBe(null);
     // No extra hosts; a pasted page URL is judged against this document's own.
@@ -185,6 +198,7 @@ describe("CFCodeEditor reference-map housekeeping", () => {
     it("returns the map's keys and the document's together", () => {
       // A key pasted into the text is spoken for even before the map has it,
       // and minting over it would point two mentions at one entry.
+
       const { self } = editorThis(`[A][${OTHER}]`, { [KEY]: {} });
       expect(call("_takenRefKeys", self)).toEqual(new Set([KEY, OTHER]));
     });
@@ -201,6 +215,7 @@ describe("CFCodeEditor reference-map housekeeping", () => {
     it("keeps a key it never saw at load", () => {
       // Another editor added it while this one was open; this editor has no
       // reason to believe it was ever in its document.
+
       const t = editorThis("no tokens left", { [KEY]: {} });
       call("_collectUnreferencedRefEntries", t.self);
       expect(t.deleted).toEqual([]);
@@ -216,6 +231,7 @@ describe("CFCodeEditor reference-map housekeeping", () => {
     it("collects nothing against a document that has not loaded", () => {
       // An empty document names nothing, which is not the same as a document
       // that names nothing — reading it as the latter empties the map.
+
       const t = editorThis("", { [KEY]: {} });
       (t.self._refKeysAtLoad as Set<string>).add(KEY);
       call("_collectUnreferencedRefEntries", t.self);
@@ -226,6 +242,7 @@ describe("CFCodeEditor reference-map housekeeping", () => {
       // The deletion that made the entry collectable is still in the
       // debounce; losing it after the entry is gone leaves a token with no
       // destination in the durable document.
+
       const t = editorThis("no tokens left", { [KEY]: {} });
       (t.self._refKeysAtLoad as Set<string>).add(KEY);
       call("_collectUnreferencedRefEntries", t.self);
@@ -309,6 +326,7 @@ describe("CFCodeEditor pasted-mention decision", () => {
     // name a piece. Preventing the paste and then declining swallowed it.
     // The space is a DID on purpose: a named space is refused one check
     // earlier, so this would not reach the branch under test.
+
     const result = paste(
       pasteThis(),
       `https://fabric.example/${SPACE}/my-note`,
@@ -338,5 +356,328 @@ describe("CFCodeEditor pasted-mention decision", () => {
     const result = paste(fakeThis, `/of:fid1:${HASH}`);
     expect(result.handled).toBe(false);
     expect(result.prevented).toBe(false);
+  });
+});
+
+describe("CFCodeEditor mention-piece resolution", () => {
+  // The private resolution surface under test. `piece`-bearing entries are
+  // index rows standing for their piece; entries without one ARE the piece.
+  // A row's piece is stored as a LINK, and its value crosses the client
+  // boundary as an empty object — so the fixtures store raw `$link`
+  // sigils, and the mock network's resolveAsCell follows them, exactly as
+  // the runtime does. Nothing here reaches a piece through a value.
+  type ResolutionInternals = {
+    mentionable: CellHandle<MentionableArray> | null;
+    mentioned?: CellHandle<MentionableArray>;
+    pattern: CellHandle<string>;
+    _editorView: EditorView | undefined;
+    _resolvePieceIds(): Promise<void>;
+    _resolvedPieceCells: Map<number, CellHandle<Mentionable>>;
+    _backlinkCompletionAwaitingResolution: boolean;
+    _getPieceId(index: number): string;
+    findPieceById(id: string): CellHandle<Mentionable> | null;
+    getFilteredMentionable(query: string): Array<[unknown, number]>;
+    _completeBacklinkQuery(view: EditorView, text: string): void;
+    createBacklinkCompletionSource(): (
+      context: CompletionContext,
+    ) => CompletionResult | null;
+    willUpdate(changedProperties: Map<string, unknown>): void;
+  };
+
+  const internals = (element: CFCodeEditor): ResolutionInternals =>
+    element as unknown as ResolutionInternals;
+
+  const pieceLink = {
+    "$link": { id: "of:target-piece", path: [] },
+  };
+
+  /** Creates the stateful part of an `EditorView` used by completion. */
+  function createBacklinkView(
+    source: (context: CompletionContext) => CompletionResult | null,
+    doc: string,
+    hasFocus = true,
+  ) {
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: doc.length },
+      extensions: [autocompletion({ override: [source] })],
+    });
+    return {
+      state,
+      hasFocus,
+      dispatch(spec: TransactionSpec) {
+        this.state = this.state.update(spec).state;
+      },
+    };
+  }
+
+  it("resolves a piece-bearing entry to its piece", async () => {
+    const element = internals(new CFCodeEditor());
+    const target = createMockCellHandle(
+      { title: "Target" },
+      { id: "of:target-piece" } as Partial<CellRef>,
+    );
+    element.mentionable = createMockCellHandle([
+      { [NAME]: "Row", title: "Row", piece: pieceLink },
+    ]) as unknown as CellHandle<MentionableArray>;
+
+    await element._resolvePieceIds();
+
+    const resolved = element._resolvedPieceCells.get(0);
+    expect(resolved?.id()).toBe(target.id());
+  });
+
+  it("resolves an entry without a piece to the entry itself", async () => {
+    const element = internals(new CFCodeEditor());
+    const list = createMockCellHandle([{ [NAME]: "Direct" }]);
+    element.mentionable = list as unknown as CellHandle<MentionableArray>;
+
+    await element._resolvePieceIds();
+
+    const resolved = element._resolvedPieceCells.get(0);
+    expect(resolved?.id()).toBe(list.key(0).id());
+  });
+
+  it("withholds an index row until its piece resolves", async () => {
+    // Before resolution a row has no usable identity — its sub-cell names
+    // the row, and no id beats a wrong one — so the completion surfaces
+    // exclude it and its id is empty. Resolution restores all three.
+    const element = internals(new CFCodeEditor());
+    const target = createMockCellHandle(
+      { title: "Target" },
+      { id: "of:target-piece" } as Partial<CellRef>,
+    );
+    element.mentionable = createMockCellHandle([
+      { [NAME]: "Row", title: "Row", piece: pieceLink },
+    ]) as unknown as CellHandle<MentionableArray>;
+
+    expect(element.getFilteredMentionable("")).toEqual([]);
+    expect(element._getPieceId(0)).toBe("");
+
+    await element._resolvePieceIds();
+
+    expect(element.getFilteredMentionable("").length).toBe(1);
+    const found = element.findPieceById(element._getPieceId(0));
+    expect(found?.id()).toBe(target.id());
+  });
+
+  it("defers `$mentioned` reconciliation until index rows resolve", async () => {
+    const element = internals(new CFCodeEditor());
+    const list = createMockCellHandle([
+      { [NAME]: "Row", title: "Row", piece: pieceLink },
+    ]);
+    const release = Promise.withResolvers<void>();
+    const realKey = list.key.bind(list);
+    list.key = ((key: PropertyKey) => {
+      const row = realKey(key as never);
+      if (String(key) === "0") {
+        const realRowKey = row.key.bind(row);
+        row.key = ((rowKey: PropertyKey) => {
+          const destination = realRowKey(rowKey as never);
+          if (String(rowKey) === "piece") {
+            const realResolve = destination.resolveAsCell.bind(destination);
+            destination.resolveAsCell = (async () => {
+              await release.promise;
+              return await realResolve();
+            }) as typeof destination.resolveAsCell;
+          }
+          return destination;
+        }) as unknown as typeof row.key;
+      }
+      return row;
+    }) as typeof list.key;
+    Object.defineProperty(list, "asSchema", { value: () => list });
+
+    const mentioned = createMockCellHandle<MentionableArray>([], {
+      id: "of:mentioned" as CellRef["id"],
+    });
+    let writes = 0;
+    let written: MentionableArray | undefined;
+    const realSet = mentioned.set.bind(mentioned);
+    Object.defineProperty(mentioned, "set", {
+      value: (value: MentionableArray) => {
+        writes++;
+        written = value;
+        return realSet(value);
+      },
+    });
+    element.mentionable = list as unknown as CellHandle<MentionableArray>;
+    element.mentioned = mentioned;
+    Object.defineProperty(element, "getValue", {
+      value: () => "[[Row (target-piece)]]",
+    });
+    const resolutions: Promise<void>[] = [];
+    const resolvePieceIds = element._resolvePieceIds.bind(element);
+    Object.defineProperty(element, "_resolvePieceIds", {
+      value: () => {
+        const resolution = resolvePieceIds();
+        resolutions.push(resolution);
+        return resolution;
+      },
+    });
+
+    element.willUpdate(new Map([["mentionable", null]]));
+    expect(writes).toBe(0);
+
+    release.resolve();
+    await Promise.all(resolutions);
+
+    expect(writes).toBe(1);
+    expect((written?.[0] as unknown as CellHandle<Mentionable>).id()).toBe(
+      "of:target-piece",
+    );
+  });
+
+  it("does not create a piece for an exact unresolved index row", async () => {
+    const element = internals(new CFCodeEditor());
+    element.mentionable = createMockCellHandle([
+      { [NAME]: "Existing Topic", title: "Existing Topic", piece: pieceLink },
+    ]) as unknown as CellHandle<MentionableArray>;
+    element.pattern = createMockCellHandle("pattern");
+    let creations = 0;
+    Object.defineProperty(element, "createBacklinkFromPattern", {
+      value: () => {
+        creations++;
+        return Promise.resolve();
+      },
+    });
+    const source = element.createBacklinkCompletionSource();
+    const view = createBacklinkView(source, "[[Existing Topic");
+    element._editorView = view as unknown as EditorView;
+
+    element._completeBacklinkQuery(
+      view as unknown as EditorView,
+      "Existing Topic",
+    );
+
+    expect(creations).toBe(0);
+    expect(view.state.doc.toString()).toBe("[[Existing Topic");
+    expect(element._backlinkCompletionAwaitingResolution).toBe(true);
+    await element._resolvePieceIds();
+  });
+
+  it("creates a piece when no exact row is present", () => {
+    const element = internals(new CFCodeEditor());
+    element.mentionable = createMockCellHandle<MentionableArray>([]);
+    element.pattern = createMockCellHandle("pattern");
+    let creation: [string, boolean] | undefined;
+    Object.defineProperty(element, "createBacklinkFromPattern", {
+      value: (text: string, navigate: boolean) => {
+        creation = [text, navigate];
+        return Promise.resolve();
+      },
+    });
+    const source = element.createBacklinkCompletionSource();
+    const view = createBacklinkView(source, "[[New Topic");
+
+    element._completeBacklinkQuery(
+      view as unknown as EditorView,
+      "New Topic",
+    );
+
+    expect(creation).toEqual(["New Topic", false]);
+    expect(view.state.doc.toString()).toBe("[[New Topic]]");
+  });
+
+  it("creates a piece when an unresolved row is not an exact match", () => {
+    const element = internals(new CFCodeEditor());
+    element.mentionable = createMockCellHandle([
+      { [NAME]: "Existing Topic", title: "Existing Topic", piece: pieceLink },
+    ]) as unknown as CellHandle<MentionableArray>;
+    element.pattern = createMockCellHandle("pattern");
+    let creation: [string, boolean] | undefined;
+    Object.defineProperty(element, "createBacklinkFromPattern", {
+      value: (text: string, navigate: boolean) => {
+        creation = [text, navigate];
+        return Promise.resolve();
+      },
+    });
+    const source = element.createBacklinkCompletionSource();
+    const view = createBacklinkView(source, "[[Top");
+
+    element._completeBacklinkQuery(
+      view as unknown as EditorView,
+      "Top",
+    );
+
+    expect(creation).toEqual(["Top", false]);
+    expect(view.state.doc.toString()).toBe("[[Top]]");
+  });
+
+  it("restarts a matching backlink completion after resolution", async () => {
+    const element = internals(new CFCodeEditor());
+    element.mentionable = createMockCellHandle([
+      { [NAME]: "Row", title: "Row", piece: pieceLink },
+    ]) as unknown as CellHandle<MentionableArray>;
+    const source = element.createBacklinkCompletionSource();
+    const view = createBacklinkView(source, "[[Ro");
+    element._editorView = view as unknown as EditorView;
+
+    const initial = source(new CompletionContext(view.state, 4, true));
+    expect(initial?.options).toEqual([]);
+    expect(completionStatus(view.state)).toBe(null);
+
+    await element._resolvePieceIds();
+
+    expect(completionStatus(view.state)).toBe("pending");
+    const refreshed = source(new CompletionContext(view.state, 4, true));
+    expect(refreshed?.options.length).toBe(1);
+  });
+
+  it("does not restart a backlink completion after focus leaves", async () => {
+    const element = internals(new CFCodeEditor());
+    element.mentionable = createMockCellHandle([
+      { [NAME]: "Row", title: "Row", piece: pieceLink },
+    ]) as unknown as CellHandle<MentionableArray>;
+    const source = element.createBacklinkCompletionSource();
+    const view = createBacklinkView(source, "[[Ro", false);
+    element._editorView = view as unknown as EditorView;
+
+    const initial = source(new CompletionContext(view.state, 4, true));
+    expect(initial?.options).toEqual([]);
+
+    await element._resolvePieceIds();
+
+    expect(completionStatus(view.state)).toBe(null);
+  });
+
+  it("keeps the newer resolution when an older pass finishes late", async () => {
+    // The mentionable HANDLE stays identical when its contents change, so an
+    // older pass that resolves slowly can finish after a newer one. The
+    // slow pass is gated open only once the fast pass has published; what
+    // the caches hold at the end decides the race. Plain entries, so the
+    // gate can ride the sub-cell the pass resolves.
+    const element = internals(new CFCodeEditor());
+    const list = createMockCellHandle([{ [NAME]: "Slow" }], {
+      id: "of:race-list" as CellRef["id"],
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let armed = true;
+    const realKey = list.key.bind(list);
+    list.key = ((k: PropertyKey) => {
+      const child = realKey(k as never);
+      if (armed && String(k) === "0") {
+        const realResolve = child.resolveAsCell.bind(child);
+        child.resolveAsCell = (async () => {
+          await gate;
+          return await realResolve();
+        }) as typeof child.resolveAsCell;
+      }
+      return child;
+    }) as typeof list.key;
+
+    element.mentionable = list as unknown as CellHandle<MentionableArray>;
+    const older = element._resolvePieceIds();
+
+    armed = false;
+    list.set([{ [NAME]: "Fast" }]);
+    await element._resolvePieceIds();
+    const fastId = element._resolvedPieceCells.get(0)?.id();
+    expect(fastId).toBeDefined();
+
+    release();
+    await older;
+    expect(element._resolvedPieceCells.get(0)?.id()).toBe(fastId);
   });
 });

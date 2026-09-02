@@ -77,7 +77,7 @@ export class MergeablePushValidationTransformer extends HelpersOnlyTransformer {
         );
         if (callback && !checked.has(callback)) {
           checked.add(callback);
-          this.checkCallback(callback, context);
+          this.#checkCallback(callback, context);
         }
       }
       ts.forEachChild(node, visit);
@@ -87,7 +87,7 @@ export class MergeablePushValidationTransformer extends HelpersOnlyTransformer {
     return context.sourceFile;
   }
 
-  private checkCallback(
+  #checkCallback(
     callback: ts.ArrowFunction | ts.FunctionExpression,
     context: TransformationContext,
   ): void {

@@ -10,6 +10,7 @@ describe("isCodecTypeTag", () => {
     // The constants are the definition of the syntax, so a predicate that
     // rejected one of them would be wrong whatever it said about anything
     // else.
+
     for (const tag of Object.values(CODEC_TYPE_TAGS)) {
       expect(isCodecTypeTag(tag)).toBe(true);
     }
@@ -18,6 +19,7 @@ describe("isCodecTypeTag", () => {
   it("returns `false` for every tag in `CODEC_META_TAGS`", () => {
     // A meta-tag is a structural marker its format handles itself, and is
     // outside this syntax by design.
+
     for (const tag of Object.values(CODEC_META_TAGS)) {
       expect(isCodecTypeTag(tag)).toBe(false);
     }
@@ -25,6 +27,7 @@ describe("isCodecTypeTag", () => {
 
   it("returns `true` for a tag naming a type nothing here defines", () => {
     // Syntax, not recognition: this is what an `UnknownValue` is made of.
+
     expect(isCodecTypeTag("FutureType@2")).toBe(true);
     expect(isCodecTypeTag("X@1")).toBe(true);
     expect(isCodecTypeTag("Abc123@1234")).toBe(true);
@@ -57,6 +60,7 @@ describe("isCodecTypeTag", () => {
     // states, and this is what holds every format to it. The case decides
     // whether an unclaimed tag round-trips as an `UnknownValue` or is refused
     // as a malformation, so a reader cannot be left to infer it.
+
     expect(isCodecTypeTag("bytes@1")).toBe(false);
     expect(isCodecTypeTag("lowerCamel@1")).toBe(false);
     expect(isCodecTypeTag("link@1")).toBe(false);
@@ -67,6 +71,7 @@ describe("isCodecTypeTag", () => {
     // and a Unicode-property spelling of the same syntax would not honor. A
     // tag crosses between systems, so the set of names it can carry cannot
     // depend on which alphabet a decoder reads it with.
+
     expect(isCodecTypeTag("\u00c9clair@1")).toBe(false);
     expect(isCodecTypeTag("Caf\u00e9@1")).toBe(false);
     expect(isCodecTypeTag("\u0411ytes@1")).toBe(false);
@@ -77,6 +82,7 @@ describe("isCodecTypeTag", () => {
     // tag does not make the string one. The newline pair is the only case in
     // this file that catches a stray `m` flag; an unanchored match would let
     // all four through.
+
     expect(isCodecTypeTag(" Bytes@1")).toBe(false);
     expect(isCodecTypeTag("Bytes@1 ")).toBe(false);
     expect(isCodecTypeTag("\nBytes@1")).toBe(false);

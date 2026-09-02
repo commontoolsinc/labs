@@ -22,7 +22,11 @@ class RecordingLoopbackSessionFactory implements SessionFactory {
     actualSessionId: string;
   }> = [];
 
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  readonly #server: MemoryV2Server.Server;
+
+  constructor(server: MemoryV2Server.Server) {
+    this.#server = server;
+  }
 
   async create(
     space: MemorySpace,
@@ -31,7 +35,7 @@ class RecordingLoopbackSessionFactory implements SessionFactory {
   ) {
     this.principals.push(signer?.did() ?? "<anonymous>");
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(
       space,
@@ -444,12 +448,15 @@ Deno.test("storage ACL bootstrap leaves populated named spaces public", async ()
   }
 });
 
+//
 // OW31 (RULED 2026-08-18; verification-coverage.md): a PROVISIONED
 // space's genesis is signed by the space's own keys and names the ACTING
 // USER as OWNER in that same first commit — the serving identity appears
 // nowhere in the ACL. The client shape (no owner supplied → the signer,
 // i.e. the active user) is pinned byte-for-byte by the named-space tests
 // above.
+//
+
 Deno.test("storage ACL bootstrap names the supplied genesis owner, not the signer (OW31)", async () => {
   const service = await Identity.fromPassphrase("acl bootstrap ow31 service");
   const alice = await Identity.fromPassphrase("acl bootstrap ow31 alice");

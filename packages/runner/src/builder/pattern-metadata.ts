@@ -130,9 +130,12 @@ export function resolveOriginal<T>(value: T): T {
  *
  * - trust propagates EAGERLY (sound: builders brand their artifacts at
  *   creation time, before any copy can be made);
- * - the entry ref propagates eagerly when already known, but lookups still
- *   walk `derivedFrom` lazily ({@link getArtifactEntryRef}) because refs are
- *   indexed only post-evaluation — AFTER build-time copies were made.
+ * - a REAL entry ref propagates eagerly when already known — a session
+ *   `keyless:` ref never does (pinning the mint onto the copy would shadow
+ *   the root's later real promotion; see the guard in the body) — and
+ *   lookups still walk `derivedFrom` lazily ({@link getArtifactEntryRef})
+ *   because refs are indexed only post-evaluation — AFTER build-time
+ *   copies were made.
  *
  * Only runner-owned copy sites may call this; it is the sole way a copy can
  * inherit trust, so forged values (which are never passed here with a trusted
@@ -146,22 +149,65 @@ export function noteDerivedCopy(copy: unknown, original: unknown): void {
   derivedFrom.set(c, root);
   if (trustedPatterns.has(root)) trustedPatterns.add(c);
   if (trustedBuilderArtifacts().has(root)) trustedBuilderArtifacts().add(c);
+  // Eager ref propagation is an optimization only — the lazy root walk in
+  // `getArtifactEntryRef` serves a copy without an own entry — and it must
+  // never pin a SESSION-synthetic ref onto the copy: `getArtifactEntryRef`
+  // consults the exact object first, so a keyless ref copied here would
+  // shadow the root's later REAL promotion (module indexing after
+  // build-time copies) for this copy forever. Real refs are immutable
+  // facts and safe to pin; keyless ones stay root-resolved.
   const ref = entryRefByValue.get(root);
-  if (ref && !entryRefByValue.has(c)) entryRefByValue.set(c, ref);
+  if (
+    ref && !entryRefByValue.has(c) && !isKeylessPatternIdentity(ref.identity)
+  ) {
+    entryRefByValue.set(c, ref);
+  }
+}
+
+/**
+ * Prefix of a session-synthetic keyless pattern identity — minted by
+ * `PatternManager.ensureKeylessPatternIdentity` for a hand-built pattern with
+ * no content-addressed entry ref. Session-only by construction (no
+ * source/compiled closure exists behind it), so such an identity must never
+ * be written into durable state (L3(a), RULED 2026-08-27).
+ */
+export const KEYLESS_PATTERN_IDENTITY_PREFIX = "keyless:";
+
+/**
+ * Whether `identity` is a session-synthetic keyless pointer rather than a
+ * durable content-addressed artifact identity. A fresh runtime can never load
+ * a keyless pointer.
+ */
+export function isKeylessPatternIdentity(identity: string): boolean {
+  return identity.startsWith(KEYLESS_PATTERN_IDENTITY_PREFIX);
 }
 
 /**
  * Associate a content-addressed `{ identity, symbol }` entry ref with a live
  * builder artifact. First write wins (an artifact may be reachable under
  * several symbols; the first registration is canonical, matching the
- * pre-existing `valueToEntryRef` semantics).
+ * pre-existing `valueToEntryRef` semantics) — with one deliberate exception:
+ * a REAL (content-addressed) ref replaces a session-synthetic `keyless:`
+ * one. The keyless mint can run before a module's post-evaluation indexing
+ * ("refs are indexed only post-evaluation — AFTER build-time copies were
+ * made"), and letting the mint win would permanently shadow the value's real,
+ * loadable identity behind a pointer no other session can resolve.
  */
 export function setArtifactEntryRef(
   value: unknown,
   ref: { identity: string; symbol: string },
 ): void {
   const key = asKey(value);
-  if (key && !entryRefByValue.has(key)) entryRefByValue.set(key, ref);
+  if (!key) return;
+  const existing = entryRefByValue.get(key);
+  if (
+    existing !== undefined &&
+    !(isKeylessPatternIdentity(existing.identity) &&
+      !isKeylessPatternIdentity(ref.identity))
+  ) {
+    return;
+  }
+  entryRefByValue.set(key, ref);
 }
 
 /**
@@ -176,6 +222,41 @@ export function getArtifactEntryRef(
   if (!key) return undefined;
   return entryRefByValue.get(key) ??
     entryRefByValue.get(resolveOriginal(key) as object);
+}
+
+/**
+ * The first REAL (non-keyless) content-addressed entry ref reachable from
+ * `value` along its derivation chain — the value itself, then each recorded
+ * `derivedFrom` step toward the root original ("walk up as many steps as
+ * needed"). This is the module-addressed PRODUCER identity of a runtime-built
+ * pattern value: the keyless population is values whose producing code is
+ * cf:module-addressed (CT-1644/CT-1655 hoisting), and a derived copy's chain
+ * ends at that addressable original.
+ *
+ * Returns undefined when no step carries a real ref — a from-scratch
+ * hand-built value with no recorded producer link (frames carry the building
+ * code's `implementationIdentity`, but nothing records it per-artifact, and a
+ * lift module's identity would not be a loadable PATTERN identity for the
+ * value anyway). Callers must treat that as "no durable convergence
+ * possible", never substitute the keyless ref.
+ */
+export function resolveProducerEntryRef(
+  value: unknown,
+): { identity: string; symbol: string } | undefined {
+  let current = asKey(value);
+  if (!current) return undefined;
+  const seen = new Set<object>();
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const ref = entryRefByValue.get(current);
+    if (ref !== undefined && !isKeylessPatternIdentity(ref.identity)) {
+      return ref;
+    }
+    const next = derivedFrom.get(current);
+    if (!next || next === current) break;
+    current = next;
+  }
+  return undefined;
 }
 
 // The authored file a pattern was defined in, per live builder artifact.
@@ -201,7 +282,7 @@ const sourcePathByValue = new WeakMap<object, string>();
  * answer that is useful (it is the file a reader must edit, and the only one
  * whose default export is this artifact), and it comes LAST because the evaluate
  * loop walks `graph.specifierByPath` importer-first. First-write-wins would name
- * the barrel. `Engine.recordModuleProvenance` solves the same re-export
+ * the barrel. `Engine.#recordModuleProvenance` solves the same re-export
  * ambiguity explicitly; here the traversal order supplies it, so a change to
  * that order has to preserve this.
  *

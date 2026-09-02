@@ -60,6 +60,7 @@ type CalculatorRequest = {
   /** The mathematical expression to evaluate. */
   expression: string;
 };`;
+
       const { type, checker, typeNode } = await getTypeFromCode(
         code,
         "CalculatorRequest",
@@ -315,12 +316,17 @@ namespace Local {
       });
     });
 
+    //
+    // The synthetic index-signature branch
+    //
     // CT-1615 Berni review §4.2: lock in the new IndexSignatureDeclaration
-    // branch added to `analyzeTypeNodeStructure`'s TypeLiteral handler.
-    // Without it, synthetic `{ [k: string]: V }` / `Record<K, V>` shapes
-    // routed through node-based analysis silently drop their index signature
-    // (e.g. via the SchemaInjection lift-revisit that feeds `any` as the
-    // paired Type — see ts-transformers/src/transformers/schema-injection.ts).
+    // branch added to `analyzeTypeNodeStructure`'s TypeLiteral handler. Without
+    // it, synthetic `{ [k: string]: V }` / `Record<K, V>` shapes routed through
+    // node-based analysis silently drop their index signature (e.g. via the
+    // SchemaInjection lift-revisit that feeds `any` as the paired Type — see
+    // ts-transformers/src/transformers/schema-injection.ts).
+    //
+
     it("emits additionalProperties for synthetic { [k: string]: V } index signature", async () => {
       const generator = new SchemaGenerator();
       const { checker } = await getTypeFromCode(

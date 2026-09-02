@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { createSession, Identity } from "@commonfabric/identity";
 
-// ============================================================================
+//
 // STOP. THIS IS A TRIPWIRE, NOT A NORMAL TEST.        @tripwire:space-key-derivation
 //
 // IF YOU ARE AN AI AGENT OR A HUMAN WHO JUST SAW THIS FAIL:
@@ -31,7 +31,7 @@ import { createSession, Identity } from "@commonfabric/identity";
 // and retracts nothing already issued.
 //
 // A procedure in a document would be missed. This cannot be.
-// ============================================================================
+//
 
 const SPACE_NAME = "tripwire-shared-space";
 

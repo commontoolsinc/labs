@@ -2,13 +2,14 @@ import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { detectCallKind } from "../ast/call-kind.ts";
 import { visitEachChildWithJsx } from "../ast/utils.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 
 /**
  * Verb listing marks, producer 1 (verb contract WS-F): a stream whose handler
  * binds session-scoped state is wrapper-tier — a UI affordance outside the
  * headless contract — so its RESULT-schema property gains the annotation-class
  * mark `tier: "wrapper"`. `cf piece verbs` hides marked verbs by default;
- * everything stays callable and `cf piece call` never consults the mark.
+ * everything stays callable and `cf call` never consults the mark.
  *
  * Runs AFTER SchemaGeneratorTransformer and BEFORE ReactiveVariableFor, on
  * purpose: at this point builder hoisting has already lifted every handler
@@ -164,15 +165,9 @@ function staticPropertyName(name: ts.PropertyName): string | undefined {
   return undefined;
 }
 
-/** Strip parentheses and `as const` / `satisfies` wrappers. */
+/** Strip the transparent wrapper set to reach the expression a tier reads. */
 function unwrapExpr(expr: ts.Expression): ts.Expression {
-  let current = expr;
-  while (true) {
-    if (ts.isParenthesizedExpression(current)) current = current.expression;
-    else if (ts.isAsExpression(current)) current = current.expression;
-    else if (ts.isSatisfiesExpression(current)) current = current.expression;
-    else return current;
-  }
+  return unwrapExpression(expr);
 }
 
 function callbackBodyStatements(

@@ -370,16 +370,16 @@ Deploy the test pattern and use CLI commands to inspect state:
 deno task cf piece new ./main.test.tsx
 
 # Get the piece ID from the output, then inspect
-deno task cf piece inspect --piece <PIECE_ID>
+deno task cf piece inspect --cell <PIECE_ID>
 
 # Get specific values
-deno task cf get subject/items --piece <PIECE_ID>
+deno task cf get subject/items --cell <PIECE_ID>
 
 # Step through manually (the reserved key is the literal `$TESTS`, quoted so
 # the shell does not expand it)
-deno task cf call --piece <PIECE_ID> '$TESTS/0/action'
-deno task cf piece step --piece <PIECE_ID>
-deno task cf get '$TESTS/1/assertion' --piece <PIECE_ID>
+deno task cf call --cell <PIECE_ID> '$TESTS/0/action'
+deno task cf piece step --cell <PIECE_ID>
+deno task cf get '$TESTS/1/assertion' --cell <PIECE_ID>
 ```
 
 This diagnostic command deliberately deploys the test pattern as the executable
@@ -406,6 +406,44 @@ return {
 ```
 
 ## Common Patterns
+
+### Seeding Stored State
+
+A scenario that needs the pattern under test to start with data already in it
+passes that data as an argument. A literal is fine. A `computed()` is not, for
+any input the pattern writes: an argument is a link, so the pattern's own state
+would live in the derivation's output cell, and the next run of the derivation
+replaces everything the pattern has written since. The rule and its read-only
+counterpart are in
+[Pattern Composition](../patterns/composition.md#an-input-the-sub-pattern-writes-takes-a-cell).
+
+Timestamps are where this bites, because a test cannot read the ambient clock
+from a pattern body and reaches for a `#now` wish instead. The interval form
+advances on a wall-clock boundary partway through a long run, so a seed derived
+from it re-runs then, and the pattern's state goes with it — which shows up as
+a test that passes on a fast machine and loses one step's worth of writes on a
+loaded one.
+
+Give such an input a cell of its own and fill it from an action. An action is a
+handler, so it can read the clock's current value and write a fixed number:
+
+```tsx
+// Shown inside a pattern body.
+const nowCell = wish<number>({ query: "#now/300" });
+const glazes = Writable.of<{ name: string; bakedAt: number }[]>([]);
+const tray = DonutTray({ glazes });
+
+const action_seed_glazes = action(() => {
+  const now = nowCell.result;
+  if (now === undefined) return;
+  glazes.set([{ name: "maple", bakedAt: now - 86_400_000 }]);
+});
+```
+
+Run that action as the first step, and assert the seed landed before anything
+depends on it — reading the seeded value back, rather than only its absence
+from a filtered view, so an unresolved wish fails the test instead of passing
+it for the wrong reason.
 
 ### Testing Initial State
 

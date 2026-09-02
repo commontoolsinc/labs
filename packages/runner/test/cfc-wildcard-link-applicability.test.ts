@@ -9,22 +9,24 @@ import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
-// Regression guard for wildcard policy applicability on unresolvable links
-// (audit S17).
-//
-// When a written value is a link whose target value cannot be resolved, the
-// policy's value condition cannot be evaluated against real data. The pre-fix
-// code fell back to comparing the policy schema against the link's
-// author-embedded schema, so an attacker could embed a mismatching schema to
-// make the policy entry "not apply" and skip its writeAuthorizedBy /
-// requiredIntegrity / uiContract checks. Unresolvable links must fail closed:
-// the entry applies.
-//
-// Driving through a full write is impractical because the Cell write path
-// collapses an unresolvable link before it reaches the verifier, so the link
-// only reaches this matcher when verifying a pre-existing stored link whose
-// target is not present in the transaction. This exercises that branch directly.
 describe("CFC wildcard policy applicability on unresolvable links", () => {
+  // Regression guard for wildcard policy applicability on unresolvable links
+  // (audit S17).
+  //
+  // When a written value is a link whose target value cannot be resolved, the
+  // policy's value condition cannot be evaluated against real data. The pre-fix
+  // code fell back to comparing the policy schema against the link's
+  // author-embedded schema, so an attacker could embed a mismatching schema to
+  // make the policy entry "not apply" and skip its writeAuthorizedBy /
+  // requiredIntegrity / uiContract checks. Unresolvable links must fail closed:
+  // the entry applies.
+  //
+  // Driving through a full write is impractical because the Cell write path
+  // collapses an unresolvable link before it reaches the verifier, so the link
+  // only reaches this matcher when verifying a pre-existing stored link whose
+  // target is not present in the transaction. This exercises that branch
+  // directly.
+
   const space = "did:key:wildcard-link" as const;
   const policySchema = {
     type: "object",
@@ -129,11 +131,12 @@ describe("CFC wildcard policy value conditions on `FabricPrimitive` types", () =
   });
 });
 
-// CT-1895: policySchemaMatchesValue validated arrays only against `items`,
-// so a tuple-shaped (prefixItems) value condition vacuously matched ANY
-// array — the policy entry applied where its condition should have excluded
-// it, or vice versa.
 describe("CFC policy value-conditions on tuple (prefixItems) schemas", () => {
+  // CT-1895: policySchemaMatchesValue validated arrays only against `items`, so
+  // a tuple-shaped (prefixItems) value condition vacuously matched ANY array —
+  // the policy entry applied where its condition should have excluded it, or
+  // vice versa.
+
   const space = "did:key:tuple-policy" as const;
   const target = { space, id: "of:guarded" as const, scope: "space" as const };
   const tx = {

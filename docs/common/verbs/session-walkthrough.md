@@ -306,14 +306,15 @@ sections claiming the pattern declares nothing.
 ## 3. Ask what a verb wants
 
 ```bash
-cf call --piece board addItem -- --help
+cf call --piece board addItem --help
 ```
 
 ```text
 Usage:
-  cf call --piece board addItem -- --help
-  cf call --piece board addItem <json>
-  cf call --piece board addItem -- --title <string>
+  cf call ... addItem --help
+  cf call ... addItem <json>
+  cf call ... addItem [invoke] --title <string>
+  cf call ... addItem ... -- --select <fields>
 
 File a new root item on the board.
 
@@ -321,7 +322,7 @@ JSON input:
   Pass inline JSON as one positional argument or after `--json`.
   { title: string }
 
-Flags after `--`:
+Flags:
   --title <string>    Required. One line naming the work.
 
 Output:
@@ -425,11 +426,11 @@ uses, and escaping a literal `@` — is in
 [verbs over the CLI](over-the-cli.md#asking-a-read-for-an-address).
 
 ```bash
-EPIC=$(cf call --piece board --select 'item@' addItem -- \
-       --title "Login rewrite" | jq -r '.result.item."$link"')
+EPIC=$(cf call --piece board addItem --title "Login rewrite" \
+       -- --select 'item@' | jq -r '.result.item."$link"')
 
-cf call "$EPIC" addChild -- --title "Session cookies"
-cf call "$EPIC" recordNote -- --body "blocked on the cookie spec"
+cf call "$EPIC" addChild --title "Session cookies"
+cf call "$EPIC" recordNote --body "blocked on the cookie spec"
 cf get "$EPIC/status"
 ```
 
@@ -495,8 +496,8 @@ the address may carry the path, as the `get` above shows. The slug stays on
 `--piece`, where no path competes for the position; naming the target both
 ways at once is refused. Identity survives the round trip instead of being
 flattened into a copy of the item's contents. Read options (`--select`,
-`--schema`, `--filter`) come before the address on a `call`, because the first
-positional starts the callable's own command line.
+`--schema`, `--filter`) come after the `--` on a `call`, because the verb opens
+the callable's section and the marker closes it.
 
 `--show-links` is a second spelling of the same move: it returns a
 dictionary of RFC 6901 pointers naming the document behind each result path, so
@@ -591,9 +592,10 @@ containers holding it rather than being read past.
 
 The same options work on a call's result, on a wish, on a verb reached through
 a filesystem mount, and on a direct read: one read layer, four arrivals.
-`cf exec` writes them before the mounted file, since everything after it
-belongs to the callable's own interface; the other three take them wherever
-their own options go.
+`cf exec` writes them past a `--`, since the mounted file opens the callable's
+section and the marker closes it — the same boundary `cf call` draws at its
+verb; `cf get` and `cf wish` name no callable, so they take them wherever their
+own options go.
 
 **A read may be asked twice; a call may not.** A projection is a question, and
 asking it changes nothing — that is the invariant, and it is what makes every
@@ -639,9 +641,9 @@ instead. Name a call with `--invocation`, and replaying that id hands back
 the original outcome:
 
 ```bash
-cf call --invocation note-retry "$EPIC" recordNote -- --body "first attempt"
+cf call --invocation note-retry "$EPIC" recordNote --body "first attempt"
 
-cf call --invocation note-retry "$EPIC" recordNote -- --body "a different body entirely"
+cf call --invocation note-retry "$EPIC" recordNote --body "a different body entirely"
 ```
 
 ```text
@@ -740,7 +742,7 @@ and they answer in this same shape.
 ## 8. Relate two items
 
 ```bash
-cf call --select blocked@,on@,blockedOnCount "$KID" blockOn -- --on "$CSRF"
+cf call "$KID" blockOn --on "$CSRF" -- --select blocked@,on@,blockedOnCount
 
 cf get "$EPIC" children --select @,title,blockedOn@
 ```
@@ -782,7 +784,7 @@ which positions declare references, and the same contract refuses the two
 payloads that could only ever be mistakes at one:
 
 ```bash
-cf call "$KID" blockOn -- --on "not-an-address"
+cf call "$KID" blockOn --on "not-an-address"
 
 cf call "$KID" blockOn '{"on":{"title":"a copy"}}'
 ```

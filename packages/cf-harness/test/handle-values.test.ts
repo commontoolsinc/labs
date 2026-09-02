@@ -4,7 +4,9 @@
  * holds a handle to resolves at all, the refusals for a reference that names
  * nothing readable, and the rule that no message ever renders the referent.
  */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -103,6 +105,44 @@ describe("handle-values", () => {
   };
 
   describe("resolveHandleValue", () => {
+    it("refuses a skill-context handle to a generic value consumer", async () => {
+      const ref = await seedRef("restricted-skill", "secret instructions");
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable("handle-values-run"),
+        ref,
+        { capability: "skill-context" },
+      );
+
+      const resolution = await resolveHandleValue(
+        { ...context(), handleTable: minted.table },
+        minted.token,
+        "browser valueHandle",
+      );
+
+      expect(resolution.value).toBeUndefined();
+      expect(resolution.error).toBe(
+        "browser valueHandle cannot consume a skill-context handle; only delegate_task skillHandle can",
+      );
+    });
+
+    it("allows delegate_task skillHandle to consume a skill-context handle", async () => {
+      const ref = await seedRef("allowed-skill", "trusted instructions");
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable("handle-values-run"),
+        ref,
+        { capability: "skill-context" },
+      );
+
+      const resolution = await resolveHandleValue(
+        { ...context(), handleTable: minted.table },
+        minted.token,
+        "skillHandle",
+        { capability: "skill-context" },
+      );
+
+      expect(resolution.value).toBe("trusted instructions");
+    });
+
     it("returns the string behind an address this run holds a handle to", async () => {
       const ref = await seedRef("traveller-name", "Ada Lovelace");
       const resolution = await resolveHandleValue(

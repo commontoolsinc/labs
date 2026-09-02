@@ -353,6 +353,10 @@ export const space = new Command()
             diff.changed > 0 ? `  (${kinds(diff.changedByKind)})` : ""
           }\n` +
           `added      ${diff.added}\n` +
+          (diff.reclassifiedGenerated > 0
+            ? `generated  ${diff.reclassifiedGenerated} reclassified — in ` +
+              `both stores, excluded here, not removed\n`
+            : "") +
           `content    ${fingerprint.match ? "unchanged" : "CHANGED"}\n` +
           `commits    ${counts.manifest.commits} → ${counts.working.commits}\n` +
           `revisions  ${counts.manifest.revisions} → ${counts.working.revisions}\n` +

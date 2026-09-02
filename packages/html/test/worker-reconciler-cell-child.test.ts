@@ -95,7 +95,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
 
   // Define MockCell extending CellImpl
   class MockCell extends (CellImplConstructor as any) {
-    private subscribers = new Set<(value: any) => void>();
+    #subscribers = new Set<(value: any) => void>();
 
     constructor(public value: any) {
       // Pass dummy args to super to satisfy it
@@ -105,19 +105,19 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
     }
 
     sink(callback: (value: any) => void) {
-      this.subscribers.add(callback);
+      this.#subscribers.add(callback);
       // Ensure callback is called asynchronously to match Reconciler expectations?
       // Actually reconciler doesn't rely on async usually for initial render.
       // But let's be safe and do it synchronously as it worked for others.
       callback(this.value);
       return () => {
-        this.subscribers.delete(callback);
+        this.#subscribers.delete(callback);
       };
     }
 
     set(newValue: any) {
       this.value = newValue;
-      for (const sub of this.subscribers) {
+      for (const sub of this.#subscribers) {
         sub(newValue);
       }
     }

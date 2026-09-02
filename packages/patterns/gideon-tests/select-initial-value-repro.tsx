@@ -16,8 +16,8 @@ import { NAME, pattern, UI, Writable } from "commonfabric";
  * when the cell value changes from the backend.
  *
  * To test:
- * 1. Deploy this pattern with `piece new`
- * 2. Use CLI to set values: echo '"video"' | cf piece set --piece ID type ...
+ * 1. Deploy this pattern with `cf piece new`
+ * 2. Use CLI to set values: echo '"video"' | cf set --piece ID type ...
  * 3. Refresh the page - the dropdown should show "🎬 Video", not "-"
  * 4. The "Current value" text should also display "video"
  */

@@ -99,8 +99,11 @@ Deno.test("transformInjectHelperModule injects JS-syntax helpers into .js source
   assertNotMatch(helper.contents, /any\[\]/);
 });
 
+//
 // Coverage remapping assumes this pretransform only adds the one-line helper
 // prelude. Mixed import splitting must preserve the original line count.
+//
+
 Deno.test("mixed import rewrite must not drift coverage line numbers", () => {
   const transformedContents = (contents: string): string =>
     transformInjectHelperModule({
@@ -164,6 +167,7 @@ Deno.test("preserveLineCount rejects expanding rewrites", () => {
   );
 });
 
+//
 // The coverage span mapper subtracts `helperInjectionLineOffset` from every span
 // line to recover the authored line, so it has to predict exactly how far
 // `transformInjectHelperModule` moved that file's content. The two live in
@@ -171,6 +175,8 @@ Deno.test("preserveLineCount rejects expanding rewrites", () => {
 // branches, so pin them against each other rather than against a hand-written
 // number: only the leading helper import shifts lines, and the trailing `h` shim
 // the injector also appends must not count.
+//
+
 Deno.test("helperInjectionLineOffset matches what the injector actually shifts", async () => {
   await ensureCompilerStack();
   const MARKER = "const marker = 1;";

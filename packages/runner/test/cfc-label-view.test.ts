@@ -1568,10 +1568,11 @@ describe("CFC label view helpers", () => {
   });
 });
 
-// Inv-12 Stage 0: the display redaction that already covers the top-level
-// cfcLabel at the IPC response sites, extended to the cfcLabelView copies
-// riding sigil links inside response values.
 describe("redactSigilCfcLabelViewsForDisplay", () => {
+  // Inv-12 Stage 0: the display redaction that already covers the top-level
+  // cfcLabel at the IPC response sites, extended to the cfcLabelView copies
+  // riding sigil links inside response values.
+
   const caveat = {
     type: "https://commonfabric.org/cfc/atom/Caveat",
     kind: "derived-from",
@@ -1640,9 +1641,10 @@ describe("redactSigilCfcLabelViewsForDisplay", () => {
     expect(redacted.tagged).not.toBe(mixed.tagged);
   });
 
-  // The inbound sibling: rather than redacting the view, ingress strips it
-  // entirely (main-thread views must not become worker label state).
   it("stripSigilCfcLabelViews removes views and keeps addressing intact", () => {
+    // The inbound sibling: rather than redacting the view, ingress strips it
+    // entirely (main-thread views must not become worker label state).
+
     const value = {
       items: [linkWithView("of:strip-a")],
       plain: 7,
@@ -1665,13 +1667,20 @@ describe("redactSigilCfcLabelViewsForDisplay", () => {
     ).toBeDefined();
   });
 
-  // A `FabricSpecialObject` is `isObjectOrArray`, so it reaches the record branch
-  // rather than the leaf return. What keeps it whole is the copy-on-write
-  // gate: such a value has zero enumerable own properties, so no member can
-  // come back changed, `changed` stays false, and the original goes back by
-  // identity. That is a real guarantee resting on nothing but the
-  // zero-property fact, so these pin it -- give a special object an enumerable
-  // property and this walk starts flattening values on the ingress path.
+  //
+  // A `FabricSpecialObject` on the strip path
+  //
+  // A `FabricSpecialObject` is `isObjectOrArray`, so it reaches the record
+  // branch rather than the leaf return. What keeps it whole is the
+  // copy-on-write gate: such a value has zero enumerable own properties, so no
+  // member can come back changed, `changed` stays false, and the original goes
+  // back by identity. That is a real guarantee resting on nothing but the
+  // zero-property fact -- give a special object an enumerable property and
+  // this walk starts flattening values on the ingress path. Where the walk
+  // cannot make that guarantee it refuses instead, rather than leaving a view
+  // in place.
+  //
+
   it("keeps a `FabricBytes` whole while stripping a sibling's view", () => {
     const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
     const value = { bytes, tagged: linkWithView("of:strip-bytes") };

@@ -19,7 +19,7 @@
 // Pure module: no FFI, no engine imports — safe for client-side import.
 
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
-import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model/fabric-value";
+import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 /** A reference to a declared column, handed to the rule as `f.<col>`. */
@@ -30,6 +30,7 @@ export type FieldRef = {
 export type MatchOpts = {
   /** Capture group to extract instead of the whole match. */
   group?: number;
+
   /** Minimum number of matches; fewer fails closed (required anchor). */
   min?: number;
 };
@@ -54,9 +55,9 @@ const isFieldRef = (x: unknown): x is FieldRef =>
   isObjectNotArray(x) && typeof x.field === "string" &&
   Object.keys(x).length === 1;
 
-// ---------------------------------------------------------------------------
+//
 // Builders — each returns its serialized AST node.
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Run `re` (forced global) over a column's text ⟹ the ordered list of matches
@@ -193,9 +194,9 @@ function assertPrincipal(x: unknown, who: string) {
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Validation — fail closed at authoring AND on wire-supplied specs.
-// ---------------------------------------------------------------------------
+//
 
 const MAX_REGEX_SOURCE = 512;
 
@@ -544,9 +545,9 @@ export function buildRowLabelSpec<C extends Record<string, unknown>>(
   return spec;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Evaluation — one pure function, shared by write gate, server, and read.
-// ---------------------------------------------------------------------------
+//
 
 class RowLabelEvalError extends Error {}
 

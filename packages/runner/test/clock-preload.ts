@@ -55,6 +55,12 @@ installFakeClock({
     // (the serving side of the client-loses-derivation-commit journey)
     // under the same wall-clock policies.
     "speculation-overlay",
+    // The UI-cell-write conflict-retry suite (the group-chat :133 stall's
+    // mechanism) drives a live shared memory server with manual fan-out
+    // and waits on pull/flush edges with bounded timeouts — the same
+    // live-transport class as the executor suites above; its retry path's
+    // catch-up rides transport edges, not virtual time.
+    "ui-cell-write-conflict-retry",
     // Stage C W3.1 (S1): the drain-settle quiescence-advance pins drive
     // a live ExecutorHost under the same wall-clock policies (flush
     // deadline, renew cadence), and pins 3/5 assert QUIET-window
@@ -136,5 +142,12 @@ installFakeClock({
     // interval and flush deadline; auto-advance turns the renew cadence
     // into a runaway (the guard names SpaceServer.activate's timers).
     "executor-warm-request",
+    // Holds the sidecar pattern fetch on an explicit test-side gate while
+    // the duplicate launch registers, with a short test-armed pump inside
+    // the held window (the gate, not the pump, carries correctness). A
+    // test-armed wall-clock sleep deadlocks under auto-advance, so this
+    // file stays on the real clock; it waits on the gate and on
+    // runtime.idle(), never on a bare delay for its verdict.
+    "wish-sidecar-duplicate-launch",
   ],
 });

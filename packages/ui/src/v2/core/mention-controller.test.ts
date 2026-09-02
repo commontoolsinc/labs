@@ -29,9 +29,9 @@ function createMentionableCell(names: string[]) {
   });
 }
 
-// ---------------------------------------------------------------------------
+//
 // Trigger detection and query extraction
-// ---------------------------------------------------------------------------
+//
 
 describe("MentionController — trigger detection", () => {
   it("shows mentions when @ is typed", () => {
@@ -99,9 +99,9 @@ describe("MentionController — trigger detection", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Filtering
-// ---------------------------------------------------------------------------
+//
 
 describe("MentionController — filtering", () => {
   it("returns all items when query is empty", () => {
@@ -136,9 +136,9 @@ describe("MentionController — filtering", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Keyboard navigation
-// ---------------------------------------------------------------------------
+//
 
 describe("MentionController — keyboard navigation", () => {
   function createShowingController() {
@@ -242,9 +242,9 @@ describe("MentionController — keyboard navigation", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Mention insertion and encoding
-// ---------------------------------------------------------------------------
+//
 
 describe("MentionController — mention insertion", () => {
   it("encodes mention as markdown link [name](encodedId)", async () => {
@@ -267,11 +267,121 @@ describe("MentionController — mention insertion", () => {
     expect(inserts[0]).toMatch(/^\[Test Item\]\(.+\)$/);
     expect(ctrl.isShowing).toBe(false);
   });
+
+  it("falls back to a direct entry's raw reference", async () => {
+    const inserts: string[] = [];
+    const ctrl = new MentionController(createMockHost(), {
+      getContent: () => "@",
+      getCursorPosition: () => 1,
+      onInsert: (markdown) => inserts.push(markdown),
+    });
+    const cell = createMentionableCell(["Direct"]);
+    ctrl.setMentionable(cell);
+    ctrl.handleInput(new Event("input"));
+    const mention = ctrl.getFilteredMentions()[0];
+    Object.defineProperty(mention, "resolveAsCell", {
+      value: () => Promise.reject(new Error("unavailable")),
+    });
+
+    await ctrl.insertMention(mention);
+
+    expect(inserts).toEqual(["[Direct](/of:mentionables/0)"]);
+    expect(ctrl.isShowing).toBe(false);
+  });
 });
 
-// ---------------------------------------------------------------------------
+//
+// Indexed rows: entries that carry their piece as a reference
+//
+
+describe("MentionController — indexed rows", () => {
+  /** An index-row list: each entry is bookkeeping standing for its piece,
+   * held as the stored `$link` an `asCell` position actually carries — the
+   * value never holds a handle, and the mock network follows the link at
+   * resolution exactly as the runtime does. */
+  function createIndexedCell(entries: { name: string; pieceId: string }[]) {
+    const rows: MentionableArray = entries.map(({ name, pieceId }) => ({
+      [NAME]: name,
+      title: name,
+      piece: { "$link": { id: pieceId, path: [] } },
+    }));
+    return {
+      cell: createMockCellHandle(rows, {
+        id: "of:mention-index" as any,
+        schema: { type: "array", items: { type: "object" } },
+      }),
+    };
+  }
+
+  it("encodes an index row's mention as its piece", async () => {
+    // The row is somebody's bookkeeping; the piece is what the mention
+    // names. The persisted href must carry the piece's id, never the
+    // index document's.
+    const inserts: string[] = [];
+    const content = "@";
+    const cursor = 1;
+    const ctrl = new MentionController(createMockHost(), {
+      getContent: () => content,
+      getCursorPosition: () => cursor,
+      onInsert: (markdown) => inserts.push(markdown),
+    });
+    const { cell } = createIndexedCell([
+      { name: "Indexed Topic", pieceId: "of:target-piece" },
+    ]);
+    ctrl.setMentionable(cell);
+    ctrl.handleInput(new Event("input"));
+
+    await ctrl.insertMention(ctrl.getFilteredMentions()[0]);
+
+    expect(inserts.length).toBe(1);
+    expect(inserts[0]).toBe("[Indexed Topic](/of:target-piece)");
+  });
+
+  it("leaves an index row uninserted when its piece cannot resolve", async () => {
+    const inserts: string[] = [];
+    const ctrl = new MentionController(createMockHost(), {
+      getContent: () => "@",
+      getCursorPosition: () => 1,
+      onInsert: (markdown) => inserts.push(markdown),
+    });
+    const { cell } = createIndexedCell([
+      { name: "Indexed Topic", pieceId: "of:target-piece" },
+    ]);
+    ctrl.setMentionable(cell);
+    ctrl.handleInput(new Event("input"));
+    const row = ctrl.getFilteredMentions()[0];
+    Object.defineProperty(row, "key", {
+      value: () => ({
+        asSchema: () => ({
+          resolveAsCell: () => Promise.reject(new Error("unavailable")),
+        }),
+      }),
+    });
+
+    await ctrl.insertMention(row);
+
+    expect(inserts).toEqual([]);
+    expect(ctrl.isShowing).toBe(true);
+  });
+
+  it("decodes a piece href back to its index row", async () => {
+    // The round trip: the id the encode persists is the piece's, so the
+    // decode has to match it through the row's destination too.
+    const ctrl = new MentionController(createMockHost());
+    const { cell } = createIndexedCell([
+      { name: "Indexed Topic", pieceId: "of:target-piece" },
+    ]);
+    ctrl.setMentionable(cell);
+
+    const decoded = await ctrl.decodePieceFromHref("/of:target-piece");
+    expect(decoded).not.toBe(null);
+    expect(decoded?.get()?.[NAME]).toBe("Indexed Topic");
+  });
+});
+
+//
 // extractMentionsFromText
-// ---------------------------------------------------------------------------
+//
 
 describe("MentionController — extractMentionsFromText", () => {
   it("extracts mentions from markdown links", async () => {
@@ -316,9 +426,9 @@ describe("MentionController — extractMentionsFromText", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Lifecycle
-// ---------------------------------------------------------------------------
+//
 
 describe("MentionController — lifecycle", () => {
   it("hide() resets state", () => {

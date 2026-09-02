@@ -41,8 +41,10 @@ import {
 interface SectionFile {
   /** Virtual file name (the section header path, or `fileName`). */
   name: string;
+
   /** Global offset of the section's first character in the blob. */
   start: number;
+
   end: number;
   text: string;
 }
@@ -378,7 +380,9 @@ function lineAndPreview(
   };
 }
 
-// --- section splitting -------------------------------------------------------
+//
+// section splitting
+//
 
 const HEADER = /^\/\/\s*transformed:\s*(.*)$/;
 
@@ -428,7 +432,9 @@ function uniqueName(
     : `${name}.${dupesBefore}.ts`;
 }
 
-// --- compiler host -----------------------------------------------------------
+//
+// compiler host
+//
 
 function makeHost(
   sections: SectionFile[],
@@ -557,7 +563,9 @@ function extensionOf(path: string): ts.Extension {
   return ts.Extension.Ts;
 }
 
-// --- import map + libs -------------------------------------------------------
+//
+// import map + libs
+//
 
 /**
  * Map a specifier to a real local file via the import map. Values in `importMap`
@@ -680,7 +688,9 @@ function defaultLibDir(): string {
   return dirname(fromFileUrl(import.meta.resolve("typescript")));
 }
 
-// --- ast helpers -------------------------------------------------------------
+//
+// ast helpers
+//
 
 /** The deepest node whose range contains `pos`. */
 function nodeAt(sf: ts.SourceFile, pos: number): ts.Node | undefined {

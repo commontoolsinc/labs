@@ -276,6 +276,7 @@ describe("stage A: instance keying — unit pins", () => {
     // that contract — a keyed remove resolves to the named instance, an
     // unkeyed one to the own instance — so both halves together are what
     // keeps the own doc intact.
+
     const replica = storageManager.open(space).replica as unknown as {
       getDocument: (
         id: string,
@@ -531,6 +532,7 @@ describe("stage A: instance keying — unit pins", () => {
     // and the pending-load park cross-matches them), and `presyncInputs`
     // is handed the same actor (so the handler's inputs load AS the
     // actor). Absent on client-side events, byte-identical there.
+
     runtime.installSealDestination(
       { seal: (tx: IExtendedStorageTransaction) => tx.tx.commit() },
       {
@@ -649,6 +651,7 @@ describe("stage A: instance keying — unit pins", () => {
     // seen; a schema-driven read follows the link, finds the target
     // absent, and kicks `ensureLinkedDocLoaded` — the stage-A site
     // threads the traversal's run identity into that kick.
+
     const target = runtime.getCell<{ label: string }>(
       space,
       "stagea-kick-target",
@@ -792,6 +795,7 @@ describe("stage A: instance keying — unit pins", () => {
     // value into another doc is the seed site (data-updating.ts): the
     // seed writes the default into the target when absent, memoized per
     // (space, INSTANCE, id) under the writing run's identity.
+
     const seedCell = runtime.getCell<string>(
       space,
       "stagea-seed-target",
@@ -877,13 +881,14 @@ describe("stage A: instance keying — unit pins", () => {
   });
 });
 
-// The OFF-arm serialized-form witness the stage-A build report claimed
-// and the independent review found unpinned (finding 9): with the flag OFF
-// and no serving posture — every client today — no storage notification
-// change address, reactivity-log address, replica state, or replica
-// document carries a `scopeKey` own-property. Adopted from the review's
-// probe (`zz-review-off-notification-probe`).
 describe("stage A: OFF-arm serialized forms carry no scopeKey", () => {
+  // The OFF-arm serialized-form witness the stage-A build report claimed and
+  // the independent review found unpinned (finding 9): with the flag OFF and no
+  // serving posture — every client today — no storage notification change
+  // address, reactivity-log address, replica state, or replica document carries
+  // a `scopeKey` own-property. Adopted from the review's probe
+  // (`zz-review-off-notification-probe`).
+
   let offManager: ReturnType<typeof StorageManager.emulate>;
   let offRuntime: Runtime;
 

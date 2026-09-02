@@ -77,14 +77,15 @@ export function reservesStdoutForCommandOutput(
   }
   if (args[0] === "exec") return true;
   if (args[0] === "wish") return true;
-  // The top-level spellings reserve stdout exactly as their `cf piece`
-  // counterparts below do. `set` is absent from both lists for the same
-  // reason: it writes prose, not a machine surface.
+  // `set` is absent for the same reason it is absent below: it writes prose,
+  // not a machine surface.
   if (args[0] === "get" || args[0] === "call") return true;
   const subcommand = pieceSubcommand(args);
-  return subcommand === "get" || subcommand === "get-label" ||
-    subcommand === "set-label" || subcommand === "call" ||
-    subcommand === "survey" || subcommand === "repair";
+  return subcommand === "get-label" ||
+    subcommand === "set-label" ||
+    subcommand === "survey" || subcommand === "repair" ||
+    subcommand === "retarget" || subcommand === "rollback" ||
+    subcommand === "restore";
 }
 
 export const stderrConsoleHandler: ConsoleHandler = ({ method, args }) => ({

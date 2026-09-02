@@ -21,7 +21,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { type FabricValue, valueEqual } from "@/fabric-value.ts";
+import { type FabricValue, valueEqual } from "@/index.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
@@ -119,19 +119,20 @@ describe("valueEqual()", () => {
     expect(valueEqual([1, , 3], [1, , 3])).toBe(true);
   });
 
-  // Value equality follows `Object.is()`: `-0` and `+0` are distinct, all
-  // `NaN`s are equal, and the two infinities are distinct (spec §6.7).
-  //
-  // Two different mechanisms produce that, and they need separate tests. A
-  // top-level primitive is settled by the `Object.is()` fast path; a primitive
-  // nested in a container never reaches that path, and is settled by the
-  // canonical content hash instead. Testing only the top level would leave the
-  // nested behavior resting on an untested second implementation.
-  //
-  // Each assertion below is on a boolean, so the matcher never has to tell
-  // `-0` from `+0` itself -- the weird number is always an input, and it is
-  // the implementation's comparison that decides the result.
   describe("non-finite and signed-zero values", () => {
+    // Value equality follows `Object.is()`: `-0` and `+0` are distinct, all
+    // `NaN`s are equal, and the two infinities are distinct (spec §6.7).
+    //
+    // Two different mechanisms produce that, and they need separate tests. A
+    // top-level primitive is settled by the `Object.is()` fast path; a
+    // primitive nested in a container never reaches that path, and is settled
+    // by the canonical content hash instead. Testing only the top level would
+    // leave the nested behavior resting on an untested second implementation.
+    //
+    // Each assertion below is on a boolean, so the matcher never has to tell
+    // `-0` from `+0` itself -- the weird number is always an input, and it is
+    // the implementation's comparison that decides the result.
+
     it("holds `-0` distinct from `+0` at the top level", () => {
       expect(valueEqual(-0, 0)).toBe(false);
       expect(valueEqual(0, -0)).toBe(false);
@@ -173,13 +174,14 @@ describe("valueEqual()", () => {
       expect(valueEqual({ a: { b: [NaN] } }, { a: { b: [NaN] } })).toBe(true);
     });
 
-    // Every case above uses the literal `NaN` on both sides, which pins that a
-    // `NaN` equals itself through the hash path but not that distinct `NaN`
-    // payloads unify. That unification is a deliberate step -- the hash feeds a
-    // canonical byte sequence for any `NaN` rather than the value's own bits --
-    // and arithmetic never produces a second payload, so reaching one takes a
-    // typed-array view.
     it("holds distinct `NaN` payloads equal inside a container", () => {
+      // Every case above uses the literal `NaN` on both sides, which pins that
+      // a `NaN` equals itself through the hash path but not that distinct `NaN`
+      // payloads unify. That unification is a deliberate step -- the hash feeds
+      // a canonical byte sequence for any `NaN` rather than the value's own
+      // bits -- and arithmetic never produces a second payload, so reaching one
+      // takes a typed-array view.
+
       const buffer = new ArrayBuffer(8);
       const bytes = new Uint8Array(buffer);
       const doubles = new Float64Array(buffer);
@@ -205,10 +207,11 @@ describe("valueEqual()", () => {
     });
   });
 
-  // CT-1770: FabricPrimitives keep their state in private fields, so a
-  // generic enumerable-own-prop comparison (`deepEqual`) conflates every
-  // distinct same-class instance. `valueEqual` compares them by content.
   describe("FabricSpecialObject values (CT-1770)", () => {
+    // CT-1770: FabricPrimitives keep their state in private fields, so a
+    // generic enumerable-own-prop comparison (`deepEqual`) conflates every
+    // distinct same-class instance. `valueEqual` compares them by content.
+
     it("distinguishes FabricBytes by content", () => {
       const a = new FabricBytes(new Uint8Array([1, 2, 3, 4]));
       const b = new FabricBytes(new Uint8Array([9, 8, 7, 6]));
@@ -255,16 +258,17 @@ describe("valueEqual()", () => {
     });
   });
 
-  // Content equality is independent of frozen-state. The three states differ
-  // only in which internal path decides them:
-  //   DF (deep-frozen)            -> the both-deep-frozen early-hash fast-path
-  //                                  (only when BOTH sides are DF).
-  //   F  (frozen, NOT deep-frozen) -> shallow `Object.freeze` with a non-frozen
-  //                                  nested value fails `isDeepFrozen()`, so it
-  //                                  takes the general subtype + hash path.
-  //   U  (unfrozen)                -> likewise the general subtype + hash path.
-  // Every pairing must agree on the result regardless of state.
   describe("frozen-state matrix", () => {
+    // Content equality is independent of frozen-state. The three states differ
+    // only in which internal path decides them:
+    // DF (deep-frozen)            -> the both-deep-frozen early-hash fast-path
+    //                                (only when BOTH sides are DF).
+    // F  (frozen, NOT deep-frozen) -> shallow `Object.freeze` with a non-frozen
+    //                                nested value fails `isDeepFrozen()`, so it
+    //                                takes the general subtype + hash path.
+    // U  (unfrozen)                -> likewise the general subtype + hash path.
+    // Every pairing must agree on the result regardless of state.
+
     // The nested array keeps the shallow-frozen `F` build genuinely
     // not-deep-frozen (an all-primitive shallow freeze reads as deep-frozen).
     const equalShape = () => ({ a: 1, b: [2, 3] });
@@ -299,9 +303,10 @@ describe("valueEqual()", () => {
     }
   });
 
-  // The cheap subtype short-circuits that resolve an object comparison
-  // without computing a hash (taken when the sides are not both deep-frozen).
   describe("object-subtype-check branch", () => {
+    // The cheap subtype short-circuits that resolve an object comparison
+    // without computing a hash (taken when the sides are not both deep-frozen).
+
     describe("given a plain object and an array", () => {
       it("returns `false`", () => {
         expect(valueEqual({ 0: 1, 1: 2 }, [1, 2])).toBe(false);

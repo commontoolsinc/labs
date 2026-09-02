@@ -17,11 +17,13 @@
 //   <dir>/clone.json               manifest: source, hashes, counts
 //   <dir>/.cf-clone                marker — "this store is NOT production"
 //   <dir>/pristine/<did>.sqlite    the baseline; never opened read-write
-//   <dir>/engine-v3/<did>.sqlite   the working copy a toolshed serves
+//   <dir>/engine-v3/engine-v3/<did>.sqlite
+//                                  the working copy a toolshed serves
 //
-// `engine-v3/` is not decoration: it is the on-disk layout the memory server
-// resolves through `resolveSpaceStoreUrl`, so pointing `MEMORY_DIR` at <dir>
-// serves the clone as a live space under the SAME DID.
+// That path is not decoration, and the doubled segment is not a typo: it is
+// what the memory server composes, so `clonePaths` DERIVES it rather than
+// spelling it out. Pointing `MEMORY_DIR` at <dir> then serves the clone as a
+// live space under the SAME DID.
 
 import * as Path from "@std/path";
 // The only read-WRITE database handle in this package, and it opens nothing:
@@ -39,12 +41,14 @@ import { openSpace } from "./db.ts";
 import {
   contentFingerprint,
   diffFingerprints,
+  entityAddressKey,
   type FingerprintReport,
   type ScopedEntity,
 } from "./fingerprint.ts";
 
-/** Filenames the layout depends on. */
+/** Manifest filename the layout depends on. */
 const MANIFEST = "clone.json";
+
 /**
  * Per-entity baseline hashes, written beside the manifest at clone time.
  *
@@ -55,20 +59,26 @@ const MANIFEST = "clone.json";
  * Kept out of `clone.json` so that file stays small enough to read by eye.
  */
 const BASELINE = "baseline-entities.json";
+
 const MARKER = ".cf-clone";
 const PRISTINE_DIR = "pristine";
 
 export interface CloneManifest {
   /** Schema version of this file, so a future reader can refuse politely. */
   version: 1;
+
   /** Space DID — the clone keeps it (see the design doc's identity section). */
   space: string;
+
   /** Where the snapshot came from: a path or URL, verbatim, for provenance. */
   source: string;
+
   /** ISO timestamp the clone was taken. */
   createdAt: string;
+
   /** SHA-256 of the pristine snapshot file. */
   snapshotHash: string;
+
   /**
    * SHA-256 of the per-entity baseline sidecar.
    *
@@ -80,7 +90,9 @@ export interface CloneManifest {
    * sidecar existed, which fall back to recomputing.
    */
   baselineHash?: string;
+
   snapshotBytes: number;
+
   /** Durable counts at clone time — the cheap half of "did content survive?". */
   counts: {
     commits: number;
@@ -88,6 +100,7 @@ export interface CloneManifest {
     entities: number;
     maxSeq: number;
   };
+
   /**
    * Content fingerprint at clone time, generated cells excluded.
    *
@@ -110,15 +123,19 @@ export interface CloneManifest {
 export interface CreateCloneOptions {
   /** Path to a `.sqlite` snapshot (a server-side `VACUUM INTO` output). */
   source: string;
+
   /** Space DID; determines the on-disk filename the server resolves. */
   space: string;
+
   /** Destination clone directory. Created if absent, must be empty otherwise. */
   targetDir: string;
+
   /**
    * Store directories that must never be written to — normally the live
    * server's. Callers pass what the environment says (`MEMORY_DIR`/`DB_PATH`).
    */
   forbiddenDirs?: string[];
+
   /** Timestamp source, injectable so tests need no clock. */
   now?: () => Date;
 }
@@ -126,8 +143,10 @@ export interface CreateCloneOptions {
 export interface ClonePaths {
   dir: string;
   manifestPath: string;
+
   /** Per-entity baseline hashes (see {@link BASELINE}). */
   baselinePath: string;
+
   pristinePath: string;
   workingPath: string;
 }
@@ -353,6 +372,7 @@ export interface VerifyResult {
    * so the tool does not guess — see `okAfterMigration`.
    */
   ok: boolean;
+
   /**
    * Relaxed: the baseline is intact and nothing was REMOVED.
    *
@@ -363,13 +383,16 @@ export interface VerifyResult {
    * checked separately.
    */
   okAfterMigration: boolean;
+
   /** The pristine snapshot still hashes to what the manifest recorded. */
   baselineIntact: boolean;
+
   /** Working-copy counts, against the manifest's. */
   counts: {
     manifest: CloneManifest["counts"];
     working: CloneManifest["counts"];
   };
+
   /** Working-copy content fingerprint, and whether it matches the baseline. */
   fingerprint: {
     manifest: string;
@@ -377,6 +400,7 @@ export interface VerifyResult {
     match: boolean;
     excludedGenerated: number;
   };
+
   /**
    * WHAT moved, against the pristine baseline — the part an operator can act on.
    *
@@ -393,10 +417,27 @@ export interface VerifyResult {
     removed: number;
     changed: number;
     added: number;
-    /** Counts per entity kind, so "74 pieces" reads differently from "74 cells". */
+
+    /**
+     * Entities the baseline hashed and this store's manifests call generated at
+     * that same (id, scope). They are present in both stores, so they are not
+     * removed; the two sides derive their exclusions from their own pieces, and
+     * a migration that adopts an unlisted cell into a generated slot moves it
+     * from one list to the other. Reported rather than dropped: a number that
+     * silently disappears is one nobody can check.
+     */
+    reclassifiedGenerated: number;
+
+    /**
+     * `changed` broken out per entity kind, so that "74 pieces" reads
+     * differently from "74 cells".
+     */
     changedByKind: Record<string, number>;
+
+    /** `removed` broken out the same way. */
     removedByKind: Record<string, number>;
   };
+
   /**
    * How much of the store the fingerprint could not speak for, on each side.
    *
@@ -484,6 +525,11 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
       hash: manifest.fingerprint.hash,
       entities: rows.length,
       excludedGenerated: manifest.fingerprint.excludedGenerated,
+      // The sidecar records how many the baseline excluded, not which. Empty
+      // is honest here and costs nothing: the reclassification below reads
+      // the WORKING store's exclusions, which is the side that can turn a
+      // present entity into an absent row.
+      excludedGeneratedAddresses: [],
       ambiguous: [],
       unhashable: [],
       perEntity: rows,
@@ -499,16 +545,37 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
   }
 
   const d = diffFingerprints(before, fingerprint);
-  // Keyed by id AND scope throughout: one id can hold a shared space value plus
-  // per-user/per-session overrides that are genuinely different entities, and a
-  // by-id lookup would let the last scope win and misclassify the tally —
-  // exactly the precision ("74 pieces vs 73 cells") the diff exists to provide.
-  // `diffFingerprints` reports the address it compared by, so there is nothing
-  // left to guess at here.
+  // Keyed by id AND scope throughout, through the shared `entityAddressKey`:
+  // one id can hold a shared space value plus per-user/per-session overrides
+  // that are genuinely different entities, and a by-id lookup would let the
+  // last scope win — misclassifying the tally, and clearing a removal below
+  // because some OTHER scope of the same id is generated. `diffFingerprints`
+  // reports the address it compared by and keys it the same way, so there is
+  // nothing left to guess at here and no second spelling to drift from.
+  //
+  // A removal is an entity gone from the store, never one this store's own
+  // manifests reclassified. The two sides compute their exclusions
+  // independently — the baseline from the pristine pieces, this from the
+  // working ones — so a cell no pristine manifest listed and a migrated piece
+  // now calls generated is present in both stores and absent from one list.
+  // Subtracting them here is what keeps `removed` meaning destroyed content,
+  // which is the verdict the runbook tells an operator to stop on. A manifest
+  // link carries no scope, so an adopted id is excluded in every scope that
+  // holds it: only the addresses this store actually enumerated are subtracted,
+  // and a scope whose rows are gone is not among them.
+  const excludedNow = new Set(
+    fingerprint.excludedGeneratedAddresses.map(entityAddressKey),
+  );
+  const reclassifiedGenerated = d.removed.filter((at) =>
+    excludedNow.has(entityAddressKey(at))
+  );
+  const removed = d.removed.filter((at) =>
+    !excludedNow.has(entityAddressKey(at))
+  );
   const kindIndex = (rows: FingerprintReport["perEntity"]) => {
-    const byAddress = new Map(rows.map((e) => [`${e.id} ${e.scope}`, e.kind]));
+    const byAddress = new Map(rows.map((e) => [entityAddressKey(e), e.kind]));
     return (at: ScopedEntity) =>
-      byAddress.get(`${at.id} ${at.scope}`) ?? "unknown";
+      byAddress.get(entityAddressKey(at)) ?? "unknown";
   };
   const kindOf = kindIndex(fingerprint.perEntity);
   const kindWas = kindIndex(before.perEntity);
@@ -524,11 +591,12 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
     return out;
   };
   const delta = {
-    removed: d.removed.length,
+    removed: removed.length,
     changed: d.changed.length,
     added: d.added.length,
+    reclassifiedGenerated: reclassifiedGenerated.length,
     changedByKind: tally(d.changed, kindOf),
-    removedByKind: tally(d.removed, kindWas),
+    removedByKind: tally(removed, kindWas),
   };
 
   const match = fingerprint.hash === manifest.fingerprint.hash;

@@ -46,7 +46,9 @@ Deno.test("displayWidth: matches the rendered cell count", () => {
   }
 });
 
-// --- mode cycle & labels -----------------------------------------------------
+//
+// mode cycle & labels
+//
 
 Deno.test("DISPLAY_MODES: pictures is first, and every mode has a label", () => {
   assertEquals(DISPLAY_MODES[0], "pictures");
@@ -56,7 +58,9 @@ Deno.test("DISPLAY_MODES: pictures is first, and every mode has a label", () => 
   assertEquals(displayModeLabel("hidden"), "hidden");
 });
 
-// --- pictures mode -----------------------------------------------------------
+//
+// pictures mode
+//
 
 Deno.test("pictures: control codes become Control Pictures glyphs, one column each", () => {
   // U+000B (vertical tab) → ␋ (U+240B), tab → ␉, CR → ␍, ESC → ␛.
@@ -78,7 +82,9 @@ Deno.test("pictures: does not interpret ANSI — the escape shows as ␛", () =>
   assertEquals(glyphs("\x1b[31mx", "pictures"), "␛[31mx");
 });
 
-// --- ansi mode ---------------------------------------------------------------
+//
+// ansi mode
+//
 
 Deno.test("ansi: an SGR color sequence is hidden and colors the text after it", () => {
   const cells = displayLine(ln("a\x1b[31mb"), "ansi");
@@ -123,7 +129,9 @@ Deno.test("ansi: 256-color and truecolor foregrounds", () => {
   assertEquals(truecolor.ansi?.fg, [10, 20, 30]);
 });
 
-// --- hidden mode -------------------------------------------------------------
+//
+// hidden mode
+//
 
 Deno.test("hidden: ANSI sequences are dropped whatever their final byte", () => {
   assertEquals(glyphs("a\x1b[31mb", "hidden"), "ab");
@@ -163,7 +171,9 @@ Deno.test("hidden: a cell visitor can stop on a collapsed control run", () => {
   assertEquals(ranges, [[0, 2]]);
 });
 
-// --- source → display column mapping (horizontal scrolling) ------------------
+//
+// source → display column mapping (horizontal scrolling)
+//
 
 Deno.test("displayColumnOf: pictures maps 1:1", () => {
   assertEquals(displayColumnOf(ln("a\x01b"), "pictures", 2), 2);
@@ -205,7 +215,9 @@ Deno.test("sourceColumnOf: maps compact display offsets back to source", () => {
   assertEquals(sourceColumnOf(ln("\x1b[31m"), "ansi", 0), 0);
 });
 
-// --- internals ---------------------------------------------------------------
+//
+// internals
+//
 
 Deno.test("glyphFor: DEL and C1 codes have block glyphs", () => {
   assertEquals(glyphFor("\x7f"), "␡");

@@ -1,5 +1,18 @@
-import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
+import {
+  encodeMemoryBoundary,
+  getMemoryProtocolFlags,
+} from "@commonfabric/memory/v2";
+import {
+  type EncodedMemoryMessage,
+  encodeMemoryCompressionControlMessage,
+  isMemoryMessageFrame,
+  MemoryMessageCompressionChannel,
+  type MemoryMessageFrame,
+  memoryMessageFrameBytes,
+  parseMemoryCompressionControlMessage,
+} from "@commonfabric/memory/v2/message-compression";
 import * as MemoryServer from "@commonfabric/memory/v2/server";
+import { getLogger } from "@commonfabric/utils/logger";
 
 import type * as Routes from "./memory.routes.ts";
 import { formatMemWriteTrace, type MemWriteOp } from "./memwrite-trace.ts";
@@ -8,7 +21,7 @@ import { createSpan } from "@/middlewares/opentelemetry.ts";
 import { memoryServer } from "@/routes/storage/memory.ts";
 
 type NegotiatedSocketHandlers = {
-  onMessage: (message: string) => void;
+  onMessage: (message: MemoryMessageFrame) => void;
   onClose?: () => void;
   onError?: (error: Error) => void;
 };
@@ -18,7 +31,6 @@ type NegotiationOptions = {
 };
 
 const NEGOTIATION_BUFFER_MAX_BYTES = 1_048_576;
-const TEXT_ENCODER = new TextEncoder();
 
 export const bufferTextMessagesUntilNegotiated = (
   socket: WebSocket,
@@ -30,19 +42,20 @@ export const bufferTextMessagesUntilNegotiated = (
 } => {
   const maxBufferedBytes = options.maxBufferedBytes ??
     NEGOTIATION_BUFFER_MAX_BYTES;
+  socket.binaryType = "arraybuffer";
   let settled = false;
-  let bufferedMessages: string[] = [];
+  let bufferedMessages: MemoryMessageFrame[] = [];
   let bufferedBytes = 0;
   let cleanup = () => {};
   let handlers: NegotiatedSocketHandlers | null = null;
   let negotiationError: Error | null = null;
 
-  const forwardMessage = (message: string) => {
+  const forwardMessage = (message: MemoryMessageFrame) => {
     if (handlers === null) {
       if (negotiationError !== null) {
         return;
       }
-      const messageBytes = TEXT_ENCODER.encode(message).byteLength;
+      const messageBytes = memoryMessageFrameBytes(message);
       if (bufferedBytes + messageBytes > maxBufferedBytes) {
         negotiationError = new Error(
           "Memory websocket negotiation buffer exceeded",
@@ -65,25 +78,31 @@ export const bufferTextMessagesUntilNegotiated = (
 
   const firstMessage = new Promise<string | undefined>((resolve, reject) => {
     const onMessage = (event: MessageEvent) => {
-      if (typeof event.data !== "string") {
+      const frame = event.data;
+      if (
+        !isMemoryMessageFrame(frame) || (!settled && typeof frame !== "string")
+      ) {
+        const error = new Error(
+          settled
+            ? "Memory websocket expects text or binary frames"
+            : "Memory websocket expects text before negotiation",
+        );
         if (!settled) {
           cleanup();
-          reject(new Error("Memory websocket expects text frames"));
+          reject(error);
         } else {
-          handlers?.onError?.(
-            new Error("Memory websocket expects text frames"),
-          );
+          handlers?.onError?.(error);
         }
         return;
       }
 
       if (!settled) {
         settled = true;
-        resolve(event.data);
+        resolve(frame as string);
         return;
       }
 
-      forwardMessage(event.data);
+      forwardMessage(frame);
     };
 
     const onClose = () => {
@@ -141,14 +160,56 @@ export const bufferTextMessagesUntilNegotiated = (
 // `memwrite-trace.ts`.
 let memwriteConnSeq = 0;
 
+const frameSizeLogger = getLogger("memory-socket", {
+  enabled: true,
+  level: "warn",
+});
+
+// Deno's WebSocket client rejects a wire frame over 64 MiB ("Frame too large")
+// and closes the connection. Compression raises the logical message ceiling to
+// 256 MiB only when its actual binary frame remains below that transport cap.
+// Warning at a quarter of the cap surfaces uncompressed or poorly-compressing
+// payload growth while every client still loads (labs#6319).
+const OUTBOUND_FRAME_WARN_BYTES = 16 * 1024 * 1024;
+
+export const warnOnOversizedOutboundFrame = (
+  frame: EncodedMemoryMessage,
+  message: unknown,
+  warnBytes: number = OUTBOUND_FRAME_WARN_BYTES,
+  warn: (key: string, lazyArgs: () => unknown[]) => void = (key, lazyArgs) =>
+    frameSizeLogger.warn(key, lazyArgs),
+): void => {
+  if (typeof frame === "string" && frame.length * 3 <= warnBytes) {
+    return;
+  }
+  const frameBytes = memoryMessageFrameBytes(frame);
+  if (frameBytes <= warnBytes) {
+    return;
+  }
+  warn("oversized-outbound-frame", () => [
+    "outbound memory frame at",
+    frameBytes,
+    "bytes approaches the 64 MiB client cap;",
+    "type:",
+    (message as { type?: string }).type ?? "unknown",
+    "space:",
+    (message as { space?: string }).space ?? "unknown",
+  ]);
+};
+
 export const attachMemorySocketPipeline = (
   socket: WebSocket,
   negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
   firstMessage: string,
 ): boolean => {
-  if (MemoryServer.parseClientMessage(firstMessage) === null) {
+  const parsedFirstMessage = MemoryServer.parseClientMessage(firstMessage);
+  if (parsedFirstMessage === null) {
     return false;
   }
+  const helloReceived = parsedFirstMessage.type === "hello";
+  const compressionNegotiated = parsedFirstMessage.type === "hello" &&
+    parsedFirstMessage.flags.messageCompressionV1 === true &&
+    getMemoryProtocolFlags().messageCompressionV1;
 
   const safeSocketClose = (code: number, reason: string) => {
     if (
@@ -163,15 +224,34 @@ export const attachMemorySocketPipeline = (
       // Ignore close races with the peer.
     }
   };
+  let closed = false;
+  const channel = new MemoryMessageCompressionChannel(
+    (frame) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(frame);
+      }
+    },
+    () => {
+      safeSocketClose(1011, "Memory websocket message failure");
+      closeConnection();
+    },
+  );
   const connection = memoryServer.connect((message) => {
-    if (socket.readyState !== WebSocket.OPEN) {
-      return;
+    const encoded = encodeMemoryBoundary(message);
+    channel.send(
+      encoded,
+      (frame) => warnOnOversizedOutboundFrame(frame, message),
+    );
+    if (compressionNegotiated && message.type === "hello.ok") {
+      channel.enable();
     }
-    socket.send(encodeMemoryBoundary(message));
   });
-  const closeConnection = () => {
+  function closeConnection(): void {
+    if (closed) return;
+    closed = true;
+    channel.close();
     connection.close();
-  };
+  }
 
   // Gated diagnostic write trace (off by default). `CF_DEBUG_MEMORY_WRITES=1`
   // logs one `[memwrite]` line per committed op, tagged with this connection's
@@ -204,22 +284,34 @@ export const attachMemorySocketPipeline = (
       logMemWrites(firstMessage);
       negotiation.handoff({
         onMessage(message) {
-          // Trace only after the receive resolves, so a message whose receive
-          // fails (the fatal-error path below) is not logged as a write.
-          void connection.receive(message).then(
-            () => logMemWrites(message),
-            () => {
-              safeSocketClose(1011, "Memory websocket receive failure");
-              closeConnection();
-            },
-          );
+          if (closed) return;
+          if (!compressionNegotiated && typeof message !== "string") {
+            safeSocketClose(
+              1003,
+              "Memory websocket expects text without compression negotiation",
+            );
+            closeConnection();
+            return;
+          }
+          channel.receive(message, async (payload) => {
+            const control = parseMemoryCompressionControlMessage(payload);
+            if (control && helloReceived) {
+              const enabled = compressionNegotiated && control.enabled;
+              channel.setSendCompressionEnabled(enabled);
+              channel.send(encodeMemoryCompressionControlMessage({
+                requestId: control.requestId,
+                enabled,
+              }));
+              return;
+            }
+            await connection.receive(payload);
+            logMemWrites(payload);
+          });
         },
         onClose: closeConnection,
         onError(error) {
           safeSocketClose(
-            error.message === "Memory websocket expects text frames"
-              ? 1003
-              : 1011,
+            error.message.startsWith("Memory websocket expects") ? 1003 : 1011,
             error.message,
           );
           closeConnection();
@@ -239,7 +331,13 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
     try {
       span.setAttribute("memory.operation", "subscribe");
 
-      const { socket, response } = Deno.upgradeWebSocket(c.req.raw);
+      // Deno's default idle timeout can mistake a legitimate synchronous
+      // memory-server stretch for a dead peer, then close every connection
+      // together when the event loop yields. Disable that transport-level
+      // pong deadline rather than turning server load into a reconnect storm.
+      const { socket, response } = Deno.upgradeWebSocket(c.req.raw, {
+        idleTimeout: 0,
+      });
       span.setAttribute("websocket.upgrade", "success");
 
       void createSpan("memory.socket.setup", async (setupSpan) => {

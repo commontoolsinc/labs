@@ -13,14 +13,11 @@
 // - amplification `derivedCommits / (authoredSeen − effectAcks)` ≤ 2
 //   on this pure workload (the §4 budget — a TRIGGER: a breach fails
 //   with the numbers so a human inspects the why);
-// - the pattern-update posture runs server-side against the REAL
-//   toolshed routes (the plan's Phase 2 revisit (b)): the serving
-//   loop's settle — with `systemPatternAutoUpdate` flipped ON in the
-//   serving runtime by the toolshed factory — must reach quiescence
-//   with the updater's network CHECK half able to complete, which the
-//   stage-F unit fixture could not serve. This is machinery-level
-//   verification (the check runs and nothing wedges idle/W); a full
-//   stale-pointer roll-forward journey stays a follow-up.
+// - the serving loop settles against the REAL toolshed while nothing
+//   follows a piece's source origin on its behalf (the plan's Phase 2
+//   revisit (b)): a serving tenure opens no piece, so it fetches no
+//   pattern route, and its settle must reach quiescence without one.
+//   A full stale-pointer roll-forward journey stays a follow-up.
 //
 // OFF arm: the same workload runs client-derived (today's posture,
 // byte-identical); the servingLoop stats block is absent and the
@@ -60,6 +57,7 @@ type ServingLoopStats = {
   effectAcks: number;
   derivedCommits: number;
   structureLoadFailures: number;
+
   /** S1 (RULED 2026-08-19): drain-settle quiescence advances — the
    * advance-only waves the budgets below subtract. */
   settleAdvances: { count: number };
@@ -273,17 +271,15 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
     );
   });
 
-  it("keeps the serving loop settled with the server-side pattern-update posture live (the Phase 2 revisit (b) surface)", async () => {
+  it("keeps the serving loop settled while nothing follows a piece's origin for it (the Phase 2 revisit (b) surface)", async () => {
     if (!FLAG_ON) return;
-    // The toolshed serving-runtime factory flips
-    // `systemPatternAutoUpdate` ON (serving-loop.md §3e), so the
-    // updater's network CHECK half runs HERE, against toolshed's real
-    // pattern routes — the environment the stage-F unit fixture could
-    // not provide. The verification is machinery-level and stated so:
-    // the served piece above reached watermark-covered quiescence with
-    // the updater active (a wedged or throwing check half would hold
-    // idle()/W), and the demanded structure kept loading. A full
-    // stale-pointer roll-forward journey is the named follow-up.
+    // Following a piece's source origin belongs to whoever opens the
+    // piece (serving-loop.md §3e), and a serving tenure opens none.
+    // The verification is machinery-level and stated so: the served
+    // piece above reached watermark-covered quiescence against
+    // toolshed's real routes, and the demanded structure kept loading.
+    // A full stale-pointer roll-forward journey is the named
+    // follow-up.
     const stats = await fetchServingLoopStats();
     assert(stats !== undefined);
     const runtime = cc.runtime;

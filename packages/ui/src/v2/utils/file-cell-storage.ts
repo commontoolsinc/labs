@@ -20,8 +20,10 @@ export interface StoredFile {
 export interface StoreFileOptions {
   file: File;
   runtime: RuntimeClient;
+
   /** The space the file's blob belongs to — part of its address. */
   space: DID;
+
   width?: number;
   height?: number;
   metadata?: Record<string, unknown>;

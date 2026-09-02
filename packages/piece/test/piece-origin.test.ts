@@ -1,11 +1,12 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { FabricInstance } from "@commonfabric/data-model/fabric-value";
+import { FabricInstance } from "@commonfabric/data-model";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   applyPieceSourceTransition,
   type Cell,
+  classifyPieceOriginString,
   getPatternIdentityRef,
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
@@ -32,6 +33,7 @@ import {
   DEFAULT_APP_PATTERN_SOURCE,
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 // The route that ref resolves to.
 const DEFAULT_APP_PATTERN_PATH = resolveSystemPatternSource(
@@ -185,31 +187,26 @@ describe("classifyOrigin", () => {
     expect(classifyOrigin(runtime, SPACE, "/api/patterns/system/home.tsx"))
       .toEqual({
         url: "https://toolshed.test/api/patterns/system/home.tsx",
-        kind: "web",
+        kind: "system",
         recorded: "/api/patterns/system/home.tsx",
       });
   });
 
-  it("keeps an absolute web URL as it is", () => {
-    expect(classifyOrigin(runtime, SPACE, "https://example.test/p.tsx"))
-      .toEqual({ url: "https://example.test/p.tsx", kind: "web" });
+  it("rejects an absolute external endpoint", () => {
+    expect(() => classifyOrigin(runtime, SPACE, "https://example.test/p.tsx"))
+      .toThrow("is an external endpoint");
   });
 
-  it("keeps the recorded form of an absolute URL the parser rewrote", () => {
-    // Canonicalizing adds the path a bare origin omits, and drops a default
-    // port. What the piece stores stays visible beside what it resolves to.
-    expect(classifyOrigin(runtime, SPACE, "https://example.test"))
-      .toEqual({
-        url: "https://example.test/",
-        kind: "web",
-        recorded: "https://example.test",
-      });
-    expect(classifyOrigin(runtime, SPACE, "https://example.test:443/p.tsx"))
-      .toEqual({
-        url: "https://example.test/p.tsx",
-        kind: "web",
-        recorded: "https://example.test:443/p.tsx",
-      });
+  it("rejects the patterns route spelled against another host", () => {
+    // It names the same file this deployment serves, but on somebody else's
+    // host, and following it would be following them rather than us.
+    expect(() =>
+      classifyOrigin(
+        runtime,
+        SPACE,
+        "https://other.test/api/patterns/system/home.tsx",
+      )
+    ).toThrow("is an external endpoint");
   });
 
   it("reads an unpinned entity reference as a mutable piece origin", () => {
@@ -318,6 +315,29 @@ describe("resolvePieceOriginSource", () => {
     expect(resolved.pattern).toEqual({ identity: HASH, symbol: "upstream" });
     expect(resolved.program.mainExport).toBe("upstream");
     expect(reads).toEqual([`piece:${otherSpace}`, `source:${otherSpace}`]);
+  });
+
+  it("refuses a self-reference before it registers the host it names", async () => {
+    const registrations: unknown[] = [];
+    const runtime = {
+      mappedHostFor: () => undefined,
+      hostForSpace: () => new URL("https://toolshed.test"),
+      registerSpaceHost: (...args: unknown[]) => {
+        registrations.push(args);
+        return true;
+      },
+    } as unknown as Runtime;
+
+    await expect(resolvePieceOriginSource(
+      runtime,
+      SPACE,
+      `cf://other.test/${SPACE}/of:fid1:${HASH}`,
+      "default",
+      { self: { space: SPACE, pieceId: `of:fid1:${HASH}` } },
+    )).rejects.toThrow("a piece cannot follow itself");
+    // Registering a host changes the route the space resolves through, and a
+    // reference this call refuses must not leave that behind.
+    expect(registrations).toEqual([]);
   });
 
   it("does not register an unaccepted host while resolving another space", async () => {
@@ -602,6 +622,87 @@ function pieceWith(
   return { piece, runtime };
 }
 
+describe("the two classifiers a recorded origin meets", () => {
+  it("agree on which strings can be followed at all", () => {
+    // `classifyOrigin` decides what the source panel shows and what an
+    // entered origin is allowed to become. `classifyPieceOriginString`
+    // decides what reconciliation will follow. They answer different
+    // questions and use different words for the kinds, but they have to
+    // agree on the boundary: a string one accepts and the other calls
+    // unusable would be stored as an origin that nothing follows, and
+    // reported by the panel as an origin that is fine.
+    const host = "https://toolshed.test";
+    const runtime = { hostForSpace: () => new URL(host) } as unknown as Runtime;
+    const hash = "b".repeat(43);
+    const strings: string[] = [
+      "system:system/home.tsx",
+      "/api/patterns/system/home.tsx",
+      `${host}/api/patterns/system/home.tsx`,
+      "https://example.test/p.tsx",
+      "http://example.test/p.tsx",
+      "ftp://example.test/p.tsx",
+      "not a url",
+      "",
+      "   ",
+      `cf:pattern:${hash}`,
+      `cf:/did:key:z6Mkabc/of:fid1:${hash}`,
+      `cf://host.test/did:key:z6Mkabc/of:fid1:${hash}`,
+      "cf:/did:key:z6Mkabc/some-slug",
+      `cf:of:fid1:${hash}`,
+      `cf:/did:key:z6Mkabc/of:fid1:${hash}@${"c".repeat(43)}`,
+      "../relative.tsx",
+      "data:text/plain,x",
+      "cf:!!malformed",
+      // A protocol-relative string looks like a rooted path and is not one:
+      // resolved against the host it names a different authority entirely.
+      "//evil.example/x",
+      "//evil.example",
+      "/\\evil.example/x",
+      "\\\\evil.example\\x",
+    ];
+
+    // Rooted paths on this host that name nothing under the patterns route.
+    // Both sides refuse them: the path names no file this deployment serves,
+    // so nothing resolves it.
+    strings.push("/", "/nope.tsx", "/api/patterns/../../etc/passwd");
+
+    for (const recorded of strings) {
+      const kind = classifyPieceOriginString(recorded, host);
+      // A rooted path carrying no ref names nothing under the patterns route,
+      // and reconciliation reports it unusable rather than following it, so
+      // that is what "followable" has to mean here.
+      const followable = kind.kind !== "unusable" &&
+        !(kind.kind === "legacy-path" && kind.ref === undefined);
+      let usable: boolean;
+      try {
+        classifyOrigin(runtime, SPACE, recorded);
+        usable = true;
+      } catch {
+        usable = false;
+      }
+      expect({ recorded, usable }).toEqual({ recorded, usable: followable });
+    }
+  });
+
+  it("refuses a rooted path that resolves to another host", () => {
+    const host = "https://toolshed.test";
+    const runtime = { hostForSpace: () => new URL(host) } as unknown as Runtime;
+    // Both begin with a slash and neither names this host: the URL parser
+    // reads `//` as an authority and a backslash as a separator. A guard
+    // written against the spellings would need one arm per such trick, so
+    // what decides it is where the string actually resolved.
+    for (const recorded of ["//evil.example/x", "/\\evil.example/x"]) {
+      expect(() => classifyOrigin(runtime, SPACE, recorded)).toThrow(
+        "resolves to https://evil.example",
+      );
+    }
+    // A rooted path on this host is still an ordinary origin.
+    expect(classifyOrigin(runtime, SPACE, "/api/patterns/x.tsx").url).toBe(
+      "https://toolshed.test/api/patterns/x.tsx",
+    );
+  });
+});
+
 describe("readPieceOrigin", () => {
   it("reads a piece with no recorded source as detached", () => {
     const { piece, runtime } = pieceWith({});
@@ -629,7 +730,7 @@ describe("readPieceSourceState collects every recorded fact", () => {
         { name: "/aaa.tsx", contents: "aaa" },
       ],
       meta: {
-        patternSource: "https://example.test/recipe.tsx",
+        patternSource: "system:system/home.tsx",
         patternIdentity: { identity: "abc", symbol: "default" },
         patternSetupIdentity: { identity: "older", symbol: "default" },
         displacedPattern: {
@@ -655,8 +756,9 @@ describe("readPieceSourceState collects every recorded fact", () => {
     });
     expect(state.repository).toBe("https://github.com/example/recipes");
     expect(state.origin).toEqual({
-      url: "https://example.test/recipe.tsx",
-      kind: "web",
+      url: "https://toolshed.test/api/patterns/system/home.tsx",
+      kind: "system",
+      recorded: "system:system/home.tsx",
     });
     // Entry file first, then the rest by name.
     expect(state.files.map((file) => file.name)).toEqual([
@@ -702,6 +804,73 @@ describe("readPieceSourceState collects every recorded fact", () => {
     const state = await readPieceSourceState(runtime, piece);
     expect(state.entry).toBeUndefined();
     expect(state.files).toEqual([]);
+  });
+
+  it("separates a string nothing can follow from detachment", async () => {
+    const { piece, runtime } = pieceWith({
+      meta: {
+        patternIdentity: { identity: "abc", symbol: "default" },
+        patternSource: "not a url",
+      },
+    });
+    const state = await readPieceSourceState(runtime, piece);
+    expect(state.origin).toBeUndefined();
+    expect(state.unusableOrigin).toEqual({
+      recorded: "not a url",
+      reason: "not a url is not an absolute URL",
+    });
+
+    const detached = pieceWith({
+      meta: { patternIdentity: { identity: "abc", symbol: "default" } },
+    });
+    const detachedState = await readPieceSourceState(
+      detached.runtime,
+      detached.piece,
+    );
+    expect(detachedState.origin).toBeUndefined();
+    expect(detachedState.unusableOrigin).toBeUndefined();
+  });
+
+  it("reports what following the origin last did", async () => {
+    const { piece, runtime } = pieceWith({
+      meta: {
+        patternIdentity: { identity: "abc", symbol: "default" },
+        patternSource: "https://example.test/recipe.tsx",
+        pieceReconciliation: {
+          outcome: "refused",
+          at: 1_700_000_000_000,
+          origin: "https://example.test/recipe.tsx",
+          offered: { identity: "candidate", symbol: "default" },
+          reason: "incompatible-schema",
+          detail: "the contracts differ",
+        },
+      },
+    });
+    const state = await readPieceSourceState(runtime, piece);
+    expect(state.reconciliation).toEqual({
+      outcome: "refused",
+      at: 1_700_000_000_000,
+      origin: "https://example.test/recipe.tsx",
+      offered: { identity: "candidate", symbol: "default" },
+      reason: "incompatible-schema",
+      detail: "the contracts differ",
+    });
+  });
+
+  it("says nothing about a reconciliation record it cannot read", async () => {
+    const { piece, runtime } = pieceWith({
+      meta: {
+        patternIdentity: { identity: "abc", symbol: "default" },
+        patternSource: "system:system/home.tsx",
+        pieceReconciliation: { outcome: "invented", at: "recently" },
+      },
+    });
+    const state = await readPieceSourceState(runtime, piece);
+    expect(state.reconciliation).toBeUndefined();
+    // The rest of the piece's source facts still read.
+    expect(state.origin?.url).toBe(
+      "https://toolshed.test/api/patterns/system/home.tsx",
+    );
   });
 });
 
@@ -754,7 +923,7 @@ describe("reading a piece's source state", () => {
     value: unknown,
   ): Promise<void> {
     const tx = runtime.edit();
-    cell.withTx(tx).setMetaRaw(key, value as never);
+    cell.withTx(tx).setMetaRaw(key, value as never, rawMetaWriteAuthorization);
     runtime.prepareTxForCommit(tx);
     const result = await tx.commit();
     expect(result.error).toBeUndefined();
@@ -782,7 +951,7 @@ describe("reading a piece's source state", () => {
     });
   });
 
-  it("reports a space root's stamped ref as an absolute web origin", async () => {
+  it("reports a space root's stamped ref as the route it addresses", async () => {
     const root = await controller.ensureDefaultPattern();
 
     const state = await readPieceSourceState(runtime, root.getCell());
@@ -790,7 +959,7 @@ describe("reading a piece's source state", () => {
     // the absolute route it resolves to, with the ref kept alongside it.
     expect(state.origin).toEqual({
       url: `http://toolshed.test${DEFAULT_APP_PATTERN_PATH}`,
-      kind: "web",
+      kind: "system",
       recorded: DEFAULT_APP_PATTERN_SOURCE,
     });
     expect(state.files.length).toBeGreaterThan(0);
@@ -824,7 +993,7 @@ describe("reading a piece's source state", () => {
     const state = await readPieceSourceState(runtime, cell);
     expect(state.origin).toEqual({
       url: `http://toolshed.test${DEFAULT_APP_PATTERN_PATH}`,
-      kind: "web",
+      kind: "system",
       recorded: DEFAULT_APP_PATTERN_PATH,
     });
     expect(state.history.at(-1)?.origin).toEqual(state.origin);
@@ -841,7 +1010,7 @@ describe("reading a piece's source state", () => {
     cell.withTx(tx).setMetaRaw("pieceSourceHistory", [{
       ...revision,
       origin: "not an origin",
-    }] as never);
+    }] as never, rawMetaWriteAuthorization);
     await tx.commit();
 
     const state = await readPieceSourceState(runtime, cell);
@@ -902,10 +1071,12 @@ describe("reading a piece's source state", () => {
 
     const startPiece = destination.startPiece.bind(destination);
     let countWhenStarted: unknown;
-    destination.startPiece = async (piece, options) => {
+    destination.startPiece = async (
+      piece: Parameters<typeof startPiece>[0],
+    ) => {
       if (typeof piece === "string") throw new Error("expected clone cell");
       countWhenStarted = destination.getResult(piece).key("count").get();
-      await startPiece(piece, options);
+      await startPiece(piece);
     };
 
     const clone = await source.cloneTo(destination, { copyData: true });
@@ -1576,7 +1747,7 @@ describe("reading a piece's source state", () => {
     const source = await controller.create({
       main: "/main.tsx",
       files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
-    }, { origin: "https://example.test/upstream.tsx" });
+    }, { origin: "system:system/home.tsx" });
     const destination = new PiecesController(
       await createSession({
         identity: signer,
@@ -1589,9 +1760,9 @@ describe("reading a piece's source state", () => {
     const clone = await source.cloneTo(destination);
     const state = await readPieceSourceState(runtime, clone.getCell());
 
-    expect(state.origin).toEqual({
-      url: "https://example.test/upstream.tsx",
-      kind: "web",
+    expect(state.origin).toMatchObject({
+      kind: "system",
+      recorded: "system:system/home.tsx",
     });
   });
 
@@ -1647,6 +1818,7 @@ describe("reading a piece's source state", () => {
       source.getCell().withTx(tx).setMetaRaw(
         "patternSource",
         "https://example.test/changed.tsx",
+        rawMetaWriteAuthorization,
       );
       runtime.prepareTxForCommit(tx);
       const result = await tx.commit();
@@ -1675,7 +1847,7 @@ describe("reading a piece's source state", () => {
     );
     await destination.synced();
     const clone = await source.cloneTo(destination);
-    await runtime.patternUpdater.idle();
+    await runtime.sourceReconciler.idle();
     const updatedSource = FOLLOW_SOURCE.replace("1 + 0", "2 + 0");
 
     await source.setPattern({
@@ -1683,7 +1855,7 @@ describe("reading a piece's source state", () => {
       files: [{ name: "/main.tsx", contents: updatedSource }],
     });
     await runtime.idle();
-    await runtime.patternUpdater.idle();
+    await runtime.sourceReconciler.idle();
     await runtime.idle();
 
     const sourceState = await readPieceSourceState(runtime, source.getCell());
@@ -1706,7 +1878,7 @@ describe("reading a piece's source state", () => {
     );
     await destination.synced();
     const clone = await source.cloneTo(destination);
-    await runtime.patternUpdater.idle();
+    await runtime.sourceReconciler.idle();
 
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -1739,9 +1911,9 @@ describe("reading a piece's source state", () => {
         }],
       });
       release.resolve();
-      await runtime.patternUpdater.idle();
+      await runtime.sourceReconciler.idle();
       await runtime.idle();
-      await runtime.patternUpdater.idle();
+      await runtime.sourceReconciler.idle();
 
       expect(getPatternIdentityRef(clone.getCell())).toEqual(
         getPatternIdentityRef(source.getCell()),
@@ -1797,7 +1969,7 @@ describe("reading a piece's source state", () => {
     try {
       const clone = await source.cloneTo(destination);
       await sinkCaptured.promise;
-      await runtime.patternUpdater.idle();
+      await runtime.sourceReconciler.idle();
       await source.setPattern({
         main: "/main.tsx",
         files: [{
@@ -1807,7 +1979,7 @@ describe("reading a piece's source state", () => {
       });
       installCapturedSink!();
       await runtime.idle();
-      await runtime.patternUpdater.idle();
+      await runtime.sourceReconciler.idle();
       await runtime.idle();
 
       expect(getPatternIdentityRef(clone.getCell())).toEqual(
@@ -1834,7 +2006,7 @@ describe("reading a piece's source state", () => {
     );
     await destination.synced();
     const clone = await source.cloneTo(destination);
-    await runtime.patternUpdater.idle();
+    await runtime.sourceReconciler.idle();
     const stoppedPattern = getPatternIdentityRef(clone.getCell());
 
     runtime.runner.stop(clone.getCell());
@@ -1846,7 +2018,7 @@ describe("reading a piece's source state", () => {
       }],
     });
     await runtime.idle();
-    await runtime.patternUpdater.idle();
+    await runtime.sourceReconciler.idle();
 
     expect(getPatternIdentityRef(clone.getCell())).toEqual(stoppedPattern);
   });
@@ -1865,7 +2037,7 @@ describe("reading a piece's source state", () => {
     );
     await destination.synced();
     const clone = await source.cloneTo(destination);
-    await runtime.patternUpdater.idle();
+    await runtime.sourceReconciler.idle();
     const stoppedPattern = getPatternIdentityRef(clone.getCell());
 
     const entered = Promise.withResolvers<void>();
@@ -1891,7 +2063,7 @@ describe("reading a piece's source state", () => {
       await entered.promise;
       runtime.runner.stop(clone.getCell());
       release.resolve();
-      await runtime.patternUpdater.idle();
+      await runtime.sourceReconciler.idle();
       await runtime.idle();
 
       expect(getPatternIdentityRef(clone.getCell())).toEqual(stoppedPattern);
@@ -1915,7 +2087,7 @@ describe("reading a piece's source state", () => {
     );
     await destination.synced();
     const clone = await source.cloneTo(destination);
-    await runtime.patternUpdater.idle();
+    await runtime.sourceReconciler.idle();
 
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -1939,11 +2111,14 @@ describe("reading a piece's source state", () => {
       });
       await entered.promise;
       runtime.runner.stop(clone.getCell());
-      await runtime.runner.start(clone.getCell());
+      // A stopped piece stops following. Opening it again is what resumes —
+      // started here, while the check the stop aborted is still held.
+      const reopened = destination.openPiece(clone.getCell());
       release.resolve();
-      await runtime.patternUpdater.idle();
+      await reopened;
+      await runtime.sourceReconciler.idle();
       await runtime.idle();
-      await runtime.patternUpdater.idle();
+      await runtime.sourceReconciler.idle();
       await runtime.idle();
 
       expect(getPatternIdentityRef(clone.getCell())).toEqual(

@@ -12,6 +12,7 @@ import { FABRIC_MOUNT_ROOT } from "../src/sandbox/module-record-compiler.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
 import { entityIdFrom } from "../src/create-ref.ts";
 import type { Cell } from "../src/cell.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("fabric imports engine test");
 const space = signer.did();
@@ -93,7 +94,7 @@ describe("Engine fabric imports", () => {
       cellWithTx.setMetaRaw("patternIdentity", {
         identity: entryIdentity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     return { cell };
   }

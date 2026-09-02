@@ -6,17 +6,21 @@ import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import {
   getPatternIdentityRef,
   getPatternSource,
+  getPieceReconciliation,
   getPieceSourceSnapshot,
   Runtime,
   type RuntimeProgram,
   setPatternSource,
+  setPieceReconciliation,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   readPieceSourceRevision,
   readPieceSourceState,
+  reconcilePieceSource,
 } from "../src/ops/piece-origin.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 const signer = await Identity.fromPassphrase("piece source lifecycle");
 
@@ -262,7 +266,8 @@ describe("piece source lifecycle", () => {
   });
 
   it("keeps a directly-created same-host piece detached", async () => {
-    runtime.experimental.systemPatternAutoUpdate = true;
+    // A module's authored filename says nothing about where its code came
+    // from, even when it is spelled like a route this deployment serves.
     const path = "/api/patterns/system/manual-piece.tsx";
     const program = {
       ...versionProgram("local"),
@@ -275,7 +280,8 @@ describe("piece source lifecycle", () => {
     webSources[path] = versionProgram("remote");
 
     const piece = await pieces.create(program, { input: {} });
-    await runtime.patternUpdater.idle();
+    expect(await reconcilePieceSource(runtime, piece.getCell()))
+      .toBe("detached");
 
     expect(webFetches).toBe(0);
     expect(getPatternSource(piece.getCell())).toBeUndefined();
@@ -336,6 +342,305 @@ describe("piece source lifecycle", () => {
         revisionId: state.history[0].revisionId,
       }),
     ).rejects.toThrow("has no origin to follow");
+    await expect(
+      piece.changeSource({ kind: "repoint", url: "   " } as never),
+    ).rejects.toThrow("unsupported piece source action");
+    await expect(
+      piece.changeSource({ kind: "adopt" }),
+    ).rejects.toThrow("piece is not following a source");
+  });
+
+  it("refuses an entered origin the source URL policy does not allow", async () => {
+    const piece = await pieces.create(versionProgram("current"), { input: {} });
+
+    await expect(
+      piece.changeSource({ kind: "repoint", url: "../pattern.tsx" }),
+    ).rejects.toThrow("is not an absolute URL");
+    await expect(
+      piece.changeSource({ kind: "repoint", url: "ftp://source.test/p.tsx" }),
+    ).rejects.toThrow("names no program");
+    await expect(
+      piece.changeSource({
+        kind: "repoint",
+        url: "https://source.test/p.tsx",
+      }),
+    ).rejects.toThrow("is an external endpoint");
+    // A URL's origin excludes its user information, so the patterns route
+    // spelled with credentials still resolves to this host and is followable
+    // but for them. The credentials guard is what refuses it.
+    await expect(
+      piece.changeSource({
+        kind: "repoint",
+        url: "http://user:secret@toolshed.test/api/patterns/p.tsx",
+      }),
+    ).rejects.toThrow("may not carry credentials");
+    // A protocol-relative string reads as a path on this host and resolves to
+    // another authority, and nothing follows one, so a piece that accepted it
+    // would report an origin as fine that no reconciliation can ever reach.
+    await expect(
+      piece.changeSource({ kind: "repoint", url: "//evil.example/p.tsx" }),
+    ).rejects.toThrow("resolves to http://evil.example");
+    // A backslash is a separator to the URL parser, so this one swaps hosts
+    // too while looking even more like a local path.
+    await expect(
+      piece.changeSource({ kind: "repoint", url: "/\\evil.example/p.tsx" }),
+    ).rejects.toThrow("resolves to http://evil.example");
+    expect(getPatternSource(piece.getCell())).toBeUndefined();
+    const state = await readPieceSourceState(runtime, piece.getCell());
+    expect(state.history.map((revision) => revision.operation)).toEqual([
+      "create",
+    ]);
+  });
+
+  it("refuses to point a piece at itself", async () => {
+    const piece = await pieces.create(versionProgram("current"), { input: {} });
+
+    await expect(
+      piece.changeSource({
+        kind: "repoint",
+        url: `cf:/${pieces.getSpace()}/${piece.id}`,
+      }),
+    ).rejects.toThrow("a piece cannot follow itself");
+    expect(getPatternSource(piece.getCell())).toBeUndefined();
+  });
+
+  it("points a piece at a deployment pattern it has never followed", async () => {
+    webSources["/api/patterns/entered.tsx"] = versionProgram("entered-v1");
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+
+    expect(
+      await piece.changeSource({
+        kind: "repoint",
+        url: "system:entered.tsx",
+      }),
+    ).toEqual({ status: "applied" });
+
+    expect(getPatternSource(piece.getCell())).toBe("system:entered.tsx");
+    expect(await piece.result.get(["version"])).toBe("entered-v1");
+    const state = await readPieceSourceState(runtime, piece.getCell());
+    expect(state.history.at(-1)).toMatchObject({ operation: "repoint" });
+    expect(state.origin).toMatchObject({
+      kind: "system",
+      recorded: "system:entered.tsx",
+    });
+  });
+
+  it("points a piece at a fabric piece it has never followed", async () => {
+    const source = await pieces.create(versionProgram("source-v1"), {
+      input: {},
+    });
+    const target = await pieces.create(versionProgram("target-v1"), {
+      input: {},
+    });
+    const url = `cf:/${pieces.getSpace()}/${source.id}`;
+
+    expect(
+      await target.changeSource({ kind: "repoint", url }),
+    ).toEqual({ status: "applied" });
+
+    expect(getPatternSource(target.getCell())).toBe(url);
+    expect(await target.result.get(["version"])).toBe("source-v1");
+  });
+
+  it("drops a recorded outcome when a transition supersedes it", async () => {
+    const origin = "system:superseded.tsx";
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, origin);
+    const { error } = await runtime.editWithRetry((tx) => {
+      setPieceReconciliation(piece.getCell(), tx, {
+        outcome: "refused",
+        at: Date.now(),
+        origin,
+        reason: "incompatible-schema",
+      });
+    });
+    expect(error).toBeUndefined();
+    expect(getPieceReconciliation(piece.getCell())).toBeDefined();
+
+    expect(await piece.changeSource({ kind: "detach" })).toEqual({
+      status: "applied",
+    });
+
+    // The recorded outcome describes a relationship the piece has left.
+    expect(getPieceReconciliation(piece.getCell())).toBeUndefined();
+  });
+
+  it("adopts what the active origin offers now, keeping the origin", async () => {
+    const origin = "system:adopted.tsx";
+    webSources["/api/patterns/adopted.tsx"] = versionProgram("origin-v1");
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, origin);
+
+    expect(await piece.changeSource({ kind: "adopt" })).toEqual({
+      status: "applied",
+    });
+
+    expect(getPatternSource(piece.getCell())).toBe(origin);
+    expect(await piece.result.get(["version"])).toBe("origin-v1");
+    const state = await readPieceSourceState(runtime, piece.getCell());
+    expect(state.history.at(-1)).toMatchObject({ operation: "origin-update" });
+    expect(state.history.at(-1)?.origin?.recorded).toBe(origin);
+  });
+
+  it("records an update that found the origin already current", async () => {
+    const origin = "system:already-current.tsx";
+    webSources["/api/patterns/already-current.tsx"] = versionProgram(
+      "origin-v1",
+    );
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, origin);
+
+    // The first ask moves the piece onto what the origin serves.
+    expect(await piece.changeSource({ kind: "adopt" })).toEqual({
+      status: "applied",
+    });
+    expect(await piece.result.get(["version"])).toBe("origin-v1");
+    const before = await readPieceSourceState(runtime, piece.getCell());
+    expect(before.history.at(-1)?.operation).toBe("origin-update");
+
+    // The second finds the same source there.
+    expect(await piece.changeSource({ kind: "adopt" })).toEqual({
+      status: "applied",
+    });
+
+    // Nothing moved, so nothing is appended: the whole result is the piece
+    // saying its origin has been asked and offers what it runs.
+    const after = await readPieceSourceState(runtime, piece.getCell());
+    expect(after.history).toEqual(before.history);
+    expect(after.currentRevisionId).toBe(before.currentRevisionId);
+    expect(getPieceReconciliation(piece.getCell())).toMatchObject({
+      outcome: "followed",
+      origin,
+    });
+  });
+
+  it("records an update that could not reach the origin", async () => {
+    const origin = "system:missing.tsx";
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, origin);
+
+    await expect(piece.changeSource({ kind: "adopt" })).rejects.toThrow();
+
+    expect(await piece.result.get(["version"])).toBe("v1");
+    expect(getPieceReconciliation(piece.getCell())).toMatchObject({
+      outcome: "unreachable",
+      origin,
+    });
+  });
+
+  it("drops an outcome about a piece that moved while it was being reached", async () => {
+    const origin = "system:moves-underneath.tsx";
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, origin);
+    // Repoint the piece from inside the fetch, so that by the time the
+    // attempt concludes it describes an origin the piece no longer records.
+    // Stamping rather than transitioning is what makes this test say
+    // something: a transition would clear the record on its own, and then an
+    // absent record would prove nothing about the guard.
+    const moved = "system:moved-to.tsx";
+    const original = globalThis.fetch;
+    globalThis.fetch =
+      (() =>
+        stampOrigin(piece, moved).then(() =>
+          new Response("not found", { status: 404 })
+        )) as typeof globalThis.fetch;
+    try {
+      await expect(piece.changeSource({ kind: "adopt" })).rejects.toThrow();
+    } finally {
+      globalThis.fetch = original;
+    }
+
+    expect(getPatternSource(piece.getCell())).toBe(moved);
+    expect(getPieceReconciliation(piece.getCell())).toBeUndefined();
+  });
+
+  it("applies the exact candidate a confirmed entered origin reviewed", async () => {
+    const origin = "system:entered-changing.tsx";
+    webSources["/api/patterns/entered-changing.tsx"] = incompatibleSeedProgram(
+      "reviewed",
+    );
+    const piece = await pieces.create(versionProgram("current"), { input: {} });
+    const action = { kind: "repoint" as const, url: origin };
+
+    const warning = await piece.changeSource(action);
+    expect(warning.status).toBe("incompatible");
+    if (warning.status !== "incompatible") {
+      throw new Error("expected an incompatibility warning");
+    }
+
+    // The origin moves between the review and the confirmation. Consent was
+    // given for what was reviewed, so that is what lands.
+    webSources["/api/patterns/entered-changing.tsx"] = incompatibleSeedProgram(
+      "later",
+    );
+    expect(
+      await piece.changeSource(action, { confirmedChange: warning.prepared }),
+    ).toEqual({ status: "applied" });
+    expect(await piece.result.get(["version"])).toBe("reviewed");
+    expect(getPatternSource(piece.getCell())).toBe(origin);
+  });
+
+  it("records an update the piece refused, and clears it on acceptance", async () => {
+    const origin = "system:refused.tsx";
+    webSources["/api/patterns/refused.tsx"] = incompatibleSeedProgram(
+      "candidate",
+    );
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, origin);
+
+    const refused = await piece.changeSource({ kind: "adopt" });
+    expect(refused.status).toBe("incompatible");
+    expect(getPieceReconciliation(piece.getCell())).toMatchObject({
+      outcome: "refused",
+      reason: "incompatible-schema",
+      origin,
+    });
+
+    expect(
+      await piece.changeSource({ kind: "adopt" }, {
+        confirmedChange: refused.status === "incompatible"
+          ? refused.prepared
+          : undefined,
+      }),
+    ).toEqual({ status: "applied" });
+
+    // The piece now runs what the origin offered, which is the fresh answer
+    // and not the refusal it replaces.
+    expect(await piece.result.get(["version"])).toBe("candidate");
+    expect(getPieceReconciliation(piece.getCell())).toMatchObject({
+      outcome: "followed",
+      origin,
+    });
+  });
+
+  it("keeps the origin when an incompatible candidate is adopted anyway", async () => {
+    const origin = "system:incompatible-origin.tsx";
+    webSources["/api/patterns/incompatible-origin.tsx"] =
+      incompatibleSeedProgram(
+        "candidate",
+      );
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, origin);
+
+    const refused = await piece.changeSource({ kind: "adopt" });
+    expect(refused.status).toBe("incompatible");
+    expect(await piece.result.get(["version"])).toBe("v1");
+    expect(getPatternSource(piece.getCell())).toBe(origin);
+
+    expect(
+      await piece.changeSource({ kind: "adopt" }, {
+        confirmedChange: refused.status === "incompatible"
+          ? refused.prepared
+          : undefined,
+      }),
+    ).toEqual({ status: "applied" });
+
+    // An accepted refusal is the owner choosing to go on following the
+    // origin, which is what separates it from a manual replacement.
+    expect(getPatternSource(piece.getCell())).toBe(origin);
+    expect(await piece.result.get(["version"])).toBe("candidate");
+    const state = await readPieceSourceState(runtime, piece.getCell());
+    expect(state.history.at(-1)).toMatchObject({ operation: "origin-update" });
   });
 
   it("rejects a source action if its pattern identity disappears while loading", async () => {
@@ -354,7 +659,11 @@ describe("piece source lifecycle", () => {
       if (!cleared) {
         cleared = true;
         const tx = runtime.edit();
-        cell.withTx(tx).setMetaRaw("patternIdentity", undefined);
+        cell.withTx(tx).setMetaRaw(
+          "patternIdentity",
+          undefined,
+          rawMetaWriteAuthorization,
+        );
         await tx.commit();
       }
       return pattern;
@@ -385,7 +694,11 @@ describe("piece source lifecycle", () => {
       if (!cleared) {
         cleared = true;
         const tx = runtime.edit();
-        cell.withTx(tx).setMetaRaw("patternIdentity", undefined);
+        cell.withTx(tx).setMetaRaw(
+          "patternIdentity",
+          undefined,
+          rawMetaWriteAuthorization,
+        );
         await tx.commit();
       }
       return pattern;
@@ -402,7 +715,7 @@ describe("piece source lifecycle", () => {
 
   it("does not accept compatibility confirmation for detach", async () => {
     const piece = await pieces.create(versionProgram("current"), { input: {} });
-    await stampOrigin(piece, "https://source.test/current.tsx");
+    await stampOrigin(piece, "system:current.tsx");
     const expected = getPieceSourceSnapshot(piece.getCell())!;
     const action = { kind: "detach" } as const;
 
@@ -423,7 +736,7 @@ describe("piece source lifecycle", () => {
 
   it("surfaces a detach transaction failure without changing source state", async () => {
     const piece = await pieces.create(versionProgram("current"), { input: {} });
-    const origin = "https://source.test/current.tsx";
+    const origin = "system:current.tsx";
     await stampOrigin(piece, origin);
     const editWithRetry = runtime.editWithRetry;
     runtime.editWithRetry = (() =>
@@ -447,12 +760,16 @@ describe("piece source lifecycle", () => {
 
   it("preserves the commit error when source history becomes unreadable", async () => {
     const piece = await pieces.create(versionProgram("current"), { input: {} });
-    await stampOrigin(piece, "https://source.test/current.tsx");
+    await stampOrigin(piece, "system:current.tsx");
     const cell = piece.getCell();
     const editWithRetry = runtime.editWithRetry;
     runtime.editWithRetry = (async () => {
       const tx = runtime.edit();
-      cell.withTx(tx).setMetaRaw("pieceSourceHistory", "invalid");
+      cell.withTx(tx).setMetaRaw(
+        "pieceSourceHistory",
+        "invalid",
+        rawMetaWriteAuthorization,
+      );
       await tx.commit();
       return {
         ok: false,
@@ -561,7 +878,11 @@ describe("piece source lifecycle", () => {
     expect(second.entityId).toEqual(first.entityId);
 
     const tx = runtime.edit();
-    first.withTx(tx).setMetaRaw("patternIdentity", undefined);
+    first.withTx(tx).setMetaRaw(
+      "patternIdentity",
+      undefined,
+      rawMetaWriteAuthorization,
+    );
     await tx.commit();
     await expect(
       pieces.setupPersistent(pattern, {}, cause),
@@ -570,9 +891,9 @@ describe("piece source lifecycle", () => {
     );
   });
 
-  it("detaches, restores exact source, and follows a web origin again", async () => {
-    const origin = "https://source.test/pattern.tsx";
-    webSources["/pattern.tsx"] = versionProgram("web-v3");
+  it("detaches, restores exact source, and follows its origin again", async () => {
+    const origin = "system:pattern.tsx";
+    webSources["/api/patterns/pattern.tsx"] = versionProgram("web-v3");
     const piece = await pieces.create(versionProgram("v1"), { input: {} });
     await stampOrigin(piece, origin);
     const originalRef = getPatternIdentityRef(piece.getCell())!;
@@ -591,7 +912,7 @@ describe("piece source lifecycle", () => {
       "detach",
     ]);
     const originalRevision = state.history.find((revision) =>
-      revision.origin?.url === origin
+      revision.origin?.recorded === origin
     )!;
     expect(originalRevision.operation).toBe("baseline");
     const originalRevisionId = originalRevision.revisionId;
@@ -646,7 +967,7 @@ describe("piece source lifecycle", () => {
         ?.origin,
     ).toEqual({
       url: "http://toolshed.test/api/patterns/system/example.tsx",
-      kind: "web",
+      kind: "system",
       recorded: origin,
     });
   });
@@ -666,7 +987,9 @@ describe("piece source lifecycle", () => {
       target.getCell(),
     );
     const followedRevisionId =
-      detachedState.history.find((revision) => revision.origin?.url === origin)!
+      detachedState.history.find((revision) =>
+        (revision.origin?.recorded ?? revision.origin?.url) === origin
+      )!
         .revisionId;
 
     await source.setPattern(versionProgram("source-v2"));
@@ -683,17 +1006,19 @@ describe("piece source lifecycle", () => {
   });
 
   it("returns an incompatibility warning without changing lifecycle state", async () => {
-    const origin = "https://source.test/incompatible.tsx";
+    const origin = "system:incompatible.tsx";
     const piece = await pieces.create(versionProgram("current"), { input: {} });
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const before = await readPieceSourceState(runtime, piece.getCell());
-    webSources["/incompatible.tsx"] = incompatibleSeedProgram("candidate");
+    webSources["/api/patterns/incompatible.tsx"] = incompatibleSeedProgram(
+      "candidate",
+    );
 
     const result = await piece.changeSource({
       kind: "follow",
       revisionId: before.history.find((revision) =>
-        revision.origin?.url === origin
+        (revision.origin?.recorded ?? revision.origin?.url) === origin
       )!.revisionId,
     });
 
@@ -707,17 +1032,21 @@ describe("piece source lifecycle", () => {
   });
 
   it("validates every compatibility confirmation against current state", async () => {
-    const origin = "https://source.test/confirmation.tsx";
+    const origin = "system:confirmation.tsx";
     const piece = await pieces.create(versionProgram("current"), { input: {} });
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const revision = (await readPieceSourceState(runtime, piece.getCell()))
-      .history.find((entry) => entry.origin?.url === origin)!;
+      .history.find((entry) =>
+        (entry.origin?.recorded ?? entry.origin?.url) === origin
+      )!;
     const action = {
       kind: "follow" as const,
       revisionId: revision.revisionId,
     };
-    webSources["/confirmation.tsx"] = incompatibleSeedProgram("candidate");
+    webSources["/api/patterns/confirmation.tsx"] = incompatibleSeedProgram(
+      "candidate",
+    );
     const warning = await piece.changeSource(action);
     if (warning.status !== "incompatible") {
       throw new Error("expected an incompatibility warning");
@@ -797,13 +1126,15 @@ describe("piece source lifecycle", () => {
   });
 
   it("rejects a compiled candidate without an entry identity", async () => {
-    const origin = "https://source.test/no-entry.tsx";
+    const origin = "system:no-entry.tsx";
     const piece = await pieces.create(versionProgram("current"), { input: {} });
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const revision = (await readPieceSourceState(runtime, piece.getCell()))
-      .history.find((entry) => entry.origin?.url === origin)!;
-    webSources["/no-entry.tsx"] = versionProgram("candidate");
+      .history.find((entry) =>
+        (entry.origin?.recorded ?? entry.origin?.url) === origin
+      )!;
+    webSources["/api/patterns/no-entry.tsx"] = versionProgram("candidate");
     const getEntryRef = runtime.patternManager.getArtifactEntryRef.bind(
       runtime.patternManager,
     );
@@ -822,17 +1153,19 @@ describe("piece source lifecycle", () => {
   });
 
   it("rejects a source that cannot use the retained argument", async () => {
-    const origin = "https://source.test/required-argument.tsx";
+    const origin = "system:required-argument.tsx";
     const piece = await pieces.create(versionProgram("current"), { input: {} });
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const selected = (await readPieceSourceState(runtime, piece.getCell()))
-      .history.find((revision) => revision.origin?.url === origin)!;
+      .history.find((revision) =>
+        (revision.origin?.recorded ?? revision.origin?.url) === origin
+      )!;
     const action = {
       kind: "follow" as const,
       revisionId: selected.revisionId,
     };
-    webSources["/required-argument.tsx"] = incompatibleProgram();
+    webSources["/api/patterns/required-argument.tsx"] = incompatibleProgram();
 
     await expect(piece.changeSource(action)).rejects.toThrow(
       "missing required property required",
@@ -841,26 +1174,73 @@ describe("piece source lifecycle", () => {
     expect(await piece.result.get(["version"])).toBe("current");
   });
 
+  it("records a refusal over data the new source cannot run on", async () => {
+    const origin = "system:needs-argument.tsx";
+    webSources["/api/patterns/needs-argument.tsx"] = incompatibleProgram();
+    const piece = await pieces.create(versionProgram("current"), { input: {} });
+    await stampOrigin(piece, origin);
+
+    await expect(piece.changeSource({ kind: "adopt" })).rejects.toThrow(
+      "missing required property required",
+    );
+
+    // Refusing this one is a reconciliation outcome like any other. Raised
+    // and not recorded, it left the piece reporting that nothing had looked.
+    expect(await piece.result.get(["version"])).toBe("current");
+    expect(getPatternSource(piece.getCell())).toBe(origin);
+    // The classifying prefix is dropped from what the panel shows: it
+    // restates the state's own name, and the part worth reading is which
+    // property does not fit.
+    expect(getPieceReconciliation(piece.getCell())).toMatchObject({
+      outcome: "refused",
+      reason: "argument-mismatch",
+      origin,
+      detail: "missing required property required",
+    });
+  });
+
+  it("leaves an origin the piece does not follow out of its outcomes", async () => {
+    const origin = "system:entered-needs-argument.tsx";
+    webSources["/api/patterns/entered-needs-argument.tsx"] =
+      incompatibleProgram();
+    const piece = await pieces.create(versionProgram("current"), { input: {} });
+
+    await expect(
+      piece.changeSource({ kind: "repoint", url: origin }),
+    ).rejects.toThrow("missing required property required");
+
+    // Being pointed somewhere new is not a relationship the piece has, so
+    // there is no outcome about it to record.
+    expect(getPieceReconciliation(piece.getCell())).toBeUndefined();
+    expect(getPatternSource(piece.getCell())).toBeUndefined();
+  });
+
   it("applies the exact candidate that produced a compatibility warning", async () => {
-    const origin = "https://source.test/changing.tsx";
+    const origin = "system:changing.tsx";
     const piece = await pieces.create(versionProgram("current"), { input: {} });
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const baseline = (await readPieceSourceState(runtime, piece.getCell()))
-      .history.find((revision) => revision.origin?.url === origin)!;
+      .history.find((revision) =>
+        (revision.origin?.recorded ?? revision.origin?.url) === origin
+      )!;
     const action = {
       kind: "follow" as const,
       revisionId: baseline.revisionId,
     };
 
-    webSources["/changing.tsx"] = incompatibleSeedProgram("reviewed");
+    webSources["/api/patterns/changing.tsx"] = incompatibleSeedProgram(
+      "reviewed",
+    );
     const warning = await piece.changeSource(action);
     expect(warning.status).toBe("incompatible");
     if (warning.status !== "incompatible") {
       throw new Error("expected an incompatibility warning");
     }
 
-    webSources["/changing.tsx"] = incompatibleSeedProgram("not-reviewed");
+    webSources["/api/patterns/changing.tsx"] = incompatibleSeedProgram(
+      "not-reviewed",
+    );
     expect(
       await piece.changeSource(action, {
         confirmedChange: warning.prepared,
@@ -877,12 +1257,14 @@ describe("piece source lifecycle", () => {
     const sourceResult = await source.result.getCell();
     await piece.input.set(sourceResult.key("value"), ["mode"]);
 
-    const origin = "https://source.test/linked.tsx";
+    const origin = "system:linked.tsx";
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const baseline = (await readPieceSourceState(runtime, piece.getCell()))
-      .history.find((revision) => revision.origin?.url === origin)!;
-    webSources["/linked.tsx"] = optionalModeProgram(2);
+      .history.find((revision) =>
+        (revision.origin?.recorded ?? revision.origin?.url) === origin
+      )!;
+    webSources["/api/patterns/linked.tsx"] = optionalModeProgram(2);
     const action = {
       kind: "follow" as const,
       revisionId: baseline.revisionId,
@@ -909,11 +1291,13 @@ describe("piece source lifecycle", () => {
     const piece = await pieces.create(optionalModeProgram(1), {
       input: { value: 4 },
     });
-    const origin = "https://source.test/contractless-link.tsx";
+    const origin = "system:contractless-link.tsx";
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const revision = (await readPieceSourceState(runtime, piece.getCell()))
-      .history.find((entry) => entry.origin?.url === origin)!;
+      .history.find((entry) =>
+        (entry.origin?.recorded ?? entry.origin?.url) === origin
+      )!;
     const argument = pieces.getArgument(piece.getCell());
     const contractless = runtime.getCell(
       pieces.getSpace(),
@@ -926,7 +1310,7 @@ describe("piece source lifecycle", () => {
         mode: contractless.getAsLink(),
       });
     });
-    webSources["/contractless-link.tsx"] = optionalModeProgram(2);
+    webSources["/api/patterns/contractless-link.tsx"] = optionalModeProgram(2);
 
     const warning = await piece.changeSource({
       kind: "follow",
@@ -943,11 +1327,13 @@ describe("piece source lifecycle", () => {
     const piece = await pieces.create(optionalModeProgram(1), {
       input: { value: 4 },
     });
-    const origin = "https://source.test/malformed-link.tsx";
+    const origin = "system:malformed-link.tsx";
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const revision = (await readPieceSourceState(runtime, piece.getCell()))
-      .history.find((entry) => entry.origin?.url === origin)!;
+      .history.find((entry) =>
+        (entry.origin?.recorded ?? entry.origin?.url) === origin
+      )!;
     const argument = pieces.getArgument(piece.getCell());
     const getArgument = pieces.getArgument;
     const getRaw = argument.getRaw;
@@ -958,7 +1344,7 @@ describe("piece source lifecycle", () => {
         mode: linkRefFrom({ path: "not an array" } as never),
       };
     }) as typeof argument.getRaw;
-    webSources["/malformed-link.tsx"] = optionalModeProgram(2);
+    webSources["/api/patterns/malformed-link.tsx"] = optionalModeProgram(2);
 
     try {
       const result = await piece.changeSource({
@@ -985,12 +1371,15 @@ describe("piece source lifecycle", () => {
       ["mode"],
     );
 
-    const origin = "https://source.test/combined-warning.tsx";
+    const origin = "system:combined-warning.tsx";
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const revision = (await readPieceSourceState(runtime, piece.getCell()))
-      .history.find((entry) => entry.origin?.url === origin)!;
-    webSources["/combined-warning.tsx"] = incompatibleOptionalModeProgram();
+      .history.find((entry) =>
+        (entry.origin?.recorded ?? entry.origin?.url) === origin
+      )!;
+    webSources["/api/patterns/combined-warning.tsx"] =
+      incompatibleOptionalModeProgram();
 
     const warning = await piece.changeSource({
       kind: "follow",
@@ -1021,12 +1410,14 @@ describe("piece source lifecycle", () => {
       ["mode"],
     );
 
-    const origin = "https://source.test/changed-link.tsx";
+    const origin = "system:changed-link.tsx";
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const revision = (await readPieceSourceState(runtime, piece.getCell()))
-      .history.find((entry) => entry.origin?.url === origin)!;
-    webSources["/changed-link.tsx"] = optionalModeProgram(2);
+      .history.find((entry) =>
+        (entry.origin?.recorded ?? entry.origin?.url) === origin
+      )!;
+    webSources["/api/patterns/changed-link.tsx"] = optionalModeProgram(2);
     const action = {
       kind: "follow" as const,
       revisionId: revision.revisionId,
@@ -1070,12 +1461,14 @@ describe("piece source lifecycle", () => {
       (await source.result.getCell()).key("value"),
       ["mode"],
     );
-    const origin = "https://source.test/resolved-link.tsx";
+    const origin = "system:resolved-link.tsx";
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const revision = (await readPieceSourceState(runtime, piece.getCell()))
-      .history.find((entry) => entry.origin?.url === origin)!;
-    webSources["/resolved-link.tsx"] = optionalModeProgram(2);
+      .history.find((entry) =>
+        (entry.origin?.recorded ?? entry.origin?.url) === origin
+      )!;
+    webSources["/api/patterns/resolved-link.tsx"] = optionalModeProgram(2);
     const action = {
       kind: "follow" as const,
       revisionId: revision.revisionId,
@@ -1108,12 +1501,14 @@ describe("piece source lifecycle", () => {
       (await firstSource.result.getCell()).key("value"),
       ["mode"],
     );
-    const origin = "https://source.test/execution-race.tsx";
+    const origin = "system:execution-race.tsx";
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const revision = (await readPieceSourceState(runtime, piece.getCell()))
-      .history.find((entry) => entry.origin?.url === origin)!;
-    webSources["/execution-race.tsx"] = optionalModeProgram(2);
+      .history.find((entry) =>
+        (entry.origin?.recorded ?? entry.origin?.url) === origin
+      )!;
+    webSources["/api/patterns/execution-race.tsx"] = optionalModeProgram(2);
     const action = {
       kind: "follow" as const,
       revisionId: revision.revisionId,
@@ -1156,12 +1551,14 @@ describe("piece source lifecycle", () => {
       (await source.result.getCell()).key("value"),
       ["mode"],
     );
-    const origin = "https://source.test/missing-argument.tsx";
+    const origin = "system:missing-argument.tsx";
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const revision = (await readPieceSourceState(runtime, piece.getCell()))
-      .history.find((entry) => entry.origin?.url === origin)!;
-    webSources["/missing-argument.tsx"] = optionalModeProgram(2);
+      .history.find((entry) =>
+        (entry.origin?.recorded ?? entry.origin?.url) === origin
+      )!;
+    webSources["/api/patterns/missing-argument.tsx"] = optionalModeProgram(2);
     const action = {
       kind: "follow" as const,
       revisionId: revision.revisionId,
@@ -1177,7 +1574,11 @@ describe("piece source lifecycle", () => {
     const runWithPattern = pieces.runWithPattern.bind(pieces);
     mutablePieces.runWithPattern = async (...args) => {
       const tx = runtime.edit();
-      piece.getCell().withTx(tx).setMetaRaw("argument", undefined);
+      piece.getCell().withTx(tx).setMetaRaw(
+        "argument",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
       await tx.commit();
       return await runWithPattern(...args);
     };
@@ -1197,12 +1598,14 @@ describe("piece source lifecycle", () => {
     const piece = await pieces.create(optionalModeProgram(1), {
       input: { value: 4 },
     });
-    const origin = "https://source.test/new-link-race.tsx";
+    const origin = "system:new-link-race.tsx";
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const revision = (await readPieceSourceState(runtime, piece.getCell()))
-      .history.find((entry) => entry.origin?.url === origin)!;
-    webSources["/new-link-race.tsx"] = optionalModeProgram(2);
+      .history.find((entry) =>
+        (entry.origin?.recorded ?? entry.origin?.url) === origin
+      )!;
+    webSources["/api/patterns/new-link-race.tsx"] = optionalModeProgram(2);
 
     const mutablePieces = pieces as unknown as {
       runWithPattern: typeof pieces.runWithPattern;
@@ -1232,13 +1635,17 @@ describe("piece source lifecycle", () => {
   });
 
   it("does not replace an execution error with a clean compatibility review", async () => {
-    const origin = "https://source.test/spurious-runtime-error.tsx";
+    const origin = "system:spurious-runtime-error.tsx";
     const piece = await pieces.create(versionProgram("current"), { input: {} });
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const revision = (await readPieceSourceState(runtime, piece.getCell()))
-      .history.find((entry) => entry.origin?.url === origin)!;
-    webSources["/spurious-runtime-error.tsx"] = versionProgram("candidate");
+      .history.find((entry) =>
+        (entry.origin?.recorded ?? entry.origin?.url) === origin
+      )!;
+    webSources["/api/patterns/spurious-runtime-error.tsx"] = versionProgram(
+      "candidate",
+    );
 
     const mutablePieces = pieces as unknown as {
       runWithPattern: typeof pieces.runWithPattern;
@@ -1262,13 +1669,15 @@ describe("piece source lifecycle", () => {
   });
 
   it("preserves a non-error execution rejection", async () => {
-    const origin = "https://source.test/non-error.tsx";
+    const origin = "system:non-error.tsx";
     const piece = await pieces.create(versionProgram("current"), { input: {} });
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const revision = (await readPieceSourceState(runtime, piece.getCell()))
-      .history.find((entry) => entry.origin?.url === origin)!;
-    webSources["/non-error.tsx"] = versionProgram("candidate");
+      .history.find((entry) =>
+        (entry.origin?.recorded ?? entry.origin?.url) === origin
+      )!;
+    webSources["/api/patterns/non-error.tsx"] = versionProgram("candidate");
 
     const mutablePieces = pieces as unknown as {
       runWithPattern: typeof pieces.runWithPattern;
@@ -1293,7 +1702,7 @@ describe("piece source lifecycle", () => {
 
   it("reports a saved transition separately from a later refresh failure", async () => {
     const piece = await pieces.create(versionProgram("v1"), { input: {} });
-    const origin = "https://source.test/post-commit.tsx";
+    const origin = "system:post-commit.tsx";
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const baseline = (await readPieceSourceState(runtime, piece.getCell()))
@@ -1331,7 +1740,7 @@ describe("piece source lifecycle", () => {
 
   it("reports a committed detach after a concurrent refresh fails", async () => {
     const piece = await pieces.create(versionProgram("v1"), { input: {} });
-    await stampOrigin(piece, "https://source.test/detach-refresh.tsx");
+    await stampOrigin(piece, "system:detach-refresh.tsx");
     const cell = piece.getCell();
     const mutableCell = cell as unknown as { sync: typeof cell.sync };
     const originalSync = cell.sync.bind(cell);
@@ -1339,7 +1748,9 @@ describe("piece source lifecycle", () => {
     const heldSyncEntered = defer<void>();
     const releaseHeldSync = defer<void>();
     let interceptDetach = true;
-    let newerEdit: Promise<void> | undefined;
+    // Only awaited, never read: this test is about what the newer edit does
+    // to the detach beside it, not about what it returns.
+    let newerEdit: Promise<unknown> | undefined;
 
     runtime.editWithRetry = (async (action, maxRetries) => {
       const result = await originalEditWithRetry(action, maxRetries);
@@ -1382,20 +1793,32 @@ describe("piece source lifecycle", () => {
 
   it("does not report a direct edit as unsaved after its refresh fails", async () => {
     const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    // Injected at the post-commit work `setPattern` actually performs:
+    // `runPatternUpdate` synchronizes the pattern AFTER its setup transaction
+    // is accepted, so a failure here is the refresh failing over a committed
+    // edit. Stubbing anything the update path does not call would leave this
+    // case asserting the clean path under a failure's name — which is why the
+    // receipt's `refresh` status is asserted below rather than only the
+    // history operation.
     const mutablePieces = pieces as unknown as {
-      runWithPattern: typeof pieces.runWithPattern;
+      syncPattern: typeof pieces.syncPattern;
     };
-    const runWithPattern = pieces.runWithPattern.bind(pieces);
-    mutablePieces.runWithPattern = async (...args) => {
-      await runWithPattern(...args);
+    const syncPattern = pieces.syncPattern.bind(pieces);
+    mutablePieces.syncPattern = async (...args) => {
+      await syncPattern(...args);
       throw new Error("direct edit refresh failed");
     };
+    let receipt: Awaited<ReturnType<typeof piece.setPattern>>;
     try {
-      await piece.setPattern(versionProgram("v2"));
+      receipt = await piece.setPattern(versionProgram("v2"));
     } finally {
-      mutablePieces.runWithPattern = runWithPattern;
+      mutablePieces.syncPattern = syncPattern;
     }
 
+    expect(receipt.refresh).toEqual({
+      status: "failed",
+      warning: "direct edit refresh failed",
+    });
     expect(
       (await readPieceSourceState(runtime, piece.getCell())).history.at(-1)
         ?.operation,
@@ -1405,7 +1828,7 @@ describe("piece source lifecycle", () => {
 
   it("recognizes a saved transition even after a newer source change", async () => {
     const piece = await pieces.create(versionProgram("v1"), { input: {} });
-    const origin = "https://source.test/concurrent-post-commit.tsx";
+    const origin = "system:concurrent-post-commit.tsx";
     await stampOrigin(piece, origin);
     await piece.changeSource({ kind: "detach" });
     const baseline = (await readPieceSourceState(runtime, piece.getCell()))

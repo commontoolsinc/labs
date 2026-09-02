@@ -3,6 +3,7 @@ import {
   type CfcFlowLabelsMode,
   isCfcEnforcementMode,
 } from "@commonfabric/runner/cfc";
+import type { CfcPosture } from "@commonfabric/runner";
 import type { HarnessCfcEnforcementModeSource } from "./contracts/cfc-policy-snapshot.ts";
 import {
   type HarnessCredentialOwnerRef,
@@ -31,6 +32,7 @@ export type HarnessGatewayAuthMode = "bearer" | "none";
 export type HarnessFabricCfcEnforcementMode =
   | "enforce-explicit"
   | "enforce-strict";
+
 export type HarnessFabricCfcFlowLabelsMode = CfcFlowLabelsMode;
 
 /**
@@ -40,7 +42,9 @@ export type HarnessFabricCfcFlowLabelsMode = CfcFlowLabelsMode;
  * the run offers `run_pattern` in the parent tool surface; when absent, the
  * tool is unavailable. The optional CFC dials reach the session's Runtime;
  * unset means the remoteClient preset's first-party posture
- * (`enforce-explicit`, flow labels off).
+ * (`enforce-explicit`, flow labels off). `cfcPosture` opts the runtime into
+ * a named bundle (`MAX_ENFORCEMENT_CFC_OPTIONS` in the runner's presets);
+ * the two dials still apply over it.
  */
 export interface HarnessFabricSessionConfig {
   apiUrl: string;
@@ -48,7 +52,47 @@ export interface HarnessFabricSessionConfig {
   space: string;
   cfcEnforcementMode?: HarnessFabricCfcEnforcementMode;
   cfcFlowLabels?: HarnessFabricCfcFlowLabelsMode;
+  cfcPosture?: CfcPosture;
 }
+
+/**
+ * Connection settings for the deployed pattern index: the base URL its
+ * functions are served under. When present, the run offers `search_patterns`
+ * in the tool surface and `run_pattern` accepts a `patternId` in place of
+ * inline source; when absent, both are unavailable.
+ *
+ * Requests carry the fabric session's identity, so this configuration goes
+ * with a fabric session and is refused without one.
+ */
+export interface HarnessPatternIndexConfig {
+  baseUrl: string;
+
+  /**
+   * Whether a pattern the model authored and ran successfully is published
+   * back to the index. Absent means published as a recorded entry. `false`
+   * makes the run a reader only.
+   */
+  publish?: boolean;
+
+  /**
+   * Whether successful authored patterns that pass the render gate are
+   * offered to search immediately. Absent means recorded only:
+   * discoverability is earned from later evidence. `true` is for deliberate
+   * corpus seeding.
+   */
+  publishDiscoverable?: boolean;
+}
+
+/**
+ * Connection settings for skills.sh metadata discovery and external
+ * acquisition. When present, the run offers `search_skills`; a run that also
+ * has a Fabric session offers `acquire_skill`.
+ */
+export interface HarnessSkillsShConfig {
+  /** Registry origin serving the public `/api/search` route. */
+  baseUrl: string;
+}
+
 export type HarnessModelProviderId =
   | "openai-compatible-gateway"
   | "openai-codex";
@@ -68,6 +112,7 @@ interface HarnessCommonConfig {
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   browserAccess?: HarnessBrowserAccessLease;
+
   /**
    * Origins where a value materialized from a handle may be sent. Operator
    * configuration, empty or absent by default: a run that names no origin
@@ -77,10 +122,13 @@ interface HarnessCommonConfig {
    * so that is what an operator gets to decide.
    */
   handleValueOrigins?: readonly string[];
+
   artifactRoot?: string;
   cfcEnforcementMode: CfcEnforcementMode;
   cfcEnforcementModeSource: HarnessCfcEnforcementModeSource;
   fabricSession?: HarnessFabricSessionConfig;
+  patternIndex?: HarnessPatternIndexConfig;
+  skillsSh?: HarnessSkillsShConfig;
   sandbox?: DockerRunscSandboxConfig;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -134,6 +182,8 @@ export interface ResolveHarnessConfigOptions {
   inheritedCfcEnforcementMode?: CfcEnforcementMode;
   cfcEnforcementModeOverride?: string | CfcEnforcementMode;
   fabricSession?: HarnessFabricSessionConfig;
+  patternIndex?: HarnessPatternIndexConfig;
+  skillsSh?: HarnessSkillsShConfig;
   sandbox?: DockerRunscSandboxConfig;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -262,6 +312,18 @@ export const resolveHarnessConfig = (
     );
   }
   if (
+    options.patternIndex !== undefined && options.fabricSession === undefined
+  ) {
+    // Index requests are signed with the fabric session's identity, and a
+    // pattern taken from the index is compiled into the session's space. With
+    // no session there is neither a signer nor anywhere to run what the index
+    // returns, so the combination is refused rather than yielding a tool that
+    // fails on its first call.
+    throw new Error(
+      "pattern index configuration requires a fabric session",
+    );
+  }
+  if (
     modelProvider === "openai-codex" &&
     (options.gatewayBaseUrl !== undefined ||
       options.gatewayAuthMode !== undefined ||
@@ -305,6 +367,10 @@ export const resolveHarnessConfig = (
     ...(options.fabricSession !== undefined
       ? { fabricSession: options.fabricSession }
       : {}),
+    ...(options.patternIndex !== undefined
+      ? { patternIndex: options.patternIndex }
+      : {}),
+    ...(options.skillsSh !== undefined ? { skillsSh: options.skillsSh } : {}),
   };
   if (modelProvider === "openai-codex") {
     return {

@@ -8,7 +8,7 @@ import { getLogger } from "../../utils/src/logger.ts";
 // reason as traverse.ts.
 import { isObjectOrArray } from "../../utils/src/types.ts";
 import type { JSONSchema, Pattern } from "./builder/types.ts";
-import { type Cell, isCell, isStream } from "./cell.ts";
+import { type Cell, isCell } from "./cell.ts";
 import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
@@ -18,10 +18,6 @@ import type { RuntimeProgram } from "./harness/types.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { isSigilLink, linkPathSegmentToCellPathSegment } from "./link-types.ts";
 import { parseLink } from "./link-utils.ts";
-import {
-  normalizePatternSource,
-  systemPatternSource,
-} from "./pattern-source-scheme.ts";
 import type { Runtime } from "./runtime.ts";
 import { DEFAULT_CELL_SCOPE, scopeRank } from "./scope.ts";
 import type {
@@ -339,53 +335,6 @@ export function getResultCellWithSourceSchema<T = unknown>(
     }
   }
   return cell;
-}
-
-const DEFAULT_APP_PATTERN_SOURCE = systemPatternSource(
-  "system/default-app.tsx",
-);
-
-/**
- * Identifies a persisted default-app-shaped root that still exposes its piece
- * registry under the retired field. Provenance-free roots and roots tracking
- * the official default app qualify; custom sourced roots do not.
- */
-export function isLegacyPieceRegistryRoot(
-  root: Cell<unknown>,
-): boolean {
-  const patternIdentity = root.getMetaRaw("patternIdentity");
-  const patternSource = root.getMetaRaw("patternSource");
-  if (
-    !isObjectOrArray(patternIdentity) ||
-    typeof patternIdentity.identity !== "string" ||
-    typeof patternIdentity.symbol !== "string" ||
-    (patternSource !== undefined &&
-      (typeof patternSource !== "string" ||
-        // Compare in canonical form: a root that tracks the official default
-        // app is the same root whether it was stamped with the `system:` ref
-        // or with either pre-scheme spelling of that route.
-        normalizePatternSource(
-            patternSource,
-            root.runtime.hostForSpace(root.space),
-          ) !== DEFAULT_APP_PATTERN_SOURCE))
-  ) {
-    return false;
-  }
-
-  return root.key("pieceRegistry").getRaw() === undefined &&
-    root.key("allPieces").getRaw() !== undefined &&
-    isStream(root.key("addPiece").resolveAsCell());
-}
-
-/**
- * The field a persisted default root exposes its piece registry under: the
- * retired `allPieces` for a legacy default-app root, `pieceRegistry`
- * otherwise. The single home for a selection every registry consumer makes.
- */
-export function pieceRegistryKeyForRoot(
-  root: Cell<unknown>,
-): "pieceRegistry" | "allPieces" {
-  return isLegacyPieceRegistryRoot(root) ? "allPieces" : "pieceRegistry";
 }
 
 /**

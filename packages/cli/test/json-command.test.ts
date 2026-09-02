@@ -41,45 +41,52 @@ describe("JSON command contracts", () => {
         "--pattern-json",
       ]),
     ).toBe(true);
-    expect(reservesStdoutForCommandOutput(["piece", "get", "path"]))
-      .toBe(true);
-    // The top-level spellings reserve stdout exactly as their piece
-    // counterparts: get and call do, set does not.
+    // Which data commands reserve stdout: get and call do, set does not.
     expect(reservesStdoutForCommandOutput(["get", "path"])).toBe(true);
     expect(reservesStdoutForCommandOutput(["call", "search"])).toBe(true);
     expect(reservesStdoutForCommandOutput(["set", "path"])).toBe(false);
+    // The piece-mounted spellings are gone, so nothing reserves stdout for
+    // them; a leftover entry would suppress the help an unknown subcommand
+    // prints, and `cf piece set` would answer differently from the other two.
+    expect(reservesStdoutForCommandOutput(["piece", "get", "path"])).toBe(
+      false,
+    );
+    expect(reservesStdoutForCommandOutput(["piece", "set", "path"])).toBe(
+      false,
+    );
+    expect(reservesStdoutForCommandOutput(["piece", "call", "verb"])).toBe(
+      false,
+    );
     expect(reservesStdoutForCommandOutput(["piece", "get-label", "path"]))
       .toBe(true);
     expect(reservesStdoutForCommandOutput(["piece", "set-label", "path"]))
       .toBe(true);
-    expect(
-      reservesStdoutForCommandOutput([
-        "piece",
-        "call",
-        "--piece",
-        "example",
-        "search",
-        '{"query":"milk"}',
-      ]),
-    ).toBe(true);
-    expect(
-      reservesStdoutForCommandOutput([
-        "piece",
-        "--space",
-        "test",
-        "call",
-        "search",
-      ]),
-    ).toBe(true);
+    // The bulk commands write their plan or their report to stdout, so they
+    // reserve it whether or not --json is on the line.
+    expect(reservesStdoutForCommandOutput(["piece", "survey", "--piece", "b"]))
+      .toBe(true);
+    expect(reservesStdoutForCommandOutput(["piece", "repair", "--piece", "b"]))
+      .toBe(true);
+    expect(reservesStdoutForCommandOutput(["piece", "retarget", "--plan", "p"]))
+      .toBe(true);
+    expect(reservesStdoutForCommandOutput(["piece", "rollback", "--plan", "p"]))
+      .toBe(true);
+    // The restore streams its revision listing to stdout in every mode, so
+    // it reserves stdout as the plan-driven commands above do.
+    expect(reservesStdoutForCommandOutput(["piece", "restore", "--piece", "b"]))
+      .toBe(true);
+    // A word that names a reserving subcommand does not reserve when it sits
+    // in a flag's value or as another command's argument. Written against a
+    // removed command these could only pass.
     expect(
       reservesStdoutForCommandOutput([
         "piece",
         "ls",
         "--space",
-        "call",
+        "survey",
       ]),
     ).toBe(false);
-    expect(reservesStdoutForCommandOutput(["piece", "new", "get"]))
+    expect(reservesStdoutForCommandOutput(["piece", "new", "get-label"]))
       .toBe(false);
     expect(reservesStdoutForCommandOutput(["exec", "/tmp/search.tool"]))
       .toBe(true);
@@ -116,11 +123,10 @@ describe("JSON command contracts", () => {
     for (
       const command of [
         "check --pattern-json --bogus fixtures/pow-5.tsx",
-        "piece get --bogus",
+        "get --bogus",
         "piece get-label --bogus",
         "piece set-label --bogus",
-        "piece --bogus get",
-        "piece --bogus call",
+        "piece --bogus survey",
         "wish --bogus #profile",
       ]
     ) {
@@ -135,8 +141,8 @@ describe("JSON command contracts", () => {
   it("does not reserve stdout for unrelated piece argument values", async () => {
     for (
       const command of [
-        "piece new get --bogus",
-        "piece ls --space call --bogus",
+        "piece new get-label --bogus",
+        "piece ls --space survey --bogus",
       ]
     ) {
       const { code, stdout, stderr } = await cf(command);
@@ -192,7 +198,7 @@ describe("JSON command contracts", () => {
   });
 
   it("documents redundant --json options on JSON-only reads", async () => {
-    const pieceGet = await cf("piece get --help");
+    const pieceGet = await cf("get --help");
     const wish = await cf("wish --help");
 
     expect(pieceGet.code).toBe(0);
@@ -219,43 +225,45 @@ describe("JSON command contracts", () => {
   });
 });
 
-describe("piece call JSON arguments", () => {
+describe("call JSON arguments", () => {
   it("passes explicit JSON input through like cf exec", () => {
-    expect(pieceCallRawArgs(["--json"], [])).toEqual(["--json"]);
-    expect(pieceCallRawArgs(["--json", '{"query":"milk"}'], [])).toEqual([
+    expect(pieceCallRawArgs(["--json"])).toEqual(["--json"]);
+    expect(pieceCallRawArgs(["--json", '{"query":"milk"}'])).toEqual([
       "--json",
       '{"query":"milk"}',
     ]);
   });
 
-  it("retains positional JSON and delimited schema flags", () => {
-    expect(pieceCallRawArgs(['{"query":"milk"}'], [])).toEqual([
+  it("retains positional JSON and the schema-derived flags beside it", () => {
+    expect(pieceCallRawArgs(['{"query":"milk"}'])).toEqual([
       "--json",
       '{"query":"milk"}',
     ]);
-    expect(pieceCallRawArgs([], ["--query", "milk"])).toEqual([
+    // The verb opened the section, so its flags stand there with no marker
+    // between them and the name.
+    expect(pieceCallRawArgs(["--query", "milk"])).toEqual([
       "--query",
       "milk",
     ]);
   });
 
-  it("rejects callable arguments on both sides of the delimiter", () => {
-    expect(() => pieceCallRawArgs(["--json"], ["--query", "milk"])).toThrow(
-      'Callable arguments cannot appear on both sides of "--".',
-    );
-  });
-
-  it("reports mixed callable argument modes as a validation error", async () => {
+  it("reports a verb's own flag past the marker as a validation error", async () => {
+    // The spelling this grammar replaces, and the one every caller migrating
+    // writes first. The refusal prints the line that works rather than
+    // reporting an unknown name.
     const { code, stdout, stderr } = await cf(
-      "piece call --identity ./missing.key --api-url http://127.0.0.1:1 --space test --piece example search --json -- --query milk",
+      "call --identity ./missing.key --api-url http://127.0.0.1:1 --space test --piece example search -- --query milk",
     );
 
     expect(code).toBe(2);
     expect(stdout).toEqual([]);
-    expect(stripAnsi(stderr.join("\n"))).toContain(
-      'Callable arguments cannot appear on both sides of "--".',
+    const errors = stripAnsi(stderr.join("\n"));
+    expect(errors).toContain('"--query" is not a read option');
+    expect(errors).toContain(
+      "write:    cf call --identity ./missing.key --api-url " +
+        "http://127.0.0.1:1 --space test --piece example search --query milk",
     );
-    expect(stripAnsi(stderr.join("\n"))).not.toContain("pieceCallRawArgs");
+    expect(errors).not.toContain("pieceCallRawArgs");
   });
 
   it("writes watch status to stderr in JSON mode", () => {

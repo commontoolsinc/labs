@@ -77,8 +77,10 @@ export interface BindingInfo {
 export interface ModuleItemClassificationOptions {
   /** Canonical shadow-guard statements that MUST be present, or none. */
   requiredGuards: ReadonlySet<string>;
+
   /** Reserved wrapper bindings authored code may not declare, or none. */
   reservedBindings: ReadonlySet<string>;
+
   /** Source offset used for the "missing required shadow guards" error. */
   missingGuardsErrorAt: number;
 }
@@ -104,6 +106,7 @@ export const RESERVED_FACTORY_BINDING_SET: ReadonlySet<string> = new Set<
 >(
   RESERVED_FACTORY_BINDINGS,
 );
+
 const DEFAULT_EXPORT_ALLOWED_BINDING_ERROR =
   "Default exports must be trusted builders, direct functions, verified data, or import re-exports";
 

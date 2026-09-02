@@ -128,79 +128,73 @@ Deno.test("main: no arguments behaves like an unknown suite", async () => {
 });
 
 Deno.test("main: empty lists print the report on stderr and nothing on stdout", async () => {
-  // The shell suite's list is empty (patterns carries the default-app
-  // STEP entry and the lunch-poll-vote FILE entry; runner and
-  // runtime-client are empty since their lifts).
+  // Every suite's list is empty since the lunch-poll-vote ruled-3b-close
+  // lift (2026-08-28, the third lift) — this case drives the shell suite
+  // as the representative empty list.
   const { out, err, io } = captureIo();
   assertEquals(await main(["shell"], io), 0);
   assertEquals(out, []);
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list = the default-app STEP entry (its charge NARROWED 2026-08-24) + the lunch-poll-vote FILE entry, both under OW45 arm B. The b04 client-start death — the flag-ON client's navigate-deferred piece start dying terminally on a stale-confirmed-read ConflictError — is CLOSED by the RULED catch-up-and-start recovery (the refusal is 'the server won the race'; the client awaits the conflict's readiness and starts from the served documents through the ordinary load walk, committing nothing; OW45's CATCH-UP-AND-START block, serving-loop.md §3d RULED 2026-08-24), and the fix-head gate watched the recovery resurrect the notebook space's refused root start in the GREEN runs. What keeps the STEP entry is the gate's 7/10: the arm-B residue is READ-SIDE — a silent sticky readCell of the argument's redirect-linked notes with the piece context fully live (r01), and a stranded whole-piece mid-session read death behind a keyless pattern-load-error, with zero start deaths (r06/r09) — both store-verified zero-loss, neither reachable from the deferred-start error arm. The lunch-poll-vote FILE entry is #5744's 2026-08-24 deliberate re-skip, and its OWN 10-run gate has now RUN at the merged head — 7/10, no lift: the b04 class it was minted for is closed there too (catch-up activations 10/10 runs, zero terminal deferred-start deaths), and the entry now stands on a THIRD, WRITE-SIDE residue member — the guest browser's mid-session profile piece never landing its program-materialization commit, its space stuck at 4 commits with no patternIdentity and zero server-log mentions against the greens' 14-21; refused vs dropped vs never issued is NOT determined. It still lifts only on its own gate evidence at the merged head, a FILE entry because every later step depends on that join. An EMPTY list is the flip PR's bar; any change here is a deliberate edit that reddens this pin", async () => {
+Deno.test("main: the patterns list is EMPTY after the ruled 3b close and the flip bar's list-EMPTY precondition is met", async () => {
+  // The patterns list is EMPTY again — lunch-poll-vote's FILE entry, the
+  // LAST entry in any suite, lifted 2026-08-28 (the THIRD lift) on the
+  // owner-ruled 3b close: the owner ruled "go with (1) plus the (2-D)
+  // kick", and both mechanisms are landed red-first — (1) event-driven
+  // re-supply (a supply-class replication failure parks under the WANTED
+  // identity and the matching persist RECORD re-issues it; the
+  // registration-time map check covers a record that landed inside the
+  // read window) and (2-D) the sidecar serve-time closure kick (the
+  // demanding space's supplier registered at page-serve time, covered by
+  // the ticket await). Campaign R 8/8 quiet-and-loaded at the lift head,
+  // and the lift PR's own ON-lane board is the direct-CI unskip probe
+  // (PROBE 6). What stays open is recorded in the register's RULING block
+  // (cross-replica never-records supplier; prior-session third-space
+  // closure; the recursive-(b) sliver). Evidence chain:
+  // verification-coverage.md OW45's lunch blocks.
+
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
-  // The step entry never drops its file; the lunch-poll-vote FILE entry
-  // is the one --ignore flag on stdout.
-  assertEquals(out, ["--ignore=integration/lunch-poll-vote.test.ts"]);
-  // …the report carries both skips loudly…
-  assertMatch(
-    err[0],
-    /patterns: SKIP-STEP integration\/default-app\.test\.ts :: should persist and reload every rapidly created notebook note \(until phase-7; the rest of the file runs\)/,
-  );
-  assertMatch(
-    err[0],
-    /patterns: SKIP integration\/lunch-poll-vote\.test\.ts \(until phase-7\)/,
-  );
-  // …and the list holds EXACTLY these two entries — a third entry or a
-  // silent lift both redden this pin.
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 2);
+  // No entries: no --ignore flag on stdout…
+  assertEquals(out, []);
+  // …the report says so loudly…
+  assertMatch(err[0], /patterns: no skips — full suite runs\./);
+  // …and the list is EMPTY — a new entry reddens this pin, so a re-skip
+  // is a deliberate change, never a leftover.
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 0);
+  // The topic-board pivot-baseline entry is GONE (#6304 fixed): the
+  // guard lookup for that step resolves nothing, so the case runs in
+  // the ON lane — it is that issue's acceptance test.
   assertEquals(
-    SERVER_EXECUTION_ON_SKIPS.patterns[0].file,
-    "integration/default-app.test.ts",
+    serverExecutionOnStepSkip(
+      "patterns",
+      "integration/topic-board-child-contract.test.ts",
+      "builds one pivot row per topic, claiming no edges before any mention",
+    ),
+    undefined,
   );
+  // The default-app reload STEP entry is GONE (LIFTED 2026-08-28 under the
+  // owner's surface reading of the ruled bar): its guard lookup resolves
+  // NOTHING, so the ON arm RUNS that step — the lift's standing proof, and the
+  // pin that makes a silent re-skip impossible.
   assertEquals(
-    SERVER_EXECUTION_ON_SKIPS.patterns[0].step,
-    "should persist and reload every rapidly created notebook note",
+    serverExecutionOnStepSkip(
+      "patterns",
+      "integration/default-app.test.ts",
+      "should persist and reload every rapidly created notebook note",
+    ),
+    undefined,
   );
-  // The lunch-poll-vote entry is FILE-level (no step guard: every step
-  // depends on the profile-first join the class kills), same class and
-  // fork memo as the step entry above.
-  assertEquals(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].file,
-    "integration/lunch-poll-vote.test.ts",
+  // No SKIP or SKIP-STEP line anywhere in the report.
+  assert(
+    !/SKIP/.test(err[0]),
+    "the patterns report must carry no SKIP line — the list is empty " +
+      "since the lunch-poll-vote ruled-3b-close lift (2026-08-28)",
   );
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[1].step, undefined);
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[1].phase, "phase-7");
-  // Its reason names the NARROWED charge the entry's own gate found
-  // (2026-08-24) — the guest profile piece's program materialization
-  // never landing — not the b04 client-start class that gate closed,
-  // whose fork memo the reason keeps as history.
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
-    /program-materialization|patternIdentity/,
-  );
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
-    /ow45-armb-client-start-fork\.md/,
-  );
-  // The guard lookup RESOLVES for the guarded step (the in-file
-  // onArmStepSkip guard binds it under the ON posture), and the reason
-  // names the narrowed residue, not the closed start class.
-  const entry = serverExecutionOnStepSkip(
-    "patterns",
-    "integration/default-app.test.ts",
-    "should persist and reload every rapidly created notebook note",
-  );
-  assert(entry !== undefined, "the reload step's guard entry must resolve");
-  assertEquals(entry.phase, "phase-7");
-  assertMatch(entry.reason, /readCell|rehydrat/);
-  assertMatch(entry.reason, /no data loss/);
-  assertMatch(entry.reason, /catch-up-and-start/);
-  // The shard filter drops exactly the FILE entry's file (the shard
-  // lanes feed explicit file lists) and passes every other candidate
-  // through untouched — remove the lunch-poll-vote entry and this
-  // assertion reds.
+  // The shard filter passes EVERY candidate through — lunch-poll-vote
+  // included: the ON lanes RUN the file, which is the lift's standing
+  // proof in the lanes that feed this list to --filter.
   const { files, skipped } = serverExecutionOnFilterFiles("patterns", [
     "./integration/default-app.test.ts",
     "./integration/cellset-lww.test.ts",
@@ -212,9 +206,10 @@ Deno.test("main: the patterns list = the default-app STEP entry (its charge NARR
     "./integration/default-app.test.ts",
     "./integration/cellset-lww.test.ts",
     "./integration/convergence-storm.test.ts",
+    "./integration/lunch-poll-vote.test.ts",
     "./integration/topics-navigation.test.ts",
   ]);
-  assertEquals(skipped, [SERVER_EXECUTION_ON_SKIPS.patterns[1]]);
+  assertEquals(skipped, []);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.shell.length, 0);
 });
 
@@ -298,7 +293,14 @@ Deno.test("validation binds a step entry: the file must name the step and call t
   ]);
 });
 
-Deno.test("main: the runner list is EMPTY — pattern-and-data-persistence LIFTED by the arrival-witness predicate (RULED 2026-08-22, candidate (B): a cover at the floor witnesses only when derived-class) on 10/10 green at the true ON topology — so the full suite runs, and the ONLY file-level skip in ANY suite is patterns' lunch-poll-vote entry (the 2026-08-24 deliberate OW45 arm-B re-skip)", async () => {
+Deno.test("main: the runner list is EMPTY and NO suite carries any entry — the ON-skip registry is EMPTY after the ruled 3b close", async () => {
+  // The runner list emptied with the arrival-witness lift (RULED 2026-08-22,
+  // candidate (B) of the OW33 fork memo); the LAST list anywhere emptied
+  // (a third time) with the lunch-poll-vote ruled-3b-close lift
+  // (2026-08-28). This pin holds the whole-registry EMPTY state: any new
+  // entry in ANY suite reddens it, so a skip is a deliberate change,
+  // never a leftover.
+
   const { out, err, io } = captureIo();
   assertEquals(await main(["runner"], io), 0);
   // No entries: no --ignore flag on stdout…
@@ -312,21 +314,17 @@ Deno.test("main: the runner list is EMPTY — pattern-and-data-persistence LIFTE
   // …and the report says so loudly.
   assertMatch(err[0], /runner: no skips — full suite runs\./);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.runner.length, 0);
-  // A FILE-level skip is a deliberate entry, never a leftover: the
-  // arrival-witness lift cleared the last one, and the single re-skip
-  // since — patterns' lunch-poll-vote entry (2026-08-24, the OW45 arm-B
-  // client-start class its profile-first join newly exposes) — is named
-  // here so the NEXT file-level entry still reddens this pin. The flip
-  // PR's list-EMPTY bar hangs on the default-app step and this file.
+  // The whole registry: every suite's list is EMPTY — the flip PR's
+  // list-EMPTY precondition (the header's contract) is MET and stays
+  // pinned. The flip bar itself remains a green ON lane, not merely
+  // this empty registry.
   for (const suite of ["patterns", "runner", "runtime-client", "shell"]) {
     if (!isServerExecutionSuite(suite)) throw new Error("unreachable");
     assertEquals(
-      SERVER_EXECUTION_ON_SKIPS[suite]
-        .filter((skip) => skip.step === undefined)
-        .map((skip) => skip.file),
-      suite === "patterns" ? ["integration/lunch-poll-vote.test.ts"] : [],
-      `${suite}: the only FILE-level skip is the deliberate ` +
-        "lunch-poll-vote OW45 arm-B entry",
+      SERVER_EXECUTION_ON_SKIPS[suite].map((skip) => skip.file),
+      [],
+      `${suite}: the ON-skip registry is EMPTY since the lunch-poll-vote ` +
+        "ruled-3b-close lift (2026-08-28)",
     );
   }
 });
@@ -451,6 +449,9 @@ Deno.test("main --filter: prints the surviving files on stdout, the report + DRO
   }
 });
 
+//
+// What `--ignore` binds to
+//
 // The mechanism's BINDING, pinned by spawning deno on both shapes (Phase 7
 // fixer, 2026-08-16): `deno test --ignore=<file>` filters only the modules
 // deno DISCOVERS — a glob it expands itself — and silently ignores nothing
@@ -458,6 +459,8 @@ Deno.test("main --filter: prints the surviving files on stdout, the report + DRO
 // the pattern shards' file list). Until this pin, every ON-arm skip since
 // Phase 4 rode a shell-expanded glob and never took effect. If deno's
 // semantics ever change, these two tests say which shape moved.
+//
+
 async function collectedTestFiles(args: string[], cwd: string) {
   const command = new Deno.Command(Deno.execPath(), {
     args: ["test", "--no-lock", "--no-check", ...args],

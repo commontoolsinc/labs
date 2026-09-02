@@ -7,7 +7,7 @@ import {
 } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import type { JSONSchema } from "@commonfabric/api";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { encodeMemoryBoundary } from "../v2.ts";
 import {
   applyCommit,
@@ -2140,6 +2140,187 @@ Deno.test("memory v2 refreshTrackedGraph double-role retirement: a key that is b
       "the miss's schema walk delivers the grandchild only it reaches",
     );
     assertEquals(state.missed.has(missKey), false);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 traversal stats charge one root's cost to that root", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-root-attribution-single";
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:attribution-root",
+          value: { value: { name: "board" } },
+        }],
+      },
+    });
+
+    const schema: JSONSchema = {
+      type: "object",
+      properties: { name: { type: "string" } },
+    };
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:attribution-root",
+        selector: { path: ["value"], schema },
+      }],
+    });
+
+    const { stats } = tracked;
+    assertEquals(stats.rootsVisited, 1);
+    const slowest = stats.slowestRoot;
+    assertExists(slowest);
+    assertEquals(slowest.id, "of:attribution-root");
+    assertEquals(slowest.scope, "space");
+    assertEquals(slowest.path, "value");
+    assertEquals(slowest.schema, internSchemaAsTaggedHashString(schema));
+
+    // With one root, the root's share IS the evaluation's: anything else
+    // means the before/after deltas are being taken against the wrong
+    // baseline. This is what makes the two-root split below trustworthy.
+    assertEquals(slowest.reads, stats.managerReads);
+    assertEquals(slowest.walk.dagTraversals, stats.dagTraversals);
+    assertEquals(slowest.walk.schemaTraversals, stats.schemaTraversals);
+    assertEquals(slowest.walk.getDocAtPathCalls, stats.getDocAtPathCalls);
+    assert(slowest.reads > 0, "the root loaded its document");
+    assert(
+      slowest.elapsedMs <= stats.rootsElapsedMs,
+      "one root cannot outlast the sum of the visits",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 traversal stats name the root that spent the time", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-root-attribution-slowest";
+  const realNow = performance.now.bind(performance);
+  let nowOffsetMs = 0;
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: "of:cheap-root", value: { value: { n: 1 } } },
+          { op: "set", id: "of:costly-root", value: { value: { n: 2 } } },
+        ],
+      },
+    });
+
+    // The clock advances when the costly root's document is loaded, which
+    // happens inside that root's charged window — the same "move time from
+    // inside the measured window" lever the slow-query tests use, aimed at
+    // one root instead of one request. Real elapsed time is never raced.
+    performance.now = () => realNow() + nowOffsetMs;
+    const manager = new EngineObjectManager(engine, "");
+    const realLoad = manager.load.bind(manager);
+    manager.load = ((address: Parameters<typeof realLoad>[0]) => {
+      if (address.id === "of:costly-root") nowOffsetMs += 500;
+      return realLoad(address);
+    }) as typeof manager.load;
+
+    // Keyed lookup would need the manager-key spelling; every key wants the
+    // same manager here, so answer them all with it.
+    class OneManager extends Map<string, EngineObjectManager> {
+      override get(_key: string): EngineObjectManager {
+        return manager;
+      }
+    }
+
+    const { stats } = trackGraph(
+      space,
+      engine,
+      {
+        roots: [
+          { id: "of:cheap-root", selector: { path: [], schema: true } },
+          { id: "of:costly-root", selector: { path: [], schema: true } },
+        ],
+      },
+      { managers: new OneManager() },
+    );
+
+    assertEquals(stats.rootsVisited, 2);
+    const slowest = stats.slowestRoot;
+    assertExists(slowest);
+    assertEquals(slowest.id, "of:costly-root");
+    assert(
+      slowest.elapsedMs >= 500,
+      `the costly root carries the advance, got ${slowest.elapsedMs}`,
+    );
+    assert(
+      stats.rootsElapsedMs >= slowest.elapsedMs,
+      "the sum covers the slowest",
+    );
+
+    // A root's reads and walk are its OWN, not the evaluation's running
+    // totals: both roots load and traverse here, so a share that failed to
+    // subtract its baseline would read as the total instead.
+    assert(
+      slowest.reads > 0 && slowest.reads < stats.managerReads,
+      `a share of ${stats.managerReads} reads, got ${slowest.reads}`,
+    );
+    assert(
+      slowest.walk.dagTraversals > 0 &&
+        slowest.walk.dagTraversals < stats.dagTraversals,
+      `a share of ${stats.dagTraversals} crossings, got ${slowest.walk.dagTraversals}`,
+    );
+  } finally {
+    performance.now = realNow;
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 extendTrackedGraph attributes the roots it adds", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-root-attribution-extend";
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: "of:extend-first", value: { value: { n: 1 } } },
+          { op: "set", id: "of:extend-second", value: { value: { n: 2 } } },
+        ],
+      },
+    });
+
+    const tracked = trackGraph(space, engine, {
+      roots: [{ id: "of:extend-first", selector: { path: [], schema: true } }],
+    });
+
+    // Extension walks its own roots against an existing graph, so it keeps
+    // its own attribution rather than inheriting the first evaluation's.
+    const extended = extendTrackedGraph(space, engine, tracked.state, {
+      roots: [{ id: "of:extend-second", selector: { path: [], schema: true } }],
+    });
+
+    assertEquals(extended.stats.rootsVisited, 1);
+    const slowest = extended.stats.slowestRoot;
+    assertExists(slowest);
+    assertEquals(slowest.id, "of:extend-second");
+    assertEquals(slowest.reads, extended.stats.managerReads);
+    assert(slowest.reads > 0, "the added root read its document");
   } finally {
     close(engine);
     await Deno.remove(path);

@@ -1,0 +1,237 @@
+/**
+ * Projects a completed console turn from its durable run report and the
+ * transcript the model received. The report identifies this run's transcript
+ * messages and supplies its final assistant text. Missing or malformed
+ * artifacts produce no result rather than a partial object that could be
+ * mistaken for a completed contract.
+ */
+
+import { join } from "@std/path";
+
+import type {
+  HarnessChatEventEnvelope,
+  HarnessChatStructuredEvent,
+} from "../src/contracts/interactive-chat.ts";
+import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
+
+/** A named piece a completed console turn made openable. */
+export interface ConsoleTurnResultPiece {
+  /** Slug returned by `assign_slug`. */
+  slug: string;
+
+  /** Openable URL returned beside the slug. */
+  url: string;
+}
+
+/** The stable result an external console caller reads for a completed turn. */
+export interface ConsoleTurnResult {
+  /** Successful named-piece outputs, in transcript order. */
+  pieces: readonly ConsoleTurnResultPiece[];
+
+  /** The space this console is configured against. */
+  spaceName: string;
+
+  /** Last assistant text, or an empty string when the turn ended on a tool. */
+  finalText: string;
+}
+
+/** The console's completed SSE event with its external result attached. */
+export type ConsoleTurnCompletedEvent =
+  & Extract<
+    HarnessChatStructuredEvent,
+    { kind: "turn_completed" }
+  >
+  & { result: ConsoleTurnResult };
+
+/** A console SSE event, whose completed-turn case always carries a result. */
+export type ConsoleChatStructuredEvent =
+  | Exclude<HarnessChatStructuredEvent, { kind: "turn_completed" }>
+  | ConsoleTurnCompletedEvent;
+
+/** The event envelope emitted by the console SSE route. */
+export type ConsoleChatEventEnvelope =
+  & Omit<
+    HarnessChatEventEnvelope,
+    "event"
+  >
+  & { event: ConsoleChatStructuredEvent };
+
+/** Inputs which identify one turn's durable result. */
+export interface ReadConsoleTurnResultOptions {
+  /** Root holding one artifact directory per turn. */
+  artifactRoot: string;
+
+  /** Turn identifier, which is also the run artifact directory name. */
+  turnId: string;
+
+  /** Space this console is configured against. */
+  spaceName: string;
+}
+
+/** Characters the artifact store admits in one run directory name. */
+const SAFE_RUN_ID = /^[A-Za-z0-9._-]+$/;
+
+/** Whether an artifact value has the minimum shape of a transcript message. */
+const isTranscriptMessage = (
+  value: unknown,
+): value is HarnessTranscriptMessage => {
+  if (
+    typeof value !== "object" || value === null || !("role" in value) ||
+    !("content" in value) || typeof value.content !== "string"
+  ) {
+    return false;
+  }
+  if (
+    value.role === "system" || value.role === "user" ||
+    value.role === "assistant"
+  ) {
+    return true;
+  }
+  return value.role === "tool" && "toolCallId" in value &&
+    typeof value.toolCallId === "string" && "toolName" in value &&
+    typeof value.toolName === "string";
+};
+
+interface TurnRunArtifacts {
+  transcript: readonly HarnessTranscriptMessage[];
+  currentTranscriptIndexes: ReadonlySet<number>;
+  finalText: string;
+}
+
+/**
+ * Returns a generated message's index, `malformed` for an invalid generated
+ * entry, or nothing for timeline entries outside this run.
+ */
+const currentTranscriptIndex = (
+  value: unknown,
+): number | "malformed" | undefined => {
+  if (
+    typeof value !== "object" || value === null ||
+    !("kind" in value) || value.kind !== "transcript_message"
+  ) {
+    return undefined;
+  }
+  if (!("modelTurn" in value)) {
+    return undefined;
+  }
+  if (
+    typeof value.modelTurn !== "number" ||
+    !Number.isSafeInteger(value.modelTurn) || value.modelTurn < 1 ||
+    !("transcriptIndex" in value) ||
+    typeof value.transcriptIndex !== "number" ||
+    !Number.isSafeInteger(value.transcriptIndex) || value.transcriptIndex < 0
+  ) {
+    return "malformed";
+  }
+  return value.transcriptIndex;
+};
+
+/** Reads the transcript and its run boundary without admitting a path. */
+const readTurnRunArtifacts = async (
+  artifactRoot: string,
+  turnId: string,
+): Promise<TurnRunArtifacts | undefined> => {
+  if (
+    !SAFE_RUN_ID.test(turnId) || turnId === "." || turnId === ".."
+  ) {
+    return undefined;
+  }
+  try {
+    const runRoot = join(artifactRoot, turnId);
+    const [transcriptValue, reportValue]: [unknown, unknown] = await Promise
+      .all(
+        [
+          Deno.readTextFile(join(runRoot, "transcript.json")).then((text) =>
+            JSON.parse(text)
+          ),
+          Deno.readTextFile(join(runRoot, "run-report.json")).then((text) =>
+            JSON.parse(text)
+          ),
+        ],
+      );
+    if (
+      !Array.isArray(transcriptValue) ||
+      !transcriptValue.every(isTranscriptMessage) ||
+      typeof reportValue !== "object" || reportValue === null ||
+      !("timeline" in reportValue) || !Array.isArray(reportValue.timeline) ||
+      !("finalAssistantText" in reportValue) ||
+      typeof reportValue.finalAssistantText !== "string"
+    ) {
+      return undefined;
+    }
+    const currentTranscriptIndexes = new Set<number>();
+    for (const entry of reportValue.timeline) {
+      const index = currentTranscriptIndex(entry);
+      if (index === "malformed") {
+        return undefined;
+      }
+      if (index !== undefined) {
+        if (index >= transcriptValue.length) {
+          return undefined;
+        }
+        currentTranscriptIndexes.add(index);
+      }
+    }
+    return {
+      transcript: transcriptValue,
+      currentTranscriptIndexes,
+      finalText: reportValue.finalAssistantText,
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+/** Copies the openable fields from one successful `assign_slug` output. */
+const pieceFromAssignSlug = (
+  message: HarnessTranscriptMessage,
+): ConsoleTurnResultPiece | undefined => {
+  if (message.role !== "tool" || message.toolName !== "assign_slug") {
+    return undefined;
+  }
+  let output: unknown;
+  try {
+    output = JSON.parse(message.content);
+  } catch {
+    return undefined;
+  }
+  if (
+    typeof output !== "object" || output === null ||
+    !("status" in output) || output.status !== "ok" ||
+    !("slug" in output) || typeof output.slug !== "string" ||
+    !("url" in output) || typeof output.url !== "string"
+  ) {
+    return undefined;
+  }
+  // These two fields are copied from the model-facing `assign_slug` output.
+  // No new data crosses the console boundary and no URL is reconstructed.
+  return { slug: output.slug, url: output.url };
+};
+
+/**
+ * Reads one completed turn from its durable report and model-facing
+ * transcript. The report supplies the run boundary and final text. Returns
+ * `undefined` when the artifacts cannot establish a complete result.
+ */
+export const readConsoleTurnResult = async (
+  options: ReadConsoleTurnResultOptions,
+): Promise<ConsoleTurnResult | undefined> => {
+  const artifacts = await readTurnRunArtifacts(
+    options.artifactRoot,
+    options.turnId,
+  );
+  if (artifacts === undefined) {
+    return undefined;
+  }
+  return {
+    pieces: artifacts.transcript.flatMap((message, index) => {
+      if (!artifacts.currentTranscriptIndexes.has(index)) {
+        return [];
+      }
+      const piece = pieceFromAssignSlug(message);
+      return piece === undefined ? [] : [piece];
+    }),
+    spaceName: options.spaceName,
+    finalText: artifacts.finalText,
+  };
+};

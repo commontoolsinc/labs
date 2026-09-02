@@ -239,9 +239,18 @@ we were not looking."
 
 ## Section markers
 
-Mark a section of a file or a class with a `//` comment block that opens and
-closes with a line holding nothing but `//`. It carries a noun-phrase title, and
-optionally a fully grammatical description after a blank line:
+Section markers separate major portions of a file or class. They are not
+headers for individual functions and their helpers — doc comments already
+carry that structure, and a reader navigating by rendered documentation never
+sees the marker at all. They are not, as a rule, headers for individual test
+blocks either;
+[`unit-test-coding-style.md`](unit-test-coding-style.md#commenting-a-block)
+says where a comment about one of those goes.
+
+Where `//` comments can be used, mark a section of a file or a class with a
+`//` comment block that opens and closes with a line holding nothing but `//`.
+It carries a noun-phrase title, and optionally a fully grammatical description
+after a blank line:
 
 ```ts
 // Shown at module scope.
@@ -256,10 +265,57 @@ optionally a fully grammatical description after a blank line:
 export function fry(): void {}
 ```
 
-Section markers separate major portions of a file or class. They are not
-headers for individual functions and their helpers — doc comments already
-carry that structure, and a reader navigating by rendered documentation never
-sees the marker at all.
+A blank line sets the frame off above as well as below. Without the one above,
+the marker runs into whatever comment precedes it and the two read as one
+comment; without the one below, the frame reads as a note on the declaration it
+touches rather than as a heading over what follows.
+
+Directly under an opening bracket there is nothing above to separate from, and
+`deno fmt` removes a blank line there in any case. A frame there takes no blank
+line above it, and reads as the first region of the block rather than as a note
+on it. Where the block opens with shared setup instead, the region's first
+marker goes after it.
+
+**A region has an end, and writing the marker is choosing it.** A marker opens
+a region that runs to the next marker at the same level, or to the end of the
+enclosing block or file. Read what sits between the marker and that point and
+check the title covers all of it. Where the material the title owns stops before
+the enclosing block does, put a marker there titling what follows. A file whose
+last marker does not head the file's last section has a region whose end nobody
+chose.
+
+**A title is a claim about everything in its region**, not an introduction to
+what comes next. The same words that pass as a label above the first of a run
+become false as a title over a region holding more than they name: "the two
+things that are not values" is a fact about a region with two of them in it.
+When a region grows, its title is read against it again.
+
+A title can be wrong by being too narrow as easily as too wide. Where the
+subject it names also appears outside its region, either the region is in the
+wrong place or the title names something smaller than its subject.
+
+**A region holds more than its blocks.** Everything between the marker and the
+region's end falls inside it: a helper function, a fixture constant, a
+`beforeEach()`. A helper that serves the whole file but happens to sit inside
+one region reads as belonging to that region, so shared setup goes above the
+first marker.
+
+**CSS takes a block comment.** CSS has no line comments, so a section marker in
+a `.css` file, a `css` template literal, or a `<style>` block is a `/* */`
+block, with each delimiter on its own line and every line at the same
+indentation. Each line between the delimiters opens with `**`, which tells a
+marker apart from an ordinary comment:
+
+```css
+/*
+** Frosting variants
+**
+** One per glaze the fryer supports, in the order the menu lists them.
+*/
+```
+
+That flush indentation is what `deno fmt` settles a continuation line on inside
+a `css` template literal, so the single form holds wherever the CSS lives.
 
 **No horizontal rules.** Do not put long runs of dashes, equals signs, or other
 repeated characters into a comment, whether or not as part of a section marker.
@@ -400,8 +456,146 @@ A doc comment with no declaration under it at all is the same defect from the
 other direction, with one exception: the file header documents the file rather
 than any declaration in it, and is written as a doc comment for that reason;
 see [File headers](#file-headers) below. Everything else in that shape is the
-defect. To title a region of a file or a class, use a section marker, which is
-a `//` block; see [Section markers](#section-markers) above.
+defect. To title a region of a file or a class, use a section marker; see
+[Section markers](#section-markers) above.
+
+### The blank line above
+
+A doc comment takes a blank line above it, except where it is the first thing
+in its file or bracketed block, and except in the three constructs `deno fmt`
+will not keep one in.
+
+That blank line is what separates a documented declaration from whatever
+precedes it, and within those bounds it holds uniformly: a function after
+another function, an interface property after another property, an array
+element after another element.
+
+Three positions have nothing above to separate from, and so take no blank line:
+
+- **The first line of a file**, where a file header opens the file. A shebang
+  or a file-scoped pragma is something above, though, and takes the blank line
+  like anything else.
+- **Directly under an opening bracket** — `{`, `(`, or `[` — where the doc
+  comment belongs to the first member, parameter, or element of the block. The
+  bracket is the separator.
+- **Directly under the `=` of a type alias**, where the doc comment belongs to
+  the first arm of the union or intersection that follows. The `=` opens the
+  declaration the way a bracket opens a block, and the arms after the first are
+  exempt under the formatter rule below. Note that `deno fmt` will keep a blank
+  line in this one position, so the convention is the whole of what holds it.
+
+The dense cases are the ones the rule is for. An interface whose properties
+each carry a one-line doc comment reads as an undifferentiated run of lines
+without it, and pairing each comment to its property is work left to the
+reader:
+
+```ts
+// Shown at module scope.
+
+/** Everything known about one donut. */
+export interface Donut {
+  /** Style, such as `cruller` or `fritter`. */
+  readonly style: string;
+
+  /** Desired fryer temperature, in Kelvin. */
+  readonly temperature: number;
+
+  /** Toppings, in the order they are applied. */
+  readonly toppings: readonly string[];
+}
+```
+
+Three constructs are exempt because the formatter overrules the rule there.
+`deno fmt` removes a blank line between two items of a parenthesized list,
+between two items of a type parameter list, and between two arms of a union or
+intersection type, so a documented parameter list, argument list, type parameter
+list, or union runs unbroken:
+
+```ts
+// Shown at module scope.
+
+/** Fries one donut to order. */
+export function fry(
+  /** Style to fry. */
+  style: string,
+  /** Desired fryer temperature, in Kelvin. */
+  temperature: number,
+): void {}
+
+/** What a fryer is doing right now. */
+export type FryerState =
+  /** Idle, at whatever temperature it last held. */
+  | { readonly kind: "idle" }
+  /** Coming up to temperature, with the shortfall in Kelvin. */
+  | { readonly kind: "heating"; readonly shortfall: number }
+  /** Frying, with the count of donuts in the basket. */
+  | { readonly kind: "frying"; readonly count: number };
+```
+
+Object types, tuple types, array literals, and class and interface bodies all
+keep their blank lines, so the rule holds in full there.
+
+### The blank line below
+
+A documented declaration takes a blank line after it as well. The rule above
+separates a doc comment from what precedes it; this one bounds what it covers.
+
+Without that blank line a doc comment reads as a header over everything down to
+the next one, and whatever sits under the declaration it was written for looks
+documented when it is not:
+
+```ts
+// Shown as alternative snippets.
+
+// Wrong: `humidity` reads as covered by the comment above `temperature`.
+
+interface Reading {
+  /** Fryer temperature, in Kelvin. */
+  readonly temperature: number;
+  readonly humidity: number;
+}
+```
+
+```ts
+// Shown as alternative snippets.
+
+// Right: the blank line ends the doc comment's reach.
+
+interface Reading {
+  /** Fryer temperature, in Kelvin. */
+  readonly temperature: number;
+
+  readonly humidity: number;
+}
+```
+
+Anything following takes the blank line, not only another declaration. A
+statement under a documented local is the same shape and gets the same
+treatment.
+
+The exemptions mirror the ones above. A declaration with nothing after it in
+its file or bracketed block takes no blank line: the closing bracket, or the
+end of the file, is the separator, exactly as the opening bracket is on the
+other side. And the three constructs `deno fmt` will not keep a blank line in
+are exempt here for the reason they are exempt there — the formatter strips one
+after a documented parameter, type parameter, or union arm just as it strips one
+before.
+
+The rule reaches documented declarations only. Two adjacent members carrying no
+doc comment between them leave no comment's scope in doubt, and stay as they
+are.
+
+For this rule an overload set is one declaration. Its signatures and the
+implementation carrying the code are a single thing to a caller and a single
+thing to the doc comment above them, so no blank line falls between one part of
+the set and the next; the one that closes the set goes after the implementation.
+The blank lines inside the implementation's own body are statement spacing and
+are not what this means.
+
+A set with no implementation to close it — in an interface, or in ambient
+`declare` form — is an overload set all the same, and closes after its last
+signature. `deno fmt` keeps a blank line between two signatures, so this is a
+convention no gate will raise.
 
 ### What gets one
 

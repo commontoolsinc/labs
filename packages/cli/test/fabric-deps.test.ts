@@ -10,6 +10,7 @@ import { slugIdForSpace } from "../../runner/src/slugs.ts";
 import { collectLocalProgram } from "../lib/dev.ts";
 import { pinProgramFabricImports } from "../lib/fabric-deps.ts";
 import { cf, stripAnsi } from "./utils.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 const signer = await Identity.fromPassphrase("cli fabric deps test");
 const space = signer.did();
@@ -45,7 +46,7 @@ describe("cli fabric deps", () => {
       pieceWithTx.setMetaRaw("patternIdentity", {
         identity: ENTRY,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     const slugCell = runtime.getCellFromEntityId(
       space,

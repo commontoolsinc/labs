@@ -37,26 +37,34 @@ import type { StreamLinkRef } from "../v2.ts";
 /** One durable outbound append row (serving-loop.md §5, FP1). */
 export type OutboxAppendRow = {
   targetSpace: string;
+
   /** The target stream SIDECAR doc id (events.md §1: an event is an
    * authored append to a stream document — `streamEntriesDocId`). */
   targetStream: string;
+
   /** The stream link the sidecar stands for — carried into the delivered
    * entry's self-describing `stream` field so the target's drain can
    * reconstruct the scheduler event link (Phase 3; events.md §1).
    * Absent on stage-G-era rows, which fall back to a path-less stream at
    * the sidecar id. */
   targetStreamLink?: StreamLinkRef;
+
   /** The client-durable event id (events.md §1); the target's dedupe
    * horizon keys on it. */
   eventId: string;
+
   /** The event payload, JSON — bounded by the event, never
    * graph-scaled (protocol.md §7's metadata discipline applies to the
    * carried event too). */
   payload: unknown;
+
   /** The ORIGINATING chain actor (events.md §2): absent only for a
    * chain with no acting user (a space-scope derivation's emission). */
   actingPrincipal?: string;
+
+  /** The session that actor was acting in. */
   actingSession?: string;
+
   /** The OW15 declaration (protocol.md §2's Phase-3 floor carve-out,
    * SHAPE RULED 2026-08-05): the chain has NO actor anywhere — a
    * space-scope derivation's emission, a timer — and the target stamps
@@ -65,10 +73,12 @@ export type OutboxAppendRow = {
    * userless without the declaration is refused at the SOURCE
    * (wave.ts's enqueueOutboundAppend) and at the target's floor alike. */
   sessionlessSpaceScope?: boolean;
+
   /** The capability grant the target's admission validates —
    * delegation, never session-identity impersonation (protocol.md §2's
    * server-produced authored row). */
   capabilityRef: string;
+
   /** The SOURCE event whose handler run emitted this append (OW14;
    * protocol.md §2b's LT4 ruling): a deterministic delivery refusal
    * writes its failure notice onto THIS entry before the row retires.
@@ -86,6 +96,7 @@ export type OutboxAppendRow = {
  * for the row's lifetime. */
 export type PendingOutboxRow = OutboxAppendRow & {
   rowId: number;
+
   /** The emitting wave's commit seq (FIFO per source wave → target
    * stream rides insertion-id order; the seq is recorded for
    * diagnostics). */

@@ -46,7 +46,7 @@ toHost({ type: "ready" });
 
 function onMessage(e) {
   // Anything the guest posts here is forwarded without being read. It has a
-  // port for everything the key/value protocol says, so this route carries
+  // port for every capability operation, so this route carries
   // only a guest reporting that it could not use that port.
   if (e.source === INNER_WINDOW) {
     toHost({ type: "guest-error", data: e.data });

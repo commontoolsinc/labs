@@ -52,11 +52,13 @@ import {
   type StreamEventsDocValue,
 } from "@commonfabric/memory/v2";
 import { UI } from "../src/builder/types.ts";
-import {
-  getPatternEnvironment,
-  setPatternEnvironment,
-} from "../src/builder/env.ts";
+import { resolveEntryIdentity } from "../src/index.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
+
+// The route the toolshed serves the profile-create surface from, which is what
+// the surface's `system:` origin resolves against.
+const SIDECAR_ROUTE = "/api/patterns/system/profile-create.tsx";
 
 class SharedServerStorageManager extends EmulatedStorageManager {
   static override connectTo(
@@ -85,20 +87,6 @@ const foreignSpace = foreignSigner.did() as MemorySpace;
 const serviceSigner = await Identity.fromPassphrase("cross-space service");
 const aliceSigner = await Identity.fromPassphrase("cross-space alice");
 const bobSigner = await Identity.fromPassphrase("cross-space bob");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 10_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 describe("Phase 5 cross-space serving", () => {
   let server: MemoryV2Server.Server;
@@ -785,6 +773,123 @@ describe("Phase 5 cross-space serving", () => {
     }
   });
 
+  it("the ruled 3b close carries the §2b delegation across the heal: a delegated replication that failed for SUPPLY parks, and the re-issue a later matching persist record triggers lands in the provisioned space through the accept gate's delegated admission — long after the triggering wave committed (late-carriage admission, the OW45 3b close)", async () => {
+    host = newHost();
+
+    // Home space active through a client demand (the S-A shape above).
+    clientManager = SharedServerStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+    });
+    const demandCell = clientRuntime.getCell<{ ping: number }>(
+      homeSpace,
+      "lc-demand",
+      undefined,
+    );
+    const cancel = demandCell.sink(() => {});
+    try {
+      await waitUntil(
+        () =>
+          servingRuntime !== undefined &&
+          host!.spaceServer(homeSpace)?.active === true,
+        "home space activation",
+      );
+      const serving = servingRuntime!;
+
+      // The pattern OBJECT reaches the serving manager with NO persist it
+      // can reach: the CLIENT compiles it into alice's own space (the
+      // entry ref rides the module-level side table; the serving
+      // manager's fallback map records only ITS OWN persists, so it
+      // stays dry for this entry).
+      const program = {
+        main: "/lc.tsx",
+        files: [{
+          name: "/lc.tsx",
+          contents: [
+            "import { computed, pattern } from 'commonfabric';",
+            "export default pattern<{ n: number }, { out: number }>(",
+            "  ({ n }) => ({ out: computed(() => n + 2) }),",
+            ");",
+          ].join("\n"),
+        }],
+      };
+      const aliceSpace = aliceSigner.did() as MemorySpace;
+      const compiled = await clientRuntime.patternManager.compilePattern(
+        program,
+        { space: aliceSpace },
+      );
+      await clientRuntime.patternManager.flushCompileCacheWrites();
+
+      // The provisioned target, genesis already landed (the B4 ordering).
+      const pSigner = await Identity.fromPassphrase("lc provisioned space");
+      const pSpace = pSigner.did() as MemorySpace;
+      const pEngine = await server.engineForSpace(pSpace);
+      applyCommit(pEngine, {
+        sessionId: "lc-genesis",
+        space: pSpace,
+        principal: pSpace,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: `of:${pSpace}`,
+            value: {
+              value: { [aliceSigner.did()]: "OWNER", "*": "WRITE" },
+            },
+          }],
+        },
+      });
+
+      // The DELEGATED replication out of the DRY home space — the lunch
+      // shape (the child replication's origin is the wave's home, and no
+      // supplier has persisted there yet). It fails loudly for SUPPLY and
+      // PARKS, carrying the §2b delegation with it; nothing lands in P.
+      serving.patternManager.replicatePatternToSpace(
+        compiled,
+        pSpace,
+        homeSpace,
+        {
+          acting: { user: aliceSigner.did(), session: "sess-lc" },
+          capabilityRef: "event-consequence:e-lc",
+        },
+      );
+      await serving.patternManager.flushCompileCacheWrites();
+      expect(serverSeq(pEngine)).toBe(1);
+
+      // THE SUPPLIER ARRIVES — the serving runtime's own compile into the
+      // HOME space (the sidecar/home-env supplier's shape, which records
+      // into the parked replication's ORIGIN: a wake filter that skipped
+      // fromSpace records would sleep through exactly the observed lunch
+      // supplier). The record wakes the park; the re-issue reads the
+      // now-supplied home space and writes into P under the ORIGINAL
+      // delegated carriage — minutes-later in production, the same
+      // admission shape: the accept gate validates completeness, not
+      // freshness (engine-wave-sink's §2b row).
+      await serving.patternManager.compilePattern(program, {
+        space: homeSpace,
+      });
+      await serving.patternManager.flushCompileCacheWrites();
+      await serving.patternManager.flushCompileCacheWrites();
+      await waitUntil(
+        () => serverSeq(pEngine) > 1,
+        "healed delegated writeback landed in the provisioned space",
+      );
+      const meta = pEngine.database.prepare(
+        `SELECT class, acting_principal, capability_ref
+         FROM "commit" WHERE seq > 1 ORDER BY seq LIMIT 1`,
+      ).get() as Record<string, string>;
+      expect(meta.class).toBe("authored");
+      expect(meta.acting_principal).toBe(aliceSigner.did());
+      expect(meta.capability_ref).toBe("event-consequence:e-lc");
+    } finally {
+      cancel();
+    }
+  });
+
   it("a served run's send to a FOREIGN stream cell crosses via the outbox: LT1's same-space axis is the WAVE's home space, never the sending cell's space (LT1/LT5; events.md §2; protocol.md §2b)", async () => {
     host = newHost();
 
@@ -1436,25 +1541,27 @@ describe("Phase 5 cross-space serving", () => {
     const aliceDid = await seedHome(aliceSigner);
     const bobDid = await seedHome(bobSigner);
 
-    // Serve the profile-create sidecar SOURCE through a gated fetch stub:
-    // the test controls when the (memoized, node-shared) pattern fetch
-    // resolves, so both demanders run while the fetch is pending — the
-    // exact schedule that clobbered the shared input holder.
+    // Serve the profile-create surface through a gated fetch stub: the test
+    // controls when its source resolves, so both demanders run while the open
+    // is pending — the exact schedule that clobbered the shared input holder.
     const sidecarSource = [
       "import { pattern } from 'commonfabric';",
       "export default pattern<{ profiles: unknown }, { echo: unknown }>(",
       "  ({ profiles }) => ({ echo: profiles }),",
       ");",
     ].join("\n");
+    const sidecarIdentity = await resolveEntryIdentity(
+      SIDECAR_ROUTE,
+      () => Promise.resolve(sidecarSource),
+    );
     const gate = Promise.withResolvers<void>();
     const originalFetch = globalThis.fetch;
-    const originalEnvironment = getPatternEnvironment();
-    setPatternEnvironment({
-      apiUrl: new URL("https://x-space-sidecar.test/"),
-    });
     globalThis.fetch = (async (input: Request | URL | string) => {
-      const url = input instanceof Request ? input.url : String(input);
-      if (url.endsWith("/api/patterns/system/profile-create.tsx")) {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname === SIDECAR_ROUTE) {
+        if (url.searchParams.has("identity")) {
+          return new Response(sidecarIdentity, { status: 200 });
+        }
         await gate.promise;
         return new Response(sidecarSource, { status: 200 });
       }
@@ -1581,7 +1688,6 @@ describe("Phase 5 cross-space serving", () => {
     } finally {
       gate.resolve();
       globalThis.fetch = originalFetch;
-      setPatternEnvironment(originalEnvironment);
       for (const cancel of cancels) cancel();
       await serving.idle();
       await serving.dispose();
@@ -1668,15 +1774,20 @@ describe("Phase 5 cross-space serving", () => {
       "  ({ profiles, mine }) => ({ echo: profiles, probe: computed(() => 1 + ((mine!.get() as number | undefined) ?? 0)) }),",
       ");",
     ].join("\n");
+    const sidecarIdentity = await resolveEntryIdentity(
+      SIDECAR_ROUTE,
+      () => Promise.resolve(sidecarSource),
+    );
     const originalFetch = globalThis.fetch;
-    const originalEnvironment = getPatternEnvironment();
-    setPatternEnvironment({
-      apiUrl: new URL("https://x-space-sidecar-chain.test/"),
-    });
     globalThis.fetch = ((input: Request | URL | string) => {
-      const url = input instanceof Request ? input.url : String(input);
-      if (url.endsWith("/api/patterns/system/profile-create.tsx")) {
-        return Promise.resolve(new Response(sidecarSource, { status: 200 }));
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname === SIDECAR_ROUTE) {
+        return Promise.resolve(
+          new Response(
+            url.searchParams.has("identity") ? sidecarIdentity : sidecarSource,
+            { status: 200 },
+          ),
+        );
       }
       return Promise.resolve(new Response("not found", { status: 404 }));
     }) as typeof fetch;
@@ -1856,7 +1967,6 @@ describe("Phase 5 cross-space serving", () => {
       expect(principals).toContain(bobDid);
     } finally {
       globalThis.fetch = originalFetch;
-      setPatternEnvironment(originalEnvironment);
       for (const cancel of cancels) cancel();
       await serving.idle();
       serving.clearSealDestination();

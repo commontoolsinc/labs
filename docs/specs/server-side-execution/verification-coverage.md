@@ -587,19 +587,14 @@ client does not; this PR):
   shadow + flip notification; flag-OFF silent-flip byte-identity;
   own-echo exemption). The stage-F residual comment at `inputSynced`
   is rewritten to the resolved posture.
-- The Phase-2 revisit (b) — the pattern-updater CHECK half: the
-  `sx2-serving-loop` integration surface is AUTHORED
-  (`packages/patterns/integration/sx2-serving-loop.test.ts`) and the
-  machinery observation was made in the live bring-up runs (the
-  serving loop settles to watermark-covered quiescence with
-  `systemPatternAutoUpdate` flipped ON server-side against toolshed's
-  real routes — the environment the stage-F unit fixture could not
-  provide). Stated honestly: that surface is currently SKIP-LISTED in
-  the ON arm (it deterministically reproduces the demand-cycle
-  starvation fork — the owed row below), so its gates are witnessed
-  by the live bring-up evidence and the serving-loop unit suite, not
-  yet by CI; the row un-skips with the terminal-state follow-up. A
-  full stale-pointer roll-forward journey remains the named
+- The Phase-2 revisit (b) — the source-following half: RETIRED, not
+  covered. A serving tenure opens no piece, so it follows no piece's
+  source origin, and there is no server-side half left to verify. The
+  `sx2-serving-loop` integration surface
+  (`packages/patterns/integration/sx2-serving-loop.test.ts`) keeps its
+  remaining gates and runs in both arms, its ON-arm skip having been
+  retired with the demand-cycle starvation fork (the skip-list row
+  below). A full stale-pointer roll-forward journey remains the named
   follow-up.
 - M1's Phase-2 seam — per-run demanded identities: the demand
   carriage (watchedRootsForSpace per-instance entries + the
@@ -1970,7 +1965,7 @@ red-first-evidenced where the batch required it):
   `event-append-client.test.ts`); the browser-adapter follow-up
   carries the remaining debts as OW20.
 - m7 — worker/host flag-posture AGREEMENT
-  (`runtime-client/backends/runtime-processor.ts`):
+  (`runtime-client/src/backends/runtime-processor.ts`):
   `InitializationData.experimental` now types `serverExecution` (it
   rode as an untyped excess property), and the worker asserts the
   constructed runtime's resolved posture matches the host's
@@ -3263,15 +3258,21 @@ findings; the OWNER RULING — the flip lands DARK):
   runner/runtime-client/shell `integration` tasks now hand deno a
   QUOTED glob; the pattern ON shard filters its list through the
   script's `--filter` mode; STEP-level entries exist (in-file guard
-  bound to the register, validated). Entries today (ALL `phase-7`, none
-  of the lists EMPTY — the P7 phase PR's "one entry" and every earlier
-  "EMPTY" wording were about a mechanism that never bit): patterns ×3
+  bound to the register, validated). Entries at this delta's date (ALL
+  `phase-7`, none of the lists EMPTY — the P7 phase PR's "one entry" and
+  every earlier "EMPTY" wording were about a mechanism that never bit):
+  patterns ×3
   (`topics-navigation`, `cfc-group-chat-demo-two-browsers`,
   `lunch-poll-vote` — the last two on OW32's characterized, unattributed
   loop), runner ×1 (`pattern-and-data-persistence` — OW33),
   runtime-client ×2 STEP entries in `client.test.ts` (OW33). Verified
   locally: runner integration 14/14 default posture, 13/14 + 1 skipped
   under ON; runtime-client 45 steps default, 43 + 2 ignored under ON.
+  [State at 2026-08-16, SUPERSEDED: the six entries were lifted
+  arc-by-arc and the ON-skip registry has been EMPTY across all four
+  suites since the ruled-3b-close lift (#6528, 2026-08-28 — the
+  RULED-CLOSE LIFT block below); the INERT-mechanism discovery, the
+  quoted-glob/`--filter` fix, and the register binding remain current.]
 - Rows: OW17 gains the review's CLASS VERDICT and the correction (the
   two-browser red is NOT evidenced as OW17; the lunch "(1)+(2)+(3) →
   join UI" narrative did not reproduce); OW25 DISCHARGED (the ON shell
@@ -3280,7 +3281,8 @@ findings; the OWNER RULING — the flip lands DARK):
   carries the characterization and fix shape (compile as an outbox
   effect kind + completion-class writeback); OW29 folds in the
   demand-root chain's list-builtin gap (fixed) and the wish-sidecar
-  question (flagged); NEW OW31 (write-authority posture — ruled item),
+  question (flagged); NEW OW31 (write-authority posture — ruled item;
+  since RULED 2026-08-18 and BUILT 2026-08-21 — its row above),
   OW32 (the client non-settling loop — first gate), OW33 (the ON-posture
   Deno-client family).
 - protocol.md §2 gains the `capabilityRef` vocabulary sentence (review
@@ -5282,8 +5284,52 @@ supply; OW29/OW32/OW34 closed):
   (2026-08-22): the test-side pass closed the step's own interim-race
   half and ISOLATED the residue as the OW45 row's real arm-B client
   starvation, so the entry now names that product charge, not a test
-  flake); they gate the
-  FLIP — whose bar is the list EMPTY — not the land. Rows, one per
+  flake). That 2026-08-26 census — THREE patterns entries: default-app's
+  reload STEP, lunch-poll-vote's FILE entry, and the topic-board
+  pivot-baseline STEP — fell to TWO with #6316 (2026-08-26, the topic-board
+  STEP lifted by its content-addressed arrival-witness fix, without updating
+  this sentence), and both of those two were campaigned for a lift on
+  2026-08-27 and neither lifted (the STEP-ENTRY and LUNCH-POLL blocks
+  below), then campaigned AGAIN the same day under the newly ruled
+  local-plus-CI-probe bar (the PHASE-3 block at the end of this row) — where
+  they split for OPPOSITE reasons: the default-app step passed BOTH halves
+  of its own evidence (10/10 local, and a GREEN direct-CI run of the exact
+  step) and was held only by a co-resident file's red in the same shard,
+  while lunch-poll-vote passed its local half 8/8 and its probe went red at
+  the probed surface for the second campaign running. **The current census
+  (2026-08-28, the ruled-3b-close PR) is EMPTY — every suite's list: the
+  owner ruled the 3b fork ("go with (1) plus the (2-D) kick"), both
+  mechanisms landed red-first, and lunch-poll-vote's FILE entry is
+  LIFTED a third time under the ruled local-plus-CI-probe bar with THIS
+  PR's own ON-lane board as the direct-CI unskip probe (the RULING and
+  RULED-CLOSE LIFT blocks at the end of this row; a red at the probed
+  surface restores the entry per the arc's standing method).** The
+  superseded 2026-08-28 census (after the geometry-3 close PR's probe 5)
+  was ONE patterns entry: lunch-poll-vote's FILE entry, RESTORED a
+  second time — the geometry-3 close landed (the mid-flight-supplier
+  once-await, red-first) and its lift attempt's own probe went red at
+  the surface with the PRE-DECLARED geometry-3b signature (the
+  GEOMETRY-3 CLOSE, LIFT-ATTEMPT, and PROBE 5 blocks at the end of this
+  row); the 3b close was an owner-court fork, since ruled. default-app's reload
+  STEP LIFTED 2026-08-28 — the owner ruled the SURFACE reading of the
+  probe bar, under which its evidence was already complete (the LIFT block
+  at the end of this row). lunch-poll-vote's lift was ATTEMPTED the same
+  day on the probe's own artifact — the park root-caused into the
+  closure-replication write path, two supplier geometries fixed red-first
+  on the PR — and every one of the PR's THREE probe boards went red at the
+  probed surface (runs 33160430927, 33164596936, 33165960083; four probes
+  across the arc, counting the pre-PR phase-3 board 33138358110 that opened
+  it), the last exposing the still-open third geometry (the supplier
+  compile mid-flight), so the entry was restored carrying the accumulated
+  map (the lunch ROOT-CAUSE, PROBE-2/3/4 blocks at the end of
+  this row); the geometry-3 close then fixed that third geometry and its
+  lift attempt was withdrawn by probe 5 (geometry 3b). The
+  FLIP's bar remains a green ON lane and every list empty; under that
+  superseded census this entry was again what held the list, and under
+  the current one NOTHING does — the ruled-3b-close lift emptied it
+  (the co-resident `:133` debt the
+  probe surfaced was paid by #6477 — the OBSERVATION's FIXED paragraph
+  below). Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:
   - **OW45 — the profile piece's PROGRAM-materialization write path
@@ -5379,7 +5425,12 @@ supply; OW29/OW32/OW34 closed):
     and loads (4.3–5.9) recorded per run, `warmRequests` 4–6 per run
     in the live stats. The row's REMAINING charge: it gates
     `integration/default-app.test.ts`'s "persist and reload every
-    rapidly created notebook note" STEP — the OW51 fix (2026-08-21)
+    rapidly created notebook note" STEP — **which is NO LONGER
+    SKIP-LISTED as of 2026-08-28 (OW45's LIFT block: 10/10 local plus a
+    green direct-CI probe of that exact step), so the ON lanes run it and
+    any recurrence surfaces as a lane red rather than behind a skip.
+    Whether that closes this charge is this row's own call, flagged not
+    taken** — the OW51 fix (2026-08-21)
     lifted that file's FILE skip and UNMASKED this same
     reload-durability surface there — the reloaded notebook's
     `noteCount` reads `undefined` past the step's wait (1/10 local ON
@@ -5651,6 +5702,51 @@ supply; OW29/OW32/OW34 closed):
     same family's second, pre-existing member is `PatternManager`'s
     compile-cache write-backs minted inside `compilePattern` (escape
     the stamp hook; enumerated with the flag in the stage-1 report).
+    **SHARD-10 DISCRIMINATED AND FIXED 2026-08-25 (PR #6320): the
+    ensure-ON board's compile-cache write-back CFC red is NOT this
+    attribution family** — the failing writer is the CLIENT under its
+    own identity in its own space, and no identity/carriage question is
+    open (the stamp-hook escape above stays flagged exactly as
+    written). Root cause, reproduced 3/3 deterministic at the true
+    topology: `loadCompiledClosure`'s `verifiedDoc` returned
+    `cell.get()` docs whose `sourceMap` is a LIVE query-result view;
+    consumers carry the field verbatim into module artifacts (the
+    process byte cache — `putAll` runs on storage-served compiles too
+    and replaces existing entries — storage-served compile bodies,
+    repair/replication write-backs), and written back into ANOTHER
+    space the view serializes as the sigil link it names: a cross-space
+    `/sourceMap` link into the space it was read from. Under ensure-ON
+    the target doc pre-exists with its stored envelope (the ensured
+    default-app closure shares content-addressed helper docs with every
+    pattern's closure), so the link write is CFC-relevant and prepare
+    fail-closes on the unreadable foreign source — `missing link source
+    metadata … at /sourceMap`, the sx2-scale shard-10 red; CFC is
+    CORRECT there. Under ensure-OFF the same corrupt link LANDED
+    SILENTLY AND DURABLY (control run: 10 of 12 fresh spaces held a
+    quoted cross-space link at `/sourceMap`; value-level reads resolve
+    THROUGH the link, which is why the green regime never noticed) — so
+    the ensure exposed a pre-existing silent-corruption class rather
+    than creating one. FIXED red-first at the one read boundary every
+    consumer funnels through: `verifiedDoc` snapshots `sourceMap`
+    exactly as it already snapshots `policyManifests`; enforcement
+    untouched. Pin `compile-cache-storage-served-values.test.ts` (both
+    arms, asserting on the RAW stored value — resolved reads are
+    blind). Live: pre-fix 3/3 red, post-fix 3/3 green ensure-ON, and
+    the ensure-OFF store dump post-fix holds 0 corrupt of 24 stored
+    sourceMap fields. Legacy residual (recorded, not owed): the
+    fleet's EXISTING poisoned docs are never healed in place — a warm
+    hit skips write-back and a runtimeVersion bump orphans rather than
+    rewrites them — but they are inert going forward (the independent
+    review's planted-corruption probes, review-6320-report.md): with
+    the serving space reachable a value read resolves THROUGH the
+    legacy link and post-fix onward write-backs LAUNDER it to the
+    plain value; with the target dangling the doc loads mapless and
+    compiles fine; and a snapshot-time throw (e.g. an
+    unreachable-space authorization error) degrades that one doc to a
+    cache miss instead of failing the closure load. Healing is
+    deliberately out of scope. Expected on #6248's board: shard 10
+    greens (its red is this exact deterministic producer); shards 2/6
+    remain the row's separate profile program-materialization family.
     **SCOPE RULED 2026-08-24 (the owner; verbatim in the stage-1
     report): production ensures a root for EVERY activated space —
     per-space discrimination is DEFERRED to its own design work — and
@@ -5665,14 +5761,19 @@ supply; OW29/OW32/OW34 closed):
     delivered-and-verified — an UNCAUGHT client-replica throw
     (`#validateArrivedSchemaDocuments`) that failed files wholesale
     (all red lanes real-toolshed; in-process harnesses unaffected;
-    main green at the identical base). The CI ON lanes now run
-    ensure-off (`cf test` needs nothing: no serving host exists in
-    `packages/cli` — the ruled opt-in is its status quo). Flagged, not
-    filled: the exposed delivery gap (computed delivered without its
-    verified `cid:` ref) is PRE-EXISTING machinery, latent again with
-    the lanes off; and no CI lane now exercises the production ensure
-    at the true topology — unit pins and the measurement harness carry
-    it until a lane opts in.
+    main green at the identical base). The CI ON lanes opted out of
+    the ensure while that gap was open (`cf test` needs nothing: no
+    serving host exists in `packages/cli` — the ruled opt-in is its
+    status quo); the exposed delivery gap became OW61's row, whose
+    arrival CONTAINMENT (per-doc quarantine, never a process kill)
+    landed with #6223, and whose residual client-side absorb defect
+    was root-caused and FIXED with #6292 (pre-watch-response
+    `session/effect` frames now reach the replica in wire order —
+    OW61's tail carries the mechanism). WITH THE OPT-OUT RETIRED
+    (the ensure-on lane flip PR, following #6223 and #6292): the ON
+    lanes run the production default again and ARE the CI coverage
+    of the ensure at the true topology — the "no CI lane exercises
+    the ensure" flag this tail carried is closed.
     **CATCH-UP-AND-START BUILT 2026-08-24 — the ruled close of the
     client-start class. RULED 2026-08-24: the coordinator's
     recommendation, ACKED verbatim by the owner ("so ack on all
@@ -5877,7 +5978,17 @@ supply; OW29/OW32/OW34 closed):
     overlay/session-synthetic pointer reaching the watcher), and the
     load-error is the discriminating event between recovered-green
     and stranded-red (greens have the same catchup and no
-    load-error). CONSEQUENCE for the family map: the fork memo's
+    load-error). **[CORRECTED 2026-08-27, root-cause seat: the
+    session-side claim is WRONG. Durable `keyless:` patternIdentity
+    pointers exist in EVERY run at the lift-campaign head — greens
+    included — written by the serving runtime's derived
+    materialization commits onto orphan sub-piece docs (one per
+    piece root; a03 seq 57 is the store witness). The pointers this
+    record checked were the piece ROOTS', which are real; the
+    keyless ones sit on sub-piece docs nothing else durably
+    references. The member is also not a stranded whole piece: the
+    root cause on the 2026-08-27 campaign row shows the diagnostics
+    were reading a different piece.]** CONSEQUENCE for the family map: the fork memo's
     working hypothesis that h01/h05/rf2 were "the same die-off
     later/earlier in the start walk" is DISPROVED — the walk
     completes in both red shapes; the residue lives in the
@@ -5903,6 +6014,511 @@ supply; OW29/OW32/OW34 closed):
     quiet-and-loaded — and its class half is now the named read-side
     residue (the START class the bar originally named is closed by
     this build); the step entry's reason names the narrowed charge.
+    **POST-#6292 RE-MEASURE, 2026-08-26: 9/10 — NO LIFT. The earlier
+    read-side residues are likely closed; the sole red is a NEW
+    store-incomplete setup-error shape.** Method: one ON binary at
+    `37b45336a6b17ad27039cc525e4ba2e89f517449` (contains #6292 as
+    `9c9073995`), sha256
+    `747c162b30bd18e144ebbf9ef1c03b7a84d44d005949bcbd4a919e17d1970ebd`;
+    the STEP guard neutralized for every run while its registry entry
+    stayed present; ensure-off, matching the CI ON lanes; fresh store,
+    independent 97xx port, ON posture probe, and LLM environment masked
+    per run; five quiet plus five loaded; PID-only teardown and a
+    port-free check. Quiet was 4/5 green and loaded 5/5. The nine greens
+    completed the step in 7–24 s. Across ten runs: 12
+    `deferred-start-catchup`, zero catch-up failures, zero
+    `pattern-load-error`, 12 stale-read lines, zero terminal deferred
+    deaths, and zero skip prints.
+
+    The sole red, quiet r01, reached the target step and remained there
+    until the unchanged 600 s harness bound returned rc 124. Its durable
+    notebook space held 89 commits, 808 entities, and 1,220 revisions;
+    the root carried a real pattern identity. The notebook argument held
+    exactly SIX note links, with post-creation patches at seqs 37, 45,
+    55, 63, 71, and 83 and no seventh append. The log held one
+    `pattern-swap-setup-error` whose server detail was “updated arguments
+    do not match the candidate schema: parentNotebook: notes: 0:
+    parentNotebook: recursive schema validation made no progress,” plus
+    seven `event-view-lag` deferrals reaching index 5. It held zero
+    `pattern-load-error`.
+
+    Discriminators: NOT the earlier r01, whose store was complete with
+    all seven appends and whose live context silently starved only the
+    read; this store was incomplete, had an explicit setup error, and
+    never reached the final authority read. NOT r06/r09, which each had
+    one keyless-identity `pattern-load-error` followed by whole-piece
+    unreadability while durable pointers remained real; this run had
+    zero load errors and a real root pattern identity. The previous
+    read-side residues are likely closed by intervening fixes, but the
+    evidence remains split: r01 has #6292's matching client-absorb
+    mechanism plus the signature's absence here; r06/r09 have
+    absence-of-observation only, since their keyless-identity mechanism
+    was never root-caused. The campaign does NOT determine whether the
+    seventh append was refused, dropped, or never issued, and assigns no
+    root cause to the recursive-schema error.
+
+    **DISPOSITION: NO LIFT.** The STEP entry and its bound guard stay,
+    reworded to this store-incomplete `pattern-swap-setup-error` charge.
+    The lift bar remains 10/10 quiet-and-loaded ON. Full ledger and
+    per-run evidence paths:
+    [`ow45-default-app-reload-post-6292-remeasure-2026-08-26.md`](../../history/plans/server-execution-v2/optimize/ow45-default-app-reload-post-6292-remeasure-2026-08-26.md).
+    **ROOT-CAUSED 2026-08-26: the campaign launcher split browser and
+    serving pattern-source authority; the seventh event was durable but
+    STRANDED before served admission, and the recursive setup error was a
+    finite witness of that divergence rather than the event's refusal.** The
+    off-repository launcher gave the browser the run's independent 97xx
+    `API_URL` but did not set `API_URL` on the toolshed process. Toolshed's
+    supported remote-source posture therefore used the default
+    `http://localhost:8000` while storage and the browser used the run
+    toolshed. Only red r01 had an unrelated old toolshed answering on 8000:
+    the browser compiled current note identity `30y74xQLD…#default`; the
+    serving updater fetched `c-jbvEpTaj…#default`, whose source maps exactly
+    to repository commit `8ca18b71e`. Green r02/r03 got connection refused
+    from the implicit source host, so no conflicting candidate was installed;
+    a self-source live control likewise avoided the path.
+
+    Store classification, now definitive: the seventh `Create` WAS emitted
+    and durably appended at seq 87, with a registered handler, but its sidecar
+    has no consequence, terminal status, error, or reason; the durable served
+    watermark covers only through seq 81. The client speculative path
+    materialized an orphan seventh note, but the served handler did not run
+    and no seventh notebook append exists. Precisely: the event is stranded
+    BEFORE served queue admission/terminal classification — not refused,
+    dropped, or never issued. The six completed actions/consequences are
+    seqs 36/37, 43/45, 53/55, 60/63, 69/71, and 81/83. Loaded green r02 has
+    all seven authored actions and consequences, ending at seqs 84/86.
+
+    The exact captured candidate was `c-jbvEpTaj…#default`, validated against
+    a note argument whose `parentNotebook` points at the notebook root. The
+    embedded NotePiece/NotebookPiece schema follows
+    `note.parentNotebook.notes[0].parentNotebook` back to the same value under
+    the same schema pair, so the schema progress guard returns “recursive
+    schema validation made no progress.” Offline replay terminates; the
+    validator is not the endless loop. An exact-old-source live probe
+    reproduced the error after all seven appends had landed, and a
+    comment-only identity split reproduced the family, ruling out the old
+    note semantics and a fixed note index. A narrow idle trace saw the same
+    client setup error but drained all observed idle branches and failed
+    normally in 22 s, so the setup error neither automatically refuses an
+    event nor intrinsically leaks the idle barrier.
+
+    Established causal chain: omitted server `API_URL` → conflicting source
+    identity → live-piece swap requests → finite recursive-argument setup
+    error; under r01's ordering, served progress then failed to reach the
+    final durable event, so `waitForRuntimeIdle`'s event/durability fixpoint
+    could not resolve before the unchanged 600 s harness bound. OPEN LIMIT:
+    the durable store names the pending event but cannot reconstruct which
+    original client scheduler collection or promise held it after the error;
+    diagnostic timing did not recreate that state. Load is not necessary
+    (r01 and the identity-only red were quiet), and `event-view-lag` alone is
+    insufficient (quiet r03 had it and greened).
+
+    No production fix: distinct source and storage hosts are supported, and
+    forcing self-source would change that contract without a mechanism pin.
+    The exact measurement fix seat is the off-repository launcher: pass the
+    run port as the server's `API_URL` and preflight that browser and serving
+    source authorities report the expected identity. No repository-owned
+    deterministic regression can directly pin that launcher, and the live
+    timing probe did not isolate a local behavior change suitable for a
+    mutation check. The STEP skip and bound guard therefore STAY. The lift bar
+    remains a separate 10/10 quiet-and-loaded campaign under the corrected
+    source-authority posture. Full RCA and evidence map:
+    [`ow45-default-app-store-incomplete-root-cause-2026-08-26.md`](../../history/plans/server-execution-v2/optimize/ow45-default-app-store-incomplete-root-cause-2026-08-26.md).
+    **DIRECT CI UNSKIP PROBE, 2026-08-26: RED — NO LIFT.** Head
+    `66a969ca02e8962ae44eeb4da264a575da421893`, Actions run
+    [33008274232, ON shard 5](https://github.com/commontoolsinc/labs/actions/runs/33008274232/job/98307864923).
+    The registry had no default-app entry, the job printed that no listed
+    skip was in its file list, and the exact rapid-note step ran. The other
+    nine ON pattern shards passed. Shard 5 failed only this target after
+    5m22s, when `waitForCondition` reached its unchanged 300000 ms bound.
+    The final client trace reported `eventInvocationCount: 7` and
+    `notebookInvocationCount: 7`, but `isNotebook: false`, `notesLength: 0`,
+    `notebookActionCount: 0`, 84 stored UI note chips, and zero rendered note
+    chips. The log had zero `pattern-swap-setup-error`, recursive-schema
+    errors, and `pattern-load-error`. This is therefore a current true-CI ON
+    failure distinct from the split-source off-repository launcher failure;
+    the direct CI artifact does not establish the durable disposition of any
+    note action or assign the new failure's root cause. The STEP entry is
+    restored with this current charge. Its bound guard and separate lift bar
+    remain.
+    **THE STEP ENTRY'S LIFT CAMPAIGN AT THE CORRECTED POSTURE, 2026-08-27:
+    7/10 — NO LIFT, and the charge REPRODUCES LOCALLY for the first time.**
+    Method: ON binary at main `4b70949ac` (sha256 `5018e589dc54b19a1…`,
+    re-verified into every run's ledger; a mismatch aborts the run), fresh
+    store and own 97xx port and ON posture probe per run, LLM masked,
+    PID-only teardown with a port-free check, the STEP entry neutralized in
+    the working tree for all ten runs (zero skip prints, step verified RAN
+    per run), `gtimeout 600` never raised, five quiet and five loaded
+    interleaved. TWO posture changes from the archived campaigns, both
+    strictly harder and both deliberate: the space-root ensure is **ON**
+    (the production default — #6248 put the CI ON lanes back on it, so the
+    archived `SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false` no longer matches
+    the lane a lifted step would run in), and the toolshed process now gets
+    the run port as its pattern-source `API_URL`, which is exactly the
+    corrected source authority the RCA above prescribed (`port_8000_holder`
+    `none` in every run; zero `pattern-swap-setup-error` and zero
+    recursive-schema across all ten — the split-source artifact is gone).
+    Greens finish the step in 13–14 s; every red is the test's own 300 s
+    `waitForCondition` bound (313–315 s wall). Reds are NOT load-driven:
+    a03 and a07 quiet, a04 loaded. Campaign-wide: `deferred-start-catchup`
+    **0**, catch-up failures **0**, terminal `Error committing deferred`
+    **0**, stale-read lines **0**, `session-remount` **0**, load-park
+    deferrals/drops **0**, `piece-start-commit-failed` **0**,
+    `sidecar-run-raced` **0**, `schema-doc-quarantine` **0** (the ensure-ON
+    tripwire, clean), `structure-load-stuck` **0**; server-side
+    `event-view-lag` 45 (4–5 per run, greens and reds alike).
+    **The three reds all carry the entry's CURRENT charge verbatim** —
+    `eventInvocationCount: 7` and `notebookInvocationCount: 7` with
+    `notebookActionCount: 0` and empty `notebookActionsById`,
+    `notebookActionTail`, `notebookCoreNodes`: all seven invocation traces,
+    no bound notebook action state. This is the first LOCAL reproduction of
+    the direct-CI charge; the CI artifact could not establish the store side
+    and these runs can. They split into two read-side shapes:
+    (i) **a03 and a07 — the KEYLESS stranded-whole-piece shape**, exactly one
+    `pattern-load-error` for a keyless identity
+    (`keyless:fid1:0r4P8HEr…#default`, `keyless:fid1:R6f49f-N…#default`),
+    then `isNotebook: false`, `noteCount: -1`, `notesLength: 0`, 84 stored UI
+    chips and zero rendered. That is **r06/r09's stated discriminator** — the
+    member whose mechanism was never root-caused and which this row has
+    carried as absence-of-observation since 2026-08-24. It is observed again,
+    2 in 10, at current main. Recorded and NOT resolved by that measurement
+    seat: this row says r06/r09's durable pointers are all REAL identities and
+    the keylessness is session-side, but in a03 the failing keyless identity
+    is present in the DURABLE store at seq 57 of the notebook space, and both
+    reds' notebook spaces carry 8 distinct `keyless:fid1:…` references.
+    Variant or distinct durable-keyless member is a root-cause question.
+    (ii) **a04 — a LIVE but incomplete piece**: zero `pattern-load-error`,
+    `isNotebook: true`, `noteCount: 5`, `notesLength: 5`, 8 stored chips and 4
+    rendered — and still `notebookActionCount: 0`. It matches neither
+    read-side member as stated (r01 needs a complete store; r06/r09 need the
+    keyless load error) and is not the 2026-08-26 store-incomplete shape
+    either, which required the recursive-schema `pattern-swap-setup-error`
+    the source-authority fix removes. Ruled out in all three from store and
+    both logs: the split-source launcher shape, the b04 client-start class,
+    and the fifth-face load-park member (no `memory session revoked`, no
+    `sync-load-failure`, no load-park deferral or terminal drop).
+    **DISPOSITION: NO LIFT.** The bar stays 10/10 quiet-and-loaded; the entry
+    and its bound guard stay, with the charge they already carry — this
+    campaign confirms that wording rather than changing it. Per-run ledger
+    and per-red classifications are on the measuring box at
+    `/Users/berni/labs-worktrees/b1-lifts-evidence/runs/default-app/`
+    (`a03|a04|a07/classification.md` beside the raw dumps) with the running
+    report at `/Users/berni/labs-worktrees/b1-lifts-report.md`.
+    **ROOT CAUSE, 2026-08-27 (the r06/r09 member, from a03/a07's own
+    stores + logs; full report
+    `../../history/plans/server-execution-v2/optimize/keyless-diagnosis-2026-08-27.md`, branch
+    `claude/server-exec-v2-keyless-diagnosis`): the member is a
+    WRONG-BRANCH OPTIMISTIC NAVIGATION, not a stranded whole piece.**
+    The client's speculative run of the final-"Create" handler
+    (`notebook.tsx:763`: `shouldNavigate = !usedCreateAnotherNote.get()`
+    → `navigateTo(newNote)`) read the flag false/undefined while the
+    durable value was TRUE (a03: derived seq 24 set true 14:27:55; the
+    authoritative consequence seq 57 patched true→false, proving the
+    server read true and computed NO navigation — and no navigate
+    intent for the note exists in any effects doc). The client enacted
+    optimistically (`optimisticNavigate`, navigate-to.ts — enactment
+    with no withdrawal when the authoritative run's branch computes no
+    effect) and the view moved to the new NOTE: reds carry TWO
+    `set-view` lines where every green carries ONE. Every wait and
+    every diagnostic reads `view.pieceId`, so `isNotebook:false,
+    noteCount:-1, notesLength:0, 84 stored chips` is a healthy NOTE
+    read through notebook accessors (the 84 chips are the note's own
+    `$UI`) — "every read returning nothing" was reads of the wrong
+    piece. The keyless `pattern-load-error` is downstream collateral of
+    mounting that freshly materialized note: `Runner.setup()` durably
+    stamps session-keyless patternIdentity (runner.ts:2315's
+    `if (entryRef)` filters nothing — `entryRefForPattern` always mints;
+    the serving runtime wrote `keyless:fid1:0r4P8HEr…` at a03 seq 57
+    onto an ORPHAN sub-piece doc nothing else durably references, in
+    EVERY run, greens included), the navigated client re-derives the
+    same doc ids live, arms the watcher with its OWN keyless mint, the
+    server's differing mint syncs in, the load fails, and the CT-1923
+    roll-forward CORRECTLY refuses (running ref also keyless) — one
+    error line, one stranded orphan sub-piece, not the step's verdict.
+    The CI charge (33008274232 shard 5: same fingerprint, zero load
+    errors) is the same chain with the sub-piece hash race falling the
+    other way — navigation alone produces the full fingerprint, load
+    error optional; charge and r06/r09 UNIFY. Why 2/10 quiet-biased:
+    the flag is read only inside handlers (no render/derive demand), so
+    under lazy materialization nothing pulls the authoritative patch to
+    the client; once the speculative echoes retire (watermark-gated,
+    speculation.md §4) a later speculative read regresses to the stale
+    base — fastest on a quiet box. That divergent-read link is inferred
+    from the speculation design, not witnessed (the overlay is
+    process-memory): flagged, not filled. NO FIX LANDED — all three
+    layers end in unstated semantics owed an owner ruling: (L1)
+    speculative echo retirement can regress reads for demand-less docs
+    (speculation.md §4's replacement guarantee is demand-gated); (L2)
+    optimistic enactment has no withdrawal on authoritative-branch
+    divergence (protocol.md §5 nonce convergence covers only
+    intent-arrives); (L3) two code paths durably write `keyless:` refs
+    (setup's stamp; `substituteOpPatternRefs`' sentinel, the latter
+    test-pinned as sanctioned) against pattern-manager.ts:543's
+    "never durable" invariant — whether a durable piece tree may carry
+    a pointer only one session can load is the unstated
+    identity-assignment semantic. Fixing L3 alone would NOT green the
+    step (the verdict is L1+L2); fixing L1/L2 alone leaves durable
+    poison pointers.
+    **RULED 2026-08-27 (owner, coordination chat) — L3 and L2; L1 remains
+    an OPEN owner question (no ruling received; flagged, not filled).**
+    L3 ruled (a), verbatim: keyless identities must NEVER land durably
+    (honor the existing contract; the transformer hoists all
+    source-authored lift()/handler() code to cf:module — CT-1644/CT-1655
+    — so the keyless population is runtime-built pattern VALUES whose
+    PRODUCING CODE is module-addressed; "nothing keyless should ever
+    need loading"). Recovery semantics: reactive producers re-derive on
+    demand (run the producing lift); handler-created-outliving-session
+    is out of contract (must instantiate from content-addressed
+    artifacts) — handler-replay is NOT built, deferred to the
+    codeless-rebuild arc (seed: `docs/plans/codeless-graph-rebuild-seed.md`).
+    L2 ruled PUNT, verbatim: optimistic navigateTo stands even when the
+    authoritative branch computes no intent — the client navigates, so
+    be it; the default-app step must be robust to it (the step's
+    navigation-robustness fix is the companion PR on
+    `claude/server-exec-v2-default-app-test`).
+    **LANDED (keyless close-out PR-1, branch
+    `claude/server-exec-v2-keyless-guard`): the L3(a) guard, all
+    writers.** A THIRD writer beyond the diagnosis's two fell out of
+    the build: the storage-boundary serializer itself
+    (`patternToEncodableForm`) — the mint sets the value's forward
+    entry ref, so the designed "no entry ref → full graph" fallback
+    stopped firing and every boundary write of a minted pattern VALUE
+    emitted the keyless ref. Landed: (1) boundary serializer treats a
+    keyless ref as no-ref (full graph); (2) `Runner.setup` skips the
+    durable `patternIdentity`/`patternSetupIdentity` stamps for
+    keyless refs — keyless pieces genuinely carry no pointer, the
+    verdict `getPatternIdentityRef`'s own doc always claimed; the
+    `onPatternInstantiated` report deliberately does NOT share that
+    gate (it reports the SESSION pointer, keyless included — it is a
+    session-side reporting channel, and cf-harness's stranded-piece
+    guard consumes exactly the keyless evidence via `keylessSince`;
+    coupling it to the stamp made that guard fail open, caught on the
+    board by the pre-existing `fabric-instantiations` pin and now
+    pinned report-flows-AND-store-stays-clean in the scan test);
+    (3) `substituteOpPatternRefs` no longer
+    substitutes the keyless `$patternRef` sentinel — the durable inputs
+    doc carries the full embedded graph and the instantiating session
+    registers a session-side resolution hint keyed by the inputs doc,
+    so CT-1812 stays sealed in-session; (4) `setArtifactEntryRef` lets
+    a REAL ref replace a keyless one (the mint used to permanently
+    shadow a later-indexed real identity — first-write-wins); (5) the
+    CT-1923 roll-forward's refuses-when-running-ref-also-keyless arm
+    now converges the unloadable durable pointer to the running VALUE's
+    module-addressed PRODUCER (`resolveProducerEntryRef`: first real
+    entry ref up the derivation chain, as many steps as recorded); a
+    from-scratch runtime-built value has NO in-memory producer link
+    (frames carry the building code's `implementationIdentity` but
+    nothing records it per-artifact, and a lift-module identity would
+    not be a loadable PATTERN identity anyway) — that shape stays a
+    tolerated orphan, `keyless-running-no-producer` at debug, nothing
+    written; (6) legacy tolerance for pre-guard durable keyless
+    pointers: watcher and start walk record
+    `legacy-keyless-pattern-pointer` at debug (not
+    `pattern-load-error`), `loadPatternByIdentity` short-circuits
+    (storage cannot hold a session identity), the start walk reports
+    not-started instead of rejecting; (7) mint-site tripwire
+    (`keyless-mint-missing-association` + `keylessMintAnomalies`
+    counter): a module-indexed pattern (source path present) reaching
+    the mint is the missing-association bug surfacing — full runner
+    battery ran silent. The build also surfaced — and replaced — THREE
+    in-session roles the durable keyless stamps had been quietly
+    playing, each now served session-side (dies with the session, the
+    contract's own shape): (i) the pattern POINTER for
+    separate-start/resume/stop-restart flows and (ii) the
+    setup-completion MARKER for `storedSetupMarker`'s reuse decision —
+    both via `Runner.sessionPatternPointers`, written exactly where the
+    stamps are skipped; and (iii) the intra-session CHANGE SIGNAL for
+    RUNNING sub-pieces: a lift re-deriving its returned pattern used to
+    reach the running piece's swap machinery THROUGH the stamp (setup
+    wrote the pointer, the meta watcher fired, swapToPattern replaced
+    the graph) — now a session swap channel
+    (`Runner.#sessionPatternSwaps`) carries the live value to the
+    watcher's own swap closure with the same guards; real patterns
+    keep the durable-stamp path byte-for-byte. Test pins that read the
+    durable stamp for hand-built pieces were adjusted to the contract
+    (cfc-boundary, patterns-lift/handlers diagnostics-identity source,
+    scheduler-event-receipts' Decision-13 discriminator → setup's
+    result-schema meta). Pinned red-first in
+    `packages/runner/test/keyless-never-durable.test.ts` (raw-sqlite
+    byte scan across all three writer paths; producer convergence;
+    start-walk tolerance; tripwire — 4 of 5 red at base, the
+    legacy-heal pin being a regression guard for the pre-existing
+    roll-forward arm).
+    **FLAGGED OPEN SEMANTIC (found by the close-out build, owed an
+    owner ruling — flagged, not filled): rejected-consequence
+    re-derivation for computation-produced children.** The
+    `child-pattern-start-ownership.test.ts` convergence pin's
+    mechanism WAS the ruled-out churn: pre-guard every re-derivation
+    of a lift-produced child durably re-stamped a fresh per-source
+    `keyless:` pointer in its own setup tx, a rejected handing commit
+    cascaded narrowly, and the child's meta watcher converged the
+    graph to whichever stamp stood. Post-guard the handing run's
+    durable footprint is its piece-instantiate tx, so a rejected
+    handing commit cascades through every subsequent run
+    ("pending dependency not resolved"), durable and local state roll
+    back COHERENTLY to the pre-bump child, the error callbacks
+    release the child and clear the materialization memo — and then
+    nothing re-derives it (the producing lift's inputs are
+    unchanged; the trigger that used to exist was the stamped-pointer
+    watch). Needed: a re-run trigger for a computation whose
+    consequence commit was rejected — the client-side cousin of the
+    §3d mark-vs-effects question above. The end-to-end pin is
+    `it.ignore`d with this flag inline; it lifts on the ruling, not
+    on a build. **a04 RECLASSIFIED — a DIFFERENT member, the
+    WRITE-side loss family (lunch third-member kin), not r06/r09:**
+    all 7 create events durably appended and marked
+    `consequenced: true`, but clientSeq 10 and 11's consequences are
+    1-op 802-byte derived commits carrying ONLY the mark (seqs 53/56;
+    healthy siblings run 19+ ops) — two user actions permanently lost:
+    the mark blocks re-dispatch and a dropped first-ever run leaves no
+    basis rows to re-run (the D3 gap record above). The
+    mark-survives-dropped-contributions atomicity break is its own
+    §3d-disposition question for the owner. The final Create being one
+    of the two lost events is also why a04 did NOT navigate (one
+    set-view). The #6224-armed decisive line
+    (`deferred-start-catchup-failed …resolved without the piece
+    running`) did not and could not fire in any of the three reds —
+    `deferred-start-catchup` was 0 campaign-wide — so these reds are
+    decisively NOT the catchup-resolved-without-running variant.
+    **THE a04 FAMILY ROOT-CAUSED AND FIXED — mark/effects atomicity,
+    RULED 2026-08-27 (owner) and built the same day (branch
+    `claude/server-exec-v2-mark-atomicity`). The ruling:** atomic with
+    all its effects — contribution-level all-or-nothing. If ANY effect
+    op of a consequence contribution is withdrawn or requeued by the
+    wave, the MARK op goes with it — the entry stays
+    pending-unconsequenced, the standard re-drain re-delivers, and the
+    retried handler's cause-derived (idempotent) writes converge. (α)
+    preserved: the mark still commits exactly once, only never without
+    its effects. Handler-launched patterns: launch writes are
+    cause-derived/idempotent; ON's run-until-first-idle analog is the
+    serving cycle's settle — no kickoff logic needed or wanted.
+    **The split point, store-proven (evidence before code): NOT the
+    wave.** commitWave already treats an event-handler contribution
+    atomically (whole-contribution requeue, wave.ts; per-doc drops
+    apply only to derivation kind; the batch build never strips a
+    handler contribution's ops; the mark rides the handler's own tx,
+    runtime.ts `streamEntry` doc + space-server.ts's stamper, written
+    BEFORE the body runs). The wave was HANDED a 1-op contribution:
+    the split is the DISPATCH-side skip at runner.ts's stream path —
+    `readJavaScriptArgument` → `isValidArgument === false` → "action
+    argument is undefined (potential schema mismatch) -- not running"
+    logged, handler body skipped, and the tx — holding the
+    pre-stamped mark and nothing else — sealed and committed cleanly.
+    a04's toolshed.log carries exactly TWO of those ERROR lines
+    (14:34:01.511 and .725, the two notebook create handlers'
+    `$ctx`), one per lost event; `events.processed 15` vs
+    `appended 14` shows clientSeq 10's FIRST run silently requeued
+    (its cause-derived note materialization surviving as the seq-52
+    orphan sets, no consequence_of) before the REDISPATCH hit the
+    skip mid-churn; clientSeq 11 skipped on its first dispatch. The
+    class was already NAMED in prose (scheduler/events.ts's B7
+    comment, scheduler/facade.ts's preflight doc: "its argument fails
+    the schema, the run is silently skipped, the entry marked
+    consequenced with no error — silent event loss"); B7 guarded one
+    trigger (the per-actor fan-out instance), a04 is a second trigger
+    (serving-replica view churn on the handler's `$ctx` docs) through
+    the same unguarded skip. **The fix (the ruled substance adapted to
+    the verified point — mark durability ⇒ effects durability):** the
+    runner records the skip on the tx
+    (`dispatchedHandlerNotRun`), and the scheduler's event finalize
+    WITHDRAWS a served dispatch's tx instead of sealing it — aborted,
+    reported `{kind: "deferred", cause: "handler-not-run"}`, counted
+    `events.handlerNotRunDeferrals` (serving-loop.md §7) — so the
+    entry stays pending and re-drains (the 8-deferral threshold
+    hardens a permanently unresolvable argument into the visible §5
+    DROP notice; no stream wedge). An LT1 copy withdraws through the
+    abort alone (no onFailure): the batch marks only a surviving lt1
+    run, the entry lands unmarked, the drain re-delivers with a
+    `streamEntry`. Client/OFF dispatches carry no mark and keep the
+    silent skip. Spec: events.md §5's new handler-body-did-not-run
+    bullet (RULED 2026-08-27). **Pin (red-first, watched):**
+    `executor-events-down.test.ts` "mark/effects atomicity at the
+    DISPATCH layer" — a served event whose handler `$ctx` requires a
+    number the argument doc does not yet hold: at the pre-fix base
+    the entry consequenced with ZERO effects (the a04 1-op shape —
+    watched red at the `consequenced not.toBe(true)` assert); with
+    the fix the entry stays pending through counted deferrals, the
+    healing write re-drains it, and mark + effects land in ONE
+    derived commit exactly once (α run-count witness: the
+    non-idempotent bump reads exactly 1; exactly one consequence-
+    carrying commit; the committing batch holds the sidecar mark op
+    AND the argument write together). Mutation kill: reverting the
+    finalize withdrawal (= the pre-fix base) reds the pin at the same
+    assert. Full events-down suite green with the fix (29 steps).
+    **NAMED FOLLOW-UP, not built (owner, verbatim, 2026-08-27): the
+    mark may duplicate the result-cell write-once guarantee** — "the
+    idea was that all handlers write result cells (even if the value
+    is undefined), and that CAS for that is the write-once guarantee.
+    but if that means we don't need the mark after all, consider
+    marking that for follow-up improvements rather than expanding
+    scope." If mark retirement is taken up, the drain's
+    delivered-scan would key on the handling receipt/result cell
+    (spec §7.6's cause-derived receipt address) instead of the
+    entry's `consequenced` field — recorded here as the candidate
+    key, not a design. Also recorded, not owed by this fix: WHY the
+    redispatch's argument read failed mid-churn (the transient
+    resolution failure on ctx docs the first run's withdrawal left
+    behind) is its own diagnosis — the atomicity fix makes every such
+    transient recoverable by re-drain instead of a permanent loss.
+    **FIX ROUND (independent review of PR #6459, 2026-08-27): F1
+    landed — the withdrawal carries §2's arrival-order barrier.** The
+    review DEMONSTRATED (213 ms probe) that the new deferral arm let
+    a later-arrived same-space served entry overtake the withdrawn
+    head — the b01 class re-opened at a new arm: durable log
+    ["B","A"] against arrival [a1, b1], b1 sealing while a1 was
+    pending. The withdrawal now sweeps later-arrived durable served
+    followers out of the scheduler queue with
+    `{cause: "arrival-barrier", blockedBy}` exactly as
+    `failHeadEventLoadPark` does (a shared events.ts helper,
+    enqueueSeq-guarded because these arms do not fail at the
+    un-dispatched queue head; the piece-start deferral arms — the
+    review's named sibling gap, same no-sweep shape, same disposition
+    — carry the same sweep). Pins red-first, watched: the ordering
+    pin inverts the review's probe (executor-events-down "the
+    handler-not-run withdrawal carries the arrival-order BARRIER" —
+    pre-fix/mutation red at stored log ["B"] while a1 pends; fixed:
+    b1 barrier-deferred and the healed re-drain lands ["A","B"]); a
+    unit pin (scheduler-event-identity) drives both piece-start
+    failure modes and the exclusions (cross-space neighbours and LT1
+    copies stay queued). Mutations killed arm by arm: finalize sweep
+    disabled → ordering pin red at the ["B"] overtake with the piece
+    sweeps still active; piece sweeps disabled → unit pin red with
+    the finalize sweep still active. The barrier's MID-PASS half
+    landed with it: the sweep can only hold entries already queued,
+    and a withdrawal landing while the drain pass awaits a later
+    sidecar's sync let the pass queue the next arrival behind the
+    barrier's back (the load-park fix's P1 gap, reopened for this
+    cause) — the plain-deferral arm now sets
+    `#loadParkDeferredInPass` for handler-not-run, and the drain's
+    existing past-every-await check stops the pass. RESIDUAL,
+    recorded (scoped-verify SV1): the piece-start (cold-view)
+    deferral arms carry NO cause, so they never set the pass flag —
+    their in-queue half is swept by the shared helper, but a
+    piece-start deferral landing mid-pass keeps the pre-existing
+    mid-pass window (their deferrals usually land outside a pass;
+    same one-flag shape if ever taken up). Deterministic
+    pin, red-first (watched): the load-park mid-pass construction —
+    pass held at B's sidecar sync, A2's withdrawal counted inside the
+    hold, gate healed before release — pre-fix durable log
+    ["A","B","A"], fixed ["A","A","B"]; the watched red is the
+    mutation evidence (that tree was the final code minus exactly the
+    flag-set). **F2 landed** — the terminal §5
+    notice branches on the final deferral's cause ("handler did not
+    run after N withdrawn dispatches"; the old
+    no-runnable-handler/load-attempt boilerplate was false in both
+    clauses for this class), red-first through the full 8-deferral
+    budget with THIS cause — which also closes the review's stated
+    gap that the threshold path was code-traced, not test-run. **F3,
+    recorded shape, not built:** a deferral that heals below the
+    threshold leaves its `#eventDeferrals` entry for the tenure, and
+    `#eventDeferrals.size > 0` arms `#eventScanOwed` on every
+    admitted commit — a per-commit drain rescan over an (empty)
+    pending set. Pre-existing for every plain-deferral cause;
+    handler-not-run makes heal-after-defer the COMMON case, so the
+    residue now arms routinely. Cheap close if taken up: delete the
+    eventId on successful seal. **F4: no change owed** — the
+    atomicity pin's final batch assert is corroborative; the teeth
+    are the α run-count and the single consequence-carrying commit.
     Sibling entry, landed mid-review: #5744 (lunch-poll profile-first
     join) re-skipped `integration/lunch-poll-vote.test.ts` as a FILE
     entry on this row's b04 signature — its recorded reds PREDATE the
@@ -5981,7 +6597,8 @@ supply; OW29/OW32/OW34 closed):
     complains when it succeeds), which is what makes the store the
     only usable witness; the worker console bridge was verified live
     at all three levels first, so the silence is a finding rather
-    than a blind instrument. **NOT DETERMINED, deliberately:**
+    than a blind instrument. **CAMPAIGN FORK, DELIBERATELY LEFT
+    UNDETERMINED AT THAT HEAD:**
     whether that commit was REFUSED, DROPPED in flight, or NEVER
     ISSUED. The guest's space appears in NO server-side line at all —
     including none of the 50-73 per-run
@@ -5995,12 +6612,14 @@ supply; OW29/OW32/OW34 closed):
     store-verified COMPLETE with the piece context fully live and
     only the read starved, whereas here the store is missing the
     PROGRAM and no piece ever ran, so there is no live context to
-    starve; NOT r06/r09's stranded whole-piece — that member fires
-    one watcher `pattern-load-error` for a keyless identity while the
-    durable store's pointers are all REAL identities (session-side
-    keylessness), whereas here `pattern-load-error` is 0 in every run
-    and the durable store carries NO `patternIdentity` at all, i.e.
-    keylessness that is DURABLE, the opposite. What it IS is this
+    starve; NOT r06/r09's shape — that member fires
+    one watcher `pattern-load-error` for a keyless identity with
+    patternIdentity STAMPS PRESENT in the durable store (real ones
+    beside keyless ones — the keylessness itself is DURABLE, per the
+    2026-08-27 correction; the older "session-side" reading was
+    wrong), whereas here `pattern-load-error` is 0 in every run and
+    the durable store carries NO `patternIdentity` stamp at all —
+    absent stamps, not keyless ones. What it IS is this
     row's opening sentence verbatim, placeholder included —
     reappearing for a piece the SECOND browser creates MID-SESSION,
     and reached by a DIFFERENT route than the row's recorded one
@@ -6045,12 +6664,1471 @@ supply; OW29/OW32/OW34 closed):
     here is WRITE-direction and occurs at ensure-OFF, so OW61's
     separate client-side ABSORB investigation is not expected to
     close this shape.
-    **DISPOSITION: NO LIFT. The entry STAYS, its reason reworded to
-    the narrowed charge — the b04 class it was minted for is closed
-    at this head, and it now stands on the guest-profile
-    program-materialization loss. The lift bar is UNCHANGED: this
-    entry's own gate evidence at the merged head, 10/10, never by
-    inference from the default-app gate.**
+    **SUPERSEDED CAMPAIGN DISPOSITION: NO LIFT.** The 2026-08-24
+    campaign kept the entry on the narrowed guest-profile
+    program-materialization charge and left the mechanism fork open.
+    **CURRENT DISPOSITION: RESOLVED — the server never issued the
+    materialization commit on its first served attempt.** Under ON the
+    client may run the handler speculatively, but intentionally discards
+    that seal and waits for the authoritative server transaction.
+    **OWNER RULING 2026-08-26:** “with ON, the transaction should go
+    through the server. it's in this case fine for the client to just
+    wait for that to complete vs speculatively running things.” The
+    server reached `ProfileHome.inSpace()` before the anonymous target
+    name was cached; name resolution warmed the cache and threw
+    `RetryImmediately`, but `retries: false` caused the served event to
+    be dropped instead of rerun. The scheduler now preserves the served
+    carriage across that name-resolution requeue and reruns it in the
+    same settle. Ordinary transient commit retries remain disabled. The
+    red-first scheduler regression failed at one attempt before the fix
+    and passes at two; production-shaped ensure-OFF ON evidence moved
+    from 2/8 target-member reds on current main to 0/8, with all eight
+    guest stores carrying the 98-operation `patternIdentity`
+    materialization. Baseline head: `37b45336a`; diagnostic fix head:
+    `8524f4ec1`; rebased smokes: f10 at `622ef2bda` and f11 at
+    `e158eb0c3`. The run stores and logs remain on the measuring box at
+    `/Users/berni/labs-worktrees/lunch-member-evidence/`; the running
+    report is `/Users/berni/labs-worktrees/lunch-member-report.md`.
+    This was neither a server refusal nor loss of a required client wire
+    send; it was the server name-resolution retry gate preventing
+    issuance.
+    **THE 2026-08-27 LIFT ATTEMPT: the local re-baseline PASSED 8/8 and
+    the DIRECT CI UNSKIP PROBE ON THE SAME BRANCH went RED — NO LIFT.**
+    Recorded in that order because the order is the finding. The bar the
+    local campaign satisfies is the one the
+    2026-08-26 ruling set in place of the old 10/10: an approximately
+    eight-run re-baseline, a red-first mechanism regression, and eight
+    post-fix runs. The regression and the first eight runs landed with
+    #6378; this is the re-baseline, run at main `4b70949ac` on an ON-built
+    binary (sha256 `5018e589dc54b19a1…`, re-verified per run), fresh store
+    and own 97xx port and ON posture probe per run, LLM masked, PID-only
+    teardown with a port-free check, the FILE entry neutralized in the
+    working tree throughout (the file's having RUN verified per run from
+    its own `running 1 test from …` line), `gtimeout 600` never raised,
+    four quiet and four loaded interleaved. **8/8 GREEN in 17–18 s** — the
+    file's recorded green band is 19–39 s and every recorded red was its
+    own 300 s `waitForCondition` net at 313–322 s, so no run came near
+    either. TWO posture changes, both harder and both deliberate: the
+    space-root ensure is **ON**, the production default the CI ON lanes
+    returned to at #6248 — the 2026-08-24 campaign's own n=3 side probe had
+    called ensure-ON "a strictly worse regime for this file" (3/3 red), and
+    the class it saw was root-caused and fixed by #6312 — and the toolshed
+    now self-sources its pattern `API_URL` on the run port, the corrected
+    source authority the default-app RCA prescribed.
+    **The member's own store discriminator is negative in 8/8.** The
+    2026-08-24 red signature was store-side and byte-stable: the GUEST's
+    profile space holding exactly 4 commits with NO `patternIdentity`,
+    against greens reaching 14–21 commits; the missing artifact was the
+    ~98–101-operation authored commit carrying the piece's root doc and its
+    whole `cid:` closure WITH `patternIdentity`. Census over all eight fresh
+    stores: five spaces per run (one more than the archived campaign's four
+    — the ensure is ON now), **every space in every run carrying
+    `patternIdentity`**, each with a materialization commit of 141–198
+    operations; the smallest space in the campaign holds 5 commits. The
+    4-commit zero-`patternIdentity` guest space does not occur once.
+    Counters across the eight: `pattern-load-error` **0**,
+    `pattern-swap-setup-error` **0**, `deferred-start-catchup` **0**,
+    catch-up failures **0**, terminal `Error committing deferred` **0**,
+    `session-remount` **0**, load-park deferrals/drops **0**,
+    `schema-doc-quarantine` **0**, `structure-load-stuck` **0**; stale-read
+    lines 8 (1/run), `piece-start-commit-failed` 8 (1/run — this row already
+    records it as NOT this file's discriminator), `sidecar-run-raced` 8
+    (1/run, #6312's designed loud yield), and the recorded background of
+    `foreign-write-refused` / `seal-space-commit-failed` refusals (80 and
+    40 per run; this row already records that background as firing just as
+    often in greens). Evidence on the measuring box at
+    `/Users/berni/labs-worktrees/b1-lifts-evidence/runs/lunch/` (per-run
+    ledger, test and toolshed logs, meta+stats JSON, own `memory/` store,
+    plus `store-census.txt`), report at
+    `/Users/berni/labs-worktrees/b1-lifts-report.md`.
+    **AND THEN CI SAID NO.** The lift PR (#6410) un-skipped the file, so its
+    own CI ran it in the true lane for the first time since #5744's re-skip:
+    **ON shard 7 of run 33085668531 (job 98564797510, head `0cebb3621`) went
+    RED.** Not at any stage this row records — the failure is
+    `lunch-poll-vote.test.ts:271`, the **HOST's**
+    `clickCfButton("#lp-join-button")`, timing out at the test's own
+    300000 ms bound after 5m10s with `"#lp-join-button": []` and the poll
+    body rendered. Every red this row has recorded for this file is the
+    GUEST's join at line 306, and the 2026-08-24 gate's own finding was
+    that "the host always joins". The 2026-08-24 n=3 ensure-ON side probe is
+    the nearest recorded neighbour — it timed out even earlier, filling the
+    HOST's `#wish-profile-name-input` — and #6312 fixed the member that
+    probe saw. Whether this is that family's residue, a new host-side
+    member, or the fifth-face load-park member reaching this surface is
+    UNDETERMINED from the CI artifact: the CI window between the file's
+    start and its failure is SILENT (zero `pattern-load-error`,
+    `pattern-swap-setup-error`, `sidecar-run-raced`,
+    `deferred-start-catchup`, `session-remount`, `piece-start-commit-failed`
+    — the neighbouring occurrences in that job's log fall outside the
+    window), and **CI does not publish the toolshed log**, so no server-side
+    member can be excluded from it. **The OFF lane's shard 7 PASSED on that
+    same run** (`Pattern Integration Tests (7/10)`, same commit, same runner
+    pool), so the red is ON-specific rather than a general flake in this
+    file. n=1 in CI, against 0/8 locally.
+    **DISPOSITION: NO LIFT.** The entry stays, its reason extended with this
+    probe (and the skip-list test pinned to it) so the 8/8 cannot be read as
+    a clean bar by the next seat. What the split says on its own terms: a
+    local campaign — however careful its posture, and this one deliberately
+    matched the lane on both the ensure and the source authority — is not
+    the lane. This row already carries one member with exactly that profile
+    (the fifth-face load-park member: local control 0/12, CI 2/2 red on two
+    shards), and the honest reading is that the lift bar for this file
+    should require a green DIRECT CI unskip probe, not a local count alone.
+    That is a bar change, so it is the owner's call, flagged not taken.
+    **RULED 2026-08-27 (owner: "agreed") — THE BAR CHANGE IS TAKEN, AND IT
+    BINDS EVERY ON-SKIP ENTRY, NOT ONLY THIS FILE.** An entry lifts only on
+    BOTH (1) its own local campaign bar AND (2) a GREEN DIRECT-CI UNSKIP
+    PROBE: a commit on the lift branch that removes the entry's guard, a CI
+    board that demonstrably RAN the un-skipped surface, and that probed lane
+    green. A local campaign is evidence about the box it ran on; only the
+    lane is evidence about the lane. Both of this row's entries carry a
+    member with exactly that profile (the fifth-face load-park member: local
+    control 0/12 against CI 2/2 red; this file's 2026-08-26 split: local 0/8
+    against CI 1/1 red), so the probe is not ceremony — it is the only
+    observation that has ever caught them. A RED probe WITHDRAWS that
+    entry's lift: the signature is captured from the job log and classified
+    against this row's recorded members, and any sibling entry's lift stands
+    or falls on its own probe. No rerun-looping — one probe board,
+    classified honestly.
+    **SURFACE READING — RULED 2026-08-28.** The bar was ruled hours before
+    its first use, and the case that distinguishes its two readings arrived
+    immediately: the default-app probe's own step passed while its shard went
+    red on a CO-RESIDENT file the entry has nothing to do with. The
+    coordinator's recommendation — that requirement (2) binds the PROBED
+    SURFACE, so a green probed surface satisfies it, and a co-resident
+    failure is a separate defect carrying its own accountability rather than
+    a veto on an unrelated entry's lift — went to the owner, who ruled
+    **"agreed with your recommendations, proceed" (2026-08-28)**. So
+    requirement (2) reads: the CI board demonstrably RAN the un-skipped
+    surface and THAT SURFACE was green. Two things the reading does not
+    license, both live: a co-resident red is not thereby forgiven — it is a
+    defect owed its own row, seat, or entry (the flip's bar is a green ON
+    lane, not merely an empty skip list, so unlisted co-resident debt still
+    blocks the flip); and a probe that reds AT THE PROBED SURFACE still
+    withdraws the lift exactly as written above.
+    **THE ENSURE-ON PROFILE-SURFACE MEMBER ROOT-CAUSED AND FIXED
+    2026-08-25 (PR #6312) — the n=3 side probe's "create surface never renders"
+    shape and the #6248 board's profile-shard family, reproduced
+    locally: a WRITE-side SELF-CLOBBER of the wish's create-surface
+    sidecar — neither recorded read-side member, and not a
+    provisioning loss.** Reproduced 6/11 at main `35ab29c38` (true
+    topology, ensure defaulting ON, fresh store + posture probe per
+    run; shared-profile, profile-embed, and a probe driver): every
+    red's store shows the served `#profile` wish's profile-create
+    sidecar materialize DURABLY and then — inside the SAME wave
+    commit — a patch removing `/value/$NAME` and
+    `/value/createProfile` and replacing `$UI` with an error span
+    carrying a conflict message. Mechanism: every pre-resolve launch
+    of the sidecar chains its OWN instantiation continuation on the
+    resolution already in flight (`openSidecarSurface` — by design,
+    so a launch arriving mid-flight joins one rather than starting a
+    second), so a wish node that runs twice before that resolution
+    answers instantiates the sidecar twice into the same
+    cause-derived result cell; the losing duplicate's commit fails on
+    the conflict class (`StorageTransactionInconsistent` /
+    `ConflictError` — its snapshot predates the winner) and
+    `runSidecarInOwnTx`'s error arm wrote the ERROR UI over the
+    winner's surface (`commitPatternErrorUI`). Nothing re-issues (the
+    continuation is one-shot; the wish never re-ran — residual (i)
+    below), the client faithfully renders the durable error box, the
+    create input never exists, and the run is SILENT — the register's
+    "fail EARLIER at the host's create" prediction, mechanized. FIX
+    (red-first): a conflict-class failure (commit-refused or thrown
+    mid-run) now checks the RESULT CELL — a materialized value there
+    means a sibling instantiation won, and the loser YIELDS, loudly
+    (`sidecar-run-raced`, serving-loop.md §3d's failure-arm
+    contract); an EMPTY cell means the conflict came from an input
+    doc (e.g. the home `profiles` list moving), and the run RE-RUNS
+    against fresh state (bounded, three attempts) rather than
+    abandoning the only instantiation; the error UI is reserved for
+    real fetch/compile/run failures and the bounded-retry terminal.
+    No local dedupe latch: the pin drives the duplicate from a
+    second runtime instance of the same node (cause-derived
+    convergence is the design), so yield-on-conflict — the OCC
+    discipline `createSpaceRootIfAbsent` already uses — is the fix,
+    not dedupe. Pin: `wish-sidecar-duplicate-launch.test.ts` (two
+    runtimes, one store, the same compiled `#profile` piece → one
+    wish-node cause → one sidecar cell; a gated fetch holds the
+    duplicate window open, a registration-counted witness — the
+    `wishSidecarDiagnostics` test seam, this package's stand-in for
+    the missing logger-capture idiom — proves the duplicate
+    continuation is chained before release, and a runs-delta
+    assertion kills the vacuous-green path; watched red at `$NAME`
+    undefined with the conflict text durable; removing only the
+    conflict-class yield reds it again). The sidecar run also now
+    observes its wave settlement OUTSIDE the tracked launch (an
+    awaited settlement would make `idle()` wait on the wave that
+    waits on quiescence) and warns (`sidecar-run-withdrawn`) when a
+    committed instantiation is withdrawn, and the wave accumulator
+    names DROPPED contributions (`contribution-dropped` — requeues
+    and superseded derivations stay quiet; both are expected
+    recovery): the r05/p11 cascades each surfaced exactly ONE logged
+    symptom before this.
+    Live evidence, by head: 6/6 GREEN in 23-27 s at the ORIGINAL fix
+    head `bcd816b8a` (shared-profile ×2, profile-embed ×2, probe ×2)
+    and 3/3 GREEN in 20-22 s re-run at the review-round head
+    `95734a5b0` (one of each) — same harness, fresh store + posture
+    probe per run, against 6/11 red pre-fix on the same box; the
+    9-green record has well under 1% probability at the pre-fix
+    rate.
+    Residuals recorded, NOT owed by this fix: (i) in red r05 the wish
+    action held a durable `scheduler_basis` row on its ready-cell
+    read (seq 0, user-instance-keyed), the ready flip landed at
+    commit 31, waves kept running through 44 — and the wish action
+    provably never re-ran (wish-state doc frozen; greens re-run it
+    within 60 ms and heal everything). When that re-run fires, every
+    one-shot loss heals; when it does not, any one-shot loss is
+    permanent. Gear undetermined — its own seat. Related, from code
+    reading: a DROPPED contribution leaves NO basis rows
+    (`#basisRowsFor` covers survivors only), so "its own reads re-run
+    it when fresh state lands" is structurally false for a first-ever
+    run that gets dropped — the D3 basis-row gap.
+    **D3 DECOUPLED from the a04 event family (2026-08-27, the
+    mark/effects-atomicity pass):** for HANDLER EVENTS the re-arm is
+    the RE-DRAIN, not basis rows — the durable pending-unconsequenced
+    entry is itself the retry record, so a withdrawn or never-run
+    handler dispatch needs no basis row to run again (the atomicity
+    fix keeps the entry pending exactly so that mechanism carries the
+    recovery). D3 therefore stays scoped to REACTIVE first-runs with
+    no durable retry record behind them — the wish case above, where
+    a dropped first-ever derivation leaves neither basis rows nor any
+    entry to re-drain. (ii) The client and server auto-updaters
+    ping-pong the ensure-created root's summary-index child between
+    its closure-embedded pattern identity and the standalone compile
+    of the same source (alternating authored/derived
+    `pieceSourceHistory` + `/value` replaces;
+    `pattern-swap-setup-withdrawn` fires in greens and reds alike) —
+    the contention population that multiplies pre-resolve wish
+    re-runs; its own defect, untouched. (iii) The lunch FILE entry's
+    third member (ensure-OFF: the guest's ~98-101-op
+    program-materialization commit never landing) is a DIFFERENT,
+    post-click stage; it is now resolved by the served-event
+    name-resolution requeue described in that entry's current
+    disposition. The 2026-08-26 owner ruling and evidence recorded there
+    supersede the earlier 10/10 lift bar with the requested approximately
+    eight-run re-baseline, a red-first mechanism regression, and eight
+    post-fix runs. (iv)
+    Whether the #6248 board's
+    POST-fill shape (shards 2/6: fill succeeded, click landed,
+    `#profile` never resolved) is this same clobber on a later
+    surface or another member is undetermined — re-measure on that
+    board at a head carrying this fix. **RESOLVED 2026-08-25 (the
+    re-measure: CI failure-path store capture at the lane-flip head,
+    run 32929764230, scratch instrumentation branch
+    `claude/server-exec-v2-postfill-diagnosis` — never merged): NOT
+    this clobber — ANOTHER MEMBER, one mechanism across both shards,
+    store-proven in both captures.** The trusted CreateProfile
+    click's durable entry is healthy (seq 17 in both event spaces:
+    `target.value "Ada Lovelace"`, `rendererTrusted: true`, clean
+    admission), and the served dispatch DROPPED it pre-dispatch: the
+    head-event load park awaited a cross-space replica load of the
+    HOME space's ensured `defaultPattern` quote doc — a doc the
+    server's OWN ensure had durably written ONE second earlier — and
+    the load failed `ConnectionError: memory session revoked:
+    unauthorized` (storage/v2.ts sync-load-failure) because the
+    serving plane's home-space session predated the genesis ACL
+    (activation-before-genesis, the recorded boot order) and the ACL
+    landing revoked it (`#revokeDeauthorizedSessions`,
+    memory/v2/server.ts — by design; a HOME
+    genesis is `{user: OWNER}` with no `"*"`, so the pre-genesis
+    session is de-authorized the moment it lands. **This clause read
+    "by design, heal-on-next-mount" until 2026-08-26. That premise was
+    FALSE — nothing remounted — and its falsification is the FIFTH-FACE
+    member recorded at the end of this entry.**);
+    `failHeadEventLoadPark` (scheduler/facade.ts) maps ANY load-park
+    failure to the TERMINAL drop arm, and the drain sealed
+    `{status: "dropped", consequenced: true}` with the watermark
+    advanced (seq 18, `consequence_of` naming the eventId) —
+    at-least-once discharged, nothing ever re-runs the event, the
+    authoritative handler never executes, and the surface starves
+    the full 300 s net. This VIOLATES events.md §5's T3 drop
+    predicate ("no runnable handler", never "the run raced"): the
+    handler was runnable and the input doc existed durably; the
+    spec-conforming disposition for an unreachable input is
+    `deferred` (no consequence; re-drain) — the same code's own
+    docstring names the split. Negative discriminators, both stores
+    swept whole: clobber patch signature 0, `sidecarError` 0,
+    `sidecar-run-raced` 0 (this fix HOLDS — no hole); not the
+    read-side r01 member (an error account exists and the
+    consequence is absent, not present-but-unread); not residual
+    (i)'s basis-row gap (the entry is consequenced-dropped, and the
+    only dropped contributions — 3× `compile-cache/writeback` in the
+    speculative profile space's first waves — re-ran and healed in
+    the same second); not OW54's give-up arm (no CFC rejection, no
+    commit attempted) and not OW58's notice wedge (the notice sealed
+    cleanly). A NEW served-event-family member: the pre-dispatch
+    load-park failure arm. Rates at this base: shard 2 red 2/2 CI
+    boards, shard 6 red 2/2, local control 0/12 — the click must
+    land inside the [pre-genesis session open → revocation →
+    re-mount] window with a cross-space read at preflight; slow CI
+    runners do, the local box did not. Shard 9
+    (`cfc-staged-publish`, `TrustedSaveDraft` → `#saved-title`) red
+    1/2 and GREEN on the capture board — UNHARVESTED: symptom-
+    compatible with this member, no store evidence, classification
+    open. Observability, recorded: a terminally dropped served event
+    is invisible in serving stats (`events.*` has no dropped
+    counter; only the scheduler WARN line and the entry's
+    `status: "dropped"` field carry it). Product exposure: an ACL change
+    that REMOVES the serving session's authority or changes its
+    delegated owner revokes that session by design
+    (`#revokeDeauthorizedSessions` — authority-PRESERVING grants
+    leave the session valid; Cubic P2 on this PR scoped the claim),
+    so under ON a served dispatch's cross-space load racing such a
+    revocation permanently and silently discards a user's trusted
+    action; the fix direction (load-park failure →
+    `deferred`/re-park) touches the seal-adjacent path — OW58's
+    "(α)-critical, its own deliberate pass" caution applies, and the
+    disposition (fix-before-flip vs. narrow honest step-skips naming
+    shared-profile's, profile-embed's, and staged-publish's steps
+    with an owed row) is the owner's call, deliberately not taken by
+    the diagnosis seat.
+    **FIXED 2026-08-26 (its own deliberate seal-adjacent pass, no
+    riders — the OW58 caution above is why): the load-park failure arm
+    DEFERS a served event instead of dropping it.**
+    `failHeadEventLoadPark` (scheduler/facade.ts) now settles a served
+    event through the `deferred` arm — no consequence sealed, the
+    durable entry left pending and UNCONSEQUENCED, the standard
+    re-drain re-delivering it — and carries the drain's arrival-order
+    BARRIER with it (events.md §2, mirroring the sidecar-sync-failure
+    arm), in TWO halves, because the deferral can land in two places.
+    IN THE QUEUE: every later-arrived durable served entry behind the
+    head IN THE SAME SPACE defers too. MID-DRAIN-PASS: the
+    scheduler-side barrier can only hold what is already queued, and
+    the drain awaits a `sync()` per new sidecar — so a park failure can
+    land between one entry's queueing and the next's, and the next
+    entry would queue behind the barrier's back and overtake. The
+    second half (`#loadParkDeferredInPass`) makes the pass STOP there,
+    the same `break` the sidecar-sync arm makes; found in this seat's
+    own adversarial pass, and its mutation reds `["A","B","A"]` exactly
+    like the in-queue one. Its CHECK POSITION is load-bearing and was
+    got wrong first: the loop awaits TWICE per entry (a new sidecar's
+    `sync()` and then the stream doc's), and a rejection landing in
+    either window sweeps only what was queued at that instant — so the
+    check sits past BOTH, immediately before
+    `#drainInFlight.set`/`queueEvent`. Independent review (Codex P1 on
+    PR #6365) caught it one await too early. **Coverage gap recorded,
+    NOT filled:** the pin discriminates the check's EXISTENCE (delete
+    it → red) but NOT its POSITION — measured, not assumed: with the
+    check moved back to the pre-review position the pin still passes.
+    Discriminating the position needs the park rejection to land inside
+    the stream-doc-sync window specifically. **PIN OWED, CONSTRUCTION
+    SKETCHED** (review F7 corrected this seat's earlier "a flaky pin
+    would be worse than none" — the construction is fully CAUSAL, not
+    timing-raced, so that framing overstated): hold B at its sidecar
+    sync (the shipped gate), wait for A2's park to be CREATED (a
+    parkObserved hook in the seam, as the scheduler pin already does),
+    arm a second gate on B's stream-doc sync (`cell.sync()` always
+    reaches `syncCell` — verified, no warm-cache short-circuit),
+    release the sidecar gate, hold at the stream gate, reject the park,
+    disarm, release. Every step causally ordered, no timers. Recorded
+    rather than built here only to keep this round scoped to the two P1
+    pins; see review-6365-report.md F7. Until it exists the position
+    rests on the code comment and this record. Two
+    exclusions, deliberate: cross-space
+    queue neighbours (§2's order is per-space) and LT1 in-process
+    copies (`served` with no `streamEntry` — no durable entry to
+    re-drain, and a running event's same-wave cascade children rather
+    than later arrivals; their entry re-drains WITH a `streamEntry`,
+    the `lt1LeftoversPurged` semantics). CLIENT-side (no `served`) the
+    drop keeps today's shape — there is no durable entry to re-drain,
+    so deferring would lose the event outright; the same split
+    events.ts already makes for a piece-load failure, and client-side
+    the two arms are behaviourally indistinguishable anyway (both
+    remove the event and abort its onCommit). T3's genuine
+    no-runnable-handler drop is UNTOUCHED — only the load-FAILURE
+    routing changed.
+    **Persistent-failure posture, stated:** a load that never heals
+    defers INDEFINITELY — durable, visible, re-tried each drain. The
+    deferral is deliberately kept OFF the queued class's bounded
+    creation-race budget (`EVENT_DEFERRAL_DROP_THRESHOLD`, which
+    hardens into §5's drop after 8 deferrals) by a typed
+    `cause: "load-park"` on the served failure outcome: that budget
+    exists because a piece which never materializes has no runnable
+    handler, whereas here the input doc EXISTS durably and only the
+    read path failed, so hardening would restore exactly the
+    at-least-once discharge this fix removes. Indefinite deferral is
+    strictly better than silent loss and is the accepted posture; its
+    cost is that the backstop rescan keeps ticking, so a never-healing
+    load holds the space out of its idle park. A give-up arm for that
+    case is OW54's separately tracked territory and was deliberately
+    NOT built here.
+    **The price, quantified (review §2 — it was asserted but not
+    costed).** Per poisoned space, per 250 ms backstop tick: one drain
+    pass, one queueEvent, one preflight, one park, one real load attempt
+    against the failing backend, and 1+N WARN lines (head plus barrier
+    victims). So ~4 load attempts/s and, for a 10-event backlog, ~44 log
+    lines/s sustained — a WARN-flood cost the fix frames as
+    observability. Same-space later served events are head-of-line
+    blocked indefinitely BY DESIGN (order over liveness). Cross-space
+    events are not deferred, but the scheduler is head-serial, so the
+    poisoned head occupies the head slot for one park-to-rejection
+    latency every tick — negligible for the production error (a revoked
+    session rejects immediately) but a TIMEOUT-class slow failure would
+    stall co-scheduled dispatch at 4 Hz. That slow-failure case is what
+    makes OW54 worth scheduling rather than itself deferring
+    indefinitely.
+    **Weakening recorded (review F5), and it is DELIBERATE but was
+    unstated.** The arm's `#eventDeferrals.delete(entry.eventId)` on
+    every load-park deferral — head and barrier victims alike — means
+    the cold-view give-up guarantee is no longer "8 deferrals" but "8
+    CONSECUTIVE cold-view deferrals uninterrupted by a load-park
+    failure". Under a FLAPPING serving session (revoke/remount cycling
+    — the production mechanism here) a genuinely unrunnable event whose
+    cold-view deferrals interleave with load-park failures at least once
+    per ~7 ticks never hardens, wedging the park criterion active for an
+    event T3 licenses dropping. The intent was only to keep the budgets
+    unmixed; the sharper alternative — leave the cold-view count ALONE
+    rather than resetting it, since not-mixing is not the same as
+    resetting — preserves the hardening bound and belongs in OW54's
+    design space. Not changed here: it is a behaviour change to the
+    cold-view arm, which this deliberately scoped pass does not touch.
+    Observability gap CLOSED with the fix: `events.loadParkDeferrals`
+    counts each deferral (head and barrier alike) and `events.dropped`
+    counts terminal drop notices sealed onto a durable entry — the
+    previously invisible half; a loud WARN per deferral names the
+    failing doc keys and the error. serving-loop.md §7 carries both.
+    Pins, red-first: `executor-events-down.test.ts`'s "a served event
+    whose HEAD-EVENT LOAD PARK fails DEFERS instead of terminally
+    dropping" (a new `GatedStorageManager.loadParkFailAddress` seam
+    reports one doc as an in-flight load and REJECTS its park settle
+    with the production error text; observed pre-fix red: BOTH entries
+    sealed `{consequenced: true, status: "dropped", reason: "Event
+    dropped: required replica load failed before dispatch"}` — the
+    exact CI store shape) and
+    `scheduler-event-load-park.test.ts`'s "a SERVED event's load-park
+    failure reaches the drain as a load-park DEFERRAL, not a drop"
+    (the contract the SpaceServer's `onFailure` branches on; the
+    pre-existing client-side drop pin beside it is unchanged).
+    A third pin covers the mid-pass half: the drain's sync gate holds a
+    pass at B's sidecar with A2's park already failed inside it, and
+    after healing and release the log still reads `["A","A","B"]`.
+    **CORRECTED 2026-08-26 (independent review F3 — this record briefly
+    claimed a mutation red that does not reproduce, the one thing it
+    must never do).** The original in-queue row was measured BEFORE the
+    mid-pass half existed and never re-run after; with both halves
+    present, emptying the in-queue loop leaves the suite GREEN, because
+    that pin's two handlers both read the ARMED doc — so a barrier-less
+    B parks on the same failure and self-defers through the HEAD arm.
+    The in-queue half is now discriminated by its own pin: the
+    `DISJOINT_CLOSURE_LOG_PATTERN` gives `pushA` an extra `gate` input
+    linked to a SEPARATE doc, the seam arms only that doc (so B stays
+    perfectly runnable), and the park rejection is HELD
+    (`loadParkSettle`) until both entries are provably queued —
+    `events.processed` up by two with the head parked — so the mid-pass
+    half cannot be what preserves the order. A fifth pin discriminates
+    the typed-cause budget bypass (review F4, the posture's load-bearing
+    half, previously unpinned): a PERSISTENT failure, waited past
+    `EVENT_DEFERRAL_DROP_THRESHOLD` on the `loadParkDeferrals` counter
+    rather than a sleep, must still seal nothing — then heals and
+    delivers once.
+    Mutations, all red, all re-run at this head: restore the drop
+    routing → both entries seal dropped and the log never grows past the
+    warm-up (and the scheduler-level pin reads `kind: "dropped"`); empty
+    the in-queue barrier loop → "B1 must not consequence while the
+    earlier-arrived A2 is deferred", `["A","B","A"]`, the OW45 arm-B b01
+    overtake shape; drop the `#loadParkDeferredInPass` check → the same
+    overtake through the mid-pass gap; fall the load-park arm through
+    into the threshold accounting → "a persistent load failure must
+    never harden into events.md §5's drop". The barrier's TWO
+    EXCLUSIONS are pinned too — they were the coverage ratchet's two
+    uncovered lines, and were COVERED rather than accepted: a
+    scheduler-level pin queues, behind a parked served head, a
+    same-space durable sibling, another SPACE's durable entry, and a
+    `streamEntry`-less LT1 copy, and asserts the sweep takes only the
+    first. Independently red: drop the cross-space guard → "another
+    space's entry must not be swept"; drop the LT1 guard → "a
+    streamEntry-less LT1 copy must not be swept". Construction note for
+    whoever edits it — both traps cost this seat a red: `addEventHandler`
+    stamps `populateDependencies` onto the HANDLER FUNCTION OBJECT, so
+    each stream needs its own function (sharing one makes all four park
+    on the armed doc), and same-stream sends COALESCE by doc id, so the
+    cross-space neighbour needs its own id rather than the sibling's
+    with the space swapped. Battery green at the fix:
+    executor-events-down
+    (26 steps, the α3 retry machinery untouched), executor-fan-out,
+    executor-serving-loop, scheduler-event-load-park,
+    executor-space-server, executor-watermark, executor-stats,
+    executor-wave, executor-cross-space, and the full
+    `packages/runner` package (1301 passed / 7549 steps / 0 failed).
+    **THE BARRIER INVARIANT AS STATED IS NOT CLOSED — a THIRD path gets
+    past both halves (review F1, structural from the code; not built as
+    a repro, and NOT a landing blocker because both the re-mark and the
+    shaper routing pre-date this PR and the pre-fix behaviour — terminal
+    drop — was strictly worse).** The drain re-marks durable entries
+    renderer-trusted before queueing (space-server.ts), and
+    `Scheduler.queueEvent` routes any renderer-trusted payload with
+    `doNotLoadPieceIfNotRunning=false` — what the drain passes — through
+    `holdShapedEvent`. The wake shaper's first `BURST_CAPACITY` (10)
+    deliveries per piece-group are synchronous, so the barrier sees
+    those; overflow sits in `group.pending` and releases as a batch on
+    the next window tick (≤1000 ms) straight into `queueSchedulerEvent`,
+    knowing nothing of a barrier sweep that ran while it was held.
+    Scenario, and the fresh-space backlog drain IS the OW45 window:
+    >10 renderer-trusted served entries for one piece drain in one pass;
+    1–10 queue, 11+ are shaper-held with their `#drainInFlight` guards
+    set (so re-drains skip them). Head 1's park fails → the in-queue
+    sweep defers 2–10 and the mid-pass break stops further queueing, but
+    11+ are in NEITHER place. The window tick releases 11 into the
+    now-empty queue; the load heals (this failure heals on next mount,
+    seconds); the rescan re-drains 1–10 BEHIND 11 → 11's consequence
+    lands ahead of 1–10, the §2 inversion the barrier exists to prevent.
+    (If the load still fails when 11 heads, 11 self-parks and order
+    self-heals; the overtake needs the heal inside the
+    release-to-rescan window — a real race for a transient failure.)
+    Named follow-up shape: exempt DRAIN RE-DISPATCHES from shaping —
+    they are re-deliveries of already-shaped input, so re-shaping
+    double-charges the timing budget anyway — or have the shaper's
+    release re-check barrier state. Sibling PRE-EXISTING hazard minted
+    separately as **OW63** below.
+    STILL OPEN, untouched by that fix: shard 9
+    (`cfc-staged-publish`) stays UNHARVESTED — symptom-compatible,
+    no store evidence, classification open — and the #6248 lane
+    disposition remains the owner's call, now with the fix-before-flip
+    option actually available.
+    **FIFTH FACE — THE MISSING SESSION REMOUNT. Store-proven
+    2026-08-26 (CI run 33021643751, the same board's shards 2 and 6,
+    both captures swept whole; forensics report
+    `session-remount-report.md`). FIXED the same day, its own seat.**
+    Not a new code region: a newly-falsified PREMISE, and the one
+    #6365's deferral arm rests on. Post-#6365 the disposition changed
+    exactly as designed — watermark held AT the click's entry (seq
+    17, not 18), `consequence_of` naming the eventId **0**,
+    `events.dropped` **0**, the entry left pending and
+    UNCONSEQUENCED — and the event still never ran: **350 deferrals
+    over 5m47s in shard 2 (329 in shard 6), `loadParkDeferrals` 349
+    / 328, ZERO successful loads**, every one
+    `ConnectionError: memory session revoked: unauthorized` on the
+    same three replicas, at the 250 ms backstop cadence decaying to
+    ~1 s. `processed − loadParkDeferrals == appended` exactly in both
+    shards — every unit of serving-loop progress after the failure
+    was a re-deferral, which is precisely the criterion `stats.ts`
+    sets for that counter. Discriminators, both stores swept:
+    `sidecarError` 0 (not #6312/#6320), `RetryImmediately`/`inSpace`
+    0 (never reached #6378), "no handler registered" 0 (not the
+    previous board's T3 face), `scheduler_basis` rows 197/197 and
+    228/228 in the shared space with 0 into home (not D3), the
+    profile program materialized fine (not OW45's write path). The
+    refused doc is PRESENT and durable: "sync completed without data"
+    was an AUTHORIZATION outcome, not an absence.
+    **The mechanism.** `SpaceReplica.sessionHandle()` (storage/v2.ts)
+    memoized the mount and dropped it only in `close()`, and
+    `terminateSession` (memory/v2/client.ts) is terminal for a
+    session — so every re-drain's load reused the very session the
+    server had revoked. `storage/rejection.ts`'s SessionError note
+    had already named the gap in prose ("the convergence argument is
+    sound, only the remount is missing"); `scheduler/facade.ts`'s
+    load-park docstring asserted the opposite ("healing by design on
+    the next mount"). The capture settled it in rejection.ts's
+    favour, and BOTH docstrings plus this entry's own clause above
+    are reconciled in the fix's PR.
+    **The fix — the space-root ensure's own re-arm, one layer down.**
+    Stage 1 solved the identical boot order for the ensure by
+    latching at the fail-closed refusal and consuming the latch when
+    an admitted commit touches `of:<space>`
+    (`#rootEnsureAwaitingOwner`). The session analog: `SpaceReplica`
+    latches an ACL-doc admission (`noteAclChanged`) and consumes it at
+    `sessionHandle()` (`consumeOwedSessionRemount`) — the one place
+    every read and commit reaches a session — dropping a mount that
+    `SessionRevokedError` or `AuthorizationError` terminated so the
+    next load re-opens. `ExecutorHost.#onCommitAdmitted` fans an
+    `of:<space>` write out to EVERY registered space server, because
+    the starved session is a CROSS-SPACE replica: the ACL commit and
+    the dead session are in different spaces.
+    **Why a LATCH and not an eager teardown, measured not assumed.**
+    The memory server emits the admitted-commit notice BEFORE it runs
+    `#revokeDeauthorizedSessions` (both inside one `transact`). At
+    notification time the session that same commit is about to revoke
+    is still OPEN, so an eager teardown inspects a live session,
+    declines, and the revocation lands a moment later — starving
+    exactly as before. Mutation-checked: making the trigger eager
+    reds the host-glue pin and only that pin.
+    **Soundness — the remount never decides.** It re-runs
+    `session.open`, which re-runs the server's admission against the
+    ACL as it now stands. One CORRECTION to the seat's own brief,
+    recorded because it changes what "fail closed" means here: under
+    OW31 a SERVING mount's READ decisions resolve as whoever OWNS the
+    space, so an ACL change that removes the USER does not
+    de-authorize the serving plane — it re-binds the NEW owner, which
+    is the outcome `#revokeDeauthorizedSessions`'s own comment asks
+    for ("the serving plane's next mount re-binds the new owner
+    instead of reading indefinitely under a stale identity"). The
+    denial the remount must respect is constructible on a principal
+    the ACL does not grant, and that is the general statement anyway.
+    Both are pinned.
+    **Pins, red-first, `executor-session-remount.test.ts`** (a real
+    memory server in ACL-enforce mode with the OW31 delegating class,
+    real signed loopback sessions): the reproduction (pre-genesis
+    session, genesis revokes it, 8 reads / 0 successes / all
+    "revoked", then the ACL notice heals it and the durable doc reads
+    through); fail-closed (one trigger, two outcomes, only the ACL
+    chooses); the ownership re-bind; NO CHURN (a live session survives
+    an ACL commit with zero new `session.open`s); and host glue (a real
+    ExecutorHost whose own admission observer carries the genesis —
+    nothing hand-fed); and the SILENT-STALE-READ pin (the Cubic-P1
+    class: post-remount reads for tracker-covered selectors returned
+    SUCCESS carrying the pre-revocation value — reproduced at the
+    pre-fix commit, fixed by dropping the dead mount's selectors from
+    the watch tracker at both consume sites, pinned both ways).
+    Mutations, all red, each reddening its own pin alone: no-op the
+    consume → the reproduction, fail-closed, ownership re-bind,
+    host-glue, and stale-read pins (no-churn stays green);
+    remove the host fan-out → host glue only; remove the ACL-verdict
+    guard → no-churn only; eager instead of latched → host glue only
+    (the measured ordering-independence proof); remove the tracker
+    drop → stale-read only; remove `pull()`'s consume → stale-read
+    only.
+    **Residual, FLAGGED not filled:** watches installed on the DEAD
+    session are not replayed on remount. The revocation had already
+    stopped their pushes (the server drops the session from its
+    registry and `terminateSession` clears `#watchSpecs`), and the
+    remount now DROPS the dead mount's selectors from the watch
+    tracker (the Cubic-P1 fix — the earlier claim that "each address
+    re-installs on its next pull" was FALSE for tracker-covered
+    selectors and is retracted), so post-remount reads re-install
+    coverage fresh instead of silently serving pre-revocation state —
+    but a general "replay the watch set on remount" still belongs
+    with the reconnect path's replay. **Also unchanged:** CLIENT runtimes get no host
+    notification, so a browser session revoked this way still stays
+    revoked; out of this seat's scope.
+    **The persistent-failure posture is UNCHANGED and still OWED to
+    OW54.** A load whose ACL never changes — or whose re-open is
+    denied — defers indefinitely, exactly as recorded above. The
+    remount removes the case where the heal existed in the design and
+    not in the code; it does not remove the need for a give-up arm.
+    The F1 barrier scenario above ("the load heals ... seconds") now
+    has an actual mechanism behind its premise for the fresh-space
+    boot order; it was written against a heal that did not exist.
+    **PHASE 3 — BOTH ENTRIES CAMPAIGNED UNDER THE RULED
+    LOCAL-PLUS-CI-PROBE BAR, 2026-08-27. NEITHER LIFTED, and the two now
+    fail for OPPOSITE reasons.** Base: main `1fc841b6e`, one ON-built
+    binary (sha256
+    `a93047a461c0c4d8cb5c63106179eaf9613b2b431269877255100e7fbaf40e79`,
+    re-verified into every run's ledger; a mismatch aborts the run), fresh
+    store and own 97xx port and ON posture probe per run, ensure defaulting
+    ON, the toolshed self-sourced on the run port, LLM masked, PID-only
+    teardown with a port-free check, `gtimeout 600` never approached, quiet
+    and loaded interleaved. Probe head `95f313835` (both entries and the
+    default-app in-file guard removed in one commit), CI run
+    [33138358110](https://github.com/commontoolsinc/labs/actions/runs/33138358110);
+    eight of the ten ON pattern shards passed, shards 5 and 7 red — the two
+    shards that carry the two probed files.
+
+    **default-app's reload STEP: LOCAL 10/10, CI PROBE OF THE STEP GREEN,
+    LANE RED ON A CO-RESIDENT FILE — the entry's own charge did not
+    reproduce in either arm.** Ten counted runs (5 quiet / 5 loaded,
+    interleaved, plus an uncounted green smoke) at 13–14 s wall each,
+    against 313–315 s for every red the earlier 2026-08-27 campaign
+    recorded; the step itself finished in 7–8 s. Campaign-wide zeroes:
+    `pattern-load-error` (so a03/a07's keyless discriminator is absent —
+    #6451), `pattern-swap-setup-error` and recursive-schema (the
+    split-source artifact stays gone), `deferred-start-catchup(-failed)`,
+    terminal `Error committing deferred`, `session-remount`, load-park
+    deferrals and drops, `piece-start-commit-failed`, `sidecar-run-raced`,
+    `schema-doc-quarantine`, `structure-load-stuck`,
+    `contribution-dropped`, and `events.handlerNotRunDeferrals` — #6459's
+    new deferral arm never had to fire, i.e. the a04 dispatch-side skip did
+    not occur rather than being recovered from. Serving stats:
+    `events.appended` 14 = `events.processed` 14 in all ten (no silent
+    requeue), `dropped` 0, `needsAttention.total` 0, `derivedCommits`
+    54–58, `settleAdvances` 12–15. Then the probe (ON shard 5, job
+    98743591519) ran the exact step with no listed skip and it **PASSED —
+    `ok (18s)`** — the whole `default-app flow test` green, and the shard's
+    published toolshed log clean across the file's window (4
+    `event-view-lag`, nothing else). Shard 5's red is
+    `cfc-group-chat-demo.test.ts:133`: `clickCfButton("#host-send-button")`
+    retargeting to the cf-button host (`cf-button#host-send-button < slot <
+    div < cf-hstack`) — rootcause §2b's disabled-inner-button shape, whose
+    S-G test-aim seat is named-but-unbuilt. That file is NOT skip-listed,
+    is untouched by the probe diff, and **reproduces 4/6 RED locally at the
+    same head running ALONE on a fresh store with the same signature
+    (line 133, same retarget chain)**, so it is neither this entry's charge
+    nor a probe artifact — see the OW31-adjacent observation below.
+    **DISPOSITION AT THE TIME: NO LIFT, on the literal reading of the ruled
+    bar** — the entry and its bound guard stayed, reworded to say exactly
+    this, with an OPEN QUESTION referred to the coordinator/owner: does "the
+    probed lane GREEN" mean the probed SURFACE green, or every test in the
+    shard green? The bar was ruled hours before its first use and the case
+    that distinguishes the two readings arrived immediately. **THAT QUESTION
+    IS NOW RULED (2026-08-28): the SURFACE reading** (the bar's SURFACE
+    READING paragraph above), **and this entry LIFTED on the evidence above
+    — see the LIFT block at the end of this row.**
+
+    **lunch-poll-vote's FILE entry: LOCAL 8/8, CI PROBE RED AT THE PROBED
+    SURFACE — and the mechanism is now OBSERVED SERVER-SIDE for the first
+    time.** Eight counted runs (4 quiet / 4 loaded, interleaved), 16–18 s
+    each, against 313–322 s for every red this entry has ever recorded; the
+    owner-directed approximately-eight-run pin MET locally, with
+    `pattern-load-error`, `deferred-start-catchup(-failed)`,
+    `session-remount`, load-park, `handler-not-run`/`arrival-barrier` and
+    `events.handlerNotRunDeferrals` all zero, `events.appended` 9 in all
+    eight, `dropped` 0, `needsAttention.total` 0, `derivedCommits` 74–87.
+    (Present in every run INCLUDING the greens, so recorded as expected
+    recovery rather than smell: one `sidecar-run-raced` — #6312's
+    loser-yields arm — one `piece-start-commit-failed`, two
+    `event-view-lag`, one stale-read line; b06 also logged two
+    `contribution-dropped` and greened.) The probe (ON shard 7, job
+    98743591583) went RED at the SAME stage and signature as the
+    2026-08-26 probe: `lunch-poll-vote.test.ts:271`, the HOST's
+    `clickCfButton("#lp-join-button")`, `Timed out waiting for
+    #lp-join-button to render. Last probe: {"#lp-join-button": []}`,
+    `waitForCondition` at its unchanged 300000 ms bound, 5m5s, the body
+    reading "0 joined" and **"Unknown profile #MjhprA"**. The OFF lane's
+    shard 7 passed on the same run, so the red is ON-specific.
+    **WHAT IS NEW — the 2026-08-26 disposition's stated blind spot is
+    CLOSED: CI now publishes the toolshed log as a job artifact**
+    (`toolshed-log-pattern-integration-server-execution-on-7`), so the
+    server-side members can be examined instead of merely not excluded. In
+    the file's window that log carries **80 `structure-load-stuck` WARNs**
+    on the profile space `did:key:z6MktpA5…`, the first naming demanded
+    root `of:fid1:32Pic3-REdd7zmJ8gPchJyFD0LECk0u-QrFUXMjhprA` as
+    `pattern-unloadable` after 8 consecutive deferred cycles — the
+    detector's own words, "a forever-park … the home-profile
+    program-write-loss shape" — and **that root's suffix IS the `#MjhprA`
+    the placeholder rendered**. Upstream sit **20
+    `seal-space-commit-failed` / `foreign-write-refused` pairs**:
+    `applyInitialName` and a `__cfLift_1` action running in the HOME wave
+    `did:key:z6Mkv7Tjz…` refused a write to the profile space for want of
+    the §2b delegated carriage. So the chain is this row's ORIGINAL
+    mechanism, end to end: profile program/name write refused → structure
+    load parks forever → the name renders the `#id` placeholder → the join
+    card never renders `#lp-join-button` → line 271 times out.
+    **CRUCIAL DISCRIMINATOR, recorded so nobody chases the refusal: the
+    refusal is NOT it.** All eight local GREENS carry 80
+    `foreign-write-refused` and 40 `seal-space-commit-failed` each — MORE
+    than the CI red — with `structureLoadStuck` 0, `structureLoadRearmed`
+    7–10 and `structureLoadTerminal` 190–199. The foreign-write refusal is
+    a standing, tolerated condition in both arms; **the PARK is the
+    discriminator.** Locally the profile space's structure load always
+    resolves; in CI it never does, and why it never does is the open
+    question this entry now names. Excluded from the CI window, all zero:
+    `pattern-load-error`, `pattern-swap-setup-error`,
+    `deferred-start-catchup`, `session-remount`,
+    `piece-start-commit-failed`, `sidecar-run-raced`, `handler-not-run`,
+    `arrival-barrier`, `memory session revoked`, `sync-load-failure`,
+    `Event deferred` and `Event dropped` — so NOT the b04 client-start
+    class, NOT the a04 mark/effects family, NOT the #6312 sidecar clobber,
+    NOT the fifth-face load-park member, and NOT #6378's name-resolution
+    drop. Each of those was a prior charge for this entry and each is now
+    excluded by OBSERVATION rather than by absence of it.
+    **DISPOSITION: NO LIFT.** Local 8/8 against CI 1/1 red, for the second
+    campaign running — this file's lift needs the park explained, not
+    another local count.
+
+    **THE PARK EXPLAINED — ROOT-CAUSED 2026-08-28 from the probe's own
+    artifact, and FIXED red-first: the child closure replication
+    one-shot-died against the IN-FLIGHT SIBLING replication supplying its
+    origin space.** The discriminating event sits 33 s before the first
+    stuck warn and appears in NO local green (0/8 in the b-runs, 1/1 in
+    the CI red): `closure-replication-failed entry=Jlzs0wulc086…
+    from=did:key:z6Mkv7Tjz… to=did:key:z6MktpA5… Error: source closure
+    unavailable in origin space` at 03:18:09.048 — the shard's ONLY
+    pattern-manager error. That is the CT-1687 write path (S-A's
+    carriage arm) — the ONE writer that supplies a fresh child space's
+    program closure — failing at its READ side and, by its own contract,
+    never retrying ("retried on the next child creation"; a user creates
+    their profile once). With the supplier dead, the profile space's
+    deferral loop re-reads an empty store every cycle: patternIdentity
+    meta present (the carriaged materialization landed), the closure
+    absent, verdict `pattern-unloadable`, forever — the 80 stuck warns
+    are 40 distinct roots x streaks 8+16, the entire piece graph of that
+    one space. The name derivation never runs, the placeholder renders,
+    line 271 times out. WHY the origin was empty — the deduction chain,
+    each link forced: the serving session is ONE (every closure write in
+    every b-run store is the service session's), so the reader and any
+    same-runtime writer share a replica; the LAYERED VIEW was verified en
+    route (a deterministic executor-wave-harness experiment: a fresh-tx
+    read DOES see a held-open wave's staged writes — executor-wave.ts's
+    documented design), so a compile TARGETING the parent space would
+    have been readable the moment its pattern existed (E4 awaits the
+    write-back); the handler demonstrably RAN ProfileHome (the refusal
+    storm at 03:18:09.353 is its actions), so the pattern object existed
+    — therefore it came from the CONTENT CACHE with `cached.space` a
+    DIFFERENT space, and the content-hit arm (pattern-manager.ts ~2435)
+    had fired `replicate(cached.space -> parentSpace)` fire-and-forget:
+    the SIBLING, mid-flight at 03:18:09, its writes not yet issued —
+    the one supplier shape that leaves the origin empty to every read.
+    The b-run stores CONFIRM the machinery by commit class and timing:
+    the first serving-side compile's E4 write-back lands in an
+    identity-home space (seq 2 DERIVED, b01 03:05:48), the sibling
+    replications into the other served spaces land DERIVED via each
+    target's wave (lunch space seq 16, 03:05:51), and the child
+    replications into the two profile spaces land AUTHORED with §2b
+    carriage (seq 2, 03:05:54/56 — protocol §2's server-produced
+    authored row). Local greens are the sibling winning by ~3 s; CI's
+    crawling boot (first home-env compile 12 s after the parent space
+    activated, the click ~1 s after the content cache warmed) flips the
+    edge — the park was CI-timing-armed exactly as the method finding
+    predicted, and the foreign-write refusals stay what this entry
+    already said they are: standing, tolerated, present in every arm,
+    NOT the discriminator. Causality was validated end to end by a
+    working-tree fault injection (never committed): failing exactly the
+    delegated-carriage replication once reproduced the FULL CI signature
+    locally — 1 replication failure, 80 stuck warns over exactly 40
+    `pattern-unloadable` roots, the join flow dead, the 300 s net
+    (evidence: lunch-park-evidence/runs/lunch/inj01 on the measuring
+    box). THE FIX, at the write path and never the tolerance
+    (pattern-manager.ts): every replication registers under its TARGET
+    space with a monotonic ticket (`replicationsIntoSpace`), and a
+    replication awaits the STRICTLY OLDER replications registered INTO
+    its origin space before reading it — event-driven (the siblings' own
+    completion, no timers), acyclic by registration order (no from/to
+    mutual wait), with genuine absence still failing loud and settling
+    (pinned — no hang into `flushCompileCacheWrites` or the S-B
+    durability barrier). Red-first pin
+    `packages/runner/test/pattern-replication-sibling-race.test.ts`: the
+    race is deterministic-by-construction (the child is issued
+    synchronously after the sibling and its origin read is strictly less
+    work than the sibling's read-plus-write); watched red at the
+    pre-fix head with the exact production error line and the child
+    space empty; 6/6 green with the fix; mutation-killed (neutralizing
+    the await hunk alone reds it — the sibling step issues BOTH
+    replications from a second manager whose fallback-origin map is
+    empty, so the later fallback fix cannot mask this pin; moving them
+    back onto the compiling manager silently unpins the await).
+    Recorded residual, flagged not filled: a CROSS-REPLICA supplier (a
+    client/harness write-back
+    arriving over the wire) is outside the await's reach — no observed
+    red has that shape (the deduction above excludes it for this one),
+    and building for it would be filling an unobserved gap. Also
+    corrected en route: this row's original "wave staging vs durable
+    read" framing for the 2026-08-27 park is WRONG — the layered-view
+    experiment kills it — and the 2026-08-26 blind-spot note's
+    hypothesis space ("refused vs dropped vs never issued") resolves as
+    NEVER ISSUED, by a supplier that died before writing.
+
+    **LIFT ATTEMPT — lunch-poll-vote's FILE entry removed 2026-08-28 on
+    the evidence below; WITHDRAWN BY THE PROBES (the PROBE-2/3/4 blocks
+    that follow) and the entry RESTORED with the accumulated map.** The
+    ruled local-plus-CI-probe bar, both halves as they stood at the
+    attempt:
+    - **Requirement (1), the local campaign — MET TWICE, 8/8
+      quiet-and-loaded at the fix head AND 8/8 again at the rebased lift
+      head.** Method both times: ON binary sha256 re-verified into every
+      run's ledger (a mismatch aborts the run), fresh store + own 97xx
+      port + ON posture probe per run, ensure defaulting ON, toolshed
+      self-sourced on the run port, LLM masked, PID-only teardown with a
+      port-free check, 4 quiet / 4 loaded interleaved. Campaign F at the
+      pre-rebase fix commit (binary `8c693ea873…`, loads 4.3–10.4) and
+      campaign G at the rebased head — fix `044993c98` on main
+      `d9dc01d75`, which folds in #6477's UI-write retry on the very
+      fill path this test drives (binary `0ef22fced1…`, loads 3.3–7.5):
+      17–18 s walls in all sixteen runs against 313–322 s for every red
+      this entry ever recorded; `structureLoadStuck` 0,
+      `closure-replication-failed` 0 (the fixed mechanism's own line),
+      `pattern-load-error` 0, `deferred-start-catchup(-failed)` 0,
+      `session-remount` 0, `event-view-lag` 2/run, one designed
+      `sidecar-run-raced` and one recorded-non-discriminator
+      `piece-start-commit-failed` per run, and the tolerated refusal
+      storm present as ever (40 `foreign-write-refused` + 40
+      `seal-space-commit-failed` per run) — the park gone with the storm
+      untouched, which is exactly the discriminator this entry named.
+      The full runner suite is 1312/1312 at the rebased head. Campaign H
+      re-ran the same 8-run posture at the v4 head (sibling-await +
+      fallback-origin; binary `72be0363…`): 8/8 again, 17–19 s walls,
+      `structureLoadStuck` 0, `closure-replication-failed` 0, and
+      `closure-replication-fallback-origin` 0 — locally the heuristic
+      origin is always supplied (the parent compiles first), so the
+      fallback stays dormant exactly as designed; the runner suite is
+      1312/1312 at v4 too. Evidence on the measuring box:
+      `/Users/berni/labs-worktrees/lunch-park-evidence/runs/lunch/`
+      (`f01…f08`, `g01…g08`, `h11…h18` — per-run ledger, test+toolshed
+      logs, stats, own store); report
+      `/Users/berni/labs-worktrees/lunch-park-report.md`.
+    - **Requirement (2), the direct-CI unskip probe — THIS lift PR's own
+      board**: the registry carries no lunch entry, so the ON pattern
+      lanes RUN the file; per the ruled SURFACE reading the probed
+      surface's verdict decides, and a red AT the surface withdraws the
+      lift exactly as the bar states (captured and classified, never
+      rerun-looped).
+    **PROBE 2 (this PR's first board at head `83f31e47f`, run
+    [33160430927](https://github.com/commontoolsinc/labs/actions/runs/33160430927),
+    ON shard 7, job 98813758092): RED AT THE PROBED SURFACE — that lift
+    attempt WITHDREW, and the classification found the SECOND supplier
+    geometry.** The surface itself failed (`:271`, the HOST's join,
+    "Unknown profile #a_FyQU"; 11 co-residents passed — #6477's `:133`
+    fix held); the published toolshed artifact carries the SAME chain —
+    exactly one `closure-replication-failed from=parent(z6Mkv6nW…)
+    to=profile(z6MkpPK85…)` at 09:45:39.983, then 80
+    `structure-load-stuck` (40 roots, `pattern-unloadable`) from
+    09:45:44 — with the sibling-await IN PLACE and inert. The
+    instrumented local greens (SCRATCH build, runs instr01/wdel01/wdel02
+    on the measuring box) then decomposed the supplier model:
+    (i) `compileOrGetPattern` is NEVER CALLED in this flow — the
+    content-cache-hit sibling does not exist here; local greens have
+    `olderIntoOrigin=none-registered` and still pass. (ii) The parent
+    space's closure is supplied by the FIRST home-env/sidecar compile
+    that targets it (`persistCompileCacheTracked(parent)`, whose
+    per-module docs cover the profile-home entry) — locally always the
+    session's first compile (instr01's line 1). (iii) On both CI reds
+    the fetch/activation timeline shows NO compile ever targeting the
+    parent (the two home-env compiles land on the identity-home spaces,
+    09:45:30/34): `loadPatternByIdentity` then serves the pattern from
+    the manager's IN-MEMORY ARTIFACT INDEX — which persists NOTHING
+    per-space — so the parent space never receives the closure from any
+    flow, and the child's read was never going to find it: an ORDER
+    flip, not a data race. (iv) Wave-hold experiments (45 s holds on
+    closure-carrying waves) could not falsify read-visibility — every
+    local read trailed durability — so staged-vs-durable remains
+    UNDISCRIMINATED and is NOT load-bearing for the fix. THE SECOND FIX
+    (same PR, red-first): `replicateClosures` records every durable
+    persist target per entry (`persistedClosureSpaces`) and, on a dry
+    heuristic origin, retries its verified read against those recorded
+    spaces — content-addressed, so the copy is byte-identical and the
+    integrity-gated read stays fail-closed; genuine absence (no recorded
+    target) still fails loud and settles. Pinned in the same suite
+    (fallback test watched red at the sibling-await-only head with the
+    exact production error; recording no-op mutation-killed; the
+    no-record loud-failure control keeps the absence contract and — since
+    the PR's fix round — the loudness too: a logger spy pins the single
+    `closure-replication-failed` line, so a throw-to-silent-return
+    mutation reds it). Under
+    the CI geometry the identity-home persists ARE recorded, so the
+    child replication converges order-independently.
+    **PROBE 3 (the v4 board, run
+    [33164596936](https://github.com/commontoolsinc/labs/actions/runs/33164596936),
+    ON shard 7, job 98827162794): RED at the surface again — and the
+    artifact caught the fix's own defect: the fallback NEVER FIRED
+    (`closure-replication-fallback-origin` 0 beside the same one
+    failure + 80 stuck warns), because the recording KEYED BY THE
+    PERSIST CALL'S ENTRY while the replicated identity is a MODULE of
+    that closure** — the identity-home persists record the home-env
+    ROOT's identity, the failing replication's entry is the
+    profile-home MODULE the in-memory index served, and the lookup
+    found an empty set. The per-module docs were addressable all along
+    (the write functions persist one doc per module; the instrumented
+    green read them by module identity). Fixed: the recording covers
+    EVERY module identity of the persisted set
+    (`recordPersistedClosureSpaces`), and the pin suite gained the
+    exact geometry — an importer program whose LIB module's pattern is
+    served from the in-memory index and replicated from a dry origin —
+    watched red at the entry-keyed head (the lib-id replication's
+    production failure line) and green with module keying; the
+    original single-module tests were blind to the keying by
+    construction (entry == module there), which is recorded so the
+    next pin author widens the module graph first. The board at the
+    keying-fix head is this attempt's probe; a red at the surface
+    there restores the entry with the accumulated map — no further
+    iteration on this PR.
+    **PROBE 4 (the keying-fix board, run
+    [33165960083](https://github.com/commontoolsinc/labs/actions/runs/33165960083),
+    ON shard 7, job 98831529935): RED at the surface — the THIRD
+    geometry, and the declared hard stop is honored: THE ENTRY IS
+    RESTORED.** Same signature, fallback counter still 0 — and this
+    time correctly: the artifact's timeline shows both identity-home
+    compiles STILL MID-FLIGHT at the child replication's moment
+    (fetch waves 18 s and 5 s earlier; the profile-home fetches before
+    them belong to the harness process), so NO persist of the
+    profile-home module had completed anywhere server-side and the
+    module-keyed map was genuinely empty. The supplier class the fix
+    chain has not reached: the IN-FLIGHT COMPILE — a compile's E4
+    persist registers in `pendingCacheWriteBacks` only once the
+    compile reaches it, so a mid-compile supplier is invisible to
+    every await the replication holds. DESIGNED, NOT LANDED (the hard
+    stop): on a dry fallback map, await the manager's in-flight
+    compilations once (`inProgressCompilations` — their E4 persists
+    record into the map before the compile promise resolves),
+    re-consult the map, then throw; event-driven, no timers, no
+    deadlock (compiles never await replications; the content-hit
+    replication call is fire-and-forget). [LANDED by the geometry-3
+    close PR — the GEOMETRY-3 CLOSE block below carries the landed
+    record.] WHAT THE PR KEEPS: both
+    landed fixes are real, pinned defect classes (the sibling race and
+    the by-ORDER dry origin with module keying); the pin suite is
+    rebound to the RESTORED single-entry registry; the entry's reason
+    carries the full three-geometry map with the four probes'
+    coordinates so the next seat starts where this one stopped. The
+    lift bar is unchanged (the ruled local-plus-CI-probe bar); the
+    lift condition is now concretely the third geometry's close. What
+    the arc's four probes taught — one before the PR, three on it —
+    recorded as method: each board's artifact advanced the map exactly
+    one geometry — the probe is not a gate ceremony but the arc's only
+    instrument that SEES the CI boot order; and a declared hard stop
+    kept the loop honest.
+    **GEOMETRY-3 CLOSE (this PR, off #6484's merge `bd9b1c10b`;
+    review-sharpened, red-first, LANDED):** on a dry origin AND dry
+    fallback map, `replicateClosures` snapshots BOTH in-flight compile
+    registries — `inProgressCompilations` AND
+    `inProgressByIdentityLoads` (a supplier can be a by-identity load's
+    recovery compile; NEVER `compileCacheWrites`, the replication's own
+    set — awaiting it would await itself), `Promise.allSettled`s the
+    snapshot ONCE (a failing compile neither hangs nor rejects the
+    replication; post-snapshot registrations are the next consult's
+    business), then re-observes a FRESH `pendingCacheWriteBacks`
+    snapshot — a settled load's recovery persist is fire-and-forget but
+    REGISTERS there synchronously before the load resolves (verified in
+    code; replications are never in that set) — and re-runs the
+    primary-then-fallbacks read once. Still dry throws the same
+    production reason string: the one-shot contract is byte-identical
+    on the still-failing path. An EMPTY registry snapshot deliberately
+    takes NO retry: every `pendingCacheWriteBacks` member belongs to a
+    compile or load (registry-covered) or to a sibling replication
+    (ticket-covered at registration), so an empty-registry retry adds
+    no designed coverage [AMENDED per review-6502 F1: justification (a)
+    is overstated — zero-announce proves "no supplier REGISTERED at
+    snapshot time", a STRICT SUPERSET of "not started": a supplier that
+    completed entirely inside the read window (F1-ii) or a load that
+    resolved leaving its repair persist floating (F1-iii) also snapshots
+    empty while a bare re-consult would rescue. Both slivers share the
+    3b signature and are closed by the ruled 3b close (the RULING block
+    below): F1-ii by the registration-time map check, F1-iii by the
+    repair persist's own record waking the park] — and it measurably
+    re-rescues the sibling
+    race nondeterministically, masking the sibling-await pin: the
+    build's unconditional-retry draft turned the sibling-await
+    mutation kill GREEN (the F1 masking class, recreated); the
+    short-circuit restored the kill (step 1 red 3/3). Acyclic (compiles
+    and loads never await replications — the content-hit replication is
+    fire-and-forget; the wholesale barrier is scheduler/facade-only).
+    The dry-consult path announces itself:
+    `closure-replication-await-inflight entry=… from=… to=…
+    compilations=N byIdentityLoads=N` (warn) fires exactly when the
+    registries are non-empty, BEFORE the await. RED-FIRST + MUTATION
+    EVIDENCE: pin step 5 in
+    `packages/runner/test/pattern-replication-sibling-race.test.ts`
+    latch-gates the supplier compile mid-flight (a harness
+    `compileToRecordGraph` gate, released by the replication's own
+    announcement — no sleeps anywhere) on a SECOND runtime with an
+    empty map and a never-supplied origin, so neither the ticket await
+    nor a pre-populated map can rescue (the F1 lesson applied at
+    birth); watched RED at pre-fix `bd9b1c10b` with the production
+    `closure-replication-failed … source closure unavailable in origin
+    space` line and an empty target; with the fix, the suite green
+    [count made count-free per review-6502 F2: the suite was 6 steps at
+    this PR's final head (the F5-1 coverage step landed after this block
+    was written) and has since grown — counts live in the test file, not
+    here]. The once-await
+    mutation (both awaits removed, warn + re-read kept) reds step 5
+    ALONE, 5/5 stable; the four existing kills re-verified at the new
+    head (sibling-await neutralized → step 1 red alone 3/3; fallback
+    consult emptied → steps 2+3 red, plus step 5 whose rescue path
+    consults the map by design; throw→silent-return → step 4 red
+    alone). From the #6484 review's F5 list, landed alongside:
+    per-candidate try/continue on fallback reads (loud:
+    `closure-replication-fallback-read-failed`), the dead
+    ticket-undefined await-all branch removed by making the private
+    params required (proven dead: exactly two call sites, both thread
+    tickets), and the map's session-growth note at the field; the
+    dependency-recursion re-read nit is recorded, NOT changed
+    (rerouting the recursion's origin is not provably safe — a
+    dependency can live in the primary origin but not in the fallback
+    space, and the map only holds THIS manager's persists).
+    **GEOMETRY 3b — PRE-DECLARED RESIDUE (recorded, NOT built):** a
+    supplier compile that has not STARTED by consult time is invisible
+    to a once-await — the throw fires and the park recurs. Signature,
+    readable in any future red's artifact: the same
+    `closure-replication-failed` chain with NO
+    `closure-replication-await-inflight` line for that entry (nothing
+    in the registries at consult), fallback counter 0, and the closure
+    appearing shortly after. A probe red with that signature is 3b —
+    classify it as such, never conflate it with 3. The full close is
+    event-driven re-supply: on every `recordPersistedClosureSpaces`
+    for identity I, re-issue any failed replication registered as
+    wanting I (once per persist event — no timers, no polling,
+    bounded). That closes ALL supplier-timing geometries at once but
+    TOUCHES THE ONE-SHOT CONTRACT ("a failure is logged and retried on
+    the next child creation" would become "…and on the next persist
+    event") — an OWNER-LEVEL DESIGN FORK, recorded here for the
+    owner's ruling; deliberately not built by this seat. [RULED AND
+    BUILT 2026-08-28 — the RULING block below carries the ruling, the
+    landed mechanism, and the contract sentence now in effect.]
+    The pin suite (`tasks/server-execution-on-skips.test.ts`) was bound,
+    post-restore, to the SINGLE-entry registry: the patterns list held
+    exactly the restored FILE entry (reason pinned to the
+    three-geometry map and the probe coordinates), the report carried
+    its SKIP line and no SKIP-STEP line, the shard filter dropped exactly
+    that file, and the whole-registry loop asserted it was the only entry
+    anywhere — so any OTHER entry or a silent lift reddened a pin. [That
+    binding was superseded by the GEOMETRY-3 LIFT-ATTEMPT below, and
+    PROBE 5's red re-superseded it: the suite was rebound to the
+    single-entry registry again, with acyclic alias chains for each
+    rename.] [And superseded a THIRD time by the RULED-CLOSE LIFT
+    below: the registry is EMPTY, so the suite is now rebound to the
+    empty state — every suite's list asserted empty, the report
+    carrying no SKIP or SKIP-STEP line, the shard filter dropping
+    nothing, and the whole-registry loop asserting NO entry anywhere,
+    so any new entry or a silent re-restore reddens a pin (17/17, two
+    further alias bridges for the renames).] The
+    flip's bar remains a green ON lane AND every list empty (the
+    co-resident `:133` blocker in the
+    OBSERVATION below is PAID by #6477, its FIXED paragraph there).
+    **GEOMETRY-3 LIFT-ATTEMPT (2026-08-28, the geometry-3 close PR —
+    WITHDRAWN by PROBE 5, exactly per this block's own clause):** this
+    block rode the lift PR; requirement (2)'s board went RED at the
+    probed surface (the PROBE 5 block below carries the reading), so the
+    entry is restored and this record converts to a LIFT-ATTEMPT — the
+    #6484 precedent, repeated. The local half of the bar WAS met at the
+    fix head:
+    - **Requirement (1), local:** campaign I, 8 counted runs i01–i08
+      (4 quiet / 4 loaded interleaved, fresh store + own 97xx port +
+      posture probe per run, ensure defaulting ON, toolshed self-sourced
+      at the fix head, binary sha256 `a483b13f70b8…` re-verified into
+      every ledger, LLM masked): **8/8 GREEN**, walls 18–19 s,
+      `structureLoadStuck` 0, `closure-replication-failed` 0,
+      `closure-replication-await-inflight` 0 — the new retry is DORMANT
+      locally, exactly the model (the parent's own sidecar compile
+      persists first locally; the geometry is CI boot order). The
+      standing refusal storm unchanged (40 foreign-write-refused pairs
+      per run, the non-discriminator). Evidence on the measuring box:
+      `/Users/berni/labs-worktrees/geometry3-evidence/` (per-run
+      ledgers, test+toolshed logs, stats, stores; the red-first and
+      mutation-ladder logs under `pin/`).
+    - **Requirement (2), the direct-CI unskip probe — THIS PR's own
+      ON-lane board: RED AT THE PROBED SURFACE (probe 5, run
+      33198257149).** Per this block's own clause the lift is WITHDRAWN
+      and the entry restored carrying the map plus probe 5's 3b
+      classification — the PROBE 5 block below.
+    **PROBE 5 (run
+    [33198257149](https://github.com/commontoolsinc/labs/actions/runs/33198257149),
+    ON shard 7, job 98941298566, head `683477989`): RED at the surface —
+    and the artifact is GEOMETRY 3B ON ITS PRE-DECLARED SIGNATURE, the
+    first probe classified by a discriminator this arc built for it in
+    advance.** The surface: `lunch-poll-vote.test.ts:271`, the HOST's
+    `#lp-join-button` timeout at the 300000ms bound (step 5m6s; file
+    FAILED | 11 passed (40 steps) | 1 failed), body "0 joined" +
+    "Unknown profile #AykQuk"; every co-resident green. The server
+    chain, from the published toolshed artifact: ONE
+    `closure-replication-failed entry=Jlzs0wulc086…
+    from=z6Mkte7…(parent) to=z6Mkk3w…(profile) — source closure
+    unavailable in origin space` at 18:16:15.616, with **ZERO
+    `closure-replication-await-inflight` lines in the whole log** — that
+    warn prints whenever EITHER compile registry is non-empty at a dry
+    consult (the pattern-manager logger's default level is "info",
+    logger.ts:821 — warn is admitted; the same logger's ERROR printed in
+    this very log), so its absence is real: BOTH registries were EMPTY
+    at consult — the supplier compile had NOT STARTED. That is 3b's
+    defining property, pre-declared above before the probe ran.
+    Fallback counters 0 (`closure-replication-fallback-origin` and
+    `-fallback-read-failed` both absent — the module-keyed map was
+    correctly dry; no persist had completed anywhere), then the park:
+    80 `structure-load-stuck` warns 18:16:50–18:20:50 (40
+    `pattern-unloadable` roots, streaks — the OW46 signature), the
+    refusal storm present as in every green (the standing
+    non-discriminator). The only `profile-home.tsx` fetches BEFORE the
+    failure are the harness process's (Deno-UA, 18:15:18.8–18:16:10.8 —
+    probe 4 established that discrimination); the artifact carries no
+    serving-side compile/persist lines at all in the window, consistent
+    with a supplier that had not begun. [Per review-6502 F3, stated
+    plainly: the pre-declared signature's "closure appearing shortly
+    after" limb was NOT VERIFIABLE FROM THIS ARTIFACT — it carries no
+    persist-level lines at all, so that limb went unchecked; the
+    classification rests on the zero-announce limb plus the
+    no-serving-side-activity window, not on all three limbs.] NOT geometry 3 (probe 4's
+    discriminator — compile waves already in flight 5–18 s before the
+    failure — is absent here); NOT the close misbehaving (the
+    empty-snapshot short-circuit's contract IS the byte-identical
+    one-shot throw, which is what fired — the behavior pinned by the
+    suite); NOT a co-resident (11/11 green beside it). DISPOSITION: the
+    lift is withdrawn, the entry restored with the four-geometry map
+    (1: sibling-await; 2: module-keyed fallback origins; 3: the
+    once-await over both in-flight compile registries — all three
+    CLOSED, red-first, kept; 3b: CONFIRMED LIVE, the residue), the pin
+    suite rebound to the single-entry registry with acyclic alias
+    chains, the workflow lane comment and plan delta updated. **THE
+    OWNER FORK IS NOW THE LIVE DECISION:** the once-await family is
+    structurally exhausted — no await can see a supplier that has not
+    started — so closing 3b means either the event-driven re-supply
+    (on each `recordPersistedClosureSpaces` for identity I, re-issue
+    failed replications wanting I — touches the one-shot contract,
+    recorded above), or a supply-side redesign (e.g. the serving
+    runtime compiles/persists the home-env closure into the parent
+    space BEFORE serving profile creation, making the supplier
+    deterministic rather than boot-order-dependent). Both are
+    owner-court; this seat built neither, per the declared stop.
+    **RULING (2026-08-28) — the owner ruled on the 3b fork: "go with
+    (1) plus the (2-D) kick"** — option (1), event-driven re-supply,
+    composed with the (2-D) sidecar serve-time kick, accepting the
+    decision memo's recommendation (fork-3b-analysis) with its two
+    design details as LOAD-BEARING parts: the registry keys by the
+    WANTED (failing) identity, not the entry (a dependency-recursion
+    failure records under the dependency's identity, which is what its
+    supplier's persist will name), and failure registration checks the
+    fallback map ONCE, re-issuing immediately when a usable record
+    already exists (closing review-6502 F1's interleaving (b): a
+    supplier that completed inside the read window records before the
+    failure registers, and its record event may never recur).
+    Supply-side determinism as a PRINCIPLE — option (2-B),
+    activation-time awaited supply — is DEFERRED to its own arc: it
+    re-rules the lazy-activation model (space-server.ts's RULED
+    2026-08-02 block) and is not the 3b close.
+    **LANDED by the ruled-close PR:** (1) in pattern-manager.ts — a
+    supply-class replication failure (the classify-throw's reasons
+    only; store-level throws and persist failures keep today's behavior)
+    PARKS under the wanted identity in `parkedFailedReplications`
+    (FIFO-capped, loud eviction, replacement on re-park) and
+    `recordPersistedClosureSpaces` re-issues matching parks once per
+    persist event (fire-and-forget off the E4-awaited chain; records
+    into a park's own toSpace are skipped — the fallback read cannot use
+    them and the filter keeps a heal from waking itself; records into a
+    park's fromSpace DO wake it, deliberately: the observed lunch
+    supplier persists into the PARENT space, the child replication's
+    origin, and the primary re-read is what heals — pinned by the
+    late-carriage pin). A failed re-issue re-parks WITHOUT the
+    registration-time check (its read just consulted the map — the spin
+    guard) and waits for the next matching record. The one-shot
+    contract sentence is now IN EFFECT as pre-drafted above: "A failure
+    is logged and retried on the next child creation and on the next
+    persist event — never on the caller's commit path." Loudness
+    strictly increased: the failure line is byte-identical, plus
+    `closure-replication-parked` / `-reissued` (with trigger) /
+    `-healed` / `-park-evicted` (all warn). (2-D) in wish.ts — the
+    sidecar cache tracks its compile space and, serving a cached
+    pattern for a space it did not compile into (cached-run arms under
+    the serving posture, and chained demanders inside the memoized
+    fetch), fires the same replicate-into-the-demanding-space the
+    content-cache hit fires, once per (cache epoch, space): the
+    demanding space's supplier is REGISTERED at page-serve time, so the
+    child replication's strictly-older-ticket await covers the lunch
+    class by registration, with (1) as the structural backstop.
+    Red-first pins (all watched red at bare main d569f3722): the
+    record-triggered heal, the module-identity wake, the
+    registration-time check (mutation-isolated pairwise: wake deleted
+    reds the heal pins alone; check neutralized reds its pin alone),
+    the dependency-frame park (wanted=dependency, entry=importer — an
+    entry-keyed-park mutation reds it alone; its phase 1 also pins that
+    a PERSIST failure does not park), the no-storm control (genuine
+    absence: one loud failure, one park, nothing else ever), the
+    late-carriage admission (executor-cross-space: a parked §2b
+    delegation rides the heal into the provisioned space through the
+    accept gate's delegated admission — completeness, not freshness —
+    asserted on the landed commit row), and the serve/chained kick pins.
+    The existing kill matrix re-ran cell-for-cell with no mask; the one
+    mask the build itself would have created — the heal re-rescuing the
+    K1-mutated sibling race's END STATE (the F1 masking class,
+    recreated by design: healing is the product behavior) — was closed
+    by rebinding pin step 1's kill signal to ZERO failure lines
+    (first-try determinism is the ticket await's contract; recovery is
+    the heal's).
+    **WHAT STAYS OPEN under the ruled close, recorded honestly:** the
+    CROSS-REPLICA / never-records supplier (a wire-arrived closure this
+    manager never persists records nothing, so no wake fires) — reduced
+    to "heals at the server's first matching persist of the identity",
+    which the observed lunch class always eventually has; the
+    PRIOR-SESSION third-space closure (durable docs from an earlier
+    session are readable but unrecorded — same reduction); and the
+    SPIN-GUARD residue — every way a RE-ISSUE can re-park onto supply
+    that is already durable, because its re-park deliberately skips the
+    registration-time check (the spin guard: the failed attempt's read
+    just consulted that very map, so an immediate retry could only spin
+    on state it already read) and no later record of the identity ever
+    fires. Two constructors reach it, and the record must name both
+    (review-6528 F7 — the first was recorded alone and under-described
+    its own class): (i) the recursive-(b) sliver — a record landing
+    inside the RE-ISSUE's own read window, i.e. two independent
+    suppliers of one identity with the second completing inside that
+    window and none after; and (ii) a re-issue woken by a REAL,
+    STANDING record that then fails on a TRANSIENT store error — no
+    new record is needed at all, and the park sleeps on supply already
+    durable. Both are vanishingly narrow, loud at every step (a
+    failure, a re-issue, and a re-park line each), and strictly smaller
+    than the pre-ruling residue — in both, pre-ruling the same child
+    was one-shot dead, so a park that sleeps is a strict improvement,
+    never a regression. The alternative — re-checking the map on
+    re-park — is exactly the immediate-retry spin the guard exists to
+    prevent, so the code is right and the RECORD is what was owed.
+    One bound worth stating outright (review-6528 F4): record events
+    include re-issues' OWN re-records — a re-issue that succeeds past
+    the already-stored short-circuit re-verifies and re-RECORDS the
+    entry's module set — so two parks whose wanted identities live in
+    each other's entries can in principle wake each other in a cycle.
+    That cycle is one wake per persist event, paced by real storage
+    I/O, loud at every step, sustainable only while every wanted-read
+    keeps failing as every entry verify-read keeps succeeding
+    (doc-specific persistent read pathology in every candidate space),
+    and it heals outright on the first good read.
+    Where truly nothing ever records, the loud one-shot behavior stands
+    — the correct floor under the wedge-loudly ruling.
+    **RULED-CLOSE LIFT (2026-08-28, this PR — the THIRD lift; the
+    ON-skip registry is EMPTY across all four suites and B1's
+    list-EMPTY precondition is met again):** the entry's lift condition
+    — "the owner-ruled 3b close … plus the ruled bar" — is met at this
+    head: the ruling is taken (the RULING block above), both mechanisms
+    are landed red-first with the full mutation ladder clean, and the
+    ruled local-plus-CI-probe bar's two halves are (1) campaign R, 8
+    counted runs quiet-and-loaded interleaved at the lift head (fresh
+    store + own 97xx port + posture probe per run, ensure defaulting
+    ON, toolshed self-sourced and sha-verified per ledger, LLM masked)
+    — the per-run ledgers, logs, and stores on the measuring box under
+    `/Users/berni/labs-worktrees/ruled-close-evidence/`, with the
+    ruled-close accounting per run (every closure-replication-* line
+    class counted; failed allowed only when followed by its heal) — and
+    (2) THIS PR's own ON-lane board as the DIRECT-CI UNSKIP PROBE
+    (PROBE 6 of the arc): ON shard 7 RUNS lunch-poll-vote, and the
+    probed surface's verdict decides under the ruled SURFACE reading.
+    A red at that surface WITHDRAWS this lift exactly per the arc's
+    standing clause — the entry is restored carrying the accumulated
+    map plus the new red's classification against the residue table
+    (which interleaving? the healed-too-late class? something new?),
+    and this block converts to a LIFT-ATTEMPT — the #6484 and #6502
+    precedent. The flip PR's list-EMPTY precondition is met; its bar
+    remains a green ON lane, not merely the empty registry.
+    **[CONFIRMED by PROBE 6 — GREEN at the probed surface; the
+    withdrawal clause went UNEXERCISED. This is the arc's first probe
+    to come back green at the lunch host-join surface, on the sixth
+    board across three PRs. The PROBE 6 block below carries the
+    reading.]**
+    **PROBE 6 (run
+    [33222653635](https://github.com/commontoolsinc/labs/actions/runs/33222653635),
+    head `1a5f3e66e`, THIS PR's own board — read settle-confirmed by
+    the arc coordinator): GREEN AT THE PROBED SURFACE.** All ten
+    server-execution ON shards succeeded — including ON shard 7 with
+    `lunch-poll-vote` RUNNING (the lift is in the branch; the shard
+    selector passed the file through, the local verification of which
+    is recorded in the lift commit). The park's whole chain — the
+    supplier geometries this arc mapped five probes deep — did not
+    fire at the surface that produced probes 2, 3, 4, and 5's reds:
+    the host's `#lp-join-button` rendered and the file went green
+    with the ruled close (event-driven re-supply + the serve-time
+    kick) live in the binary. THE LIFT STANDS: the ON-skip registry
+    is EMPTY and B1's list-EMPTY precondition is MET. The board's
+    sole red, classified and NOT conflated with the probe: Test
+    (3/8), `packages/cli/test/view-diffedit.test.ts:3630` — "diffedit:
+    abbreviated, compact, and email formats amend hunk edits",
+    AssertionError "commit 26953" — a CLI view-layer surface this
+    PR's diff cannot reach (the diff touches packages/runner's
+    replication path, wish.ts's sidecar cache, tasks/, docs/, and a
+    workflow comment; zero packages/cli files), with main green at
+    the base `a3eae3e97`; a second observation (shard relaunch on the
+    same run id) was in flight when this block landed — its verdict
+    belongs to the merge gate's ordinary every-lane-read bar, not to
+    the probe, whose ruled reading is the SURFACE. **Read the run
+    HEADER with this decomposition, not on its own:** the run's overall
+    conclusion is `cancelled`, because the relaunched Test (3/8) was
+    still running when this very record's push created the next board
+    at 00:23:34 and GitHub's concurrency rule cancelled it (00:23:59),
+    taking the jobs gated behind it with it — the relaunch never
+    concluded, so the second observation fell to the `bdaabf8ee` board,
+    where Test (3/8) is GREEN. The decomposition is clean either way:
+    on attempt 1 the only non-success jobs were Test (3/8), the Status
+    aggregate, and the four jobs Status gates (skipped); on attempt 2
+    all ten `Pattern Integration Tests / server-execution ON (n/10)`
+    shards were SUCCESS again. So a future
+    forensics pass that reads only the header's `cancelled` is reading
+    a push-cancelled relaunch, not a probe verdict — the same honesty
+    class as #6502's F3. Per the arc's
+    method note: this record lands as a docs-only commit AFTER the
+    probe board settled — the probe's coordinates are immutable above;
+    the commit's own board is the ordinary merge gate, not a probe.
+
+    **OBSERVATION, not owed by this row and NOT one of the two entries —
+    `cfc-group-chat-demo.test.ts` is failing ON at current main, 4/6, and
+    is not skip-listed.** The file's ON skip was lifted with OW31's
+    trust-attribution build (that row's live lift condition, green 4/4 at
+    the time). At `1fc841b6e`, run alone on a fresh store under the full ON
+    posture, it reds 4 of 6 at `:133` —
+    `clickCfButton("#host-send-button")`, the aimed button's click
+    retargeting to its own cf-button host, which rootcause §2b identifies
+    as the inner native button being DISABLED (the served `sendDisabled`
+    never flipping). Its named seats S-E (the client binding-write wedge),
+    S-F (the barrier that did not see that write as pending) and S-G (the
+    missing `waitForDisabled(false)` before a served-enable round trip) are
+    all recorded-not-built. Main's own board at `1fc841b6e` was green on
+    that shard, so CI sees it less often than this box does; either way it
+    is a FLIP blocker in its own right (the flip's bar is a green ON lane,
+    not merely an empty skip list) and it is what held the default-app lift
+    under the shard reading. Recorded here because the phase-3 probe is
+    where it surfaced; whether it earns its own row is the coordinator's
+    call. **Under the 2026-08-28 surface ruling it no longer holds that
+    lift — it is a separate unlisted defect carrying its own
+    accountability, and it is still a flip blocker.**
+
+    **FIXED 2026-08-28 (PR #6477, branch
+    `claude/server-exec-v2-groupchat-stall`; red-first, store/probe-proven
+    at `23cf68e7d`).** The mechanism MIGRATED from §2b's recorded shape —
+    not the OW47 standing echo (no `speculative-basis-refused` anywhere; a
+    refill after a 300 s hang landed and enabled the button: one-shot
+    loss, not poison; the "recorded-not-built" S-E/S-F/S-G reading above
+    was stale — OW47 closed them 2026-08-21, S-G for Bob's click only).
+    Two parts, both instrumented-red-proven (4/4 taps): (1) the `:128`
+    fill's blind write is engine-rejected `stale confirmed read` — the
+    room-add wave's consequence stamps the argument doc's FIRST `/cfc`
+    labelMap and adds `/value/rooms`, structure at/above the blind write's
+    shape-read parent, against a pre-wave client basis — a RETRYABLE
+    ConflictError (the ruled vocabulary) that NO UI-write path consumed:
+    `applyCellWrite` fire-and-forgot `tx.commit()` (never pending, no log,
+    no retry; the S-G wait alone hung 300 s ×3). (2) each fill issues TWO
+    same-value writes (change-event + commit()); the second succeeds
+    VACUOUSLY (zero ops against the first's standing optimistic layer,
+    `{ok}` before any verdict), so a token-guarded retry of the first
+    declined toward a no-op owner and the revert erased the only copy
+    (8/8 red at that intermediate head). Fix: `Runtime.commitUiCellWrite`
+    — UI cell writes commit through `editWithRetry`, blind marks +
+    structural parent re-threaded per attempt, VALUE-FOLLOWING lanes
+    (every attempt writes the lane's newest requested value; refcounted
+    entry) closing LWW inversion AND the vacuous owner; a finally-lost
+    write is logged+counted (`runtime.ui-cell-write`/`lost`, the OW46-class
+    detectability); `applyCellWrite` rewired; the S-G wait added at `:133`
+    (mirrors `:203`). Pins red-first in
+    `runner/test/ui-cell-write-conflict-retry.test.ts` (the engine half
+    already pinned by `memory/test/cellset-structural-precondition.test.ts`).
+    Lift evidence: baseline 5/6 red running alone → post-fix 8/8 green →
+    6/6 green on the probe-stripped shipped binary, the draft durable in
+    every store (14/14); runner suite 1309/1310 (the one red re-ran green
+    alone — load flake). The file was never skip-listed: NO census change.
+    The surface-ruled default-app lift (the LIFT block below) never
+    waited on this fix; what it retires is the standing unlisted
+    flip-blocker itself. Review round on the PR: cubic P1/codex P1
+    (a retried CAS push could erase an intervening append) fixed —
+    non-blind writes take ONE attempt, no lane; the processor
+    set/push harness re-pinned at the new routing seam; final tally
+    18/18 green across three gate rounds. Live-class note for the
+    flip: the same race silently ate a real user's keystroke commit
+    wherever a wave landed structure mid-typing — the fix is
+    product-side, not test-side.
+
+    **LIFT — default-app's reload STEP entry is REMOVED, 2026-08-28, under
+    the ruled SURFACE reading of the local-plus-CI-probe bar.** The entry
+    (`integration/default-app.test.ts` :: "should persist and reload every
+    rapidly created notebook note") and its bound in-file
+    `serverExecutionOnStepSkip` guard are both gone from
+    `tasks/server-execution-on-skips.ts` and
+    `packages/patterns/integration/default-app.test.ts`. No new measurement
+    was taken for this lift; the bar was already met by evidence in hand,
+    and the only thing that changed is which reading of requirement (2)
+    governs. The chain, in full:
+    - **Requirement (1), the local campaign bar — MET, 10/10
+      quiet-and-loaded.** Phase 3's campaign at main `1fc841b6e` on one
+      ON-built binary (sha256 `a93047a461c0c4d8…`, re-verified into every
+      run's ledger), fresh store + own 97xx port + ON posture probe per run,
+      ensure defaulting ON, toolshed self-sourced on the run port, LLM
+      masked, PID-only teardown, `gtimeout 600` never approached, 5 quiet / 5
+      loaded interleaved: 13–14 s wall per run against 313–315 s for every
+      red the earlier 2026-08-27 campaign recorded, with EVERY fixed-mechanism
+      counter zero (`pattern-load-error`, `pattern-swap-setup-error` and
+      recursive-schema, `deferred-start-catchup(-failed)`, terminal `Error
+      committing deferred`, `session-remount`, load-park deferrals and drops,
+      `piece-start-commit-failed`, `sidecar-run-raced`,
+      `schema-doc-quarantine`, `structure-load-stuck`, `contribution-dropped`,
+      `events.handlerNotRunDeferrals`) and `events.appended` 14 =
+      `events.processed` 14 in all ten. Ledger: the PHASE 3 block above; the
+      campaign's own report is PR #6469's (merged `23cf68e7d`) record.
+    - **Requirement (2), the direct-CI unskip probe — MET at the probed
+      SURFACE.** Probe head `95f313835`, CI run
+      [33138358110](https://github.com/commontoolsinc/labs/actions/runs/33138358110),
+      ON shard 5, job 98743591519: the registry carried no default-app entry,
+      the job ran this exact step, and it **PASSED — `ok (18s)`** — the whole
+      `default-app flow test` file green, the shard's published toolshed log
+      clean across the file's window (4 `event-view-lag`, nothing else).
+    - **The shard's red was CO-RESIDENT, not this surface.**
+      `cfc-group-chat-demo.test.ts:133` — not skip-listed, untouched by the
+      probe diff, and 4/6 RED locally at the same head running ALONE with the
+      same signature (the OBSERVATION paragraph above). It is a separate
+      defect with its own accountability and its own flip-blocking weight.
+    - **The ruling.** The coordinator recommended that the probe proves the
+      unskipped SURFACE and that co-resident debt carries its own
+      accountability; the owner ruled **2026-08-28: "agreed with your
+      recommendations, proceed"**. Recorded verbatim, with its date, because
+      it is the whole difference between this entry's 2026-08-27
+      NO-LIFT disposition and its lift.
+    - **The lift's own final proof runs on the lift PR's board**: with the
+      entry gone, the ON pattern lanes execute this step on that PR. A red
+      there would be new information against the surface evidence and is
+      captured and reported rather than rerun-looped.
+    The pin suite (`tasks/server-execution-on-skips.test.ts`) is updated to
+    bind the lift rather than the entry: the patterns list holds exactly ONE
+    entry (lunch-poll-vote's FILE entry), the step's guard lookup resolves to
+    `undefined`, and the report carries no `SKIP-STEP` line — so a silent
+    re-skip reds, and a re-listing without a restored in-file guard fails the
+    registry's own step-entry binding check.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
@@ -6231,7 +8309,13 @@ supply; OW29/OW32/OW34 closed):
     `stale confirmed read … conflicted with` (the commit-outcome tap's
     signature, store-confirmed: basis = the draft mint's seq, head =
     the served seed's); a concurrent `/cfc` change still conflicts —
-    the precondition the ruling kept. Pinned red-first
+    the precondition the ruling kept. *(SUPERSEDED 2026-08-28: a
+    runtime-internal verifier read at `["cfc"]` no longer enters the
+    commit's conflict set, per CFC spec §18.6.2's read exclusion for
+    runtime-internal label-metadata reads and §8.9.4's point-in-time
+    derived-label semantics. The read stays journaled, so the
+    commit-set shape this entry pins — verifier reads sit AT
+    `["cfc"]`, never the doc root — is unchanged.)* Pinned red-first
     in `speculation-overlay.test.ts`, six ways: the CFC-relevant
     blind write over a standing echo EXPORTS (base red:
     `SpeculativeBasisError` naming the echo layer; exactly one engine
@@ -6725,75 +8809,74 @@ supply; OW29/OW32/OW34 closed):
     two-tabs-of-one-user step (one Identity in two harness
     sessions: user-granularity sharing — same cell, same hash —
     green OFF and under the true-ON gate, serving loop live).
-  - **OW54 — a served EVENT whose commit-prep crashes seals NO
-    consequence (adversarial review of PR #6157, F1 —
-    CONFIRMED-by-trace; minted 2026-08-21): CLOSED (2026-08-21, the
-    OW54 follow-on fix — the give-up arm's discriminated
-    `served.onFailure`).** The gap as confirmed: a deterministic CFC
-    pre-storage rejection of a served event's commit (the
-    "CFC enforcement rejected commit" class,
-    `rejectCommitBeforeStorage` — including a prep CRASH, which OW50's
-    totality records as a modeled rejection of this class) classified
-    give-up "non-retryable", and the give-up arm settled the commit
-    callback and reported the dropped write but sealed NO consequence:
-    the durable entry stayed unconsequenced and re-drained every wave
-    ("the wave IS the retry cadence"), and under #6158's settle wait
-    the unretired client intent paid the full bounded quiescence
-    timeout per settle round. Pre-OW50 the same crash THREW from
-    `prepareTxForCommit` and took the ERROR arm, which seals "the
-    error IS the consequence". The fix restores that contract on the
-    modeled path: the give-up arm, when the event is served AND the
-    error is the deterministic CFC pre-storage rejection (the SAME
-    message-prefix discriminator `reportDroppedCfcRejectedWrite` keys
-    on — `isCfcRejectedCommitError`, scheduler/events.ts), calls
-    `served.onFailure({kind: "error", message})` before settling, and
-    the error consequence seals through the drain's existing notice
-    machinery (events.md §5 now states the class). Lift evidence: the
-    red-first pin in `executor-events-down.test.ts` ("the give-up
-    arm's CFC discriminator (OW54)") — RED on the unmodified base
-    (the served copy took the give-up disposition twice for one
-    eventId across two waves, no consequence, and the wait for the
-    seal timed out), GREEN with the fix (exactly ONE completed run,
-    ONE consequence commit naming the event, ONE dropped-write
-    report, the entry's `error` carries the refusal, the watermark
-    advances, and a second poisoned fire seals its own consequence
-    behind it) — plus the scope-boundary pin ("a NON-CFC give-up on a
-    served event keeps the re-drain cadence": a handler `tx.abort()`
-    re-drains unconsequenced with no frontier advance, green on base
-    AND after, so the non-CFC cadence is byte-identical). #6158
-    interaction, recorded: with the consequence sealed, the client
-    intent retires through the normal arrived-terminal-consequence
-    path, so the unretired-intent settle-timeout class for this shape
-    disappears. RULING-5 interaction, resolved: the narrowing had
-    shrunk the exposed class to genuinely ambiguous envelopes; the
-    corner is now closed for the whole pre-storage-rejection message
-    class (genuine ambiguity, unreadable stored envelopes, prepared
-    digest drift). Sub-case honesty (the #6186 review's MINOR-2,
-    recorded as-built): the message class also covers OW50's modeled
-    prep-crash recordings ("commit-prep crashed: …"), so a prep crash
-    caused by TRANSIENT local state seals a terminal error consequence
-    where a re-drain might have succeeded — whether transient
-    prep-crashes deserve the re-drain instead is on the owner's
-    one-liner list; the behavior here is as-built, not ruled. Scope
-    honesty, deliberate and pinned: non-CFC
-    give-ups (transport, authorization, a handler abort, opt-out)
-    still seal nothing and re-drain on the wave cadence; and a
-    storage-time commit-rule refusal (`RowLabelCommitError`) of a
-    served event also seals no consequence today — verified (#6186
-    Cubic round): it never reaches the scheduler's terminal
-    disposition on a served copy (the handler tx sealed and resolved
-    at seal-accept), it refuses the WAVE's store commit instead, and
-    the refused wave reports the event's contributions as requeued
-    (`aborted: "rejected"`, executor/wave.ts) — guard released,
-    unconsequenced entry re-drained, the same durable fate through
-    the wave verdict channel. An adjacent residual of the same shape,
-    FLAGGED (not silently included) in
-    docs/history/plans/server-execution-v2/optimize/
-    ow54-build-report.md. The sealed consequence itself rides the
-    consequence-notice machinery, whose resolved-error guard wedge is
-    the OW58 row below (pre-existing, not introduced by the OW54 fix):
-    a notice whose commit RESOLVES `{error}` pre-destination strands
-    the entry guarded-unconsequenced until park.
+  - **OW54 — bounded terminal cover for proven delivery failure: IMPLEMENTED;
+    OQ-23 TRANSIENT FINALIZATION AND VALIDATION FOLLOW-UPS OPEN
+    (2026-08-27).** A failed served-event head records a
+    durable typed delivery checkpoint and accumulates only confirmed
+    failed-state time. Arrival-barrier followers, dirty-input
+    settlement, and the served `RetryImmediately` name-resolution path
+    spend no budget. Positive recovery persists a recovering state and
+    wakes one retry, including after storage-manager recreation because the
+    failed boundary is keyed by document instance; flapping never erases spent
+    time. An unchanged
+    active failure reaches the explicitly ratified 60-second policy
+    boundary, while a current-ACL or `RowLabelCommitError`
+    proven-no-commit verdict terminalizes immediately. Typed
+    commit-preparation crashes use the same cover; exact
+    `CfcCommitRefusalError` verdicts and explicit handler aborts remain
+    error consequences. Ambiguous storage-time or transport outcomes
+    remain outside explicit replay. No current transient pre-seal transport
+    producer supplies positive no-commit evidence, so that OQ-23 arm remains
+    pending on the ordinary re-drain cadence and this row does not claim the
+    every-entry-terminal invariant for it. It joins this checkpoint policy when
+    its producer can distinguish a pre-storage refusal from an ambiguous
+    outcome without inspecting diagnostic text.
+
+    Terminal cover is one entry-local `{status: "needs-attention",
+    consequenced: true}` notice plus the per-space unresolved-attention
+    discovery index, keyed by prototype-safe encodings of stream sidecar and
+    immutable `(eventId, seq)` identity and protected
+    from authored writes. The entry stays authoritative and uncompactable
+    until resolution. The arrival barrier opens only after the notice's
+    wave confirms the whole terminal contribution committed; failed
+    checkpoint or notice writes fail closed and are counted. Retry and Dismiss
+    resolve the original, remove the unresolved index item, and record a durable
+    resolution tombstone in one same-space CAS. Retry appends at most one fresh
+    ID with `retryOf`,
+    exact server-copied payload and admission provenance, and the
+    original user's current session; concurrent and replayed requests return the
+    recorded winner after source-entry compaction as well. The runtime-client and
+    persistent shell
+    surface carry the complete safe attention object for the active space,
+    and reconnect discovery reads the unresolved index back through the
+    authoritative entry. Health reads recompute active failed-state duration
+    from the checkpoint timestamps rather than freezing it at the last state
+    transition.
+
+    Pins cover cumulative flapping and clock skew, typed successful recovery,
+    failed-head versus barrier-follower routing, immediate permanent
+    evidence, checkpoint and notice commit accounting, terminal
+    ordering, CFC versus preparation-crash classification,
+    `RowLabelCommitError` operation-owner attribution through an actual
+    refused-wave outcome, current-ACL routing, ambiguous-outcome
+    exclusion, exact-provenance Retry, Retry/Dismiss and lost-response races,
+    lost-response replay after source compaction, equal event IDs within and
+    across streams, cross-user/sessionless rejection, unresolved retention,
+    userless Dismiss without replay authority, in-flight retry ownership at the
+    budget boundary, runtime-client forwarding,
+    mutation-aware shell refresh ownership, dark-theme and live-region
+    presentation, and the end-to-end transient and persistent load paths.
+    Direct pins for cold-view T3 observations interleaved with load-park
+    failures, absence of a retry cadence between the single budget-boundary
+    wake and valid storage wakes, foreign-space preflight recompute spending no
+    failure budget, and a served current-ACL denial produced by the live memory
+    authorization path remain validation follow-ups. The structural paths keep
+    cold-view counts separate, schedule only the budget-boundary timer, and
+    create checkpoints only from served head-failure outcomes; these statements
+    do not substitute for those integration pins.
+    OQ-19's foreign-derived
+    freshness mechanism remains its separate currentness design and is
+    not part of this closure.
   - **OW55 — the serving runtimes' pattern-fetch trust surface
     (adversarial review of PR #6157, F7; the OW48 investigation's
     security-adjacent residual; minted 2026-08-21).** Under ON,
@@ -6888,13 +8971,15 @@ supply; OW29/OW32/OW34 closed):
       server-only compilation and closes the forgery path. The spec's
       named end-state (server-only compilation + real attestation,
       `api/cfc.ts` :132-140) remains the complete fix — this OW56 row.
-    - **Finding 2 — version-update is a dual-write under ON, client AND
-      server, unarbitrated.** Both runtimes default
-      `systemPatternAutoUpdate: true` (shell `env.ts`; serving factory
-      `server-execution.ts` :160-172), so both run the pattern-updater
-      check/fetch/compile/persist and attempt the pointer swap; they
-      RACE — OCC-guarded so the loser fails clean (`pattern-updater.ts`
-      :326-338), content-addressed so double-writes converge. NOT a
+    - **Finding 2 — version-update was a dual-write under ON, client AND
+      server, unarbitrated.** CLOSED: following a piece's source origin
+      now runs only where a piece is OPENED, and a serving tenure opens
+      none, so the server no longer fetches, compiles, or swaps on a
+      piece's behalf. What follows is the finding as recorded. Both
+      runtimes defaulted the update posture on, so both ran the
+      check/fetch/compile/persist and attempted the pointer swap; they
+      RACED — OCC-guarded so the loser failed clean,
+      content-addressed so double-writes converged. NOT a
       correctness bug (freshness is safe either way); the cost is a
       duplicated network fetch + full TS compile per piece per runtime,
       and mismatched compiler fingerprints (shell-baked vs server
@@ -6951,26 +9036,26 @@ supply; OW29/OW32/OW34 closed):
     for tail-arriving work, and even a held gate only DELAYS (the
     deadline arm commits what is sealed so far). RULED 2026-08-24
     (owner, verbatim): "agreed with your recommendation: bounded
-    accept-and-retry for now". BUILT (the retry PR): the M1 SIBLING
-    step re-runs its FULL construction (fresh prefix, host tenure,
-    client) at most TWICE; ONLY the tagged structural signature
-    retries — the held-wave probe finding the flushed ping durable
-    (`A3StructuralWindow`) — and every other failure propagates on
-    the first attempt (verified: the title's sibling-fold mutation
-    reds attempt 1 with zero retries; the forced window retries
-    once, logs once, and propagates after attempt 2). Absorbed hits
-    log the greppable marker `a3-structural-window-retry (OW57)` —
-    the CI count is the evidence base for this row's DESTINATION: a
-    product-side seam on the committing tail (its own considered
-    change), which is what would let a held-wave construction bind
-    again. The plain (α3) ORPHAN step shares the construction class
-    and INHERITS this disposition if it ever fires the same
-    signature (durable flushed ping at its held-wave probe) — not
-    pre-wrapped: the ruling's scope is "for now", the observed
-    step. Until then a red of an (α3) step with the ping already
-    durable at the probe is this window, not a product regression,
-    and not the inserting PR's defect. No lift trigger
-    (test-harness item).
+    accept-and-retry for now". That bounded retry shipped as the
+    interim disposition: the M1 SIBLING step re-ran its full
+    construction at most twice, and only a tagged
+    `A3StructuralWindow` retried. CLOSED 2026-08-27: the existing
+    test-only `decorateWaveCommitSink` seam is late enough to make
+    the race deterministic without a product change. The test gates
+    the exact home-space batch whose `eventAppends` and
+    `consequenceOf` both name the ping event, after the emitter and
+    handler/sibling contributions have accumulated but immediately
+    before the real sink's head-checked store commit. While that
+    batch is paused, the client commits the rival sidecar append;
+    releasing it therefore deterministically exercises the
+    production sink's conflict reconciliation and orphan/sibling
+    fold. The settle-gate/queue monkeypatch, tagged structural
+    exception, fresh-attempt teardown, and bounded retry are removed:
+    every assertion now fails on its first construction. Validation:
+    20/20 focused fake-clock runs and the full 28-step events-down file
+    passed; the standard repository checks are recorded on the closing
+    PR. No lift trigger (test-harness item; no product-side seam or
+    behavior change).
   - **OW58 — the consequence-notice resolved-error guard wedge
     (adversarial review of PR #6186, MAJOR-1 — probe-confirmed;
     minted 2026-08-21; PRE-EXISTING since Phase 3, NOT introduced by
@@ -7182,10 +9267,13 @@ supply; OW29/OW32/OW34 closed):
     dependent: whether the computed doc's frame lands before its
     `cid:` sibling is delivery-window timing (CI hit it consistently;
     one local run at the same head did not). With the test lanes'
-    ensure opt-out (the RULED switch) the defect is LATENT again, not
-    fixed. SURFACED TO THE OWNER 2026-08-24 (the coordinator is
-    carrying it). RULED 2026-08-24 (owner, verbatim — the shipping
-    side is the fix):
+    ensure opt-out (the RULED switch) the defect was LATENT again, not
+    fixed — history: the opt-out retired with the ensure-on lane-flip
+    PR once the containment below and the client absorb fix (#6292,
+    this row's tail) had both landed, and the ON lanes run the
+    production default again. SURFACED TO THE OWNER 2026-08-24 (the
+    coordinator is carrying it). RULED 2026-08-24 (owner, verbatim —
+    the shipping side is the fix):
 
     > "seam 3: that's a bug then, and the most straightforward fix is
     > to make sure the subscription query results include cids when
@@ -7232,11 +9320,10 @@ supply; OW29/OW32/OW34 closed):
     cross-frame elision of already-delivered cid docs is
     correct-by-design, and the ACTUAL bug is CLIENT-side — a replica
     that failed to absorb/retain (or apply in order) an earlier cid
-    delivery. That investigation and fix run as a SEPARATE
-    owner-spawned session (its deliverable includes the
-    absorb-contract pin); its design is deliberately not scoped in
-    this row. (2) Containment — ACKed, KEPT, and what closes OW61's
-    crash class on its own: `#validateArrivedSchemaDocuments`
+    delivery. The client absorb handoff that closes that defect is
+    recorded at the end of this row. (2) Containment — ACKed, KEPT,
+    and what closes OW61's crash class on its own:
+    `#validateArrivedSchemaDocuments`
     returns a quarantine set instead of throwing — the offending doc
     drops from the frame with a loud per-doc diagnostic (fixpoint
     over in-frame schema docs so dependents fail closed together),
@@ -7279,14 +9366,74 @@ supply; OW29/OW32/OW34 closed):
     subscription (`piece/src/ops/pieces-controller.ts` —
     `runtime.getSpaceCell(space).sync()`, no root-aware demand) —
     constructed by the CLI (`cli/lib/piece.ts`), agents-host
-    (`agents-host/src/fabric-runtime.ts`), AND cf-harness's
+    (`connectors/agents/host/src/fabric-runtime.ts`), AND cf-harness's
     run_pattern session (`cf-harness/src/fabric-session.ts`), so
     yes: cf-harness is also that shape, and the containment covers
-    all three. Residual trigger: the investigation session's
-    absorb-contract fix landing (which retires the quarantine to a
-    true never-fires net), and any live `schema-doc-quarantine` log
-    — each occurrence is evidence for that investigation, not a
-    server-side hole.
+    all three. Residual trigger: any live `schema-doc-quarantine` log
+    — each occurrence is evidence that another client absorb/ordering
+    defect remains, not a server-side hole. The LOSS no longer outlives
+    a reconnect: a reconnecting client declares its holdings
+    (memory-v2/04-protocol.md §4.1.2), and a quarantined document is not
+    among them, so the resume's catch-up (or the re-establishing
+    watch.set) re-delivers it with its closure — the diagnostic still
+    names the defect to find; the replica no longer stays incomplete
+    until the session lapses.
+    SHIPPING SIDE, current state: the closure pass stages what a
+    delivered document's refs name, and the memory package now PINS both
+    halves of that guarantee —
+    `memory/test/v2-schema-doc-closure-delivery.test.ts`, seven
+    properties over the session frame, each with a mutation that reds it,
+    every watch using the SELECTS-NOTHING selector because under a
+    walking selector the traversal loads the schema documents anyway and
+    the assertions pass with the closure pass disabled. The gate that
+    keeps a session from being sent a closure document twice is the frame
+    builders' session-cache diff, NOT the closure pass's
+    `tracker.has(key)` staging gate: removing that gate changes no wire
+    frame. THE SHIPPING SIDE IS NOT THE DEFECT, measured rather than
+    argued: the per-session delivery probe was carried into a CI pattern
+    lane at the ensure-ON posture (the class does not reproduce on demand
+    locally), and one run produced both halves at once — 103
+    `schema-doc-quarantine` on the client over 13 distinct missing
+    `cid:` ids, including this row's own `computed:fid1:7Byc…` against
+    `cid:fid1:zgJY…`, against 136 ref-carrying frames on the server with
+    ZERO delivery violations and zero own-write elisions. Every `cid:` a
+    delivered document referenced had been put on the wire for that
+    session. That is the owner's 2026-08-24 ruling in measured form, and
+    it hands the residual to the CLIENT-side absorb/retention
+    investigation. The bound: the probe sees what the server puts in a
+    frame, not what the socket carried or the replica applied, so it
+    rules out the shipping side without separating a lost frame from an
+    unabsorbed one. The
+    measurements behind all of this, including the probe results that
+    falsify the earlier "the closure pass never completes an iteration"
+    localization and the correction to this row's own claim that
+    Cz/Nz/xz reference g2, are in
+    [`ow61-shipping-side-reexamination-2026-08-25.md`](../../history/plans/server-execution-v2/optimize/ow61-shipping-side-reexamination-2026-08-25.md).
+    CLIENT ABSORB SIDE, current state: FIXED. A `session/effect` could
+    arrive before the first watch response; `SpaceSession.handleEffect`
+    created a `WatchView` with the frame in its aggregate snapshot but
+    did not enqueue the raw sync, the first watch response returned only
+    its own sync to `SpaceReplica`, and the runner subscribed afterward.
+    The replica therefore never applied the earlier frame even though the
+    server session had delivered and cached it. `SpaceSession` now returns
+    those pre-response effects in wire order as
+    `WatchMutationResult.precedingSyncs`, and `SpaceReplica` applies that
+    prefix before the response sync. The buffer belongs to the session's
+    delivery epoch: a successful resume retains it, while a replaced
+    session clears it before re-establishing watches. No server
+    retransmission changes.
+    The runner pin sends a valid schema document before the first
+    `watch.add` response and a referrer in that response; it quarantines
+    before the fix, stores both afterward, and reds again when only the
+    prefix apply is removed. A per-session ensure-ON CI probe removed the
+    earlier realm-global ambiguity: before the fix all 7 pre-watch
+    `cid:` effects (raw-complete and carrying `ayhc5ov`) lacked a
+    same-session/same-sequence replica apply and the lane emitted 118
+    quarantines; after the fix all 6 pre-watch effects reached the
+    ordered-prefix apply, quarantine count was 0, and shard 1 passed.
+    The complete mechanism, layer boundary, mutation check, and run/job
+    ids are in
+    [`ow61-client-absorb-root-cause-2026-08-25.md`](../../history/plans/server-execution-v2/optimize/ow61-client-absorb-root-cause-2026-08-25.md).
 
   - **OW62 — adopt-not-start: the piece-open seam is where the ON
     execution model's "one starter per piece" has to land. POST-FLIP
@@ -7384,6 +9531,34 @@ supply; OW29/OW32/OW34 closed):
     never landed at all (`deferred-start-conflict-exhausted` never
     became a live log key; the recovery's keys are
     `deferred-start-catchup` / `deferred-start-catchup-failed`).**
+  - **OW63 — the wake shaper can invert same-space arrival order
+    across PIECES, with no load-park involved (PRE-EXISTING; minted
+    2026-08-26 from the independent review of PR #6365, finding F1's
+    sibling). NOT OWED BY THAT PR** — it neither introduced nor
+    worsened this; it is recorded because reading the barrier's
+    reachability exposed it. events.md §2 orders served entries
+    "across streams in one space, arrival order", but the wake shaper
+    buckets held events per PIECE-GROUP, and two pieces in one space
+    have SEPARATE buckets with independent burst budgets and window
+    ticks. So a later-arrived entry for piece Y whose bucket is cold
+    (synchronous, inside `BURST_CAPACITY`) can consequence ahead of an
+    earlier-arrived entry for piece X whose bucket is saturated and
+    therefore held to the next window tick (≤1000 ms). No failure of
+    any kind is required — only a burst on one piece and normal
+    traffic on another, which is ordinary multi-piece load. What is
+    NOT yet established: whether any §2-visible consequence ordering
+    actually depends on cross-piece order in practice (same-piece and
+    same-stream order are preserved by the shaper's own FIFO), so the
+    first move is to decide whether §2's "across streams in one space"
+    is meant to bind across pieces at all — a SPEC question for the
+    owner before it is a code question. If it does bind, the candidate
+    shapes are the same two F1 names for the load-park case: exempt
+    drain re-dispatches from shaping (re-deliveries of already-shaped
+    input — re-shaping double-charges the timing budget), or give the
+    shaper a space-level ordering constraint rather than a per-group
+    one. Unpinned and unmeasured; structural from the code only
+    (`wake-shaping.ts`'s per-group `pending` + window tick, and the
+    drain's per-entry `queueEvent`).
 
 ## 4. Standing rule
 

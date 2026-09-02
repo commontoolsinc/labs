@@ -19,7 +19,7 @@ import { newSharedServer } from "./memory-v2-test-utils.ts";
 // same-space link targets the local replica has never seen (see the hop loop
 // in link-resolution.ts and IStorageManager.shouldPullDoc), which
 // `Cell.pull()`'s convergence loop awaits — so schema-less pulls now resolve
-// to the true value. This suite mirrors the CLI `piece get` read path
+// to the true value. This suite mirrors the CLI `cf get` read path
 // (schema-less cell -> pull() -> resolveCellPath).
 const signer = await Identity.fromPassphrase("fresh-replica-read-asymmetry");
 const space = signer.did();

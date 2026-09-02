@@ -56,16 +56,20 @@ export interface RecordOutput {
   title?: string | Default<"">;
   subPieces?: SubPieceEntry[] | Default<[]>;
   trashedSubPieces?: TrashedSubPieceEntry[] | Default<[]>;
+
   /** Self-reference for sub-pieces to access their parent Record */
   parentRecord?: RecordOutput | null;
+
   /** Adds a module of the named type to this record's sub-pieces. */
   addModule?: Stream<{
     type: string;
     initialData?: { label?: string; [key: string]: unknown };
     result?: Writable<unknown>;
   }>;
+
   /** Writes a structured summary of every module into the result cell. */
   getSummary?: Stream<{ result?: Writable<unknown> }>;
+
   /** Sets a directly-settable field on the module at the given index. The
    * value is written into that field, so it is declared as the scalars a
    * module field holds rather than as `unknown`, which declares a reference. */
@@ -75,10 +79,13 @@ export interface RecordOutput {
     value: string | number | boolean | null;
     result?: Writable<unknown>;
   }>;
+
   /** Moves the module at the given index to the trash. */
   removeModule?: Stream<{ index: number; result?: Writable<unknown> }>;
+
   /** Sets this record's title. */
   setTitle?: Stream<{ newTitle: string; result?: Writable<unknown> }>;
+
   /** Writes the list of addable module types into the result cell. */
   listModuleTypes?: Stream<{ result?: Writable<unknown> }>;
 }
@@ -153,10 +160,13 @@ const seedRecord = lift<{
 interface SubPieceDisplayFields {
   /** The module type, carried through so a reader can pick modules by it. */
   type: string;
+
   /** Instance label, e.g. the email module's "Personal" or "Work". */
   label?: string;
+
   /** Icon chosen in a record-icon module. */
   icon?: string;
+
   /** Alias held by a nickname module. */
   nickname?: string;
 }

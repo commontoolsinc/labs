@@ -37,6 +37,7 @@ export const SPOOL_STAGING_PREFIX = "staging-";
 /** A spool this process owns or has adopted; the lock is held until close. */
 export interface HeldSpool {
   dir: string;
+
   /** Releases the lock and closes the lock file. */
   close(): void;
 }

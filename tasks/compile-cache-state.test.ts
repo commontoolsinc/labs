@@ -109,11 +109,12 @@ Deno.test("classifyRunAgainstPredecessor fails open to unknown", async () => {
   );
 });
 
-// The drift guard: COMPILE_CACHE_KEY_GLOBS mirrors the FIRST hashFiles(...)
-// argument list of every cc-* compile-cache key in the workflow. If this
-// fails, update the constant and the workflow together (and matcherForGlob
-// if a new glob shape appeared).
 Deno.test("COMPILE_CACHE_KEY_GLOBS matches the cc-* cache keys in deno.yml", async () => {
+  // The drift guard: COMPILE_CACHE_KEY_GLOBS mirrors the FIRST hashFiles(...)
+  // argument list of every cc-* compile-cache key in the workflow. If this
+  // fails, update the constant and the workflow together (and matcherForGlob if
+  // a new glob shape appeared).
+
   const workflow = await Deno.readTextFile(
     new URL("../.github/workflows/deno.yml", import.meta.url),
   );
@@ -168,7 +169,7 @@ Deno.test("pattern unit cache follows sources and shard selector", async () => {
   const job = workflow.slice(start, end);
   assert(
     job.includes(
-      "hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'tasks/integration.ts')",
+      "hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'packages/connectors/agents/debug-view/**/*.ts', 'packages/connectors/agents/debug-view/**/*.tsx', 'packages/connectors/github/activity-view/**/*.ts', 'packages/connectors/github/activity-view/**/*.tsx', 'packages/connectors/pattern-sources.ts', 'tasks/integration.ts', 'tasks/pattern-files.ts')",
     ),
     "pattern unit cache must rotate when source or file assignment changes",
   );

@@ -17,9 +17,13 @@
 // applier would get subtly wrong. `applyPatch` is offline-safe (pure value ops;
 // no live runtime/cell). See packages/memory/v2/patch.ts.
 
-import { applyPatch } from "@commonfabric/memory/v2/patch";
-import type { PatchOp } from "@commonfabric/memory/v2";
-import type { FabricValue } from "@commonfabric/api";
+import { applyPatchToDocument } from "@commonfabric/memory/v2/patch";
+import {
+  decodeStoredDocumentPayload,
+  decodeStoredPatchListPayload,
+  type EntityDocument as StoredDocument,
+  type PatchOp,
+} from "@commonfabric/memory/v2";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
 import type { SpaceDb } from "./db.ts";
@@ -46,6 +50,7 @@ export type EntityDocument =
 export interface PathSelection {
   /** Whether every segment selected an own property. */
   found: boolean;
+
   /** The selected value. This can be `undefined` when `found` is true. */
   value: unknown;
 }
@@ -99,6 +104,23 @@ interface RevRow {
 
 const MAX_SEQ = Number.MAX_SAFE_INTEGER;
 
+/**
+ * Read a stored document payload through the memory layer's rule, with THIS
+ * package's decoder. The rule — handle an absent payload without asking the
+ * decoder, and refuse a root that is not a tree of paths — belongs to the engine
+ * and is shared rather than re-derived. The decoder is ours, because a durable
+ * file may hold untagged plain-JSON rows that the engine's own boundary decoder
+ * does not accept.
+ */
+function storedDocument(data: string | null): StoredDocument {
+  return decodeStoredDocumentPayload(decodeStored, data);
+}
+
+/** Read a stored patch-list payload through the same shared rule. */
+function storedPatchList(data: string | null): PatchOp[] {
+  return decodeStoredPatchListPayload(decodeStored, data);
+}
+
 /** Does this DB carry a given table? (legacy/partial DBs lack branch/snapshot.) */
 function hasTable(space: SpaceDb, name: string): boolean {
   return !!space.db
@@ -109,6 +131,7 @@ function hasTable(space: SpaceDb, name: string): boolean {
 /** One branch a read consults, and the seq its rows are visible up to. */
 export interface BranchReadLink {
   branch: string;
+
   /** Rows with `seq <= atSeq` on this branch are visible from the read. */
   atSeq: number;
 }
@@ -169,8 +192,10 @@ export function branchReadChain(
 export interface VisibleRevisionRow {
   scope: string;
   id: string;
+
   /** Revisions on the branch that OWNS it — the history a read can reach. */
   revisions: number;
+
   /** The chain link that owns it. */
   link: BranchReadLink;
 }
@@ -226,6 +251,71 @@ export function visibleRevisionRows(
 }
 
 /**
+ * Ids whose stored rows match every `data LIKE` pattern, across each branch the
+ * read can reach.
+ *
+ * The LIKE set is a CANDIDATE filter — each hit is reconstructed and tested
+ * properly by the caller — so a union across the chain is enough and no
+ * ownership arbitration belongs here: an id matched on a parent but overridden
+ * on the child reconstructs to the child's value and fails the real test on its
+ * own. Searching local rows only is what goes wrong, by never offering an
+ * inherited entity as a candidate at all.
+ */
+export function candidatesMatching(
+  space: SpaceDb,
+  opts: { branch: string; scope: string; like: readonly string[] },
+): string[] {
+  const stmt = space.db.prepare(
+    `SELECT DISTINCT id FROM revision
+     WHERE branch = ? AND scope_key = ? AND seq <= ?
+       AND ${opts.like.map(() => "data LIKE ?").join(" AND ")}`,
+  );
+  const ids = new Set<string>();
+  for (const link of branchReadChain(space, opts.branch)) {
+    for (
+      const r of stmt.all<{ id: string }>(
+        link.branch,
+        opts.scope,
+        link.atSeq,
+        ...opts.like,
+      )
+    ) {
+      ids.add(r.id);
+    }
+  }
+  return [...ids];
+}
+
+/**
+ * The branch that owns one entity's records, or undefined when no branch the
+ * read can reach holds any.
+ *
+ * A pass describing ONE entity's history asks this: nearest-branch ownership
+ * decides which log the reader can reach, and it hides a parent's writes for an
+ * entity the child overrode exactly as it hides the parent's value.
+ *
+ * NOT a readability check. It follows `visibleRevisionRows` in enumerating
+ * RECORDS, so a tombstoned entity has an owning branch while a read of it
+ * returns nothing — which is right for a history (a delete is a write worth
+ * showing) and wrong as a gate. A caller that needs "can this be read" must
+ * reconstruct, or take the entity from `visibleEntityRows`.
+ */
+export function owningLink(
+  space: SpaceDb,
+  opts: { branch?: string; scope?: string; id: string },
+): BranchReadLink | undefined {
+  // `scope` is NOT optional in meaning, only in spelling: ownership is a
+  // property of (scope, entity), and the same id can be owned by different
+  // branches in `space` and in a user scope. Left unfiltered, the first scoped
+  // row to come back would decide, so this defaults the way the rest of the
+  // package does rather than answering about an arbitrary scope.
+  return visibleRevisionRows(space, {
+    ...opts,
+    scope: opts.scope ?? "space",
+  })[0]?.link;
+}
+
+/**
  * Resolve the single revision row visible for `id` at `atSeq` on `branch`,
  * replicating the engine's `readRowForBranch` (`engine.ts`): take the latest
  * local row at/before `atSeq`; if the branch has NONE, inherit the parent's row
@@ -268,7 +358,7 @@ function reconstructWithinBranch(
   id: string,
   rowSeq: number,
   rowOpIndex: number,
-): FabricValue {
+): StoredDocument {
   const base = space.db
     .prepare(
       `SELECT seq, op_index, op, data FROM revision
@@ -278,8 +368,8 @@ function reconstructWithinBranch(
     )
     .get<RevRow>(branch, id, scope, rowSeq, rowSeq, rowOpIndex);
 
-  let doc: FabricValue = base && base.op === "set" && base.data
-    ? (decodeStored(base.data) as FabricValue)
+  let doc: StoredDocument = base && base.op === "set"
+    ? storedDocument(base.data)
     : {};
   let baseSeq = base ? base.seq : 0;
   let baseOpIndex = base ? base.op_index : -1;
@@ -297,7 +387,10 @@ function reconstructWithinBranch(
       )
       .get<{ seq: number; value: string }>(branch, id, scope, rowSeq);
     if (snap && snap.seq >= baseSeq) {
-      doc = decodeStored(snap.value) as FabricValue;
+      // A snapshot is a materialized document, held to the same root rule as
+      // any other. Decoding it without that check lets a malformed one through
+      // for later patches to rebuild a valid-looking document over.
+      doc = storedDocument(snap.value);
       baseSeq = snap.seq;
       baseOpIndex = MAX_SEQ; // patches with seq > snapshot.seq only
     }
@@ -323,11 +416,37 @@ function reconstructWithinBranch(
       rowOpIndex,
     );
   for (const p of patches) {
-    const ops = p.data ? (decodeStored(p.data) as PatchOp[]) : [];
-    doc = applyPatch(doc, ops);
+    // `applyPatchToDocument`, not bare `applyPatch`: a root op can replace the
+    // document with any value, and the engine rejects at the FIRST patch that
+    // leaves a non-document. Checking only the final result would let a later
+    // patch restore an object and launder the invalid step before it.
+    doc = applyPatchToDocument(doc, storedPatchList(p.data));
   }
   return doc;
 }
+
+/**
+ * The result of reconstructing an entity, naming WHY there is no document when
+ * there is none. Four unrelated situations leave an entity without a document
+ * at a (branch, seq), and a reader told only "no document" cannot tell a routine
+ * deletion from a corrupt payload. `reconstructDocument` collapses `deleted`,
+ * `empty` and `absent` back to `undefined` for callers that do not care, and
+ * rethrows an `undecodable` one; the callers that report entities to a human
+ * read this instead, and never have to catch.
+ */
+export type ReconstructOutcome =
+  | { status: "present"; document: EntityDocument }
+  /** The visible head row is a `delete` — the entity was removed. */
+  | { status: "deleted" }
+  /** The visible head row is a `set` that stored no data. */
+  | { status: "empty" }
+  /** No revision row is visible at this (branch, scope, seq). */
+  | { status: "absent" }
+  /** The stored payload did not decode. `error` is the original throw. */
+  | { status: "undecodable"; error: unknown };
+
+/** The `status` values that carry no document. */
+export type AbsenceStatus = Exclude<ReconstructOutcome["status"], "present">;
 
 /**
  * Reconstruct an entity document at a (branch, seq) by replicating the engine's
@@ -335,40 +454,75 @@ function reconstructWithinBranch(
  * `packages/memory/v2`), proven identical by `reconstruct-parity.test.ts` which
  * drives the real engine. Branch inheritance resolves the visible ROW (not a
  * merged log); patched reconstruction stays within the resolved branch.
+ *
+ * A decode failure is returned as `undecodable` rather than thrown, so that one
+ * corrupt entity does not abort a walk over a whole space.
  */
-export function reconstructDocument(
+export function reconstructOutcome(
   space: SpaceDb,
   opts: ReconstructOptions,
-): EntityDocument | undefined {
+): ReconstructOutcome {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
   const atSeq = opts.atSeq ?? MAX_SEQ;
 
   const resolved = resolveBranchRow(space, branch, scope, opts.id, atSeq);
-  if (!resolved) return undefined;
+  if (!resolved) return { status: "absent" };
 
   const { row, branch: rb } = resolved;
-  if (row.op === "set") {
-    return (row.data ? decodeStored(row.data) : undefined) as
-      | EntityDocument
-      | undefined;
+  if (row.op === "delete") return { status: "deleted" };
+  try {
+    // A `set` stores no data only when `data` is NULL. An empty string is a
+    // payload, and a malformed one — it belongs with the decode failures below.
+    //
+    // The engine reads a NULL payload as `null` and rejects it as a document,
+    // so this names as `empty` what the engine names an error. Both carry no
+    // document, which is what `reconstructDocument` reports either way; the
+    // status is finer than the engine's because a listing that says "(no data)"
+    // tells a reader something "(undecodable)" does not.
+    if (row.op === "set" && row.data === null) return { status: "empty" };
+    // Both arms return a document already held to the root rule — `storedDocument`
+    // checks the payload it decodes, and every boundary inside the patch chain is
+    // checked as it is crossed — so a present outcome here carries a document no
+    // reader has to re-test, and a malformed one arrives as the shared rule's own
+    // error, naming the shape it found.
+    const document = row.op === "set"
+      ? storedDocument(row.data)
+      // patch: reconstruct within the branch that owns the resolved row.
+      : reconstructWithinBranch(
+        space,
+        rb,
+        scope,
+        opts.id,
+        row.seq,
+        row.op_index,
+      );
+    return { status: "present", document: document as EntityDocument };
+  } catch (error) {
+    return { status: "undecodable", error };
   }
-  if (row.op === "delete") return undefined;
-  // patch: reconstruct within the branch that owns the resolved row.
-  return reconstructWithinBranch(
-    space,
-    rb,
-    scope,
-    opts.id,
-    row.seq,
-    row.op_index,
-  ) as EntityDocument;
+}
+
+/**
+ * The document an entity holds at a (branch, seq), or `undefined` when it holds
+ * none. Throws the decode error for a payload that does not decode. Callers that
+ * distinguish a tombstone from corruption call {@link reconstructOutcome}.
+ */
+export function reconstructDocument(
+  space: SpaceDb,
+  opts: ReconstructOptions,
+): EntityDocument | undefined {
+  const outcome = reconstructOutcome(space, opts);
+  if (outcome.status === "undecodable") throw outcome.error;
+  return outcome.status === "present" ? outcome.document : undefined;
 }
 
 export interface ValueAtResult {
   exists: boolean;
+
   /** The full reconstructed document (`{ value, source, … }`). */
   document?: EntityDocument;
+
   /** The value navigated to `path` within `document.value`. */
   value?: unknown;
 }

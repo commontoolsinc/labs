@@ -27,10 +27,15 @@ import {
   parseEntityRef,
   summarize,
 } from "./decode.ts";
-import { reconstructDocument, selectAtPath } from "./reconstruct.ts";
+import {
+  owningLink,
+  reconstructDocument,
+  selectAtPath,
+} from "./reconstruct.ts";
 
 /** Annotation depth used for values included in diff output. */
 const COMPARE_DEPTH = 32;
+
 const DEFAULT_DIFF_DEPTH = 12;
 
 export type ChangeKind = "added" | "removed" | "changed";
@@ -53,19 +58,26 @@ export type StoredValueKind =
 export interface ValueChange {
   /** Slash-delimited path of the change. */
   path: string;
+
   /** Exact path segments, e.g. `["value", "items", "0"]`. */
   pathSegments?: string[];
+
   kind: ChangeKind;
   before?: unknown;
   after?: unknown;
+
   /** Set when `before` is the annotation for a stored `undefined` value. */
   beforeIsUndefined?: true;
+
   /** Set when `after` is the annotation for a stored `undefined` value. */
   afterIsUndefined?: true;
+
   /** Set when different stored values have equal display annotations. */
   annotationCollision?: true;
+
   /** Stored value kind for `before` when display annotations collide. */
   beforeValueKind?: StoredValueKind;
+
   /** Stored value kind for `after` when display annotations collide. */
   afterValueKind?: StoredValueKind;
 }
@@ -416,16 +428,22 @@ export interface TimelineStep {
   commitSeq: number;
   session: string;
   createdAt: string;
+
   /** One-line summary of the entity's value after this write. */
   summary: string;
+
   /** Whether the entity is known to exist after this write. */
   exists: boolean;
+
   /** Number of changes from the preceding state. */
   changes: number;
+
   /** Set when the preceding or current state could not be reconstructed. */
   changesKnown?: false;
+
   /** Set when the entity's state after this write could not be reconstructed. */
   stateKnown?: false;
+
   /** The reconstruction error, when this write could not establish state. */
   error?: string;
 }
@@ -446,12 +464,17 @@ export function entityTimeline(
   const scope = opts.scope ?? "space";
   const branch = opts.branch ?? "";
   const limit = opts.limit ?? 500;
-  const rows = space.db
+  // The branch that OWNS the visible row, not the branch asked about: the
+  // replay below mirrors `reconstructWithinBranch`, which never composes across
+  // a fork, so the rows to replay are that branch's. Reading local rows only
+  // would return an empty timeline for an entity the branch inherited.
+  const owner = owningLink(space, { branch, scope, id: opts.id });
+  const rows = owner === undefined ? [] : space.db
     .prepare(
       `SELECT r.seq, r.op_index, r.op, r.data, r.commit_seq,
               c.session_id, c.created_at
        FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
-       WHERE r.branch = ? AND r.id = ? AND r.scope_key = ?
+       WHERE r.branch = ? AND r.id = ? AND r.scope_key = ? AND r.seq <= ?
        ORDER BY r.seq ASC, r.op_index ASC LIMIT ?`,
     )
     .all<{
@@ -462,9 +485,9 @@ export function entityTimeline(
       commit_seq: number;
       session_id: string;
       created_at: string;
-    }>(branch, opts.id, scope, limit);
+    }>(owner.branch, opts.id, scope, owner.atSeq, limit);
 
-  // Replay this branch's rows INCREMENTALLY — apply one op per step against a
+  // Replay the owning branch's rows INCREMENTALLY — apply one op per step against a
   // running document — instead of re-reconstructing from scratch at every seq
   // (which is O(writes²) and won't return on a hot entity). The op semantics
   // mirror reconstructWithinBranch: set=decode, patch=applyPatch(doc ?? {}),
@@ -544,10 +567,13 @@ export interface SpaceTimelineEntry {
   commitSeq: number;
   createdAt: string;
   session: string;
+
   /** Entities touched (revisions) in this commit. */
   touched: number;
+
   /** Entities seen here for the first time. */
   created: number;
+
   /** Cumulative distinct entities up to and including this commit. */
   cumulativeEntities: number;
 }

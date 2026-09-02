@@ -12,8 +12,11 @@ import { join } from "@std/path";
 import { serializeRecordLine, type TestRecord } from "./schema.ts";
 import { type Environment, recordsDir } from "./paths.ts";
 
-/** Fragment files are `fragment-<ulid>.ndjson` inside the spool. */
+/** Leading half of a fragment file's name: `fragment-<ulid>.ndjson` inside
+ * the spool. */
 export const FRAGMENT_PREFIX = "fragment-";
+
+/** The extension that completes that name. */
 export const FRAGMENT_SUFFIX = ".ndjson";
 
 const encoder = new TextEncoder();
@@ -22,11 +25,16 @@ const encoder = new TextEncoder();
 export class FragmentWriter {
   #file: Deno.FsFile | undefined;
   #warned = false;
-  readonly path: string;
+  readonly #path: string;
 
   private constructor(path: string, file: Deno.FsFile) {
-    this.path = path;
+    this.#path = path;
     this.#file = file;
+  }
+
+  /** The fragment file this writer appends to. */
+  get path(): string {
+    return this.#path;
   }
 
   /**
@@ -77,7 +85,7 @@ export class FragmentWriter {
     } catch (error) {
       if (!this.#warned) {
         this.#warned = true;
-        warnOnce(`cannot append to ${this.path}: ${error}`);
+        warnOnce(`cannot append to ${this.#path}: ${error}`);
       }
       this.close();
     }

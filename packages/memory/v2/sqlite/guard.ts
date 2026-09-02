@@ -22,6 +22,10 @@ export const CORE_TABLE_NAMES: readonly string[] = [
   "blob_store",
   "authorization",
   "invocation",
+  "op_field_epoch",
+  "op_submission",
+  "op_integrated",
+  "op_checkpoint",
   "scheduler_basis",
   "execution_lease",
   "execution_outbox",
@@ -33,12 +37,16 @@ export type StatementKind = "select" | "write" | "other";
 export type StatementClassification = {
   /** Leading-keyword classification. */
   kind: StatementKind;
+
   /** More than one statement (after dropping a trailing `;`). */
   multiple: boolean;
+
   /** A schema-qualified table reference (`db.table`) in a table position. */
   qualified: boolean;
+
   /** Contains a forbidden verb: PRAGMA / ATTACH / DETACH. */
   forbidden: boolean;
+
   /** References a core engine table name. */
   coreRef: boolean;
 };

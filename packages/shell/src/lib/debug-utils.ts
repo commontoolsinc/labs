@@ -21,7 +21,7 @@ import type {
 import type { DID } from "@commonfabric/identity";
 import { hasEntityUriScheme } from "@commonfabric/runner/entity-kind";
 import { isObjectOrArray } from "@commonfabric/utils/types";
-import type { MetaField } from "@commonfabric/api";
+import type { MetaField } from "@commonfabric/runner";
 import { createVDomDebugHelpers, viewSettled } from "@commonfabric/html/debug";
 
 /**
@@ -48,6 +48,9 @@ export type CommonfabricDebugState =
     viewSettled?: () => Promise<void>;
     vdom?: ReturnType<typeof createVDomDebugHelpers>;
     detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
+
+    /** Changes memory-message compression for live and later connections. */
+    setMemoryMessageCompression?: (enabled: boolean) => Promise<void>;
   };
 
 type CommonfabricGlobal = { commonfabric?: CommonfabricDebugState };
@@ -78,6 +81,8 @@ export function exposeCommonfabricGlobals(
     console.log("Cycles:", result.cycles);
     return result;
   };
+  cf.setMemoryMessageCompression = (enabled) =>
+    runtime.setMemoryMessageCompression(enabled);
   const debugUtils = createDebugUtils(getSpace, getRuntime);
   cf.readCell = debugUtils.readCell;
   cf.readArgumentCell = debugUtils.readArgumentCell;
@@ -95,18 +100,23 @@ export function clearRuntimeDebugGlobals(global: CommonfabricGlobal): void {
   if (global.commonfabric) {
     global.commonfabric.rt = undefined;
     global.commonfabric.viewSettled = undefined;
+    global.commonfabric.setMemoryMessageCompression = undefined;
   }
 }
 
 interface DebugCellOptions {
   /** Space DID — defaults to current shell space */
   space?: string;
+
   /** Piece CID — defaults to piece from URL bar */
   did?: string;
+
   /** Full entity ID — use this when you already have `of:...` from trigger trace */
   id?: string;
+
   /** Path into cell — defaults to [] */
   path?: string[];
+
   /** Metadata link to follow before reading the cell */
   meta?: MetaField;
 }
@@ -114,8 +124,10 @@ interface DebugCellOptions {
 interface ExplainTriggerTraceOptions {
   /** Number of grouped changes to resolve and return. Defaults to 10. */
   limit?: number;
+
   /** When true, only keep root writes (`path.length === 0`). Defaults to false. */
   rootOnly?: boolean;
+
   /** Include the full current value in each returned change. Defaults to false. */
   includeCurrentValue?: boolean;
 }
@@ -123,6 +135,7 @@ interface ExplainTriggerTraceOptions {
 interface WatchWritesOptions extends DebugCellOptions {
   /** Path matching mode. Defaults to "exact". */
   match?: "exact" | "prefix";
+
   /** Optional label shown in recorded write-trace entries. */
   label?: string;
 }
@@ -314,7 +327,7 @@ export function summarizeDebugValue(value: unknown): DebugValueSummary {
 }
 
 export function summarizeTriggerTraceEntries(
-  trace: TriggerTraceEntry[],
+  trace: readonly TriggerTraceEntry[],
   options: { limit?: number; rootOnly?: boolean } = {},
 ): TriggerTraceExplanation {
   const { limit = 10, rootOnly = false } = options;
@@ -537,7 +550,7 @@ export function createDebugUtils(
   }
 
   async function getWriteStackTrace(): Promise<
-    WriteStackTraceEntry[] | undefined
+    readonly WriteStackTraceEntry[] | undefined
   > {
     const rt = getRt();
     if (!rt) {

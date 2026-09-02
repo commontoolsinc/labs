@@ -1,6 +1,6 @@
 import { JSONSchemaObj, type JSONValue } from "@commonfabric/api";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
@@ -244,6 +244,7 @@ const symbolicSchemaAtPathPart = (
  * for a default it no longer describes.
  */
 const defaultSchemaTags = new WeakMap<object, string>();
+
 let nextDefaultSchemaTag = 0;
 
 const defaultSchemaTag = (schema: JSONSchema): string | undefined => {
@@ -455,6 +456,7 @@ export class ContextualFlowControl {
   // the right thing, since those are all at the top level. However, we
   // could have a reference to an anchor (not currently allowed), and
   // for those, if the User is secret, their Address should be too.
+
   /**
    * Resolve a $ref in a schema.
    * This doesn't currently handle $anchor tags or external documents
@@ -570,7 +572,7 @@ export class ContextualFlowControl {
       emptyTag !== undefined && missingTag !== undefined &&
       isObjectOrArray(schema) && isDeepFrozen(schema);
     if (!cacheable) {
-      return ContextualFlowControl.schemaAtPathInternal(
+      return ContextualFlowControl.#schemaAtPathInternal(
         schema,
         path,
         defs,
@@ -591,7 +593,7 @@ export class ContextualFlowControl {
       // instance: downstream identity-keyed caches (standardization, value
       // hashing) hit instead of re-walking a fresh anyOf rebuild every time.
       const missesBefore = externalResolutionMissCount();
-      result = internSchema(ContextualFlowControl.schemaAtPathInternal(
+      result = internSchema(ContextualFlowControl.#schemaAtPathInternal(
         schema,
         path,
         defs,
@@ -612,7 +614,7 @@ export class ContextualFlowControl {
     return result;
   }
 
-  private static schemaAtPathInternal(
+  static #schemaAtPathInternal(
     schema: JSONSchema,
     path: readonly string[],
     defs: Record<string, JSONSchema> | undefined,
@@ -657,7 +659,7 @@ export class ContextualFlowControl {
           const entryDefs = isObjectOrArray(entry) && entry.$defs !== undefined
             ? entry.$defs as Record<string, JSONSchema>
             : defs;
-          const optSchema = ContextualFlowControl.schemaAtPathInternal(
+          const optSchema = ContextualFlowControl.#schemaAtPathInternal(
             entry,
             path.slice(index),
             entryDefs,

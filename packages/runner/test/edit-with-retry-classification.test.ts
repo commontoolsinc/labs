@@ -127,6 +127,15 @@ describe("editWithRetry rejection classification", () => {
     }],
     // A malformed store operation.
     ["StoreError", { name: "StoreError", message: "malformed operation" }],
+    // The client-side sibling of RowLabelCommitError: the CFC boundary
+    // evaluated the transaction's own reads and writes and refused them
+    // before storage saw the commit. Deterministic in exactly the same way,
+    // so a re-run recomputes the identical refused write.
+    ["CfcCommitRefusalError", {
+      name: "CfcCommitRefusalError",
+      message: "CFC enforcement rejected commit: writer-fit misfit",
+      reasons: ["writer-fit misfit"],
+    }],
   ];
 
   for (const [name, rejection] of terminal) {
@@ -193,7 +202,11 @@ describe("editWithRetry rejection classification", () => {
       name: "InvalidMessageError",
       message: "Unable to parse memory server message",
     }],
-    // The callback discarded this attempt; also the CFC pre-storage refusal.
+    // The callback discarded this attempt; also the one CFC pre-storage
+    // rejection that stays retryable, where a PREPARED transaction's inputs
+    // drifted before the verdict and a fresh attempt prepares against the
+    // current ones. The boundary's own refusal is `CfcCommitRefusalError`,
+    // below, and is terminal.
     ["StorageTransactionAborted", {
       name: "StorageTransactionAborted",
       message: "CFC enforcement rejected commit: prepared digest changed",
@@ -235,14 +248,19 @@ const TEST_AUDIENCE = "did:key:z6Mk-runner-retry-classification-audience";
 
 class CountingLoopbackSessionFactory implements SessionFactory {
   readonly supportsAclBootstrap = true;
+
   /** Commits sent for the ACL document, across all sessions. */
   aclCommits = 0;
+
   #aclDocId: string;
 
+  readonly #server: MemoryV2Server.Server;
+
   constructor(
-    private readonly server: MemoryV2Server.Server,
+    server: MemoryV2Server.Server,
     space: MemorySpace,
   ) {
+    this.#server = server;
     this.#aclDocId = `of:${space}`;
   }
 
@@ -252,7 +270,7 @@ class CountingLoopbackSessionFactory implements SessionFactory {
     requested: MemoryV2Client.MountOptions = {},
   ) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(
       space,
@@ -374,8 +392,8 @@ Deno.test("a server ProtocolError reaches editWithRetry by name, once", async ()
 // session could land it. It fails on a fact about the RETRY PATH, not about the
 // error: nothing between two `editWithRetry` attempts remounts the session.
 // `SpaceReplica.sessionHandle()` memoizes the mount and clears it only in
-// `close()`/`closeNow()` (storage/v2.ts), and `SpaceSession.reopen()` runs only
-// from `restore()`, which only the client's transport `reconnect()` calls
+// `close()`/`closeNow()` (storage/v2.ts), and `SpaceSession.#reopen()` runs
+// only from `restore()`, which only the client's transport `reconnect()` calls
 // (memory/v2/client.ts). So every attempt re-sends over the very handle the
 // server just refused.
 //
@@ -386,13 +404,20 @@ Deno.test("a server ProtocolError reaches editWithRetry by name, once", async ()
 // in storage/rejection.ts.
 class SessionErrorSessionFactory implements SessionFactory {
   readonly supportsAclBootstrap = true;
+
   /** Mounts created — how many times a session was (re)opened. */
   sessions = 0;
+
   /** transact() calls made after `arm()`. */
   commits = 0;
+
   #armed = false;
 
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  readonly #server: MemoryV2Server.Server;
+
+  constructor(server: MemoryV2Server.Server) {
+    this.#server = server;
+  }
 
   arm(): void {
     this.#armed = true;
@@ -405,7 +430,7 @@ class SessionErrorSessionFactory implements SessionFactory {
   ) {
     this.sessions++;
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(
       space,

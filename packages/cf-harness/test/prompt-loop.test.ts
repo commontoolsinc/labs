@@ -46,6 +46,7 @@ import type {
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
 import { discoverHarnessSkills } from "../src/skills/registry.ts";
+import { createPatternSkillsFixture } from "./support/pattern-skills-fixture.ts";
 import {
   chatViewOfRequest,
   responsesBodyFromChatFixture,
@@ -78,10 +79,16 @@ const contextPromptSlotBinding: PromptSlotBinding = {
 class FakeSandboxRuntime implements SandboxRuntime {
   readonly shellRequests: SandboxShellRequest[] = [];
 
+  readonly #shellResults: SandboxCommandResult[];
+  readonly #shellError?: Error;
+
   constructor(
-    private readonly shellResults: SandboxCommandResult[] = [],
-    private readonly shellError?: Error,
-  ) {}
+    shellResults: SandboxCommandResult[] = [],
+    shellError?: Error,
+  ) {
+    this.#shellResults = shellResults;
+    this.#shellError = shellError;
+  }
 
   describe(): SandboxRuntimeDescription {
     return {
@@ -128,11 +135,11 @@ class FakeSandboxRuntime implements SandboxRuntime {
         exitCode: 0,
       });
     }
-    if (this.shellError) {
-      return Promise.reject(this.shellError);
+    if (this.#shellError) {
+      return Promise.reject(this.#shellError);
     }
     return Promise.resolve(
-      this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      this.#shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
   }
 }
@@ -156,12 +163,16 @@ class FakeRunSandboxRuntime extends FakeSandboxRuntime {
 class FakeProcessRunner implements ProcessRunner {
   readonly requests: ProcessRunRequest[] = [];
 
-  constructor(private readonly results: ProcessRunResult[] = []) {}
+  readonly #results: ProcessRunResult[];
+
+  constructor(results: ProcessRunResult[] = []) {
+    this.#results = results;
+  }
 
   run(request: ProcessRunRequest): Promise<ProcessRunResult> {
     this.requests.push(request);
     return Promise.resolve(
-      this.results.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      this.#results.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
   }
 }
@@ -849,7 +860,10 @@ class RecordingArtifactStore implements HarnessArtifactStore {
     path: string;
   }> = [];
 
-  constructor(readonly artifactRoot: string, private readonly runId: string) {
+  readonly #runId: string;
+
+  constructor(readonly artifactRoot: string, runId: string) {
+    this.#runId = runId;
     this.runRoot = `${artifactRoot}/${runId}`;
   }
 
@@ -1026,6 +1040,7 @@ const observedCfcResult = (
 });
 
 Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant response", async () => {
+  await using fixture = await createPatternSkillsFixture();
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
     apiKey: "test-key",
@@ -1036,6 +1051,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
       runId: "run-loop",
       model: "gpt-5.4",
       cfcEnforcementMode: "disabled",
+      skillsRoot: fixture.skillsRoot,
       now: (() => {
         const timestamps = [
           "2026-04-15T20:00:00.000Z",
@@ -1965,6 +1981,7 @@ const noToolCallFetch =
   };
 
 Deno.test("CfHarnessPromptLoop advertises run_pattern in the default tool surface when a fabric session is configured", async () => {
+  await using fixture = await createPatternSkillsFixture();
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
     apiKey: "test-key",
@@ -1972,6 +1989,7 @@ Deno.test("CfHarnessPromptLoop advertises run_pattern in the default tool surfac
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-pattern-default-surface",
       model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
       fabricSessionFactory: () =>
         Promise.reject(new Error("session is never built in this test")),
     }),
@@ -2050,7 +2068,470 @@ Deno.test("CfHarnessPromptLoop drops run_pattern from an explicit allowlist when
   );
 });
 
+Deno.test("CfHarnessPromptLoop withholds the skill tools from an explicit allowlist when no skills root is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "read_skill_resource", "run_skill_script"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-skill-tools-no-root",
+      model: "gpt-5.4",
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop advertises the skill tools from an explicit allowlist when a skills root is configured", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "read_skill_resource", "run_skill_script"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-skill-tools-with-root",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file", "read_skill_resource", "run_skill_script"],
+  );
+});
+
+/**
+ * A pattern-index client factory that is never called: what the gate turns on
+ * is whether the run HAS one, and no test of the surface reaches the index.
+ */
+const unusedPatternIndexClientFactory = () =>
+  Promise.reject(new Error("the index client is never built in this test"));
+
+Deno.test("CfHarnessPromptLoop advertises the pattern-index tools in the default tool surface when an index is configured", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-default-surface",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+      patternIndexClientFactory: unusedPatternIndexClientFactory,
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    [
+      "bash",
+      "read_file",
+      "view_image",
+      "read_skill_resource",
+      "edit_file",
+      "write_file",
+      "delegate_task",
+      "run_pattern",
+      "assign_slug",
+      "describe_handle",
+      "search_patterns",
+      "record_feedback",
+    ],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop advertises the pattern-index tools from an explicit allowlist when an index is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "search_patterns", "record_feedback"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-allowlisted",
+      model: "gpt-5.4",
+      patternIndexClientFactory: unusedPatternIndexClientFactory,
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file", "search_patterns", "record_feedback"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop drops the pattern-index tools from an explicit allowlist when no index is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "search_patterns", "record_feedback"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-absent",
+      model: "gpt-5.4",
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop advertises search_skills in the default tool surface when configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "skills-sh-default-surface",
+      model: "gpt-5.4",
+      skillsSh: { baseUrl: "https://registry.example" },
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assert(
+    chatViewOfRequest(request).tools.includes("search_skills"),
+  );
+});
+
+Deno.test("CfHarnessPromptLoop advertises search_skills from an explicit allowlist when configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "search_skills"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "skills-sh-allowed-surface",
+      model: "gpt-5.4",
+      skillsSh: { baseUrl: "https://registry.example" },
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools,
+    ["read_file", "search_skills"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop drops search_skills from an explicit allowlist when no registry is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "search_skills"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "skills-sh-absent",
+      model: "gpt-5.4",
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop withholds the pattern-index tools from the pattern-author profile when no index is configured", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedSubagentProfiles: ["pattern-author"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-profile-gate",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  const result = await loop.runPrompt({ prompt: "Say hi." });
+
+  // The profile a delegation would run under, as the run's own policy
+  // snapshot records it: `run_pattern` stays, since the run has a session to
+  // back it, and the two index tools leave.
+  const profile = result.runState.cfcPolicySnapshot?.subagents.profileConfigs
+    .find((config) => config.profile === "pattern-author");
+  assertEquals(profile?.allowedToolIds, [
+    "bash",
+    "read_file",
+    "read_skill_resource",
+    "describe_handle",
+    "run_pattern",
+  ]);
+});
+
+/**
+ * A scripted loop that delegates once and then finishes: the child answers
+ * its profile's own return contract, and the parent says it is done. The
+ * request bodies are collected, so `requestBodies[1]` is the child's.
+ */
+const delegateThenFinishFetch = (
+  requestBodies: unknown[],
+  delegateArguments: Record<string, unknown>,
+): typeof fetch =>
+(_input, init) => {
+  requestBodies.push(JSON.parse(String(init?.body)));
+  const assistant = (message: Record<string, unknown>) => ({
+    choices: [{ index: 0, message: { role: "assistant", ...message } }],
+  });
+  const payload = requestBodies.length === 1
+    ? assistant({
+      content: "",
+      tool_calls: [{
+        id: "call-delegate",
+        type: "function",
+        function: {
+          name: "delegate_task",
+          arguments: JSON.stringify(delegateArguments),
+        },
+      }],
+    })
+    : requestBodies.length === 2
+    ? assistant({
+      content: JSON.stringify({
+        ok: true,
+        resultRef: `of:fid1:${"A".repeat(43)}`,
+        describes: "Counts things.",
+      }),
+    })
+    : assistant({ content: "Parent done." });
+  return Promise.resolve(
+    new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+      status: 200,
+    }),
+  );
+};
+
+Deno.test("CfHarnessPromptLoop delegates in a run configured with a pattern index", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedSubagentProfiles: ["pattern-author"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-delegation",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+      // The shape a console or CLI run has: a session and an index together,
+      // which is the pair the config layer requires of anything holding an
+      // index. The child is configured from the same pair rather than from
+      // the factory alone.
+      fabricSession: {
+        apiUrl: "http://localhost:8000",
+        identityKeyPath: "/dev/null",
+        space: "index-demo",
+      },
+      patternIndex: { baseUrl: "https://index.example/" },
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+      patternIndexClientFactory: () =>
+        Promise.reject(new Error("index client is never built in this test")),
+    }),
+    fetchFn: (() => {
+      let turn = 0;
+      const assistant = (message: Record<string, unknown>) => ({
+        choices: [{ index: 0, message: { role: "assistant", ...message } }],
+      });
+      return () => {
+        turn += 1;
+        const payload = turn === 1
+          ? assistant({
+            content: "",
+            tool_calls: [{
+              id: "call-delegate",
+              type: "function",
+              function: {
+                name: "delegate_task",
+                arguments: JSON.stringify({
+                  goal: "Author a counter.",
+                  profile: "pattern-author",
+                }),
+              },
+            }],
+          })
+          : turn === 2
+          ? assistant({
+            content: JSON.stringify({
+              ok: true,
+              resultRef: `of:fid1:${"A".repeat(43)}`,
+              describes: "Counts things.",
+              hashtags: ["counter"],
+            }),
+          })
+          : assistant({ content: "Parent done." });
+        return Promise.resolve(
+          new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+            status: 200,
+          }),
+        );
+      };
+    })(),
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate the authoring.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  // The delegation reached a child rather than failing the run: a child given
+  // an index and no session is a configuration the config layer refuses.
+  assertEquals(result.runState.status, "completed");
+  assertEquals(result.runState.subagentRuns?.length, 1);
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.manifest.allowedToolIds.includes(
+      "search_patterns",
+    ),
+    true,
+  );
+});
+
+Deno.test("CfHarnessPromptLoop tells an index-backed pattern-author child to publish and to return the hashtags it published under", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const requestBodies: unknown[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedSubagentProfiles: ["pattern-author"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-child-prompt",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+      fabricSession: {
+        apiUrl: "http://localhost:8000",
+        identityKeyPath: "/dev/null",
+        space: "index-demo",
+      },
+      patternIndex: { baseUrl: "https://index.example/" },
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+      patternIndexClientFactory: () =>
+        Promise.reject(new Error("index client is never built in this test")),
+    }),
+    fetchFn: delegateThenFinishFetch(requestBodies, {
+      goal: "Author a counter.",
+      profile: "pattern-author",
+    }),
+  });
+
+  await loop.runPrompt({
+    prompt: "Delegate the authoring.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  const childSystemPrompt =
+    chatViewOfRequest(requestBodies[1]).messages[0]!.content ?? "";
+  // The index is what makes a hashtag mean anything: it is where the atom is
+  // published and where the next run finds it.
+  assertStringIncludes(
+    childSystemPrompt,
+    "plus the hashtags you published it under",
+  );
+  assertStringIncludes(
+    childSystemPrompt,
+    "Give every atom its own description and hashtags",
+  );
+  assertStringIncludes(
+    childSystemPrompt,
+    "A search hit is a component to wire, not a specification to rebuild.",
+  );
+});
+
+Deno.test("CfHarnessPromptLoop leaves publishing out of a pattern-author child's prompt when the run has no index", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const requestBodies: unknown[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedSubagentProfiles: ["pattern-author"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "no-index-child-prompt",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+    }),
+    fetchFn: delegateThenFinishFetch(requestBodies, {
+      goal: "Author a counter.",
+      profile: "pattern-author",
+    }),
+  });
+
+  await loop.runPrompt({
+    prompt: "Delegate the authoring.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  // A run that publishes nothing asks for no hashtags anywhere, including in
+  // the sentence naming the deliverable: the return contract leaves them out
+  // too, so a child told to supply them would be told to supply nothing.
+  const childSystemPrompt =
+    chatViewOfRequest(requestBodies[1]).messages[0]!.content ?? "";
+  assertStringIncludes(childSystemPrompt, "You never return source.");
+  assertEquals(childSystemPrompt.includes("hashtags"), false);
+});
+
 Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summary-only result", async () => {
+  await using fixture = await createPatternSkillsFixture();
   const requestBodies: Array<{
     messages: Array<{ role: string; content: string }>;
     tools: Array<{ function: { name: string } }>;
@@ -2062,6 +2543,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
       runId: "run-delegate",
       model: "gpt-5.4",
       cfcEnforcementMode: "enforce-explicit",
+      skillsRoot: fixture.skillsRoot,
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -2948,6 +3430,7 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override and
 });
 
 Deno.test("CfHarnessPromptLoop keeps browser unavailable to the parent by default", async () => {
+  await using fixture = await createPatternSkillsFixture();
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
     apiKey: "test-key",
@@ -2957,6 +3440,7 @@ Deno.test("CfHarnessPromptLoop keeps browser unavailable to the parent by defaul
       runId: "run-parent-host-tool-denied",
       model: "gpt-5.4",
       cfcEnforcementMode: "enforce-explicit",
+      skillsRoot: fixture.skillsRoot,
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -3030,6 +3514,7 @@ Deno.test("CfHarnessPromptLoop keeps browser unavailable to the parent by defaul
 });
 
 Deno.test("CfHarnessPromptLoop gives the browser tool only to the authorized browser subagent profile", async () => {
+  await using fixture = await createPatternSkillsFixture();
   const requestBodies: Array<{
     messages: Array<{ role: string; content: string }>;
     tools: Array<{ function: { name: string } }>;
@@ -3044,6 +3529,7 @@ Deno.test("CfHarnessPromptLoop gives the browser tool only to the authorized bro
       runId: "run-delegate-browser-profile",
       model: "gpt-5.4",
       cfcEnforcementMode: "enforce-explicit",
+      skillsRoot: fixture.skillsRoot,
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -3658,6 +4144,7 @@ Deno.test("CfHarnessPromptLoop gives web_fetch only to the authorized web_fetch 
 });
 
 Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind structured opaque links", async () => {
+  await using fixture = await createPatternSkillsFixture();
   const baseDir = await Deno.makeTempDir({
     dir: "/tmp",
     prefix: "cf-harness-browser-return-",
@@ -3709,6 +4196,7 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
         runId: "run-browser-structured-return",
         model: "gpt-5.4",
         cfcEnforcementMode: "enforce-explicit",
+        skillsRoot: fixture.skillsRoot,
       }),
       fetchFn: (_input, init) => {
         const body = JSON.parse(String(init?.body)) as {
@@ -4996,6 +5484,80 @@ Deno.test("CfHarnessPromptLoop truncates large model-facing bash output in obser
   assertEquals(content.exitCode, 0);
 });
 
+Deno.test("CfHarnessPromptLoop bounds a large model-facing read_file result more tightly than bash output", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const document = `${"a".repeat(20_000)}MIDDLE${"z".repeat(20_000)}`;
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        { stdout: document, stderr: "", exitCode: 0 },
+      ]),
+      runId: "run-large-read-file",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "observe",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-large-read-file",
+                type: "function",
+                function: {
+                  name: "read_file",
+                  arguments: JSON.stringify({ path: "/workspace/guide.md" }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: { role: "assistant", content: "Read the guide." },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+          status: 200,
+        }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Read the guide.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(result.finalAssistantText, "Read the guide.");
+  const secondRequest = JSON.parse(String(fetchCalls[1]?.body)) as {
+    messages: Array<{ role: string; content: string }>;
+  };
+  const toolMessage = chatViewOfRequest(secondRequest).messages.at(-1);
+  assertEquals(toolMessage?.role, "tool");
+  const content = JSON.parse(toolMessage!.content);
+  assertEquals(
+    content.outputId,
+    createToolOutputId("run-large-read-file", "read_file", 1),
+  );
+  assertEquals(content.contentTruncated, true);
+  assertEquals(content.contentOriginalLength, document.length);
+  // 8,000 characters of head and 2,000 of tail, well under the 80,000 a bash
+  // stream keeps, with the marker naming the artifact holding the whole file.
+  assert(content.content.startsWith("a".repeat(8_000)));
+  assert(content.content.endsWith("z".repeat(2_000)));
+  assert(content.content.includes("omitted 30006 characters"));
+  assert(content.content.includes("run-large-read-file:read_file:1"));
+  assert(content.content.length < 11_000);
+});
+
 Deno.test("CfHarnessPromptLoop denies bash output without CFC metadata in enforce mode", async () => {
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
@@ -5121,6 +5683,7 @@ Deno.test({
         runId: "run-missing-cfc-script-result",
         model: "gpt-5.4",
         cfcEnforcementMode: "enforce-explicit",
+        skillsRoot: root,
         allowedSkillScripts: [{
           skill: "deno-memory-profiler",
           path: "scripts/memory.ts",
@@ -5265,6 +5828,7 @@ Deno.test({
         runId: "run-mediated-skill-script",
         model: "gpt-5.4",
         cfcEnforcementMode: "enforce-explicit",
+        skillsRoot: root,
         allowedSkillScripts: [{
           skill: "deno-memory-profiler",
           path: "scripts/memory.ts",

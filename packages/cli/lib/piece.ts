@@ -2,14 +2,11 @@ import { ensureDir } from "@std/fs";
 import { dirname, join } from "@std/path";
 
 import type { CellScope, JSONSchema } from "@commonfabric/api";
+import { FabricPrimitive, FabricSpecialObject } from "@commonfabric/data-model";
 import {
   codecOf,
   NULL_LIVE_ENVIRONMENT,
 } from "@commonfabric/data-model/codec-common";
-import {
-  FabricPrimitive,
-  FabricSpecialObject,
-} from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { createSession, isDID, Session } from "@commonfabric/identity";
 import { collectDataFileNames } from "@commonfabric/js-compiler";
@@ -27,6 +24,7 @@ import {
 } from "@commonfabric/piece";
 import {
   type PatternCompatibilityReport,
+  type PatternUpdateReceipt,
   type PiecePatternRef,
   PiecesController,
 } from "@commonfabric/piece/ops";
@@ -121,14 +119,17 @@ import { validateEmbeddedSpaces } from "./llm-friendly-ref.ts";
 import { deriveDiskHandleId } from "./sqlite-source.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
 import { startVersionCheck } from "./version-check.ts";
+import { noteWroteTo } from "./write-receipt.ts";
 
 export interface EntryConfig {
   mainPath: string;
   mainExport?: string;
   repository?: string;
   rootPath?: string;
+
   /** Test entry paths whose resolved source closures travel with the piece. */
   testPaths?: string[];
+
   /** Data file paths stored with the piece and never compiled. */
   dataFilePaths?: string[];
 }
@@ -139,6 +140,7 @@ export interface SpaceConfig {
   identity: string;
   jsonOutput?: boolean;
   deferSpaceCellSync?: boolean;
+
   /**
    * Space DIDs embedded in LLM-friendly references given to this command,
    * carried here when `space` is a name rather than a DID. A name only
@@ -158,13 +160,15 @@ export interface PieceSearchResult {
 export interface PieceConfig extends SpaceConfig {
   piece: string;
   pieceScope?: CellScope;
+
   /**
-   * Path segments embedded in an LLM-friendly `--piece` reference. A command
+   * Path segments embedded in an LLM-friendly `--cell` reference. A command
    * that reads or writes at a path prepends these to its positional path
    * argument; a command whose intake is id-only rejects a reference that
    * carries them.
    */
   piecePath?: (string | number)[];
+
   /**
    * True when the reference carried the `#argument` suffix: the caller
    * selected the piece's arguments cell. A command that takes `--input`
@@ -282,11 +286,11 @@ function cfcLabelViewForCommand(
     : redactCaveatSourcesForDisplay(effectiveView);
 }
 
-/** A read path that lands ON a verb, under either spelling. Reading a verb returns the
+/** A `cf get` path that lands ON a verb. Reading a verb returns the
  * stream's serialization — never what the caller wanted — so the read refuses
  * and redirects instead, mirroring the llm-dialog read tool's "Path resolves
  * to a handler; use invoke() instead." (verb contract WS-F, read-path guard).
- * `callable` is whether `cf piece call <verb>` actually resolves the verb —
+ * `callable` is whether `cf call <verb>` actually resolves the verb —
  * the dispatcher resolves root-level names only — so the refusal never
  * suggests a command that would fail: a nested verb points at reading the
  * parent object or the root-level verbs listing instead. */
@@ -294,11 +298,11 @@ export class PieceVerbReadError extends Error {
   constructor(verb: string, piece: string, callable: boolean) {
     super(
       callable
-        ? `Path resolves to a verb; use 'cf call --piece ${piece} ${verb}' instead.`
+        ? `Path resolves to a verb; use 'cf call --cell ${piece} ${verb}' instead.`
         : `Path resolves to a verb that is not directly callable: verbs are ` +
           `invoked at the piece's root surface. Read the parent object ` +
           `instead, or list the callable verbs with ` +
-          `'cf piece verbs --piece ${piece}'.`,
+          `'cf piece verbs --cell ${piece}'.`,
     );
     this.name = "PieceVerbReadError";
   }
@@ -353,6 +357,7 @@ async function resultProjectionFailedAtPath(
  */
 export interface ResolvedPieceCallable extends CallableResolution {
   commandSpec: ExecCommandSpec;
+
   /**
    * This verb's documentation, resolved on demand — a thunk for the same
    * reason `declaredResult` is one, and attached under the same condition:
@@ -366,6 +371,7 @@ export interface ResolvedPieceCallable extends CallableResolution {
 
 export interface PieceCallableDependencies extends CallableExecutionDeps {
   helpCommandPrefix?: string;
+
   loadPieces?: (config: SpaceConfig) => Promise<any>;
   loadPiece?: (
     pieces: any,
@@ -381,10 +387,13 @@ export interface PieceCallableDependencies extends CallableExecutionDeps {
 export interface ExecutedPieceCallable {
   helpText?: string;
   outputText?: string;
+
   /** Handler invocation outcome, passed through from ExecutedCallable. */
   invocation?: InvocationOutcome;
+
   /** Tool result cell address, passed through from ExecutedCallable. */
   resultRef?: CallableResultRef;
+
   parsed: ParsedExecArgs;
   resolved: ResolvedPieceCallable;
 }
@@ -512,10 +521,11 @@ export async function loadPieces(
   ]);
   // A `--space` given as a name has only now resolved to a DID; this is the
   // deferred half of the embedded-space check `normalizeLLMFriendlyRef`
-  // performs at parse time for a DID-configured space.
-  validateEmbeddedSpaces(config.embeddedSpaces, session.space);
-  // Use a const ref object so we can assign later while keeping const binding
-  const piecesRef: { current?: PiecesController } = {};
+  // performs at parse time when the two spaces are written the same way. A
+  // reference naming its space by name is held to the same derivation the
+  // target space went through, so the two are compared as the one thing they
+  // both stand for.
+  await validateEmbeddedSpaces(config.embeddedSpaces, session);
   const runtimeErrors: CliRuntimeErrorRecord[] = [];
   const runtime = await timeCliPhase(
     "loadPieces.runtime",
@@ -555,25 +565,6 @@ export async function loadPieces(
               (config.jsonOutput ? console.error : console.log)(
                 `navigateTo new piece id ${id}`,
               );
-              // Best-effort: ensure piece is present in list
-              runtime.storageManager
-                .synced()
-                .then(async () => {
-                  try {
-                    const mgr = piecesRef.current!;
-                    const piecesCell = await mgr.getPieceRegistry();
-                    const list = piecesCell.get();
-                    const exists = list.some((c) => pieceId(c) === id);
-                    if (!exists) {
-                      await mgr.add([target]);
-                    }
-                  } catch (e) {
-                    console.error("navigateTo add error:", e);
-                  }
-                })
-                .catch((_err: unknown) => {
-                  // ignore; we already emitted the id
-                });
             } catch (e) {
               console.error("navigateTo callback error:", e);
             }
@@ -608,7 +599,6 @@ export async function loadPieces(
           deferSpaceCellSync: config.deferSpaceCellSync,
         }),
     );
-    piecesRef.current = pieces;
     if (config.deferSpaceCellSync) {
       await timeCliPhase(
         "loadPieces.ensureSpaceSession",
@@ -710,7 +700,7 @@ export interface SlugSummary {
 }
 
 /** Every slug the space's index records, each resolved to the piece id
- * `--piece` would resolve it to. The index bounds the listing: it names
+ * `--cell` would resolve it to. The index bounds the listing: it names
  * slugs assigned since it existed, so an older slug still resolves but is
  * not listed — nothing can enumerate what it was never told the name of. */
 export async function listSpaceSlugs(
@@ -1437,6 +1427,10 @@ export async function newPiece(
       clearTimeout(timer)
     );
   });
+  // Here rather than after the registry add below: the piece now exists in
+  // the space, and a slug or registry step that throws afterwards leaves a
+  // partial write that the operator is owed the location of.
+  noteWroteTo(config.space);
 
   if (options?.slug) {
     await timeCliPhase(
@@ -1501,14 +1495,16 @@ export async function setPieceSlug(
         writeTargetMetadata: sourcePath.length === 0,
       }),
   );
+  noteWroteTo(config.space);
 }
 
+/** Replaces the piece's source and returns its setup transaction receipt. */
 export async function setPiecePattern(
   config: PieceConfig,
   entry: EntryConfig,
   options: SetPiecePatternOptions = {},
   deps: PieceOperationDependencies = {},
-): Promise<void> {
+): Promise<PatternUpdateReceipt> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const resolvedConfig = await resolvePieceConfigWithPieces(
     config,
@@ -1521,7 +1517,7 @@ export async function setPiecePattern(
     undefined,
     resolvedConfig.pieceScope,
   );
-  await piece.setPattern(
+  const receipt = await piece.setPattern(
     await (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
       pieces,
       entry,
@@ -1533,6 +1529,8 @@ export async function setPiecePattern(
         : {}),
     },
   );
+  noteWroteTo(config.space);
+  return receipt;
 }
 
 /**
@@ -1663,6 +1661,7 @@ export async function applyPieceInput(config: PieceConfig, input: object) {
     resolvedConfig.pieceScope,
   );
   await piece.setInput(input);
+  noteWroteTo(config.space);
 }
 
 /**
@@ -1738,7 +1737,7 @@ async function tryResolvePieceCallableAt(
 
 /** The forced-stream cast: assert `name` on `cell` is a stream, then ask the
  * runtime whether it answers as one. The third and last resolution path of
- * `cf piece call` (tryResolvePieceHandler), where a handler whose stored
+ * `cf call` (tryResolvePieceHandler), where a handler whose stored
  * schema lost the stream marker still answers.
  *
  * It proves nothing, and belongs ONLY here. The cast's stream schema survives
@@ -1845,7 +1844,7 @@ async function tryResolveLivePieceToolCallable(
 
 /** Load the target piece and its pieces controller for callable
  * resolution/listing —
- * one shared path so `cf piece call` and `cf piece verbs` always see the same
+ * one shared path so `cf call` and `cf piece verbs` always see the same
  * piece state. */
 async function loadPieceForCallables(
   config: PieceConfig,
@@ -1976,6 +1975,7 @@ export interface PieceCallablesListing {
   /** The deployed pattern's source identity; null when the piece exposes
    * none (e.g. harness doubles). */
   pattern: PiecePatternRef | null;
+
   /** Present when the listing is a LOWER BOUND rather than the surface,
    * naming what it could not read. `verbs` is still every callable the
    * listing found, and every row in it is still real.
@@ -1989,6 +1989,7 @@ export interface PieceCallablesListing {
    * `probeForcedStreamCell`, whose cast is the only thing that finds one and
    * finds every data field with it. */
   incomplete?: "pattern-unavailable";
+
   verbs: PieceCallableListing[];
 }
 
@@ -1996,16 +1997,20 @@ export interface PieceCallablesListing {
 export interface PieceCallableListing {
   name: string;
   kind: "handler" | "tool";
+
   /** Which cell the callable lives on. `result` shadows `input` on a name
-   * collision, matching `cf piece call`'s resolution order. */
+   * collision, matching `cf call`'s resolution order. */
   on: "result" | "input";
+
   /** The verb's input schema — the same schema `call <verb> --help --json`
    * serves. `true` means unconstrained. */
   inputSchema: JSONSchema | true;
+
   /** What the verb hands back: a tool's pattern result schema, a handler's
    * declared result. Absent when the verb declares none — the value-less
    * shape, which is the common one. */
   outputSchema?: JSONSchema;
+
   /**
    * What the verb is FOR, in the author's own words: the doc comment on the
    * pattern property declaring it, the same prose `call <verb> --help` prints
@@ -2017,10 +2022,12 @@ export interface PieceCallableListing {
    * caller who wrote it and calls it documentation.
    */
   description?: string;
+
   /** Listing mark: a UI affordance outside the headless contract (inferred
    * from session-scoped handler bindings at compile time). Hidden from the
    * default listing; always callable. */
   tier?: "wrapper";
+
   /** Listing mark: `@deprecated` JSDoc on the verb, lowered to the standard
    * schema annotation. Hidden from the default listing; always callable. */
   deprecated?: boolean;
@@ -2217,6 +2224,7 @@ export interface DeclaredVerbProse {
    * merged into it.
    */
   description?: string;
+
   /**
    * The verb's declared event schema with its `$ref` followed against the
    * result schema's own root, so the field descriptions inside the `$defs`
@@ -2313,6 +2321,7 @@ export function declaredVerbProse(
 interface DescriptionEdit {
   /** Keys from the served document's root down to the `description` slot. */
   readonly path: readonly string[];
+
   readonly description: string;
 }
 
@@ -2535,13 +2544,16 @@ interface ProseWalk {
  */
 interface ProseWalkState {
   readonly edits: DescriptionEdit[];
+
   /** Paths already recorded, so the first account of a position wins. Two
    * positions sharing one `$defs` target can each reach it now that the guard
    * is path-scoped, and without this the later one would silently overwrite
    * the earlier. */
   readonly written: Set<string>;
+
   /** Served `$defs` names open on the current descent. */
   readonly openDefinitions: string[];
+
   /** Declared references open on the current expansion, each with the scope it
    * was followed in — the same reference in two different scopes is two
    * different targets. */
@@ -3015,7 +3027,7 @@ async function declaredVerbEventFor(
  *
  * Candidate names come from the result cell, then the input cell, then the
  * piece root and the compiled pattern's result properties; every one of them
- * is put to the same classification `cf piece call` resolves through, so the
+ * is put to the same classification `cf call` resolves through, so the
  * listing and the dispatcher can never disagree about what is callable. The
  * two halves are deliberately asymmetric — enumeration is generous because a
  * name it never proposes can never be listed, and classification is strict
@@ -3108,7 +3120,7 @@ async function listCallablesForLoadedPiece(piece: any): Promise<{
 
   const listings = new Map<string, PieceCallableListing>();
   // Names ordinary detection rejected: candidates for the forced-stream
-  // fallback below, so the listing covers every path `cf piece call` resolves.
+  // fallback below, so the listing covers every path `cf call` resolves.
   const rejected = new Set<string>();
   let resultRoot: any;
   for (const cellProp of ["result", "input"] as const) {
@@ -3167,7 +3179,7 @@ async function listCallablesForLoadedPiece(piece: any): Promise<{
   // result cell reads through the pattern's declared result type, so a verb
   // that type omits is absent from the schema-filtered value and from the
   // durable schema alike, and no amount of classification reaches a name
-  // nothing proposed. `cf piece call` never had this problem — a dispatcher is
+  // nothing proposed. `cf call` never had this problem — a dispatcher is
   // handed the name — which is how a piece answers "no verbs" and then accepts
   // one.
   //
@@ -3234,7 +3246,7 @@ async function listCallablesForLoadedPiece(piece: any): Promise<{
       if (existing?.on === "result") continue;
       const callableCell = resultRoot.key(name).asSchemaFromLinks();
       // `detectCallableKind`, not an assumed "handler": the walk above uses it,
-      // `cf piece call` resolves through it, and a candidate proposed by the
+      // `cf call` resolves through it, and a candidate proposed by the
       // graph arrives with no evidence of its kind at all — a tool sits in the
       // pattern's result exactly as a handler's stream does. Assuming here
       // would list a tool as a handler and hand a caller `invoke` and the
@@ -3266,7 +3278,7 @@ async function listCallablesForLoadedPiece(piece: any): Promise<{
       const spec = callableCommandSpec(callableCell, kind);
       const outputSchema = spec.outputSchemaSummary ?? handlerResults.get(name);
       // `result`, because that is where the row was reached and where
-      // `cf piece call` reaches it: a graph candidate is a property of the
+      // `cf call` reaches it: a graph candidate is a property of the
       // PATTERN's result, and a piece-root candidate is dispatched on the
       // result cell too. Neither is on the input cell, whose same-named verb
       // would be a different stream.
@@ -3382,12 +3394,19 @@ export async function executePieceCallable(
     callableName,
     deps,
   );
+  // The mount that was invoked, named once: the verb's help page and a
+  // refusal about the verb's own section both reprint the command a caller
+  // typed, and printing two spellings of it would be two answers to the same
+  // question.
+  const commandPrefix = deps.helpCommandPrefix ??
+    cliCommand(["call", "...", callableName]);
   return await executeCallableCommand({
     resolved,
     execution: resolved,
     commandSpec: resolved.commandSpec,
     rawArgs,
     deps,
+    sectionPrefix: commandPrefix,
     renderHelp: async (commandSpec, parsed) => {
       // The pattern is consulted HERE and nowhere earlier: the parse has
       // established that a page is being rendered, so the load it costs is
@@ -3399,19 +3418,22 @@ export async function executePieceCallable(
       const spec = await withDeclaredPatternDocs(commandSpec, resolved);
       return parsed.showHelpJson
         ? renderExecHelpJson(spec)
-        : renderPieceCallHelp(
-          // Each mount passes its own spelling, so the page names the
-          // command that was typed. The fallback is the canonical top-level
-          // spelling: a page minted with no mount to name must not teach
-          // the deprecated one.
-          deps.helpCommandPrefix ??
-            cliCommand(["call", "...", callableName]),
-          spec,
-        );
+        // Each mount passes its own spelling, so the page names the command
+        // that was typed; `commandPrefix` above holds the fallback for a page
+        // minted with no mount to name.
+        : renderPieceCallHelp(commandPrefix, spec);
     },
   });
 }
 
+/**
+ * Points the target piece's `targetPath` at the value `sourcePath` names on
+ * the source piece, so the target reads the source rather than holding a copy
+ * of what it said.
+ *
+ * Both endpoints are read back first, and the link is refused when either the
+ * piece or the path is missing; `options.allowNonExisting` links anyway.
+ */
 export async function linkPieces(
   config: SpaceConfig,
   sourcePieceId: string,
@@ -3424,21 +3446,30 @@ export async function linkPieces(
     sourceScope?: PieceConfig["pieceScope"];
     targetScope?: PieceConfig["pieceScope"];
   },
+  deps: PieceResolutionDeps = {},
 ): Promise<void> {
   const pieces = await timeCliPhase(
     "linkPieces.loadPieces",
-    () => loadPieces(config),
+    () => (deps.loadPieces ?? loadPieces)(config),
   );
   const resolvedSourcePieceId = await timeCliPhase(
     "linkPieces.resolveSource",
     () =>
-      resolveLinkEndpointAddress(pieces, sourcePieceId, undefined, {
-        allowMissingSlugFallback: true,
-      }),
+      resolveLinkEndpointAddress(
+        pieces,
+        sourcePieceId,
+        deps.resolvePieceAddress,
+        { allowMissingSlugFallback: true },
+      ),
   );
   const resolvedTargetPieceId = await timeCliPhase(
     "linkPieces.resolveTarget",
-    () => resolveLinkEndpointAddress(pieces, targetPieceId),
+    () =>
+      resolveLinkEndpointAddress(
+        pieces,
+        targetPieceId,
+        deps.resolvePieceAddress,
+      ),
   );
 
   // Validate that source and target pieces/paths exist by reading them
@@ -3446,7 +3477,7 @@ export async function linkPieces(
     const errors: string[] = [];
 
     // Check source piece exists by verifying it has a pattern cell
-    // (i.e., was created via cf piece new, not just written to with cf piece set)
+    // (i.e., was created via cf piece new, not just written to with cf set)
     const sourcePiece = await timeCliPhase(
       "linkPieces.getSourcePiece",
       () =>
@@ -3548,6 +3579,7 @@ export async function linkPieces(
         options,
       ),
   );
+  noteWroteTo(config.space);
 }
 
 /**
@@ -3586,6 +3618,9 @@ export async function linkSqliteDiskSource(
     handle.withTx(tx).set({ id, tables: {}, rev: 0 });
   });
   if (writeRes.error) throw writeRes.error;
+  // The handle is committed, so the space has been written to whether or not
+  // the registration and link below succeed.
+  noteWroteTo(config.space);
 
   // 2. Register the on-disk source with the server (read-only attach for `id`).
   const provider = pieces.runtime.storageManager.open(space);
@@ -3783,6 +3818,7 @@ export async function generateSpaceMap(
 export interface CachedResultField {
   /** The field's name on the piece's result. */
   name: string;
+
   /** The computed documents crossed while resolving the field's value. */
   cells: CachedResultCell[];
 }
@@ -3791,10 +3827,13 @@ export interface CachedResultField {
 export interface CachedResultCell {
   /** The computed entity's id. */
   id: string;
+
   /** The space whose commit sequence contains `derivedAtCommit`. */
   space: MemorySpace;
+
   /** The computed entity's memory scope. */
   scope: CellScope;
+
   /**
    * The commit the entity's document last stood at. Absent when the local
    * replica holds no confirmed version of that document.
@@ -3873,16 +3912,20 @@ export interface PieceInspection {
   patternRef?: PiecePatternRef;
   source?: Readonly<unknown>;
   result: Readonly<unknown> | null | undefined;
+
   /**
    * The commit the argument document behind `source` last stood at. It can be
    * ordered against a {@link CachedResultCell} commit only when both have the
    * same `space`.
    */
   sourceCommit?: number;
+
   /** The space whose commit sequence contains `sourceCommit`. */
   sourceSpace?: MemorySpace;
+
   /** The fields of `result` whose resolution crosses a computed-cell cache. */
   cachedResultFields: CachedResultField[];
+
   readingFrom: Array<{ id: string; name?: string }>;
   readBy: Array<{ id: string; name?: string }>;
 }
@@ -3990,8 +4033,15 @@ async function inspectSlugTargetCell(
   };
 }
 
-export async function getPieceView(config: PieceConfig): Promise<unknown> {
-  const data = (await inspectPiece(config)) as any;
+/**
+ * Returns the view a piece publishes — the `[UI]` node on its result cell —
+ * or `undefined` where the piece publishes none.
+ */
+export async function getPieceView(
+  config: PieceConfig,
+  deps: PieceResolutionDeps = {},
+): Promise<unknown> {
+  const data = (await inspectPiece(config, deps)) as any;
   return data.result?.[UI] as VNode;
 }
 
@@ -4017,14 +4067,14 @@ export function formatViewTree(view: unknown): string {
 }
 
 /** A read path's last segment classified as a verb: the name, and whether
- * `cf piece call <name>` actually resolves it (root-level names only). */
+ * `cf call <name>` actually resolves it (root-level names only). */
 interface ReadPathVerb {
   verb: string;
   callable: boolean;
 }
 
 /**
- * Classify a `cf piece get` path whose last segment CERTAINLY lands on a
+ * Classify a `cf get` path whose last segment CERTAINLY lands on a
  * verb. The guard refuses only on the two definite stored signals: the
  * link-derived schema answers as a stream (`isHandlerCell` on the
  * `asSchemaFromLinks` cell — that schema comes from stored links, never from
@@ -4237,6 +4287,7 @@ export async function setCellCfcLabel(
   }
   await pieces.synced();
 
+  noteWroteTo(config.space);
   return cfcLabelViewForCommand(targetCell, path);
 }
 
@@ -4288,7 +4339,7 @@ export async function getCellValue(
         // The verb refusal wins over every selection error, not only the
         // "Cannot access path" family: a real `--filter` against a handler
         // fails inside the selector with a shape error that sends the caller
-        // to their schema, when the answer is `cf piece call`. Classification
+        // to their schema, when the answer is `cf call`. Classification
         // fails open, so an uncertain path keeps its original error.
         const verbRefusal = await verbReadRefusalOrNull(
           piece,
@@ -4396,14 +4447,23 @@ export async function getCellValue(
   }
 }
 
+/**
+ * Writes `value` at `path` on a piece's result cell, or on its arguments cell
+ * under `options.input`, and receipts the space the write landed in.
+ */
 export async function setCellValue(
   config: PieceConfig,
   path: (string | number)[],
   value: unknown,
   options?: { input?: boolean },
+  deps: PieceResolutionDeps = {},
 ): Promise<void> {
-  const pieces = await loadPieces(config);
-  const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
+    config,
+    pieces,
+    deps.resolvePieceAddress,
+  );
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
@@ -4415,35 +4475,67 @@ export async function setCellValue(
   } else {
     await piece.result.set(value, path);
   }
+  noteWroteTo(config.space);
 }
 
 /**
+ * What a {@link callPieceHandler} call supplies: the connection its
+ * resolution runs over, and the three execution deps a handling can observe
+ * through a call that returns nothing.
+ *
+ * Narrower than {@link PieceCallableDependencies} by the fields this path
+ * cannot keep. The input readers and the help prefix have no bearing on it —
+ * the payload arrives decoded as an argument, and nothing here renders a
+ * page. The result-shaping deps are excluded for a sharper reason: a
+ * selection makes the dispatch derive a value that this signature then
+ * discards, so admitting one would spend a settle and a sync on an answer
+ * nobody receives, and could raise where the handling itself committed
+ * cleanly. A call that wants a result wants
+ * {@link executePieceCallable}, which returns one.
+ */
+export type PieceHandlerCallDeps =
+  & Pick<CallableExecutionDeps, "invocation" | "onPhase" | "skipReadback">
+  & Pick<PieceCallableDependencies, "loadPieces" | "loadPiece">;
+
+/**
  * Calls a named handler within a piece with a decoded JSON payload.
+ *
+ * A `deps.invocation` names the id and session the handling files its receipt
+ * under; without one the dispatch takes a runtime-minted event id, and there
+ * is no receipt to come back for.
  */
 export async function callPieceHandler<T = any>(
   config: PieceConfig,
   handlerName: string,
   args: T,
+  deps: PieceHandlerCallDeps = {},
 ): Promise<void> {
   const resolved = await timeCliPhase(
     "callPieceHandler.resolve",
-    () => resolvePieceCallable(config, handlerName),
+    () => resolvePieceCallable(config, handlerName, deps),
   );
   if (resolved.callableKind !== "handler") {
     throw new Error(`Callable "${handlerName}" is not a handler`);
   }
   await timeCliPhase(
     "callPieceHandler.execute",
-    () => executeResolvedCallable(resolved, args),
+    () => executeResolvedCallable(resolved, args, deps),
   );
 }
 
-export async function stepPiece(config: PieceConfig): Promise<void> {
+export async function stepPiece(
+  config: PieceConfig,
+  deps: PieceResolutionDeps = {},
+): Promise<void> {
   const pieces = await timeCliPhase(
     "stepPiece.loadPieces",
-    () => loadPieces(config),
+    () => (deps.loadPieces ?? loadPieces)(config),
   );
-  const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
+    config,
+    pieces,
+    deps.resolvePieceAddress,
+  );
   const piece = await timeCliPhase(
     "stepPiece.getPiece",
     () =>
@@ -4456,6 +4548,9 @@ export async function stepPiece(config: PieceConfig): Promise<void> {
   );
   await timeCliPhase("stepPiece.pull", () => piece.getCell().pull());
   await timeCliPhase("stepPiece.synced", () => pieces.synced());
+  // A step exists to run the pattern and commit what recomputation
+  // produced, so the synced state above is the write the receipt follows.
+  noteWroteTo(config.space);
   await timeCliPhase(
     "stepPiece.stop",
     () => pieces.stopPiece(resolvedConfig.piece),
@@ -4465,14 +4560,22 @@ export async function stepPiece(config: PieceConfig): Promise<void> {
 /**
  * Removes a piece from the space.
  */
-export async function removePiece(config: PieceConfig): Promise<void> {
-  const pieces = await loadPieces(config);
-  const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
+export async function removePiece(
+  config: PieceConfig,
+  deps: PieceResolutionDeps = {},
+): Promise<void> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
+    config,
+    pieces,
+    deps.resolvePieceAddress,
+  );
   const removed = await pieces.remove(resolvedConfig.piece);
 
   if (!removed) {
     throw new Error(`Piece "${config.piece}" not found`);
   }
+  noteWroteTo(config.space);
 }
 
 interface RootPatternDeps {
@@ -4488,6 +4591,7 @@ export async function recreateSpaceRootPattern(
 ): Promise<string> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const piece = await pieces.recreateDefaultPattern();
+  noteWroteTo(config.space);
   return piece.id;
 }
 
@@ -4521,6 +4625,7 @@ export async function setHomePattern(
     customProgram: program,
     repository: entry.repository,
   });
+  noteWroteTo(homeConfig.space);
 }
 
 /**
@@ -4533,4 +4638,5 @@ export async function resetHomePattern(
   const homeConfig: SpaceConfig = { ...config, space: identity.did() };
   const pieces = await loadPieces(homeConfig);
   await pieces.recreateDefaultPattern();
+  noteWroteTo(homeConfig.space);
 }

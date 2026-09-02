@@ -185,14 +185,25 @@ outcome:
 | `ConflictError` | Stale basis from upstream. The retry first awaits the conflict's `readyToRetry` catch-up gate, then pulls the doc the conflict names, so it runs against fresh state. |
 | `StorageTransactionInconsistent` | Stale basis on this replica — a value read during the transaction changed locally; re-reading resolves it. |
 | `ConnectionError`, `InvalidMessageError` | Liveness failure: the commit never reached a verdict, and the memory client re-establishes the link on its own (a transport close schedules `reconnect()`; a `transact` issued while disconnected queues and calls `restoreConnection()`), so a retry can land the identical write. `InvalidMessageError` is collateral — an undecodable frame makes the client reject every in-flight request, including commits it says nothing about. |
-| `StorageTransactionAborted` | The attempt was discarded before storage — the callback called `tx.abort()`, or CFC enforcement refused to hand the transaction over. A re-run is a genuinely new attempt, and costs no round-trip. |
+| `StorageTransactionAborted` | The attempt was discarded before storage, and a re-run is a genuinely new attempt that costs no round-trip. Producers: the callback called `tx.abort()`; a prepared CFC transaction's inputs drifted before the verdict (`cfc-prepared-digest-mismatch`, and the `invalidateCfc` drift reasons such as `read-after-prepare`); or a CFC refusal that is not wholly a verdict (`cfc-refusal-not-a-verdict`) — prepare could not evaluate an input it needed, or a resolution failed. Those clear on a fresh attempt once the input is there. |
 | `AuthorizationError` with `retriable: true` | The server itself marked this denial as one a fresh handshake heals (a session-open anti-replay race). |
 
 Everything else is **terminal on the first attempt**: a `ProtocolError` (the
 server refused the commit's shape), an unmarked `AuthorizationError` (the server
 evaluated the request and denied it), a `PreconditionFailedError` (permanent by
 definition — the client must not retry), a `RowLabelCommitError` (a commit-time
-rule refused the data), a `StoreError`, or the generic `TransactionError`. Those
+rule refused the data), a `CfcCommitRefusalError` (the client-side CFC boundary
+evaluated the transaction's own reads and writes and refused them before
+storage saw them — and did so on EVERY recorded reason. A refusal is terminal
+only when every reason is a verdict; a reason is a verdict only when its
+producer tags it as one (`cfc/verdict-reason.ts`), so anything untagged — an
+unavailable input, a failed resolution, a prepared state a caller disturbed —
+stays retryable. It carries both channels: `reasons`, the prose one per rule
+that refused, and `refusals`, the structured descriptions
+(`cfc/refusal-detail.ts`) naming the boundary, the offending label atoms, and
+the reads that carried them — which is what lets a consumer state a remedy
+rather than only a verdict), a
+`StoreError`, or the generic `TransactionError`. Those
 are deterministic with respect to the committed data: a re-run recomputes the
 identical refused write, and each doomed attempt costs a server round-trip plus
 a revert notification to the cell's subscribers.

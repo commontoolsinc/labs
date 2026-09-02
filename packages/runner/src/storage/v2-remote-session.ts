@@ -1,8 +1,15 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { type MemorySpace, type Signer } from "@commonfabric/memory/interface";
-import * as MemoryClient from "@commonfabric/memory/v2/client";
 import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
+import * as MemoryClient from "@commonfabric/memory/v2/client";
+import {
+  decodeCompressedMemoryMessage,
+  encodeCompressedMemoryMessage,
+  encodeMemoryCompressionControlMessage,
+  isMemoryMessageFrame,
+  parseMemoryCompressionControlMessage,
+} from "@commonfabric/memory/v2/message-compression";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 
 export interface SessionFactory {
@@ -10,6 +17,7 @@ export interface SessionFactory {
    *  by lower-level replica tests omit this because they intentionally model
    *  only the messages under test. */
   readonly supportsAclBootstrap?: boolean;
+
   create(
     space: MemorySpace,
     signer?: Signer,
@@ -19,6 +27,9 @@ export interface SessionFactory {
     client: MemoryClient.Client;
     session: MemoryClient.SpaceSession;
   }>;
+
+  /** Changes compression on live sessions and the default for later ones. */
+  setMessageCompressionEnabled?(enabled: boolean): Promise<void>;
 }
 
 export const toWebSocketAddress = (address: URL): URL => {
@@ -121,12 +132,40 @@ export const createStorageAddressResolver = (
 };
 
 export class WebSocketTransport implements MemoryClient.Transport {
+  #address: URL;
+  #compressionNegotiated = false;
+  #compressionPreference: boolean;
+  #compressionRequests = new Map<
+    string,
+    ReturnType<typeof Promise.withResolvers<boolean>>
+  >();
+  #disposed = false;
+  #onDispose: () => void;
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
   #socket: WebSocket | null = null;
   #opening: Promise<WebSocket> | null = null;
+  #receiveCompressionEnabled = false;
+  #sendCompressionEnabled = false;
+  #sending: Promise<void> = Promise.resolve();
+  #receiving: Promise<void> = Promise.resolve();
 
-  constructor(private readonly address: URL) {}
+  /** Constructs a transport for one memory WebSocket route. */
+  constructor(
+    address: URL,
+    compressionPreference = true,
+    onDispose: () => void = () => {},
+  ) {
+    this.#address = address;
+    this.#compressionPreference = compressionPreference;
+    this.#onDispose = onDispose;
+  }
+
+  /** @inheritDoc */
+  get supportsMessageCompression(): boolean {
+    return typeof CompressionStream === "function" &&
+      typeof DecompressionStream === "function";
+  }
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -136,15 +175,55 @@ export class WebSocketTransport implements MemoryClient.Transport {
     this.#closeReceiver = receiver;
   }
 
+  /** @inheritDoc */
+  setMessageCompressionEnabled(enabled: boolean): void {
+    this.#compressionNegotiated = enabled;
+    this.#receiveCompressionEnabled = enabled;
+    this.#sendCompressionEnabled = enabled && this.#compressionPreference;
+    if (enabled && !this.#compressionPreference) {
+      void this.#sendCompressionControl(false).catch(reportError);
+    }
+  }
+
+  /** Changes compression in both directions without reconnecting. */
+  async requestMessageCompression(enabled: boolean): Promise<boolean> {
+    this.#compressionPreference = enabled;
+    this.#sendCompressionEnabled = enabled && this.#compressionNegotiated;
+    if (!this.#compressionNegotiated) return false;
+    return await this.#sendCompressionControl(enabled);
+  }
+
+  /**
+   * Sends in submission order using the compression mode active at submission.
+   * Every payload stays on the queue because a later text frame must not
+   * overtake earlier asynchronous compression.
+   */
   async send(payload: string): Promise<void> {
-    const socket = await this.open();
-    socket.send(payload);
+    const opening = this.#open();
+    const compressionEnabled = this.#sendCompressionEnabled;
+    const send = this.#sending.then(async () => {
+      const socket = await opening;
+      const frame = compressionEnabled
+        ? await encodeCompressedMemoryMessage(payload)
+        : payload;
+      socket.send(frame);
+    });
+    this.#sending = send.catch(() => {});
+    await send;
   }
 
   async close(): Promise<void> {
     const socket = this.#socket;
     this.#socket = null;
     this.#opening = null;
+    this.#compressionNegotiated = false;
+    this.#receiveCompressionEnabled = false;
+    this.#sendCompressionEnabled = false;
+    this.#rejectCompressionRequests(new Error("Memory transport closed"));
+    if (!this.#disposed) {
+      this.#disposed = true;
+      this.#onDispose();
+    }
     if (!socket || socket.readyState === WebSocket.CLOSED) {
       return;
     }
@@ -161,56 +240,163 @@ export class WebSocketTransport implements MemoryClient.Transport {
     await closed;
   }
 
-  private async open(): Promise<WebSocket> {
+  async #open(): Promise<WebSocket> {
     if (this.#socket?.readyState === WebSocket.OPEN) {
       return this.#socket;
     }
     if (this.#opening) {
       return await this.#opening;
     }
-    const address = toWebSocketAddress(this.address);
+    const address = toWebSocketAddress(this.#address);
     const opening = new Promise<WebSocket>((resolve, reject) => {
       const socket = new WebSocket(address);
+      socket.binaryType = "arraybuffer";
       this.#socket = socket;
+      this.#compressionNegotiated = false;
+      this.#receiveCompressionEnabled = false;
+      this.#sendCompressionEnabled = false;
       let opened = false;
       socket.addEventListener("open", () => {
         opened = true;
         resolve(socket);
       }, { once: true });
       socket.addEventListener("message", (event) => {
-        if (typeof event.data === "string") {
-          this.#receiver(event.data);
-        }
+        const frame = event.data;
+        const receive = this.#receiving.then(async () => {
+          if (this.#socket !== socket) return;
+          try {
+            if (!isMemoryMessageFrame(frame)) {
+              throw new Error("Unsupported memory websocket frame type");
+            }
+            let payload: string;
+            if (this.#receiveCompressionEnabled) {
+              payload = await decodeCompressedMemoryMessage(frame);
+            } else {
+              if (typeof frame !== "string") {
+                throw new Error(
+                  "Memory websocket expects text before compression negotiation",
+                );
+              }
+              payload = frame;
+            }
+            if (this.#socket !== socket) return;
+            const control = parseMemoryCompressionControlMessage(payload);
+            if (control) {
+              const pending = this.#compressionRequests.get(control.requestId);
+              if (pending) {
+                this.#compressionRequests.delete(control.requestId);
+                const enabled = control.enabled && this.#compressionNegotiated;
+                this.#sendCompressionEnabled = enabled;
+                pending.resolve(enabled);
+              }
+              return;
+            }
+            try {
+              this.#receiver(payload);
+            } catch (cause) {
+              reportError(cause);
+            }
+          } catch (cause) {
+            if (this.#socket !== socket) return;
+            const error = new Error(
+              "Unable to decode compressed memory websocket message",
+              { cause },
+            );
+            this.#socket = null;
+            this.#compressionNegotiated = false;
+            this.#receiveCompressionEnabled = false;
+            this.#sendCompressionEnabled = false;
+            this.#rejectCompressionRequests(error);
+            this.#closeReceiver(error);
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.close(1007, error.message);
+            }
+          }
+        });
+        this.#receiving = receive.catch(reportError);
       });
       socket.addEventListener("close", () => {
-        if (this.#socket === socket) {
+        const isCurrentSocket = this.#socket === socket;
+        if (isCurrentSocket) {
           this.#socket = null;
+          this.#compressionNegotiated = false;
+          this.#receiveCompressionEnabled = false;
+          this.#sendCompressionEnabled = false;
+          this.#rejectCompressionRequests(
+            new Error("Memory websocket transport closed"),
+          );
         }
         if (this.#opening === opening) {
           this.#opening = null;
         }
-        this.#closeReceiver();
+        if (isCurrentSocket) {
+          this.#closeReceiver();
+        }
         if (!opened) {
           reject(new Error("memory websocket transport closed before opening"));
         }
       });
       socket.addEventListener("error", (event) => {
-        if (this.#socket === socket) {
+        const isCurrentSocket = this.#socket === socket;
+        if (isCurrentSocket) {
           this.#socket = null;
+          this.#compressionNegotiated = false;
+          this.#receiveCompressionEnabled = false;
+          this.#sendCompressionEnabled = false;
+          this.#rejectCompressionRequests(
+            new Error("Memory websocket transport failed"),
+          );
         }
         if (this.#opening === opening) {
           this.#opening = null;
         }
-        this.#closeReceiver(
-          event instanceof ErrorEvent && event.error instanceof Error
-            ? event.error
-            : new Error("memory websocket transport error"),
-        );
+        if (isCurrentSocket) {
+          this.#closeReceiver(
+            event instanceof ErrorEvent && event.error instanceof Error
+              ? event.error
+              : new Error("memory websocket transport error"),
+          );
+        }
         reject(event);
       }, { once: true });
     });
     this.#opening = opening;
     return await this.#opening;
+  }
+
+  /** Sends one inspectable control frame after every earlier application send. */
+  async #sendCompressionControl(enabled: boolean): Promise<boolean> {
+    const requestId = crypto.randomUUID();
+    const response = Promise.withResolvers<boolean>();
+    void response.promise.catch(() => {});
+    this.#compressionRequests.set(requestId, response);
+    const opening = this.#open();
+    const send = this.#sending.then(async () => {
+      const socket = await opening;
+      if (this.#socket !== socket) {
+        throw new Error("Memory websocket changed before compression control");
+      }
+      socket.send(encodeMemoryCompressionControlMessage({
+        requestId,
+        enabled,
+      }));
+    });
+    this.#sending = send.catch(() => {});
+    try {
+      await send;
+      return await response.promise;
+    } catch (cause) {
+      this.#compressionRequests.delete(requestId);
+      throw cause;
+    }
+  }
+
+  /** Rejects control requests which cannot receive an acknowledgement. */
+  #rejectCompressionRequests(error: Error): void {
+    for (const pending of this.#compressionRequests.values()) {
+      pending.reject(error);
+    }
+    this.#compressionRequests.clear();
   }
 }
 
@@ -260,11 +446,29 @@ export async function createSignedSessionOpenAuth(
 
 export class RemoteSessionFactory implements SessionFactory {
   readonly supportsAclBootstrap = true;
+  #compressionEnabled = true;
+  #transports = new Set<WebSocketTransport>();
+
+  readonly #resolveAddress: (space: MemorySpace) => URL;
+  readonly #defaultSigner: Signer;
 
   constructor(
-    private readonly resolveAddress: (space: MemorySpace) => URL,
-    private readonly defaultSigner: Signer,
-  ) {}
+    resolveAddress: (space: MemorySpace) => URL,
+    defaultSigner: Signer,
+  ) {
+    this.#resolveAddress = resolveAddress;
+    this.#defaultSigner = defaultSigner;
+  }
+
+  /** Changes compression on live sessions and the default for later ones. */
+  async setMessageCompressionEnabled(enabled: boolean): Promise<void> {
+    this.#compressionEnabled = enabled;
+    await Promise.all(
+      [...this.#transports].map((transport) =>
+        transport.requestMessageCompression(enabled)
+      ),
+    );
+  }
 
   #createSessionOpenAuth(
     signer: Signer,
@@ -277,13 +481,16 @@ export class RemoteSessionFactory implements SessionFactory {
 
   async create(
     space: MemorySpace,
-    signer = this.defaultSigner,
+    signer = this.#defaultSigner,
     mountOptions: MemoryClient.MountOptions = {},
     signal?: AbortSignal,
   ) {
     const transport = new WebSocketTransport(
-      toSpaceWebSocketAddress(this.resolveAddress(space), space),
+      toSpaceWebSocketAddress(this.#resolveAddress(space), space),
+      this.#compressionEnabled,
+      () => this.#transports.delete(transport),
     );
+    this.#transports.add(transport);
     let client: MemoryClient.Client | undefined;
     const abortError = (): Error =>
       signal?.reason instanceof Error

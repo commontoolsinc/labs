@@ -93,17 +93,22 @@ export const containsLink = (value: unknown): boolean => {
   }
   return false;
 };
+
 export const isValidPartition = isValidSegment;
 
 export interface IngestRegistration {
   id: string;
   name: string;
+
   /** The space partition cells are written into (the end user's space). */
   space: string;
+
   /** Cell-cause prefix; a partition cell's cause is `${causePrefix}/${partition}`. */
   causePrefix: string;
+
   /** Stable source identifier: recorded on the mark + the cross-repo join key. */
   installId: string;
+
   /**
    * The sink discriminator. Only `"journal"` (durable, append-only, marked)
    * exists in iteration 1; `"stream"` (today's webhook dispatch) joins the union
@@ -111,7 +116,9 @@ export interface IngestRegistration {
    * stream-channel id can never silently be given journal semantics here.
    */
   sink: "journal";
+
   secretHash: string;
+
   /**
    * The hash of the token this channel most recently rotated AWAY from.
    *
@@ -124,9 +131,11 @@ export interface IngestRegistration {
    * proof-of-possession, so nothing leaks to a guesser.
    */
   previousSecretHash?: string;
+
   createdBy: string;
   createdAt: string;
   enabled: boolean;
+
   /**
    * The VERIFIED DID that minted this channel — a first-party request proof,
    * checked against an explicit OWNER grant on `space` (lib/space-authority.ts).
@@ -135,12 +144,14 @@ export interface IngestRegistration {
    * the operator script before self-serve existed.
    */
   owner?: string;
+
   /**
    * Hard expiry, enforced on the data plane by `processIngest` — not merely
    * stored. A minted token otherwise outlives any later ACL change (the
    * authorization is checked once, at mint), so this is the bound on that.
    */
   expiresAt?: string;
+
   /**
    * CURRENT revocation state — present iff the channel is revoked right now.
    * Revocation is a soft disable, not a deletion, diverging deliberately from
@@ -154,12 +165,14 @@ export interface IngestRegistration {
    * on arrival. The history below is what preserves the audit trail.
    */
   revoked?: { at: string; by: string };
+
   /**
    * Past revocations, oldest first, bounded. Keeping this separate from
    * `revoked` is what lets re-minting restore service without erasing the
    * record that the channel was once revoked, and by whom.
    */
   revocations?: { at: string; by: string }[];
+
   /**
    * Monotonic version, bumped on every write. It exists so lifecycle mutations
    * can be optimistic: a caller states the revision its decisions were based
@@ -515,6 +528,7 @@ export async function getSpaceRegistrationIndex(
 // capability, and silently killing the victim's live token. There is no replay
 // cache on request proofs (docs/specs/toolshed-access-control.md), so this is
 // durable and per-request rather than an in-memory cache with a timer.
+
 /**
  * Replay defense only has to span the first-party proof's freshness window, so
  * claims older than it can be forgotten. `DEFAULT_MAX_PROOF_AGE_SECONDS` in
@@ -575,6 +589,7 @@ export const isValidRequestId = isValidSegment;
  * conflict — which is the whole basis of the claim that a replay can never
  * reach `generateIngestSecret`.
  */
+
 /** The claim a lifecycle write records, atomically with the write itself. */
 export interface ClaimRequest {
   owner: string;

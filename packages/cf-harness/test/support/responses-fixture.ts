@@ -20,11 +20,13 @@
  */
 export interface ChatViewMessage {
   role: string;
+
   /**
    * Text turns project to a plain string. Multimodal turns project to the
    * chat-style content-part array; those few assertions cast to read it.
    */
   content: string;
+
   tool_call_id?: string;
 }
 

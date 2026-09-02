@@ -19,7 +19,14 @@ import {
   type DiffWorkspace,
   type WorkspaceCache,
 } from "./diffdoc.ts";
-import { type DiffHunk, type DiffModel, parseDiff } from "./diff.ts";
+import {
+  type DiffFile,
+  type DiffHunk,
+  type DiffLine,
+  type DiffModel,
+  parseDiff,
+} from "./diff.ts";
+import type { DiffCountFileContext } from "./diffcounts.ts";
 import {
   type CommitHeader,
   type CommitMessage,
@@ -106,6 +113,15 @@ export function diffSource(
     fileText: expectedFiles,
     hunks: saveHunks,
   };
+  let countContextText: string | undefined;
+  let countContexts: readonly DiffCountFileContext[] = [];
+  const diffCountContexts = (text: string) => {
+    if (text !== countContextText) {
+      countContextText = text;
+      countContexts = buildDiffCountContexts(edit, text);
+    }
+    return countContexts;
+  };
 
   // No file on disk backs this diff (nothing resolved or verified): read-only.
   // A deletion of an entire file has no new-side lines, but its empty workspace
@@ -117,6 +133,7 @@ export function diffSource(
     return {
       label: null,
       isDiff: true,
+      diffCountContexts,
       editable: false,
       reason:
         "This diff doesn't match any file on disk, so there is nothing to edit.",
@@ -233,6 +250,7 @@ export function diffSource(
       ? shortName(files[0])
       : `${files.length} files`,
     isDiff: true,
+    diffCountContexts,
     editable: true,
     policy,
     logicalEnd: (lines, row) =>
@@ -470,6 +488,97 @@ export function diffSource(
         ? baselineWithCurrentHunks(baseline, current)
         : current,
   };
+}
+
+function buildDiffCountContexts(
+  edit: DiffEdit,
+  text: string,
+): readonly DiffCountFileContext[] {
+  const model = parseDiff(text);
+  if (!model) return [];
+  const raw = text.split("\n");
+  return model.files.map((file, fileIndex) => {
+    const oldLines = edit.oldFileLines[fileIndex] ?? undefined;
+    const newText = oldLines
+      ? reconstructNewSide(file, oldLines, raw, model.lines)
+      : undefined;
+    const newLines = newText === undefined
+      ? undefined
+      : languageForFile(file.newPath ?? file.oldPath).highlightLines(
+        newText,
+        file.newPath ?? file.oldPath,
+      );
+    return {
+      oldLines,
+      newLines,
+    };
+  });
+}
+
+function reconstructNewSide(
+  file: DiffFile,
+  oldLines: readonly Line[],
+  raw: readonly string[],
+  diffLines: readonly DiffLine[],
+): string {
+  const lines = oldLines.map((line) => line.text);
+  const oldTrailingNewline = lines.length > 1 && lines.at(-1) === "";
+  const oldLineCount = lines.length === 1 && lines[0] === ""
+    ? 0
+    : lines.length - (oldTrailingNewline ? 1 : 0);
+  let trailingNewline = oldTrailingNewline;
+  const hunks = [...file.hunks].sort((a, b) =>
+    sideStart(b.oldStart, b.oldCount) - sideStart(a.oldStart, a.oldCount) ||
+    b.headerLine - a.headerLine
+  );
+  for (const hunk of hunks) {
+    const replacement: string[] = [];
+    for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
+      const kind = diffLines[i]?.kind;
+      if (kind === "ctx" || kind === "add") {
+        let text = (raw[i] ?? "").slice(1);
+        if (raw[hunk.headerLine]?.endsWith("\r") && text.endsWith("\r")) {
+          text = text.slice(0, -1);
+        }
+        replacement.push(text);
+      }
+    }
+    const start = sideStart(hunk.oldStart, hunk.oldCount);
+    if (start + hunk.oldCount === oldLineCount) {
+      const oldNoNewline = hunkSideHasNoNewline(hunk, "old", raw, diffLines);
+      const newNoNewline = hunkSideHasNoNewline(hunk, "new", raw, diffLines);
+      if (oldNoNewline || newNoNewline) trailingNewline = !newNoNewline;
+      else if (oldLineCount === 0 && hunk.newCount > 0) trailingNewline = true;
+    }
+    lines.splice(
+      start,
+      hunk.oldCount,
+      ...replacement,
+    );
+  }
+  if (trailingNewline && lines.at(-1) !== "") lines.push("");
+  if (!trailingNewline && lines.length > 1 && lines.at(-1) === "") lines.pop();
+  return lines.join("\n");
+}
+
+function hunkSideHasNoNewline(
+  hunk: DiffHunk,
+  side: "old" | "new",
+  raw: readonly string[],
+  diffLines: readonly DiffLine[],
+): boolean {
+  for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
+    const kind = diffLines[i]?.kind;
+    const belongs = kind === "ctx" || side === "old" && kind === "del" ||
+      side === "new" && kind === "add";
+    if (
+      belongs &&
+      raw[i + 1]?.replace(/\r$/u, "") === "\\ No newline at end of file"
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** The commit a save would amend when changed text represents HEAD. */
@@ -2072,10 +2181,13 @@ interface MutableHunk {
   newFileHasUtf8Bom?: boolean;
   oldNoTrailingNewline?: boolean;
   newNoTrailingNewline?: boolean;
+
   /** The nearest preceding commit header in the source text. */
   commitSha?: string | null;
+
   /** This is the first verified hunk that names its workspace range. */
   writable?: boolean;
+
   /** Removed lines have a workspace-verified insertion point. */
   resurrectable?: boolean;
 }

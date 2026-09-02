@@ -21,6 +21,7 @@ import * as path from "@std/path";
 import ports from "@commonfabric/ports" with { type: "json" };
 import {
   FragmentWriter,
+  preloadArgument,
   RECORDS_DIR_VARIABLE,
   recordsDir,
 } from "@commonfabric/test-support/records";
@@ -29,6 +30,12 @@ import {
   type RunRecording,
   startRunRecording,
 } from "./test-records.ts";
+import {
+  matchesPatternFilter,
+  normalizePatternPath,
+  PATTERN_TREES,
+  patternRoot,
+} from "./pattern-files.ts";
 
 // Packages with integration tests that need a running server by default.
 const DEFAULT_PACKAGES_WITH_SERVER = [
@@ -209,7 +216,6 @@ function getCfCommand(rootDir: string): string[] {
  */
 async function findPatternTests(
   rootDir: string,
-  patternsDir: string,
   filter?: string,
 ): Promise<string[]> {
   const { chunkStr, totalChunksStr, nameFilter } = (filter ?? "")
@@ -225,17 +231,18 @@ async function findPatternTests(
   const chunk = chunkStr ? parseInt(chunkStr) : undefined;
   const totalChunks = totalChunksStr ? parseInt(totalChunksStr) : undefined;
 
-  // Find all .test.tsx files
   const testFiles: string[] = [];
-  for await (
-    const entry of walk(patternsDir, {
-      includeDirs: false,
-      exts: [".test.tsx"],
-    })
-  ) {
-    const relative = path.relative(rootDir, entry.path);
-    if (!nameFilter || relative.includes(nameFilter)) {
-      testFiles.push(relative);
+  for (const tree of PATTERN_TREES) {
+    for await (
+      const entry of walk(path.join(rootDir, tree.directory), {
+        includeDirs: false,
+        exts: [".test.tsx"],
+      })
+    ) {
+      const relative = normalizePatternPath(path.relative(rootDir, entry.path));
+      if (!nameFilter || matchesPatternFilter(relative, nameFilter)) {
+        testFiles.push(relative);
+      }
     }
   }
 
@@ -290,9 +297,8 @@ async function runPatternTests(
   filter?: string,
   junitDir?: string,
 ): Promise<boolean> {
-  const patternsDir = path.join(rootDir, "packages/patterns");
   const cfCmd = getCfCommand(rootDir);
-  const testFiles = await findPatternTests(rootDir, patternsDir, filter);
+  const testFiles = await findPatternTests(rootDir, filter);
 
   if (testFiles.length === 0) {
     console.log("No pattern test files found.");
@@ -335,7 +341,7 @@ async function runPatternTests(
               "--timeout",
               "180000",
               "--root",
-              patternsDir,
+              path.join(rootDir, patternRoot(testFile)),
               testFile,
             ],
             { cwd: rootDir, env: { CF_TEST_RECORDS_DIR: "" } },
@@ -516,6 +522,8 @@ export async function findIntegrationTestFiles(
  * matching files are passed as explicit paths under `relDir`. Deno does not
  * filter explicitly-passed paths through a package `test` config's `exclude`,
  * so they run even where that config drops the `integration/` directory.
+ * With a JUnit directory the run also carries the registration preload,
+ * which is what gives the report's cases their files.
  */
 export function buildFilteredTestArgs(
   pkg: string,
@@ -533,6 +541,7 @@ export function buildFilteredTestArgs(
 
   if (junitDir) {
     args.push(`--junit-path=${path.join(junitDir, `${pkg}.xml`)}`);
+    args.push(preloadArgument());
   }
 
   for (const name of testFiles) {
@@ -621,7 +630,11 @@ export async function runPackageIntegration(
   if (junitDir) {
     await Deno.mkdir(junitDir, { recursive: true });
     const junitPath = path.resolve(junitDir, `${pkg}.xml`);
-    env.INTEGRATION_TEST_FLAGS = `--junit-path=${junitPath}`;
+    // The preload travels with the JUnit path: the report names each case
+    // by its describe chain, and the map the preload leaves in the spool
+    // is what turns that chain back into a file.
+    env.INTEGRATION_TEST_FLAGS =
+      `--junit-path=${junitPath} ${preloadArgument()}`;
   } else {
     // Pass through INTEGRATION_TEST_FLAGS if set in environment
     const testFlags = Deno.env.get("INTEGRATION_TEST_FLAGS");

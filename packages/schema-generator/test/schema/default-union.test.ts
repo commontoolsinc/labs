@@ -234,6 +234,229 @@ describe("Schema: Default in unions", () => {
     expect(result.default).toEqual({ theme: "dark", retries: 3 });
   });
 
+  describe("typeof values imported from another module", () => {
+    // A `typeof CONST` payload reads the const's initializer off the AST, so
+    // the const must be found through its import when it lives in another
+    // module — the shape a pattern that keeps its defaults in a `contract.ts`
+    // has. `getSymbolAtLocation` on the import returns the alias symbol, whose
+    // valueDeclaration is the ImportSpecifier, not the const; without the alias
+    // hop the default silently disappears from the schema (2026-08-28, found
+    // through the pattern-iframe wrapper: every deployed guest hydrated to
+    // `undefined`).
+
+    const contract = `
+      export interface Config {
+        theme: string;
+        retries: number;
+      }
+      export const DEFAULT_CONFIG: Config = { theme: "dark", retries: 3 };
+      export const DEFAULT_THEME = "light";
+    `;
+
+    async function schemaFor(mainSource: string) {
+      const { type, checker, typeNode } = await getTypeFromFiles(
+        { "/contract.ts": contract, "/main.ts": mainSource },
+        "/main.ts",
+        "T",
+      );
+      return asObjectSchema(
+        new SchemaGenerator().generateSchema(type, checker, typeNode),
+      );
+    }
+
+    it("applies them in Config | Default<typeof IMPORTED>", async () => {
+      const result = await schemaFor(`
+        import { type Config, DEFAULT_CONFIG } from "./contract.ts";
+        interface Default<T, V extends T = T> {}
+        export type T = Config | Default<typeof DEFAULT_CONFIG>;
+      `);
+      expect(result.$ref).toBe("#/$defs/Config");
+      expect(result.default).toEqual({ theme: "dark", retries: 3 });
+    });
+
+    it("applies them in Config | Default<Config, typeof IMPORTED>", async () => {
+      const result = await schemaFor(`
+        import { type Config, DEFAULT_CONFIG } from "./contract.ts";
+        interface Default<T, V extends T = T> {}
+        export type T = Config | Default<Config, typeof DEFAULT_CONFIG>;
+      `);
+      expect(result.$ref).toBe("#/$defs/Config");
+      expect(result.default).toEqual({ theme: "dark", retries: 3 });
+    });
+
+    it("applies an imported const used as a shorthand property", async () => {
+      const result = await schemaFor(`
+        import { type Config, DEFAULT_THEME as theme } from "./contract.ts";
+        interface Default<T, V extends T = T> {}
+        const LOCAL = { theme, retries: 3 } as const;
+        export type T = Config | Default<typeof LOCAL>;
+      `);
+      expect(result.default).toEqual({ theme: "light", retries: 3 });
+    });
+
+    it("applies an imported const named in longhand", async () => {
+      const result = await schemaFor(`
+        import { type Config, DEFAULT_THEME } from "./contract.ts";
+        interface Default<T, V extends T = T> {}
+        const LOCAL = { theme: DEFAULT_THEME, retries: 3 } as const;
+        export type T = Config | Default<typeof LOCAL>;
+      `);
+      expect(result.default).toEqual({ theme: "light", retries: 3 });
+    });
+
+    it("applies an imported primitive const", async () => {
+      const result = await schemaFor(`
+        import { DEFAULT_THEME } from "./contract.ts";
+        interface Default<T, V extends T = T> {}
+        export type T = string | Default<typeof DEFAULT_THEME>;
+      `);
+      expect(result.default).toBe("light");
+    });
+  });
+
+  describe("a payload the reader cannot fully evaluate", () => {
+    // A default the reader cannot fully evaluate is withheld, never shipped as
+    // a fragment: a partial object satisfies every "is there a default?" check
+    // while missing a required member, and the runtime's own `Writable(CONST)`
+    // holds the whole value, so schema and runtime would disagree.
+
+    async function defaultFor(main: string) {
+      const { type, checker, typeNode } = await getTypeFromFiles(
+        {
+          "/contract.ts": `
+            export interface Config { theme: string; retries: number }
+            export function computed(): string { return "x"; }
+          `,
+          "/main.ts": main,
+        },
+        "/main.ts",
+        "T",
+      );
+      return asObjectSchema(
+        new SchemaGenerator().generateSchema(type, checker, typeNode),
+      ).default;
+    }
+
+    it("withholds an object with one non-literal member", async () => {
+      expect(
+        await defaultFor(`
+          import { type Config, computed } from "./contract.ts";
+          interface Default<T, V extends T = T> {}
+          const PARTIAL = { theme: computed(), retries: 3 };
+          export type T = Config | Default<typeof PARTIAL>;
+        `),
+      ).toBeUndefined();
+    });
+
+    it("withholds an object with one non-literal member outside a union", async () => {
+      expect(
+        await defaultFor(`
+          import { type Config, computed } from "./contract.ts";
+          interface Default<T, V extends T = T> {}
+          const PARTIAL = { theme: computed(), retries: 3 };
+          export type T = Default<Config, typeof PARTIAL>;
+        `),
+      ).toBeUndefined();
+    });
+
+    it("withholds an array with one non-literal element", async () => {
+      expect(
+        await defaultFor(`
+          import { computed } from "./contract.ts";
+          interface Default<T, V extends T = T> {}
+          const ITEMS = ["a", computed()];
+          export type T = string[] | Default<typeof ITEMS>;
+        `),
+      ).toBeUndefined();
+    });
+
+    it("withholds a `let` initializer", async () => {
+      expect(
+        await defaultFor(`
+          import { type Config } from "./contract.ts";
+          interface Default<T, V extends T = T> {}
+          let MUTABLE = { theme: "dark", retries: 3 };
+          export type T = Config | Default<typeof MUTABLE>;
+        `),
+      ).toBeUndefined();
+    });
+
+    for (const spelling of ["undefined", "void 0"]) {
+      it(`treats a member set to ${spelling} as absent`, async () => {
+        expect(
+          await defaultFor(`
+            interface Default<T, V extends T = T> {}
+            const PREFS = { theme: "dark", selectedId: ${spelling} };
+            export type T =
+              | { theme: string; selectedId?: string }
+              | Default<typeof PREFS>;
+          `),
+        ).toEqual({ theme: "dark" });
+      });
+    }
+
+    it("withholds a non-computed __proto__ member, which sets no property", async () => {
+      expect(
+        await defaultFor(`
+          interface Default<T, V extends T = T> {}
+          const ROWS = { __proto__: { inherited: true }, id: 1 };
+          export type T = { id: number } | Default<typeof ROWS>;
+        `),
+      ).toBeUndefined();
+    });
+
+    for (const operand of ["computed()", "1"]) {
+      it(`withholds \`void ${operand}\``, async () => {
+        expect(
+          await defaultFor(`
+            import { computed } from "./contract.ts";
+            interface Default<T, V extends T = T> {}
+            const X = { a: 1, b: void ${operand} };
+            export type T = { a: number; b?: number } | Default<typeof X>;
+          `),
+        ).toBeUndefined();
+      });
+    }
+
+    it("keeps a computed __proto__ key as an own property", async () => {
+      const value = await defaultFor(`
+        interface Default<T, V extends T = T> {}
+        const ROWS = { ["__proto__"]: "text", id: 1 };
+        export type T =
+          | { ["__proto__"]: string; id: number }
+          | Default<typeof ROWS>;
+      `) as Record<string, unknown>;
+      expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+      expect(Object.hasOwn(value, "__proto__")).toBe(true);
+      expect(value["__proto__"]).toBe("text");
+      expect(value.id).toBe(1);
+    });
+
+    it("materializes a const two members share, by value", async () => {
+      expect(
+        await defaultFor(`
+          interface Default<T, V extends T = T> {}
+          const LEAF = { n: 1 };
+          const PAIR = { left: LEAF, right: LEAF };
+          export type T =
+            | { left: { n: number }; right: { n: number } }
+            | Default<typeof PAIR>;
+        `),
+      ).toEqual({ left: { n: 1 }, right: { n: 1 } });
+    });
+
+    it("withholds a const that names itself", async () => {
+      expect(
+        await defaultFor(`
+          interface Default<T, V extends T = T> {}
+          const A: { next: unknown } = { next: B };
+          const B: { next: unknown } = { next: A };
+          export type T = { next: unknown } | Default<typeof A>;
+        `),
+      ).toBeUndefined();
+    });
+  });
+
   it("applies object defaults from typeof values with shorthand properties", async () => {
     const code = `
       interface Default<T, V extends T = T> {}

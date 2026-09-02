@@ -38,6 +38,7 @@ export const MODULE_METADATA: ModuleMetadata = {
 export interface PhotoModuleInput {
   /** The uploaded image data (null if no image) */
   image: ImageData | null | Default<null>;
+
   /** User-defined label for the photo */
   label: string | Default<"">;
 }

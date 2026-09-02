@@ -11,8 +11,10 @@
 const fixtureName = Deno.args[0] ?? "notebook-test";
 const rounds = Deno.args[1] ?? "2";
 const outPrefix = Deno.args[2] ?? `/tmp/traverse-${fixtureName}`;
+
 /** Optional: forwarded to profile-target to replay a single invocation. */
 const onlyInvocation = Deno.args[3];
+
 const INSPECT_PORT = 9911;
 
 const target = new Deno.Command(Deno.execPath(), {
@@ -114,9 +116,12 @@ type CPUProfile = {
 
 Deno.writeTextFileSync(`${outPrefix}.cpuprofile`, JSON.stringify(profile));
 
-// ---- self-time report -------------------------------------------------
+//
+// self-time report
+//
 // Attribute sampled time per node via timeDeltas (more accurate than
 // hitCount * interval), then aggregate by frame and by file.
+//
 const nodeTime = new Map<number, number>();
 if (profile.samples && profile.timeDeltas) {
   for (let i = 0; i < profile.samples.length; i++) {

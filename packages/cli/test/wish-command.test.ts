@@ -12,7 +12,7 @@ import {
 import { setQuietMode } from "../commands/piece.ts";
 import type { WishReadConfig, WishReadResult } from "../lib/wish.ts";
 import { CellSelectionError } from "../lib/cell-selection.ts";
-import { withEnv } from "./utils.ts";
+import { captureStderr, withEnv } from "./utils.ts";
 
 // Drives the `cf wish` action body in-process with a stubbed readWish/exit
 // (same idiom as test/inspect-remote.test.ts), so flag handling, config
@@ -61,20 +61,6 @@ async function captureStdout(fn: () => Promise<void>): Promise<string> {
     Deno.stdout.writeSync = original;
   }
   return captured;
-}
-
-async function captureStderr(fn: () => Promise<void>): Promise<string[]> {
-  const errors: string[] = [];
-  const original = console.error;
-  console.error = (...args: unknown[]) => {
-    errors.push(args.join(" "));
-  };
-  try {
-    await fn();
-  } finally {
-    console.error = original;
-  }
-  return errors;
 }
 
 async function makeTempKeyFile(): Promise<{ path: string; did: string }> {
@@ -309,7 +295,7 @@ describe("cf wish command action", () => {
     );
 
     // The parsed selection, not the raw flag text: `cf wish` reads the same
-    // grammar `cf piece get` and `cf piece call` read, through the same
+    // grammar `cf get` and `cf call` read, through the same
     // parser, so a caller learns it once.
     expect(calls[0].selection?.projection?.source).toBe("name,bio");
     expect(calls[0].selection?.projection?.flag).toBe("--select");

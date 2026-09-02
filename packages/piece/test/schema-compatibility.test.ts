@@ -41,17 +41,19 @@ const oldPattern = pattern(
 );
 
 describe("piece schema compatibility", () => {
-  // A CFC write authorization (`TrustedActionWrite`) lowers to an
-  // `ifc.writeAuthorizedBy.__ctWriterIdentityOf` whose `moduleIdentity` is the
-  // content-addressed hash of the authoring module. Editing that module at all
-  // — a type annotation, a comment, whitespace — rehashes it, so `moduleIdentity`
-  // changes while `file`, `path`, and the `uiContract` stay identical. That is a
-  // recompile of the same authorization, not a narrowed contract, so the
-  // backward-compatibility check accepts it: the content-addressed identity is
-  // normalized out of the `ifc` comparison. The ten baselined patterns that
-  // carry a CFC write (system/home, system/profile-*, lobby, and the cfc-*
-  // demos) depend on this to stay editable.
   it("accepts a recompile that only changes writeAuthorizedBy moduleIdentity", () => {
+    // A CFC write authorization (`TrustedActionWrite`) lowers to an
+    // `ifc.writeAuthorizedBy.__ctWriterIdentityOf` whose `moduleIdentity` is
+    // the content-addressed hash of the authoring module. Editing that module
+    // at all — a type annotation, a comment, whitespace — rehashes it, so
+    // `moduleIdentity` changes while `file`, `path`, and the `uiContract` stay
+    // identical. That is a recompile of the same authorization, not a narrowed
+    // contract, so the backward-compatibility check accepts it: the
+    // content-addressed identity is normalized out of the `ifc` comparison. The
+    // ten baselined patterns that carry a CFC write (system/home,
+    // system/profile-*, lobby, and the cfc-* demos) depend on this to stay
+    // editable.
+
     const resultSchema = (moduleIdentity: string): JSONSchema => ({
       type: "object",
       properties: {
@@ -131,15 +133,16 @@ describe("piece schema compatibility", () => {
     ).not.toThrow();
   });
 
-  // A writer claim's `file` is the module's source-file spelling, and that
-  // spelling is resolver-dependent: the same module compiles to a different
-  // `file` under piece-deploy staging, a piece manifest, and HTTP resolution,
-  // while its content-addressed `moduleIdentity` agrees everywhere (labs#4772).
-  // The runtime authorizes a write on `moduleIdentity` plus the binding `path`
-  // and never on `file`, so a cross-resolver recompile that re-spells only the
-  // `file` — same `moduleIdentity`, same `path`, same `uiContract` — is the same
-  // authorization, and the update is accepted.
   it("accepts a cross-resolver recompile that only re-spells the writeAuthorizedBy file", () => {
+    // A writer claim's `file` is the module's source-file spelling, and that
+    // spelling is resolver-dependent: the same module compiles to a different
+    // `file` under piece-deploy staging, a piece manifest, and HTTP resolution,
+    // while its content-addressed `moduleIdentity` agrees everywhere
+    // (labs#4772). The runtime authorizes a write on `moduleIdentity` plus the
+    // binding `path` and never on `file`, so a cross-resolver recompile that
+    // re-spells only the `file` — same `moduleIdentity`, same `path`, same
+    // `uiContract` — is the same authorization, and the update is accepted.
+
     const respelled = (file: string): JSONSchema =>
       trustedWriteResult({ ...baselineIdentity, file }, baselineUiContract);
     expect(() =>
@@ -150,12 +153,13 @@ describe("piece schema compatibility", () => {
     ).not.toThrow();
   });
 
-  // `file` carries no authorization signal beyond the content-addressed
-  // `moduleIdentity` (which the runtime re-verifies live) and the binding
-  // `path`, so it is normalized out of the comparison entirely rather than made
-  // spelling-tolerant. Any `file` change is accepted while the `path` and
-  // `uiContract` are unchanged.
   it("accepts a writeAuthorizedBy binding file change", () => {
+    // `file` carries no authorization signal beyond the content-addressed
+    // `moduleIdentity` (which the runtime re-verifies live) and the binding
+    // `path`, so it is normalized out of the comparison entirely rather than
+    // made spelling-tolerant. Any `file` change is accepted while the `path`
+    // and `uiContract` are unchanged.
+
     expect(() =>
       assertPatternSchemasBackwardCompatible(
         pattern(
@@ -171,6 +175,255 @@ describe("piece schema compatibility", () => {
         ),
       )
     ).not.toThrow();
+  });
+
+  // A floored path is authored to mint the atom it floors, because the write
+  // floor tests the integrity of the value being written and a mint on the
+  // entries below the path does not reach a floor declared on the path itself.
+  // A pattern that declares a floor and mints nothing has to gain the mint
+  // before any write to it can conform. The mint names the derived per-value
+  // component (CFC §8.12.8), which the monotone constraint behind this
+  // comparison does not govern, so gaining one is not a contract change.
+  const flooredList = (ifc: Record<string, unknown>): JSONSchema => ({
+    type: "object",
+    properties: {
+      admins: { type: "array", items: { type: "string" }, ifc },
+    },
+  });
+  const floorOnly = { requiredIntegrity: ["group-chat-admin"] };
+  const floorAndMint = {
+    requiredIntegrity: ["group-chat-admin"],
+    addIntegrity: ["group-chat-admin"],
+  };
+
+  it("accepts a floored path that gains the mint its own floor names", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(flooredList(floorOnly), { type: "object" }),
+        pattern(flooredList(floorAndMint), { type: "object" }),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts a floored path that loses its mint", () => {
+    // The derived component is replace-on-overwrite, not a ratchet, so this
+    // comparison has no opinion either way. A pattern whose writes stop
+    // satisfying its own floor fails at the write, where its tests are.
+
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(flooredList(floorAndMint), { type: "object" }),
+        pattern(flooredList(floorOnly), { type: "object" }),
+      )
+    ).not.toThrow();
+  });
+
+  it("compares a writeAuthorizedBy claim carrying no writer identity whole", () => {
+    // Normalization reaches inside `__ctWriterIdentityOf`. A claim without one
+    // has nothing volatile to remove, so two such claims compare equal.
+    // The two sides differ by a mint, which is dropped, so what is left to
+    // compare is the claim itself. Comparing two schemas that are equal all
+    // the way down would settle before reaching it.
+
+    const claimWith = (mint: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        flag: {
+          type: "boolean",
+          ifc: {
+            writeAuthorizedBy: {},
+            ...(mint ? { addIntegrity: ["reviewed"] } : {}),
+          },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, claimWith(true)),
+        pattern({ type: "object" }, claimWith(false)),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts a claim that gains only the volatile identity fields", () => {
+    // Same binding path, same uiContract, and a content hash and file spelling
+    // the runtime re-derives rather than holds fixed. That is a recompile of
+    // one authorization, so it is accepted.
+
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(
+          { type: "object" },
+          trustedWriteResult({ path: ["setFlag"] }, baselineUiContract),
+        ),
+        pattern(
+          { type: "object" },
+          trustedWriteResult(baselineIdentity, baselineUiContract),
+        ),
+      )
+    ).not.toThrow();
+  });
+
+  it("finds owner evidence nested inside a mint, as the runtime does", () => {
+    // `literalDidSubjectsForPrincipalClaim` walks arrays and object values, so
+    // an atom nested inside another structure still authorizes the write.
+    // Losing it has to read as a change here rather than slip through.
+
+    const ownerNode = (withEvidence: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        bio: {
+          type: "string",
+          ifc: {
+            ownerPrincipal: { __ctCurrentPrincipal: true },
+            addIntegrity: [
+              {
+                kind: "delegated",
+                via: withEvidence
+                  ? {
+                    kind: "represents-principal",
+                    subject: { __ctCurrentPrincipal: true },
+                  }
+                  : { kind: "unrelated" },
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(ownerNode(true), { type: "object" }),
+        pattern(ownerNode(false), { type: "object" }),
+      )
+    ).toThrow(/ifc changed/);
+  });
+
+  it("reads no owner evidence out of a mint that is not a list of atoms", () => {
+    // A malformed mint carries no represents-principal atom, so there is
+    // nothing for the owner check to match and nothing for this comparison to
+    // hold. It reduces the same as a node that mints nothing at all.
+
+    const ownerNode = (withMint: boolean): JSONSchema =>
+      JSON.parse(
+        `{"type":"object","properties":{"bio":{"type":"string","ifc":{` +
+          `"ownerPrincipal":{"__ctCurrentPrincipal":true}` +
+          (withMint ? `,"addIntegrity":"not-a-list"` : "") +
+          `}}}}`,
+      );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(ownerNode(true), { type: "object" }),
+        pattern(ownerNode(false), { type: "object" }),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts dropping an atom the owner check does not read", () => {
+    // Only `represents-principal` evidence feeds the owner check. An atom
+    // beside it is a label nothing consults, so losing it leaves the write
+    // authorized exactly as before and is not a contract change.
+
+    const ownerNode = (extra: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        bio: {
+          type: "string",
+          ifc: {
+            ownerPrincipal: { __ctCurrentPrincipal: true },
+            addIntegrity: [
+              {
+                kind: "represents-principal",
+                subject: { __ctCurrentPrincipal: true },
+              },
+              ...(extra ? ["profile-reviewed"] : []),
+            ],
+          },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(ownerNode(true), { type: "object" }),
+        pattern(ownerNode(false), { type: "object" }),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts losing the last mint into an empty ifc", () => {
+    // The reduction leaves nothing behind on one side and finds an already
+    // empty extension on the other. Both say the same thing, so they compare
+    // equal rather than reading as a change.
+
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(flooredList({ addIntegrity: ["group-chat-admin"] }), {
+          type: "object",
+        }),
+        pattern(flooredList({}), { type: "object" }),
+      )
+    ).not.toThrow();
+  });
+
+  it("still compares the mint on a node that authorizes by owner principal", () => {
+    // Beside an `ownerPrincipal`, the mint supplies the represents-principal
+    // atom the runtime matches against the owner before authorizing a write.
+    // Losing it there refuses writes that used to be accepted, so the mint is
+    // part of the contract on such a node rather than a derived label.
+
+    const ownerNode = (mint: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        bio: {
+          type: "string",
+          ifc: {
+            ownerPrincipal: { __ctCurrentPrincipal: true },
+            ...(mint
+              ? {
+                addIntegrity: [{
+                  kind: "represents-principal",
+                  subject: { __ctCurrentPrincipal: true },
+                }],
+              }
+              : {}),
+          },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(ownerNode(true), { type: "object" }),
+        pattern(ownerNode(false), { type: "object" }),
+      )
+    ).toThrow(/ifc changed/);
+  });
+
+  it("still rejects a change to the floor the path requires", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(flooredList(floorAndMint), { type: "object" }),
+        pattern(
+          flooredList({
+            requiredIntegrity: ["group-chat-owner"],
+            addIntegrity: ["group-chat-admin"],
+          }),
+          { type: "object" },
+        ),
+      )
+    ).toThrow(/ifc changed/);
+  });
+
+  it("still rejects a change to the integrity a path declares it holds", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(flooredList({ integrity: ["group-chat-admin"] }), {
+          type: "object",
+        }),
+        pattern(flooredList({ integrity: ["group-chat-owner"] }), {
+          type: "object",
+        }),
+      )
+    ).toThrow(/ifc changed/);
   });
 
   it("still rejects a writeAuthorizedBy binding path change", () => {
@@ -1257,6 +1510,7 @@ describe("piece schema compatibility", () => {
   it("treats `FabricPrimitive` types as subtypes of object (one-way)", () => {
     // A "FabricBytes" source widens safely into an "object" target; the
     // reverse narrows and must be flagged. Same-type stays compatible.
+
     expect(() =>
       assertSchemaSubset({ type: "FabricBytes" }, { type: "object" })
     ).not.toThrow();
@@ -2243,6 +2497,7 @@ describe("piece schema compatibility", () => {
     // update rewrites stored data verbatim -- so any such value would
     // survive the update only to be rejected by every subsequent read.
     // See the note in `schemaSubsetIssue`.
+
     const brand = "@commonfabric/FabricSpecialObject";
     const oldBytes: JSONSchema = {
       type: "object",
@@ -2272,6 +2527,7 @@ describe("piece schema compatibility", () => {
       // subtypes of "object", members are present via `in`, and the brand
       // is exempt for instances). Nothing is stranded, so no allowance is
       // involved -- this holds through the ordinary subset machinery.
+
       expect(() =>
         assertPatternSchemasBackwardCompatible(
           pattern(true, withField(oldBytes)),
@@ -2325,6 +2581,7 @@ describe("verb event closed-world transitions", () => {
   // so open→closed surfaces silent loss as rule 1's typed rejection
   // (accepted-and-STRIPPED was never contract, decided 2026-08-03), and
   // closed→open must stay free for `never`-derived closure cleanup.
+
   const verbPattern = (event: JSONSchema, viaRef = true): Pattern => {
     const argument: JSONSchema = viaRef
       ? {
@@ -2466,6 +2723,141 @@ describe("verb event closed-world transitions", () => {
   });
 });
 
+describe("verb event required-field transitions", () => {
+  // A verb node sits in the RESULT, which the checker compares covariantly
+  // because a pattern produces its result. The event below it inverts that:
+  // the caller supplies the value, so requiring a field the previous event
+  // did not is a demand on every call already written, each refused at
+  // dispatch once the update lands. Distinct from the closed-world rule
+  // above — that one is free in both directions, this one is not.
+
+  const verbInResult = (event: JSONSchema): Pattern =>
+    pattern({ type: "object", properties: {} }, {
+      type: "object",
+      properties: { setLabel: { $ref: "#/$defs/Ev", asCell: ["stream"] } },
+      $defs: { Ev: event },
+    });
+
+  const oneRequired: JSONSchema = {
+    type: "object",
+    properties: { label: { type: "string" } },
+    required: ["label"],
+  };
+
+  it("refuses an event field the candidate newly requires", () => {
+    const twoRequired: JSONSchema = {
+      type: "object",
+      properties: { label: { type: "string" }, color: { type: "string" } },
+      required: ["label", "color"],
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(oneRequired),
+        verbInResult(twoRequired),
+      )
+    ).toThrow(/newly required verb event field has no default/);
+  });
+
+  it("accepts an event field that becomes required while keeping its default", () => {
+    const withDefault = (required: string[]): JSONSchema => ({
+      type: "object",
+      properties: {
+        label: { type: "string" },
+        color: { type: "string", default: "none" },
+      },
+      required,
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(withDefault(["label"])),
+        verbInResult(withDefault(["label", "color"])),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts an event field added as optional", () => {
+    const widened: JSONSchema = {
+      type: "object",
+      properties: { label: { type: "string" }, color: { type: "string" } },
+      required: ["label"],
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(oneRequired),
+        verbInResult(widened),
+      )
+    ).not.toThrow();
+  });
+
+  it("reaches a required field nested inside the event", () => {
+    const nested = (required: string[]): JSONSchema => ({
+      type: "object",
+      properties: {
+        payload: {
+          type: "object",
+          properties: { note: { type: "string" }, kind: { type: "string" } },
+          required,
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(nested(["note"])),
+        verbInResult(nested(["note", "kind"])),
+      )
+    ).toThrow(/newly required verb event field has no default/);
+  });
+
+  it("accepts an event field that stops being required", () => {
+    const twoRequired: JSONSchema = {
+      type: "object",
+      properties: { label: { type: "string" }, color: { type: "string" } },
+      required: ["label", "color"],
+    };
+    const oneOfTwo: JSONSchema = {
+      type: "object",
+      properties: { label: { type: "string" }, color: { type: "string" } },
+      required: ["label"],
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(twoRequired),
+        verbInResult(oneOfTwo),
+      )
+    ).not.toThrow();
+  });
+
+  it("still refuses an ordinary result field that stops being required", () => {
+    const result = (required: string[]): Pattern =>
+      pattern({ type: "object", properties: {} }, {
+        type: "object",
+        properties: { total: { type: "number" }, label: { type: "string" } },
+        required,
+      });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        result(["total", "label"]),
+        result(["total"]),
+      )
+    ).toThrow(/result field is no longer required/);
+  });
+
+  it("still lets an ordinary result field become newly required", () => {
+    const result = (required: string[]): Pattern =>
+      pattern({ type: "object", properties: {} }, {
+        type: "object",
+        properties: { total: { type: "number" }, label: { type: "string" } },
+        required,
+      });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        result(["total"]),
+        result(["total", "label"]),
+      )
+    ).not.toThrow();
+  });
+});
+
 describe("listing marks are annotation-class", () => {
   // `tier: "wrapper"` and standard `deprecated: true` shape only what
   // `cf piece verbs` shows by default (verb contract WS-F); neither
@@ -2473,6 +2865,7 @@ describe("listing marks are annotation-class", () => {
   // updates. Classified before the generator emits them — the checker
   // equality-compares unknown keywords, so an unclassified mark would be
   // refused in both directions: the C3 append-only lesson.
+
   const verbArgument = (marks: Record<string, unknown>): Pattern =>
     pattern(
       {
@@ -2505,6 +2898,7 @@ describe("listing marks are annotation-class", () => {
   it("still refuses a genuinely unknown keyword (control)", () => {
     // The pin proves classification, not a checker that stopped looking:
     // an unclassified key on the same node is refused exactly as before.
+
     expect(() =>
       assertPatternSchemasBackwardCompatible(
         unmarked,

@@ -2,11 +2,13 @@ import { assertEquals } from "@std/assert";
 import { normalizeEntityId } from "../src/lib/debug-utils.ts";
 import { XSchedulerGraph } from "../src/views/SchedulerGraphView.ts";
 
+//
 // The debug command surface and the scheduler graph both bridge between
 // human/bare ids and the full schemed URIs that programmatic surfaces
 // (diagnostics pieceId, error strings) emit. Full schemed ids pass through
 // untouched — the scheme is part of the identity — while adding `of:` to a
 // bare id is a human-input convenience only.
+//
 
 Deno.test("normalizeEntityId prefixes bare ids and passes schemed ids through", () => {
   // Bare id (typed or copied from a URL path): of: is the convenience.

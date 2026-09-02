@@ -55,10 +55,13 @@ export interface RunHarnessInteractiveChatStdioOptions {
   output?: WritableStream<Uint8Array>;
   sessionDbPath?: string;
   maxInMemoryEvents?: number;
+
   /** Trusted host injection point for an owner-bound provider client. */
   basePromptLoopOptions?: CreateHarnessPromptLoopOptions;
+
   /** Single authenticated owner for an owner-bound service process. */
   credentialOwner?: HarnessCredentialOwnerRef;
+
   createPromptLoop?: HarnessInteractivePromptLoopFactory;
   createService?: (
     onEvent: (event: HarnessChatEventEnvelope) => void | Promise<void>,
@@ -68,6 +71,7 @@ export interface RunHarnessInteractiveChatStdioOptions {
 export interface HarnessInteractiveChatStdioCliOptions {
   sessionDbPath?: string;
   maxInMemoryEvents?: number;
+
   /**
    * Raw `--host-mount` specs, in the batch CLI's grammar, left unresolved.
    *
@@ -78,6 +82,7 @@ export interface HarnessInteractiveChatStdioCliOptions {
    * learning a second mount vocabulary.
    */
   hostMountSpecs?: readonly string[];
+
   maxModelTurns?: number;
   help: boolean;
 }

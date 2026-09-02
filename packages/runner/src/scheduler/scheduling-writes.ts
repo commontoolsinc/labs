@@ -11,6 +11,7 @@ import type { Action, SpaceScopeAndURI } from "./types.ts";
 export interface WriterIndexState {
   /** Identity entity keys resolve scoped addresses against (keys.ts). */
   readonly scopeKeyIdentity: () => ScopeKeyIdentity;
+
   readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly actionWriteEntities: WeakMap<Action, Set<SpaceScopeAndURI>>;
   setSurface(action: Action, surface: IMemorySpaceAddress[]): void;

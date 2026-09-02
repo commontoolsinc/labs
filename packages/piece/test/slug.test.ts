@@ -71,6 +71,48 @@ describe("piece slugs", () => {
     expect(await resolvePieceAddress(pieces, "demo")).toBe(id);
   });
 
+  it("throws naming the storage failure when the slug transaction is rejected", async () => {
+    // A rejected slug transaction must reach the caller. Resolving normally
+    // would report a slug that never landed, and the next read would find
+    // the name unassigned.
+    const piece = await createPiece("slug-rejected");
+    const rejection = {
+      name: "StorageTransactionAborted",
+      message: "storage refused the commit",
+      reason: new Error("refused"),
+    };
+    const originalEditWithRetry = runtime.editWithRetry;
+    runtime.editWithRetry =
+      (() =>
+        Promise.resolve({ error: rejection })) as typeof runtime.editWithRetry;
+    let failure: unknown;
+    try {
+      failure = await setSlugLink(pieces, "rejected", piece).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
+    }
+
+    expect(failure).toBeInstanceOf(Error);
+    const error = failure as Error;
+    expect(error.message).toContain("rejected");
+    expect(error.message).toContain("StorageTransactionAborted");
+    expect(error.message).toContain("storage refused the commit");
+    // The storage rejection stays reachable for a caller that wants to tell
+    // a conflict from a refusal.
+    expect(error.cause).toBe(rejection);
+    // The name is not listed, because the transaction carrying it never
+    // committed.
+    expect(await listSlugs(pieces)).not.toContain("rejected");
+    // The slug document was not written either: resolving the name still
+    // reports it missing.
+    await expect(resolvePieceAddress(pieces, "rejected")).rejects.toThrow(
+      /Slug "rejected" not found/,
+    );
+  });
+
   it("lists every assigned slug, once, however many times a name is set", async () => {
     const piece = await createPiece("index-target");
     const other = await createPiece("index-other");

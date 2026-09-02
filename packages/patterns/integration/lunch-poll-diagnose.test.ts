@@ -1,0 +1,107 @@
+/**
+ * The lunch-poll scaling probe still drives the poll it measures.
+ *
+ * `tools/lunch-poll-diagnose.ts` is the scaling diagnostic for the lunch
+ * poll, and nothing else runs it. Every step it drives is gated in the
+ * pattern — joining needs a resolved profile, adding an option needs the
+ * host, casting a vote needs a roster entry and a resolved clock — and a gate
+ * that refuses writes nothing and reports nothing. A probe driving a contract
+ * the pattern has moved on from therefore still finishes and still prints its
+ * JSON, reporting a matrix of zeros that reads like a measurement of an idle
+ * poll. This runs the smallest case the probe has and asks what it measured.
+ *
+ * No toolshed or browser required (Deno workers + in-process storage server).
+ */
+
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
+import { runCase, voterIdentity } from "../tools/lunch-poll-diagnose.ts";
+
+describe("lunch-poll-diagnose", () => {
+  it("measures a poll two voters joined, filled, and voted in", async () => {
+    const result = await runCase({
+      optionCount: 1,
+      userCount: 2,
+      voteRounds: 1,
+    });
+
+    // Both sessions see the same poll, and it is the poll the case asked
+    // for: two voters on the roster, the host's one option, and a vote from
+    // each of them.
+    expect(result.convergence.converged).toBe(true);
+    expect(result.convergence.userCounts).toEqual([2, 2]);
+    expect(result.convergence.optionCounts).toEqual([1, 1]);
+    expect(result.convergence.voteCounts).toEqual([2, 2]);
+
+    // The samples the probe exists to collect, taken at each phase.
+    expect(result.phases.map((phase) => phase.phase)).toEqual([
+      "baseline-open",
+      "all-users-join",
+      "host-adds-options",
+      "concurrent-vote-round-1",
+    ]);
+    for (const phase of result.phases) {
+      expect(phase.aggregate.maxNodes).toBeGreaterThan(0);
+      expect(phase.sessions.map((session) => session.label)).toEqual([
+        "user-1",
+        "user-2",
+      ]);
+    }
+  });
+
+  describe("voterIdentity", () => {
+    // A vote names its voter by profile cell, and a read of the poll output
+    // hands that back either resolved or as the link that reaches it. Both
+    // name the same person, and the convergence fingerprint is only a
+    // comparison of vote sets while every voter has a key of their own.
+
+    const ID = "of:fid1:lj_-VYUlQNO3nl9TB-U3wTrLA7NTtge02az-NgnaA1g";
+    const SPACE = "did:key:z6Mkh7LjNUSoSVtFSQQRAVZz5XigakGLvLemwAeC4nCjQb4m";
+
+    it("names a voter by the name on their resolved profile", () => {
+      expect(voterIdentity({ name: "User 1" })).toEqual(["name", "User 1"]);
+    });
+
+    it("names a voter by the link that reaches their profile", () => {
+      const identity = voterIdentity(
+        linkRefFrom({ path: [], id: ID, space: SPACE, scope: "space" }),
+      );
+      expect(identity).toEqual(["link", SPACE, ID, "space", []]);
+    });
+
+    it("tells two links apart by the scope they are stored under", () => {
+      const inSpace = linkRefFrom({
+        path: [],
+        id: ID,
+        space: SPACE,
+        scope: "space",
+      });
+      const perUser = linkRefFrom({
+        path: [],
+        id: ID,
+        space: SPACE,
+        scope: "user",
+      });
+      expect(voterIdentity(inSpace)).not.toEqual(voterIdentity(perUser));
+    });
+
+    it("tells two links apart when a path segment holds a separator", () => {
+      const nested = linkRefFrom({ path: ["a", "b"], id: ID, space: SPACE });
+      const dotted = linkRefFrom({ path: ["a.b"], id: ID, space: SPACE });
+      expect(voterIdentity(nested)).not.toEqual(voterIdentity(dotted));
+    });
+
+    it("names no voter for a vote that has none", () => {
+      expect(voterIdentity(undefined)).toEqual([]);
+    });
+
+    it("refuses a voter it cannot name", () => {
+      // An empty key for a voter who has one would read as a vote nobody
+      // cast, in every session at once, and compare equal everywhere.
+      expect(() => voterIdentity({ profile: "not a link" })).toThrow(
+        "cannot identify",
+      );
+    });
+  });
+});

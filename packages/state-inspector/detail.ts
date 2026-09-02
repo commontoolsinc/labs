@@ -20,14 +20,16 @@ import {
 import type { SpaceDb } from "./db.ts";
 import {
   annotate,
-  type DecodedLink,
   decodedLinkOf,
+  linksWithPaths,
+  type LinkWalkBounds,
   parseSigilLink,
   summarize,
 } from "./decode.ts";
-import { reconstructDocument } from "./reconstruct.ts";
+import { reconstructOutcome } from "./reconstruct.ts";
 import type { EntityDocument } from "./reconstruct.ts";
 import {
+  absentEntity,
   classifyDocument,
   type EntityKind,
   isModuleValue,
@@ -40,14 +42,20 @@ import {
 /** A resolved reference to another entity (or a cross-space target). */
 export interface LinkRef {
   id: string;
+
   /** Resolved label of the target (if in this space). */
   label?: string;
+
   kind?: EntityKind;
+
   /** Cross-space target space DID. */
   space?: string;
+
   path?: string[];
+
   /** True when the target is in another space (not resolvable locally). */
   external?: boolean;
+
   /** Where this link sits in the source value (a JSON path), for "links" lists. */
   at?: string;
 }
@@ -75,30 +83,44 @@ export interface EntityDetail {
   kind: EntityKind;
   regime: string;
   owned: boolean;
+
   /** Context-aware label (key-name / import specifier / $NAME / module file). */
   label: string;
+
   /** Short human role, e.g. "input cell", "owned stream", "module import". */
   role: string;
+
   /** The key in the owner piece that names this entity, if any. */
   contextName?: string;
+
   /** Top-level document paths present (the control plane). */
   paths: string[];
+
   valueShape: string;
+
   /** The annotated value (links/streams normalized; depth-bounded). */
   value: unknown;
+
   valuePreview: string;
+
   /** The result JSONSchema (annotated), if the entity carries one. Streams and
    * named owned cells get their DECLARED schema resolved from the owner piece. */
   schema?: unknown;
+
   schemaKeys?: string[];
+
   /** Where `schema` came from when it isn't the entity's own (e.g. owner piece). */
   schemaSource?: string;
+
   /** True when the declared schema is a stream payload (`asCell:["stream"]`). */
   streamPayload?: boolean;
+
   /** IFC labels from a schema-as-value entity, if present. */
   ifc?: unknown;
+
   /** Parsed CFC labels from the `cfc` meta path, if present. */
   cfc?: CfcSummary;
+
   revisions: number;
   headSeq: number | null;
   firstSeq: number | null;
@@ -112,11 +134,14 @@ export interface EntityDetail {
     argument?: LinkRef;
     internal?: LinkRef[];
     owner?: LinkRef;
+
     /** Legacy regime: the result cell a process cell produces (`resultRef`). */
     result?: LinkRef;
   };
+
   /** Outgoing data links found in the value, resolved to target labels. */
   outLinks: LinkRef[];
+
   /** Module source (only on module entities). */
   code?: string;
 }
@@ -251,36 +276,26 @@ function declaredSchemaFor(
   return undefined;
 }
 
-/** Collect every link in a value, in either at-rest form, with its JSON path. */
-function linksWithPaths(
-  v: unknown,
-  base: string[] = [],
-  out: { link: DecodedLink; at: string }[] = [],
-  depth = 10,
-): { link: DecodedLink; at: string }[] {
-  if (depth < 0) return out;
-  const link = decodedLinkOf(v);
-  if (link) {
-    out.push({ link, at: base.join("/") });
-    return out;
-  }
-  if (isObjectNotArray(v)) {
-    for (const [k, val] of Object.entries(v)) {
-      linksWithPaths(val, [...base, k], out, depth - 1);
-    }
-  } else if (Array.isArray(v)) {
-    v.forEach((val, i) =>
-      linksWithPaths(val, [...base, String(i)], out, depth - 1)
-    );
-  }
-  return out;
-}
+/**
+ * How far a detail's link walks reach. A detail describes ONE entity for a
+ * reader, and the rendering it feeds is itself depth-bounded, so a link past
+ * ten levels of nesting is one no reader of this output would have seen
+ * anyway. That depth is small enough to bound the walk's work on its own —
+ * see `LinkWalkBounds` for why a larger one would not be — so no node count is
+ * imposed on top of it.
+ */
+const DETAIL_LINK_WALK: LinkWalkBounds = {
+  maxDepth: 10,
+  maxNodes: Number.POSITIVE_INFINITY,
+};
 
 interface DetailContext {
   ownDid: string;
   labelOf: Map<string, { kind: EntityKind; label: string }>;
+
   /** entityId → { ownerId, key } naming it in its owner piece's value. */
   nameOf: Map<string, { owner: string; key: string }>;
+
   moduleIndex: Map<string, ModuleEntry>;
   docs: Map<string, EntityDocument>;
 }
@@ -306,7 +321,7 @@ function detailFromDoc(
   const spec = importSpecifier(value);
   const named = ctx.nameOf.get(id);
 
-  // --- context-aware label + role ----------------------------------------
+  // context-aware label + role
   // Label comes from the shared index (it already folds in import/context/legacy
   // refinements); role is computed here.
   let label = ctx.labelOf.get(id)?.label ?? c.label;
@@ -324,7 +339,7 @@ function detailFromDoc(
     role = roleFor(c.kind, c.owned);
   }
 
-  // --- lineage, resolved to target labels --------------------------------
+  // lineage, resolved to target labels
   const lineage: EntityDetail["lineage"] = {};
   if (c.lineage.argument) {
     lineage.argument = refTo(c.lineage.argument, ctx);
@@ -334,7 +349,15 @@ function detailFromDoc(
   if (c.kind === "piece" && c.regime === "legacy" && isObjectNotArray(value)) {
     const rid = legacyResultId(value);
     if (rid) lineage.result = refTo(rid, ctx);
-    const internalIds = linksWithPaths(value.internal)
+    // The links alone. A detail is a rendering bounded to a depth its own
+    // output would not have shown past, so `tooDeep` and `budgetExhausted`
+    // change nothing a reader could act on. `opaque` is not covered by that
+    // argument — a `ProblematicValue` holds the state it wrapped out of a
+    // structural walk's reach, so a link inside one is missing from this list
+    // and nothing here says so. Reporting it needs a field on `EntityDetail`
+    // and a place in what renders it, which is a change to the detail rather
+    // than to the walk.
+    const internalIds = linksWithPaths(value.internal, DETAIL_LINK_WALK).links
       .map((l) => l.link.id).filter((x): x is string => !!x);
     if (internalIds.length) {
       lineage.internal = internalIds.map((cid) => refTo(cid, ctx)!);
@@ -360,26 +383,30 @@ function detailFromDoc(
     lineage.pattern = ref;
   }
 
-  // --- outgoing links, resolved ------------------------------------------
-  const outLinks: LinkRef[] = linksWithPaths(value).map(({ link, at }) => {
-    const external = !!link.space && link.space !== ctx.ownDid &&
-      link.space !== `did:key:${ctx.ownDid}`;
-    return {
-      id: link.id ?? "?",
-      label: link.id ? ctx.labelOf.get(link.id)?.label : undefined,
-      kind: link.id ? ctx.labelOf.get(link.id)?.kind : undefined,
-      space: link.space,
-      path: link.path ? [...link.path] : undefined,
-      external,
-      at,
-    };
-  });
+  // outgoing links, resolved. The links alone, for the reason above — and
+  // with the same gap: a link inside a value the walk could read only in part
+  // is absent from this list without the list saying so.
+  const outLinks: LinkRef[] = linksWithPaths(value, DETAIL_LINK_WALK).links.map(
+    ({ link, at }) => {
+      const external = !!link.space && link.space !== ctx.ownDid &&
+        link.space !== `did:key:${ctx.ownDid}`;
+      return {
+        id: link.id ?? "?",
+        label: link.id ? ctx.labelOf.get(link.id)?.label : undefined,
+        kind: link.id ? ctx.labelOf.get(link.id)?.kind : undefined,
+        space: link.space,
+        path: link.path ? [...link.path] : undefined,
+        external,
+        at: at.join("/"),
+      };
+    },
+  );
 
-  // --- module source -----------------------------------------------------
+  // module source
   let code: string | undefined;
   if (isModuleValue(value)) code = value.code;
 
-  // --- schema / ifc / cfc ------------------------------------------------
+  // schema / ifc / cfc
   let schema = doc.schema !== undefined ? annotate(doc.schema) : undefined;
   let schemaKeys = isObjectNotArray(doc.schema)
     ? Object.keys(doc.schema)
@@ -455,6 +482,7 @@ function roleFor(kind: EntityKind, owned: boolean): string {
 export interface DetailListing {
   /** The entities detailed, at most `extent.limit` of them. */
   details: EntityDetail[];
+
   extent: ScanExtent;
 }
 
@@ -485,18 +513,17 @@ export function buildAllDetails(
   const moduleIndex = new Map<string, ModuleEntry>();
   const labelOf = new Map<string, { kind: EntityKind; label: string }>();
   for (const r of scanned) {
-    let doc: EntityDocument | undefined;
-    try {
-      doc = reconstructDocument(space, { id: r.id, branch, scope });
-    } catch {
-      doc = undefined;
-    }
-    if (!doc) {
+    const outcome = reconstructOutcome(space, { id: r.id, branch, scope });
+    if (outcome.status !== "present") {
       // Enumerated but not described: counted, never silently dropped, or a pass
-      // that skipped it would report itself complete over a smaller set.
+      // that skipped it would report itself complete over a smaller set. It
+      // still earns a label, so a link INTO it resolves to why it cannot be
+      // read rather than to nothing.
+      labelOf.set(r.id, absentEntity(outcome.status));
       unreadable++;
       continue;
     }
+    const doc = outcome.document;
     docs.set(r.id, doc);
     const v = doc.value;
     if (isModuleValue(v)) {
@@ -580,6 +607,7 @@ export function buildAllDetails(
     "owned-cell": 4,
     "free-cell": 5,
     unknown: 6,
+    deleted: 7,
   };
   return {
     details: out.sort(

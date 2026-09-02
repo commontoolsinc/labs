@@ -75,9 +75,16 @@ export type {
   OrderedWriteAttempt,
   PostCommitSideEffect,
   PreparedDigestInput,
+  RuntimeWritePolicyAuthorization,
   TrustSnapshot,
   WritePolicyInput,
 } from "./types.ts";
+// `runtimeWritePolicyAuthorization` is deliberately NOT re-exported here.
+// `./cfc` is a public entry point of this package, and the value is what
+// mints a write-policy input the route-2 declaration acts on; publishing it
+// would let anything that can import the package name it. The type above
+// carries no such risk — it is erased, and names nothing at run time. The
+// runtime passes the value through an in-package import.
 export {
   cfcCanonicalClauseDigest,
   collectDeclaredMonotonicityViolations,
@@ -222,6 +229,7 @@ export {
 } from "./space-membership.ts";
 export {
   CFC_PREFIX_PROVENANCE_MAX_WRITES,
+  describeSinkReleaseRefusal,
   flowLabelWorkExists,
   flowReadExcluded,
   gatedSinkRequestExists,
@@ -236,9 +244,9 @@ export type {
   CfcPrepareInstrumentation,
   StoredCfcEnvelope,
 } from "./prepare.ts";
-export { readStoredCfcMetadata } from "./metadata.ts";
+export { cfcMetadataPresent, readStoredCfcMetadata } from "./metadata.ts";
 export { cfcSchemaMergeIssue } from "./schema-merge.ts";
-export type { CfcSchemaMergeIssue } from "./schema-merge.ts";
+export type { CfcSchemaMergeIssue, IfcKey } from "./schema-merge.ts";
 export {
   createSinkRequestPolicyInput,
   recordSinkRequestPolicyInput,
@@ -252,8 +260,11 @@ export type {
 } from "./harness-write-policy.ts";
 export { evaluateHarnessWriteFileAuthorization } from "./harness-write-policy.ts";
 export {
+  type CfcExternalFetchIngestMeta,
   type CfcExternalIngestMeta,
+  type CfcExternalIngestTarget,
   externalIngestStamp,
+  stampExternalFetchIngest,
   stampExternalIngest,
 } from "./external-ingest.ts";
 export {
@@ -313,3 +324,12 @@ export {
   validateAndSanitizeStructuredResultValue,
   validateStructuredResultValue,
 } from "./structured-result.ts";
+export {
+  type CfcRefusalAttribution,
+  type CfcRefusalDetail,
+  type CfcRefusalGate,
+  type CfcRefusalInput,
+  type ConsumedAtomSource,
+  describeRefusalInputs,
+  renderCfcAtom,
+} from "./refusal-detail.ts";

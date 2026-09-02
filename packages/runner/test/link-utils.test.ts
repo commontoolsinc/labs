@@ -26,11 +26,12 @@ import {
   parseLink,
   parseLinkOrThrow,
   parseLLMFriendlyLink,
+  parseReferenceParts,
   sanitizeSchemaForLinks,
 } from "../src/link-utils.ts";
 import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { Runtime } from "../src/runtime.ts";
 import {
   resetContentAddressedSchemasConfig,
@@ -57,6 +58,7 @@ describe("link-utils", () => {
   });
 
   afterEach(async () => {
+    resetContentAddressedSchemasConfig();
     tx.abort();
     await runtime?.dispose();
     await storageManager?.close();
@@ -760,6 +762,82 @@ describe("link-utils", () => {
         },
         required: ["title"],
       });
+    });
+
+    it("externalizes each sanitization mode for one frozen schema", () => {
+      setContentAddressedSchemasConfig(true);
+      const schema = deepFreeze(
+        {
+          type: "object",
+          properties: {
+            send: {
+              type: "string",
+              asCell: ["stream"],
+            },
+          },
+          required: ["send"],
+        } as const satisfies JSONSchema,
+      );
+      const link = {
+        id: "of:cached-schema",
+        path: [],
+        space,
+        schema,
+      } as const;
+
+      const kept = createSigilLinkFromParsedLink(link, {
+        includeSchema: true,
+      });
+      const stripped = createSigilLinkFromParsedLink(link, {
+        includeSchema: true,
+        keepAsCell: KeepAsCell.None,
+      });
+
+      expect(resolvedSchema(linkRefPayload(kept).schema)).toEqual(schema);
+      expect(resolvedSchema(linkRefPayload(stripped).schema)).toEqual({
+        type: "object",
+        properties: {
+          send: { type: "string" },
+        },
+      });
+    });
+
+    it("re-registers cached schema documents after an epoch change", async () => {
+      setContentAddressedSchemasConfig(true);
+      const schema = deepFreeze(
+        {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+          },
+        } as const satisfies JSONSchema,
+      );
+      const link = {
+        id: "of:cached-schema-epoch",
+        path: [],
+        space,
+        schema,
+      } as const;
+
+      const first = createSigilLinkFromParsedLink(link, {
+        includeSchema: true,
+      });
+      expect(resolvedSchema(linkRefPayload(first).schema)).toEqual(schema);
+
+      tx.abort();
+      await runtime.dispose();
+      await storageManager.close();
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+
+      const second = createSigilLinkFromParsedLink(link, {
+        includeSchema: true,
+      });
+      expect(resolvedSchema(linkRefPayload(second).schema)).toEqual(schema);
     });
   });
 
@@ -1656,6 +1734,44 @@ describe("link-utils", () => {
     it("should throw if handle is too short (human name)", () => {
       expect(() => parseLLMFriendlyLink("/of:short/path", space)).toThrow(
         /Piece references must use handles.*"of:short"/,
+      );
+    });
+
+    it("should throw if the embedded space is a name rather than a DID", () => {
+      // A link resolves from the string alone, so a space that needs looking
+      // up is refused here even though the grammar admits it.
+      expect(() => parseLLMFriendlyLink(`/@my:space/${longId}`, space))
+        .toThrow(/Link spaces must be DIDs.*"my:space"/);
+    });
+  });
+
+  describe("parseReferenceParts", () => {
+    const longId = "of:bafyabc12345678901234567890";
+
+    it("splits the parts without holding either to a form", () => {
+      // The wider vocabulary a session can resolve: a space by name and a
+      // piece by slug, in the positions a DID and a handle occupy.
+      expect(parseReferenceParts("/@my-space/tracker@user/items/0")).toEqual({
+        id: "tracker",
+        scope: "user",
+        space: "my-space",
+        path: ["items", "0"],
+      });
+      expect(parseReferenceParts(`/${longId}/path`)).toEqual({
+        id: longId,
+        path: ["path"],
+      });
+    });
+
+    it("throws for a string that is not a reference at all", () => {
+      expect(() => parseReferenceParts(`${longId}/path`)).toThrow(
+        "Target must start with a slash",
+      );
+      expect(() => parseReferenceParts(`/@${space}`)).toThrow(
+        "Target must include a piece handle",
+      );
+      expect(() => parseReferenceParts("/@/tracker")).toThrow(
+        'Target must name a space after "@"',
       );
     });
   });

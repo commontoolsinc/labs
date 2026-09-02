@@ -23,6 +23,25 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   not-yet-consequenced event) or `input(bindingId)` (live UI input echo).
 - The overlay is process-memory only. It is NEVER serialized, synced, or
   committed. On reload it is empty and the store is the truth.
+- The seal emits an entry's document operations as WHOLE-DOCUMENT
+  set/delete (`markWholeDocumentWrites`), and refuses a transaction that
+  cannot. The ops are materialized over the confirmed value on every
+  read, and that value moves under them: the space's serving runtime
+  commits the authoritative derivation for the same document, and it
+  arrives before the coverage that retires the entry (§4). A positional
+  array splice re-applied over an array that already carries what it
+  inserts duplicates that element, one that removed elements drops one,
+  and a mergeable append double-applies — so an entry says what its run
+  computed rather than how that differed from the layer it ran over. The
+  mergeable intents the run recorded are abandoned with the ops they
+  would have produced, so the reads those ops would have narrowed out of
+  the commit stay in the entry's read set, which is what its retirement
+  floor and its pending-read documents are built from. Pinned in
+  `speculation-overlay.test.ts` and `array-push-mergeable.test.ts`.
+- A standing entry therefore masks a concurrent authoritative change to
+  any other path of the same document, until the entry retires and the
+  arrived value renders. What a reader sees while it stands is a value
+  some run computed, whole.
 
 ## 2. What may speculate
 
@@ -53,7 +72,14 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   identity — a session-blind recomputation would misread "inputs
   changed" for every such node.
 - `navigate-to`: may enact optimistically (protocol.md §5) — navigation
-  is reversible. The overlay records the nonce it acted on.
+  is reversible. The overlay records the nonce it acted on. When the
+  AUTHORITATIVE run's branch computes NO navigation (a speculative read
+  diverged — the 2026-08-27 r06/r09 root cause, register OW45), the
+  optimistic enactment STANDS: ruled PUNT (owner, 2026-08-27) — the
+  client navigates, so be it. Nonce reconciliation covers only the
+  intent-arrives case; no withdrawal mechanism exists, and consumers
+  (tests included) must be robust to the view resting where the
+  speculative branch left it.
 - Child-piece instantiation (builtins.md §3): result-as-pattern
   children MAY instantiate speculatively, overlay-local (owner,
   2026-08-02 — reversing the earlier no-children rule). Child ids
@@ -391,7 +417,25 @@ either: the predicate demands the derivation itself — `derived` — not
 merely a server-side write (`!== "derived"`, conservative, converging
 on the next cover). The elision posture above is unchanged: no rewrite
 means the doc's seq stays BELOW the floor, and the predicate is never
-consulted. Carriage: the covering commit's class rides session-frame
+consulted. **A content-addressed doc the store holds witnesses at ANY cover seq
+(#6304, 2026-08-25): its stored envelope is immutable — admission
+refuses a `cid:` delete or patch outright, and a `cid:` set unless
+the whole stored envelope, metadata included, is value-equal;
+identical rewrites are elided — so its cover never advances and the
+floor comparison can never pass for it. The witness rests on that
+commit-boundary immutability: a metadata-write carve-out for `cid:`
+docs (a label merge for two sources of one hash, say) would have to
+revisit it.
+Nothing newer can be pending at the id, and retiring the layer
+renders the STORED value whatever the layer holds: the store wins,
+the disposition every divergence gets (a divergent speculative cid
+layer is inadmissible content that can never arrive; holding the
+entry for it would strand the entry, and its sibling layers,
+forever). A cid doc with NO confirmed cover still holds the entry:
+nothing has served the schema document yet. Pinned in
+`speculation-arrival-gate.test.ts` — scripted with its mutation, and
+on a real replica for identical, divergent, and unstored cid
+writes.** Carriage: the covering commit's class rides session-frame
 upserts as `coverClass` (populated only under the flag — the OFF wire
 is byte-identical), is recorded on the replica's confirmed record
 (frames on integrate; `authored`/`derived` at own-commit promotions),

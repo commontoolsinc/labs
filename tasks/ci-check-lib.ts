@@ -6,14 +6,16 @@
  *   - post-coverage-comment.ts (posts the gate's coverage comment)
  */
 
-// ---------------------------------------------------------------------------
+//
 // Config (from environment)
-// ---------------------------------------------------------------------------
+//
 
 export const REPO = Deno.env.get("GITHUB_REPOSITORY") ?? "commontoolsinc/labs";
+
 /** Where the repository is hosted; a workflow run names it. */
 export const SERVER_URL = Deno.env.get("GITHUB_SERVER_URL") ??
   "https://github.com";
+
 export const TOKEN = Deno.env.get("GITHUB_TOKEN");
 export const WORKFLOW_FILE = "deno.yml";
 
@@ -28,6 +30,8 @@ export const WORKFLOW_FILE = "deno.yml";
  * in the identical JSON shape, so it reads as a valid baseline unchanged.
  */
 export const PERF_METRICS_ARTIFACT_NAME = "perf-metrics";
+
+/** The file inside that artifact. */
 export const PERF_METRICS_FILE = "perf-metrics.json";
 
 /**
@@ -36,6 +40,7 @@ export const PERF_METRICS_FILE = "perf-metrics.json";
  * contains one JSON file matching {@link CacheStateRecord}.
  */
 export const CACHE_STATE_ARTIFACT_PREFIX = "cache-state-";
+
 export const COVERAGE_METRIC_PREFIX = "coverage-debt:";
 export const COVERAGE_BASELINE_RESET_MARKER = "NEW_COVERAGE_BASELINE";
 
@@ -52,6 +57,8 @@ export const COVERAGE_SUGGESTION_MARKER = "<!-- coverage-debt-suggestion -->";
  * up and posts it with a write token from the base-repo context.
  */
 export const COVERAGE_COMMENT_ARTIFACT_NAME = "coverage-comment";
+
+/** The file inside that artifact. */
 export const COVERAGE_COMMENT_FILE = "coverage-comment.json";
 
 /**
@@ -62,24 +69,33 @@ export const COVERAGE_COMMENT_FILE = "coverage-comment.json";
  * - `state: "resolved"` carries `improvedLines`, the net reduction in uncovered
  *   lines versus baseline across the changed, gated coverage groups, and
  *   `groups`, the per-group baseline-versus-this-PR breakdown. When the gate
- *   passed only because the debt was accepted, `overridden` is set. The poster
- *   rebuilds an existing comment into a collapsed summary of where the PR left
- *   coverage; it does nothing when there is no existing comment to update.
+ *   passed only because the debt was accepted, `overridden` is set and `files`
+ *   names what the acceptance is standing in for. The poster rebuilds an
+ *   existing comment into a collapsed summary of where the PR left coverage; it
+ *   does nothing when there is no existing comment to update.
  */
 export interface CoverageCommentPayload {
   prNumber: number;
   state: "regressed" | "resolved";
+
   /** Present when `state` is "regressed". */
   body?: string;
+
   /** Present when `state` is "resolved". */
   improvedLines?: number;
+
   /** Present when `state` is "resolved": the changed source groups and where
    * this PR left each one's uncovered-line count. */
   groups?: CoverageResolvedGroup[];
+
   /** Present when `state` is "resolved": true when the gate passed because a
    * changed group's debt was accepted with a per-group acceptance or the reset
    * marker, not because the new code is covered. */
   overridden?: boolean;
+
+  /** Present when `overridden` is set: the files holding the uncovered lines
+   * the acceptance covers for. */
+  files?: CoverageSuggestionFileLines[];
 }
 
 /**
@@ -96,9 +112,9 @@ export const COVERAGE_LOCAL_CHECK_COMMAND = [
   '  --profile-dir="$(pwd)/coverage/raw/local" --root="$(pwd)"',
 ].join("\n");
 
-// ---------------------------------------------------------------------------
+//
 // Types
-// ---------------------------------------------------------------------------
+//
 
 export interface WorkflowRun {
   id: number;
@@ -184,8 +200,10 @@ export type CompileCacheStates = Partial<
 export interface CacheStateRecord {
   family: string;
   shard: string;
+
   /** The cache key `actions/cache` restored from; empty on a full miss. */
   matchedKey: string;
+
   /** True only when the primary key matched exactly. */
   exactHit: boolean;
 }
@@ -194,6 +212,7 @@ export interface CoverageBaselineFile {
   version: 1;
   generatedAt: string;
   metrics: MetricRecord[];
+
   /**
    * Per-family compile cache states for the run this file describes. Absent
    * when no cache-state artifact recorded for the run.
@@ -211,8 +230,10 @@ export interface PRInfo {
 
 export interface PRFile {
   filename: string;
+
   /** Old path for renamed files; the fingerprint classifier needs both. */
   previous_filename?: string;
+
   /** Unified diff for this file. Absent for binary or oversized changes. */
   patch?: string;
 }
@@ -236,13 +257,14 @@ export interface BaselineOverrides {
    * reads the number off the current pull request alone.
    */
   metrics: Map<string, number>;
+
   /** Reset all coverage-debt metrics at the commit carrying this marker. */
   coverageBaselineReset: boolean;
 }
 
-// ---------------------------------------------------------------------------
+//
 // GitHub API helpers
-// ---------------------------------------------------------------------------
+//
 
 function apiHeaders(): Record<string, string> {
   return {
@@ -378,9 +400,9 @@ export async function githubPatch<T>(
   return resp.json();
 }
 
-// ---------------------------------------------------------------------------
+//
 // Fetch artifacts
-// ---------------------------------------------------------------------------
+//
 
 export async function fetchArtifactsForRun(
   runId: number,
@@ -465,6 +487,7 @@ function metricsToRecords(
 /** Parsed coverage baseline plus the run's compile cache states, when tagged. */
 export interface CoverageBaselineDetailed {
   metrics: Map<string, BaselineSample>;
+
   /** Null when the file recorded no compile cache states. */
   compileCacheStates: CompileCacheStates | null;
 }
@@ -670,9 +693,9 @@ export async function downloadAndParseCoverageBaseline(
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Compile cache state
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Parse the JSON contents of cache-state artifact files into records.
@@ -744,9 +767,9 @@ export function aggregateCacheStates(
   return states;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Formatting
-// ---------------------------------------------------------------------------
+//
 
 export function isCoverageDebtMetric(name: string): boolean {
   return name.startsWith(COVERAGE_METRIC_PREFIX);
@@ -854,13 +877,19 @@ export function parseAddedLinesFromPatch(patch: string): Map<number, string> {
 /** A changed source group whose uncovered-line count regressed. */
 export interface CoverageSuggestionGroup {
   group: string;
+
   /** Uncovered-line count from latest `main`; the PR must not exceed it. */
   target: number;
+
   /** Uncovered-line count this PR produced. */
   current: number;
 }
 
-/** Count of lines a PR added that no test executes, for one file. */
+/**
+ * Count of newly uncovered lines attributed to one file. Usually these are
+ * lines the PR added; an accepted unattributed regression can instead name
+ * lines in an unchanged file that the baseline run covered.
+ */
 export interface CoverageSuggestionFileLines {
   relativePath: string;
   group: string;
@@ -870,8 +899,10 @@ export interface CoverageSuggestionFileLines {
 /** A changed source group and where this PR left its uncovered-line count. */
 export interface CoverageResolvedGroup {
   group: string;
+
   /** Uncovered-line count from latest `main`. */
   baseline: number;
+
   /** Uncovered-line count this PR produced. */
   current: number;
 }
@@ -901,6 +932,22 @@ function limitSuggestionFiles(
 
 function uncoveredLineCount(count: number): string {
   return `${count} ${count === 1 ? "line" : "lines"}`;
+}
+
+/**
+ * The Markdown bullet list naming each file and how many of the lines it adds
+ * no test executes. Both coverage comments render it, in the same words, so a
+ * reader who has seen one recognizes the other.
+ */
+function uncoveredFileList(
+  files: CoverageSuggestionFileLines[],
+  omitted: number,
+): string[] {
+  const lines = files.map((file) =>
+    `- \`${file.relativePath}\` — ${uncoveredLineCount(file.uncoveredCount)}`
+  );
+  if (omitted > 0) lines.push(`- _…and ${omitted} more file(s)._`);
+  return lines;
 }
 
 /**
@@ -1028,16 +1075,7 @@ export function buildCoverageDebtSuggestionComment(
   out.push("### Files with new uncovered lines");
   out.push("");
   if (files.length > 0) {
-    for (const file of files) {
-      out.push(
-        `- \`${file.relativePath}\` — ${
-          uncoveredLineCount(file.uncoveredCount)
-        }`,
-      );
-    }
-    if (omitted > 0) {
-      out.push(`- _…and ${omitted} more file(s)._`);
-    }
+    out.push(...uncoveredFileList(files, omitted));
   } else {
     out.push(
       "Could not tie the regression to specific files from the diff (the " +
@@ -1081,6 +1119,7 @@ export interface CoverageUnattributedFile {
 export interface CoverageMeasurement {
   /** The run's page on GitHub. */
   runUrl?: string;
+
   /** The base-branch commit the run merged the pull request into. */
   baseSha?: string;
 }
@@ -1089,6 +1128,7 @@ export interface CoverageMeasurement {
 export interface CoverageRunIdentity {
   /** The run's page on GitHub. */
   runUrl?: string;
+
   /** The commit that run measured. */
   sha?: string;
 }
@@ -1101,12 +1141,14 @@ export interface CoverageUnattributedGroup extends CoverageSuggestionGroup {
 export interface CoverageDebtUnattributedInput {
   groups: CoverageUnattributedGroup[];
   files: CoverageUnattributedFile[];
+
   /** The run whose coverage report the affected lines were read from. */
   measurement?: CoverageMeasurement;
 }
 
 /** How many affected files the comment names before it starts counting. */
 const MAX_UNATTRIBUTED_FILES = 20;
+
 /** How many line numbers one file contributes before the rest are counted. */
 const MAX_UNATTRIBUTED_LINES_PER_FILE = 20;
 
@@ -1355,11 +1397,19 @@ function coverageChangeText(baseline: number, current: number): string {
  * `overridden` is set the gate passed only because the debt was accepted with an
  * override or the reset marker, so the summary says the metric was overridden
  * rather than implying the new code is covered.
+ *
+ * `files` names where those uncovered lines are, and is rendered only under an
+ * override. This comment replaces an earlier regression body in place, and that
+ * body is the only place the attribution was ever written down: without it here,
+ * accepting the debt erases the answer to "which file" from the pull request.
+ * The other two resolutions have no such answer to keep — the debt was covered
+ * rather than accepted.
  */
 export function buildCoverageResolvedComment(
   improvedLines: number,
   groups: CoverageResolvedGroup[],
   overridden = false,
+  files: CoverageSuggestionFileLines[] = [],
 ): string {
   const summary = overridden
     ? "Code coverage debt accepted with an override."
@@ -1401,15 +1451,24 @@ export function buildCoverageResolvedComment(
         "uncovered lines.",
     );
   }
+
+  const limited = limitSuggestionFiles(files);
+  if (overridden && limited.files.length > 0) {
+    out.push("");
+    out.push("### Files with new uncovered lines");
+    out.push("");
+    out.push(...uncoveredFileList(limited.files, limited.omitted));
+  }
+
   out.push("");
   out.push("</details>");
 
   return out.join("\n");
 }
 
-// ---------------------------------------------------------------------------
+//
 // Event helpers
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Reads and parses the GHA event. Returns `undefined` if it can't be done.
@@ -1431,9 +1490,9 @@ export async function readAndParseEvent(
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // PR helpers
-// ---------------------------------------------------------------------------
+//
 
 /** Fetch the full body of a PR by number. */
 export async function fetchPRBody(prNumber: number): Promise<string> {
@@ -1504,9 +1563,9 @@ export async function fetchCurrentPRBody(
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Coverage override parsing
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Each `ACCEPT_COVERAGE_DEBT:` marker that starts a line, and the rest of that

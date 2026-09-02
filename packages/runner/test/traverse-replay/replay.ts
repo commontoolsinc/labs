@@ -14,9 +14,9 @@
  */
 
 import type { SchemaPathSelector } from "@commonfabric/api";
+import type { FabricValue } from "@commonfabric/data-model";
 import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 import { ExtendedStorageTransaction } from "../../src/storage/extended-storage-transaction.ts";
@@ -47,16 +47,20 @@ import { readMaybeGzippedText } from "./gzip.ts";
 
 export type ReplayInvocationOracle = {
   ok: boolean;
+
   /** TraverseFailure code when ok is false. */
   code?: string;
+
   /** Truncated structural hash of the returned value ("undefined" if so). */
   hash: string;
 };
 
 export type ReplayOracle = {
   invocations: ReplayInvocationOracle[];
+
   /** Sorted unique read descriptors: `space|scope|id|<json path>|flags`. */
   readSet: string[];
+
   /**
    * Per context id: sorted `trackerKey::selectorHash` entries. Only contexts
    * shared by multiple invocations or with includeMeta (the server query
@@ -100,10 +104,17 @@ export type ReplayLatencySample = {
   ms: number;
   selector: number;
   docId: string;
-  /** Counter deltas for this single invocation. */
+
+  /** Schema-call delta for this single invocation. */
   schemaCalls: number;
+
+  /** `anyOf`-branch delta over the same invocation. */
   anyOfBranches: number;
+
+  /** DAG-call delta over the same invocation. */
   dagCalls: number;
+
+  /** Pointer-call delta over the same invocation. */
   pointerCalls: number;
 };
 
@@ -114,6 +125,7 @@ export type ReplayLatencyReport = {
   p999: number;
   max: number;
   mean: number;
+
   /** The N slowest invocations, slowest first. */
   slowest: ReplayLatencySample[];
 };
@@ -149,9 +161,13 @@ function buildLatencyReport(
  * the corpus, exactly as live storage does.
  */
 export class FixtureObjectManager implements ObjectStorageManager {
-  private attestations = new Map<string, IAttestation>();
+  #attestations = new Map<string, IAttestation>();
 
-  constructor(private docs: Record<string, FabricValue>) {}
+  #docs: Record<string, FabricValue>;
+
+  constructor(docs: Record<string, FabricValue>) {
+    this.#docs = docs;
+  }
 
   load(address: BaseMemoryAddress): IAttestation | null {
     if (hasDataUriScheme(address.id)) {
@@ -163,9 +179,9 @@ export class FixtureObjectManager implements ObjectStorageManager {
     const key = fixtureDocKey(
       address as BaseMemoryAddress & { space: string },
     );
-    const cached = this.attestations.get(key);
+    const cached = this.#attestations.get(key);
     if (cached !== undefined) return cached;
-    const value = this.docs[key];
+    const value = this.#docs[key];
     if (value === undefined) return null;
     const attestation: IAttestation = {
       address: { ...address, path: [] },
@@ -175,7 +191,7 @@ export class FixtureObjectManager implements ObjectStorageManager {
       // can never engage during replay even though they do in production.
       value: deepFreeze(value),
     };
-    this.attestations.set(key, attestation);
+    this.#attestations.set(key, attestation);
     return attestation;
   }
 }
@@ -251,6 +267,7 @@ export function replayFixture(
   options: {
     collectOracle?: boolean;
     limit?: number;
+
     /** Collect per-invocation latency samples (slight timing overhead). */
     collectLatency?: boolean;
   } = {},

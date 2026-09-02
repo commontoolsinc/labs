@@ -1,3 +1,17 @@
+/**
+ * The harness against a real sandbox: every case here runs a container under
+ * the `runsc-cfc` gVisor runtime, and the label cases additionally read the
+ * host sidecar directories that runtime writes to. Some cases reach further
+ * still, into a live Fabric FUSE mount bind-mounted into the container.
+ *
+ * That equipment is a property of a workstation, not of a continuous-
+ * integration runner, so no job dispatches this file: `deno task
+ * test:integration` runs it, a person runs that, and `CF_HARNESS_INTEGRATION=1`
+ * is what admits the cases. Everything narrower than the whole runtime takes
+ * a further environment variable, listed under Testing in the package README.
+ * `deno task check` type-checks this file whether or not anything runs it.
+ */
+
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
 import type {
@@ -22,6 +36,7 @@ import type {
   ReadFileToolOutput,
   ReadFileToolSuccessOutput,
 } from "../src/tools/read-file.ts";
+import { commandStatusWithTimeout } from "../test/support/command-timeout.ts";
 
 const INTEGRATION = Deno.env.get("CF_HARNESS_INTEGRATION") === "1";
 const DOCKER_RUNTIME = Deno.env.get("CF_HARNESS_INTEGRATION_RUNTIME") ??
@@ -211,68 +226,6 @@ const fabricHostPathForSandboxPath = (
 ): string =>
   join(fabricHostPath, ...sandboxPath.slice("/fabric/".length).split("/"));
 
-type BoundedCommandStatus =
-  | { kind: "completed"; status: Deno.CommandStatus }
-  | { kind: "timed-out"; killError?: string };
-
-const commandStatusWithTimeout = async (
-  command: Deno.Command,
-  timeoutMs: number,
-): Promise<BoundedCommandStatus> => {
-  const child = command.spawn();
-  const statusPromise = child.status;
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<"timed-out">((resolve) => {
-    timeoutId = setTimeout(() => resolve("timed-out"), timeoutMs);
-  });
-  const result = await Promise.race([statusPromise, timeoutPromise]);
-  if (timeoutId !== undefined) clearTimeout(timeoutId);
-  if (result !== "timed-out") return { kind: "completed", status: result };
-
-  const describeError = (error: unknown): string =>
-    error instanceof Error ? error.message : String(error);
-  const appendError = (
-    existing: string | undefined,
-    label: string,
-    error: unknown,
-  ): string => {
-    const message = `${label}: ${describeError(error)}`;
-    return existing === undefined ? message : `${existing}; ${message}`;
-  };
-
-  let killError: string | undefined;
-  try {
-    child.kill("SIGKILL");
-  } catch (error) {
-    killError = appendError(killError, "SIGKILL failed", error);
-  }
-
-  let cleanupTimeoutId: ReturnType<typeof setTimeout> | undefined;
-  const cleanupTimeoutPromise = new Promise<"cleanup-timed-out">((resolve) => {
-    cleanupTimeoutId = setTimeout(() => resolve("cleanup-timed-out"), 1_000);
-  });
-  const cleanupResult = await Promise.race([
-    statusPromise.then(() => "closed" as const).catch((error) => ({
-      kind: "status-error" as const,
-      message: describeError(error),
-    })),
-    cleanupTimeoutPromise,
-  ]);
-  if (cleanupTimeoutId !== undefined) clearTimeout(cleanupTimeoutId);
-
-  if (cleanupResult === "cleanup-timed-out") {
-    child.unref();
-  } else if (cleanupResult !== "closed") {
-    killError = killError === undefined
-      ? `child status failed after timeout: ${cleanupResult.message}`
-      : `${killError}; child status failed after timeout: ${cleanupResult.message}`;
-  }
-
-  return killError === undefined
-    ? { kind: "timed-out" }
-    : { kind: "timed-out", killError };
-};
-
 const waitForFabricHostCfcSubject = async (
   fabricHostPath: string,
   sandboxPath: string,
@@ -336,26 +289,6 @@ const waitForFabricHostCfcSubject = async (
     });
   }
 };
-
-Deno.test({
-  name:
-    "cf-harness integration helper: command timeout returns before child exits",
-  permissions: { run: true },
-  async fn() {
-    const result = await commandStatusWithTimeout(
-      new Deno.Command(
-        Deno.execPath(),
-        {
-          args: ["eval", "await new Promise(() => {})"],
-          stdout: "null",
-          stderr: "null",
-        },
-      ),
-      20,
-    );
-    assertEquals(result.kind, "timed-out");
-  },
-});
 
 const invocationInputLabels = (): CfcLabelView => ({
   version: 1,

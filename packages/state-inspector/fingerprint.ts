@@ -86,12 +86,49 @@ function allEntities(
   return out;
 }
 
+/**
+ * An {@link EntityAddress} whose scope is known — which, for anything this
+ * module reports, it always is.
+ *
+ * An id is NOT unique on its own: one id can hold a shared space value plus
+ * per-user/per-session overrides that are genuinely different entities. So a
+ * report names the pair it computed over. A bare id forces every caller to
+ * re-associate it with a scope by guessing — a lookup that silently lets the
+ * last scope win, misclassifying exactly the per-kind precision ("74 pieces vs
+ * 73 cells") the diff exists to provide.
+ *
+ * Being an `EntityAddress` is the useful part: what a diff entry is FOR is
+ * looking the entity up, and this hands straight to `reconstructDocument`.
+ */
+export type ScopedEntity = EntityAddress & { scope: string };
+
+/**
+ * The composite key an entity address indexes by — one spelling, exported, so
+ * two sides of a comparison cannot key differently and quietly disagree about
+ * which entity is which.
+ *
+ * The separator is NUL because it has to be a byte neither field can hold. A
+ * minted id is `of:fid1:<base64url>`, `computed:fid1:<…>` or a DID, and a scope
+ * key is `space` or `user:`/`session:` over percent-encoded segments, so no
+ * value the runtime writes contains a control byte. A printable separator has
+ * no such floor under it: this tool reads stores it did not write, where both
+ * columns are opaque TEXT, and `("of:a", "b c")` and `("of:a b", "c")` would
+ * then share a key. That is not a cosmetic collision — `verifyClone` subtracts
+ * generated exclusions by this key, so an alias could clear a removal that
+ * really happened, which is the one verdict this module must never soften.
+ */
+export function entityAddressKey(at: ScopedEntity): string {
+  return `${at.id}\x00${at.scope}`;
+}
+
 /** One entity's content hash at head. */
 export interface EntityFingerprint {
   id: string;
   scope: string;
+
   /** Entity classification (`piece`, `cell`, …) as the model reports it. */
   kind: string;
+
   /** `hashOf` the entity's durable `value`, or null when it has no value. */
   hash: string | null;
 }
@@ -99,10 +136,29 @@ export interface EntityFingerprint {
 export interface FingerprintReport {
   /** Hash over every included entity's (id, scope, hash) — the one number. */
   hash: string;
+
   /** Entities included in `hash`. */
   entities: number;
+
   /** Internal cells skipped because a manifest calls them compiler-generated. */
   excludedGenerated: number;
+
+  /**
+   * The entities behind {@link excludedGenerated}, by address. A diff against a
+   * fingerprint taken from another store must subtract these before calling
+   * anything removed: the two stores compute their exclusions independently, so
+   * a cell no manifest listed THERE and this manifest calls generated HERE is
+   * present in both and absent from one list. Reporting that as removed content
+   * is the loudest verdict this module has, spent on a filter disagreement.
+   *
+   * The scope travels with the id because the subtraction is only sound per
+   * (id, scope). A manifest link carries an id and no scope, so calling a cell
+   * generated excludes EVERY scope that holds the id; subtracting by id alone
+   * would then clear the alarm for a scope whose rows are gone, reporting
+   * destroyed per-user state as a filter disagreement.
+   */
+  excludedGeneratedAddresses: ScopedEntity[];
+
   /**
    * Ids some manifest calls generated and another calls named. Counted as
    * generated (rotation-prone wins, so the fingerprint stays stable) but
@@ -110,14 +166,17 @@ export interface FingerprintReport {
    * be silent. Zero on every store observed so far.
    */
   ambiguous: string[];
+
   /** Entities whose value could not be hashed, with the reason. Never silent. */
   unhashable: { id: string; reason: string }[];
+
   /** Per-entity hashes, id-sorted — the input to `diffFingerprints`. */
   perEntity: EntityFingerprint[];
 }
 
 export interface FingerprintOptions {
   branch?: string;
+
   /**
    * Refuse rather than fingerprint a space whose scope enumerates more than
    * this many entities, since the enumeration was truncated. A scope holding
@@ -125,6 +184,7 @@ export interface FingerprintOptions {
    * any real space; raise it only knowingly.
    */
   enumerationCap?: number;
+
   /**
    * Include compiler-generated internal cells. Default false. Turning this on
    * makes the fingerprint change on every pattern update by design; it exists
@@ -211,11 +271,11 @@ export function contentFingerprint(
   );
   const perEntity: EntityFingerprint[] = [];
   const unhashable: { id: string; reason: string }[] = [];
-  let excludedGenerated = 0;
+  const excludedGeneratedAddresses: ScopedEntity[] = [];
 
   for (const model of allEntities(space, branch, options.enumerationCap)) {
     if (generated.has(model.id)) {
-      excludedGenerated++;
+      excludedGeneratedAddresses.push({ id: model.id, scope: model.scope });
       continue;
     }
     // The models come from this branch, so the values must too — reading the
@@ -254,28 +314,13 @@ export function contentFingerprint(
       perEntity.map((e) => [e.id, e.scope, e.hash] as const),
     ).toString(),
     entities: perEntity.length,
-    excludedGenerated,
+    excludedGenerated: excludedGeneratedAddresses.length,
+    excludedGeneratedAddresses,
     ambiguous,
     unhashable,
     perEntity,
   };
 }
-
-/**
- * An {@link EntityAddress} whose scope is known — which, for a diff, it always
- * is.
- *
- * An id is NOT unique on its own: one id can hold a shared space value plus
- * per-user/per-session overrides that are genuinely different entities. So the
- * diff reports the pair it compared by. Returning a bare id forced every caller
- * to re-associate it with a scope by guessing — a lookup that silently lets the
- * last scope win, misclassifying exactly the per-kind precision ("74 pieces vs
- * 73 cells") the diff exists to provide.
- *
- * Being an `EntityAddress` is the useful part: what a diff entry is FOR is
- * looking the entity up, and this hands straight to `reconstructDocument`.
- */
-export type ScopedEntity = EntityAddress & { scope: string };
 
 export interface FingerprintDiff {
   equal: boolean;
@@ -292,9 +337,8 @@ export function diffFingerprints(
   before: FingerprintReport,
   after: FingerprintReport,
 ): FingerprintDiff {
-  const key = (e: EntityFingerprint) => `${e.id}\x00${e.scope}`;
-  const a = new Map(before.perEntity.map((e) => [key(e), e]));
-  const b = new Map(after.perEntity.map((e) => [key(e), e]));
+  const a = new Map(before.perEntity.map((e) => [entityAddressKey(e), e]));
+  const b = new Map(after.perEntity.map((e) => [entityAddressKey(e), e]));
 
   const added: ScopedEntity[] = [];
   const removed: ScopedEntity[] = [];

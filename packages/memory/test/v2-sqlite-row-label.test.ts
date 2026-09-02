@@ -57,9 +57,23 @@ function emailSpec(): RowLabelSpec {
   return schema.rowLabel as RowLabelSpec;
 }
 
-// ---------------------------------------------------------------------------
+function expectError(
+  spec: RowLabelSpec,
+  row: Record<string, unknown>,
+  ctx: { dbOwner?: string },
+  needle: string,
+) {
+  const res = evaluateRowLabel(spec, row, ctx);
+  assert("error" in res, `expected {error} for ${JSON.stringify(row)}`);
+  assert(
+    res.error.includes(needle),
+    `error "${res.error}" should mention "${needle}"`,
+  );
+}
+
+//
 // Builder -> AST
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("table(columns, rule) serializes the rule to a plain-JSON rowLabel AST", () => {
   const schema = table(EMAIL_COLUMNS, emailRule);
@@ -130,13 +144,14 @@ Deno.test("match() forces the global flag so split-on-match works", () => {
   assert(node.principal.of.match.flags.includes("g"));
 });
 
-// ---------------------------------------------------------------------------
-// Fail-closed at authoring (table() throws)
-// ---------------------------------------------------------------------------
+//
+// any(): the OR-clauses it authors, and the shape it refuses
+//
 
 Deno.test("any() builds and validates an OR-clause (Epic E1)", () => {
   // any() no longer throws at table() time — it produces an authored OR-clause
   // the runner's clause-aware profile enforces by subsumption.
+
   const schema = table(EMAIL_COLUMNS, (f) => ({
     confidentiality: any(
       principal("mailto", match(f.from, ADDR)),
@@ -194,6 +209,10 @@ Deno.test("any() rejects a conjunctive alternative — no (A∧B)∨C → A∨B�
     Error,
   );
 });
+
+//
+// Static analysis of an authored rule (no row required)
+//
 
 Deno.test("ruleCommonAlternatives: the static readers of EVERY clause (Epic E2)", () => {
   const OWNER = "did:key:zOwner";
@@ -300,6 +319,7 @@ Deno.test("ruleConstrainsConfidentiality: confidentiality present vs integrity-o
   // An integrity-only rule imposes NO confidentiality constraint — an aggregate
   // over it is public, not a refusal. Distinguished from a rule that DOES
   // constrain (any nesting of at least one clause).
+
   const integrityOnly = table(EMAIL_COLUMNS, (f) => ({
     integrity: authoredBy(principal("mailto", match(f.from, ADDR))),
   })).rowLabel as RowLabelSpec;
@@ -319,6 +339,10 @@ Deno.test("ruleConstrainsConfidentiality: confidentiality present vs integrity-o
   })).rowLabel as RowLabelSpec;
   assertEquals(ruleConstrainsConfidentiality(nested), true);
 });
+
+//
+// Fail-closed at authoring, and again on a spec that arrives built
+//
 
 Deno.test("a rule referencing an unknown column throws", () => {
   assertThrows(
@@ -445,9 +469,9 @@ Deno.test("validateRowLabelSpec re-validates a wire-supplied spec (fail closed)"
   assert(typeof wrongCols === "string");
 });
 
-// ---------------------------------------------------------------------------
+//
 // evaluateRowLabel — happy paths
-// ---------------------------------------------------------------------------
+//
 
 const OWNER = "did:key:zOwner";
 
@@ -583,23 +607,11 @@ Deno.test("constant() injects a literal atom; intersect() meets integrity atom s
   assertEquals(res.integrity, ["b"]);
 });
 
-// ---------------------------------------------------------------------------
-// evaluateRowLabel — fail-closed branches (each returns {error}, never partial)
-// ---------------------------------------------------------------------------
-
-function expectError(
-  spec: RowLabelSpec,
-  row: Record<string, unknown>,
-  ctx: { dbOwner?: string },
-  needle: string,
-) {
-  const res = evaluateRowLabel(spec, row, ctx);
-  assert("error" in res, `expected {error} for ${JSON.stringify(row)}`);
-  assert(
-    res.error.includes(needle),
-    `error "${res.error}" should mention "${needle}"`,
-  );
-}
+//
+// evaluateRowLabel — fail-closed on the row and the context
+//
+// Each returns {error}, never a partial label.
+//
 
 Deno.test("a referenced field absent from the row fails closed", () => {
   expectError(
@@ -665,9 +677,18 @@ Deno.test("dbOwner() with no owner in ctx fails closed", () => {
   );
 });
 
+//
+// evaluateRowLabel — OR-clause evaluation (Epic E1)
+//
+// An anyOf node evaluates to one structural OR-clause rather than to flattened
+// atoms, a conjunction smuggled in as an alternative fails closed instead of
+// widening into one, and an all() of any()-clauses composes into proper CNF.
+//
+
 Deno.test("an anyOf node evaluates to a structural OR-clause (Epic E1)", () => {
   // any(dbOwner ∨ from-participants): the row is readable by the owner OR any
   // sender — ONE OR-clause, not flattened into bare atoms.
+
   const spec = table(EMAIL_COLUMNS, (f) => ({
     confidentiality: any(dbOwner(), principal("mailto", match(f.from, ADDR))),
   })).rowLabel as RowLabelSpec;
@@ -685,6 +706,7 @@ Deno.test("evalConf fails closed on a conjunctive any() alternative that bypasse
   // with a conjunction as an any() alternative must fail closed at eval —
   // never union-flatten (A∧B)∨C into A∨B∨C. Both the direct all() and the
   // when()-wrapped all() shapes are rejected.
+
   const direct: RowLabelSpec = {
     version: 1,
     confidentiality: {
@@ -717,6 +739,7 @@ Deno.test("evalConf fails closed on a conjunctive any() alternative that bypasse
 
 Deno.test("an all() of any()-clauses is proper CNF (Epic E1)", () => {
   // all(any(owner ∨ from), to-participants) → (owner∨from) ∧ to.
+
   const spec = table(EMAIL_COLUMNS, (f) => ({
     confidentiality: all(
       any(dbOwner(), principal("mailto", match(f.from, ADDR))),
@@ -734,6 +757,10 @@ Deno.test("an all() of any()-clauses is proper CNF (Epic E1)", () => {
     "did:mailto:bob@example.com",
   ]);
 });
+
+//
+// evaluateRowLabel — fail-closed on the spec itself
+//
 
 Deno.test("an unknown op reaching the evaluator fails closed", () => {
   const spec: RowLabelSpec = {
@@ -753,7 +780,14 @@ Deno.test("an unsupported spec version fails closed", () => {
   );
 });
 
-// endorsedBy variant mints the endorsed claim kind.
+//
+// Claim minting variants
+//
+// What the evaluator mints when it does not fail closed: the endorsed-by kind,
+// and the no-claim answer that zero matches gives where more than one would
+// have been an error.
+//
+
 Deno.test("endorsedBy mints claimed-endorsed-by", () => {
   const schema = table(
     { reviewer: "text" },
@@ -772,9 +806,10 @@ Deno.test("endorsedBy mints claimed-endorsed-by", () => {
   ]);
 });
 
-// Zero matches in an integrity position mints nothing (the claim simply is not
-// made) — distinct from >1 which is an error.
 Deno.test("zero matches in an integrity position mints no claim", () => {
+  // Zero matches in an integrity position mints nothing (the claim simply is
+  // not made) — distinct from >1 which is an error.
+
   const schema = table(
     { reviewer: "text" },
     (f) => ({
@@ -790,9 +825,9 @@ Deno.test("zero matches in an integrity position mints no claim", () => {
   assertEquals(res.integrity, []);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Provenance gate predicates (shared server/runner — v2.ts)
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("dbNeedsColumnProvenance: rowLabel-only tables need origin capture too", () => {
   const ruleOnly = {
@@ -821,9 +856,9 @@ Deno.test("dbNeedsColumnProvenance: rowLabel-only tables need origin capture too
   assert(!dbNeedsColumnProvenance(undefined));
 });
 
-// ---------------------------------------------------------------------------
+//
 // Review-round fixes: validator/evaluator robustness on hostile wire specs
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("an unbalanced regex in a wire spec returns a reason (no lint crash)", () => {
   const spec: RowLabelSpec = {
@@ -841,7 +876,6 @@ Deno.test("an unbalanced regex in a wire spec returns a reason (no lint crash)",
   assert(typeof reason === "string");
 });
 
-// ---------------------------------------------------------------------------
 // Ambiguous dual-op nodes: a node carrying TWO recognized op keys must refuse
 // everywhere. The validator, the evaluator, and the static common-alternative
 // analysis each dispatch by their own key precedence, so a hand-crafted
@@ -849,7 +883,6 @@ Deno.test("an unbalanced regex in a wire spec returns a reason (no lint crash)",
 // the principal, and STATICALLY count the owner as a common reader — labeling
 // a COUNT(*) [owner] although the owner is not an alternative in any row's
 // label (CFC spec §8.17.4 violation).
-// ---------------------------------------------------------------------------
 
 const DUAL_PRINCIPAL_OWNER: RowLabelSpec = {
   version: 1,
@@ -962,6 +995,7 @@ Deno.test("ruleCommonAlternatives never counts a dual-op node's owner as a commo
   // principal, so the owner is not an alternative in ANY row's label — the
   // static analysis must not report it (an ambiguous node contributes no
   // static reader; the aggregate refuses).
+
   assertEquals(
     ruleCommonAlternatives(DUAL_PRINCIPAL_OWNER, { dbOwner: OWNER }),
     [],
@@ -988,6 +1022,7 @@ Deno.test("an ambiguous allOf wrapper is opaque to the static analysis (no unwra
   // the allOf key alone and unwrap it: that silently drops the smuggled
   // sibling op and hands the inner conjuncts to the static analysis, which
   // would report a guaranteed reader for a node the evaluator refuses.
+
   const ambiguousWrapper = {
     version: 1,
     confidentiality: { allOf: [{ dbOwner: true }], constant: "x" },
@@ -1014,6 +1049,7 @@ Deno.test("evaluateRowLabel fails closed on a dual-op node that bypassed validat
   // Defense in depth (like the conjunctive-anyOf-alternative check): a wire
   // spec that skipped validation must refuse at eval, never silently pick one
   // op by precedence.
+
   expectError(
     DUAL_PRINCIPAL_OWNER,
     { from: "alice@a.example" },

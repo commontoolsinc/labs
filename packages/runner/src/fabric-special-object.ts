@@ -1,4 +1,4 @@
-import type { FabricInstance } from "@commonfabric/data-model/fabric-value";
+import type { FabricInstance } from "@commonfabric/data-model";
 
 /**
  * Builds the refusal a `FabricInstance` gets from a walk that cannot yet

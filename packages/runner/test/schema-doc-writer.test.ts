@@ -19,17 +19,18 @@ import {
 } from "../src/schema-decompose.ts";
 import { resetContentAddressedSchemasConfig } from "../src/schema-doc-config.ts";
 import { lookupSchemaDocument } from "../src/schema-registry.ts";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import {
   getSyncSchemaTableConfig,
   resetSyncSchemaTableConfig,
 } from "@commonfabric/memory/v2";
 import type { CellLinkRefPayload, URI } from "../src/sigil-types.ts";
 
-// The Phase 1 writer: with the flag on, a schema-bearing link is stamped
-// with a cid: reference and the commit materializes the schema documents
-// into the destination space (the write-side delivery guarantee).
 describe("schema-doc-writer", () => {
+  // The Phase 1 writer: with the flag on, a schema-bearing link is stamped with
+  // a cid: reference and the commit materializes the schema documents into the
+  // destination space (the write-side delivery guarantee).
+
   let server: MemoryV2Server.Server;
   let writerStorage: EmulatedStorageManager;
   let readerStorage: EmulatedStorageManager;
@@ -51,9 +52,8 @@ describe("schema-doc-writer", () => {
   });
 
   afterEach(async () => {
-    // The ambient flag is realm-sticky; later test files must see its
-    // default, and the sync schema table (disabled by the flag-on Runtime
-    // construction above) must come back to its own.
+    // The ambient flags are realm-sticky; later test files must see
+    // their defaults.
     resetContentAddressedSchemasConfig();
     resetSyncSchemaTableConfig();
     await writer.dispose();
@@ -274,6 +274,154 @@ describe("schema-doc-writer", () => {
     }
   });
 
+  it("re-stages a schema document that is visible only through speculation", async () => {
+    // A speculative computed commit is process-memory only — the server's
+    // own execution is expected to reproduce it, so it is never pushed —
+    // yet its writes are visible through the overlay. A schema document
+    // created by such a commit is therefore visible without being
+    // server-confirmed, and an authored commit referencing it must
+    // re-stage it: eliding on overlay visibility ships a reference the
+    // space cannot resolve, and the commit boundary rejects the whole
+    // authored write.
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { speculativeVisibleField: { type: "string" } },
+    };
+    const sigil = sigilFor(schema);
+    const rootRef = (payloadSchema(sigil) as JSONSchemaObj).$ref!;
+    const rootHash = parseExternalSchemaRef(rootRef)!.taggedHash;
+    const closure = new Set<string>([rootHash]);
+    for (const hash of closure) {
+      for (
+        const dep of collectExternalSchemaRefHashes(lookupSchemaDocument(hash))
+      ) {
+        closure.add(dep);
+      }
+    }
+
+    // The whole closure arrives as ONE client speculation overlay entry —
+    // the shape a speculative handler run seals, its schema-doc staging
+    // riding the same layer. Nothing here reaches the wire.
+    const replica = writerStorage.open(space).replica;
+    replica.sealNative!(
+      {
+        operations: [...closure].map((hash) => ({
+          op: "set" as const,
+          id: `cid:${hash}` as URI,
+          type: "application/json" as const,
+          value: { value: lookupSchemaDocument(hash) },
+        })),
+      },
+      undefined,
+      new Promise(() => {}),
+      { speculative: true },
+    );
+    expect(writerStorage.isSchemaDocPersisted(space, rootHash)).toBe(false);
+
+    const tx = writer.edit();
+    tx.writeValueOrThrow(
+      { space, id: "of:speculative-root" as URI, scope: "space", path: [] },
+      { person: sigil },
+    );
+    const staged = [...tx.getWriteDetails?.(space) ?? []].map((detail) =>
+      detail.address.id
+    );
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
+    expect(staged.some((id) => id.startsWith("cid:"))).toBe(true);
+
+    // The server accepted and persists the closure: a fresh replica pulls
+    // the documents from storage, where only this authored commit can
+    // have put them.
+    const provider = readerStorage.open(space);
+    for (const hash of closure) {
+      const synced = await provider.sync(`cid:${hash}` as URI, {
+        path: [],
+        schema: false,
+      });
+      expect(synced.error).toBeUndefined();
+      const stored = (provider as unknown as {
+        get: (uri: URI) => { value?: unknown } | undefined;
+      }).get(`cid:${hash}` as URI);
+      expect(
+        internSchemaAsTaggedHashString(stored?.value as JSONSchemaObj),
+      ).toBe(hash);
+    }
+  });
+
+  it("re-stages a schema document batched as two equal writes", async () => {
+    // The batch write path has its own no-op elisions, and a run of two
+    // equal writes to one document is what routes a write through them
+    // (a single write falls back to the unified single-write entry).
+    // The referenced document is deliberately absent from the realm
+    // registry, so the carrier's staging warns and skips: the batched
+    // writes are the commit's ONLY delivery vehicle. With the document
+    // visible only through speculation, both elisions must yield the
+    // same delivery the single-write path grants, or the carrier's
+    // reference ships unbacked and the commit is rejected.
+    const document: JSONSchemaObj = {
+      type: "object",
+      properties: { batchedVisibleField: { type: "string" } },
+      title: "batched-delivery-only",
+    };
+    const rootHash = internSchemaAsTaggedHashString(document);
+    const handCrafted = {
+      "/": {
+        "link@1": {
+          id: "of:batched-target",
+          path: [],
+          schema: { $ref: `cid:${rootHash}` },
+        },
+      },
+    };
+
+    const replica = writerStorage.open(space).replica;
+    replica.sealNative!(
+      {
+        operations: [{
+          op: "set" as const,
+          id: `cid:${rootHash}` as URI,
+          type: "application/json" as const,
+          value: { value: document },
+        }],
+      },
+      undefined,
+      new Promise(() => {}),
+      { speculative: true },
+    );
+    expect(writerStorage.isSchemaDocPersisted(space, rootHash)).toBe(false);
+
+    const tx = writer.edit();
+    tx.writeValueOrThrow(
+      { space, id: "of:batched-root" as URI, scope: "space", path: [] },
+      { crafted: handCrafted },
+    );
+    const schemaDocAddress = {
+      id: `cid:${rootHash}` as URI,
+      space,
+      path: [],
+      type: "application/json",
+    } as never;
+    tx.writeValuesOrThrow!([
+      { address: schemaDocAddress, value: document as never },
+      { address: schemaDocAddress, value: document as never },
+    ]);
+    expect((await tx.commit()).error).toBeUndefined();
+
+    const provider = readerStorage.open(space);
+    const synced = await provider.sync(`cid:${rootHash}` as URI, {
+      path: [],
+      schema: false,
+    });
+    expect(synced.error).toBeUndefined();
+    const stored = (provider as unknown as {
+      get: (uri: URI) => { value?: unknown } | undefined;
+    }).get(`cid:${rootHash}` as URI);
+    expect(
+      internSchemaAsTaggedHashString(stored?.value as JSONSchemaObj),
+    ).toBe(rootHash);
+  });
+
   it("externalizes a schema whose only external refs are embedded", () => {
     const vnodeRef = "https://commonfabric.org/schemas/vnode.json";
     const schema: JSONSchemaObj = {
@@ -301,11 +449,13 @@ describe("schema-doc-writer", () => {
     expect(collectExternalSchemaRefHashes(uiDoc).size).toBe(0);
   });
 
-  it("disables the sync schema table for the process", () => {
-    // Both mechanisms dedupe the same link-schema positions; a flag-on
-    // process must not negotiate the frame table (the Runtime in
-    // beforeEach carries the flag).
-    expect(getSyncSchemaTableConfig()).toBe(false);
+  it("keeps the sync schema table negotiated for the process", () => {
+    // The mechanisms compose: the table encoder skips reference-only
+    // positions, and stored links minted before the flag still carry
+    // inline schemas that only the table compresses in flight. The
+    // flag-on Runtime construction in beforeEach must therefore leave
+    // the table's negotiation untouched.
+    expect(getSyncSchemaTableConfig()).toBe(true);
   });
 
   it("keeps a schema decomposition refuses inline", () => {

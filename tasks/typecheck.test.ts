@@ -21,8 +21,16 @@ describe("typecheck", () => {
       expect(scopeOfPath("packages/patterns/google/core/util")).toBe(
         "patterns",
       );
-      expect(scopeOfPath("packages/connectors/agents")).toBe(
-        "connectors/agents",
+      expect(scopeOfPath("packages/connectors/agents/connector")).toBe(
+        "connectors/agents/connector",
+      );
+      expect(
+        scopeOfPath("packages/connectors/github/connector/src/client.ts"),
+      ).toBe(
+        "connectors/github/connector",
+      );
+      expect(scopeOfPath("packages/connectors/github/host/src/host.ts")).toBe(
+        "connectors/github/host",
       );
       expect(scopeOfPath("tasks/typecheck.ts")).toBe("tasks");
       expect(scopeOfPath("scripts/bundle.ts")).toBe("scripts");
@@ -46,6 +54,36 @@ describe("typecheck", () => {
         for (const path of paths) {
           expect(scopeOfPath(path)).toBe(scope);
         }
+      }
+    });
+
+    it("includes iframe guests of either extension under arbitrary names", async () => {
+      const root = await Deno.makeTempDir({ prefix: "typecheck-guests-" });
+      try {
+        await Deno.mkdir(
+          join(root, "packages", "ui", "src", "v2", "components"),
+          { recursive: true },
+        );
+        for (
+          const [name, guest] of [
+            ["custom-board", "guest.ts"],
+            ["plain-name", "guest.tsx"],
+          ]
+        ) {
+          const directory = join(root, "packages", "patterns", name);
+          await Deno.mkdir(directory, { recursive: true });
+          await Deno.writeTextFile(join(directory, guest), "export {};\n");
+        }
+
+        const byScope = await collectPathsByScope(root);
+        expect(byScope.get("patterns")).toContain(
+          "packages/patterns/custom-board/guest.ts",
+        );
+        expect(byScope.get("patterns")).toContain(
+          "packages/patterns/plain-name/guest.tsx",
+        );
+      } finally {
+        await Deno.remove(root, { recursive: true });
       }
     });
   });

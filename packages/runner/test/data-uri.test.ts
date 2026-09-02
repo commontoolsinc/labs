@@ -267,10 +267,11 @@ describe("data-uri", () => {
       expect(JsonCodecEngine.seemsLikeEncoded(payload)).toBe(true);
     });
 
-    // The standard encoding canonicalizes key order, so the minted id is a
-    // function of content alone. This is the property whose absence #4360
-    // worked around in `schema-hash.ts`.
     it("mints the same URI regardless of key insertion order", () => {
+      // The standard encoding canonicalizes key order, so the minted id is a
+      // function of content alone. This is the property whose absence #4360
+      // worked around in `schema-intern.ts`.
+
       const inOrder = { alpha: 1, beta: [2, 3], gamma: { delta: 4 } };
       const scrambled = { gamma: { delta: 4 }, beta: [2, 3], alpha: 1 };
       expect(dataUriFromValueWithResolvedLinks(scrambled)).toBe(
@@ -290,19 +291,20 @@ describe("data-uri", () => {
       expect(Object.is(parsed.i, -Infinity)).toBe(true);
     });
 
-    // `undefined` is a `FabricValue` and round-trips as itself; the
-    // present-`undefined` document property is the reader's synthesis
-    // (see attestation `load()`), not part of the payload.
     it("round-trips an `undefined` value", () => {
+      // `undefined` is a `FabricValue` and round-trips as itself; the
+      // present-`undefined` document property is the reader's synthesis
+      // (see attestation `load()`), not part of the payload.
+
       expect(valueFromDataUri(dataUriFromValueWithResolvedLinks(undefined)))
         .toBeUndefined();
     });
 
-    // The walk rebuilds a container only when something under it was
-    // rewritten, so these two exercise the rebuilding branch and pin what it
-    // has to carry across: the holes in a sparse array, and every sibling of
-    // the member that changed.
     it("keeps the holes in a sparse array that also holds a link", () => {
+      // The walk rebuilds a container only when something under it was
+      // rewritten. A sparse array holding a link takes that branch, and the
+      // holes have to survive it.
+
       const baseCell = runtime.getCell(space, "base", undefined, tx);
       const sparse: unknown[] = [];
       sparse[0] = { "/": { [LINK_V1_TAG]: { path: ["item"] } } };
@@ -319,6 +321,9 @@ describe("data-uri", () => {
     });
 
     it("keeps the siblings of a rewritten link untouched", () => {
+      // The same rebuilding branch, pinning the other thing it has to carry
+      // across: every sibling of the member that changed.
+
       const baseCell = runtime.getCell(space, "base", undefined, tx);
       const baseId = baseCell.getAsNormalizedFullLink().id;
       const data = {
@@ -336,9 +341,10 @@ describe("data-uri", () => {
       expect(parsed.after).toBe("unchanged");
     });
 
-    // A value with no fabric representation reaches the encoder as it came
-    // in, rather than being emptied out into a plain object on the way.
     it("refuses a value that no codec can represent", () => {
+      // A value with no fabric representation reaches the encoder as it came
+      // in, rather than being emptied out into a plain object on the way.
+
       expect(() =>
         dataUriFromValueWithResolvedLinks({ when: new Date() } as any)
       )
@@ -352,11 +358,12 @@ describe("data-uri", () => {
       expect(parsed.h.toString()).toBe(h.toString());
     });
 
-    // Link-free content on purpose: for an instance whose state carries no
-    // links, today's pass-through and the eventual traverse-into-state
-    // behavior (see the `TODO` in the walk) coincide, so this pins only the
-    // codec round-trip, not the pass-through itself.
     it("represents a link-free `FabricInstance` via its codec", () => {
+      // Link-free content on purpose: for an instance whose state carries no
+      // links, today's pass-through and the eventual traverse-into-state
+      // behavior (see the `TODO` in the walk) coincide, so this pins only the
+      // codec round-trip, not the pass-through itself.
+
       const inst = new UnknownValue("Zzz@1", { a: 1 });
       const parsed = valueFromDataUri(
         dataUriFromValueWithResolvedLinks({ inst }),

@@ -11,6 +11,7 @@ export const TEST_COMMANDS = [
     `--allow-run=${Deno.execPath()},git`,
     "--ignore=favicon-client.browser.test.ts",
     "--ignore=dashboard-message-client.browser.test.ts",
+    "--ignore=render.browser.test.ts",
     "--ignore=theme.browser.test.ts",
     "--ignore=favicon-raster.test.ts",
     "--ignore=regenerate-favicons.test.ts",
@@ -70,7 +71,13 @@ export async function runDashboardTests(options: {
     (() => Deno.makeTempDir({ prefix: "commontools-dashboard-tests-" })))();
   const removeDirectory = options.removeDirectory ??
     ((path) => Deno.remove(path, { recursive: true }));
-  const env = { TMPDIR: directory, DASHBOARD_CACHE_DIR: directory };
+  // The dashboard's own caches are the only thing this directory holds. The
+  // runner removes it once the last command has finished, and what it waits
+  // for is the commands themselves. The browser command leaves Chrome's crash
+  // handler, zygote, and GPU processes running after it exits, and those write
+  // into whatever directory `TMPDIR` names, so `TMPDIR` keeps naming the
+  // machine's own temporary directory.
+  const env = { DASHBOARD_CACHE_DIR: directory };
   const interrupts = options.interrupts ?? INTERRUPTS;
   const addSignalListener = options.addSignalListener ?? Deno.addSignalListener;
   const removeSignalListener = options.removeSignalListener ??

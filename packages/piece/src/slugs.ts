@@ -13,6 +13,7 @@ import {
 } from "@commonfabric/runner";
 import { pieceId } from "./piece-id.ts";
 import type { PiecesController } from "./ops/pieces-controller.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 export { SlugResolutionError };
 
@@ -86,7 +87,7 @@ export async function setSlugLink(
   const indexCell = slugIndexCell(pieces);
   await indexCell.sync();
 
-  await pieces.runtime.editWithRetry((tx) => {
+  const { error } = await pieces.runtime.editWithRetry((tx) => {
     const targetWithTx = target.withTx(tx);
     const slugWithTx = slugCell.withTx(tx);
     const metadataTargetWithTx = metadataTarget?.withTx(tx);
@@ -97,9 +98,13 @@ export async function setSlugLink(
       metadataTargetWithTx !== undefined &&
       metadataTargetLink?.path.length === 0
     ) {
-      metadataTargetWithTx.setMetaRaw("slug", validSlug);
+      metadataTargetWithTx.setMetaRaw(
+        "slug",
+        validSlug,
+        rawMetaWriteAuthorization,
+      );
     }
-    slugWithTx.setMetaRaw("slug", validSlug);
+    slugWithTx.setMetaRaw("slug", validSlug, rawMetaWriteAuthorization);
     slugWithTx.setRawUntyped(
       targetWithTx.getAsWriteRedirectLink({ base: slugWithTx }),
     );
@@ -107,6 +112,12 @@ export async function setSlugLink(
     // never see a name without its slug or a slug without its name.
     indexCell.withTx(tx).key(validSlug).set(true);
   });
+  if (error) {
+    throw new Error(
+      `Linking the slug "${validSlug}" failed because storage returned ${error.name}: ${error.message}`,
+      { cause: error },
+    );
+  }
 
   await pieces.runtime.idle();
   await pieces.synced();
@@ -121,7 +132,15 @@ export async function resolvePieceAddress(
   }
 
   const target = await resolveSlugTargetCell(pieces, token);
-  if (getPatternIdentityRef(target) === undefined) {
+  // A KEYLESS piece carries no durable pointer (the never-durable
+  // contract; L3(a), RULED 2026-08-27): in the session that set it up the
+  // runner's session pointer vouches for it. A fresh session cannot vouch
+  // for a keyless target — which matches the contract: nothing keyless is
+  // loadable there anyway.
+  if (
+    getPatternIdentityRef(target) === undefined &&
+    pieces.runtime.runner.sessionPatternPointerFor(target) === undefined
+  ) {
     throw new SlugResolutionError(
       `Slug "${token}" redirects to a document that is not a piece.`,
       "not-piece",

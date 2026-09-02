@@ -4,7 +4,9 @@
  * announcement text — which must carry tokens and harness-authored prose
  * only, never the address behind a token.
  */
+
 import { describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import {
   ADDRESS_HANDLE_TOKEN_PREFIX,
@@ -44,9 +46,6 @@ const stubSession = (
           return Promise.resolve(undefined);
         }
         return Promise.resolve({
-          // Answering no pattern identity makes the canonical legacy-root
-          // predicate say "modern" without touching any registry field.
-          getMetaRaw: () => undefined,
           key: (segment: string) => ({
             getAsNormalizedFullLink: () => ({
               space: SPACE_DID,

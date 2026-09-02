@@ -85,7 +85,9 @@ implementation.
 
 Group related tests with nested `describe()` blocks rather than comment
 banners. A `describe()` title appears in the test run transcript, where it
-tells a reader which group failed; a comment does not.
+tells a reader which group failed; a comment does not. A comment that turns out
+to describe several adjacent tests is the usual sign that a group is missing;
+see [Commenting a block](#commenting-a-block).
 
 ### Describing a class
 
@@ -175,6 +177,134 @@ Description strings may run past the 80-column line width the rest of the
 repository holds to. A description that reads well is worth more than a
 description that wraps well.
 
+### Commenting a block
+
+A comment about a test, or about a group of tests, goes inside the block it
+describes, as the first thing in the callback, followed by a blank line:
+
+```ts
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+
+declare class DonutWeight {
+  constructor(grams: number);
+  readonly grams: number;
+  plus(other: DonutWeight): DonutWeight;
+}
+
+describe("instance members", () => {
+  // Comparing two `DonutWeight`s would rest on whatever equality the class
+  // gives. Each case reads `grams` off the result instead, so what the
+  // assertion turns on is the arithmetic alone.
+
+  describe("plus()", () => {
+    it("returns the sum of the two weights", () => {
+      expect(new DonutWeight(3).plus(new DonutWeight(4)).grams).toBe(7);
+    });
+  });
+});
+```
+
+Above the call, such a comment is held in place by adjacency and nothing else.
+A block inserted at that line lands between the two, and the comment then heads
+a group it was not written for while the group it describes has none. Inside
+the callback there is nothing to insert between them, and the indentation says
+how far the comment reaches.
+
+The blank line under it separates the two jobs a `//` comment does here. With
+one, the comment is about the block. Without one, it is about the statement
+directly beneath it, which is the ordinary use and is untouched by any of this.
+
+This holds for a test and for a group of them: `describe()`, `it()`, and
+`Deno.test()`, `Deno.bench()` and `t.step()` where a file uses them. It does
+not reach the `beforeEach()` family. A hook is setup rather than a case, and
+reads the way any other statement does with a line or two of `//` over it.
+
+A callback that opens no body of its own has nowhere to hold a comment, and the
+note stays beside it. Three shapes do that — a body that is a bare expression,
+an empty body written on the opener's line, and an options object whose `fn` is
+the name of a function declared elsewhere:
+
+```ts
+// Shown for illustration only.
+
+it("returns `undefined` for a bad name", () => expect(f(x)).toBeUndefined());
+Deno.test("would-pass", function () {});
+Deno.test({ name: "derive array leak", fn: runTest, sanitizeOps: false });
+```
+
+This is the same allowance
+[`code-comment-style.md`](code-comment-style.md#where-one-goes) makes for a
+declaration with no body to put a note in.
+
+An options object whose `fn` is written out — `fn() { … }` or
+`fn: async () => { … }` — has a body like any other callback, and the
+comment goes inside it.
+
+Three nearby shapes are not this one:
+
+- A comment whose subject is a **run of sibling blocks** — two or three adjacent
+  cases that each pin one part of what it says — has no home inside any one of
+  them. That comment is telling you the run wants a `describe()`: give the run
+  its own block, and the comment goes inside that block by the rule above, which
+  is where a long rationale belongs anyway. Wrapping a run renames every test in
+  it, so where the history is worth keeping, bridge the rename as [test
+  records](test-records.md) describes. A run that should not become a block
+  takes a [section marker](code-comment-style.md#section-markers) instead, and
+  then the region needs closing — a second marker after the run, or the end of
+  the enclosing block or file — or a reader cannot see where it ends. And where
+  what you have to say names the cases one at a time, say each part in the case
+  it belongs to rather than all of it in one place.
+- A comment describing the **file** rather than any block in it is a file
+  header. It goes at the top of the file as a doc comment, per
+  [File headers](code-comment-style.md#file-headers), and not above the
+  top-level `describe()`.
+- A [section marker](code-comment-style.md#section-markers) titles a region of
+  the file holding several blocks. Reach is what tells the two apart, not
+  length or subject matter.
+
+  A marker covering a single block is usually a block comment in the wrong
+  frame: where it says something about that block, it becomes a block comment
+  in the form above, and where it says no more than the block's own
+  description, it is deleted. A comment that would say no more than the
+  description above it is not worth writing.
+
+  Two things stop that. Where a file marks its regions in a series and this
+  marker is one of the series, it stays. The series is what says where each
+  region begins and ends, so a marker missing from the middle of one leaves
+  the region above it looking wider than it is. The text can say no more
+  than the block does and the marker still earns its place, because what it
+  carries is the boundary. And where the marker closes the region above it,
+  removing it reopens that region, so it is replaced rather than removed —
+  by a marker titling what follows, or by wrapping the region above in a
+  `describe()` that ends it.
+
+### The shape to aim for
+
+A reader should be able to tell what a comment covers from where it sits, and
+each place carries one reach. First thing inside a callback, it covers that
+block — the single case, or the whole group, whichever the callback opens.
+Framed as a section marker, it covers the region running to the next marker at
+the same level, or to the end of the enclosing block or file. Beside a hook or a
+body-less callback, it covers the statement it touches. At the top of the file,
+as a doc comment, it covers the file. Write each comment into the place that
+matches its reach and a reader never has to guess.
+
+Give a file one way of showing its regions and keep to it. Where a file marks
+regions, a marker ends the one before it, so a series of them reads as a series
+and a lone label in another form leaves the region above it looking wider than
+it is.
+
+Moving a comment into its block takes a boundary away with it. Whatever sat
+above was bounded in practice by that comment being there, and with the comment
+inside a callback the thing above reaches past where the comment held it. Look
+up before moving one: where a region ends at the comment, it needs a closer of
+its own in the same change. Deleting a comment does the same thing.
+
+None of this is checked mechanically, on purpose: the cases that do not fit
+keep arriving, and a gate would only make them expensive. It is guidance. A
+file that reads better than the guidance is the better file.
+
 ## Assertions
 
 Default to `expect()`-style assertions — `expect(...).toBe(...)`,
@@ -234,7 +364,7 @@ assert on _that_ result:
 
 ```ts
 import { expect } from "@std/expect";
-import { valueEqual } from "@commonfabric/data-model/fabric-value";
+import { valueEqual } from "@commonfabric/data-model";
 
 // Vacuous: asserts `Object.is(NaN, NaN)`, which holds regardless of
 // what `valueEqual()` does.

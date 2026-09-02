@@ -5,7 +5,17 @@
  * on the main thread. They are batched and sent as a single message.
  */
 
-import type { CellRef, JSONValue } from "@commonfabric/runtime-client";
+import type { FabricValue } from "@commonfabric/data-model";
+import type { CellRef } from "@commonfabric/runtime-client";
+
+/**
+ * Reserved node ID for the container element. The main thread registers the
+ * container DOM element under it, and the worker names it as the parent when
+ * inserting a child directly into the container. It lives here, with the rest
+ * of the vocabulary the two sides share, because agreeing on it is the whole
+ * of its job.
+ */
+export const CONTAINER_NODE_ID = 0;
 
 /**
  * Create a new DOM element.
@@ -14,6 +24,7 @@ export type CreateElementOp = {
   op: "create-element";
   nodeId: number;
   tagName: string;
+
   /**
    * The space of the cell whose render produced this element, present
    * only when it differs from the nearest ancestor element that
@@ -49,14 +60,14 @@ export type SetPropOp = {
   op: "set-prop";
   nodeId: number;
   key: string;
-  // TODO(danfuzz): a prop is whatever a pattern put on a render node, so its
-  // value is a `FabricValue`, and `JSONValue` narrows that to the
-  // JSON-compatible subset. The producer (`transformPropValue()` in
-  // `worker/reconciler.ts`) does not narrow to match: it hands over a
-  // `FabricPrimitive` whole, and structured clone strips one to `{}` on the
-  // way here. `codec-realm` is the mechanism, this batch crossing by
-  // `postMessage` rather than as JSON text.
-  value: JSONValue;
+
+  /**
+   * The value to set, which is whatever a pattern put on a render node and so
+   * is a `FabricValue` entire. The batch crosses inside the envelope's
+   * encoding, which carries a `FabricPrimitive` with its class where a bare
+   * structured clone stripped one to `{}`.
+   */
+  value: FabricValue;
 };
 
 /**
@@ -157,7 +168,7 @@ export type VDomBatch = {
   batchId: number;
 
   /** The operations to apply, in order */
-  ops: VDomOp[];
+  ops: readonly VDomOp[];
 
   /**
    * The root node ID for this render tree; `null` while the tree has no root

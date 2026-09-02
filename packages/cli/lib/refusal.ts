@@ -83,3 +83,14 @@ export function nearestName(
     ? best
     : undefined;
 }
+
+/**
+ * Flag names as prose: "--a", "--a and --b", "--a, --b and --c".
+ *
+ * Shared because a refusal naming more than one flag is written by more than
+ * one door, and a list joined two ways reads as two conventions.
+ */
+export function listFlags(flags: readonly string[]): string {
+  if (flags.length <= 1) return flags.join("");
+  return `${flags.slice(0, -1).join(", ")} and ${flags.at(-1)}`;
+}

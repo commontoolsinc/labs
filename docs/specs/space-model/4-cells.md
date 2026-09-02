@@ -329,7 +329,7 @@ The current system does **not** add timestamps or unique IDs to event payloads:
   include it in the allowlist of properties passed through
 
 However, each handler **invocation** does receive a unique identity. When an
-event handler is invoked, `Runner.instantiateJavaScriptHandlerNode`
+event handler is invoked, `Runner.#instantiateJavaScriptHandlerNode`
 (`packages/runner/src/runner.ts`) puts an event id in the `cause` object used
 to derive cell identities for handler results — the durable id minted for the
 dispatched event (`tx.dispatchedEventId`), falling back to a fresh

@@ -6,14 +6,15 @@ import { shaperInstanceGroupKey } from "../src/scheduler/wake-shaping.ts";
 // deno-lint-ignore no-explicit-any
 const anyOf = <T>(v: unknown) => v as T;
 
-// The classifier that keys the cell-notification token bucket. Only renderer
-// keystroke input is shaped; server pushes must NOT be, because deferring a
-// push's mark-dirty breaks incremental observation adoption (the writer's
-// observations arrive in the same synchronous turn as the integrate whose dirt
-// they clear). The bucket key is space-qualified so two instances of one pattern
-// in different spaces (which can share a content-addressed pieceId) do not
-// collide.
 describe("shapableWakeGroupKey", () => {
+  // The classifier that keys the cell-notification token bucket. Only renderer
+  // keystroke input is shaped; server pushes must NOT be, because deferring a
+  // push's mark-dirty breaks incremental observation adoption (the writer's
+  // observations arrive in the same synchronous turn as the integrate whose
+  // dirt they clear). The bucket key is space-qualified so two instances of one
+  // pattern in different spaces (which can share a content-addressed pieceId)
+  // do not collide.
+
   const rendererInputTx = { marker: "renderer-input" };
   const state = anyOf<Parameters<typeof shapableWakeGroupKey>[0]>({
     isRendererInputSource: (source: object | undefined) =>
@@ -35,10 +36,11 @@ describe("shapableWakeGroupKey", () => {
     ).toBe(`${instanceKey}|input`);
   });
 
-  // Server pushes stay unshaped: the adoption-era reason is deleted with the
-  // observation machinery (server-execution v2 stage C), and re-deciding the
-  // shaping is a separate open question. See shapableWakeGroupKey.
   it("never shapes server pushes (pull / integrate)", () => {
+    // Server pushes stay unshaped: the adoption-era reason is deleted with the
+    // observation machinery (server-execution v2 stage C), and re-deciding the
+    // shaping is a separate open question. See shapableWakeGroupKey.
+
     expect(shapableWakeGroupKey(state, notif("pull"), withPiece)).toBe(
       undefined,
     );

@@ -1,11 +1,13 @@
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import {
   type CellScope,
+  DEFAULT_BRANCH,
   type EntitySnapshot,
   type GraphQuery,
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
+  type SessionHolding,
   type SessionSync,
   type SessionSyncRemove,
   type SessionSyncUpsert,
@@ -51,7 +53,8 @@ export const sameSnapshot = (
 };
 
 export const isEmptySync = (sync: SessionSync): boolean =>
-  sync.upserts.length === 0 && sync.removes.length === 0;
+  sync.upserts.length === 0 && sync.removes.length === 0 &&
+  (sync.operationFields?.length ?? 0) === 0;
 
 /**
  * Build a session cache entry for one tracked instance. The instance key
@@ -91,6 +94,42 @@ export const toCacheEntry = (
       ? {}
       : { coverClass: entity.coverClass }),
   };
+};
+
+/**
+ * The delivery diff base a client DECLARES: its holdings, in the cache's
+ * own terms. Each holding names a document instance the client confirms
+ * it holds at `seq` (a tombstone when `deleted`); the instance resolves
+ * from the session identity as every wire frame's does, and the branch is
+ * the holding's own declaration, the default branch when it declares
+ * none. A holding the diff then finds unchanged is
+ * elided, a changed or unlisted document is delivered, and a held
+ * document the watch union no longer covers is removed — the same rules
+ * the server's own delivery memory drives, with the client's statement
+ * in that memory's place. Keyed by branch as the cache is: a holding
+ * names its branch (absent = the default), so a same-id document on
+ * another branch can never stand in for it. `doc` is deliberately absent:
+ * a diff never reads the previous entry's content.
+ */
+export const holdingsToCacheEntries = (
+  holdings: readonly SessionHolding[],
+  identity: ScopeKeyIdentity,
+): Map<string, SessionCacheEntry> => {
+  const entries = new Map<string, SessionCacheEntry>();
+  for (const holding of holdings) {
+    const scope = holding.scope ?? DEFAULT_SCOPE;
+    const scopeKey = resolveScopeKey(scope, identity);
+    const branch = holding.branch ?? DEFAULT_BRANCH;
+    entries.set(cacheKeyForEntity(branch, holding.id, scopeKey), {
+      branch,
+      id: holding.id,
+      scope,
+      scopeKey,
+      seq: holding.seq,
+      ...(holding.deleted === true ? { deleted: true } : {}),
+    });
+  }
+  return entries;
 };
 
 export const trackedIdsFromEntries = (
@@ -164,7 +203,7 @@ export const toWireRemove = (
   ...(keyed ? { scopeKey: entry.scopeKey } : {}),
 });
 
-const compareSyncAddress = (
+export const compareSyncAddress = (
   left: { branch: string; id: string; scope?: CellScope },
   right: { branch: string; id: string; scope?: CellScope },
 ): number =>
@@ -177,6 +216,7 @@ export const groupedQueries = (
 ): Map<string, GraphQuery> => {
   const grouped = new Map<string, GraphQuery>();
   for (const watch of watches) {
+    if (watch.kind === "operation") continue;
     const branch = watch.query.branch ?? "";
     const existing = grouped.get(branch);
     if (existing === undefined) {
@@ -219,12 +259,20 @@ const watchRootIdentity = (root: GraphQuery["roots"][number]): string =>
   ]);
 
 const watchQueryIdentity = (watch: WatchSpec): string =>
-  JSON.stringify({
-    branch: watch.query.branch ?? "",
-    atSeq: watch.query.atSeq ?? null,
-    excludeSent: watch.query.excludeSent === true,
-    roots: watch.query.roots.map(watchRootIdentity).toSorted(),
-  });
+  watch.kind === "operation"
+    ? JSON.stringify({
+      branch: watch.query.branch ?? "",
+      id: watch.query.id,
+      scope: watch.query.scope ?? DEFAULT_SCOPE,
+      path: watch.query.path,
+      after: watch.query.after ?? null,
+    })
+    : JSON.stringify({
+      branch: watch.query.branch ?? "",
+      atSeq: watch.query.atSeq ?? null,
+      excludeSent: watch.query.excludeSent === true,
+      roots: watch.query.roots.map(watchRootIdentity).toSorted(),
+    });
 
 export const sameWatchSpec = (
   left: WatchSpec,

@@ -14,11 +14,18 @@ how to opt a workstation in, and how to read the data.
 
 ## What a record is
 
-A test's identity is the triple of **kind** (`unit`, `browser`, `pattern`,
-`integration`, `typecheck`, `lint`, `format`, `gate`), **scope** (the owning
-workspace member, or `repo`), and **name** (whatever the test's own runner
-reports — a bdd describe chain, a pattern file path, a task name, a script
-step). One record is one JSON line; one uploaded object is a run's
+A test's identity has three required parts: **kind** (`unit`, `browser`,
+`pattern`, `integration`, `typecheck`, `lint`, `format`, `gate`), **scope**
+(the owning workspace member, or `repo`), and **name** (whatever the test's
+own runner reports — a bdd describe chain, a pattern file path, a task name,
+a script step). An optional **variant** separates the same test running
+in a non-default configuration. The default configuration is unmarked. The
+server-execution ON jobs use `server-execution` after variant-aware relay
+support is on the default branch. When server execution becomes the default,
+remove that marker from the ON jobs and mark the surviving explicit OFF jobs
+as `server-execution-off`. New default runs then continue the history of
+today's unmarked default jobs. One record is one JSON line; one uploaded
+object is a run's
 context line followed by its record lines. The schema, the line codecs, and
 their validators live in `packages/test-support/src/records/`.
 
@@ -34,7 +41,8 @@ Renaming a test renames its identity and splits its history. When the
 continuity matters, append a line to `tasks/test-identity-aliases.jsonl`
 mapping the old identity (or a whole scope, for a package rename) to the
 new one with the date; `deno task check-test-aliases` holds that file to
-append-only, no-double-mapping, acyclic rules.
+append-only, no-double-mapping, acyclic rules. The same rename applies to
+every variant.
 
 ## The environment surface
 
@@ -57,6 +65,13 @@ append-only, no-double-mapping, acyclic rules.
   there is left alone. Anything else — a bash workstation whose agents run
   non-interactive shells, a harness nothing here knows — puts the variable
   in whatever starts the agent.
+- `CF_TEST_SKIP_LIST` — a file naming the tests this invocation is not to
+  run, keyed by registering file and by name. The registration preload
+  reads it and registers a listed test as ignored rather than dropping it,
+  so a skipped test appears in the report as skipped instead of
+  disappearing. An identity the file does not name runs, so a test added
+  or renamed since the list was built runs. A file that is missing or
+  malformed runs everything.
 - `CF_TEST_AGENT` — an opaque label for the operating agent, recorded
   verbatim in the run context. Set it to tell one agent from another, or
   one checkout of a fleet from the next; it is never required. Left
@@ -214,6 +229,16 @@ nothing authored by anyone else; other fork runs still run their tests
 normally and simply ship no records. Re-running the relay, or
 dispatching it with a run id, re-ships idempotently.
 
+The shared `test-records-ship` action accepts an optional `variant` input.
+It applies the value to every spooled and JUnit-derived record in that job.
+Leave it unset for the default configuration.
+
+The relay runs its parser from the default branch. Land parser, relay, reader,
+and action support for a new optional record field before any test workflow
+starts emitting it. Enabling a field in the same change makes the old relay
+drop it from that change's pull-request artifacts before writing them to the
+create-only store.
+
 ## Reading the data
 
 Everything under the dataset is publicly readable:
@@ -230,8 +255,13 @@ validating reader; `deno task` scripts built on it:
   families, and the over-sixty-seconds list (`--gate` turns that list into
   the ratchet's exit status).
 - `tasks/test-records-compact.ts` — rewrites each closed day of raw
-  records as one rollup under `aggregated/`; `--plan` shows what it would
-  do without credentials.
+  records as a manifest and a few tens of rollup shards under
+  `aggregated/`, sized so that a shard is a string a reader can hold;
+  `--plan` reads the listing alone and shows what it would do without
+  credentials. It writes from `.github/workflows/test-records-compact.yml`
+  on a daily schedule, which is the only place its identity can be
+  assumed; there is no key for it and no way to run the writing half by
+  hand.
 - `packages/dashboard/test-records-history.ts` — the dashboard's collector:
   cached per-identity daily series shaped for `trend.ts`.
 
@@ -258,7 +288,27 @@ is the record of who minted what for whom.
 ## Covering a new test surface
 
 A runner that already emits JUnit needs nothing but a `--junit`
-specification on its job's ship step. A harness with per-result callbacks
+specification on its job's ship step, and a `--preload` naming
+`packages/test-support/src/records/preload.ts` where the surface is
+`deno test`. `preloadArgument()` from `@commonfabric/test-support/records`
+spells that flag; Deno resolves `--preload` as a path rather than through
+the import map, so it must be absolute and no caller writes it out.
+
+The preload does two things, and it only installs itself when it has one
+of them to do: it captures the file each test was registered from and
+leaves the map in the spool, and it applies `CF_TEST_SKIP_LIST`. Wrapping
+`Deno.test` costs a JUnit report the file attribution it carries on its
+own, so a process with nothing to skip and no spool it may write leaves
+`Deno.test` alone and the report's own class names are read instead.
+
+A test task naming its own `--import-map` does not take the preload. That
+map governs every module of the invocation, the preload included, so a
+specifier the preload needs and the map does not carry fails the whole
+run rather than the preload alone. Such a member keeps its JUnit path and
+loses nothing by the omission: with no wrapper installed, the report
+keeps its own class names and ingestion reads the file from those.
+
+A harness with per-result callbacks
 appends records through `FragmentWriter` (see the hooks in
 `packages/cli/lib/test-runner.ts` and `packages/deno-web-test/runner.ts`).
 Anything else wraps its command:

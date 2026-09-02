@@ -48,6 +48,7 @@ export interface Output {
   [UI]: VNode;
   auth: Writable<Auth>;
   accountType: "personal";
+
   /** Minimal preview for picker display with PERSONAL badge */
   [TILE_UI]: VNode;
 }

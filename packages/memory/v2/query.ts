@@ -1,9 +1,9 @@
 import type { FabricValue, JSONSchema } from "@commonfabric/api";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import {
   internPathSelector,
+  internSchemaAsTaggedHashString,
   REJECTING_SELECTOR,
-} from "@commonfabric/data-model/schema-utils";
+} from "@commonfabric/data-model-schema";
 import {
   createGraphQueryWalkStats,
   createSchemaMemo,
@@ -34,6 +34,7 @@ import {
   type EntitySnapshot,
   getServerExecutionConfig,
   type GraphQuery,
+  type GraphQueryRoot,
   isScopeKey,
   resolveScopeKey,
   type ScopeKey,
@@ -59,12 +60,14 @@ export type QueryDocKey = `${string}/${ScopeKey}/${string}`;
 export type TrackedGraphState = {
   branch: string;
   tracker: MapSetStringToPathSelectors;
+
   /** Value-link dead-ends the query's walks read as ABSENT (see
    * GraphQueryWalkOptions.onMissedDoc): keyed like the tracker, never
    * delivered — a miss keeps the graph reactive to the document's later
    * creation (the wake pass and the dirty refresh consult it) without
    * putting an absence marker on the wire. */
   missed: MapSetStringToPathSelectors;
+
   /** missKey → the REFERRER keys whose links dead-ended on it. A miss
    * lives while any referrer attributes it: a referrer that is
    * re-walked clears its attributions first, so a link edited away
@@ -72,26 +75,159 @@ export type TrackedGraphState = {
    * attribution-less miss — defensive, no known producer — retires
    * only on its own arrival). */
   missedBy: Map<string, Set<string>>;
+
   /** referrerKey → the miss keys it attributed (the reverse index the
    * re-walk clears by). */
   missesOf: Map<string, Set<string>>;
+
   entities: Map<QueryDocKey, EntitySnapshot>;
   memo: SchemaMemo;
   manager: EngineObjectManager;
 };
 
 /**
+ * The costliest single root of one query evaluation.
+ *
+ * A query's roots are the union of every watch's roots on a branch, so a
+ * slow `watch.add` reports its duration against a watch COUNT and says
+ * nothing about which declaration spent it. This names the root that did.
+ *
+ * It names the root that PAID, which is not always the root to blame.
+ * Roots share coverage within an evaluation: the first to reach a document
+ * is charged for it, and a later root that would have reached the same
+ * document is skipped instead. So where several roots declare overlapping
+ * closures, the whole cost lands on whichever ran first, and bounding that
+ * one root moves the charge to the next rather than removing it. Read a
+ * large `slowestRoot` as "the cost is reachable from here", and confirm a
+ * suspected cause by checking that narrowing it lowers the request's own
+ * elapsed time — not merely that it lowers this root's.
+ */
+export type SlowestQueryRoot = {
+  id: string;
+  scope: CellScope;
+
+  /** The explicit scope INSTANCE the root named, on the lease-holder reads
+   * that may name one. Roots alike in every other field but this one are
+   * different reads of different instances, so without it the record
+   * cannot say which instance cost the time. */
+  entityScopeKey?: ScopeKey;
+
+  /** The selector's path, slash-joined; empty for a whole-document root. */
+  path: string;
+
+  /** The selector schema's interned tagged hash, absent when the root
+   * declares none. The hash rather than the schema itself: a board root's
+   * schema runs to kilobytes, and the hash is how the registry names it. */
+  schema?: string;
+
+  elapsedMs: number;
+
+  /** Engine documents read while visiting this root. */
+  reads: number;
+
+  /** The walk this root ran, as counters: how many documents it crossed
+   * (`dagTraversals`), what kind of structure it crossed them through, and
+   * how much the schema memo saved. `elapsedMs` says a root was expensive;
+   * this says what it did to get that way — a wide root crossing thousands
+   * of documents and one deep root re-walking a schema are the same
+   * duration and different bugs. */
+  walk: GraphQueryWalkStats;
+};
+
+/** One root's share of the walk counters its evaluation accumulated. */
+const walkStatsDelta = (
+  after: GraphQueryWalkStats,
+  before: GraphQueryWalkStats,
+): GraphQueryWalkStats => ({
+  coveredSelectorSkips: after.coveredSelectorSkips -
+    before.coveredSelectorSkips,
+  schemaTraversals: after.schemaTraversals - before.schemaTraversals,
+  pointerTraversals: after.pointerTraversals - before.pointerTraversals,
+  arrayTraversals: after.arrayTraversals - before.arrayTraversals,
+  objectTraversals: after.objectTraversals - before.objectTraversals,
+  dagTraversals: after.dagTraversals - before.dagTraversals,
+  getDocAtPathCalls: after.getDocAtPathCalls - before.getDocAtPathCalls,
+  schemaMemoHits: after.schemaMemoHits - before.schemaMemoHits,
+});
+
+/**
  * What one query cost: the walk's own counters, plus how many documents the
- * query read out of the engine.
+ * query read out of the engine, plus which of its roots was the expensive
+ * one.
  */
 export type QueryTraversalStats = GraphQueryWalkStats & {
   managerReads: number;
+
+  /** Roots this evaluation visited. A cache hit visits none. */
+  rootsVisited: number;
+
+  /** Summed elapsed time of those visits. Roots are visited in sequence,
+   * so this is directly comparable with the caller's own elapsed
+   * measurement, and what it leaves over is everything outside the root
+   * loop — entity assembly and schema-closure staging. Read the two
+   * together: they say whether a slow evaluation was slow at a root at
+   * all. */
+  rootsElapsedMs: number;
+
+  /** The costliest one, absent when no root was visited. */
+  slowestRoot?: SlowestQueryRoot;
 };
 
 const createQueryTraversalStats = (): QueryTraversalStats => ({
   managerReads: 0,
+  rootsVisited: 0,
+  rootsElapsedMs: 0,
   ...createGraphQueryWalkStats(),
 });
+
+/**
+ * Run one root's evaluation, charging what it cost to `stats` and keeping
+ * the costliest root seen so far.
+ *
+ * Two clock reads and one counter read per root, paid unconditionally,
+ * because which evaluation turns out to be the slow one is not knowable
+ * before it runs. The overhead is bounded by the same factor that makes a
+ * query large: a root cheap enough for two `performance.now()` calls to
+ * register against it did no document reads.
+ */
+const chargeRootVisit = (
+  root: GraphQueryRoot,
+  manager: EngineObjectManager,
+  stats: QueryTraversalStats,
+  visit: () => void,
+): void => {
+  const startedAt = performance.now();
+  const readsBefore = manager.readCount;
+  const walkBefore = { ...stats };
+  try {
+    visit();
+  } finally {
+    // Charged from `finally`, so a root that throws is attributed too: a
+    // slow failing root is at least as interesting as a slow passing one.
+    const elapsedMs = performance.now() - startedAt;
+    stats.rootsVisited++;
+    stats.rootsElapsedMs += elapsedMs;
+    if (
+      stats.slowestRoot === undefined ||
+      elapsedMs > stats.slowestRoot.elapsedMs
+    ) {
+      stats.slowestRoot = {
+        id: root.id,
+        scope: root.scope ?? DEFAULT_SCOPE,
+        ...(root.entityScopeKey === undefined
+          ? {}
+          : { entityScopeKey: root.entityScopeKey }),
+        path: root.selector.path.join("/"),
+        ...(root.selector.schema === undefined ? {} : {
+          schema: internSchemaAsTaggedHashString(root.selector.schema),
+        }),
+        elapsedMs,
+        reads: manager.readCount - readsBefore,
+        walk: walkStatsDelta(stats, walkBefore),
+      };
+    }
+  }
+};
 
 /**
  * The identity a manager's tracked-graph keys resolve against: the
@@ -112,13 +248,21 @@ export class EngineObjectManager implements ObjectStorageManager {
   #missing = new Set<string>();
   #readCount = 0;
 
+  readonly #engine: Engine.Engine;
+  readonly #branch: string;
+  readonly #readSeq?: number;
+
   constructor(
-    private readonly engine: Engine.Engine,
-    private readonly branch: string,
+    engine: Engine.Engine,
+    branch: string,
     readonly principal?: string,
     readonly sessionId?: string,
-    private readonly readSeq?: number,
-  ) {}
+    readSeq?: number,
+  ) {
+    this.#engine = engine;
+    this.#branch = branch;
+    this.#readSeq = readSeq;
+  }
 
   /** The scope INSTANCE an address resolves to for this manager: the
    * explicit key where the caller named one (protocol.md §2's read row),
@@ -139,14 +283,14 @@ export class EngineObjectManager implements ObjectStorageManager {
     scope: CellScope = DEFAULT_SCOPE,
     scopeKey?: ScopeKey,
   ): Engine.EntityState | null {
-    return Engine.readState(this.engine, {
+    return Engine.readState(this.#engine, {
       id,
       scope,
       ...(scopeKey === undefined ? {} : { scopeKey }),
       principal: this.principal,
       sessionId: this.sessionId,
-      branch: this.branch,
-      ...(this.readSeq === undefined ? {} : { seq: this.readSeq }),
+      branch: this.#branch,
+      ...(this.#readSeq === undefined ? {} : { seq: this.#readSeq }),
     });
   }
 
@@ -155,7 +299,7 @@ export class EngineObjectManager implements ObjectStorageManager {
    * for seq 0 / an unknown seq. Memoized per engine; see
    * {@link Engine.commitClassOfSeq}. */
   coverClassOf(seq: number): CommitClass | undefined {
-    return Engine.commitClassOfSeq(this.engine, seq);
+    return Engine.commitClassOfSeq(this.#engine, seq);
   }
 
   load(
@@ -280,10 +424,384 @@ export type QueryGraphReuseContext = {
   managers?: Map<string, EngineObjectManager>;
 };
 
+/** Source of fresh ids for {@link canonicalSelectorId}. */
+let nextCanonicalSelectorId = 0;
+
+/** Ids already issued, keyed by canonical (interned) selector instance. */
+const canonicalSelectorIds = new WeakMap<SchemaPathSelector, number>();
+
+/**
+ * Returns the canonical selector identity for evaluation-cache keys.
+ * Interning gives structurally equal selectors one canonical instance
+ * (`internPathSelector`), so reference identity is structural equality and
+ * the id is exact. Canonical instances are weakly held, so an id can lapse
+ * with its selector and a re-interned equal reappears under a fresh id —
+ * that costs a cache miss, never a wrong hit.
+ */
+const canonicalSelectorId = (selector: SchemaPathSelector): number => {
+  const interned = internPathSelector(selector);
+  let id = canonicalSelectorIds.get(interned);
+  if (id === undefined) {
+    id = nextCanonicalSelectorId++;
+    canonicalSelectorIds.set(interned, id);
+  }
+  return id;
+};
+
+const evaluationQueryKey = (query: GraphQuery): string =>
+  JSON.stringify([
+    query.branch ?? "",
+    query.roots
+      .map((root) => [
+        root.id,
+        root.scope ?? DEFAULT_SCOPE,
+        root.entityScopeKey ?? "",
+        canonicalSelectorId(toDocumentSelector(root.selector)),
+      ])
+      .map((parts) => JSON.stringify(parts))
+      .toSorted(),
+  ]);
+
+const evaluationIdentityKey = (options: TrackGraphOptions): string =>
+  JSON.stringify([options.principal ?? null, options.sessionId ?? null]);
+
+/**
+ * Bounds an evaluation cache's entry COUNT — the cardinality backstop for
+ * adversarial query-shape churn, not the memory bound. Memory is bounded
+ * by the server's cross-space retained-entity budget, which evicts by
+ * weight (see Server's evaluation-cache budget).
+ */
+const EVALUATION_CACHE_MAX_ENTRIES = 16;
+
+export type QueryEvaluationCacheDiagnostics = {
+  seq: number;
+  entries: number;
+  weight: number;
+
+  /** Total serves: the sum of the three per-class hit counters. */
+  hits: number;
+
+  misses: number;
+  rotations: number;
+
+  /** Serves of a scope-pure entry (identical for every identity). */
+  hitsPure: number;
+
+  /** Serves of an absent-residue entry — the recording identity's own
+   * re-ask included (its keys need no rewrite, but the entry is the
+   * same class). */
+  hitsAbsentResidue: number;
+
+  /** Serves of a tainted entry to the identity it is keyed to. */
+  hitsIdentity: number;
+
+  /** Absent-residue shares refused because a residue doc is PRESENT
+   * for the requester. A refusal is not a miss by itself: the call
+   * then serves from the identity entry (an identity hit) or
+   * evaluates in full (a miss). */
+  residueRefusals: number;
+
+  /** Live scope-pure entries. This count and the two below it are the live
+   * entries by share class; together with the hit split they are the
+   * production measure of how often scoped reach actually forecloses
+   * cross-identity sharing. */
+  entriesPure: number;
+
+  /** Live absent-residue entries. */
+  entriesAbsentResidue: number;
+
+  /** Live tainted entries, each keyed to one identity. */
+  entriesTainted: number;
+};
+
+/**
+ * Caches whole tracked-graph evaluations per (query shape, engine seq).
+ *
+ * The WHOLE evaluation is the smallest soundly shareable unit: within one
+ * walk, an already-covered (doc, selector) skips its subtree — including
+ * the tracker registrations that subtree would record — so any per-document
+ * slice of a walk's effects depends on what its siblings covered first, and
+ * replaying one standalone under-registers coverage. A complete evaluation
+ * carries no such context.
+ *
+ * Entries are valid only at the engine seq they were evaluated at; a seq
+ * advance rotates the whole cache. Staleness is therefore structural — no
+ * write hooks, no dependency tracking — and the sharing this buys is
+ * exactly where the cost multiplies: many sessions establishing the same
+ * watch corpus between two commits (a reconnect stampede after a process
+ * death is this, at its worst).
+ *
+ * Scope purity decides who may share an entry. An evaluation whose whole
+ * reach — tracked, missed, and loaded — resolved under the `space` scope is
+ * identical for every identity and is shared across them; one that touched
+ * a session- or user-scoped instance is keyed to the evaluating identity
+ * (key-vocabulary.md §5's identity-bound invariant — the same value-bleed
+ * rule `assertSchemaMemoIdentity` enforces for the inner schema memos).
+ * ACL changes are themselves commits, so a grant or revocation rotates the
+ * cache before any post-change evaluation could be served from it.
+ *
+ * Cross-identity sharing rests on evaluation being recipient-blind: the
+ * walk consults the requesting identity only to resolve scope instances,
+ * never to shape what a document contributes, so scope classification
+ * alone decides who an entry may serve. CFC enforcement lives outside
+ * this path (the runtime's flow-label and sink-ceiling dials; the
+ * server's sqlite read labeling annotates results rather than filtering
+ * them). A per-recipient filter inside evaluation would invalidate
+ * shared entries invisibly — clearance differs between identities at
+ * one seq, so rotation cannot fence it and scope keys cannot classify
+ * it — and must therefore key this cache by its filtering context or
+ * bypass it (key-vocabulary.md §5, the identity-bound inventory).
+ */
+export type QueryEvaluationCache = {
+  /** The engine the entries were evaluated against. A sequence number
+   * identifies state only within its engine, so a different engine object
+   * for the same space rotates the cache exactly as a seq advance does —
+   * both entry points accept a caller-supplied engine. */
+  engine: Engine.Engine | null;
+
+  seq: number;
+  entries: Map<
+    string,
+    { state: TrackedGraphState; share: StateScopeClass; weight: number }
+  >;
+
+  /** Sum of entry weights (retained entity count — the proxy for the
+   * parsed documents an entry keeps alive). The server enforces its
+   * cross-space budget against this. */
+  weight: number;
+
+  /** Serves of a scope-pure entry. This counter and the two below it are the
+   * per-class serve counters, which diagnostics report summed as `hits`;
+   * {@link QueryEvaluationCacheDiagnostics} defines each class. */
+  hitsPure: number;
+
+  /** Serves of an absent-residue entry. */
+  hitsAbsentResidue: number;
+
+  /** Serves of a tainted entry to the identity it is keyed to. */
+  hitsIdentity: number;
+
+  /** Absent-residue shares refused because a residue doc is present. */
+  residueRefusals: number;
+
+  /** Evaluations that found no usable entry. */
+  misses: number;
+
+  /** Times the cache was rotated out — a newer engine seq, or a different
+   * engine object for the same space. */
+  rotations: number;
+};
+
+export const createQueryEvaluationCache = (): QueryEvaluationCache => ({
+  engine: null,
+  seq: -1,
+  entries: new Map(),
+  weight: 0,
+  hitsPure: 0,
+  hitsAbsentResidue: 0,
+  hitsIdentity: 0,
+  residueRefusals: 0,
+  misses: 0,
+  rotations: 0,
+});
+
+export const queryEvaluationCacheDiagnostics = (
+  cache: QueryEvaluationCache,
+): QueryEvaluationCacheDiagnostics => {
+  const entriesByClass = { "pure": 0, "absent-residue": 0, "tainted": 0 };
+  for (const { share } of cache.entries.values()) {
+    entriesByClass[share.kind]++;
+  }
+  return {
+    seq: cache.seq,
+    entries: cache.entries.size,
+    weight: cache.weight,
+    hits: cache.hitsPure + cache.hitsAbsentResidue + cache.hitsIdentity,
+    misses: cache.misses,
+    rotations: cache.rotations,
+    hitsPure: cache.hitsPure,
+    hitsAbsentResidue: cache.hitsAbsentResidue,
+    hitsIdentity: cache.hitsIdentity,
+    residueRefusals: cache.residueRefusals,
+    entriesPure: entriesByClass["pure"],
+    entriesAbsentResidue: entriesByClass["absent-residue"],
+    entriesTainted: entriesByClass["tainted"],
+  };
+};
+
+/**
+ * How an evaluation's reach constrains who may share its cache entry.
+ *
+ * `pure`: every key resolved under the space scope — the result is
+ * identical for every identity. `absent-residue`: identity-dependent ONLY
+ * through scoped value-link dead-ends (`missed` keys — docs that were
+ * ABSENT), which is the shape a live corpus actually produces: per-session
+ * draft cells linked from shared documents that no fresh session has ever
+ * written. Such an entry serves another identity by REWRITING those keys
+ * to the requester's own instances — sound because the keys are the only
+ * identity-dependent part of the state (nothing was delivered from them,
+ * nothing was traversed under them) — after verifying each is absent for
+ * the requester too. `tainted`: scoped PRESENT data reached the tracker,
+ * or a key did not classify; the entry stays keyed to its identity.
+ */
+type StateScopeClass =
+  | { kind: "pure" }
+  | {
+    kind: "absent-residue";
+    residue: { key: QueryDocKey; id: string; scope: CellScope }[];
+  }
+  | { kind: "tainted" };
+
+/** Exported for testing (the malformed-key guard is unreachable through
+ * a real walk while the scope-key vocabulary holds). */
+export const classifyStateScope = (
+  state: TrackedGraphState,
+): StateScopeClass => {
+  for (const [key] of state.tracker) {
+    if (fromDocKey(key as QueryDocKey).scopeKey !== "space") {
+      return { kind: "tainted" };
+    }
+  }
+  for (const address of state.manager.loadedAddresses()) {
+    // Both halves checked deliberately: an explicit entity_scope_key can
+    // pair a non-space scope NAME with an aliased key, and such a load
+    // must never classify as shared. (Explicit foreign keys are
+    // lease-holder-only, and that whole session class bypasses the cache
+    // — this guards the invariant locally as well.)
+    if (address.scopeKey !== "space" || address.scope !== "space") {
+      return { kind: "tainted" };
+    }
+  }
+  const residue: { key: QueryDocKey; id: string; scope: CellScope }[] = [];
+  for (const [key] of state.missed) {
+    // The scope-key vocabulary is closed (isScopeKey), so a key that is
+    // not the space instance necessarily recovers a session or user
+    // scope; fromDocKey throws on anything outside the vocabulary.
+    const { id, scope, scopeKey } = fromDocKey(key as QueryDocKey);
+    if (scopeKey === "space") continue;
+    residue.push({ key: key as QueryDocKey, id, scope });
+  }
+  return residue.length === 0
+    ? { kind: "pure" }
+    : { kind: "absent-residue", residue };
+};
+
+/**
+ * Serve an `absent-residue` entry to `options`' identity: verify each
+ * residue doc is ABSENT for the requester too, then clone with the
+ * residue's miss keys rewritten to the requester's instances — so the
+ * clone's wake and dirty-refresh reactivity points at the docs the OWNING
+ * session would create, not the recording session's.
+ *
+ * The absence probes are load-bearing and cannot be skipped for a
+ * different identity: the requester's instance may have existed since
+ * before the entry was recorded (the recording walk never looked at it).
+ * They are also sufficient — entries live only within one engine seq, and
+ * absence cannot change without a commit. A present instance returns
+ * null: the caller evaluates normally, and that evaluation's tracker then
+ * carries the scoped doc, keying its own entry to the identity.
+ */
+const cloneWithRewrittenResidue = (
+  engine: Engine.Engine,
+  space: string,
+  state: TrackedGraphState,
+  residue: { key: QueryDocKey; id: string; scope: CellScope }[],
+  options: TrackGraphOptions,
+): { state: TrackedGraphState | null; probeReads: number } => {
+  const identity: ScopeKeyIdentity = {
+    principal: options.principal,
+    sessionId: options.sessionId,
+  };
+  const mapping = new Map<string, string>();
+  let probeReads = 0;
+  for (const { key, id, scope } of residue) {
+    const requesterScopeKey = resolveScopeKey(scope, identity);
+    const requesterKey = `${space}/${requesterScopeKey}/${id}`;
+    if (requesterKey !== key) {
+      probeReads++;
+      const probe = Engine.readState(engine, {
+        id,
+        scope,
+        scopeKey: requesterScopeKey,
+        principal: options.principal,
+        sessionId: options.sessionId,
+        branch: state.branch,
+      });
+      if (probe !== null && probe.document !== null) {
+        // Refused — but the probes already performed are reads this call
+        // made, and the caller's statistics must carry them.
+        return { state: null, probeReads };
+      }
+      mapping.set(key, requesterKey);
+    }
+  }
+  const clone = cloneTrackedGraphStateForIdentity(engine, state, options);
+  if (mapping.size === 0) {
+    return { state: clone, probeReads };
+  }
+  const missed = new MapSetStringToPathSelectors(true);
+  for (const [key, selectors] of clone.missed) {
+    const mapped = mapping.get(key) ?? key;
+    for (const selector of selectors) {
+      missed.add(mapped, selector);
+    }
+  }
+  const missedBy = new Map<string, Set<string>>();
+  for (const [key, referrers] of clone.missedBy) {
+    missedBy.set(mapping.get(key) ?? key, referrers);
+  }
+  const missesOf = new Map<string, Set<string>>();
+  for (const [referrer, misses] of clone.missesOf) {
+    missesOf.set(
+      referrer,
+      new Set([...misses].map((miss) => mapping.get(miss) ?? miss)),
+    );
+  }
+  return { state: { ...clone, missed, missedBy, missesOf }, probeReads };
+};
+
+/**
+ * Clone for a cache hit: `cloneTrackedGraphState` rebound to the
+ * requesting identity. Only scope-pure entries are ever cloned across
+ * identities, so every key, entity, memo entry, and manager cache line in
+ * the source resolved identically to what this identity's own evaluation
+ * would have produced; the rebind exists so the clone's LATER operations —
+ * refreshes, extensions — resolve scoped reach against the session that
+ * owns it. The cloned memo is a fresh Map, so the identity binding the
+ * schema-memo tripwire tracks starts unbound and binds to the new owner.
+ */
+const cloneTrackedGraphStateForIdentity = (
+  engine: Engine.Engine,
+  state: TrackedGraphState,
+  options: TrackGraphOptions,
+): TrackedGraphState => {
+  const clone = cloneTrackedGraphState(engine, state);
+  if (
+    clone.manager.principal === options.principal &&
+    clone.manager.sessionId === options.sessionId
+  ) {
+    return clone;
+  }
+  const manager = new EngineObjectManager(
+    engine,
+    state.branch,
+    options.principal,
+    options.sessionId,
+  );
+  manager.mergeFrom(state.manager);
+  return { ...clone, manager };
+};
+
 export type TrackGraphOptions = {
   readSeq?: number;
   principal?: string;
   sessionId?: string;
+
+  /** Serve/record whole evaluations through this cache (current-seq reads
+   * only; a `readSeq` read bypasses it). See {@link QueryEvaluationCache}
+   * for the sharing and rotation rules. */
+  evaluationCache?: QueryEvaluationCache;
+
   /**
    * `queryGraph` only (server-execution v2 stage A, OW17's wire leg):
    * annotate every returned snapshot with its scope INSTANCE
@@ -761,6 +1279,88 @@ export const trackGraph = (
   stats: QueryTraversalStats;
 } => {
   const branch = query.branch ?? "";
+  // Historical reads bypass the cache (entries are current-seq only), and
+  // so does the lease-holder exemption class: an exempt evaluation judges
+  // the CURRENT live lease, which is host state that can move without a
+  // commit — seq rotation cannot fence it, so those evaluations are never
+  // cached or served.
+  const cache = options.readSeq === undefined && options.keyedSnapshots !== true
+    ? options.evaluationCache
+    : undefined;
+  let cacheKeys: { pure: string; identity: string } | undefined;
+  let refusalProbeReads = 0;
+  if (cache !== undefined) {
+    const currentSeq = Engine.serverSeq(engine);
+    if (cache.engine !== engine || cache.seq !== currentSeq) {
+      cache.engine = engine;
+      cache.seq = currentSeq;
+      cache.entries.clear();
+      cache.weight = 0;
+      cache.rotations++;
+    }
+    const queryKey = evaluationQueryKey(query);
+    cacheKeys = {
+      pure: `P${queryKey}`,
+      identity: `I${evaluationIdentityKey(options)}${queryKey}`,
+    };
+    const pureEntry = cache.entries.get(cacheKeys.pure);
+    let served: TrackedGraphState | null = null;
+    let probeReads = 0;
+    if (pureEntry !== undefined) {
+      if (pureEntry.share.kind === "absent-residue") {
+        const rewritten = cloneWithRewrittenResidue(
+          engine,
+          space,
+          pureEntry.state,
+          pureEntry.share.residue,
+          options,
+        );
+        served = rewritten.state;
+        probeReads = rewritten.probeReads;
+        if (served === null) {
+          cache.residueRefusals++;
+        } else {
+          cache.hitsAbsentResidue++;
+        }
+      } else {
+        served = cloneTrackedGraphStateForIdentity(
+          engine,
+          pureEntry.state,
+          options,
+        );
+        cache.hitsPure++;
+      }
+    }
+    if (served === null) {
+      // Either no shared entry, or its residue is PRESENT for this
+      // identity and the share was refused. The identity's own earlier
+      // evaluation — tainted, keyed to exactly this (principal,
+      // sessionId) — still answers; without this lookup a shared entry
+      // would shadow it and the identity would re-evaluate every time.
+      const identityEntry = cache.entries.get(cacheKeys.identity);
+      if (identityEntry !== undefined) {
+        served = cloneTrackedGraphStateForIdentity(
+          engine,
+          identityEntry.state,
+          options,
+        );
+        cache.hitsIdentity++;
+      }
+    }
+    if (served !== null) {
+      // A hit ran no traversal, and its stats say so — but the residue
+      // absence probes ARE engine reads, and they report as such.
+      return {
+        serverSeq: currentSeq,
+        state: served,
+        stats: { ...createQueryTraversalStats(), managerReads: probeReads },
+      };
+    }
+    // A refused share's probes were still reads this call performed; the
+    // full evaluation below reports them alongside its own.
+    refusalProbeReads = probeReads;
+    cache.misses++;
+  }
   const managerKey = options.readSeq === undefined
     ? `${branch}\0${options.principal ?? ""}\0${options.sessionId ?? ""}`
     : `${branch}\0${options.readSeq}\0${options.principal ?? ""}\0${
@@ -799,33 +1399,35 @@ export const trackGraph = (
   validateSelectorSchemaRefs(space, manager, branch, query.roots);
 
   for (const root of query.roots) {
-    const selector = toDocumentSelector(root.selector);
-    const rootScope = root.scope ?? DEFAULT_SCOPE;
-    // A root naming an explicit instance (protocol.md §2's read row —
-    // lease-holder only, admission enforced at the server layer) reads
-    // and tracks THAT instance; traversal beyond the root resolves under
-    // the session identity as today (per-run deep threading is the
-    // Phase 2 fan-out work).
-    const loaded = manager.load({
-      id: root.id,
-      scope: rootScope,
-      ...(root.entityScopeKey === undefined
-        ? {}
-        : { scopeKey: root.entityScopeKey }),
-      type: "application/json",
+    chargeRootVisit(root, manager, stats, () => {
+      const selector = toDocumentSelector(root.selector);
+      const rootScope = root.scope ?? DEFAULT_SCOPE;
+      // A root naming an explicit instance (protocol.md §2's read row —
+      // lease-holder only, admission enforced at the server layer) reads
+      // and tracks THAT instance; traversal beyond the root resolves under
+      // the session identity as today (per-run deep threading is the
+      // Phase 2 fan-out work).
+      const loaded = manager.load({
+        id: root.id,
+        scope: rootScope,
+        ...(root.entityScopeKey === undefined
+          ? {}
+          : { scopeKey: root.entityScopeKey }),
+        type: "application/json",
+      });
+      if (loaded !== null) {
+        walk.visit(
+          loaded,
+          selector,
+          rootDocKey(space, root, identityOf(manager)),
+        );
+      } else {
+        schemaTracker.add(
+          rootDocKey(space, root, identityOf(manager)),
+          selector,
+        );
+      }
     });
-    if (loaded !== null) {
-      walk.visit(
-        loaded,
-        selector,
-        rootDocKey(space, root, identityOf(manager)),
-      );
-    } else {
-      schemaTracker.add(
-        rootDocKey(space, root, identityOf(manager)),
-        selector,
-      );
-    }
   }
 
   const entities = entitiesFromTracker(space, schemaTracker, manager, branch);
@@ -844,18 +1446,37 @@ export const trackGraph = (
     entities.set(key, snapshot);
   }
 
-  stats.managerReads = manager.readCount - readCountBefore;
+  stats.managerReads = manager.readCount - readCountBefore +
+    refusalProbeReads;
 
+  const state: TrackedGraphState = {
+    branch,
+    tracker: schemaTracker,
+    ...missState,
+    entities,
+    memo: sharedMemo,
+    manager,
+  };
+  if (
+    cache !== undefined && cacheKeys !== undefined &&
+    cache.entries.size < EVALUATION_CACHE_MAX_ENTRIES
+  ) {
+    // The cache keeps its own clone: the state returned below belongs to
+    // the caller's session, whose refreshes and extensions mutate it.
+    const share = classifyStateScope(state);
+    const weight = state.entities.size;
+    const key = share.kind === "tainted" ? cacheKeys.identity : cacheKeys.pure;
+    const previous = cache.entries.get(key);
+    cache.entries.set(key, {
+      state: cloneTrackedGraphState(engine, state),
+      share,
+      weight,
+    });
+    cache.weight += weight - (previous?.weight ?? 0);
+  }
   return {
     serverSeq: Engine.serverSeq(engine),
-    state: {
-      branch,
-      tracker: schemaTracker,
-      ...missState,
-      entities,
-      memo: sharedMemo,
-      manager,
-    },
+    state,
     stats,
   };
 };
@@ -883,26 +1504,28 @@ export const extendTrackedGraph = (
   validateSelectorSchemaRefs(space, manager, state.branch, query.roots);
 
   for (const root of query.roots) {
-    const selector = toDocumentSelector(root.selector);
-    const rootScope = root.scope ?? DEFAULT_SCOPE;
-    const rootKey = rootDocKey(space, root, identityOf(manager));
-    touched.add(rootKey);
-    evaluateTrackedDocument(
-      space,
-      manager,
-      {
-        id: root.id,
-        scope: rootScope,
-        ...(root.entityScopeKey === undefined
-          ? {}
-          : { scopeKey: root.entityScopeKey }),
-      },
-      selector,
-      state.tracker,
-      missRecorderFor(state),
-      state.memo,
-      stats,
-    );
+    chargeRootVisit(root, manager, stats, () => {
+      const selector = toDocumentSelector(root.selector);
+      const rootScope = root.scope ?? DEFAULT_SCOPE;
+      const rootKey = rootDocKey(space, root, identityOf(manager));
+      touched.add(rootKey);
+      evaluateTrackedDocument(
+        space,
+        manager,
+        {
+          id: root.id,
+          scope: rootScope,
+          ...(root.entityScopeKey === undefined
+            ? {}
+            : { scopeKey: root.entityScopeKey }),
+        },
+        selector,
+        state.tracker,
+        missRecorderFor(state),
+        state.memo,
+        stats,
+      );
+    });
   }
 
   for (const address of manager.loadedAddresses()) {
@@ -980,6 +1603,11 @@ export const queryGraph = (
 ): {
   serverSeq: number;
   entities: EntitySnapshot[];
+
+  /** What the evaluation cost. Carried out so the server can attribute a
+   * slow `graph.query` to a root; it is not part of the wire result, and
+   * the caller drops it before responding. */
+  stats: QueryTraversalStats;
 } => {
   const tracked = trackGraph(space, engine, query, reuse, {
     ...options,
@@ -993,6 +1621,7 @@ export const queryGraph = (
     : [...tracked.state.entities.values()];
   return {
     serverSeq: tracked.serverSeq,
+    stats: tracked.stats,
     entities: entities
       .toSorted((left, right) => left.id.localeCompare(right.id)),
   };

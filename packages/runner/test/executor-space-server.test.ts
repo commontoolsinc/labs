@@ -19,6 +19,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { getLogger } from "@commonfabric/utils/logger";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import {
@@ -49,12 +50,13 @@ import {
   SpaceServer,
   STRUCTURE_LOAD_STUCK_AFTER,
 } from "../src/executor/space-server.ts";
-import { stampWaveRunContext } from "../src/executor/wave.ts";
+import { stampWaveRunContext, waveRunContextOf } from "../src/executor/wave.ts";
 import {
   emptyServingLoopStats,
   type ServingLoopStats,
 } from "../src/executor/stats.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("space-server test space");
 const space = spaceSigner.did() as MemorySpace;
@@ -63,20 +65,6 @@ const targetSpace = targetSigner.did() as MemorySpace;
 const serviceSigner = await Identity.fromPassphrase(
   "space-server test service",
 );
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 10_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 const pendingRowStream = { id: "of:space-server-stream", path: [] as string[] };
 const pendingRowSidecar = streamEntriesDocId(pendingRowStream);
@@ -116,6 +104,7 @@ describe("stage G SpaceServer recovery seams", () => {
       serverFacade?: MemoryV2Server.Server;
       stats?: ServingLoopStats;
       policy?: ConstructorParameters<typeof SpaceServer>[0]["policy"];
+      onParked?: (reason: string) => void;
     } = {},
   ): SpaceServer => {
     const stats = options.stats ?? emptyServingLoopStats();
@@ -147,6 +136,7 @@ describe("stage G SpaceServer recovery seams", () => {
       localSeqRef: { value: 0 },
       stats,
       policy: options.policy ?? { flushDeadlineMs: 2_000, idleParkMs: 600_000 },
+      ...(options.onParked !== undefined ? { onParked: options.onParked } : {}),
     });
     spaceServer = created;
     return created;
@@ -213,6 +203,35 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(
       liveExecutionLeaseHolder(engine, space),
     ).toBeUndefined();
+  });
+
+  it("returns `false` from `activate()` while another process holds the space's execution lease, and reports `lease-unavailable` without building a runtime (serving-loop.md §3)", async () => {
+    // The rival's row is the whole staging: a lease acquired under a
+    // holder this server can never match, live for far longer than the
+    // activation below takes.
+    const rival = executionLeaseHolder("did:key:space-server-rival");
+    expect(
+      acquireExecutionLease(engine, {
+        space,
+        holder: rival,
+        ttlMs: 600_000,
+      }),
+    ).toBe(true);
+
+    const parks: string[] = [];
+    const refused = newSpaceServer({
+      onParked: (reason) => parks.push(reason),
+    });
+
+    expect(await refused.activate()).toBe(false);
+    expect(refused.active).toBe(false);
+    expect(parks).toEqual(["lease-unavailable"]);
+    // The refusal precedes the runtime factory — a second deriver must
+    // not build a serving runtime it has no right to commit from — and
+    // it leaves the rival's row exactly as it found it.
+    expect(servingRuntime).toBeUndefined();
+    expect(liveExecutionLeaseHolder(engine, space)).toBe(rival);
+    expect(lastStats.lease.held).toBe(0);
   });
 
   it("re-sends pending durable append rows on ACTIVATION (serving-loop.md §6 step 5): park-stranded rows deliver, then retire", async () => {
@@ -520,6 +539,91 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(stats.watermarkClamped).toBe(3);
   });
 
+  it("holds the watermark when its bookkeeping transaction fails, then advances on fresh input", async () => {
+    const created = newSpaceServer();
+    expect(await created.activate()).toBe(true);
+
+    const runtime = servingRuntime!;
+    const edit = runtime.edit.bind(runtime);
+    const watermarkFailureCount = () =>
+      getLogger("space-server").countsByKey["watermark-seal-failed"]?.warn ??
+        0;
+    const failuresBefore = watermarkFailureCount();
+    const retryCommitGate = Promise.withResolvers<void>();
+    let watermarkCommitAttempts = 0;
+    runtime.edit = (options) => {
+      const tx = edit(options);
+      const commit = tx.commit.bind(tx);
+      tx.commit = () => {
+        if (
+          waveRunContextOf(tx)?.actionId !== "server-execution/watermark"
+        ) {
+          return commit();
+        }
+        watermarkCommitAttempts += 1;
+        if (watermarkCommitAttempts === 1) {
+          const reason = new Error("injected watermark commit failure");
+          return Promise.resolve({
+            error: {
+              name: "StorageTransactionAborted" as const,
+              message: reason.message,
+              reason,
+            },
+          });
+        }
+        if (watermarkCommitAttempts === 2) {
+          return retryCommitGate.promise.then(() => commit());
+        }
+        return commit();
+      };
+      return tx;
+    };
+
+    const first = await server.writeDocument(
+      space,
+      "of:watermark-failure-first",
+      { n: 1 },
+    );
+    created.enqueueCommit({
+      space,
+      seq: first.seq,
+      class: "authored",
+      sessionId: "session:watermark-failure",
+      writes: [{ id: "of:watermark-failure-first", scopeKey: "space" }],
+    });
+    await waitUntil(
+      () => watermarkFailureCount() > failuresBefore,
+      "the failed watermark transaction to be reported",
+    );
+    expect(watermarkCommitAttempts).toBe(1);
+
+    const second = await server.writeDocument(
+      space,
+      "of:watermark-failure-second",
+      { n: 2 },
+    );
+    try {
+      created.enqueueCommit({
+        space,
+        seq: second.seq,
+        class: "authored",
+        sessionId: "session:watermark-failure",
+        writes: [{ id: "of:watermark-failure-second", scopeKey: "space" }],
+      });
+      await waitUntil(
+        () => watermarkCommitAttempts === 2,
+        "the fresh input to start the retry transaction",
+      );
+      expect(created.watermark).toBeLessThan(first.seq);
+    } finally {
+      retryCommitGate.resolve();
+    }
+    await waitUntil(
+      () => created.watermark >= second.seq,
+      "the watermark to advance after the retry commits",
+    );
+  });
+
   it("fires an EFFECT-ONLY batch on a quiet space: an all-no-op tx's deferred effects close a vacuous wave instead of starving until park (round-2 thread 1)", async () => {
     // The §6-step-3 recovery shape: an activation re-run of an
     // effectful node whose claim is already durable seals an ALL-NO-OP
@@ -688,7 +792,9 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(notices.length).toBe(1);
   });
 
-  // ---- stage P2-F: late-notice accounting (the sx2 unskip flake) ----
+  //
+  // Stage P2-F: late-notice accounting (the sx2 unskip flake)
+  //
 
   it("counts an authored notice that arrives AFTER a higher-seq echo (the two-producer notice race): late records still count and re-arm, and coverage stays in-order", async () => {
     const stats = emptyServingLoopStats();
@@ -745,11 +851,13 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(created.watermark).toBeGreaterThanOrEqual(second.seq);
   });
 
-  // ---- stage P2-F: the demand-cycle terminal state (OW19) ----
+  //
+  // The demand-seam apparatus
+  //
+  // The helpers the regions below share: what they hand-feed, and the shape
+  // demand takes under (d′).
+  //
 
-  /** A facade whose watch registry names exactly the given demanded
-   * roots — the unit-level stand-in for client sessions' watches (the
-   * production feed is pinned in the serving-loop E2E). */
   // W0 (d′) SCRATCH: these seams hand-feed DEMAND with no client session.
   // Under (d′) demand is the tracked-ids CLOSURE (`demandedInstancesForSpace`
   // rows: instance-keyed, `root` marked) — a client watching a piece's
@@ -805,6 +913,12 @@ describe("stage G SpaceServer recovery seams", () => {
     }
     return rows;
   };
+
+  /**
+   * A facade whose watch registry names exactly the given demanded roots — the
+   * unit-level stand-in for client sessions' watches (the production feed is
+   * pinned in the serving-loop E2E).
+   */
   const demandFacade = (
     roots: Array<{
       id: string;
@@ -821,6 +935,13 @@ describe("stage G SpaceServer recovery seams", () => {
         return typeof value === "function" ? value.bind(target) : value;
       },
     }) as typeof server;
+
+  //
+  // The terminal decision for a demanded root
+  //
+  // Reaching it and stopping the per-cycle churn, counting a root that stays
+  // parked short of it, and re-arming out of it on a later commit.
+  //
 
   it("terminalizes a confirmed no-meta demanded root and STOPS the per-cycle churn (OW19's terminal half)", async () => {
     // A doc that EXISTS durably with a plain value and NO pattern meta
@@ -1097,7 +1218,9 @@ describe("stage G SpaceServer recovery seams", () => {
     }
   });
 
-  // ---- stage P2-F: the argument-doc demand → owning-piece run supply ----
+  //
+  // Stage P2-F: the argument-doc demand → owning-piece run supply
+  //
 
   it("supplies a scoped ARGUMENT-doc demand's identity to the owning piece's derivation runs: the ensure-resolved root differs from the demanded id, and the derived commit still carries the demanding actor (the #pieceRootByDemandKey arm)", async () => {
     // An ordinary nested-doc watch: the client's scoped subscription
@@ -1286,6 +1409,13 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(stats.structureLoadFailures).toBe(0);
   });
 
+  //
+  // LT6 at the events-down layer
+  //
+  // The same demanded-run attribution, seen where the event is emitted rather
+  // than where the run is supplied.
+  //
+
   it("LT6 at the events-down layer: an event emitted by a DEMANDED (user, session) derivation run carries the demanding actor on its durable entry — and with the supply neutral (no demanded instance) the same emission classifies userless", async () => {
     // The cross-stack blocker this pin closes (round-2, STEP 3): under
     // Phase 3 a serving-arm emission stamps the entry's `firedAt` from
@@ -1381,6 +1511,7 @@ describe("stage G SpaceServer recovery seams", () => {
         probe: string;
         pieceRootId: string;
         actionId: string;
+
         /** The EARLY-EMIT shape (fan-out stage B): send FIRST, read user
          * scope AFTER. */
         emitBeforeRead?: boolean;

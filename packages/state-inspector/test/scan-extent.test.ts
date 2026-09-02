@@ -22,6 +22,7 @@ import {
   isCompleteScan,
   isEntityKind,
   listEntityModels,
+  rowLimit,
   scanLimit,
   visibleEntityRows,
 } from "../model.ts";
@@ -29,6 +30,8 @@ import { reconstructDocument } from "../reconstruct.ts";
 import { contentFingerprint } from "../fingerprint.ts";
 import { listScopes, scopeOverlay } from "../scopes.ts";
 import { buildAllDetails } from "../detail.ts";
+import { hotEntities } from "../queries.ts";
+import { contendedEntities } from "../conflicts.ts";
 import { buildSpaceGraph, subgraphAround } from "../graph.ts";
 import { buildInspectorBundle, renderInspectorHtml } from "../html.ts";
 
@@ -58,13 +61,18 @@ const MODULE_IDENTITY = "pf1v3J_M5Nep7cq-Uh8EYG0ZQaE217FfDfcjbwGdjVI";
 
 interface SeedEntity {
   id: string;
+
   /** The stored document, written once per revision. */
   document: Record<string, unknown>;
+
   revisions: number;
+
   /** Branch the revisions are written on. Defaults to the space branch. */
   branch?: string;
+
   /** Written after the revisions: the entity's visible head is a tombstone. */
   deleted?: boolean;
+
   /** Scope the revisions are written under. Defaults to the shared scope. */
   scope?: string;
 }
@@ -212,6 +220,7 @@ describe("scan-extent", () => {
         "owned-cell",
         "free-cell",
         "unknown",
+        "deleted",
       ]);
     });
   });
@@ -537,11 +546,13 @@ describe("scan-extent", () => {
   });
 
   describe("a module that ranks below the pieces pointing at it", () => {
-    /** Three busy pieces; their module written once, so it sorts last. */
+    /** The document all three busy pieces share. */
     const PIECE_DOC = {
       value: { $NAME: "Topic" },
       patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
     };
+
+    /** Three busy pieces, and their module written once, so it sorts last. */
     const quietModule = (run: (space: SpaceDb) => void) =>
       withSeeded(
         [
@@ -593,6 +604,44 @@ describe("scan-extent", () => {
       expect(scanLimit(-3)).toBe(0);
       expect(scanLimit(undefined)).toBe(DEFAULT_SCAN_LIMIT);
       expect(scanLimit(NaN)).toBe(DEFAULT_SCAN_LIMIT);
+    });
+  });
+
+  describe("rowLimit()", () => {
+    it("returns undefined for a negative, which a row listing reads as unlimited", () => {
+      expect(rowLimit(-1)).toBeUndefined();
+      expect(rowLimit(0)).toBe(0);
+      expect(rowLimit(20)).toBe(20);
+    });
+
+    it("refuses a limit no SQL LIMIT would have accepted", () => {
+      // SQLite answers each of these with a datatype mismatch; `slice` would
+      // read them as one row, no rows, and every row.
+      for (const bad of [1.5, NaN, Infinity, -Infinity]) {
+        expect(() => rowLimit(bad)).toThrow("whole number of rows");
+      }
+    });
+  });
+
+  describe("a row listing's refusal", () => {
+    it("lands before the scan, as the SQL LIMIT it replaced did", async () => {
+      // A space with no tables at all. If the limit were checked at the
+      // terminal slice, the walk would run first and fail on the missing
+      // `revision` table — so the error naming the LIMIT is proof the refusal
+      // came before any query, without reaching into the driver to count them.
+      const dir = await Deno.makeTempDir({ prefix: "state-inspector-ff-" });
+      const path = `${dir}/empty.sqlite`;
+      new Database(path, { create: true }).close();
+      const empty = openSpace(path);
+      try {
+        expect(() => hotEntities(empty, { limit: 1.5 }))
+          .toThrow("whole number of rows");
+        expect(() => contendedEntities(empty, { limit: 1.5 }))
+          .toThrow("whole number of rows");
+      } finally {
+        empty.close();
+        await Deno.remove(dir, { recursive: true });
+      }
     });
   });
 
@@ -662,6 +711,7 @@ describe("scan-extent", () => {
 
   describe("a fingerprint of a child branch", () => {
     const MINE = "user:did:key:zBob";
+
     /** A parent entity the child overrides, and a parent-only user scope. */
     const forked = (run: (space: SpaceDb) => void) =>
       withSeeded(
@@ -713,6 +763,7 @@ describe("scan-extent", () => {
 
   describe("an entity deleted in one scope and live in another", () => {
     const MINE = "user:did:key:zBob";
+
     /** Shared value kept; the per-user copy written and then deleted. */
     const halfDeleted = (run: (space: SpaceDb) => void) =>
       withSeeded(
@@ -775,8 +826,10 @@ describe("scan-extent", () => {
         (space) => {
           // The filter drops the undecodable row because its kind cannot be
           // determined — which is precisely why the omission has to be
-          // reported. `topics-export.ts` runs this exact scan under
-          // `--require-complete` to guard a rollback payload.
+          // reported. `scripts/topics-export.ts` runs this exact scan and
+          // refuses to write a rollback payload when `isCompleteScan` says
+          // no, so this report is what stands between an operator and a
+          // partial export that reads like a whole one.
           const listing = listEntityModels(space, { kind: "piece" });
           expect(listing.entities.map((e) => e.id)).toEqual(["of:piece-1"]);
           expect(listing.extent.unreadable).toBe(1);
@@ -864,6 +917,38 @@ describe("scan-extent", () => {
           expect(uncapped.extent.truncated).toBe(false);
           expect(uncapped.extent.unreadable).toBe(1);
           expect(isCompleteScan(uncapped.extent)).toBe(false);
+        },
+      );
+    });
+
+    it("does not count an unreadable row a deleted-only filter dropped", async () => {
+      await withSeeded(
+        [
+          {
+            id: "of:gone",
+            document: { value: "was here" },
+            revisions: 1,
+            deleted: true,
+          },
+          { id: "of:bad", document: UNDECODABLE, revisions: 1 },
+        ],
+        [{ name: "" }],
+        (space) => {
+          // The reverse of the tombstone-vs-piece case below. What makes an
+          // entity `deleted` is the OP of its visible row, read before any
+          // payload is — so a row that would not decode is definitively not a
+          // tombstone, and dropping it leaves nothing out of the answer.
+          const listing = listEntityModels(space, { kind: "deleted" });
+          expect(listing.entities.map((e) => e.id)).toEqual(["of:gone"]);
+          expect(listing.extent.unreadable).toBe(0);
+          expect(isCompleteScan(listing.extent)).toBe(true);
+
+          // The same undecodable row IS a gap for any other kind, which is what
+          // keeps the assertion above from passing for the wrong reason.
+          const pieces = listEntityModels(space, { kind: "piece" });
+          expect(pieces.entities).toEqual([]);
+          expect(pieces.extent.unreadable).toBe(1);
+          expect(isCompleteScan(pieces.extent)).toBe(false);
         },
       );
     });

@@ -1,10 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 
 import type { JSONSchemaObj } from "@commonfabric/api";
-import { resolveExternalRootRefForStructure } from "../src/cfc.ts";
+import { resolveExternalRootRefForStructure } from "../src/index.ts";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
 
 describe("resolveExternalRootRefForStructure", () => {

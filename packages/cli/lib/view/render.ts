@@ -61,6 +61,7 @@ export type DiffAnnotationKind =
 export interface DiffAnnotation {
   /** Folded logical line carrying the annotation. */
   readonly line: number;
+
   readonly kind: DiffAnnotationKind;
 }
 
@@ -186,68 +187,96 @@ export interface ViewState {
   width: number;
   height: number;
   color: boolean;
+
   /** Whether the source is a diff. */
   isDiff?: boolean;
+
   showLineNumbers: boolean;
+
   /** How long logical lines continue on later screen rows. */
   wrapMode: WrapMode;
+
   /** A precomputed wrapping layout for `doc`, when the session has one. */
   wrapPlan?: WrapPlan | null;
+
   /** The number to show in the gutter on each display row, or null there for a
    * blank gutter. Absent → the legacy 1-based display-row number. Only consulted
    * when `showLineNumbers` is set. */
   lineNumbers?: readonly (number | null)[] | null;
+
   /** How the non-printable characters in the content are shown. */
   displayMode: DisplayMode;
+
   /** The selected structure node (WASD navigation), or null. */
   selected: StructureNode | null;
+
   /** All search matches, document-ordered; null when no active search. */
   matches: readonly Match[] | null;
+
   /** Index into `matches` of the focused match. */
   currentMatch: number;
+
   /** Transient status text (e.g. "Pattern not found"). */
   message: string;
+
   /** Command/search input line, e.g. "/token"; null in normal mode. */
   inputLine: string | null;
+
   overlay: OverlayState | null;
+
   /** A modal prompt drawn as a centered Turbo Vision dialog (the save, revert and
    * amend confirmations). Covers the content like an overlay; the two never
    * coexist. */
   dialog?: DialogState | null;
+
   /** The text cursor, in document coordinates (line + display column), when
    * edit mode has it visible. The pager positions the real terminal cursor. */
   cursor?: { line: number; col: number } | null;
+
   /** Edit-mode key hints, shown on the status line in place of the navigation
    * help while the text cursor is active. */
   editHint?: readonly KeyHint[] | null;
+
   /** Whether Ctrl-L can reveal more context here (a diff), so the navigation
    * help advertises it. */
   canExpand?: boolean;
+
   /** Whether this pager can draw diff annotations. */
   expandMargin?: boolean;
+
   /** Per-line annotations drawn against the right edge. */
   diffAnnotations?: readonly DiffAnnotation[];
+
   /** Whole-diff added/removed totals, drawn at the top right corner of the
    * first line. */
   diffTotals?: DiffTotals | null;
+
   /** Absolute display row of the diff edge the next Ctrl-L will expand. */
   expandRow?: number | null;
+
   /** Whether the marked edge expands upward. False means downward. */
   expandUp?: boolean | null;
+
   /** Absolute display rows occupied by metadata adjacent to the expansion edge. */
   diffMetadataRows?: readonly number[];
+
   /** Whether the view is editable, so the navigation help advertises `e`. */
   canEdit?: boolean;
+
   /** Whether this source offers an alternate rendered representation. */
   canRender?: boolean;
+
   /** The representation currently shown. */
   viewMode?: ViewMode;
+
   /** Whether the content holds non-printable characters, so the navigation help
    * advertises the display-mode key `C`. */
   hasNonPrintables?: boolean;
+
   /** Lines shown just above the status/prompt bar (e.g. the list of files an
    * edited diff would save), overwriting the bottom content rows. */
   notice?: readonly string[] | null;
+
   /** The file currently in view — the diff file or source under the viewport, or
    * the file being edited — shown on the right of the status bar. Null when
    * there is none (a bare pipe). */
@@ -335,8 +364,10 @@ export interface OverlayState {
   readonly lines: readonly Line[];
   readonly scroll: number;
   readonly footer: string;
+
   /** Index into `lines` of the selected (highlighted) reference, if any. */
   readonly selectedLine?: number;
+
   /** The overlay shows source code, so it is drawn as a blue editor window
    * rather than a gray dialog. */
   readonly sourceView?: boolean;
@@ -356,9 +387,11 @@ export interface DialogState {
   readonly title: string;
   readonly body: readonly string[];
   readonly buttons: readonly DialogButton[];
+
   /** Index of the focused button — the one Space and Enter activate, drawn
    * highlighted. When absent, the default button (if any) is highlighted. */
   readonly focus?: number;
+
   /** Index of a button drawn mid-press: shifted one column right with its
    * shadow hidden, for the brief animation after it is activated. */
   readonly pushed?: number;
@@ -1188,7 +1221,9 @@ function lineInfo(
   return `${first}-${last}/${total}  ${where}`;
 }
 
-// --- Overlay (info card / definition peek) ----------------------------------
+//
+// Overlay (info card / definition peek)
+//
 
 export interface OverlayBox {
   x: number;
@@ -1321,7 +1356,9 @@ function darkenSpan(
   rows[r] = overlayRow(rows[r], from, paint(chars, ui.overlayShadow));
 }
 
-// --- Modal dialog (save / revert / amend prompt) ----------------------------
+//
+// Modal dialog (save / revert / amend prompt)
+//
 
 /** Blank columns between adjacent buttons in a dialog's button row. */
 const BUTTON_GAP = 3;
@@ -1549,7 +1586,9 @@ function overlayRow(base: string, x: number, insert: string): string {
   return left + RESET + insert + RESET + right;
 }
 
-// --- Cell / style helpers ----------------------------------------------------
+//
+// Cell / style helpers
+//
 
 function cellsToAnsi(cells: Cell[], color: boolean): string {
   if (!color) return cells.map((c) => c.ch).join("");
@@ -1623,7 +1662,9 @@ function kindGlyph(kind: string): string {
   }
 }
 
-// --- Visible-width string ops (ANSI-aware) -----------------------------------
+//
+// Visible-width string ops (ANSI-aware)
+//
 
 // deno-lint-ignore no-control-regex
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;

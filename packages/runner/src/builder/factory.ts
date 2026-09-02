@@ -2,6 +2,12 @@
  * Factory function to create builder functions with runtime dependency injection
  */
 
+import {
+  FabricInstance,
+  FabricPrimitive,
+  FabricSpecialObject,
+  valueEqual,
+} from "@commonfabric/data-model";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import {
   FabricError,
@@ -15,12 +21,6 @@ import {
   FabricKeyPair,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
-import {
-  FabricInstance,
-  FabricPrimitive,
-  FabricSpecialObject,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
 import {
   toCompactDebugString,
   toIndentedDebugString,
@@ -311,10 +311,10 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     UiDisclosure,
 
     // `FabricSpecialObject` classes -- runtime values backing the type
-    // declarations in api/index.ts. Enables `new FabricEpochNsec(...)` and
-    // `instanceof` checks in patterns. `FabricSpecialObject` is abstract; it is
-    // bound for `instanceof` only. Listed in declaration order, so this list
-    // and the declarations in api/index.ts can be compared directly.
+    // declarations in data-model/src/api.ts. Enables `new FabricEpochNsec(...)`
+    // and `instanceof` checks in patterns. `FabricSpecialObject` is abstract;
+    // it is bound for `instanceof` only. Listed in declaration order, so this
+    // list and those declarations can be compared directly.
     FabricSpecialObject,
     FabricInstance,
     FabricPrimitive,

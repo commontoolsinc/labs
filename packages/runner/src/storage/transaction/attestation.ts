@@ -1,14 +1,14 @@
 import {
+  type FabricPlainObject,
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model";
+import {
   extractDataUriPayloadText,
   isDataUriMediaType,
   isFabricDataUri,
   valueFromDataUriPayloadText,
 } from "@commonfabric/data-model/data-uri-codec";
-import {
-  type FabricPlainObject,
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -40,6 +40,7 @@ const cacheHitLogger = getLogger("attestation-hit", {
   enabled: false,
   level: "debug",
 });
+
 /**
  * Cache for parsed data URIs to avoid redundant parsing.
  * Key format: `${address.id}::${address.type}`
@@ -143,6 +144,7 @@ export const claim = (
   // stage A — OW17's tx→replica seam): the claim re-reads the SAME instance
   // the load came from; absent = the replica's own, as before.
   identity?: ScopeKeyIdentity,
+  durable = false,
 ): Result<State, IStorageTransactionInconsistent> => {
   const type = address.type ?? "application/json";
   const state = replica.get(address) ?? { the: type, of: address.id };
@@ -151,7 +153,13 @@ export const claim = (
       address.path.length === 0 &&
       typeof replica.getDocument === "function"
     ? toTransactionDocumentValue(
-      replica.getDocument(address.id, address.scope, identity),
+      durable && replica.getNonSpeculativeDocument
+        ? replica.getNonSpeculativeDocument(
+          address.id,
+          address.scope,
+          identity,
+        )
+        : replica.getDocument(address.id, address.scope, identity),
     )
     : read(source, address)?.ok?.value;
 

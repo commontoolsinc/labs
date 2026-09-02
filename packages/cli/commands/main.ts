@@ -27,13 +27,23 @@ import { wish } from "./wish.ts";
 function envStatus(): string {
   const identity = Deno.env.get("CF_IDENTITY");
   const apiUrl = Deno.env.get("CF_API_URL");
-  if (!identity && !apiUrl) return "";
+  const space = Deno.env.get("CF_SPACE");
+  if (!identity && !apiUrl && !space) return "";
   const lines: string[] = ["", "ENVIRONMENT:"];
   if (identity) {
     lines.push(`  CF_IDENTITY = ${identity} (set, no need to pass --identity)`);
   }
   if (apiUrl) {
     lines.push(`  CF_API_URL  = ${apiUrl} (set, no need to pass --api-url)`);
+  }
+  if (space) {
+    // Named rather than promised generally: `ingest`, `fuse` and `check` take
+    // a space and do not read this, so a blanket "no need to pass --space"
+    // would be wrong exactly where a caller is most surprised to be asked.
+    lines.push(
+      `  CF_SPACE    = ${space} (set, no need to pass --space on piece, ` +
+        `get/set/call, wish, acl, deps)`,
+    );
   }
   return lines.join("\n");
 }
@@ -49,6 +59,8 @@ FIRST TIME SETUP:
   cf id new > claude.key            # Create identity key
   export CF_IDENTITY=./claude.key   # Set default identity
   export CF_API_URL=http://localhost:${ports.toolshed}  # Set default API URL
+  export CF_SPACE=my-space          # Default space for piece/get/set/call,
+                                    # wish, acl and deps (--space overrides)
 
 SHELL COMPLETION:
   source <(cf completion zsh)      # add to ~/.zshrc  (bash: completion bash)
@@ -183,10 +195,8 @@ export const main = new Command()
   .command("invocation-session", invocationSession)
   .command("test", createTestCommand({ recordResults: true }))
   .command("wish", wish)
-  // The top-level spellings of the piece data commands: the same builders
-  // the `piece` chain mounts under the same names, so `cf get` and
-  // `cf piece get` are one definition parsed two ways
-  // (docs/plans/cli-surface-shape.md, step 5).
+  // The piece data commands. `pieceDataCommand` holds the one definition
+  // of each, and this is the only place they are mounted.
   // @ts-ignore for the above type issue
   .command("get", pieceDataCommand("get"))
   // @ts-ignore for the above type issue

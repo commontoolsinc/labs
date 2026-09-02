@@ -28,6 +28,24 @@ import {
 class ProbePrimitive extends BaseFabricPrimitive {}
 
 /**
+ * A `BaseFabricPrimitive` subclass that assigns a private field after
+ * `super()`, which is the shape every concrete primitive has.
+ */
+class StatefulProbe extends BaseFabricPrimitive {
+  readonly #value: bigint;
+
+  constructor(value: bigint) {
+    super();
+
+    this.#value = value;
+  }
+
+  get value(): bigint {
+    return this.#value;
+  }
+}
+
+/**
  * A rogue direct subclass of `FabricPrimitive` that bypasses
  * `BaseFabricPrimitive` -- the shape the invariant forbids. Used only to
  * witness `isInstance()`'s enforcement throw; no production class is built this
@@ -41,6 +59,36 @@ describe("BaseFabricPrimitive", () => {
       const probe = new ProbePrimitive();
       expect(probe instanceof BaseFabricPrimitive).toBe(true);
       expect(probe instanceof FabricPrimitive).toBe(true);
+    });
+  });
+
+  describe("constructor()", () => {
+    it("leaves the instance frozen and non-extensible", () => {
+      const probe = new ProbePrimitive();
+      expect(Object.isFrozen(probe)).toBe(true);
+      expect(Object.isExtensible(probe)).toBe(false);
+    });
+
+    it("refuses a new property, whichever way it is added", () => {
+      // Every path here is strict-mode, which is what a module is. Sloppy-mode
+      // assignment is the one path that fails silently instead of throwing.
+      const probe = new ProbePrimitive() as unknown as Record<string, unknown>;
+
+      expect(() => {
+        probe.extra = 42;
+      }).toThrow(TypeError);
+      expect(() => Object.defineProperty(probe, "extra", { value: 42 }))
+        .toThrow(TypeError);
+      expect(Reflect.set(probe, "extra", 42)).toBe(false);
+    });
+
+    it("freezes without disturbing a subclass's private fields", () => {
+      // The freeze lands before a subclass's own assignments. Private fields
+      // are not properties and so are unaffected, which is what makes freezing
+      // here rather than in each concrete constructor sound.
+      const probe = new StatefulProbe(7n);
+      expect(Object.isFrozen(probe)).toBe(true);
+      expect(probe.value).toBe(7n);
     });
   });
 

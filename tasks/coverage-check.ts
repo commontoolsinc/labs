@@ -345,8 +345,10 @@ export async function fetchAncestorRanks(
 export interface BaselineRunReading {
   /** The run's uncovered-line count per metric, from its baseline artifact. */
   samples: Map<string, BaselineSample>;
+
   /** What the run's merged pull request accepted, when it has one. */
   overrides: BaselineOverrides | null;
+
   /** True when the run compiled patterns from scratch. */
   cold: boolean;
 }
@@ -357,10 +359,13 @@ export interface WalkBaselineRunsOptions {
    * because a one-shot iterator would leave a second pass over it empty.
    */
   metrics: readonly string[];
+
   /** Recent `main` runs, newest first. */
   runs: WorkflowRun[];
+
   /** Reads one run. Called only for the runs the walk reaches. */
   readRun: (run: WorkflowRun) => Promise<BaselineRunReading>;
+
   /**
    * How far back from the base-branch commit this run merged each recent commit
    * sits, or null when there is no base-branch commit to measure against.
@@ -538,8 +543,10 @@ export function isComparableBaseline(
 
 export interface MetricBaseline {
   sample?: BaselineSample;
+
   /** Whether the ratchet may fail this metric against that sample. */
   comparable: boolean;
+
   /**
    * The base-branch commit the comparison was judged against: the commit this
    * run merges the pull request into. Absent on a `main` push run, and when
@@ -551,10 +558,13 @@ export interface MetricBaseline {
 export interface SelectBaselinesOptions {
   /** The metrics to gate; an array, as in {@link WalkBaselineRunsOptions}. */
   metrics: readonly string[];
+
   /** Recent `main` runs, newest first. */
   runs: WorkflowRun[];
+
   /** Reads one baseline run; called only for the runs the walk reaches. */
   readRun: (run: WorkflowRun) => Promise<BaselineRunReading>;
+
   isPullRequest: boolean;
   readBaseSha?: () => Promise<string | null>;
   fetchRanks?: (baseSha: string) => Promise<Map<string, number>>;
@@ -562,8 +572,10 @@ export interface SelectBaselinesOptions {
     baselineSha: string,
     baseSha: string,
   ) => Promise<Set<string>>;
+
   /** Wraps the GitHub calls made here so a rate limit skips the check. */
   guard?: <T>(description: string, operation: () => Promise<T>) => Promise<T>;
+
   log?: (message: string) => void;
   warn?: (message: string) => void;
 }
@@ -1142,20 +1154,26 @@ export interface Row {
   metric: string;
   status: Status;
   current: number;
+
   /** Uncovered lines the chosen `main` run measured for this metric. */
   baseline?: number;
+
   /** Head SHA of the run that baseline came from. */
   baselineSha?: string;
+
   /** Id of the run that baseline came from. */
   baselineRunId?: number;
+
   /** Id of the run that measured `current`. */
   measuredRunId?: number;
+
   /**
    * The base-branch commit that run merged this pull request into. A
    * `pull_request` run measures `refs/pull/<number>/merge`, so this is the
    * `main` commit whose code the measurement covers.
    */
   baseSha?: string;
+
   pctIncrease?: number;
 }
 
@@ -1178,14 +1196,17 @@ export interface BuildCoverageRowsOptions {
   currentMetrics: Map<string, BaselineSample>;
   baselineByMetric: Map<string, MetricBaseline>;
   overrides: BaselineOverrides;
+
   /** Undefined when the PR's changed files could not be read. */
   changedCoverageGroups: Set<string> | undefined;
 }
 
 export interface CoverageRows {
   rows: Row[];
+
   /** The subset of `rows` that fails the gate. */
   failures: Row[];
+
   /** Groups whose baseline could not be held against this run. */
   ungatedGroups: Set<string>;
 }
@@ -1465,7 +1486,7 @@ export async function writeCoverageComment(
       lcov,
     );
   } else {
-    await writeCoverageResolved(prNumber, coverageRows, prFiles);
+    await writeCoverageResolved(prNumber, coverageRows, prFiles, lcov);
   }
 }
 
@@ -1493,18 +1514,37 @@ function measurementFromFailures(failures: Row[]): CoverageMeasurement {
  * pull request changed — and the caller falls back to the ordinary comment.
  */
 export interface UnattributedRegressionOptions {
+  /** Repository checkout whose source files the LCOV reports describe. */
   rootDir: string;
+
   groups: CoverageSuggestionGroup[];
   coverageFailures: Row[];
   prFiles: PRFile[];
+
   /** LCOV from this run. */
   lcov: string;
+
   readBaselineLcov: (runId: number) => Promise<string | null>;
 }
 
-export async function buildUnattributedRegressionBody(
-  options: UnattributedRegressionOptions,
-): Promise<string | null> {
+interface UnattributedRegressionFile extends CoverageUnattributedFile {
+  group: string;
+}
+
+interface UnattributedRegressionAttribution {
+  files: UnattributedRegressionFile[];
+  baselineByGroup: Map<string, CoverageRunIdentity>;
+}
+
+/**
+ * Resolve an unattributed regression to unchanged files by comparing each
+ * affected group's current LCOV with the particular baseline run that supplied
+ * its ratchet. The result stays as data so both the failing and accepted-debt
+ * comment paths can describe the same attribution.
+ */
+async function collectUnattributedRegressionAttribution(
+  options: Omit<UnattributedRegressionOptions, "groups">,
+): Promise<UnattributedRegressionAttribution> {
   // Each metric resolves its own ratchet baseline, so two regressed groups can
   // be held against two different `main` runs. A group is compared against the
   // run its own baseline came from and no other: another run measured a
@@ -1524,13 +1564,12 @@ export async function buildUnattributedRegressionBody(
       sha: failure.baselineSha,
     });
   }
-  if (groupsByBaselineRun.size === 0) return null;
 
   const changedFiles = new Set(
     options.prFiles.map((prFile) => prFile.filename.replaceAll("\\", "/")),
   );
 
-  const files: CoverageUnattributedFile[] = [];
+  const files: UnattributedRegressionFile[] = [];
   for (const [runId, groups] of groupsByBaselineRun) {
     const baselineLcov = await options.readBaselineLcov(runId);
     if (baselineLcov === null) continue;
@@ -1542,9 +1581,22 @@ export async function buildUnattributedRegressionBody(
       changedFiles,
     });
     for (const file of regressed) {
-      files.push({ relativePath: file.relativePath, lines: file.lines });
+      files.push({
+        relativePath: file.relativePath,
+        group: file.metricGroup,
+        lines: file.lines,
+      });
     }
   }
+
+  return { files, baselineByGroup };
+}
+
+export async function buildUnattributedRegressionBody(
+  options: UnattributedRegressionOptions,
+): Promise<string | null> {
+  const { files, baselineByGroup } =
+    await collectUnattributedRegressionAttribution(options);
 
   if (files.length === 0) return null;
 
@@ -1561,6 +1613,50 @@ export async function buildUnattributedRegressionBody(
     files,
     measurement: measurementFromFailures(options.coverageFailures),
   });
+}
+
+/**
+ * Per changed file in one of `groups`, how many of the lines the pull request
+ * added no test executes. Files that added no uncovered line are left out.
+ *
+ * This is the attribution both coverage comments carry: a regression names the
+ * files to write tests for, and an accepted debt names the files the acceptance
+ * stands in for. Uncovered line numbers are resolved only for changed files in
+ * those groups, so per-line data is never materialized for the whole workspace.
+ */
+async function uncoveredAddedLinesByFile(
+  prFiles: PRFile[],
+  lcov: string,
+  groups: Set<string>,
+): Promise<CoverageSuggestionFileLines[]> {
+  const changedInGroups = prFiles
+    .map((prFile) => prFile.filename.replaceAll("\\", "/"))
+    .filter((relativePath) => {
+      const group = coverageGroupForChangedFile(relativePath);
+      return group !== null && groups.has(group);
+    });
+  const uncoveredByPath = await collectUncoveredLinesForFiles({
+    rootDir: Deno.cwd(),
+    lcov,
+    files: changedInGroups,
+  });
+
+  const files: CoverageSuggestionFileLines[] = [];
+  for (const prFile of prFiles) {
+    const relativePath = prFile.filename.replaceAll("\\", "/");
+    const group = coverageGroupForChangedFile(relativePath);
+    if (!group || !groups.has(group)) continue;
+
+    const uncoveredLines = uncoveredByPath.get(relativePath);
+    if (!uncoveredLines || !prFile.patch) continue;
+
+    const addedLines = parseAddedLinesFromPatch(prFile.patch);
+    const uncoveredCount = uncoveredLines.filter((line) =>
+      addedLines.has(line)
+    ).length;
+    if (uncoveredCount > 0) files.push({ relativePath, group, uncoveredCount });
+  }
+  return files;
 }
 
 /**
@@ -1588,39 +1684,11 @@ export async function writeCoverageDebtSuggestion(
 
   if (groups.length === 0) return;
 
-  const failingGroups = new Set(groups.map((group) => group.group));
-
-  // Resolve uncovered line numbers only for changed files in the regressed
-  // groups, so we never materialize per-line data for the whole workspace.
-  const changedInFailingGroups = prFiles
-    .map((prFile) => prFile.filename.replaceAll("\\", "/"))
-    .filter((relativePath) => {
-      const group = coverageGroupForChangedFile(relativePath);
-      return group !== null && failingGroups.has(group);
-    });
-  const uncoveredByPath = await collectUncoveredLinesForFiles({
-    rootDir: Deno.cwd(),
+  const files = await uncoveredAddedLinesByFile(
+    prFiles,
     lcov,
-    files: changedInFailingGroups,
-  });
-
-  // Count, per changed file, the lines this PR added that coverage marks
-  // uncovered.
-  const files: CoverageSuggestionFileLines[] = [];
-  for (const prFile of prFiles) {
-    const relativePath = prFile.filename.replaceAll("\\", "/");
-    const group = coverageGroupForChangedFile(relativePath);
-    if (!group || !failingGroups.has(group)) continue;
-
-    const uncoveredLines = uncoveredByPath.get(relativePath);
-    if (!uncoveredLines || !prFile.patch) continue;
-
-    const addedLines = parseAddedLinesFromPatch(prFile.patch);
-    const uncoveredCount = uncoveredLines.filter((line) =>
-      addedLines.has(line)
-    ).length;
-    if (uncoveredCount > 0) files.push({ relativePath, group, uncoveredCount });
-  }
+    new Set(groups.map((group) => group.group)),
+  );
 
   try {
     // Nothing the pull request added accounts for the regression, so the lines
@@ -1673,11 +1741,24 @@ export async function writeCoverageDebtSuggestion(
  * changed, the same groups the gate ratchets, so the collapsed comment can show
  * where the PR left coverage. Never throws —
  * best-effort, like the regression path.
+ *
+ * An accepted debt also carries the files holding the uncovered lines, because
+ * this payload rewrites the regression comment that named them and would
+ * otherwise leave the pull request with no record of which file the acceptance
+ * is for. When no added line explains the regression, the same baseline LCOV
+ * comparison as the failing path recovers its attribution to unchanged files.
+ * Files are read only for an accepted debt: every other resolution covered its
+ * debt rather than accepting it, so there is nothing to name.
  */
 export async function writeCoverageResolved(
   prNumber: number,
   coverageRows: Row[],
   prFiles: PRFile[],
+  lcov: string,
+  options: {
+    rootDir?: string;
+    readBaselineLcov?: (runId: number) => Promise<string | null>;
+  } = {},
 ): Promise<void> {
   const improvedLines = coverageRows.reduce((sum, row) => {
     if (row.status !== "OK" || row.baseline === undefined) return sum;
@@ -1702,22 +1783,57 @@ export async function writeCoverageResolved(
       changedGroups.has(group.group)
     );
 
-  // The gate passed because a changed group's debt was accepted with a
-  // per-group acceptance or the reset marker (status "ovrd"), not because the
-  // new code is covered.
-  const overridden = coverageRows.some((row) => {
+  // The groups whose debt the gate accepted with a per-group acceptance or the
+  // reset marker (status "ovrd"), rather than passing because the new code is
+  // covered.
+  const overriddenRows = coverageRows.filter((row) => {
     if (row.status !== "ovrd") return false;
     const group = coverageMetricGroupName(row.metric);
     return group !== null && group !== "workspace" && changedGroups.has(group);
   });
+  const overriddenGroups = new Set(
+    overriddenRows
+      .map((row) => coverageMetricGroupName(row.metric))
+      .filter((group): group is string => group !== null),
+  );
+  const overridden = overriddenGroups.size > 0;
 
   try {
+    let files: CoverageSuggestionFileLines[] = [];
+    if (overridden) {
+      files = await uncoveredAddedLinesByFile(
+        prFiles,
+        lcov,
+        overriddenGroups,
+      );
+
+      // The failing comment takes this same fallback when no added line in the
+      // diff accounts for the regression. Recompute it here after an override,
+      // because this payload replaces that comment and must not erase its only
+      // record of which unchanged file started flapping.
+      if (files.length === 0) {
+        const unattributed = await collectUnattributedRegressionAttribution({
+          rootDir: options.rootDir ?? Deno.cwd(),
+          coverageFailures: overriddenRows,
+          prFiles,
+          lcov,
+          readBaselineLcov: options.readBaselineLcov ?? baselineLcovForRun,
+        });
+        files = unattributed.files.map((file) => ({
+          relativePath: file.relativePath,
+          group: file.group,
+          uncoveredCount: file.lines.length,
+        }));
+      }
+    }
+
     const payload: CoverageCommentPayload = {
       prNumber,
       state: "resolved",
       improvedLines,
       groups,
       overridden,
+      files,
     };
     const outputFile = coverageCommentOutputPath();
     await Deno.writeTextFile(outputFile, JSON.stringify(payload, null, 2));
@@ -1731,9 +1847,9 @@ export async function writeCoverageResolved(
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Main
-// ---------------------------------------------------------------------------
+//
 
 export async function main() {
   const runId = Deno.env.get("GITHUB_RUN_ID");

@@ -106,9 +106,10 @@ Deno.test("namesResolverInCode ignores a string literal", () => {
   );
 });
 
-// A scan that blanked a line from its first `//` would stop reading here at the
-// URL and never reach the construction that follows it.
 Deno.test("namesResolverInCode reads past a comment marker inside a string", () => {
+  // A scan that blanked a line from its first `//` would stop reading here at
+  // the URL and never reach the construction that follows it.
+
   assert(
     namesResolverInCode(
       `const docs = "https://example.com/x"; const r = new FileSystemProgramResolver(m);`,
@@ -117,9 +118,10 @@ Deno.test("namesResolverInCode reads past a comment marker inside a string", () 
   );
 });
 
-// Likewise for a block-comment opener: taken literally it would swallow the
-// rest of the file.
 Deno.test("namesResolverInCode reads past a block-comment marker inside a string", () => {
+  // Likewise for a block-comment opener: taken literally it would swallow the
+  // rest of the file.
+
   assert(
     namesResolverInCode(
       `const glob = "/*"; const r = new FileSystemProgramResolver(m);\nconst end = "*/";`,
@@ -140,6 +142,7 @@ Deno.test("namesResolverInCode parses markup in a .tsx file", () => {
 Deno.test("namesResolverInCode ignores a same-named property of another object", () => {
   // A property access still names the resolver, so it counts; a property whose
   // name merely resembles it does not.
+
   assertFalse(
     namesResolverInCode(
       `const x = { fileSystemProgramResolver: 1 };`,
@@ -255,9 +258,10 @@ Deno.test("main reports the offender and the route to take instead", async () =>
   }
 });
 
-// A tracked path that has become a directory is not a deletion, so the read
-// fails for a reason the scan has no answer for and the failure carries.
 Deno.test("scan reports a tracked path it cannot read for another reason", async () => {
+  // A tracked path that has become a directory is not a deletion, so the read
+  // fails for a reason the scan has no answer for and the failure carries.
+
   const root = await fixtureRepo({
     "packages/foo/build.ts":
       "export const r = new FileSystemProgramResolver(main);\n",
@@ -272,10 +276,11 @@ Deno.test("scan reports a tracked path it cannot read for another reason", async
   }
 });
 
-// Runs the check the way CI does, as a program rather than as an import. The
-// repository passes it, so this doubles as the end-to-end case: the entry
-// point wires the scan to an exit code, and the tree it ships is clean.
 Deno.test("the check runs as a program over this repository", async () => {
+  // Runs the check the way CI does, as a program rather than as an import. The
+  // repository passes it, so this doubles as the end-to-end case: the entry
+  // point wires the scan to an exit code, and the tree it ships is clean.
+
   const script = fromFileUrl(
     new URL("./check-local-program.ts", import.meta.url),
   );

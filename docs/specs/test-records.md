@@ -13,7 +13,7 @@ reasoning that shaped what follows. The shared implementation is
 
 ## Identity
 
-A test's identity is the triple, scoped within a repository:
+A test's identity has three required parts, scoped within a repository:
 
 - **kind** — the class of check: `unit`, `browser`, `pattern`,
   `integration`, `typecheck`, `lint`, `format`, `gate`.
@@ -25,17 +25,26 @@ A test's identity is the triple, scoped within a repository:
   script's own name (`acl.sh`), a script step (`integration.sh
   piece-values`), or a task-plus-item pair (`cfcheck <file>`,
   `pattern-compat <key>`, `pattern-vintage <testKey> <tier> <stamp>`).
+- **variant**, when present — a stable name for a non-default configuration
+  that runs the same test. The default configuration has no variant. The
+  server-execution ON jobs use `server-execution` after variant-aware relay
+  support is on the default branch. When server execution becomes the
+  default, the ON jobs omit that marker, so new runs continue the history of
+  today's unmarked default jobs. The surviving explicit OFF jobs use
+  `server-execution-off` so their history remains separate.
 
 Identity survives moving a test between files, splitting or renaming test
 files, reformatting, editing bodies, and resharding — shard and slice
 labels, and the section that dispatched a script step, are run context and
-never identity. Identity does not survive a change to the reported name; a
+never identity. A configuration is a variant only when its results need a
+separate history. Identity does not survive a change to the reported name; a
 rename splits history, and a line appended to
 `tasks/test-identity-aliases.jsonl` bridges a split worth bridging. That
 file is append-only, maps any identity at most once, must stay acyclic, and
 each line carries the rename's date; readers resolve aliases transitively
 and apply one only to records older than its date
-(`deno task check-test-aliases` enforces the file's shape).
+(`deno task check-test-aliases` enforces the file's shape). Alias lines name
+the three required identity parts and apply the rename to every variant.
 
 A task-level record may coexist with the per-item records of the same run
 (`pattern-compat` beside `pattern-compat <key>`, `integration.sh` beside
@@ -50,15 +59,20 @@ label, report under that item's identity.
 
 An uploaded object is gzip-encoded NDJSON (`Content-Encoding: gzip`, so a
 plain HTTPS reader receives text): one context line, then one record line
-per test execution. A rollup object concatenates a day of such reports;
-in every object, a context line opens a report and each record line
-belongs to the report whose context most recently preceded it, which is
-how per-report provenance — the fork flag among it — survives
+per test execution. A rollup shard concatenates a share of a day's such
+reports; in every object, a context line opens a report and each record
+line belongs to the report whose context most recently preceded it, which
+is how per-report provenance — the fork flag among it — survives
 compaction.
 
 ```json
 { "line": "record", "test": { "k": "unit", "s": "bakery", "n": "glaze > thickens when heated" }, "outcome": "pass", "durationMs": 12 }
 ```
+
+The compact identity fields are `k`, `s`, `n`, and optional `v`. Omitting
+`v` means the default configuration. Readers retain the existing
+`[k,s,n]` grouping key for unmarked records and append `v` as a fourth part
+only when it is present.
 
 A record carries `outcome` (`pass`, `fail`, or `skip`), `durationMs` from
 the runner's own measurement (never a clock inside the test process, which
@@ -66,6 +80,17 @@ several packages fake), and optionally `file`, the repository-relative
 source path when the producer reliably knows it — metadata, not identity.
 `cfcheck` items carry a zero duration: the batch is one TypeScript program
 and per-file durations do not exist there.
+
+For a suite ingested from a JUnit report, `file` comes from one of two
+places and the second overrides the first. Deno names a case's class after
+the module that registered the test, so the case a `describe` registers
+carries the file of every leaf beneath it, and the report joins itself: a
+leaf is named as its describe chain, and its file is the one whose
+registered name is the longest prefix of that chain. That source
+disappears the moment anything wraps `Deno.test`, because every class then
+names the wrapper. The registration preload is such a wrapper, and it
+replaces what it takes: it writes a name-to-file map into the spool, and
+ingestion lays that over what the report says.
 
 The context line carries `schema` (this document describes version 1, the
 `v1` in object paths), a per-object ULID `reportId`, the canonical `repo`
@@ -144,8 +169,24 @@ area, managed by the infra repository's `tofu/test-records` root:
 ```
 <repo>/test-records/submissions/ci/v1/<yyyy>/<mm>/<dd>/run-<runId>-<artifact>.ndjson
 <repo>/test-records/submissions/local/<username>/v1/<yyyy>/<mm>/<dd>/<reportId>-<slug>.ndjson
-<repo>/test-records/aggregated/ci/v1/<yyyy>/<mm>/<dd>.ndjson
+<repo>/test-records/aggregated/ci/v1/<yyyy>/<mm>/<dd>/partition.json
+<repo>/test-records/aggregated/ci/v1/<yyyy>/<mm>/<dd>/0003-of-0017.ndjson
+<repo>/test-records/aggregated/ci/v1/<yyyy>/<mm>/<dd>/rollup.json
 ```
+
+One further dataset area sits beside it and is written by the
+test-selection publisher rather than by anything recording:
+
+```
+<repo>/test-selection/v1/manifest-<ISO 8601 timestamp>-<ULID>.json.gz
+<repo>/test-selection/v1/state/<yyyy-mm-dd>-<ULID>.json.gz
+```
+
+The timestamp leads a manifest's name, so a lexical listing is a
+chronological one and a reader takes the newest that is not after the
+moment it asks about. There is no name meaning "the current one": the
+writer holds create and nothing else, so nothing can be overwritten, and
+that is the property the whole store rests on.
 
 The date partition comes from the run's start, so late-shipped orphans
 land in their run's partition; readers list a trailing window rather than
@@ -155,11 +196,12 @@ which cannot read, list, overwrite, or delete; nothing already stored can
 be modified by any append credential. An incompatible schema writes under
 `v2/` and readers migrate at their own pace.
 
-Three writer principals exist. The **relay** — the only CI principal —
-holds create on `submissions/ci/` through a Workload Identity provider
-pinned to one workflow file on the default branch, with the impersonation
-binding keyed to that exact workflow ref. **People** hold per-person
-service accounts (`test-records-gh-<username>`, the login lowercased)
+Four writer principals exist, three of them recording. The **relay** —
+the only one that writes what CI produced — holds create on
+`submissions/ci/` through a Workload Identity provider pinned to one
+workflow file on the default branch, with the impersonation binding keyed
+to that exact workflow ref. **People** hold per-person service accounts
+(`test-records-gh-<username>`, the login lowercased)
 with create on their own `submissions/local/<username>/` folders, minted
 by a dispatch-gated workflow and delivered sealed to a
 requester-generated X25519 identity. Minting revokes the account's
@@ -167,13 +209,41 @@ previous keys before the new one exists — a person holds one live key,
 never two, and re-requesting is how a lost or compromised key is
 rotated — and a daily
 janitor disables accounts after a month without pull-request activity
-and re-enables them on return. The **compactor**, when provisioned,
-holds create on `aggregated/` and rewrites each closed day of raw
-records — after a seven-day late-arrival lag — as one validated rollup
-that keeps each report's context line ahead of its records; a day with
+and re-enables them on return. The **compactor** holds create on
+`aggregated/` through a provider pinned to its own daily workflow file,
+the relay's arrangement again, and rewrites each closed day of raw
+records — after a seven-day late-arrival lag — as validated rollup shards
+that keep each report's context line ahead of its records; a day with
 no records stays open, since a write-once rollup would permanently
 exclude late arrivals. Rollups are a read optimization, and
-full-fidelity readers list the raw area.
+full-fidelity readers list the raw area. The **publisher** holds create on
+`test-selection/` through a provider pinned to its own workflow file on
+the default branch, on the relay's pattern and for the relay's reason.
+
+A day is several shards. A busy day is over a gigabyte of NDJSON, against
+V8's maximum string length of about half that, and an object has to fit in
+a string at both ends: the compactor builds one, and a reader fetches one.
+Each shard is sized for a few tens of megabytes of text, so a day of tens
+of thousands of raw objects becomes tens of shards.
+
+Which shard a raw object's reports go into is a hash of the object's name
+taken modulo the shard count, so the partition is a property of each
+object rather than of the order the compactor read them in. How many
+shards there are is fixed by `partition.json`, written before any shard of
+the day under the same create-only precondition as everything else here,
+so a day is partitioned once however many runs reach it: the write that
+loses reads the count that won and works to that one. A run that finds a
+day part way through finishes it in the partition claimed for it, writing
+the shards that are missing and leaving the rest alone, so no run leaves
+shards of a partition nothing names and no record reaches two shards. The
+count is in every shard's name as well, so a shard says which partition it
+belongs to. What a partition does not fix is which raw objects it covers:
+an object arriving between two runs is in the rollup when its shard is one
+of the ones still to be written, and in the raw area only otherwise, the
+same as any arrival after a day is compacted. The `rollup.json` manifest
+names the day's shards and is written after all of them, so a day counts
+as compacted when its manifest exists, and a reader that finds no manifest
+reads the raw area for that day.
 
 ## CI movement
 
@@ -187,8 +257,20 @@ zero records or not — and `job.json`; an artifact without a readable
 than ship a context-only object that would read as a run with no tests. The attempt lives in the artifact name because artifacts
 are scoped to the run: a re-run's relay re-ships an earlier attempt's
 artifacts into collisions and ships the re-run jobs' new artifacts as new
-objects, so re-runs neither drop nor double-count records. The relay
-workflow follows the completion of every workflow that runs tests —
+objects, so re-runs neither drop nor double-count records.
+
+The shared shipping action's optional `variant` input stamps every spooled
+and JUnit-derived record gathered by that job. Jobs omit it for the default
+configuration.
+
+The relay checks out its implementation from the default branch, not from
+the triggering test run. A new optional record field therefore rolls out in
+two changes. Its parser, relay, readers, and shipping-action support land
+first. Test workflows start emitting the field only after that support is on
+the default branch. Otherwise the old relay drops the field before writing a
+create-only object that cannot be repaired in place.
+
+The relay workflow follows the completion of every workflow that runs tests —
 success, failure, cancellation, and timeout alike. It ships a
 same-repository run unconditionally, since only write access creates
 one, and a fork run only when the run's actor — read from the trusted
@@ -227,6 +309,22 @@ identity it has no fresh records for as one that must run: records exist
 only for tests that ran, so a selector that never re-runs the unselected
 starves its own data, and a renamed test is an unknown identity until an
 alias line lands.
+
+Test selection reads `submissions/local/` as well, and weighs a failure
+seen there above one seen in continuous integration. That is a deliberate
+widening of the rule above, and the reason is the quality of the
+evidence: somebody at a workstation, part way through writing something,
+ran a test and it went red because of what they had just written. There
+is no ambiguity about what changed, no shared infrastructure to blame,
+and no question about whether the failure was real, because they went on
+to fix it. What it costs is that a local record can now displace another
+test from a budgeted run rather than only ever adding to what runs. Three
+things bound that: local keys are held by people with repository write
+access, which is the trust boundary the continuous-integration records
+already sit inside; every manifest records the inputs behind every score,
+so a strange selection traces back to the records that produced it; and
+the worst outcome is a pull request that ran a less useful set of tests,
+which the full run on the default branch catches.
 
 ## The sixty-second rule
 

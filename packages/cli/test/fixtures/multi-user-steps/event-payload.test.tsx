@@ -1,10 +1,12 @@
 /// <cts-enable />
+
 /**
  * An action step's `event` payload in a multi-user run. Alice sends an object
  * payload and asserts on what the handler recorded, so the assertion fails if
  * the orchestrator delivers anything other than what the step authored. An
  * object payload is the case that matters: a primitive one has always arrived.
  */
+
 import {
   assert,
   handler,

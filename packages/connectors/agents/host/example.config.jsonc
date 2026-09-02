@@ -1,0 +1,16 @@
+{
+  "schema": "commonfabric.agents-host.config",
+  "ownerDid": "did:key:replace-with-the-identity-did",
+  "collectionIntervalMs": 900000,
+  "checkoutRoots": ["/workspace/checkouts"],
+  "sources": [
+    {
+      "id": "codex",
+      "driver": "codex-app-server",
+      "enabled": true,
+      "codexTransport": "stdio",
+      "cwd": "/path/to/worktree",
+      "allowDangerFullAccess": false
+    }
+  ]
+}

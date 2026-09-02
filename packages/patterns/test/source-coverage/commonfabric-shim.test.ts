@@ -36,10 +36,7 @@
 
 // The generated child import map resolves the transitive
 // `data-model`/`content-hash`/`leb128` graph these pull in.
-import {
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import { type FabricValue, valueEqual } from "@commonfabric/data-model";
 export { valueEqual };
 export {
   toCompactDebugString,
@@ -81,6 +78,27 @@ let generateTextResult: {
   result: "",
   error: undefined,
 };
+let fetchJsonResult: unknown = defaultFetchJsonResult();
+
+function defaultFetchJsonResult(): unknown {
+  return {
+    name: "stub-repo",
+    owner: { login: "stub-owner" },
+    description: "stub description",
+    stargazers_count: 123,
+    forks_count: 0,
+    language: "TypeScript",
+    html_url: "https://example.com/stub-repo",
+  };
+}
+
+export function setFetchJsonResult(result: unknown): void {
+  fetchJsonResult = result;
+}
+
+export function clearFetchJsonResult(): void {
+  fetchJsonResult = defaultFetchJsonResult();
+}
 
 export function setWishResult(query: string, result: unknown): void {
   wishResults.set(query, result);
@@ -107,6 +125,12 @@ export function clearGenerateTextResult(): void {
 }
 
 export class Writable<T = unknown> {
+  static perSession = class<T = unknown> extends Writable<T> {
+    static of<T>(value: T): Writable<T> {
+      return new Writable.perSession<T>(value);
+    }
+  };
+
   #value: T;
 
   constructor(value: T) {
@@ -301,15 +325,7 @@ export function fetchJson<T>(
     pending: false,
     // A GitHub-repo-shaped stub: covers both `stargazers_count` readers and
     // patterns that walk further into the response (owner, name, etc.).
-    result: {
-      name: "stub-repo",
-      owner: { login: "stub-owner" },
-      description: "stub description",
-      stargazers_count: 123,
-      forks_count: 0,
-      language: "TypeScript",
-      html_url: "https://example.com/stub-repo",
-    } as T,
+    result: fetchJsonResult as T,
     error: undefined,
   };
 }

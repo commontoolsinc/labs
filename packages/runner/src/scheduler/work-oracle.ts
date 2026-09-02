@@ -122,12 +122,14 @@ export function isIdleMaterializerRunnable(
 export interface PullWorkAssessment {
   /** A seed the settle loop would run right now exists. */
   readonly runnableNow: boolean;
+
   /**
    * Earliest future eligibility among deferred idle-relevant work (effects,
    * materializers, demanded computations, awaited first runs). Feeds the
    * single wake timer.
    */
   readonly nextWakeAt?: number;
+
   /**
    * Some deferred node's eventual run is one an idle() waiter must observe:
    * effects and materializers (side effects), and a never-ran demanded

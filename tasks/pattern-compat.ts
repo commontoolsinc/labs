@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run -A
+
 /**
  * Tier 1 pattern-update gate. Compiles every authored pattern, then proves its
  * argument/result contract can still be applied over every contract recorded
@@ -28,7 +29,8 @@ import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { FragmentWriter } from "@commonfabric/test-support/records";
 import { createRuntime } from "../packages/cli/lib/dev.ts";
 import {
-  collectPatternFiles,
+  collectAllPatternFiles,
+  matchesPatternFilter,
   patternKey,
   PATTERNS_DIR,
 } from "./pattern-files.ts";
@@ -99,10 +101,12 @@ async function main() {
     Deno.exit(1);
   }
 
-  const allFiles = await collectPatternFiles();
+  const allFiles = await collectAllPatternFiles();
   const selected = only.length === 0
     ? allFiles
-    : allFiles.filter((file) => only.some((match) => file.includes(match)));
+    : allFiles.filter((file) =>
+      only.some((match) => matchesPatternFilter(file, match))
+    );
   const files = selected.filter((_file, i) => i % shard.count === shard.index);
 
   const shardLabel = shard.count > 1
@@ -117,6 +121,7 @@ async function main() {
   const cwd = Deno.cwd();
 
   const contracts = new Map<string, PatternContract>();
+
   /**
    * Files that yielded no contract, and why. Most of `packages/patterns` is not
    * a pattern entry — `schemas.tsx`, `auth-types.ts`, client helpers — and a
@@ -126,6 +131,7 @@ async function main() {
    * and can no longer roll forward. That case is `checkPattern`'s `retired`.
    */
   const unavailable = new Map<string, string>();
+
   /** Skips that are an evaluation error rather than "not a pattern entry". */
   const evaluationErrors: { pattern: string; error: string }[] = [];
 
@@ -197,7 +203,12 @@ async function main() {
   // Retirement is a whole-tree question, so only an unfiltered shard 1 asks it;
   // otherwise every pattern outside this shard would look retired.
   if (only.length === 0 && shard.index === 0) {
-    findings.push(...await findRetired(BASELINES_DIR, PATTERNS_DIR));
+    findings.push(
+      ...await findRetired(
+        BASELINES_DIR,
+        new Set(allFiles.map((file) => patternKey(file))),
+      ),
+    );
   }
 
   const recorded: string[] = [];

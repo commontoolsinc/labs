@@ -468,7 +468,7 @@ describe("pattern update over captured prior state", () => {
     // that sentence: it drives a real captured argument through the production
     // repair call and requires the refusal.
     //
-    // The guard is `Runner.validateArgument` → `validateSchemaValue`, reached
+    // The guard is `Runner.#validateArgument` → `validateSchemaValue`, reached
     // from `applySetupState`'s re-stage branch. Reaching it on THIS path needed
     // the setup-completion marker: the repair stamps the candidate's
     // `patternIdentity` before running setup (`pieces-controller.ts`, and this

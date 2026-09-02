@@ -151,7 +151,7 @@ by any repo test.
 | `Record<K,V>` with finite literal-union `K` | expands to concrete `properties` (checker-driven property enumeration) | via `ObjectFormatter`; fixture `record-union-keys` | record-mapped-types.test.ts |
 | Functions / callables / constructables | property skipped entirely (not in `properties`, not in `required`) — **except** callable properties whose call signature returns `Stream`/`Cell`/`SqliteDb` (ModuleFactory/HandlerFactory shapes): kept as `{ asCell: ["stream"/"cell"/"sqlite"] }`, they participate in `required`, and they carry the property's JSDoc description and lowered tags (`deprecated` included) exactly like a kept data property | skip: `type-utils.ts`, `object-formatter.ts`; exception: `object-formatter.ts` (only those three kinds; capability cells like `ReadonlyCell` returns are *not* kept) | pattern-with-types fixtures; object-formatter.test.ts |
 | `FabricPrimitive` class (`FabricBytes`, `FabricEpochDay`, `FabricEpochNsec`, `FabricHash`, `FabricKeyPair`, `FabricRegExp` carrying the `FabricSpecialObject` brand) | `{ type: "<Name>" }` — the fabric-primitive schema vocabulary (§5.2); a leaf, not hoisted, matched by prototype at validation time | `native-type-formatter.ts` | fixture `fabric-special-object-brand`; end-to-end: ts-transformers `schema-transform/fabric-special-object-brand` |
-| `FabricSpecialObject` nominal brand (the `"@commonfabric/FabricSpecialObject"` key, `FABRIC_SPECIAL_OBJECT_BRAND` in `packages/api/index.ts`) on any other branded type | property skipped entirely (not in `properties`, not in `required`) — the key exists only in the type system, so no runtime value could ever satisfy it; e.g. a field typed as the `FabricPrimitive` base emits `{ type: "object", properties: {} }` | `shouldSkipInternalProperty`, `object-formatter.ts` | fixture `fabric-special-object-brand` |
+| `FabricSpecialObject` nominal brand (the `"@commonfabric/FabricSpecialObject"` key, `FABRIC_SPECIAL_OBJECT_BRAND` in `packages/data-model/src/api.ts`) on any other branded type | property skipped entirely (not in `properties`, not in `required`) — the key exists only in the type system, so no runtime value could ever satisfy it; e.g. a field typed as the `FabricPrimitive` base emits `{ type: "object", properties: {} }` | `shouldSkipInternalProperty`, `object-formatter.ts` | fixture `fabric-special-object-brand` |
 | TS `enum` declaration | hoisted under the enum name with **no `type` key** (all-literal union path, §8): numeric → `$defs: { Color: { enum: [0,1,2] } }` + `$ref`; string → `$defs: { Mode: { enum: ["on","off"] } }` | union path `union-formatter.ts`; hoisting §5 | `test/enum-schema-rows.test.ts` |
 | Single enum member type (`Mode.On`) | inline literal schema, e.g. `{ type: "string", enum: ["on"] }`; enum-member symbols are excluded from named-type hoisting so same-named members and unrelated named types cannot collide in `$defs` | `getNamedTypeKey`, `type-utils.ts`; pinned by `test/enum-member-hoisting.test.ts` | — |
 | `Date` / `URL` / typed arrays / etc. | native table, §5.2 | `native-type-formatter.ts` | date-types fixture, native-type tests |
@@ -236,7 +236,7 @@ A field authored against a `FabricPrimitive` class ITSELF (`blob: FabricBytes`)
 emits that class's schema-vocabulary name, a leaf with no `properties`, no
 `required`, and no `$defs` hoisting. Validation is by prototype
 (`schemaTypeOfFabricPrimitive`,
-`packages/data-model/src/fabric-primitives/index.ts`); the dialect side is
+`packages/data-model-schema/src/schemaTypeOfFabricPrimitive.ts`); the dialect side is
 specified in `docs/specs/json_schema.md`.
 
 The remaining typed arrays and the buffer types map to `true` (accept
@@ -412,7 +412,7 @@ emits `asCell: ["opaque"]` is wrong on this tree.
 ### 6.5 Stream event schemas — deliberately open (C5)
 
 A stream property's schema object is the verb's **event** schema — what a
-caller sends, which `cf piece verbs` publishes and `piece call` validates
+caller sends, which `cf piece verbs` publishes and `cf call` validates
 payloads against. It carries no `additionalProperties` of its own — only
 what the event type itself demands (an index signature, a `Record` value
 type). The verb contract wants event schemas closed-world
@@ -882,7 +882,7 @@ canonical; update prose from it, not the other way around. Paths relative to
 
 | Spec content | Canonical source | Guard / note |
 | --- | --- | --- |
-| Formatter chain + order (§3) | `SchemaGenerator.formatters` (`src/schema-generator.ts`) | array literal is the order; routing tests in `test/schema-generator.test.ts` |
+| Formatter chain + order (§3) | `SchemaGenerator.#formatters` (`src/schema-generator.ts`) | array literal is the order; routing tests in `test/schema-generator.test.ts` |
 | Core keyword mappings (§4) | `PrimitiveFormatter.getSchemaType` (`src/formatters/primitive-formatter.ts`); node table `analyzeTypeNodeStructure` (`src/schema-generator.ts`) | void-type / array-special-types tests |
 | Hoisting exclusion rule (§5.1) | `getNamedTypeKey` (`src/type-utils.ts`) | recursion/shared-type/alias fixtures |
 | Native leaf table + guard (§5.2) | `NATIVE_TYPE_SCHEMAS` / `LIB_DECLARED_NATIVE_TYPES` (`src/formatters/native-type-formatter.ts`) | `test/native-type-parameters.test.ts` |

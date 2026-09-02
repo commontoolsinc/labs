@@ -159,10 +159,13 @@ const PROGRAM = {
 
 const VERB_PROSE = "File a new root item on the board.";
 const FIELD_PROSE = "One line naming the work.";
+
 /** `Details.note` — one declared reference deep. */
 const NESTED_PROSE = "Free text the caller may attach.";
+
 /** `Details.tags` — the array property, one declared reference deep. */
 const NESTED_ARRAY_PROSE = "Labels to file it under.";
+
 /** `Tag.label` — reached through the inlined `primary`, two deep. */
 const ELEMENT_PROSE = "The tag's visible text.";
 
@@ -242,7 +245,7 @@ async function verbsJson(live: LivePiece): Promise<Record<string, unknown>> {
   return verbListingJson(listing, false);
 }
 
-/** The `cf piece call <verb> --help --json` payload, as the command emits it. */
+/** The `cf call <verb> --help --json` payload, as the command emits it. */
 async function callHelpJson(
   live: LivePiece,
   verb: string,
@@ -256,7 +259,7 @@ async function callHelpJson(
   return JSON.parse(executed.helpText ?? "{}");
 }
 
-/** The `cf piece call <verb> --help` text page. */
+/** The `cf call <verb> --help` text page. */
 async function callHelpText(live: LivePiece, verb: string): Promise<string> {
   const executed = await executePieceCallable(
     configFor(live.space),
@@ -486,7 +489,7 @@ describe("an author's verb prose reaching a caller", () => {
     });
   });
 
-  describe("cf piece call --help --json", () => {
+  describe("cf call --help --json", () => {
     it("carries the verb's own doc comment as its description", async () => {
       const live = await runLivePiece("verb-prose-help-json");
       try {
@@ -596,7 +599,7 @@ describe("an author's verb prose reaching a caller", () => {
     });
   });
 
-  describe("cf piece call --help", () => {
+  describe("cf call --help", () => {
     it("prints the verb's own doc comment as the page's summary line", async () => {
       const live = await runLivePiece("verb-prose-help-text");
       try {

@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-run=git
+
 /**
  * Fails when a tracked source file contains a control codepoint below 0x20
  * other than newline.
@@ -98,8 +99,10 @@ export function isGovernedPath(path: string): boolean {
 export interface ControlViolation {
   file: string;
   line: number;
+
   /** The offending codepoint, e.g. `0x00`. */
   code: number;
+
   /** How many times it occurs in the file, so a CRLF file reports once. */
   count: number;
 }
@@ -215,9 +218,18 @@ export function parseBatchBlobs(
     let lineEnd = at;
     while (lineEnd < output.length && output[lineEnd] !== 0x0a) lineEnd++;
     const header = new TextDecoder().decode(output.subarray(at, lineEnd));
-    const size = Number(header.split(" ")[2]);
-    if (!Number.isInteger(size)) break;
+    // Read as the run of digits git writes. `Number` takes an empty field as
+    // 0 and a negative field as itself, and a record pushed at either length
+    // leaves every record after it sliced at the wrong offset.
+    const declared = header.split(" ")[2] ?? "";
+    if (!/^[0-9]+$/.test(declared)) break;
+    const size = Number(declared);
     const start = lineEnd + 1;
+    // A record the output does not carry in full stops the parse too. The
+    // slice would otherwise clamp to what is there, and a blob short of the
+    // size its own header declares would be scanned as though it were the
+    // whole file, with the count still matching what was asked for.
+    if (start + size >= output.length) break;
     contents.push(output.subarray(start, start + size));
     at = start + size + 1;
   }
@@ -246,7 +258,7 @@ export async function blobContents(
     cwd: root,
     stdin: "piped",
     stdout: "piped",
-    stderr: "null",
+    stderr: "piped",
   }).spawn();
 
   // Start draining stdout BEFORE writing the ids. git writes as it reads, and
@@ -265,8 +277,12 @@ export async function blobContents(
     // reports it.
   }
 
-  const { success, stdout } = await output;
-  if (!success) throw new Error("git cat-file failed");
+  const { success, stdout, stderr } = await output;
+  if (!success) {
+    throw new Error(
+      `git cat-file failed: ${new TextDecoder().decode(stderr).trim()}`,
+    );
+  }
 
   return parseBatchBlobs(stdout, ids.length);
 }

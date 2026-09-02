@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
+import { isInternedSchema } from "@commonfabric/data-model-schema";
 
 import { createJsonSchema } from "../src/builder/create-json-schema.ts";
 import { type JSONSchema, type JSONSchemaObj } from "../src/builder/types.ts";

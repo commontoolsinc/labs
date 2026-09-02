@@ -50,10 +50,13 @@ import {
 export interface SelectItem {
   /** Text shown to the user */
   label: string;
+
   /** Arbitrary JS value returned when this option is selected */
   value: unknown;
+
   /** Disabled state for this option */
   disabled?: boolean;
+
   /**
    * Optional grouping key. When provided, options with
    * identical `group` values will be wrapped in an <optgroup>.
@@ -62,7 +65,7 @@ export interface SelectItem {
 }
 
 export class CFSelect extends BaseElement {
-  /* ---------- Styles ---------- */
+  /** Styles */
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -181,10 +184,11 @@ export class CFSelect extends BaseElement {
   ];
 
   private _select!: HTMLSelectElement;
+
   /** Mapping from stringified option key -> SelectItem */
   private _keyMap = new Map<string, SelectItem>();
 
-  /* ---------- Cell controller for value binding ---------- */
+  /** Cell controller for value binding */
   private _cellController = createCellController<unknown | unknown[]>(this, {
     timing: { strategy: "immediate" }, // Select changes should be immediate
     onChange: (newValue, oldValue) => {
@@ -206,7 +210,7 @@ export class CFSelect extends BaseElement {
     },
   });
 
-  /* ---------- Form field controller for buffering ---------- */
+  /** Form field controller for buffering */
   private _formField = createFormFieldController<unknown | unknown[]>(this, {
     cellController: this._cellController,
     validate: () => ({
@@ -215,7 +219,10 @@ export class CFSelect extends BaseElement {
     }),
   });
 
-  /* ---------- Reactive properties ---------- */
+  //
+  // Reactive properties
+  //
+
   static override properties = {
     disabled: { type: Boolean, reflect: true },
     multiple: { type: Boolean, reflect: true },
@@ -258,7 +265,10 @@ export class CFSelect extends BaseElement {
     this.addEventListener("focus", this._forwardFocusToSelect);
   }
 
-  /* ---------- Lifecycle ---------- */
+  //
+  // Lifecycle
+  //
+
   override connectedCallback() {
     super.connectedCallback();
     this._updateAccessibilityAttributes();
@@ -322,7 +332,10 @@ export class CFSelect extends BaseElement {
   @property({ attribute: false })
   accessor theme: CFTheme = defaultTheme;
 
-  /* ---------- Render ---------- */
+  //
+  // Render
+  //
+
   override render() {
     return html`
       <!-- The host owns role and tabindex; focus is forwarded to this native
@@ -415,7 +428,10 @@ export class CFSelect extends BaseElement {
     return templates;
   }
 
-  /* ---------- Events ---------- */
+  //
+  // Events
+  //
+
   private _onChange(e: Event) {
     const select = e.target as HTMLSelectElement;
     const _oldValue = this.getCurrentValue();
@@ -435,7 +451,10 @@ export class CFSelect extends BaseElement {
     this._formField.setValue(newValue);
   }
 
-  /* ---------- Public API ---------- */
+  //
+  // Public API
+  //
+
   override focus(options?: FocusOptions) {
     if (this.disabled) return;
     this._select?.focus(options);
@@ -460,7 +479,10 @@ export class CFSelect extends BaseElement {
     this._select?.focus();
   };
 
-  /* ---------- Accessibility ---------- */
+  //
+  // Accessibility
+  //
+
   private _updateAccessibilityAttributes() {
     // A single select is a combobox; a multi-select is a listbox (ARIA spec).
     const role = this.multiple ? "listbox" : "combobox";
@@ -479,7 +501,10 @@ export class CFSelect extends BaseElement {
     this.setAttribute("aria-required", String(this.required));
   }
 
-  /* ---------- Internal helpers ---------- */
+  //
+  // Internal helpers
+  //
+
   private _makeKey(_item: SelectItem, index: number) {
     // Unique deterministic key for each option
     return `${index}`;

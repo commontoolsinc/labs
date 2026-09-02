@@ -3,7 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 
 import {
@@ -30,11 +30,12 @@ const certified = (policy: string) => ({
   policy,
 });
 
-// S16 phase C: integrity propagation through the default transition —
-// class-aware hereditary meet (§8.9.3/§3.1.6.2: an output is certified only
-// when every observed input was) plus runtime-minted TransformedBy
-// derivation provenance.
 describe("CFC flow labels: integrity propagation (phase C)", () => {
+  // S16 phase C: integrity propagation through the default transition —
+  // class-aware hereditary meet (§8.9.3/§3.1.6.2: an output is certified only
+  // when every observed input was) plus runtime-minted TransformedBy derivation
+  // provenance.
+
   const makeRuntime = () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({

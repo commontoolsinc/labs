@@ -3,9 +3,9 @@
 // Deno Memory Profiler — V8 Inspector CDP client
 // Zero dependencies. Single file. JSON output to stdout, status to stderr.
 
-// ---------------------------------------------------------------------------
+//
 // Arg parsing
-// ---------------------------------------------------------------------------
+//
 
 interface GlobalOpts {
   host: string;
@@ -34,21 +34,21 @@ function parseGlobalOpts(args: string[]): { opts: GlobalOpts; rest: string[] } {
   return { opts: { host, port }, rest };
 }
 
-// ---------------------------------------------------------------------------
+//
 // CDP Client
-// ---------------------------------------------------------------------------
+//
 
 type CDPEventHandler = (params: Record<string, unknown>) => void;
 
 class CDPClient {
-  private ws!: WebSocket;
-  private nextId = 1;
-  private pending = new Map<
+  #ws!: WebSocket;
+  #nextId = 1;
+  #pending = new Map<
     number,
     { resolve: (v: unknown) => void; reject: (e: Error) => void }
   >();
-  private eventHandlers = new Map<string, CDPEventHandler[]>();
-  private openPromise!: Promise<void>;
+  #eventHandlers = new Map<string, CDPEventHandler[]>();
+  #openPromise!: Promise<void>;
 
   static async connect(host: string, port: number): Promise<CDPClient> {
     // Discover websocket URL
@@ -69,24 +69,24 @@ class CDPClient {
     }
     const wsUrl = targets[0].webSocketDebuggerUrl;
     const client = new CDPClient();
-    await client._connect(wsUrl);
+    await client.#connect(wsUrl);
     return client;
   }
 
-  private _connect(wsUrl: string): Promise<void> {
-    this.ws = new WebSocket(wsUrl);
-    this.openPromise = new Promise<void>((resolve, reject) => {
-      this.ws.onopen = () => resolve();
-      this.ws.onerror = (e) =>
+  #connect(wsUrl: string): Promise<void> {
+    this.#ws = new WebSocket(wsUrl);
+    this.#openPromise = new Promise<void>((resolve, reject) => {
+      this.#ws.onopen = () => resolve();
+      this.#ws.onerror = (e) =>
         reject(new Error("WebSocket error: " + String(e)));
     });
 
-    this.ws.onmessage = (evt) => {
+    this.#ws.onmessage = (evt) => {
       const msg = JSON.parse(String(evt.data));
       if (msg.id !== undefined) {
-        const p = this.pending.get(msg.id);
+        const p = this.#pending.get(msg.id);
         if (p) {
-          this.pending.delete(msg.id);
+          this.#pending.delete(msg.id);
           if (msg.error) {
             p.reject(
               new Error(`CDP error: ${msg.error.message} (${msg.error.code})`),
@@ -97,42 +97,42 @@ class CDPClient {
         }
       } else if (msg.method) {
         // CDP event
-        const handlers = this.eventHandlers.get(msg.method);
+        const handlers = this.#eventHandlers.get(msg.method);
         if (handlers) {
           for (const h of handlers) h(msg.params ?? {});
         }
       }
     };
 
-    return this.openPromise;
+    return this.#openPromise;
   }
 
   on(method: string, handler: CDPEventHandler): void {
-    const list = this.eventHandlers.get(method) ?? [];
+    const list = this.#eventHandlers.get(method) ?? [];
     list.push(handler);
-    this.eventHandlers.set(method, list);
+    this.#eventHandlers.set(method, list);
   }
 
   send(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
-    const id = this.nextId++;
+    const id = this.#nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.ws.send(JSON.stringify({ id, method, params }));
+      this.#pending.set(id, { resolve, reject });
+      this.#ws.send(JSON.stringify({ id, method, params }));
     });
   }
 
   disconnect(): void {
     try {
-      this.ws.close();
+      this.#ws.close();
     } catch {
       // ignore
     }
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Commands
-// ---------------------------------------------------------------------------
+//
 
 async function cmdUsage(client: CDPClient, args: string[]) {
   const doGC = args.includes("--gc");
@@ -281,9 +281,9 @@ async function cmdSample(client: CDPClient, args: string[]) {
   );
 }
 
-// ---------------------------------------------------------------------------
+//
 // Snapshot helpers
-// ---------------------------------------------------------------------------
+//
 
 interface HeapSnapshotData {
   snapshot: {
@@ -446,9 +446,9 @@ async function cmdSnapshot(client: CDPClient, _args: string[]) {
   );
 }
 
-// ---------------------------------------------------------------------------
+//
 // Diff
-// ---------------------------------------------------------------------------
+//
 
 async function cmdDiff(client: CDPClient, args: string[], port: number) {
   const subcommand = args[0];
@@ -590,9 +590,9 @@ async function cmdDiff(client: CDPClient, args: string[], port: number) {
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Main
-// ---------------------------------------------------------------------------
+//
 
 async function main() {
   const rawArgs = Deno.args;

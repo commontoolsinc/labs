@@ -14,8 +14,7 @@
  * dry further back than its lag allows.
  */
 
-import type { Status } from "./types.ts";
-import { multiSparkline, SPARK_FADE } from "./lib.ts";
+import { multiSparkline } from "./lib.ts";
 import { themedChartSeries } from "./theme.ts";
 
 export const DAY_MS = 86_400_000;
@@ -49,6 +48,7 @@ export interface SpendChartSource {
   color: string;
   label?: string;
   lagDays: number;
+
   /**
    * The calendar months, as "YYYY-MM", the source has a report for. A day
    * outside them is left out of the source's line. Leave it undefined when the
@@ -219,13 +219,15 @@ export function summarizeDailySpend(
 export function spendChart(
   sources: SpendChartSource[],
   now: Date,
-  status: Status,
   estimateDays?: number,
 ): { chart: string; duration: number } {
   const allDays = new Set<string>();
   for (const source of sources) {
     if (source.spend) {
       for (const day of source.spend.byDay.keys()) allDays.add(day);
+      if (source.spend.byDay.size > 0 && source.knownMonths) {
+        for (const month of source.knownMonths) allDays.add(`${month}-01`);
+      }
     }
   }
   if (allDays.size < 2) return { chart: "", duration: 0 };
@@ -308,7 +310,7 @@ export function spendChart(
   });
   return {
     chart: multiSparkline(lines, {
-      fadeFrom: SPARK_FADE[status],
+      fade: true,
       highlight: { count: highlightDays },
     }),
     duration: end - start + DAY_MS,

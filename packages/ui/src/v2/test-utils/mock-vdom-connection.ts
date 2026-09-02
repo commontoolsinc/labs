@@ -22,10 +22,13 @@ import {
 export interface VDomSessionLog {
   /** Cell references passed to `mount`, in order. */
   mounted: CellRef[];
+
   /** Mount ids passed to `unmount`, in order. */
   unmounted: number[];
+
   /** Whether the renderer detached its disposal teardown. */
   detached: boolean;
+
   /** Whether a VDOM session was attached at all. */
   attached: boolean;
 }
@@ -60,8 +63,8 @@ export function createRenderableCellHandle<T>(
     signal: lifetime.signal,
     mount: (_mountId: number, cellRef: CellRef) => {
       log.mounted.push(cellRef);
-      // rootId 0 is the container itself: nothing was rendered above it.
-      return Promise.resolve({ rootId: 0 });
+      // `null`: nothing was rendered, so the tree has no root child.
+      return Promise.resolve({ rootId: null });
     },
     unmount: (mountId: number) => {
       log.unmounted.push(mountId);

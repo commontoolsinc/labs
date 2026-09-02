@@ -160,14 +160,14 @@ function workflowTriggers(contents: string): string {
   return contents.slice(0, concurrencyStart);
 }
 
-// Every other check in this file reads the workflow files as TEXT (regex over
-// job and step blocks), so none of them can notice that a file has stopped
-// being valid YAML — and a workflow that does not parse produces ZERO jobs on
-// every push while every text-level check here stays green. That happened: an
-// unquoted `default: ` inside two step names turned deno.yml into a nested
-// mapping the runner refused, and CI silently ran nothing for a whole stack of
-// pushes. This is the one check that would have caught it.
 Deno.test("every workflow and composite action is valid YAML", async () => {
+  // Every other check in this file reads the workflow files as TEXT (regex over
+  // job and step blocks), so none of them can notice that a file has stopped
+  // being valid YAML — and a workflow that does not parse produces ZERO jobs on
+  // every push while every text-level check here stays green. Parsing is what
+  // catches that, and an unquoted `default: ` inside a step name is enough to
+  // turn a workflow into a nested mapping the runner refuses.
+
   const broken: string[] = [];
   for await (const path of githubYamlPaths()) {
     const contents = await Deno.readTextFile(path);
@@ -244,6 +244,43 @@ Deno.test("CI browser tests use the runner's installed Chrome", async () => {
   }
 });
 
+Deno.test("Check preserves a native crash from Deno lint", async () => {
+  const contents = await workflow("deno.yml");
+  const check = jobBlock(contents, "check");
+  const lint = stepBlock(check, "🧹 Lint codebase");
+  const describe = stepBlock(check, "📋 Describe Deno lint core dump");
+  const upload = stepBlock(check, "📤 Upload Deno lint core dump");
+
+  assertStringIncludes(lint, "ulimit -c unlimited");
+  assertStringIncludes(
+    lint,
+    'sudo sysctl -w kernel.core_pattern="$GITHUB_WORKSPACE/deno-core.%p"',
+  );
+  assertStringIncludes(
+    lint,
+    "deno task run-recorded lint repo deno-lint -- deno lint",
+  );
+  assertStringIncludes(describe, "if: ${{ failure() }}");
+  assertStringIncludes(describe, 'file "$core"');
+  assertStringIncludes(upload, "if: ${{ failure() }}");
+  assertStringIncludes(upload, "uses: actions/upload-artifact@v7");
+  assertStringIncludes(
+    upload,
+    "name: deno-lint-core-a${{ github.run_attempt }}",
+  );
+  assertStringIncludes(upload, "path: deno-core.*");
+  assertStringIncludes(upload, "if-no-files-found: ignore");
+  assert(
+    check.indexOf("🧹 Lint codebase") <
+        check.indexOf("📋 Describe Deno lint core dump") &&
+      check.indexOf("📋 Describe Deno lint core dump") <
+        check.indexOf("📤 Upload Deno lint core dump") &&
+      check.indexOf("📤 Upload Deno lint core dump") <
+        check.indexOf("🔎 Type check codebase"),
+    "the lint crash report must run immediately after the lint step",
+  );
+});
+
 Deno.test("Status waits for every pull request validation job", async () => {
   const contents = await workflow("deno.yml");
   const gate = jobBlock(contents, "status");
@@ -298,6 +335,7 @@ Deno.test("every step we name carries a phase marker", async () => {
   // "other", which is how a job's setup time goes missing from the timings
   // people read when deciding what to make faster. The classifier reads the
   // marker rather than the wording, so the check is the classifier itself.
+
   const unmarked: string[] = [];
   let steps = 0;
   for await (const path of githubYamlPaths()) {
@@ -326,6 +364,7 @@ Deno.test("every work step is bounded before its job is", async () => {
   // upload steps around it normally need. Both bounds are aliases to an anchor,
   // so each is a name here rather than a number, and the minutes behind the
   // names are written once.
+
   const headroom = 10;
   const contents = await workflow("deno.yml");
   const anchors = anchoredMinutes(contents);
@@ -466,6 +505,42 @@ Deno.test("sharded pattern caches follow their shard topology", async () => {
   }
 });
 
+Deno.test("pattern shard selection fails loudly instead of running an empty shard", async () => {
+  // `mapfile -t X < <(deno run … select-pattern-integration-files.ts …)`
+  // discards the selector's exit status: a selector failure leaves the
+  // array empty WITHOUT failing the step, and the step then runs ZERO test
+  // files and exits green — a silently empty shard. The selector itself
+  // throws on an empty selection (every shard carries the
+  // internally-sharded files), so empty output is only ever a failure; the
+  // exit status is the discriminator, and only a plain command
+  // substitution propagates it under `bash -e`.
+
+  const contents = withoutComments(await workflow("deno.yml"));
+  for (
+    const jobId of [
+      "pattern-integration-test",
+      "pattern-integration-test-server-execution-on",
+    ]
+  ) {
+    const job = jobBlock(contents, jobId);
+    assert(
+      !/mapfile[^\n]*<\s*<\([^\n]*select-pattern-integration-files/.test(job),
+      `${jobId}: the shard selector must not feed mapfile through a ` +
+        `process substitution — that discards its exit status, and a ` +
+        `selector failure then runs an empty shard green`,
+    );
+    assertStringIncludes(
+      job,
+      "SELECTED_FILES=$(deno run --allow-read " +
+        "../../tasks/select-pattern-integration-files.ts",
+    );
+    assertStringIncludes(
+      job,
+      "::error::select-pattern-integration-files.ts selected no files",
+    );
+  }
+});
+
 Deno.test("Dashboard publishes only from main, never from a pull request", async () => {
   const deno = await workflow("deno.yml");
   const dashboard = await workflow("dashboard-image.yml");
@@ -524,6 +599,67 @@ Deno.test("Dashboard publishes only from main, never from a pull request", async
   );
 });
 
+Deno.test("One commit publishes one set of release artifacts", async () => {
+  // A release artifact is named after the commit it was built from, and the
+  // deploy hands the bastion a commit rather than a build. So a commit has one
+  // tarball and one checksum for that tarball, and they stay as they were
+  // published. Two builds of one commit do not produce the same tarball: the
+  // binaries are compiled again, and `tar` records modification times. Publish
+  // a second build over a first and a reader can come away holding one build's
+  // tarball beside the other build's checksum, which is what the deploy's
+  // `sha256sum -c` reports as a failure. docs/development/deploying.md covers
+  // the invariant.
+
+  const contents = await workflow("deno.yml");
+
+  // Main can receive the same head commit twice, which starts two runs of that
+  // commit. Grouping a push by the commit makes the second run wait for the
+  // first, so the two builds never publish at once. Grouping it by anything
+  // that differs between runs of one commit, `github.run_id` among them, puts
+  // them in separate groups and lets them overlap.
+  assertStringIncludes(
+    contents,
+    "\nconcurrency:\n" +
+      "  group: ${{ github.workflow }}-" +
+      "${{ github.event.pull_request.number || github.sha }}\n" +
+      "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n",
+  );
+
+  // Waiting alone leaves the second run free to publish over the first once the
+  // first has finished, so the publish itself is what holds the bytes still: a
+  // commit that already has both objects keeps them. The pair is published
+  // together, in the one branch, because publishing just one of them is how a
+  // commit ends up with two builds' halves.
+  const upload = stepBlock(
+    jobBlock(contents, "attest-binaries"),
+    "📤 Upload artifacts to Google Cloud Storage",
+  );
+  const guard =
+    'if gsutil -q stat "$BUCKET/$TARBALL" && gsutil -q stat "$BUCKET/$CHECKSUM"; then';
+  const guardStart = upload.indexOf(guard);
+  assert(
+    guardStart >= 0,
+    "the published pair is not looked for before it is published",
+  );
+  const branchStart = upload.indexOf("\n          else\n", guardStart);
+  const branchEnd = upload.indexOf("\n          fi\n", branchStart);
+  assert(
+    branchStart >= 0 && branchEnd > branchStart,
+    "publishing branch not found",
+  );
+  const branch = upload.slice(branchStart, branchEnd);
+
+  for (const object of ["$TARBALL", "$CHECKSUM"]) {
+    const copy = `gsutil cp "release/${object}" "$BUCKET/"`;
+    assertStringIncludes(branch, copy);
+    assertEquals(
+      upload.split(copy).length - 1,
+      1,
+      `${copy} runs somewhere other than the branch that publishes the pair`,
+    );
+  }
+});
+
 Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () => {
   // The bastion's /opt/cf/deploy.sh takes an environment name and a
   // 40-character commit SHA, and nothing else. Hand it a third argument, an
@@ -531,6 +667,7 @@ Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () =
   // prints its usage and exits 1, failing the deploy job. That script belongs
   // to the infra repository, so nothing else here sees it and the call sites
   // are checked instead. docs/development/deploying.md covers the seam.
+
   const environments = ["estuary", "rapids"];
   // The revision has to expand to a full SHA, which is a property of what the
   // expression reads rather than of the expression itself. `github.ref_name`
@@ -578,6 +715,82 @@ Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () =
   }
 });
 
+Deno.test("a configured presence URL reaches every shell bundle CI builds", async () => {
+  // Both shells CI builds take their co-presence endpoint from a repository
+  // variable, and an unset variable is a supported state that builds a working
+  // shell. Every check the wiring performs therefore sits inside an
+  // `if [ -n "$PRESENCE_URL" ]` that a repository without the variable never
+  // enters, so those checks cannot report on the wiring itself: remove the
+  // wiring and the same runs stay green. The properties a configured value
+  // depends on are checked here instead, against the workflow text, where
+  // repository configuration does not get to decide whether the check runs.
+
+  const deno = await workflow("deno.yml");
+
+  // Each job that builds a shell, and the directory its build leaves the
+  // bundle in. Both are named so the shell embedded in the toolshed binary and
+  // the one published to the bucket are held to a single shape.
+  const bundles = new Map([
+    ["build-toolshed", "packages/toolshed/shell-frontend/scripts"],
+    ["deploy-shell-staging", "dist/scripts"],
+  ]);
+
+  // Membership is checked both ways. A job that starts carrying a presence URL
+  // without being named above would go unchecked, and a job that stops
+  // carrying one is a shell that quietly lost co-presence.
+  const carriers = jobIds(deno).filter((id) =>
+    jobBlock(deno, id).includes('PRESENCE_URL=$PRESENCE_URL" >> "$GITHUB_ENV"')
+  );
+  assertEquals(carriers.sort(), [...bundles.keys()].sort());
+
+  for (const [id, bundle] of bundles) {
+    const steps = stepBlocks(jobBlock(deno, id));
+
+    const exporter = steps.findIndex((step) =>
+      step.body.includes('PRESENCE_URL=$PRESENCE_URL" >> "$GITHUB_ENV"')
+    );
+    assert(exporter >= 0, `${id}: no step exports PRESENCE_URL`);
+
+    // Read from `vars`, never `secrets`: the value ships inside a bundle any
+    // reader can open, so hiding it would cost review and buy nothing.
+    assertStringIncludes(steps[exporter].body, "PRESENCE_URL: ${{ vars.");
+
+    // What the bundle carries is `URL.href`, which is not always the spelling
+    // the variable holds — a host written without a path gains a trailing
+    // slash. Exporting the normalized form is what makes the check below an
+    // equality on the value that shipped rather than a prefix match.
+    assertStringIncludes(
+      steps[exporter].body,
+      "packages/shell/src/lib/presence-url.ts",
+    );
+    assertStringIncludes(steps[exporter].body, "?.href");
+
+    // A configured endpoint that did not reach the bundle is a deployment
+    // whose co-presence is off with nothing downstream to notice, so the build
+    // is not allowed to pass until the URL is found in what it produced.
+    const verifier = steps.findIndex((step) =>
+      step.body.includes(`grep -rqF -e "$PRESENCE_URL" ${bundle}`)
+    );
+    assert(
+      verifier >= 0,
+      `${id}: nothing greps ${bundle} for the presence URL`,
+    );
+    assertStringIncludes(
+      steps[verifier].body,
+      'does not reference $PRESENCE_URL."\n            exit 1\n',
+    );
+
+    // GITHUB_ENV reaches the steps after the one that writes it, and not that
+    // step itself. An exporter placed after the build it configures would
+    // export a value no later step reads, and the guarded check above would
+    // then skip on an empty variable instead of failing.
+    assert(
+      exporter < verifier,
+      `${id}: PRESENCE_URL is exported after the build that has to read it`,
+    );
+  }
+});
+
 Deno.test("every test-records artifact name is store-safe and unique", async () => {
   // The relay derives each store object's name from the artifact's name
   // through objectNameSlug, which collapses characters unsafe in object
@@ -588,6 +801,7 @@ Deno.test("every test-records artifact name is store-safe and unique", async () 
   // these names, so distinct names stay distinct in the store. Uniqueness
   // matters per workflow: object names carry the run id, so two different
   // workflows can reuse a name.
+
   let shipSteps = 0;
   for (const name of await workflowNames()) {
     const contents = withoutComments(await workflow(name));
@@ -618,7 +832,7 @@ Deno.test("every test-records artifact name is store-safe and unique", async () 
   assert(shipSteps >= 14, `only ${shipSteps} ship steps found`);
 });
 
-Deno.test("every deno.yml job that writes a JUnit file spools and ships test records (the ON lanes' observability gap: 25 pattern-ON flakes had to be censused from raw Actions logs because the two server-execution ON jobs set no CF_TEST_RECORDS_DIR and had no ship step — records the dashboard never saw)", async () => {
+Deno.test("every deno.yml JUnit job spools and ships test records", async () => {
   const contents = withoutComments(await workflow("deno.yml"));
   const missing: string[] = [];
   let junitJobs = 0;
@@ -630,6 +844,14 @@ Deno.test("every deno.yml job that writes a JUnit file spools and ships test rec
       missing.push(
         `${jobId}: writes a JUnit file but has no test-records-ship step`,
       );
+    } else {
+      const ship = stepBlock(job, "📤 Ship test records");
+      if (!ship.includes("if: always()")) {
+        missing.push(`${jobId}: does not ship test records after a failure`);
+      }
+      if (!ship.includes("junit:")) {
+        missing.push(`${jobId}: does not gather its JUnit file`);
+      }
     }
     if (!job.includes("CF_TEST_RECORDS_DIR:")) {
       missing.push(
@@ -642,4 +864,84 @@ Deno.test("every deno.yml job that writes a JUnit file spools and ships test rec
   // Pin the search itself: zero junit jobs would mean the extraction
   // broke, not that the repository stopped writing JUnit files.
   assert(junitJobs >= 7, `only ${junitJobs} JUnit-writing jobs found`);
+});
+
+Deno.test("test-records-ship forwards its optional variant input", async () => {
+  const action = await Deno.readTextFile(
+    new URL(
+      "../.github/actions/test-records-ship/action.yml",
+      import.meta.url,
+    ),
+  );
+  assertStringIncludes(action, "  variant:\n");
+  assertStringIncludes(action, "SHIP_VARIANT: ${{ inputs.variant }}");
+  assertStringIncludes(action, 'args+=(--variant "$SHIP_VARIANT")');
+});
+
+Deno.test("server-execution ON jobs ship records under their variant", async () => {
+  const contents = withoutComments(await workflow("deno.yml"));
+  const packageJob = jobBlock(
+    contents,
+    "package-integration-test-server-execution-on",
+  );
+  const patternJob = jobBlock(
+    contents,
+    "pattern-integration-test-server-execution-on",
+  );
+  assertStringIncludes(
+    packageJob,
+    "--junit-path=../../test-results/${JUNIT_NAME}.xml",
+  );
+  assertStringIncludes(packageJob, "JUNIT_NAME: ${{ matrix.junit_name }}");
+  assertStringIncludes(
+    stepBlock(packageJob, "📤 Ship test records"),
+    "glob=test-results/${{ matrix.junit_name }}.xml",
+  );
+  assertStringIncludes(
+    patternJob,
+    "--junit-path=../../test-results/patterns-server-execution-on-${{ matrix.shard }}.xml",
+  );
+  assertStringIncludes(
+    stepBlock(patternJob, "📤 Ship test records"),
+    "glob=test-results/patterns-server-execution-on-${{ matrix.shard }}.xml",
+  );
+
+  for (
+    const jobId of ["package-integration-test", "pattern-integration-test"]
+  ) {
+    const ship = stepBlock(jobBlock(contents, jobId), "📤 Ship test records");
+    assert(
+      !ship.includes("variant:"),
+      `${jobId}: the default configuration must remain unmarked`,
+    );
+  }
+
+  for (
+    const jobId of [
+      "package-integration-test-server-execution-on",
+      "pattern-integration-test-server-execution-on",
+    ]
+  ) {
+    const ship = stepBlock(jobBlock(contents, jobId), "📤 Ship test records");
+    assertStringIncludes(ship, "variant: server-execution");
+  }
+});
+
+Deno.test("server-execution ON pattern failures upload the toolshed log", async () => {
+  const contents = await workflow("deno.yml");
+  const patternJob = jobBlock(
+    contents,
+    "pattern-integration-test-server-execution-on",
+  );
+  const upload = stepBlock(patternJob, "📋 Upload toolshed log on failure");
+
+  assertStringIncludes(upload, "if: failure()");
+  assertStringIncludes(upload, "uses: actions/upload-artifact@v7");
+  assertStringIncludes(
+    upload,
+    "name: toolshed-log-pattern-integration-server-execution-on-${{ matrix.shard }}",
+  );
+  assertStringIncludes(upload, "path: ${{ runner.temp }}/toolshed.log");
+  assertStringIncludes(upload, "retention-days: 14");
+  assertStringIncludes(upload, "if-no-files-found: ignore");
 });

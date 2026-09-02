@@ -32,9 +32,6 @@ let host: ExecutorHost | undefined;
  */
 const SERVING_RUNTIME_EXPERIMENTAL = {
   serverExecution: true,
-  // serving-loop.md §3e: the pattern-update posture flips server-side — the
-  // SpaceServer owns the watcher and the swap under the flag.
-  systemPatternAutoUpdate: true,
 } as const satisfies ExperimentalOptions;
 
 /** The production default for the per-space outstanding-network-effect
@@ -80,10 +77,12 @@ export function serverExecutionPolicyFromEnv(
    * prefixes of those). */
   const strictNonNegativeInt = (raw: string): number | undefined =>
     /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : undefined;
+
   const readRaw = (name: string): string | undefined => {
     const raw = envGet(name);
     return raw === undefined || raw === "" ? undefined : raw;
   };
+
   /** Positive-int knobs whose absence means the built-in default. */
   const positiveOrDefault = (name: string): number | undefined => {
     const raw = readRaw(name);
@@ -98,6 +97,7 @@ export function serverExecutionPolicyFromEnv(
     }
     return value;
   };
+
   const flushDeadlineMs = positiveOrDefault(
     "SERVER_EXECUTION_FLUSH_DEADLINE_MS",
   );
@@ -166,8 +166,10 @@ export function ensureSpaceRootsFromEnv(
 export function startServerExecutionHost(options: {
   server: MemoryServer;
   identity: Identity;
+
   /** The patterns/compile base — the serving runtimes' `apiUrl`. */
   apiUrl: URL;
+
   envGet?: EnvReader;
 }): ExecutorHost | undefined {
   const envGet = options.envGet ?? Deno.env.get;

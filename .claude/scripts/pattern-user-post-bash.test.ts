@@ -342,21 +342,8 @@ describe("pattern-user-post-bash", () => {
 
     it("keeps the recomputation guidance for state writes", () => {
       expect(
-        suggestionForPatternUserCommand("cf piece set --piece ID title"),
+        suggestionForPatternUserCommand("cf set --piece ID title"),
       ).toContain("Run 'cf piece step'");
-    });
-
-    it("gives the same guidance whether or not a data command names piece", () => {
-      // `set` is the only data command carrying guidance, so it is the only
-      // one whose two spellings can be compared for anything. Asserting the
-      // text as well as the equality keeps the comparison from holding
-      // because both sides are empty.
-      const nested = suggestionForPatternUserCommand(
-        "cf piece set --piece ID title",
-      );
-      expect(nested).toContain("Run 'cf piece step'");
-      expect(suggestionForPatternUserCommand("cf set --piece ID title"))
-        .toBe(nested);
     });
 
     it("still ignores a bare cf whose next word carries no guidance", () => {

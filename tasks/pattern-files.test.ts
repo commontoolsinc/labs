@@ -4,7 +4,11 @@ import { fromFileUrl } from "@std/path/from-file-url";
 import {
   collectPatternFiles,
   isPatternSource,
+  matchesPatternFilter,
+  normalizePatternPath,
   patternKey,
+  patternPath,
+  patternRoot,
   PATTERNS_DIR,
 } from "./pattern-files.ts";
 
@@ -36,6 +40,31 @@ describe("isPatternSource", () => {
     expect(isPatternSource("packages/patterns/tools/foo.ts")).toBe(false);
     expect(isPatternSource("packages/patterns/mod.ts")).toBe(false);
   });
+
+  it("rejects authored iframe support modules", () => {
+    expect(
+      isPatternSource("packages/patterns/iframe-notes/contract.ts"),
+    ).toBe(false);
+    expect(isPatternSource("packages/patterns/iframe-notes/guest.ts")).toBe(
+      false,
+    );
+    expect(isPatternSource("packages/patterns/iframe-notes/guest.tsx")).toBe(
+      false,
+    );
+    expect(isPatternSource("packages/patterns/iframe-notes/main.tsx")).toBe(
+      true,
+    );
+  });
+
+  it("does not reserve iframe support basenames outside iframe patterns", () => {
+    expect(isPatternSource("packages/patterns/notebook/contract.ts")).toBe(
+      true,
+    );
+    expect(isPatternSource("packages/patterns/notebook/guest.ts")).toBe(true);
+    expect(
+      isPatternSource("packages/connectors/example/pattern/guest.ts", "."),
+    ).toBe(true);
+  });
 });
 
 describe("patternKey", () => {
@@ -50,6 +79,85 @@ describe("patternKey", () => {
 
   it("leaves a path that is not under the patterns root alone", () => {
     expect(patternKey("elsewhere/home.tsx")).toBe("elsewhere/home.tsx");
+  });
+
+  it("preserves the deployed keys of connector-owned patterns", () => {
+    expect(
+      patternKey("packages/connectors/agents/debug-view/main.tsx"),
+    ).toBe("agent-sessions-debug/main.tsx");
+    expect(
+      patternKey("packages/connectors/github/activity-view/main.tsx"),
+    ).toBe("github-activity/main.tsx");
+  });
+
+  it("normalizes Windows paths before deriving a deployed key", () => {
+    expect(
+      patternKey("packages\\connectors\\agents\\debug-view\\main.tsx"),
+    ).toBe("agent-sessions-debug/main.tsx");
+    expect(
+      patternKey(
+        "C:\\repo\\packages\\patterns\\system\\home.tsx",
+        "C:\\repo\\packages\\patterns",
+      ),
+    ).toBe("system/home.tsx");
+  });
+});
+
+describe("normalizePatternPath", () => {
+  it("uses repository separators on every platform", () => {
+    expect(normalizePatternPath("packages\\patterns\\main.tsx")).toBe(
+      "packages/patterns/main.tsx",
+    );
+  });
+});
+
+describe("patternPath", () => {
+  it("returns the source path for central and connector-owned patterns", () => {
+    expect(patternPath("system/home.tsx")).toBe(
+      "packages/patterns/system/home.tsx",
+    );
+    expect(patternPath("agent-sessions-debug/main.tsx")).toBe(
+      "packages/connectors/agents/debug-view/main.tsx",
+    );
+  });
+});
+
+describe("matchesPatternFilter", () => {
+  it("matches both source paths and preserved deployed keys", () => {
+    const path = "packages/connectors/agents/debug-view/main.tsx";
+    expect(matchesPatternFilter(path, "debug-view")).toBe(true);
+    expect(matchesPatternFilter(path, "agent-sessions-debug")).toBe(true);
+    expect(matchesPatternFilter(path, "github-activity")).toBe(false);
+  });
+
+  it("matches a preserved key for a Windows source path", () => {
+    expect(
+      matchesPatternFilter(
+        "packages\\connectors\\agents\\debug-view\\main.tsx",
+        "agent-sessions-debug",
+      ),
+    ).toBe(true);
+  });
+
+  it("normalizes a Windows path filter", () => {
+    expect(
+      matchesPatternFilter(
+        "packages\\connectors\\agents\\debug-view\\main.tsx",
+        "packages\\connectors\\agents\\debug-view",
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("patternRoot", () => {
+  it("returns the source root containing a pattern", () => {
+    expect(patternRoot("packages/patterns/system/home.tsx")).toBe(
+      "packages/patterns",
+    );
+    expect(patternRoot("packages/connectors/agents/debug-view/main.tsx"))
+      .toBe(".");
+    expect(patternRoot("packages\\connectors\\agents\\debug-view\\main.tsx"))
+      .toBe(".");
   });
 });
 

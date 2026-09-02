@@ -13,7 +13,10 @@
  * index-like name that is not canonical all count as absent -- and absent
  * means nothing shifts.
  *
- * Neither one descends into a `FabricInstance` on its way through a path.
+ * Neither one descends into a `FabricInstance`, which holds its state privately
+ * and so has nothing a path key addresses. They part on what that means:
+ * writing refuses it, while removal reads it as absent and leaves the root
+ * alone.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -23,8 +26,9 @@ import {
   CloneForMutationError,
   cloneWithoutValueAtPath,
   cloneWithValueAtPath,
-} from "@/fabric-value.ts";
+} from "@/index.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
+import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -101,6 +105,36 @@ describe("value-clone", () => {
       expect(result.value.keep).toBeInstanceOf(FabricHash);
       expect(result.value.keep.tag).toBe("sha256");
     });
+
+    it("throws when the parent of the path is a `FabricInstance`", () => {
+      const root = deepFreeze({
+        err: FabricError.fromNativeError(new Error("boom")),
+      });
+
+      expect(() => cloneWithValueAtPath(root, ["err", "extra"], 42))
+        .toThrow(CloneForMutationError);
+    });
+
+    it("reports a `FabricInstance` parent as a failed descent", () => {
+      // Not `non-mutable-*`: an instance IS mutable and IS a container. What
+      // it is not is addressable by a key, which is what the descent kinds
+      // report. (An own property assigned through one would be invisible to
+      // every reading of it as a `FabricValue` -- the codec's included.)
+      const root = deepFreeze({
+        err: FabricError.fromNativeError(new Error("boom")),
+      });
+
+      try {
+        cloneWithValueAtPath(root, ["err", "extra"], 42);
+        throw new Error("expected throw");
+      } catch (e) {
+        expect(e).toBeInstanceOf(CloneForMutationError);
+        const err = e as CloneForMutationError;
+        expect(err.kind).toBe("non-container-descent");
+        expect(err.pathIndex).toBe(0);
+        expect(err.valueKind).toBe("FabricInstance (FabricError)");
+      }
+    });
   });
 
   describe("cloneWithoutValueAtPath()", () => {
@@ -169,12 +203,26 @@ describe("value-clone", () => {
       expect(result).toEqual(root); // same content
     });
 
-    it("does not descend into a FabricInstance/FabricPrimitive in the path", () => {
+    it("returns the root unchanged for a path under a `FabricPrimitive`", () => {
       const hash = FabricHash.fromString("sha256:abcd");
       const root = deepFreeze({ value: { wrapper: hash } });
 
       // There is nothing path-addressable under an opaque wrapper, so removal
       // is a no-op rather than an attempt to clone or mutate the wrapper.
+      expect(cloneWithoutValueAtPath(root, ["value", "wrapper", "x"])).toBe(
+        root,
+      );
+    });
+
+    it("returns the root unchanged for a path under a `FabricInstance`", () => {
+      // The same answer for the other non-addressable arm, which the primitive
+      // case above does not reach: a `FabricPrimitive` is refused by the
+      // descent itself, while an instance is a container the descent admits.
+      // Removal parts from `cloneWithValueAtPath()` here -- absent is absent,
+      // so there is nothing to refuse.
+      const err = FabricError.fromNativeError(new Error("boom"));
+      const root = deepFreeze({ value: { wrapper: err } });
+
       expect(cloneWithoutValueAtPath(root, ["value", "wrapper", "x"])).toBe(
         root,
       );

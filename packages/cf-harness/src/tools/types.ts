@@ -18,6 +18,10 @@ import type {
 import type { HarnessBrowserAccessLease } from "../contracts/browser-access.ts";
 import type { HarnessHandleTable } from "../contracts/handle-table.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
+import type { PatternIndexClient } from "../pattern-index/client.ts";
+import type { PatternIndexPublicationLedger } from "../pattern-index/publish-ledger.ts";
+import type { SkillsShAcquisitionClient } from "../skills-sh/acquisition.ts";
+import type { SkillsShSearchClient } from "../skills-sh/search-client.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
 import type { ProcessRunner } from "../sandbox/process-runner.ts";
@@ -31,6 +35,7 @@ export interface HarnessToolContext {
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   browserAccess?: HarnessBrowserAccessLease;
+
   /**
    * Origins a value materialized from a handle may be sent to. Absent or
    * empty means none: materialization is default-deny by destination, and a
@@ -38,25 +43,84 @@ export interface HarnessToolContext {
    * asking the model where it meant.
    */
   handleValueOrigins?: readonly string[];
+
   /**
    * The run's handle table, as it stands at the invocation. Undefined until
-   * the run mints its first handle. `describe_handle` is the only tool that
-   * reads it: every other tool sees its input with tokens already resolved to
-   * addresses by the prompt loop.
+   * the run mints its first handle. `describe_handle` reads it directly, and
+   * value-handle consumers use it to prove membership and enforce entry
+   * capabilities. Ordinary tool inputs see general tokens resolved to
+   * addresses by the prompt loop; restricted tokens remain opaque.
    */
   handleTable?: HarnessHandleTable;
+
   /**
    * The run's trusted Fabric session, lazy and cached by the engine.
    * Undefined when the run has no fabric session configured, which also
-   * keeps `run_pattern` out of the tool surface.
+   * keeps `run_pattern` and `acquire_skill` out of the tool surface.
    */
   getFabricSession?: () => Promise<HarnessFabricSession>;
+
+  /**
+   * The run's pattern-index client, lazy and cached by the engine.
+   * Undefined when the run has no pattern index configured, which also keeps
+   * `search_patterns` and `record_feedback` out of the tool surface and
+   * `run_pattern`'s `patternId` argument unusable.
+   */
+  getPatternIndexClient?: () => Promise<PatternIndexClient>;
+
+  /**
+   * The run's skills.sh discovery client, lazy and cached by the engine.
+   * Undefined when no remote skill registry is configured, which also keeps
+   * `search_skills` out of the tool surface.
+   */
+  getSkillsShSearchClient?: () => Promise<SkillsShSearchClient>;
+
+  /**
+   * The run's host-side pinned acquisition client. Undefined when external
+   * skill acquisition is not configured, which keeps `acquire_skill` absent.
+   */
+  getSkillsShAcquisitionClient?: () => Promise<SkillsShAcquisitionClient>;
+
+  /** Mints the sole capability that may enter delegate_task.skillHandle. */
+  mintSkillContextHandle?(ref: string): Promise<string>;
+
+  /**
+   * Whether a pattern the model authored and ran successfully is published
+   * back to the index. Absent or `false` makes the run a reader of the index
+   * only; the client is still there, since a run that does not publish still
+   * searches, runs, and votes.
+   */
+  patternIndexPublishEnabled?: boolean;
+
+  /**
+   * Whether a successful authored pattern is offered to search immediately.
+   * Absent or `false` records it without making it discoverable.
+   */
+  patternIndexPublishDiscoverable?: boolean;
+
+  /**
+   * Where a pattern this run authored is held until the session ends. The
+   * ledger publishes once per capability rather than once per successful run
+   * — see `pattern-index/publish-ledger.ts`. Absent when the run has no
+   * index, and absent for a tool invoked outside the engine, which publishes
+   * as it goes instead.
+   */
+  patternIndexPublications?: PatternIndexPublicationLedger;
+
+  /**
+   * What this run was asked to do, in the words it was asked in. A published
+   * pattern carries it as the request it answers, which is what the index
+   * ranks a later search against. Absent when the run has no such text.
+   */
+  taskText?: string;
+
   /**
    * The prompt loop's run-level abort signal, when the invocation came
    * through the loop. The only cancellation source a tool may honor — no
    * tool-side timeout supplements it. Tools are free to ignore it.
    */
   signal?: AbortSignal;
+
   sandbox: SandboxRuntime;
   hostProcessRunner: ProcessRunner;
   currentDir: string;
@@ -73,12 +137,14 @@ export interface HarnessToolContext {
     path: string,
     options?: { allowMissing?: boolean },
   ): Promise<boolean>;
+
   /**
    * Host directory for image-attachment snapshots (under the artifact
    * root). Undefined when the run has no artifact store; attachments then
    * stay locked to their source file's bytes.
    */
   imageAttachmentSnapshotDir?: string;
+
   doesHostPathIntersectArtifactRoot(
     path: string,
     options?: { allowMissing?: boolean },

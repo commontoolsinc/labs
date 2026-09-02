@@ -91,14 +91,17 @@ class HeldTransactTransport extends ScriptedSessionTransport {
   #held: HeldTransact | null = null;
   #transactSent = Promise.withResolvers<void>();
 
+  readonly #docs: Map<URI, SessionSyncUpsert["doc"]>;
+
   constructor(
-    private readonly docs: Map<URI, SessionSyncUpsert["doc"]>,
+    docs: Map<URI, SessionSyncUpsert["doc"]>,
   ) {
     super({
       name: "sync-under-pending",
       sessionId: "session:sync-under-pending",
       space,
     });
+    this.#docs = docs;
   }
 
   protected override ackServerSeq(): number {
@@ -130,7 +133,7 @@ class HeldTransactTransport extends ScriptedSessionTransport {
             serverSeq: roots.length,
             sync: fullSync(
               roots.length,
-              roots.map((id) => doc(id, 1, this.docs.get(id))),
+              roots.map((id) => doc(id, 1, this.#docs.get(id))),
             ),
           },
         });
@@ -203,30 +206,31 @@ const notificationCarriesField = (
       after.value[key] === expected;
   });
 
-// LAYER: this pins the worker-side SpaceReplica against the client↔server
-// WIRE protocol (the scripted transport plays the server). It does NOT touch
-// the main-thread↔worker IPC hop — the CellSet/CellUpdate echo ordering on
-// that hop is pinned separately by
-// packages/runtime-client/backends/cell-set-echo-race.test.ts.
-//
-// The red/green/blue race: a local blind leaf write ("green") is committed and
-// in flight (unconfirmed) when a foreign writer's server sync ("blue", which
-// also changes a sibling field) arrives. The write uses the real blind-UI-input
-// marks (markUiInputBlindWriteTx + setBlindStructuralTarget), so the commit on
-// the wire is shaped exactly like handleCellSet's: no value-equality read at
-// the written leaf, one nonRecursive structural read at the cell's parent —
-// which is why a real server accepts it on top of blue instead of rejecting a
-// stale CAS read. applySessionSync must only advance the CONFIRMED base — the
-// pending write replays on top, so the visible value keeps the local leaf
-// while integrating the sibling change, exactly matching what the server
-// computes when it later applies the patch on top of blue. The other guards
-// then hold the line: confirming the commit promotes the merged value forward,
-// and a late stale replay of blue can never regress it.
-// (The individual guards are pinned elsewhere — the watch-refresh-race test
-// covers monotonicity, the stacked-commit suite covers pending visibility —
-// but this is the only test that delivers a foreign sync WHILE a commit is
-// pending.)
 Deno.test("memory v2 SpaceReplica rebases a pending blind write over a server sync arriving before its confirmation", async () => {
+  // LAYER: this pins the worker-side SpaceReplica against the client↔server
+  // WIRE protocol (the scripted transport plays the server). It does NOT touch
+  // the main-thread↔worker IPC hop — the CellSet/CellUpdate echo ordering on
+  // that hop is pinned separately by
+  // packages/runtime-client/test/backends/cell-set-echo-race.test.ts.
+  //
+  // The red/green/blue race: a local blind leaf write ("green") is committed
+  // and in flight (unconfirmed) when a foreign writer's server sync ("blue",
+  // which also changes a sibling field) arrives. The write uses the real
+  // blind-UI-input marks (markUiInputBlindWriteTx + setBlindStructuralTarget),
+  // so the commit on the wire is shaped exactly like handleCellSet's: no
+  // value-equality read at the written leaf, one nonRecursive structural read
+  // at the cell's parent — which is why a real server accepts it on top of blue
+  // instead of rejecting a stale CAS read. applySessionSync must only advance
+  // the CONFIRMED base — the pending write replays on top, so the visible value
+  // keeps the local leaf while integrating the sibling change, exactly matching
+  // what the server computes when it later applies the patch on top of blue.
+  // The other guards then hold the line: confirming the commit promotes the
+  // merged value forward, and a late stale replay of blue can never regress it.
+  // (The individual guards are pinned elsewhere — the watch-refresh-race test
+  // covers monotonicity, the stacked-commit suite covers pending visibility —
+  // but this is the only test that delivers a foreign sync WHILE a commit is
+  // pending.)
+
   const docA = `of:sync-under-pending-a-${crypto.randomUUID()}` as URI;
   const docB = `of:sync-under-pending-b-${crypto.randomUUID()}` as URI;
   const transport = new HeldTransactTransport(

@@ -1,5 +1,6 @@
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { unsafeObjectKeyIn } from "@commonfabric/utils/types";
 
 import {
   type ClientCommit,
@@ -11,15 +12,19 @@ import {
   type EntityIdListResult,
   type EntityIdLookupResult,
   type EntitySnapshot,
+  type EventAttentionResolveResult,
   getMemoryProtocolFlags,
   type GraphQuery,
   type GraphQueryResult,
   MAX_ENTITY_ID_PAGE_SIZE,
   MEMORY_PROTOCOL,
   type MemoryProtocolFlags,
+  type OperationFieldQuery,
+  type OperationFieldQueryResult,
   parseMemoryProtocolFlags,
   type ResponseMessage,
   type SessionEffectMessage,
+  type SessionHolding,
   type SessionOpenAuthMetadata,
   type SessionOpenChallenge,
   type SessionOpenResult,
@@ -28,7 +33,9 @@ import {
   type SqliteDbRef,
   type SqliteParamsWire,
   type SqliteQueryResult,
+  type SqliteQueryWireResult,
   type SqliteRegisterDiskSourceResult,
+  sqliteRowFromWire,
   type WatchAddResult,
   type WatchSetResult,
   type WatchSpec,
@@ -40,10 +47,16 @@ import { expandServerMessageSchemas } from "./sync-schema-table.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
 
 export type Transport = {
+  /** Whether this transport can exchange negotiated compression envelopes. */
+  readonly supportsMessageCompression?: boolean;
+
   send(payload: string): Promise<void>;
   close(): Promise<void>;
   setReceiver(receiver: (payload: string) => void): void;
   setCloseReceiver?(receiver: (error?: Error) => void): void;
+
+  /** Enables compression after a successful capability handshake. */
+  setMessageCompressionEnabled?(enabled: boolean): void;
 };
 
 export type ConnectOptions = {
@@ -55,6 +68,7 @@ export type MountOptions = {
   sessionId?: string;
   seenSeq?: number;
   sessionToken?: string;
+
   /** The session-level delegated READ binding (OW31; see the wire
    * `SessionDescriptor.actingAs`): only the serving plane's loopback
    * managers set it; the server admits it for delegating-class
@@ -81,6 +95,10 @@ export type SessionOpenAuthFactory = (
 
 export type WatchMutationResult = {
   view: WatchView;
+
+  /** Effects delivered before the first watch response, in wire order. */
+  precedingSyncs: SessionSync[];
+
   sync: SessionSync;
 };
 
@@ -174,11 +192,14 @@ export class Client {
   // for other spaces on this client alive.
   #fatalError: Error | null = null;
 
+  readonly #transport: Transport;
+
   private constructor(
-    private readonly transport: Transport,
+    transport: Transport,
   ) {
-    this.transport.setReceiver((payload) => this.onMessage(payload));
-    this.transport.setCloseReceiver?.((error) => this.onClose(error));
+    this.#transport = transport;
+    this.#transport.setReceiver((payload) => this.#onMessage(payload));
+    this.#transport.setCloseReceiver?.((error) => this.#onClose(error));
   }
 
   static async connect(options: ConnectOptions): Promise<Client> {
@@ -193,7 +214,7 @@ export class Client {
     options.signal?.addEventListener("abort", closeForAbort, { once: true });
     try {
       if (options.signal?.aborted) throw abortError();
-      await client.hello();
+      await client.#hello();
       if (options.signal?.aborted) throw abortError();
       return client;
     } catch (error) {
@@ -215,10 +236,10 @@ export class Client {
     this.#closed = true;
     this.#connected = false;
     this.#cancelReconnectDelay?.();
-    this.rejectPending(new Error("memory client closed"));
+    this.#rejectPending(new Error("memory client closed"));
     await Promise.all([...this.#spaces].map((space) => space.close()));
     this.#spaces.clear();
-    await this.transport.close();
+    await this.#transport.close();
     await this.#reconnecting?.catch(() => undefined);
   }
 
@@ -273,7 +294,7 @@ export class Client {
   }
 
   async request<Result>(message: FabricPlainObject): Promise<Result> {
-    await this.ensureConnected();
+    await this.#ensureConnected();
     // `ensureConnected()` is async even when the transport is already live, so
     // close() can run while this request is suspended there. Recheck before
     // registering the request; otherwise it can miss close()'s rejectPending()
@@ -291,7 +312,7 @@ export class Client {
     // observes the rejection.
     pending.promise.catch(() => {});
     this.#pending.set(requestId, pending);
-    await this.transport.send(encodeMemoryBoundary(message));
+    await this.#transport.send(encodeMemoryBoundary(message));
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
@@ -308,6 +329,14 @@ export class Client {
         (error as Error & { retriable?: boolean }).retriable =
           result.error.retriable;
       }
+      if (result.error.permanentEvidence === true) {
+        (error as Error & { permanentEvidence?: true }).permanentEvidence =
+          true;
+      }
+      if (result.error.aclRevision !== undefined) {
+        (error as Error & { aclRevision?: number }).aclRevision =
+          result.error.aclRevision;
+      }
       throw error;
     }
     return result.ok as Result;
@@ -317,15 +346,17 @@ export class Client {
     space: string,
     session: MountOptions,
     auth?: SessionOpenAuth,
+    holdings?: SessionHolding[],
   ): Promise<SessionOpenResult> {
     const result = await this.request<SessionOpenResult>({
       type: "session.open",
-      requestId: this.nextRequestId(),
+      requestId: this.#nextRequestId(),
       space,
       session,
       ...(auth ? auth : {}),
+      ...(holdings !== undefined ? { holdings } : {}),
     });
-    this.updateSessionOpenAuthContext(result.sessionOpen);
+    this.#updateSessionOpenAuthContext(result.sessionOpen);
     return result;
   }
 
@@ -344,23 +375,29 @@ export class Client {
     return this.#sessionOpenAuthContext;
   }
 
-  private updateSessionOpenAuthContext(sessionOpen: unknown): void {
+  #updateSessionOpenAuthContext(sessionOpen: unknown): void {
     this.#sessionOpenAuthContext = requireSessionOpenAuthMetadata(sessionOpen);
   }
 
   async restoreConnection(): Promise<void> {
-    await this.ensureConnected();
+    await this.#ensureConnected();
   }
 
-  private async hello(): Promise<void> {
+  async #hello(): Promise<void> {
+    this.#transport.setMessageCompressionEnabled?.(false);
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
+    const expectedFlags = getMemoryProtocolFlags();
     try {
       await Promise.all([
-        this.transport.send(encodeMemoryBoundary({
+        this.#transport.send(encodeMemoryBoundary({
           type: "hello",
           protocol: MEMORY_PROTOCOL,
-          flags: getMemoryProtocolFlags(),
+          flags: {
+            ...expectedFlags,
+            messageCompressionV1: expectedFlags.messageCompressionV1 &&
+              this.#transport.supportsMessageCompression === true,
+          },
         })),
         ack.promise,
       ]);
@@ -370,7 +407,7 @@ export class Client {
     }
   }
 
-  private onMessage(payload: string): void {
+  #onMessage(payload: string): void {
     let message: unknown;
     try {
       message = decodeMemoryBoundary(payload);
@@ -389,7 +426,7 @@ export class Client {
       if (this.#helloPending !== null) {
         this.#helloPending.reject(error);
       } else {
-        this.rejectPending(error);
+        this.#rejectPending(error);
       }
       return;
     }
@@ -416,6 +453,11 @@ export class Client {
         // consumers (e.g. the runner's sqlite write-gate relaxation) read
         // these; absent-on-old-server keys parse to false — fail closed.
         this.#serverFlags = helloOk.flags;
+        this.#transport.setMessageCompressionEnabled?.(
+          expectedFlags.messageCompressionV1 &&
+            this.#transport.supportsMessageCompression === true &&
+            helloOk.flags.messageCompressionV1,
+        );
         try {
           this.#sessionOpenAuthContext = requireSessionOpenAuthMetadata(
             helloOk.sessionOpen,
@@ -480,11 +522,11 @@ export class Client {
     }
   }
 
-  private nextRequestId(): string {
+  #nextRequestId(): string {
     return `req:${this.#nextRequest++}`;
   }
 
-  private async ensureConnected(): Promise<void> {
+  async #ensureConnected(): Promise<void> {
     if (this.#closed) {
       throw new Error("memory client is closed");
     }
@@ -494,15 +536,15 @@ export class Client {
     if (this.#connected) {
       return;
     }
-    await this.reconnect();
-    // reconnect() resolves without connecting when it gives up on a permanent
+    await this.#reconnect();
+    // #reconnect() resolves without connecting when it gives up on a permanent
     // handshake failure; surface it here rather than returning as if connected.
     if (this.#fatalError) {
       throw this.#fatalError;
     }
   }
 
-  private onClose(error?: Error): void {
+  #onClose(error?: Error): void {
     if (this.#closed) {
       return;
     }
@@ -510,11 +552,11 @@ export class Client {
     for (const session of this.#spaces) {
       session.handleDisconnect();
     }
-    this.rejectPending(toConnectionError(error));
-    void this.reconnect().catch(() => undefined);
+    this.#rejectPending(toConnectionError(error));
+    void this.#reconnect().catch(() => undefined);
   }
 
-  private async reconnect(): Promise<void> {
+  async #reconnect(): Promise<void> {
     if (this.#closed) {
       throw new Error("memory client is closed");
     }
@@ -528,7 +570,7 @@ export class Client {
       let attempt = 0;
       while (!this.#closed) {
         try {
-          await this.hello();
+          await this.#hello();
           for (const session of this.#spaces) {
             await session.restore();
           }
@@ -541,11 +583,11 @@ export class Client {
             // protocol-flag mismatch). Stop looping and remember the failure so
             // every present and future request fails fast with it.
             this.#fatalError = err;
-            this.rejectPending(err);
+            this.#rejectPending(err);
             return;
           }
-          this.rejectPending(err);
-          await this.waitForReconnectDelay(reconnectDelayMs(attempt));
+          this.#rejectPending(err);
+          await this.#waitForReconnectDelay(reconnectDelayMs(attempt));
           attempt += 1;
         }
       }
@@ -563,7 +605,7 @@ export class Client {
   // runs on a timer, since a returning server raises no event to await. The
   // delay bounds the retry rate, and `close()` ends it through the stored
   // canceller.
-  private waitForReconnectDelay(delayMs: number): Promise<void> {
+  #waitForReconnectDelay(delayMs: number): Promise<void> {
     if (this.#closed) {
       return Promise.resolve();
     }
@@ -580,7 +622,7 @@ export class Client {
     });
   }
 
-  private rejectPending(error: Error): void {
+  #rejectPending(error: Error): void {
     for (const pending of this.#pending.values()) {
       pending.reject(error);
     }
@@ -597,6 +639,7 @@ export class SpaceSession {
   }>();
   #watchSpecs: WatchSpec[] = [];
   #watchView: WatchView | null = null;
+  #precedingWatchSyncs: SessionSync[] = [];
   #sessionId: string;
   #sessionToken: string | undefined;
   #serverSeq: number;
@@ -630,6 +673,18 @@ export class SpaceSession {
    * marker-keyed client state (parked accepted promotions) must be
    * reconciled immediately (CT-1927). */
   onSessionReplaced: (() => void) | undefined;
+
+  /** Supplies the replica's declared holdings for a reconnect (see the
+   * wire `SessionHolding`): consulted on every reopen. The session itself
+   * holds no document state — the replica that consumes its frames does —
+   * so the statement comes from the consumer. Absent, a reconnect
+   * declares nothing and takes the declaration-less delivery paths (the
+   * server-memory resume, the full re-establishment). Present, the
+   * declaration is what makes those paths safe to skip — so a server that
+   * cannot take it (`sessionHoldings` unadvertised) terminates the
+   * session at restore rather than silently degrading (see `restore`). */
+  holdingsProvider: (() => SessionHolding[] | undefined) | undefined;
+
   // Highest caughtUpLocalSeq already pushed into the WatchView (via a real sync
   // or a synthetic forward). Subscribers such as runner storage only advance
   // their own caught-up seq from emitted syncs, so a resume that promotes
@@ -641,16 +696,25 @@ export class SpaceSession {
     pending: PromiseWithResolvers<void>;
   }[] = [];
 
+  readonly #client: Client;
+  readonly #openAuthFactory?: SessionOpenAuthFactory;
+  readonly #routeSignal?: AbortSignal;
+  readonly #actingAs?: "space-owner";
+
   constructor(
-    private readonly client: Client,
+    client: Client,
     readonly space: string,
     sessionId: string,
     sessionToken: string | undefined,
     serverSeq: number,
-    private readonly openAuthFactory?: SessionOpenAuthFactory,
-    private readonly routeSignal?: AbortSignal,
-    private readonly actingAs?: "space-owner",
+    openAuthFactory?: SessionOpenAuthFactory,
+    routeSignal?: AbortSignal,
+    actingAs?: "space-owner",
   ) {
+    this.#client = client;
+    this.#openAuthFactory = openAuthFactory;
+    this.#routeSignal = routeSignal;
+    this.#actingAs = actingAs;
     this.#sessionId = sessionId;
     this.#sessionToken = sessionToken;
     this.#serverSeq = serverSeq;
@@ -693,6 +757,13 @@ export class SpaceSession {
     beforeIssue?: () => void,
   ): Promise<AppliedCommit> {
     this.#assertOpen();
+    if (
+      commit.operations.some((operation) =>
+        operation.op === "apply-op" || operation.op === "release-op-field"
+      ) && this.#client.serverFlags?.applyOp !== true
+    ) {
+      throw protocolError("memory server does not support apply-op");
+    }
     const existing = this.#outstandingCommits.get(commit.localSeq);
     if (existing) {
       return await existing.pending.promise;
@@ -708,13 +779,13 @@ export class SpaceSession {
     const outstanding = this.#outstandingCommits.get(commit.localSeq);
     if (
       outstanding !== undefined &&
-      this.client.isConnected() &&
+      this.#client.isConnected() &&
       this.#readyOnConnection &&
       !this.#restoring
     ) {
-      this.sendOutstandingCommit(commit.localSeq, outstanding);
+      this.#sendOutstandingCommit(commit.localSeq, outstanding);
     } else {
-      void this.client.restoreConnection();
+      void this.#client.restoreConnection();
     }
 
     return await pending.promise;
@@ -722,7 +793,7 @@ export class SpaceSession {
 
   async queryGraph(query: GraphQuery): Promise<GraphQueryResult> {
     this.#assertOpen();
-    const result = await this.client.request<GraphQueryResult>({
+    const result = await this.#client.request<GraphQueryResult>({
       type: "graph.query",
       requestId: crypto.randomUUID(),
       space: this.space,
@@ -730,7 +801,46 @@ export class SpaceSession {
       query,
     });
 
-    this.noteResult(result.serverSeq);
+    this.#noteResult(result.serverSeq);
+    return result;
+  }
+
+  async queryOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+  ): Promise<OperationFieldQueryResult> {
+    this.#assertOpen();
+    if (this.#client.serverFlags?.applyOp !== true) {
+      throw protocolError("memory server does not support apply-op");
+    }
+    const result = await this.#client.request<OperationFieldQueryResult>({
+      type: "op.query",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      query,
+    });
+    this.#noteResult(result.serverSeq);
+    return result;
+  }
+
+  async resolveEventAttention(
+    eventId: string,
+    seq: number,
+    sidecarId: string,
+    action: "retry" | "dismiss",
+  ): Promise<EventAttentionResolveResult> {
+    this.#assertOpen();
+    const result = await this.#client.request<EventAttentionResolveResult>({
+      type: "event.attention.resolve",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      eventId,
+      seq,
+      sidecarId,
+      action,
+    });
+    this.#noteResult(result.serverSeq);
     return result;
   }
 
@@ -738,14 +848,14 @@ export class SpaceSession {
     options: EntityIdListOptions = {},
   ): Promise<EntityIdListResult | undefined> {
     this.#assertOpen();
-    if (this.client.serverFlags?.entityIdListing !== true) {
+    if (this.#client.serverFlags?.entityIdListing !== true) {
       return undefined;
     }
-    const pagination = this.client.serverFlags.entityIdPagination === true;
+    const pagination = this.#client.serverFlags.entityIdPagination === true;
     if (!pagination && Object.keys(options).length > 0) {
       return undefined;
     }
-    const result = await this.client.request<EntityIdListResult>({
+    const result = await this.#client.request<EntityIdListResult>({
       type: "entity-id.list",
       requestId: crypto.randomUUID(),
       space: this.space,
@@ -755,7 +865,7 @@ export class SpaceSession {
         : {}),
     });
 
-    this.noteResult(result.serverSeq);
+    this.#noteResult(result.serverSeq);
     return result;
   }
 
@@ -763,10 +873,10 @@ export class SpaceSession {
     id: EntityId,
   ): Promise<EntityIdLookupResult | undefined> {
     this.#assertOpen();
-    if (this.client.serverFlags?.entityIdLookup !== true) {
+    if (this.#client.serverFlags?.entityIdLookup !== true) {
       return undefined;
     }
-    const result = await this.client.request<EntityIdLookupResult>({
+    const result = await this.#client.request<EntityIdLookupResult>({
       type: "entity-id.exists",
       requestId: crypto.randomUUID(),
       space: this.space,
@@ -774,7 +884,7 @@ export class SpaceSession {
       id,
     });
 
-    this.noteResult(result.serverSeq);
+    this.#noteResult(result.serverSeq);
     return result;
   }
 
@@ -785,15 +895,24 @@ export class SpaceSession {
     params?: SqliteParamsWire,
   ): Promise<SqliteQueryResult> {
     this.#assertOpen();
-    return await this.client.request<SqliteQueryResult>({
+    const paramFields = params === undefined
+      ? {}
+      : !Array.isArray(params) && unsafeObjectKeyIn(params) !== undefined
+      ? { namedParams: Object.entries(params) }
+      : { params };
+    const result = await this.#client.request<SqliteQueryWireResult>({
       type: "sqlite.query",
       requestId: crypto.randomUUID(),
       space: this.space,
       sessionId: this.#sessionId,
       db,
       sql,
-      params,
+      ...paramFields,
     });
+    return {
+      rows: result.rows.map(sqliteRowFromWire),
+      columns: result.columns,
+    };
   }
 
   // No `sqliteExecute` write RPC: writes go through the commit fold (a `sqlite`
@@ -813,7 +932,7 @@ export class SpaceSession {
     this.#assertOpen();
     const requestId = crypto.randomUUID();
     beforeIssue?.();
-    return await this.client.request<SqliteRegisterDiskSourceResult>({
+    return await this.#client.request<SqliteRegisterDiskSourceResult>({
       type: "sqlite.register-disk-source",
       requestId,
       space: this.space,
@@ -833,28 +952,34 @@ export class SpaceSession {
     return result.view;
   }
 
-  async watchSetSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
+  async watchSetSync(
+    watches: WatchSpec[],
+    holdings?: SessionHolding[],
+  ): Promise<WatchMutationResult> {
     this.#assertOpen();
-    return await this.runWatchMutation(
+    return await this.#runWatchMutation(
       () =>
-        this.client.request<WatchSetResult>({
+        this.#client.request<WatchSetResult>({
           type: "session.watch.set",
           requestId: crypto.randomUUID(),
           space: this.space,
           sessionId: this.#sessionId,
           watches,
+          ...(holdings !== undefined ? { holdings } : {}),
         }),
       (result) => {
-        this.noteResult(result.serverSeq);
+        this.#noteResult(result.serverSeq);
         this.#watchSpecs = watches;
+        this.#noteOperationWatchCursors(result.sync);
         if (this.#watchView === null) {
           this.#watchView = WatchView.fromSync(result.sync);
         } else {
           this.#watchView.applySync(result.sync, false);
         }
-        this.scheduleAck(result.serverSeq);
+        this.#scheduleAck(result.serverSeq);
         return {
           view: this.#watchView,
+          precedingSyncs: this.#takePrecedingWatchSyncs(),
           sync: result.sync,
         };
       },
@@ -873,9 +998,9 @@ export class SpaceSession {
 
   async watchAddSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
     this.#assertOpen();
-    return await this.runWatchMutation(
+    return await this.#runWatchMutation(
       () =>
-        this.client.request<WatchAddResult>({
+        this.#client.request<WatchAddResult>({
           type: "session.watch.add",
           requestId: crypto.randomUUID(),
           space: this.space,
@@ -883,20 +1008,61 @@ export class SpaceSession {
           watches,
         }),
       (result) => {
-        this.noteResult(result.serverSeq);
+        this.#noteResult(result.serverSeq);
         this.#watchSpecs = [
           ...new Map(
             [...this.#watchSpecs, ...watches].map((watch) => [watch.id, watch]),
           ).values(),
         ];
+        this.#noteOperationWatchCursors(result.sync);
         if (this.#watchView === null) {
           this.#watchView = WatchView.fromSync(result.sync);
         } else {
           this.#watchView.applySync(result.sync, false);
         }
-        this.scheduleAck(result.serverSeq);
+        this.#scheduleAck(result.serverSeq);
         return {
           view: this.#watchView,
+          precedingSyncs: this.#takePrecedingWatchSyncs(),
+          sync: result.sync,
+        };
+      },
+    );
+  }
+
+  /** Removes watches from both the live session and reconnect intent. */
+  async watchRemoveSync(
+    watchIds: readonly string[],
+  ): Promise<WatchMutationResult> {
+    const removed = new Set(watchIds);
+    return await this.#runWatchMutation(
+      () => {
+        const watches = this.#watchSpecs.filter((watch) =>
+          !removed.has(watch.id)
+        );
+        // Cancellation is local intent even when the request fails: a later
+        // reconnect must not restore a watch its last subscriber removed.
+        this.#watchSpecs = watches;
+        return this.#client.request<WatchSetResult>({
+          type: "session.watch.set",
+          requestId: crypto.randomUUID(),
+          space: this.space,
+          sessionId: this.#sessionId,
+          watches,
+        });
+      },
+      (result) => {
+        this.#noteResult(result.serverSeq);
+        this.#noteOperationWatchCursors(result.sync);
+        if (this.#watchView === null) {
+          this.#watchView = WatchView.fromSync(result.sync);
+        } else {
+          this.#watchView.applySync(result.sync, false);
+        }
+        this.#scheduleAck(result.serverSeq);
+        return {
+          view: this.#watchView,
+          precedingSyncs: this.#takePrecedingWatchSyncs(),
           sync: result.sync,
         };
       },
@@ -907,11 +1073,11 @@ export class SpaceSession {
     if (this.#closed) {
       return;
     }
-    if (!this.client.isConnected() || seenSeq <= this.#ackedSeq) {
+    if (!this.#client.isConnected() || seenSeq <= this.#ackedSeq) {
       this.#ackedSeq = Math.max(this.#ackedSeq, seenSeq);
       return;
     }
-    await this.client.request({
+    await this.#client.request({
       type: "session.ack",
       requestId: crypto.randomUUID(),
       space: this.space,
@@ -925,18 +1091,45 @@ export class SpaceSession {
     if (this.#closed) {
       return;
     }
-    this.noteResult(effect.toSeq);
+    this.#noteResult(effect.toSeq);
+    this.#noteOperationWatchCursors(effect);
     if (this.#watchView === null) {
       this.#watchView = WatchView.fromSync(effect);
+      this.#precedingWatchSyncs.push(effect);
+    } else if (this.#precedingWatchSyncs.length > 0) {
+      this.#watchView.applySync(effect, false);
+      this.#precedingWatchSyncs.push(effect);
     } else {
       this.#watchView.applySync(effect, true);
     }
-    this.scheduleAck(effect.toSeq);
-    this.noteCaughtUpLocalSeq(effect.caughtUpLocalSeq);
+    this.#scheduleAck(effect.toSeq);
+    this.#noteCaughtUpLocalSeq(effect.caughtUpLocalSeq);
   }
 
   async restore(): Promise<void> {
     if (this.#closed) {
+      return;
+    }
+    if (
+      this.holdingsProvider !== undefined &&
+      this.#client.serverFlags?.sessionHoldings !== true
+    ) {
+      // A consumer that installed a holdings provider relies on the
+      // declaration for reconnect correctness: without it, a resume is
+      // diffed against the server's memory of the session — which can
+      // elide a document the replica lost — and a re-establishment
+      // re-downloads the whole union. Against a server that cannot take
+      // the declaration, restoring would silently reintroduce both, so
+      // the session fails here, loudly, with the cause. The initial
+      // connection is unaffected: nothing was held, so nothing needed
+      // declaring.
+      this.#terminateSession(
+        new Error(
+          "memory session cannot be restored: the server does not " +
+            "advertise sessionHoldings, so the replica's declared " +
+            "holdings cannot be the reconnect's delivery base",
+        ),
+      );
       return;
     }
     this.#restoring = true;
@@ -945,7 +1138,7 @@ export class SpaceSession {
     try {
       let restored: SessionOpenResult;
       try {
-        restored = await this.reopen();
+        restored = await this.#reopen();
       } catch (error) {
         if (isSessionRevokedError(error)) {
           this.handleRevoked("taken-over");
@@ -964,12 +1157,13 @@ export class SpaceSession {
       const replayTasks = [...this.#outstandingCommits.entries()].map((
         [localSeq, pendingCommit],
       ) =>
-        this.sendOutstandingCommit(localSeq, pendingCommit, {
+        this.#sendOutstandingCommit(localSeq, pendingCommit, {
           throwOnConnectionError: true,
         })
       );
       if (restored.sync) {
-        this.noteCaughtUpLocalSeq(restored.sync.caughtUpLocalSeq);
+        this.#noteCaughtUpLocalSeq(restored.sync.caughtUpLocalSeq);
+        this.#noteOperationWatchCursors(restored.sync);
         if (this.#watchView === null) {
           this.#watchView = WatchView.fromSync(restored.sync);
         } else {
@@ -987,17 +1181,23 @@ export class SpaceSession {
             );
           }
         }
-        this.scheduleAck(restored.serverSeq);
+        this.#scheduleAck(restored.serverSeq);
       } else if (restored.resumed === true && this.#watchSpecs.length > 0) {
-        this.scheduleAck(restored.serverSeq);
+        this.#scheduleAck(restored.serverSeq);
       }
-      this.noteCaughtUpLocalSeq(restored.caughtUpLocalSeq);
+      this.#noteCaughtUpLocalSeq(restored.caughtUpLocalSeq);
       // Forward a top-level-only caught-up marker (resume with no sync) to
       // WatchView subscribers; the guard above suppresses a duplicate when a
       // real sync already carried it.
-      this.forwardCaughtUpLocalSeqToWatchers(restored.caughtUpLocalSeq);
+      this.#forwardCaughtUpLocalSeqToWatchers(restored.caughtUpLocalSeq);
       if (restored.resumed !== true && this.#watchSpecs.length > 0) {
-        const { view, sync } = await this.watchSetSync(this.#watchSpecs);
+        // The server forgot this session (or never had it): re-establish
+        // the watch set, declaring what the replica still holds so the
+        // response carries the difference rather than the whole union.
+        const { view, sync } = await this.watchSetSync(
+          this.#watchSpecs,
+          this.#declaredHoldings(),
+        );
         if (!isEmptySync(sync)) {
           view.emit(sync);
         }
@@ -1012,14 +1212,14 @@ export class SpaceSession {
       // reconnect loop, which would then fail sessions for other spaces on the
       // same client. Every other error propagates so the loop retries it.
       if (isPermanentAuthorizationError(error)) {
-        this.terminateSession(error as Error);
+        this.#terminateSession(error as Error);
         return;
       }
       throw error;
     } finally {
       this.#restoring = false;
       if (!this.#closed && this.#outstandingCommits.size > 0) {
-        this.replayOutstandingCommits(replayedThroughLocalSeq);
+        this.#replayOutstandingCommits(replayedThroughLocalSeq);
       }
     }
   }
@@ -1031,8 +1231,8 @@ export class SpaceSession {
     this.#closed = true;
     this.#closeError = new Error("memory session closed");
     this.#readyOnConnection = false;
-    this.client.forgetSession(this);
-    this.rejectCaughtUpLocalSeqWaiters(this.#closeError);
+    this.#client.forgetSession(this);
+    this.#rejectCaughtUpLocalSeqWaiters(this.#closeError);
     const background = [...this.#background];
     this.#background.clear();
     await Promise.allSettled(background);
@@ -1051,7 +1251,7 @@ export class SpaceSession {
     }
     const error = new Error(`memory session revoked: ${reason}`);
     error.name = "SessionRevokedError";
-    this.terminateSession(error);
+    this.#terminateSession(error);
   }
 
   /**
@@ -1059,17 +1259,18 @@ export class SpaceSession {
    * and caught-up waiters, forget it from the client, and drop its watch state.
    * The stored error is what `#assertOpen()` rethrows for any later call, so a
    * storage subscriber observes the real cause on its next watch or transact.
-   * Shared by session revocation and a permanent reopen authorization denial.
+   * Shared by session revocation, a permanent reopen authorization denial,
+   * and a restore against a server that cannot take declared holdings.
    */
-  private terminateSession(error: Error): void {
+  #terminateSession(error: Error): void {
     this.#closed = true;
     this.#closeError = error;
     this.#readyOnConnection = false;
-    this.client.forgetSession(this);
+    this.#client.forgetSession(this);
     for (const pending of this.#outstandingCommits.values()) {
       pending.pending.reject(error);
     }
-    this.rejectCaughtUpLocalSeqWaiters(error);
+    this.#rejectCaughtUpLocalSeqWaiters(error);
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
     this.#watchView?.close();
@@ -1083,14 +1284,14 @@ export class SpaceSession {
     this.#readyOnConnection = false;
   }
 
-  private queueBackground(task: Promise<void>): void {
+  #queueBackground(task: Promise<void>): void {
     const tracked = task
       .catch(() => undefined)
       .finally(() => this.#background.delete(tracked));
     this.#background.add(tracked);
   }
 
-  private scheduleAck(seenSeq: number): void {
+  #scheduleAck(seenSeq: number): void {
     if (this.#closed) {
       return;
     }
@@ -1099,37 +1300,37 @@ export class SpaceSession {
       return;
     }
     this.#ackScheduled = true;
-    this.queueBackground(
+    this.#queueBackground(
       (async () => {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
         this.#ackScheduled = false;
         this.#ackFlushing = true;
         try {
-          await this.flushScheduledAcks();
+          await this.#flushScheduledAcks();
         } finally {
           this.#ackFlushing = false;
           if (
             this.#pendingAckSeq > this.#ackedSeq &&
             !this.#closed &&
-            this.client.isConnected()
+            this.#client.isConnected()
           ) {
-            this.scheduleAck(this.#pendingAckSeq);
+            this.#scheduleAck(this.#pendingAckSeq);
           }
         }
       })(),
     );
   }
 
-  private async flushScheduledAcks(): Promise<void> {
+  async #flushScheduledAcks(): Promise<void> {
     while (true) {
       const target = this.#pendingAckSeq;
       if (
-        this.#closed || target <= this.#ackedSeq || !this.client.isConnected()
+        this.#closed || target <= this.#ackedSeq || !this.#client.isConnected()
       ) {
         this.#ackedSeq = Math.max(this.#ackedSeq, target);
         return;
       }
-      await this.client.request({
+      await this.#client.request({
         type: "session.ack",
         requestId: crypto.randomUUID(),
         space: this.space,
@@ -1153,13 +1354,23 @@ export class SpaceSession {
     this.#concurrentWatchRefresh = enabled;
   }
 
+  #takePrecedingWatchSyncs(): SessionSync[] {
+    const syncs = this.#precedingWatchSyncs;
+    this.#precedingWatchSyncs = [];
+    // Effects can arrive between request issue and response application. They
+    // were observed against the old watch spec, so replay their operation
+    // cursors after the mutation has installed the new spec as well.
+    for (const sync of syncs) this.#noteOperationWatchCursors(sync);
+    return syncs;
+  }
+
   /**
    * Serialize a watch mutation (`watch.set` / `watch.add`). `send` issues the
    * request; `apply` mutates the session view (`#watchSpecs` / `#watchView`)
    * from the response. Splitting them lets concurrent mode overlap the request
    * round trips while keeping application ordered.
    */
-  private async runWatchMutation<R, T>(
+  async #runWatchMutation<R, T>(
     send: () => Promise<R>,
     apply: (result: R) => T,
   ): Promise<T> {
@@ -1207,11 +1418,36 @@ export class SpaceSession {
     return await current;
   }
 
-  private noteResult(serverSeq: number): void {
+  #noteResult(serverSeq: number): void {
     this.#serverSeq = Math.max(this.#serverSeq, serverSeq);
   }
 
-  private noteCaughtUpLocalSeq(localSeq: number | undefined): void {
+  #noteOperationWatchCursors(sync: SessionSync): void {
+    if ((sync.operationFields?.length ?? 0) === 0) return;
+    const delivered = new Map(
+      sync.operationFields!.map((delivery) =>
+        [
+          delivery.watchId,
+          delivery.field.cursor,
+        ] as const
+      ),
+    );
+    this.#watchSpecs = this.#watchSpecs.map((watch) => {
+      if (watch.kind !== "operation" || !delivered.has(watch.id)) {
+        return watch;
+      }
+      const query = { ...watch.query };
+      const cursor = delivered.get(watch.id);
+      if (cursor === null) {
+        delete query.after;
+      } else if (cursor !== undefined) {
+        query.after = cursor;
+      }
+      return { ...watch, query };
+    });
+  }
+
+  #noteCaughtUpLocalSeq(localSeq: number | undefined): void {
     if (localSeq === undefined) {
       return;
     }
@@ -1236,7 +1472,7 @@ export class SpaceSession {
   // than via a sync they already observed. Emits an empty caught-up sync so
   // downstream waiters (notably runner storage's read-repair gate) resolve
   // instead of stranding after a reconnect.
-  private forwardCaughtUpLocalSeqToWatchers(
+  #forwardCaughtUpLocalSeqToWatchers(
     localSeq: number | undefined,
   ): void {
     if (
@@ -1257,7 +1493,7 @@ export class SpaceSession {
     });
   }
 
-  private waitForCaughtUpLocalSeq(localSeq: number): Promise<void> {
+  #waitForCaughtUpLocalSeq(localSeq: number): Promise<void> {
     if (this.#closed) {
       return Promise.reject(
         this.#closeError ?? new Error("memory session closed"),
@@ -1271,7 +1507,7 @@ export class SpaceSession {
     return pending.promise;
   }
 
-  private rejectCaughtUpLocalSeqWaiters(error: Error | null): void {
+  #rejectCaughtUpLocalSeqWaiters(error: Error | null): void {
     const waiters = this.#caughtUpLocalSeqWaiters;
     this.#caughtUpLocalSeqWaiters = [];
     for (const waiter of waiters) {
@@ -1279,7 +1515,15 @@ export class SpaceSession {
     }
   }
 
-  private async reopen(): Promise<SessionOpenResult> {
+  /** The holdings to declare on this reconnect: the provider's statement,
+   * or nothing from a consumer that installed no provider. A provider
+   * paired with a server that cannot take the declaration never reaches
+   * here — `restore` terminates the session before reopening. */
+  #declaredHoldings(): SessionHolding[] | undefined {
+    return this.holdingsProvider?.();
+  }
+
+  async #reopen(): Promise<SessionOpenResult> {
     const oldSessionId = this.#sessionId;
     const session = {
       sessionId: this.#sessionId,
@@ -1287,28 +1531,29 @@ export class SpaceSession {
       sessionToken: this.#sessionToken,
       // The delegated READ binding survives a route replacement (OW31):
       // a reopen without it would silently drop to envelope-only READ.
-      ...(this.actingAs !== undefined ? { actingAs: this.actingAs } : {}),
+      ...(this.#actingAs !== undefined ? { actingAs: this.#actingAs } : {}),
     };
     const auth = await runWithAbortSignal(
-      this.routeSignal,
+      this.#routeSignal,
       "memory session route cancelled",
       () =>
-        this.openAuthFactory?.(
+        this.#openAuthFactory?.(
           this.space,
           session,
-          this.client.sessionOpenAuthContext(),
+          this.#client.sessionOpenAuthContext(),
         ),
     );
+    const holdings = this.#declaredHoldings();
     const restored = await runWithAbortSignal(
-      this.routeSignal,
+      this.#routeSignal,
       "memory session route cancelled",
-      () => this.client.openSession(this.space, session, auth),
+      () => this.#client.openSession(this.space, session, auth, holdings),
     );
     const sessionChanged = restored.sessionId !== oldSessionId;
     const sessionReplaced = sessionChanged || restored.resumed !== true;
     this.#sessionId = restored.sessionId;
     this.#sessionToken = restored.sessionToken ?? this.#sessionToken;
-    this.noteResult(restored.serverSeq);
+    this.#noteResult(restored.serverSeq);
 
     if (sessionReplaced) {
       const sessionChangedError = new Error(
@@ -1324,7 +1569,11 @@ export class SpaceSession {
       }
       this.#caughtUpLocalSeq = 0;
       this.#forwardedCaughtUpLocalSeq = 0;
-      this.rejectCaughtUpLocalSeqWaiters(sessionChangedError);
+      // An unforwarded effect belongs to the retired session's delivery
+      // epoch. A replacement establishes its own watch state and must not
+      // apply that effect as though the new session delivered it.
+      this.#precedingWatchSyncs = [];
+      this.#rejectCaughtUpLocalSeqWaiters(sessionChangedError);
       // The marker epoch died with the old session: obligations it staged
       // are gone, and the fresh session's markers know nothing of the old
       // localSeqs. Consumers holding marker-keyed state (the runner's
@@ -1332,16 +1581,16 @@ export class SpaceSession {
       // than wait for markers that can never arrive.
       this.onSessionReplaced?.();
     }
-    this.noteCaughtUpLocalSeq(restored.caughtUpLocalSeq);
+    this.#noteCaughtUpLocalSeq(restored.caughtUpLocalSeq);
 
     return restored;
   }
 
-  private replayOutstandingCommits(minLocalSeqExclusive = 0): void {
+  #replayOutstandingCommits(minLocalSeqExclusive = 0): void {
     if (
       this.#outstandingCommits.size === 0 ||
       !this.#readyOnConnection ||
-      !this.client.isConnected()
+      !this.#client.isConnected()
     ) {
       return;
     }
@@ -1351,11 +1600,11 @@ export class SpaceSession {
       if (localSeq <= minLocalSeqExclusive) {
         continue;
       }
-      this.sendOutstandingCommit(localSeq, pendingCommit);
+      this.#sendOutstandingCommit(localSeq, pendingCommit);
     }
   }
 
-  private sendOutstandingCommit(
+  #sendOutstandingCommit(
     localSeq: number,
     pendingCommit: {
       commit: ClientCommit;
@@ -1369,20 +1618,20 @@ export class SpaceSession {
       if (
         this.#closed ||
         !this.#readyOnConnection ||
-        !this.client.isConnected()
+        !this.#client.isConnected()
       ) {
         return;
       }
 
       try {
-        const applied = await this.client.request<AppliedCommit>({
+        const applied = await this.#client.request<AppliedCommit>({
           type: "transact",
           requestId: crypto.randomUUID(),
           space: this.space,
           sessionId: this.#sessionId,
           commit: pendingCommit.commit,
         });
-        this.noteResult(applied.seq);
+        this.#noteResult(applied.seq);
         if (this.#outstandingCommits.get(localSeq) === pendingCommit) {
           this.#outstandingCommits.delete(localSeq);
         }
@@ -1401,14 +1650,14 @@ export class SpaceSession {
           this.#outstandingCommits.delete(localSeq);
         }
         if (isRetryableConflict(error)) {
-          error.readyToRetry = () => this.waitForCaughtUpLocalSeq(localSeq);
+          error.readyToRetry = () => this.#waitForCaughtUpLocalSeq(localSeq);
         }
         pendingCommit.pending.reject(
           error instanceof Error ? error : new Error(String(error)),
         );
       }
     })();
-    this.queueBackground(task);
+    this.#queueBackground(task);
     return task;
   }
 }
@@ -1431,7 +1680,7 @@ export class WatchView {
   #syncQueue: SessionSync[] = [];
   #syncPending = new Set<PromiseWithResolvers<IteratorResult<SessionSync>>>();
   #entities = new Map<string, EntitySnapshot>();
-  #orderedEntities: EntitySnapshot[] | null = null;
+  #orderedEntitiesCache: EntitySnapshot[] | null = null;
   #closed = false;
   #serverSeq = 0;
 
@@ -1442,7 +1691,7 @@ export class WatchView {
   }
 
   get entities(): EntitySnapshot[] {
-    return [...this.orderedEntities()];
+    return [...this.#orderedEntities()];
   }
 
   get serverSeq(): number {
@@ -1548,7 +1797,7 @@ export class WatchView {
     }
 
     if (changedEntities) {
-      this.#orderedEntities = null;
+      this.#orderedEntitiesCache = null;
     }
 
     this.#serverSeq = Math.max(this.#serverSeq, sync.toSeq);
@@ -1569,7 +1818,7 @@ export class WatchView {
   snapshot(): GraphQueryResult {
     return {
       serverSeq: this.#serverSeq,
-      entities: [...this.orderedEntities()],
+      entities: [...this.#orderedEntities()],
     };
   }
 
@@ -1643,12 +1892,12 @@ export class WatchView {
     this.#syncQueue = [];
   }
 
-  private orderedEntities(): EntitySnapshot[] {
-    if (this.#orderedEntities === null) {
-      this.#orderedEntities = [...this.#entities.values()]
+  #orderedEntities(): EntitySnapshot[] {
+    if (this.#orderedEntitiesCache === null) {
+      this.#orderedEntitiesCache = [...this.#entities.values()]
         .sort(compareEntitySnapshot);
     }
-    return this.#orderedEntities;
+    return this.#orderedEntitiesCache;
   }
 }
 
@@ -1874,7 +2123,8 @@ const isResponse = (message: unknown): message is ResponseMessage<unknown> => {
 };
 
 const isEmptySync = (sync: SessionSync): boolean =>
-  sync.upserts.length === 0 && sync.removes.length === 0;
+  sync.upserts.length === 0 && sync.removes.length === 0 &&
+  (sync.operationFields?.length ?? 0) === 0;
 
 const isSessionRevokedError = (error: unknown): boolean =>
   error instanceof Error && error.name === "SessionRevokedError";

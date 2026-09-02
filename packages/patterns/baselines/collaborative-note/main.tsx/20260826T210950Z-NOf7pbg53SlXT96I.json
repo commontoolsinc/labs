@@ -1,0 +1,39 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "note": {
+        "default": "# Collaborative note\n\nStart writing together.",
+        "description": "Note body shared by every viewer of this piece.",
+        "scope": "space",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "collaborative-note/main.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "note": {
+        "default": "# Collaborative note\n\nStart writing together.",
+        "scope": "space",
+        "type": "string"
+      },
+      "participantName": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "note",
+      "participantName",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

@@ -28,8 +28,11 @@ vocabulary, and they map cleanly onto ideas you already have.
 | **Space** | The shared durable place pieces live in, named by a cryptographic identifier. | A database, or a tenant. |
 
 The fourth term is the one this work is named for. A **verb** is an operation a
-pattern declares — the only way its state ever changes. In the source it is a
-typed stream: an event type in, a result type out.
+pattern declares — the only way a pattern changes its own state, an operator
+writing a cell directly with `cf set` being a write that runs nothing and that
+the next recomputation may overwrite
+([the read and write session](../workflows/reading-and-writing.md)). In the
+source it is a typed stream: an event type in, a result type out.
 
 Every example from here on comes from one program: a work-item tracker,
 written to be driven and nothing else. Items sit in a tree on a **board**, and
@@ -245,7 +248,7 @@ for the CLI.
 **A verb's own help page.**
 
 ```console
-$ cf call -s demo --piece board addItem -- --help
+$ cf call -s demo --piece board addItem --help
 File a new root item on the board.
 
 JSON input:
@@ -254,7 +257,7 @@ JSON input:
     title: string
   }
 
-Flags after `--`:
+Flags:
   --title <string>  Required. One line naming the work.
 
 Output:
@@ -296,10 +299,18 @@ marking positions deeper than a link, the `{"$link": true}` spelling a JSON
 Schema uses, and escaping a literal `@` — is in
 [verbs over the CLI](over-the-cli.md#asking-a-read-for-an-address).
 
+Note where it stands on the line. The verb name opens the verb's own section
+and `--` closes it, so a verb's fields are written straight after the name and
+the read options come past the marker. That is the order the words become
+knowable: a result has to be named before it can be shaped, and a projection
+written before the verb would name positions in a result nothing has
+identified. `cf get` and `wish` have no verb between them and their read
+options, so they need no marker — the read options still come last.
+
 **A create hands back an address.**
 
 ```console
-$ cf call -s demo --piece board --select item@ addItem -- --title 'Login rewrite'
+$ cf call -s demo --piece board addItem --title 'Login rewrite' -- --select item@
 {
   "invocation": "74c9fde6-bdee-4163-9775-b2f7f38add94",
   "status": "settled",
@@ -323,7 +334,7 @@ all.
 **The same call, captured — and the address goes into the next command unedited.**
 
 ```bash
-EPIC=$(cf call -s demo --piece board --select item@ addItem -- --title 'Login rewrite' \
+EPIC=$(cf call -s demo --piece board addItem --title 'Login rewrite' -- --select item@ \
        | jq -r '.result.item."$link"')
 
 cf piece verbs -s demo --piece "$EPIC"
@@ -396,7 +407,7 @@ from outside.
 **A stamp the caller could not have sent.**
 
 ```console
-$ cf call -s demo /of:fid1:2zR3_Jo…mC84 recordNote -- --body 'blocked on the cookie spec'
+$ cf call -s demo /of:fid1:2zR3_Jo…mC84 recordNote --body 'blocked on the cookie spec'
 {
   "invocation": "58cb83ba-51c0-453d-87a4-b53e9ec9537d",
   "status": "settled",
@@ -444,8 +455,8 @@ outcome back. The second payload below is deliberately different text.
 **The same id, a different payload.**
 
 ```console
-$ cf call -s demo --invocation note-retry /of:fid1:3bSpAHm…JIRk recordNote -- --body 'first attempt'
-$ cf call -s demo --invocation note-retry /of:fid1:3bSpAHm…JIRk recordNote -- --body 'a different body entirely'
+$ cf call -s demo --invocation note-retry /of:fid1:3bSpAHm…JIRk recordNote --body 'first attempt'
+$ cf call -s demo --invocation note-retry /of:fid1:3bSpAHm…JIRk recordNote --body 'a different body entirely'
 {
   "invocation": "note-retry",
   "status": "settled",
@@ -588,7 +599,7 @@ and the second one has to be named.
 **The address as printed, standing as an argument.**
 
 ```console
-$ cf call -s demo --select blocked@,on@,blockedOnCount /of:fid1:SKf22px…N5UfM blockOn -- --on /of:fid1:d4ppvfP…Pqsls
+$ cf call -s demo /of:fid1:SKf22px…N5UfM blockOn --on /of:fid1:d4ppvfP…Pqsls -- --select blocked@,on@,blockedOnCount
 "result": {
   "blocked":         { "$link": "/of:fid1:xIWrhn5…nWsK4" },
   "blockedOnCount":  1,
@@ -605,7 +616,7 @@ refused by name.
 **Guarding a reference position. Both blocks below are refusals.**
 
 ```console
-$ cf call -s demo /of:fid1:SKf22px…N5UfM blockOn -- --on not-an-address
+$ cf call -s demo /of:fid1:SKf22px…N5UfM blockOn --on not-an-address
 "not-an-address" at <event>.on is not an address — the position declares a
 reference, and takes the /of:… form a read prints
 

@@ -40,6 +40,9 @@ export interface MarkdownCallbacks {
   checkboxToggled(index: number, checked: boolean): void;
 }
 
+/** Scratch element {@link decodeEntities} parses into; created on first use. */
+let scratch: HTMLElement | undefined;
+
 /**
  * Resolves the HTML character references in a run of markdown text.
  *
@@ -47,11 +50,10 @@ export interface MarkdownCallbacks {
  * output to an HTML parser that resolves them. This one does not, so `&amp;`
  * would otherwise reach the page as four characters rather than one.
  *
- * The assignment below cannot produce an element: `<` and `>` are replaced by
- * their own references first, and every markup construct needs a `<`. What
- * comes back is the single text node the parser built.
+ * The `innerHTML` assignment cannot produce an element: `<` and `>` are
+ * replaced by their own references first, and every markup construct needs a
+ * `<`. What comes back is the single text node the parser built.
  */
-let scratch: HTMLElement | undefined;
 function decodeEntities(text: string): string {
   if (!text.includes("&")) return text;
   scratch ??= document.createElement("div");

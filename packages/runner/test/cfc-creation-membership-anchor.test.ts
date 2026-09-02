@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
@@ -19,20 +19,21 @@ type StoredEntry = {
   observes?: string;
 };
 
-// A document-creating write lands at the RAW document root: writeOrThrow's
-// missing-doc retry constructs the envelope `{value: ...}` and writes it at
-// storage path []. `valueWriteTargets` canonicalizes the write PATH but used
-// to keep the RAW envelope as the written value, so the pure-link container
-// walk descended through the `value` wrapper key and emitted raw-projected
-// container paths — the membership stamp (origin:"structure",
-// observes:"enumerate") then persisted anchored at ["value"] instead of the
-// canonical container path []. Consumption compares stored anchors against
-// canonical read paths, so nothing at the canonical path consumed the
-// membership label until the next write's carry-forward re-anchored it; the
-// window was only masked by the co-minted frozen existence entry carrying
-// the same creating join. These tests pin the canonical anchoring at
-// creation itself.
 describe("CFC: creation anchors membership at the canonical container path", () => {
+  // A document-creating write lands at the RAW document root: writeOrThrow's
+  // missing-doc retry constructs the envelope `{value: ...}` and writes it at
+  // storage path []. `valueWriteTargets` canonicalizes the write PATH but used
+  // to keep the RAW envelope as the written value, so the pure-link container
+  // walk descended through the `value` wrapper key and emitted raw-projected
+  // container paths — the membership stamp (origin:"structure",
+  // observes:"enumerate") then persisted anchored at ["value"] instead of the
+  // canonical container path []. Consumption compares stored anchors against
+  // canonical read paths, so nothing at the canonical path consumed the
+  // membership label until the next write's carry-forward re-anchored it; the
+  // window was only masked by the co-minted frozen existence entry carrying
+  // the same creating join. These tests pin the canonical anchoring at
+  // creation itself.
+
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 

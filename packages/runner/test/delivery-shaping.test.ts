@@ -38,9 +38,9 @@ function link(id: string, path: string[] = []): NormalizedFullLink {
   return { space, id, path } as unknown as NormalizedFullLink;
 }
 
-// ---------------------------------------------------------------------------
+//
 // stripClockFields
-// ---------------------------------------------------------------------------
+//
 
 describe("stripClockFields", () => {
   it("removes a top-level timestamp without mutating the input", () => {
@@ -87,9 +87,9 @@ describe("stripClockFields", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // shouldShapeDelivery
-// ---------------------------------------------------------------------------
+//
 
 describe("shouldShapeDelivery", () => {
   it("is true only for renderer-trusted events", () => {
@@ -101,9 +101,9 @@ describe("shouldShapeDelivery", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Wake shaper, event path (unit, deterministic zero-length window)
-// ---------------------------------------------------------------------------
+//
 
 // The old DeliveryShaper surface, expressed over the unified WakeShaper +
 // holdShapedEvent adapter, so the event-path contract assertions below stay
@@ -356,9 +356,9 @@ describe("wake shaper (event path)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Unified engine (plan C): properties specific to one shaper serving both paths
-// ---------------------------------------------------------------------------
+//
 
 describe("WakeShaper (unified engine)", () => {
   it("keeps event-path and cell-path budgets separate for the same pattern", async () => {
@@ -435,9 +435,9 @@ describe("WakeShaper (unified engine)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Scheduler integration (real Runtime, default shaper)
-// ---------------------------------------------------------------------------
+//
 
 const STREAM_SCHEMA = {
   type: "object",
@@ -561,9 +561,10 @@ describe("delivery shaping (scheduler integration)", () => {
     }
   });
 
-  // W4: the in-queue backlog cap. Non-renderer events go straight to the queue
-  // (the shaper only holds renderer input), so they exercise the cap.
   it("caps the per-stream in-queue backlog, collapsing the overflow", async () => {
+    // W4: the in-queue backlog cap. Non-renderer events go straight to the
+    // queue (the shaper only holds renderer input), so they exercise the cap.
+
     const runtime = makeRuntime();
     try {
       const { tx, linkRef, received } = streamWithHandler(runtime, "w4/cap");
@@ -582,12 +583,13 @@ describe("delivery shaping (scheduler integration)", () => {
     }
   });
 
-  // W4 exclusion: a caller-supplied durable id names an invocation whose
-  // receipt address derives from it, so it must never be last-wins-merged.
-  // At the cap it is refused loudly before dispatch — callback settled
-  // errored, nothing executed — rather than silently folded into another
-  // event's identity.
   it("refuses a caller-id send at the backlog cap instead of collapsing it", async () => {
+    // W4 exclusion: a caller-supplied durable id names an invocation whose
+    // receipt address derives from it, so it must never be last-wins-merged.
+    // At the cap it is refused loudly before dispatch — callback settled
+    // errored, nothing executed — rather than silently folded into another
+    // event's identity.
+
     const runtime = makeRuntime();
     try {
       const { tx, linkRef, received } = streamWithHandler(runtime, "w4/refuse");
@@ -634,11 +636,12 @@ describe("delivery shaping (scheduler integration)", () => {
     }
   });
 
-  // Same pair, same stream: the same invocation. At the cap a retry rides the
-  // already-pending entry — first payload wins, matching the create-only
-  // receipt arbitration it would get after dispatch — and both senders settle
-  // on the one outcome.
   it("coalesces a same-id send at the cap onto its pending invocation", async () => {
+    // Same pair, same stream: the same invocation. At the cap a retry rides the
+    // already-pending entry — first payload wins, matching the create-only
+    // receipt arbitration it would get after dispatch — and both senders settle
+    // on the one outcome.
+
     const runtime = makeRuntime();
     try {
       const { tx, linkRef, received } = streamWithHandler(
@@ -651,6 +654,7 @@ describe("delivery shaping (scheduler integration)", () => {
       }
       let settledOriginal = 0;
       let settledRetry = 0;
+      let settledSecondRetry = 0;
       runtime.scheduler.queueEvent(
         linkRef,
         { marker: "original" },
@@ -667,22 +671,35 @@ describe("delivery shaping (scheduler integration)", () => {
         false,
         { eventId: "inv-coalesced" },
       );
+      runtime.scheduler.queueEvent(
+        linkRef,
+        { marker: "second-retry" },
+        true,
+        () => settledSecondRetry++,
+        false,
+        { eventId: "inv-coalesced" },
+      );
       await runtime.idle();
-      // One delivery, carrying the FIRST payload; both callbacks settled on it.
+      // One delivery carries the FIRST payload. Every retry callback settles
+      // on that outcome, including a callback appended to the existing flat
+      // callback chain.
       expect(received).toContainEqual({ marker: "original" });
       expect(received).not.toContainEqual({ marker: "retry" });
+      expect(received).not.toContainEqual({ marker: "second-retry" });
       expect(received.length).toBe(MAX_EVENT_BACKLOG_PER_STREAM);
       expect(settledOriginal).toBe(1);
       expect(settledRetry).toBe(1);
+      expect(settledSecondRetry).toBe(1);
     } finally {
       await runtime.dispose();
     }
   });
 
-  // The other direction of the exclusion: a minted flood collapsing at the cap
-  // must never select a caller-id entry as its survivor, which would rewrite
-  // the payload that entry's receipt is about to witness.
   it("never rewrites a queued caller-id entry when a minted flood collapses", async () => {
+    // The other direction of the exclusion: a minted flood collapsing at the
+    // cap must never select a caller-id entry as its survivor, which would
+    // rewrite the payload that entry's receipt is about to witness.
+
     const runtime = makeRuntime();
     try {
       const { tx, linkRef, received } = streamWithHandler(runtime, "w4/keep");
@@ -713,12 +730,14 @@ describe("delivery shaping (scheduler integration)", () => {
     }
   });
 
-  // The collapse is last-wins for the event TIME as well as the payload: a
-  // dispatched handler must read the instant of the event it actually runs, not
-  // the first event that happened to occupy the collapsed slot. These events are
-  // origin-less (no originTx) with distinct instants — the case where the times
-  // genuinely differ (a same-origin flood shares one frozen instant).
   it("collapse carries the newest event's time, not the first collapsed one", async () => {
+    // The collapse is last-wins for the event TIME as well as the payload: a
+    // dispatched handler must read the instant of the event it actually runs,
+    // not the first event that happened to occupy the collapsed slot. These
+    // events are origin-less (no originTx) with distinct instants — the case
+    // where the times genuinely differ (a same-origin flood shares one frozen
+    // instant).
+
     const runtime = makeRuntime();
     try {
       const tx = runtime.edit();

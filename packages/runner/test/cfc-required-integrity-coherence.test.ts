@@ -212,15 +212,17 @@ describe("CFC requiredIntegrity coherence (B5)", () => {
     });
   });
 
-  // Epic D4 (docs/specs/cfc-write-prefix-provenance.md): the coherent floor
-  // quantifies over each write's READ PREFIX, not the transaction-global
-  // consumed set. A labeled read whose activity-clock position is at/after the
-  // last write attempt overlapping the protected path provably did not feed
-  // the committed value, so it is excluded from the witness set the floor is
-  // judged over. The read-side integration tests above keep BOTH reads in the
-  // prefix (they read then write), so they never exercise the prefix's effect
-  // on witness coverage; these do, by interleaving a read past the write.
   describe("D4 read-prefix narrows the coherent-witness set", () => {
+    // Epic D4 (docs/specs/cfc-write-prefix-provenance.md): the coherent floor
+    // quantifies over each write's READ PREFIX, not the transaction-global
+    // consumed set. A labeled read whose activity-clock position is at/after
+    // the last write attempt overlapping the protected path provably did not
+    // feed the committed value, so it is excluded from the witness set the
+    // floor is judged over. The read-side integration tests above keep BOTH
+    // reads in the prefix (they read then write), so they never exercise the
+    // prefix's effect on witness coverage; these do, by interleaving a read
+    // past the write.
+
     const sourceSchema = (id: string) =>
       ({
         type: "string",

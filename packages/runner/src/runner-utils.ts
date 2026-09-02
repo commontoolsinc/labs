@@ -4,9 +4,9 @@ import {
   isValidFabricPlainObject,
   shallowMutableClone,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
@@ -423,6 +423,7 @@ export function mergeSchemaDefaults<T>(
       schema: JSONSchema,
       fullSchema: JSONSchema,
     ) => boolean;
+
     /** Disambiguate otherwise-valid top-level union default candidates. */
     acceptUnionCandidate?: (candidate: unknown) => boolean;
   } = {},

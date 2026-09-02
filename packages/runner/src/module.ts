@@ -1,5 +1,6 @@
 import { createNodeFactory } from "./builder/module.ts";
 import {
+  type CellScope,
   type JSONSchema,
   Module,
   type ModuleFactory,
@@ -28,6 +29,7 @@ export interface RawBuiltinResult {
   debounce?: number;
   noDebounce?: boolean;
   throttle?: number;
+
   /**
    * Receives the Action the runner actually registers with the scheduler —
    * a wrapper around `action`, so `action`'s own identity is not the
@@ -59,7 +61,7 @@ export function isRawBuiltinResult(
 }
 
 export class ModuleRegistry {
-  private moduleMap = new Map<string, Module>();
+  #moduleMap = new Map<string, Module>();
   readonly runtime: Runtime;
 
   constructor(runtime: Runtime) {
@@ -70,23 +72,61 @@ export class ModuleRegistry {
     const target = Object.isExtensible(module)
       ? module
       : cloneModuleRecord(module);
-    Object.defineProperty(target, "debugName", {
-      value: ref,
-      configurable: true,
-    });
-    this.moduleMap.set(ref, target);
+    defineDebugName(target, ref);
+    this.#moduleMap.set(ref, target);
   }
 
-  getModule(ref: string): Module {
+  /**
+   * The module registered under `ref`.
+   *
+   * A `defaultScope` is applied to a COPY: the registered module is shared by
+   * every node that names the ref, while a scope belongs to the one call site
+   * that declared it (`.asScope("user")`, or the `PerUser<>` annotation the
+   * transformer lowers to it).
+   *
+   * The copy restates `debugName` through {@link defineDebugName}, which is
+   * what proves the module's `{ kind: "builtin", builtinId }` policy identity
+   * to `resolvePolicyFacingImplementationIdentity`. Being non-enumerable, the
+   * name is not among the members a spread carries, and a scoped module with
+   * no name on it writes unattributed.
+   */
+  getModule(ref: string, defaultScope?: CellScope): Module {
     if (typeof ref !== "string") throw new Error(`Unknown module ref: ${ref}`);
-    const module = this.moduleMap.get(ref);
+    const module = this.#moduleMap.get(ref);
     if (!module) throw new Error(`Unknown module ref: ${ref}`);
-    return module;
+    if (defaultScope === undefined) return module;
+    const scoped: Module = { ...module, defaultScope };
+    defineDebugName(scoped, ref);
+    return scoped;
   }
 
   clear(): void {
-    this.moduleMap.clear();
+    this.#moduleMap.clear();
   }
+}
+
+/**
+ * Name a module with the ref it is registered under.
+ *
+ * The name is the module's policy identity: it is what
+ * `resolvePolicyFacingImplementationIdentity` reads to resolve
+ * `{ kind: "builtin", builtinId }`, so the writes a builtin's node makes are
+ * attributable to it.
+ *
+ * It is defined rather than assigned, and every attribute is stated rather
+ * than left to default, because `Object.defineProperty` carries forward the
+ * attributes an existing property already had. A module carrying an ordinary
+ * `debugName` of its own would otherwise keep it enumerable, which puts the
+ * name in `moduleToEncodableForm`'s key set and so into every content-derived
+ * id built from that module.
+ */
+function defineDebugName(module: Module, ref: string): void {
+  Object.defineProperty(module, "debugName", {
+    value: ref,
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  });
 }
 
 function cloneModuleRecord(module: Module): Module {
@@ -104,12 +144,16 @@ function cloneModuleRecord(module: Module): Module {
 export interface RawModuleOptions {
   /** If true, this module is an effect (side-effectful) rather than a computation */
   isEffect?: boolean;
+
   /** Optional scheduler debounce delay in milliseconds */
   debounce?: number;
+
   /** Opt out of scheduler auto-debounce */
   noDebounce?: boolean;
+
   /** Optional scheduler throttle period in milliseconds */
   throttle?: number;
+
   /**
    * Optional argument schema for the raw module's inputs. Threaded into input
    * binding resolution so the emitted links carry per-key schema annotations

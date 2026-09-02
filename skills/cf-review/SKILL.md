@@ -153,9 +153,9 @@ names drift, so confirm against the package's actual exports when you rely on it
 | stringifying `FabricValue`s for debug/log    | `@commonfabric/data-model/value-debug`                                                                        | `JSON.stringify()` on a `FabricValue`; it stringifies most non-plain objects as literally `{}`                                                    |
 | sorting strings for cross-platform           | `@commonfabric/utils/utf8`                                                                                    | use JavaScript `string1 < string2` (incorrect given UTF-16 surrogate code points), hand-roll or import a different sorting function               |
 | SHA-256 / content addressing                 | `@commonfabric/content-hash`                                                                                  | hand-roll, call `crypto.subtle.digest("SHA-256", …)` directly, or import `@noble/hashes` / `hash-wasm` / `node:crypto` / `@std/crypto`            |
-| hashing a `FabricValue` or schema            | `@commonfabric/data-model/value-hash`, `@commonfabric/data-model/schema-hash`                                 | re-derive value / schema hashing, or use `JSON.stringify()` to "simulate" a hash — it erases type identity and most contents of non-plain objects |
+| hashing a `FabricValue` or schema            | `@commonfabric/data-model/value-hash`, `@commonfabric/data-model-schema`                                      | re-derive value / schema hashing, or use `JSON.stringify()` to "simulate" a hash — it erases type identity and most contents of non-plain objects |
 | cloning a `FabricValue`                      | `@commonfabric/data-model/value-clone`                                                                        | `structuredClone()` or `JSON.parse(JSON.stringify(...))` on `FabricValue` / cell data — drops cell links, dies on circular `$UI` trees            |
-| cloning a schema (for modification)          | `@commonfabric/data-model/schema-utils`, several useful functions available                                   | `structuredClone()` or `JSON.parse(JSON.stringify(...))`                                                                                          |
+| cloning a schema (for modification)          | `@commonfabric/data-model-schema`, several useful functions available                                         | `structuredClone()` or `JSON.parse(JSON.stringify(...))`                                                                                          |
 | (de)serializing `FabricValue`s / wire format | `@commonfabric/data-model/codec-json`                                                                         | invent a parallel serializer / `toJSON` for `FabricValue`s                                                                                        |
 | cell ↔ link conversion                       | `convertCellsToLinks` (`packages/runner/src/cell.ts`)                                                         | re-implement link conversion (don't copy the internal `traverse*` helpers in `llm-dialog.ts`)                                                     |
 | identity / DID / keypairs                    | `@commonfabric/identity`                                                                                      | mint DIDs or keys ad hoc                                                                                                                          |
@@ -211,6 +211,15 @@ is allowed. Two doc comments in a row are the loudest tell — only the nearer o
 survives into rendered documentation. See
 `docs/development/code-comment-style.md`, "Where one goes".
 
+**A documented declaration with nothing blank after it** is that same defect
+read downward, and it is quieter, because the comment is still next to the thing
+it was written for. The comment reaches on past it, so the members added under
+it look documented when they are not — which is exactly the shape a diff
+appending one member to a run of them puts in front of you. See the same
+document, "The blank line below". An overload set counts as one declaration
+here, so the blank line falls after the implementation — or, for a set with none
+to close it, after its last signature — and never between the signatures.
+
 **A missing or misplaced file header** is that same defect one level up, and is
 equally a thing a diff shows you. A file header is a doc comment at the very
 top, above the first `import` and the first `export`; a new file carrying none,
@@ -224,10 +233,22 @@ Mostly Improvement / Nit — don't drown the report in these. Dead code, unused
 exports, superfluous abstraction, unclear names. Types: no needless `any`; no
 needless casts (an `as Something` that isn't required for correctness) and no
 unjustified `as unknown as Something`, especially one erasing `Immutable<T>` /
-`Readonly<T>`. For the rest — named exports, JSDoc on exports and public
-members, import grouping, `@commonfabric/api` xor `/interface`, module-graph
-hygiene — follow `docs/development/DEVELOPMENT.md` and point to it rather than
-relisting it.
+`Readonly<T>`.
+
+For the rest the authority is `docs/development/DEVELOPMENT.md`, § Style &
+Conventions: follow it and point to it rather than relisting it. Its subsections
+seed what to look for — e.g. named exports, JSDoc on exports and public members,
+import grouping and collation, `@commonfabric/api` xor `/interface`,
+module-graph hygiene. Two of them seed nothing any gate will ever raise, which
+is where a diff-reading reviewer earns their keep: **§ Classes** —
+`#privateName` over TypeScript's `private`, a class exposing no enumerable
+properties, and the member order; the wrong form compiles and type-checks clean,
+and an erased `private` leaves an own enumerable property behind — and **§ Word
+choice**, American spelling and one word per concept, which reaches comments and
+error and log messages as much as it reaches documents.
+
+`skills/writing-code/SKILL.md` is what an author is handed for this same
+material. A finding here that it does not cover is a gap in the skill; say so.
 
 ### 7. Test rigor — the special-attention area
 
@@ -299,6 +320,8 @@ file.
   `docs/development/skill-authoring.md`
 - Pattern rules + severity taxonomy: `docs/common/ai/pattern-critique-guide.md`
 - Design principles & idioms: `docs/development/DEVELOPMENT.md`
+- What an author is handed for the same conventions:
+  `skills/writing-code/SKILL.md`
 - Comment style, `//` and JSDoc alike, file headers included:
   `docs/development/code-comment-style.md`
 - Transformer semantics: `docs/specs/ts-transformer/README.md`

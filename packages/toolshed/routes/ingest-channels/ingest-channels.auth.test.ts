@@ -10,19 +10,19 @@ if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
 }
 
-// The POSITIVE auth path, which nothing else covers: a genuinely signed
-// first-party request reaching a handler. Everything before this asserted only
-// that bad requests are rejected — "the real thing is accepted" is the half
-// that actually has to work.
-//
-// Under test the `runtime` singleton these handlers import is uninitialized, so
-// any path touching storage answers 502. That is itself the storage-error
-// contract, and it proves the request cleared the signature check, the rate
-// limiter, and body validation to get there. The authorization logic proper is
-// tested against a real ACL-enforcing memory server in
-// ingest-channels.utils.test.ts.
-
 describe("Ingest channels route (authenticated)", () => {
+  // The POSITIVE auth path, which nothing else covers: a genuinely signed
+  // first-party request reaching a handler. Everything before this asserted
+  // only that bad requests are rejected — "the real thing is accepted" is the
+  // half that actually has to work.
+  //
+  // Under test the `runtime` singleton these handlers import is uninitialized,
+  // so any path touching storage answers 502. That is itself the storage-error
+  // contract, and it proves the request cleared the signature check, the rate
+  // limiter, and body validation to get there. The authorization logic proper
+  // is tested against a real ACL-enforcing memory server in
+  // ingest-channels.utils.test.ts.
+
   // A distinct client per request: the limiters are module-level, so sharing a
   // key across tests turns a later 502 expectation into a 429.
   let clientCounter = 0;
@@ -78,10 +78,11 @@ describe("Ingest channels route (authenticated)", () => {
     }
   });
 
-  // The revoke replay defense is only as strong as the request id being part
-  // of what was signed. If the field were optional, a captured revoke would
-  // carry no id to spend and the middle box could add its own.
   it("rejects a signed revoke that omits requestId", async () => {
+    // The revoke replay defense is only as strong as the request id being part
+    // of what was signed. If the field were optional, a captured revoke would
+    // carry no id to spend and the middle box could add its own.
+
     const res = await signedRequest("revoke", {
       id: "ing_whatever",
       expectedRevision: 1,
@@ -89,10 +90,11 @@ describe("Ingest channels route (authenticated)", () => {
     expect(res.status).toBe(422);
   });
 
-  // The generation binding is the half that stops a captured-and-withheld
-  // revoke, so it has to be part of what was signed rather than something a
-  // middle box can supply or drop.
   it("rejects a signed revoke that omits expectedRevision", async () => {
+    // The generation binding is the half that stops a captured-and-withheld
+    // revoke, so it has to be part of what was signed rather than something a
+    // middle box can supply or drop.
+
     const res = await signedRequest("revoke", {
       id: "ing_whatever",
       requestId: crypto.randomUUID(),
@@ -100,17 +102,19 @@ describe("Ingest channels route (authenticated)", () => {
     expect(res.status).toBe(422);
   });
 
-  // Request validation runs after auth, so a signed request with a bad body is
-  // the only way to reach schema validation at all. stoker's `defaultHook`
-  // answers 422 for a zod failure, not 400.
   it("rejects a signed request whose body fails schema validation", async () => {
+    // Request validation runs after auth, so a signed request with a bad body
+    // is the only way to reach schema validation at all. stoker's `defaultHook`
+    // answers 422 for a zod failure, not 400.
+
     const res = await signedRequest("mint", { installId: "phone-1" });
     expect(res.status).toBe(422);
   });
 
-  // Tamper: the proof commits to the body hash, so changing the body after
-  // signing must not verify.
   it("rejects a signed request whose body was altered after signing", async () => {
+    // Tamper: the proof commits to the body hash, so changing the body after
+    // signing must not verify.
+
     const identity = await Identity.generate();
     const url = new URL(`${BASE}/list`, "http://localhost");
     const headers = await signFirstPartyHttpRequest({

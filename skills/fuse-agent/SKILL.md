@@ -30,10 +30,10 @@ ID=$(cf piece new packages/patterns/<path>.tsx \
   --space SPACE --root packages/patterns 2>/dev/null | head -1)
 
 # 3. Set title
-cf call --quiet --piece $ID --space SPACE setTitle -- --value "My Title"
+cf call --quiet --cell $ID --space SPACE setTitle --value "My Title"
 
 # 4. Step to materialize
-cf piece step --piece $ID --space SPACE
+cf piece step --cell $ID --space SPACE
 
 # 5. Re-read pieces.json immediately — stale after deploy
 cat "MOUNT/SPACE/pieces/pieces.json"
@@ -106,7 +106,7 @@ cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c \
 | Read/Write/Edit on `index.md` | Never                                      |
 
 When in doubt after a FUSE handler call: run
-`cf piece step --piece $ID --space SPACE`, then re-read `pieces.json`.
+`cf piece step --cell $ID --space SPACE`, then re-read `pieces.json`.
 
 ### NFS timeout and remount
 
@@ -265,9 +265,9 @@ repeatable `--test` flags here and on every later `setsrc` update.
 ID=$(cf piece new packages/patterns/annotation.tsx \
   --space SPACE --root packages/patterns 2>/dev/null | head -1)
 echo '"Standup notes mention 5 people with no structured contact list"' \
-  | cf set --piece $ID content --space SPACE
-echo '"wish"' | cf set --piece $ID kind --space SPACE
-cf piece step --piece $ID --space SPACE
+  | cf set --cell $ID content --space SPACE
+echo '"wish"' | cf set --cell $ID kind --space SPACE
+cf piece step --cell $ID --space SPACE
 # Re-read pieces.json — name now reflects content: "Standup notes mention..."
 ```
 
@@ -287,8 +287,8 @@ cf piece step --piece $ID --space SPACE
 **Mark a wish resolved** (when fulfilling another agent's annotation):
 
 ```bash
-echo '"resolved"' | cf set --piece $WISH_ID status --space SPACE
-cf piece step --piece $WISH_ID --space SPACE
+echo '"resolved"' | cf set --cell $WISH_ID status --space SPACE
+cf piece step --cell $WISH_ID --space SPACE
 ```
 
 **Discover open annotations** — deploy `annotation-manager.tsx` for an
@@ -400,7 +400,7 @@ for x in p:
 ## Cleanup
 
 ```bash
-cf piece rm --piece $ID --space SPACE
+cf piece rm --cell $ID --space SPACE
 ```
 
 Use this to clean up duplicate pieces deployed by accident (no `--confirm`

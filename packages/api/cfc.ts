@@ -64,10 +64,10 @@ export const CFC_ATOM_TYPE = {
   // entailment ORDER (`atomEntails`): an earlier deadline entails a later one.
   Expires: "https://commonfabric.org/cfc/atom/Expires",
   // Runtime-minted external-ingest provenance: this value arrived through a
-  // vouched ingest channel (an owner-granted, revocable append authority held
-  // by an outside service). Mirrors `UserSurfaceInput` — human input gets its
-  // own origin class; external input is just another origin. Evidence, not
-  // authorable in schemas: the *channel* is vouched, the *contents* are not.
+  // trusted host boundary. The atom carries a discriminated origin claim: a
+  // vouched channel identifies an owner-granted append authority, while a
+  // fetch identifies only the immutable source read by the host. Evidence,
+  // not authorable in schemas; neither variant vouches for the contents.
   ExternalIngest: "https://commonfabric.org/cfc/atom/ExternalIngest",
   // Role-membership fact (integrity; spec §4.9.3/§15.4) minted by the trusted
   // runtime from verified space membership — the guard that derives user
@@ -198,22 +198,46 @@ export type CfcLlmDerivedAtom = CfcAtomObject & {
   readonly model?: string;
 };
 
-export type CfcExternalIngestAtom = CfcAtomObject & {
-  readonly type: typeof CFC_ATOM_TYPE.ExternalIngest;
-  // The ingest channel this value arrived through (a vouched, revocable append
-  // grant). Carried by the channel's own space, so this identifies the grant.
-  readonly channel: string;
-  // The presenter the grant was vouched to (the external service's DID).
-  // Recorded for audit/display; NOT enforced here (audience-binding is the
-  // federation PR5 dependency — see proposal).
-  readonly audience: string;
-  // When the operator runtime received the payload (ISO 8601).
-  readonly receivedAt: string;
-  // Digest of the payload bytes the mark is stamped on. The mark derives only
-  // from verified channel metadata plus this digest of the written value —
-  // never from attacker-controlled label atoms (the split-mint invariant).
-  readonly valueDigest: string;
+/** Pinned source identity carried by fetch-ingest provenance. */
+export type CfcExternalFetchSource = CfcAtomObject & {
+  readonly url: string;
+  readonly commitSha: string;
 };
+
+/**
+ * External-ingest provenance for an owner-vouched channel. The audience is a
+ * commitment-classified identity because the channel grant vouches for that
+ * presenter.
+ */
+export type CfcVouchedChannelExternalIngestAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.ExternalIngest;
+  readonly channel: string;
+  readonly audience: string;
+  readonly receivedAt: string;
+  readonly valueDigest: string;
+  readonly kind?: never;
+  readonly pinnedSource?: never;
+};
+
+/**
+ * External-ingest provenance for a pinned host fetch. This is the weaker
+ * variant: the host attests only to which immutable source it fetched, and no
+ * presenter or audience was vouched.
+ */
+export type CfcFetchExternalIngestAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.ExternalIngest;
+  readonly kind: "fetch";
+  readonly pinnedSource: CfcExternalFetchSource;
+  readonly receivedAt: string;
+  readonly valueDigest: string;
+  readonly channel?: never;
+  readonly audience?: never;
+};
+
+/** Provenance for external bytes crossing a trusted host boundary. */
+export type CfcExternalIngestAtom =
+  | CfcVouchedChannelExternalIngestAtom
+  | CfcFetchExternalIngestAtom;
 
 export type CfcUserAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.User;
@@ -273,6 +297,7 @@ export type CfcThisPolicySubjectPattern = CfcAtomObject & {
 
 export type CfcThisPolicyPattern = CfcAtomObject & {
   readonly thisPolicy: true;
+
   /** Non-enumerable authoring affordance; lowers to `thisPolicyField`. */
   readonly subject: CfcThisPolicySubjectPattern;
 };
@@ -592,11 +617,25 @@ export const cfcAtom = {
     audience: string,
     receivedAt: string,
     valueDigest: string,
-  ): CfcExternalIngestAtom {
+  ): CfcVouchedChannelExternalIngestAtom {
     return {
       type: CFC_ATOM_TYPE.ExternalIngest,
       channel,
       audience,
+      receivedAt,
+      valueDigest,
+    };
+  },
+
+  externalFetchIngest(
+    pinnedSource: CfcExternalFetchSource,
+    receivedAt: string,
+    valueDigest: string,
+  ): CfcFetchExternalIngestAtom {
+    return {
+      type: CFC_ATOM_TYPE.ExternalIngest,
+      kind: "fetch",
+      pinnedSource,
       receivedAt,
       valueDigest,
     };

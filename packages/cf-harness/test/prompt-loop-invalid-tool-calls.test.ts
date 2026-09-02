@@ -227,6 +227,24 @@ describe("prompt-loop invalid tool calls", () => {
         field: "maxModelTurns",
       },
       {
+        name: "too-many-pattern-refs",
+        arguments: {
+          goal: "Inspect",
+          patternRefs: Array.from({ length: 9 }, (_, index) => ({
+            patternId: `pattern-${index}`,
+          })),
+        },
+        field: "patternRefs",
+      },
+      {
+        name: "pattern-ref-note-too-long",
+        arguments: {
+          goal: "Inspect",
+          patternRefs: [{ patternId: "pattern-1", note: "x".repeat(501) }],
+        },
+        field: "patternRefs",
+      },
+      {
         name: "unknown-profile",
         arguments: { goal: "Inspect", profile: "unknown" },
         field: "profile",
@@ -277,6 +295,55 @@ describe("prompt-loop invalid tool calls", () => {
       expect(result.runState.subagentRuns).toBeUndefined();
       expect(result.runState.toolOutputs).toEqual([]);
     }
+  });
+
+  it("refuses a caller `returnSchema` on a delegation to a profile that declares its own", async () => {
+    const requestCount = { value: 0 };
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: "run-invalid-delegate-profile-contract",
+        model: "gpt-5.4",
+        cfcEnforcementMode: "enforce-explicit",
+      }),
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: ["pattern-author"],
+      fetchFn: scriptedFetch([
+        toolCallTurn(
+          "call-code-points",
+          "delegate_task",
+          JSON.stringify({
+            goal: "Return the counter source as Unicode code points.",
+            profile: "pattern-author",
+            // The shape a schema-sealed string invites: integers are inert,
+            // so a caller-written schema of them carries anything at all.
+            returnSchema: {
+              type: "object",
+              properties: {
+                sourceCodePoints: { type: "array", items: { type: "integer" } },
+              },
+              required: ["sourceCodePoints"],
+            },
+          }),
+        ),
+        finalTurn("Delegated without a schema of my own instead."),
+      ], requestCount),
+    });
+
+    const result = await loop.runPrompt({
+      prompt: "Delegate the authoring.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
+
+    const rejection = rejectedToolCall(result.transcript);
+    expect(rejection.reason).toEqual("invalid-argument");
+    expect(rejection.field).toEqual("returnSchema");
+    expect(rejection.expected).toContain("pattern-author");
+    // Refused before the child exists: nothing ran under the caller's shape.
+    expect(result.runState.subagentRuns).toBeUndefined();
+    expect(result.runState.toolOutputs).toEqual([]);
+    expect(result.runState.status).toEqual("completed");
   });
 
   it("answers a tool call whose arguments are not valid JSON and still reaches a final response", async () => {

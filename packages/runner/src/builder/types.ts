@@ -66,6 +66,12 @@ import type {
 import { toSchema } from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
 import type {
+  FabricInstance,
+  FabricPrimitive,
+  FabricSpecialObject,
+  valueEqual,
+} from "@commonfabric/data-model";
+import type {
   FabricError,
   FabricLink,
 } from "@commonfabric/data-model/fabric-instances";
@@ -77,12 +83,6 @@ import type {
   FabricKeyPair,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
-import type {
-  FabricInstance,
-  FabricPrimitive,
-  FabricSpecialObject,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
 import type {
   toCompactDebugString,
   toIndentedDebugString,
@@ -230,6 +230,7 @@ declare module "@commonfabric/api" {
   export interface Module {
     type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
     implementation?: ((...args: any[]) => any) | Pattern | string;
+
     /**
      * Content-addressed reference to the module-scope builder artifact whose
      * implementation this module runs: the defining module's content identity
@@ -237,20 +238,27 @@ declare module "@commonfabric/api" {
      * identity (see docs/specs/content-addressed-action-identity.md).
      */
     $implRef?: { identity: string; symbol: string };
+
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;
     propagateInputIfc?: boolean;
+
     /** If true, this module is an effect (side-effectful) rather than a computation */
     isEffect?: boolean;
+
     /** Optional scheduler debounce delay in milliseconds */
     debounce?: number;
+
     /** Opt out of scheduler auto-debounce */
     noDebounce?: boolean;
+
     /** Optional scheduler throttle period in milliseconds */
     throttle?: number;
+
     /** Pull-mode write envelopes for broad/dynamic writable-input materializers */
     materializerWriteEnvelopes?: readonly NormalizedFullLink[];
+
     /**
      * Exhaustive analyzed record of input paths the module may write. Only
      * writable-branded paths become materializer envelopes; stream paths
@@ -259,12 +267,14 @@ declare module "@commonfabric/api" {
      * the opaque-result envelope fallback.
      */
     materializerWriteInputPaths?: readonly (readonly string[])[];
+
     /**
      * Transformer proof that this source-backed lift's cell surface is
      * exhaustively described by its structural bindings.  Absence means
      * unknown/incomplete; raw modules and handlers never receive this marker.
      */
     completeSchedulerScopeSummary?: true;
+
     /** Run this module's result in a specific space. */
     targetSpace?: MemorySpace;
   }
@@ -295,6 +305,7 @@ export type DerivedInternalCellDescriptor = {
   partialCause: JSONValue;
   schema?: JSONSchema;
   scope?: CellScope;
+
   /**
    * Entity kind minted into the cell's id (preimage + visible tag). Set to
    * `"computed"` only when the builder proves the cell is written solely by
@@ -347,6 +358,7 @@ export type Frame = {
   space?: MemorySpace;
   inHandler?: boolean;
   reactives: Set<Reactive<any>>;
+
   /**
    * Positive marker for the kind of authored pattern code running under this
    * frame: "handler" for an event handler, "lift" for a reactive computation
@@ -355,6 +367,7 @@ export type Frame = {
    * — both of which lack `inHandler` — without conflating them.
    */
   frameKind?: "lift" | "handler";
+
   /**
    * The wall-clock instant (ms) bound to the event that opened this handler
    * frame. A handler's ambient clock reads this FROZEN value, coarsened, rather
@@ -365,19 +378,23 @@ export type Frame = {
    * Only meaningful on handler frames.
    */
   eventTime?: number;
+
   unsafe_binding?: UnsafeBinding;
+
   /**
    * Marks a module-evaluation frame. Its presence is the whole signal: it is
    * how the action-execution guard admits the transformer's module-scope
    * builder mints while an action is suspended.
    */
   moduleEvaluation?: true;
+
   /**
    * Named/anonymous `PatternFactory.inSpace(...)` targets encountered during
    * this frame whose space DID was not yet cached. The runner resolves these
    * after the run and re-runs (see RetryImmediately).
    */
   pendingSpaceNames?: Set<string>;
+
   /** Per-frame counter giving each anonymous `inSpace()` call a stable name. */
   inSpaceCounter?: number;
 };

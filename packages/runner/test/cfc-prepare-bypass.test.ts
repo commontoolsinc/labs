@@ -7,19 +7,20 @@ import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-prepare-bypass-tests");
 
-// Regression guard for the prepareCfc verification-bypass (audit S2).
-//
-// The hole: prepareCfc(input) skipped prepareBoundaryCommit whenever an input
-// was supplied, and the commit-time digest recheck only confirms the input
-// matches real activity — not that policy verification ran. Untrusted code
-// holding the transaction could reconstruct the genuine prepared-digest input
-// from the public read/write getters, hand it to prepareCfc, and commit a
-// policy-violating transaction cleanly.
-//
-// The fix removes the input parameter entirely so verification always runs.
-// This test pins the behavioral contract: a relevant, policy-violating
-// transaction can never reach a committed state through prepareCfc.
 describe("CFC prepareCfc verification bypass", () => {
+  // Regression guard for the prepareCfc verification-bypass (audit S2).
+  //
+  // The hole: prepareCfc(input) skipped prepareBoundaryCommit whenever an input
+  // was supplied, and the commit-time digest recheck only confirms the input
+  // matches real activity — not that policy verification ran. Untrusted code
+  // holding the transaction could reconstruct the genuine prepared-digest input
+  // from the public read/write getters, hand it to prepareCfc, and commit a
+  // policy-violating transaction cleanly.
+  //
+  // The fix removes the input parameter entirely so verification always runs.
+  // This test pins the behavioral contract: a relevant, policy-violating
+  // transaction can never reach a committed state through prepareCfc.
+
   it("rejects a writeAuthorizedBy violation even when prepareCfc is driven directly", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({

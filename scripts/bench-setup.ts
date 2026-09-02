@@ -1,4 +1,5 @@
 #!/usr/bin/env deno run -A
+
 /**
  * bench-setup.ts — CT-1409+ benchmark space deployer
  *
@@ -16,13 +17,17 @@ import {
   type SpaceConfig,
 } from "../packages/cli/lib/piece.ts";
 
-// ===== Path resolution =====
+//
+// Path resolution
+//
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const NOTE_PATTERN = `${REPO_ROOT}/packages/patterns/notes/note.tsx`;
 const TODO_PATTERN = `${REPO_ROOT}/packages/patterns/todo-list/todo-list.tsx`;
 
-// ===== Content =====
+//
+// Content
+//
 
 const NOTES = [
   { title: "Standup 2026-03-27", content: "No blockers today." },
@@ -131,7 +136,9 @@ const TODO_ITEMS = [
   "Write integration test for concurrent FUSE writes",
 ];
 
-// ===== CLI parsing =====
+//
+// CLI parsing
+//
 
 function parseArgs(args: string[]): {
   apiUrl: string;
@@ -159,7 +166,9 @@ function parseArgs(args: string[]): {
   };
 }
 
-// ===== Timestamp =====
+//
+// Timestamp
+//
 
 function timestamp(): string {
   const now = new Date();
@@ -170,7 +179,9 @@ function timestamp(): string {
   );
 }
 
-// ===== Main =====
+//
+// Main
+//
 
 async function deployNote(
   spaceConfig: SpaceConfig,

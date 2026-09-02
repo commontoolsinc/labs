@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
 import {
@@ -28,7 +28,7 @@ import {
 const signer = await Identity.fromPassphrase("cf-piece-get-transform");
 const space = signer.did();
 
-describe("cf piece get transforms", () => {
+describe("cf get transforms", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
@@ -2020,7 +2020,7 @@ describe("cf piece get transforms", () => {
 
     await expect(deriveSelectedValue(runtime, space, source, {
       filter: parseSelectionFilter(".score > 1"),
-    })).rejects.toThrow("Could not apply piece get transform");
+    })).rejects.toThrow("Could not apply get transform");
   });
 
   it("reports transform transaction commit failures", async () => {
@@ -2048,7 +2048,7 @@ describe("cf piece get transforms", () => {
       await expect(deriveSelectedValue(runtime, space, source, {
         projection: await parseSelectionProjection("id"),
       })).rejects.toThrow(
-        "Could not apply piece get transform: forced commit failure",
+        "Could not apply get transform: forced commit failure",
       );
     } finally {
       (runtime as any).edit = originalEdit;

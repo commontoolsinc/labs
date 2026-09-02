@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read
+
 /**
  * Where a run's elapsed time went, and how much of it nothing accounts for.
  *
@@ -25,6 +26,7 @@
  * you have: unwrapped compute and a blocking round trip look identical from
  * here. What it can do is say where to look, and how much is at stake.
  */
+
 import { buildForest, loadMeasures, type Span } from "./measure-forest.ts";
 
 /**

@@ -23,6 +23,23 @@ export default pattern<{ who?: Writable<string | Default<"world">> }>(({ who }) 
   }],
 });
 
+const programOf = (
+  props: string,
+  destructure: string,
+  body: string,
+): RuntimeProgram => ({
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: `/// <cts-enable />
+import { NAME, pattern, str, Writable, Default } from "commonfabric";
+export default pattern<${props}>((${destructure}) => {
+  ${body}
+});
+`,
+  }],
+});
+
 const GREETING = "return { who, greeting: str`Hello, ${who}!` };";
 
 describe("str builtin", () => {
@@ -42,14 +59,12 @@ describe("str builtin", () => {
     await storageManager?.close();
   });
 
-  const runProgram = async (
+  const runSource = async (
     runtime: Runtime,
-    body: string,
+    program: RuntimeProgram,
     label: string,
   ) => {
-    const compiled = await runtime.patternManager.compilePattern(
-      programFor(body),
-    );
+    const compiled = await runtime.patternManager.compilePattern(program);
     const tx = runtime.edit();
     const resultCell = runtime.getCell<Record<string, unknown>>(
       space,
@@ -63,6 +78,9 @@ describe("str builtin", () => {
     await result.pull();
     return { compiled, result };
   };
+
+  const runProgram = (runtime: Runtime, body: string, label: string) =>
+    runSource(runtime, programFor(body), label);
 
   it("interpolates a reactive substitution", async () => {
     const runtime = newRuntime();
@@ -132,6 +150,54 @@ describe("str builtin", () => {
       expect(result.key("greeting").get()).toBe(
         `v=${undefined} ${null} ${{ a: 1 }}`,
       );
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("reads a substituted array as its value, not as a link", async () => {
+    const runtime = newRuntime();
+    try {
+      const { result } = await runSource(
+        runtime,
+        programOf(
+          `{
+  list?: Writable<string[] | Default<["a", "b"]>>;
+  n?: Writable<number | Default<0>>;
+  flag?: Writable<boolean | Default<false>>;
+}`,
+          "{ list, n, flag }",
+          "return { list, n, flag, greeting: str`${list} ${n} ${flag}` };",
+        ),
+        "value-read",
+      );
+      // An array renders through its own `toString` ("a,b") only if the
+      // substitution arrived as a VALUE. `STR_ARGUMENT_SCHEMA` leaves `values`
+      // without an `items` schema precisely so its elements resolve; were that
+      // to stop, the element would arrive as an unresolved link sigil and
+      // render "[object Object]" instead. Numbers and booleans pin the two
+      // falsy substitutions the interpolation must not treat as absent.
+      expect(result.key("greeting").get()).toBe(`${["a", "b"]} ${0} ${false}`);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("interpolates per element inside a map", async () => {
+    const runtime = newRuntime();
+    try {
+      const { result } = await runSource(
+        runtime,
+        programOf(
+          `{ items?: Writable<string[] | Default<["a", "b"]>> }`,
+          "{ items }",
+          "return { items, labels: items.map((item) => str`<${item}>`) };",
+        ),
+        "map-op",
+      );
+      // The shape shipped patterns actually use: one `str` node per element,
+      // minted inside the map's op sub-pattern rather than at pattern scope.
+      expect(result.key("labels").get()).toEqual(["<a>", "<b>"]);
     } finally {
       await runtime.dispose();
     }

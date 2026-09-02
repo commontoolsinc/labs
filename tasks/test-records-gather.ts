@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-env
+
 /**
  * The credential-free shipping step every CI test job ends with: gather the
  * job's spooled record fragments and its JUnit files into one artifact
@@ -6,6 +7,7 @@
  *
  *   deno run -A tasks/test-records-gather.ts --out <dir> --job <name>
  *     [--shard <label>]
+ *     [--variant <name>]
  *     [--junit kind=<kind>,scope=<scope>[,prefix=<repo path>],glob=<glob>]...
  *
  * The output directory holds records.ndjson (one record line per test) and
@@ -22,6 +24,7 @@ import {
   type Environment,
   ingestJUnit,
   readEnv,
+  readNameMaps,
   readSpool,
   recordsDir,
   serializeRecordLine,
@@ -83,6 +86,7 @@ export interface GatherOptions {
   out: string;
   job: string;
   shard?: string;
+  variant?: string;
   junit: JUnitSpec[];
   spoolDir?: string;
   env?: Environment;
@@ -90,7 +94,16 @@ export interface GatherOptions {
 
 /** Gathers the spool and JUnit files into the artifact directory. */
 export async function gather(options: GatherOptions): Promise<void> {
+  if (options.variant !== undefined && options.variant.length === 0) {
+    throw new Error("--variant must not be empty");
+  }
   const records: TestRecord[] = [];
+  // The registration preload leaves a name-to-file map in the spool, and
+  // it is the only thing that can tell a bdd leaf's file: Deno names a
+  // case by its describe chain and puts that chain in the classname too.
+  const fileByName = options.spoolDir === undefined
+    ? new Map<string, string>()
+    : await readNameMaps(options.spoolDir);
   if (options.spoolDir !== undefined) {
     const spooled = await readSpool(options.spoolDir);
     for (const warning of spooled.warnings) {
@@ -111,6 +124,7 @@ export async function gather(options: GatherOptions): Promise<void> {
           const ingestOptions: Parameters<typeof ingestJUnit>[1] = {
             kind: spec.kind,
             scope: spec.scope,
+            fileByName,
           };
           if (spec.prefix !== undefined) ingestOptions.filePrefix = spec.prefix;
           records.push(...ingestJUnit(xml, ingestOptions));
@@ -126,6 +140,10 @@ export async function gather(options: GatherOptions): Promise<void> {
     if (matched === 0) {
       console.warn(`test records: no JUnit files matched ${spec.glob}`);
     }
+  }
+
+  if (options.variant !== undefined) {
+    for (const record of records) record.test.v = options.variant;
   }
 
   const env = options.env ?? Deno.env.get;
@@ -171,7 +189,7 @@ export async function gather(options: GatherOptions): Promise<void> {
 function usage(): never {
   console.error(
     "usage: test-records-gather.ts --out <dir> --job <name> " +
-      "[--shard <label>] [--junit <spec>]...",
+      "[--shard <label>] [--variant <name>] [--junit <spec>]...",
   );
   Deno.exit(2);
 }
@@ -188,6 +206,7 @@ export function parseGatherArgs(
   let out: string | undefined;
   let job: string | undefined;
   let shard: string | undefined;
+  let variant: string | undefined;
   const junit: JUnitSpec[] = [];
   const args = [...argsIn];
   while (args.length > 0) {
@@ -204,6 +223,10 @@ export function parseGatherArgs(
       case "--shard":
         shard = value;
         break;
+      case "--variant":
+        if (value.length === 0) return undefined;
+        variant = value;
+        break;
       case "--junit":
         try {
           junit.push(parseJUnitSpec(value));
@@ -218,6 +241,7 @@ export function parseGatherArgs(
   if (out === undefined || job === undefined) return undefined;
   const options: GatherOptions = { out, job, junit };
   if (shard !== undefined) options.shard = shard;
+  if (variant !== undefined) options.variant = variant;
   return options;
 }
 

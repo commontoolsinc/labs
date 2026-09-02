@@ -177,13 +177,8 @@ which is why both the test commands and the flags are required.
   **host** is a separate, in-poll role (first joiner — see Identity below).
 
 **Command spellings:** the data commands are `cf get`, `cf set` and `cf call`.
-The `cf piece get` / `cf piece set` / `cf piece call` spellings still run and
-print a deprecation notice on stderr naming the day they stop working.
-`PIECE_DATA_SPELLING_END_DATE` in
-[`packages/cli/commands/piece.ts`](../../cli/commands/piece.ts) is where that
-day is set, and the notice quotes it. The piece-lifecycle commands keep the
-`cf piece` prefix: `new`, `setsrc`, `getsrc`, `step`, `inspect`, `render`, `ls`,
-`rm`, `verbs`, `recreate-root`.
+The piece-lifecycle commands keep the `cf piece` prefix: `new`, `setsrc`,
+`getsrc`, `step`, `inspect`, `render`, `ls`, `rm`, `verbs`, `recreate-root`.
 
 ## Option A — ordinary compatible source updates
 
@@ -241,16 +236,20 @@ the input interface casually against a piece you care about.
 > (see "Recovering the piece").
 
 > **`setsrc` can half-succeed.** Saving the source and refreshing the running
-> piece are separate steps, and the second can fail on its own:
+> piece are separate steps, and the second can fail on its own. The command
+> still exits 0, because the source update did commit:
 >
 > ```
 > Piece source was saved, but refreshing the running piece failed: [Error: updated arguments do not match the candidate schema: profileAvatar: value does not match type string]
+> Committed source update for piece bafy… (Pattern Ref: cf:module/Qy36SQqu…#default, Revision: 0f2c…)
+> Source revision 0f2c… committed as cf:module/Qy36SQqu…#default, but refreshing the running piece failed: updated arguments do not match the candidate schema: profileAvatar: value does not match type string
 > ```
 >
-> The piece is now on the new source and will not start. That line comes
-> _before_ the usual `Updated source for piece …` line and the next-step hints,
-> so a caller reading only the tail of the output takes it for a clean deploy.
-> See "A piece that saved its source and will not start".
+> The piece is now on the new source and will not start. Read the whole output,
+> not its tail and not stdout alone: the success line is the only thing on
+> stdout, so `setsrc … > log` records what committed and drops both warnings. A
+> committed receipt is proof the source update landed, never proof the running
+> piece refreshed. See "A piece that saved its source and will not start".
 
 ## Option B — migrate the populated name-keyed poll to a fresh piece
 

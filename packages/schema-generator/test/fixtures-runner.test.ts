@@ -8,16 +8,16 @@ import {
   createUnifiedDiff,
   defineFixtureSuite,
 } from "@commonfabric/test-support/fixture-runner";
+import {
+  FabricPrimitive,
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model";
 import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import {
   fabricFromJsonValue,
   jsonFromFabricValue,
 } from "@commonfabric/data-model/codecs";
-import {
-  FabricPrimitive,
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { SchemaGenerator } from "../src/schema-generator.ts";
 import {
@@ -244,10 +244,13 @@ function normalizeArrayOrdering(obj: unknown): unknown {
   return obj;
 }
 
+//
 // The golden format exists to hold values plain JSON cannot. Guard that
 // directly: a fixture cannot reach these values on its own yet, and a golden
 // that silently flattens them would agree with buggy output instead of
 // catching it.
+//
+
 Deno.test("golden encoding preserves values JSON cannot represent", () => {
   const schema = {
     type: "object",

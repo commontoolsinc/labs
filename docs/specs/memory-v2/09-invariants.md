@@ -43,6 +43,10 @@ Checkers referenced below:
   dependency-recording and staleness-basis variant, and — in its
   delayed-verdict-delivery mode (the `PendingStacks_Channel*.cfg` configs) —
   INV-6 over the decided-but-not-yet-processed window.
+- the **delivery model**: `docs/specs/memory-v2/tla/SessionDelivery.tla`,
+  which model-checks INV-14 over one session's watch delivery across lost
+  pushes, a wiped replica, and both reconnect paths (resumed and
+  re-established), for each diff-base design (`SessionDelivery_*.cfg`).
 
 ## The invariants
 
@@ -486,6 +490,71 @@ or write a new space", "the space identity initializes a private space",
 fresh-space genesis remains a hard invariant", "direct writes cannot create or
 mutate ACL state", "a retracted ACL fails closed instead of becoming public".
 
+### INV-14 — Reconnect convergence
+
+> A reconnect brings a session's replica to the current state of its watch
+> union: after the reconnect's frame, every document the union covers is
+> held at its current seq (a tombstone as a tombstone, an uncovered document
+> removed), whatever the replica lost, was wiped of, or missed while away.
+
+This is the mandatory clause. Its efficiency companion — **no redundant
+delivery**: the frame delivers nothing the replica already holds at its
+current seq — is NOT part of the correctness contract. A redundant delivery
+is a wasted frame the replica's monotonic seq guard drops as a no-op, so
+convergence never depends on it; it is stated as `NoRedundantDelivery` in
+the delivery model, and certified there, precisely so it can be checked
+without being conflated with the safety property. Where the two pull apart
+— a client that under-declares — convergence wins: the omitted document is
+re-delivered.
+
+The diff base is the client's DECLARED holdings (`04-protocol.md` §4.1.2,
+§4.3.5), on a resumed session and a re-established one alike. The server's
+own memory of what it delivered is a claim about the client the client cannot
+contradict — a push it recorded and the client failed to absorb, or a replica
+wiped under a surviving session, left the memory asserting a document the
+replica did not hold, and the resumed catch-up elided it for the session's
+life. A declaration is the diff's own vocabulary; its trustworthiness is a
+property of how the CLIENT builds it, not a given (see the soundness
+direction) — the runtime derives it from the last frame each document was
+DELIVERED at, never from a locally promoted confirmed seq the server never
+sent.
+
+Layer: server (`holdingsToCacheEntries` and the resumed-open reconcile in
+`packages/memory/v2/server.ts`; `buildDiffSync` against the declaration in
+`watchSet`); client (`SpaceSession.holdingsProvider`, `reopen`/`restore` in
+`packages/memory/v2/client.ts`; `SpaceReplica.holdings()` in
+`packages/runner/src/storage/v2.ts`).
+
+Soundness direction: the server MAY deliver a document the replica already
+holds (a redundant frame is tolerated — the replica's monotonic seq guard makes
+an equal or older re-delivery a no-op) and MUST NOT elide a document the
+replica does not hold at its current seq. The client MAY under-declare (a
+document it holds but omits is re-delivered) and MUST NOT over-declare: a
+claim to hold a document at a seq it does not is the one input that makes the
+server elide a real gap. The declaration is therefore derived from DELIVERED
+state only — the seq and deletedness of the last `SessionSync` the replica
+absorbed for each watched document — and never from `record.confirmed`,
+which a local promotion (`confirmPending`: an own accepted write extrapolated
+over the pending base) can advance to a seq carrying a value the server never
+delivered. An own write the server elided as this session's echo declares the
+older delivered seq and is re-delivered — redundant, never a gap. Pending and
+never-seen keys are excluded for the same reason.
+
+Checked by: the delivery model (`SessionDelivery_Holdings.cfg` certifies it
+with loss, a wipe, union shrink, and the zero-watch reconcile in play;
+`SessionDelivery_Memory.cfg` is the violation witness for the server-memory
+base — the schema-doc quarantine residual; `SessionDelivery_MemoryFull.cfg`
+witnesses the full re-download of a lapsed session under the old base). The
+model certifies the SERVER's diff rule against a truthful declaration —
+`tla/README.md` states the assumption set — and each CLIENT construction
+obligation is pinned by a unit test instead: delivered-not-promoted seqs and
+the end-to-end declaration by
+`packages/runner/test/memory-v2-reconnect-holdings.test.ts`; branch identity,
+the wire-boundary parse, and the zero-watch retraction by
+`packages/memory/test/v2-session-holdings.test.ts`; the declaration on both
+reconnect paths and the terminal restore against a server that cannot take
+one by `packages/memory/test/v2-client-holdings.test.ts`.
+
 ## Change discipline
 
 When a change narrows dependency recording, overlap matching, staleness
@@ -499,7 +568,10 @@ scanning, cascade scope, or retry behavior:
 3. If the change touches pending-stack recording, resolution ordering, or
    staleness bases, run the corresponding TLA+ configs (see
    `docs/specs/memory-v2/tla/README.md`) — add a mode to the model if the
-   change introduces a new recording/basis shape.
+   change introduces a new recording/basis shape. The same holds on the
+   delivery side: a change to the reconnect diff base, the holdings
+   declaration, or removal semantics runs the `SessionDelivery` configs,
+   and a new base or declaration shape becomes a `Mode` variant there.
 4. Run the differential harness; if the change makes the engine accept
    strictly more histories, the naive validator must agree on every newly
    accepted one.

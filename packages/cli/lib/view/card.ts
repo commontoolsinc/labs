@@ -34,17 +34,24 @@ import {
 export interface CardTarget {
   /** Index into the card's `info` lines (for highlight + reveal). */
   readonly cardLine: number;
-  /** Destination line/column in the main document. */
+
+  /** Destination line in the main document. */
   readonly destLine: number;
+
+  /** Destination column on that line. */
   readonly destCol: number;
+
   /** Char offset of the declaration to select, when the target is a definition. */
   readonly defOffset?: number;
+
   /** End offset of that declaration. Diff views clamp nested nodes to the same
    * start offset, so the end disambiguates which node to select. */
   readonly defEndOffset?: number;
+
   /** External file to open, when the definition lives outside the blob; with
    * `destLine` the line within that file. */
   readonly filePath?: string;
+
   /** A "… N more" line: selecting it and pressing Enter rebuilds the card with
    * every truncated list shown in full, rather than navigating anywhere. */
   readonly expand?: boolean;
@@ -190,7 +197,9 @@ function cardTitle(node: StructureNode): string {
   return `${node.kind}  ${node.label}`;
 }
 
-// --- sections ----------------------------------------------------------------
+//
+// sections
+//
 
 function metaLine(node: StructureNode): Line {
   const span = node.endLine - node.startLine + 1;
@@ -803,13 +812,17 @@ function enclosingNode(
   return best;
 }
 
-// --- schema rendering --------------------------------------------------------
+//
+// schema rendering
+//
 
-// --- schema → TypeScript-like type rendering --------------------------------
+//
+// schema → TypeScript-like type rendering
 //
 // Schemas are shown as a type signature (`{ token: string }`, `string[]`,
 // nested objects) rather than the underlying JSON-schema shape. Optional fields
 // (not in `required`) get a `?`. Rendered inline when it fits, else multi-line.
+//
 
 const INLINE_MAX = 56;
 
@@ -902,7 +915,9 @@ function pad(indent: number): string {
   return "  ".repeat(indent);
 }
 
-// --- line/span helpers -------------------------------------------------------
+//
+// line/span helpers
+//
 
 type Part = readonly [string, TokenClass];
 

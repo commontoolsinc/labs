@@ -56,10 +56,11 @@ export function dataFileSpecifier(path: string): string {
 }
 
 /**
- * Memo of the two pure derivations {@link buildRecordsFromCompiled} extracts
- * from a module's compiled body: its direct export surface (names + `export *`
- * target specifiers) and its runtime `require()` specifiers. **Keyed by the
- * compiled body itself** — both derivations are pure functions of that body.
+ * Memo of one of the two pure derivations {@link buildRecordsFromCompiled}
+ * extracts from a module's compiled body: its direct export surface (names +
+ * `export *` target specifiers). Its partner is `importParseCache` below.
+ * **Keyed by the compiled body itself** — both derivations are pure functions
+ * of that body.
  *
  * At piece boot every system pattern loaded by identity rebuilds its record
  * graph from the SAME shared module closure, so `buildRecordsFromCompiled` runs
@@ -75,7 +76,7 @@ export function dataFileSpecifier(path: string): string {
  * body's parse for another; the body fully determines the parse, so a body key
  * is exact and cross-contamination is impossible.
  *
- * The two maps are process-global and unbounded by design: one small
+ * Both maps are process-global and unbounded by design: one small
  * record-surface entry (export names + import specifiers) per distinct compiled
  * body, retained for the process lifetime and keyed by the body string. Distinct
  * bodies are bounded by the pattern universe a worker serves; a long-lived
@@ -89,6 +90,12 @@ const exportParseCache = new Map<
   string,
   { exportNames: readonly string[]; starTargetSpecs: readonly string[] }
 >();
+
+/**
+ * Memo of the other derivation: the module body's runtime `require()`
+ * specifiers. Same key, same lifetime, and same reasoning as
+ * `exportParseCache` above.
+ */
 const importParseCache = new Map<string, readonly string[]>();
 
 function parseCompiledExports(
@@ -383,13 +390,16 @@ export interface CompileSourcesOptions {
    * `cf:runtime/<specifier>`; the caller must register a matching record.
    */
   runtimeModules?: Record<string, string[]>;
+
   runtimeFingerprint?: string;
+
   /**
    * Attached data files as `[authored path, bytes]`, carried onto the graph for
    * the modules that read them. They are not sources: nothing here compiles,
    * parses, or records them.
    */
   dataFiles?: Iterable<readonly [string, string]>;
+
   /**
    * Pre-compiled CommonJS body per source name. When provided (e.g. from
    * `TypeScriptCompiler.compileToModules`, which runs the full CF transformer
@@ -398,14 +408,17 @@ export interface CompileSourcesOptions {
    * generation, `__cf_data` wrapping) cannot be produced by transpileModule.
    */
   precompiledBodies?: Map<string, string>;
+
   /**
    * Per-source source map (from `compileToModules`), keyed by source name. Used
    * to compose per-load maps so error stacks resolve back to the original
    * authored files.
    */
   precompiledSourceMaps?: Map<string, SourceMap>;
+
   /** Debug-only authored builder sites per source name. */
   precompiledBuilderSourceSites?: Map<string, BuilderSourceSitesV1>;
+
   /**
    * Whole-program path prefix (`/<id>`, no trailing slash) to strip from each
    * module's path *for content-addressed identity only*. The compile path
@@ -420,6 +433,7 @@ export interface CompileSourcesOptions {
    * error-stack mapping) keeps the prefixed path untouched.
    */
   idPrefix?: string;
+
   /**
    * Precomputed per-path module identities (from {@link computeModuleIdentities}).
    * When the caller already derived these (e.g. the Engine, for its cache-hit
@@ -427,11 +441,13 @@ export interface CompileSourcesOptions {
    * be consistent with `idPrefix` / `runtimeFingerprint`.
    */
   identityByPath?: Map<string, string>;
+
   /**
    * Maps an authored import specifier to a concrete file already present in the
    * program. Used for scheme-prefixed fabric refs mounted under reserved paths.
    */
   specifierAliases?: ReadonlyMap<string, string>;
+
   /**
    * The stored path for a resolved source name — the spelling `dataFiles` is
    * keyed by, with the per-load `idPrefix` and any fabric mount root taken off.
@@ -444,20 +460,26 @@ export interface CompileSourcesOptions {
 
 export interface CompiledModuleGraph {
   records: Map<string, VirtualModuleRecord>;
+
   /** Content-addressed specifier for each original file path. */
   specifierByPath: Map<string, string>;
+
   /** Compiled CommonJS body per specifier — the text the verifier classifies. */
   compiledBodies: Map<string, string>;
+
   /** Per-specifier source map (compiled body → original source), when available. */
   moduleSourceMaps: Map<string, SourceMap>;
+
   /** Debug-only authored builder sites per content-addressed module identity. */
   builderSourceSitesByIdentity: Map<string, BuilderSourceSitesV1>;
+
   /**
    * Hoist registrations, populated as the graph's modules evaluate (`__cfReg`).
    * Empty until `importNow` runs each module's `execute`. The engine reads it
    * after evaluation; the PatternManager assigns `{ identity, symbol }` refs.
    */
   registrationSink: HoistRegistrationSink;
+
   /**
    * Specifiers of modules the VERIFIER approved for hoist registration (a valid
    * top-level `__cfReg({ … })` call). The engine fills this during the verify
@@ -466,6 +488,7 @@ export interface CompiledModuleGraph {
    * missed fails closed at runtime instead of registering attacker values.
    */
   registrationApproved: Set<string>;
+
   /**
    * Verbatim bytes of every attached data file in this graph, keyed by the
    * data entry's authored path. These are carried alongside the records rather
@@ -579,8 +602,10 @@ export const FABRIC_MOUNT_ROOT = "/~cf/";
 export interface FabricMount {
   /** Terminal identity the subtree was fetched by and must hash back to. */
   entryIdentity: string;
+
   /** Mounted path of the subtree's entry file. */
   entryPath: string;
+
   /** The fabric specifiers that resolve to this mount. */
   specifiers: string[];
 }
@@ -980,19 +1005,25 @@ export function compileSourcesToRecords(
 export interface CachedCompiledModule {
   /** Prefix-free content identity (the `cf:module/<hash>` hash, no scheme). */
   identity: string;
+
   /** Normalized authored path (e.g. `/main.tsx`); used for the eval sourceURL. */
   filename: string;
+
   /** Compiled CommonJS body, or the verbatim bytes of a data entry. */
   code: string;
+
   /** Internal import edges: require specifier → dependency module identity. */
   imports: { specifier: string; targetIdentity: string }[];
+
   /**
    * This entry carries data rather than code, so `code` is its authored bytes.
    * A data entry never becomes a module record and is never parsed as one.
    */
   isData?: boolean;
+
   /** Per-module source map, if cached. */
   sourceMap?: SourceMap;
+
   /**
    * Precomputed record surface (Fix B), derived from `code` at compile time via
    * {@link deriveModuleRecordFields} and persisted on the compiled doc: the
@@ -1003,8 +1034,13 @@ export interface CachedCompiledModule {
    * which parses and writes the surface back for later warm loads.
    */
   exportNames?: readonly string[];
+
+  /** The `export *` target specifiers of that same surface. */
   starTargetSpecs?: readonly string[];
+
+  /** The runtime import specifiers of that same surface. */
   importSpecs?: readonly string[];
+
   /**
    * Authored-line spans for the coverage probes baked into `code`, carried from
    * the cached document. The engine registers them with the collector it
@@ -1012,6 +1048,7 @@ export interface CachedCompiledModule {
    * resolve to source lines. Absent whenever `code` is uninstrumented.
    */
   patternCoverageSpans?: readonly PatternCoverageSpan[];
+
   /** Debug-only authored builder sites carried from the cached document. */
   builderSourceSites?: BuilderSourceSitesV1;
 }

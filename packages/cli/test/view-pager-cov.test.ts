@@ -266,6 +266,7 @@ function editableDoc(): {
   doc: typeof DOC;
   source: ReturnType<typeof fileSource>;
   dir: string;
+
   /** How many times the source has been re-parsed — the deferred reparse calls
    * `source.parse`, so this stays 0 unless an edit actually scheduled and ran
    * one. */
@@ -370,7 +371,9 @@ Deno.test("realPagerDeps: the wrappers reach the real primitives", () => {
   } catch { /* no controlling terminal in this environment */ }
 });
 
-// --- Ctrl-L reveal frames ---------------------------------------------------
+//
+// Ctrl-L reveal frames
+//
 
 /** A one-file diff whose hunk has room to reveal ten lines above it. */
 function revealFixture() {

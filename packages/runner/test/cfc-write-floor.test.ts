@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
 
@@ -217,6 +217,66 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
       await runtime.dispose();
       await storageManager.close();
     }
+  });
+
+  it("a mint on an array's items does not satisfy a floor on the array path", async () => {
+    // The shape a pattern reaches for when a list of endorsed entries is
+    // stored behind a floor: each entry mints the atom, the list path
+    // declares it. The floor is checked at the path it is declared on, and
+    // the items' mints sit below that path, so the list write is unendorsed
+    // until the list path mints too. Both halves run here — the item-only
+    // shape rejects, the same shape with a path mint commits.
+    const items = {
+      type: "object",
+      properties: {
+        subject: { type: "string" },
+        displayName: { type: "string" },
+      },
+      required: ["subject", "displayName"],
+      ifc: { addIntegrity: [ADMIN_ATOM] },
+    } as const;
+    const itemMintOnly = {
+      type: "object",
+      properties: {
+        admins: {
+          type: "array",
+          items,
+          ifc: { requiredIntegrity: [ADMIN_ATOM] },
+        },
+      },
+      required: ["admins"],
+    } as const satisfies JSONSchema;
+    const alsoPathMint = {
+      type: "object",
+      properties: {
+        admins: {
+          type: "array",
+          items,
+          ifc: { requiredIntegrity: [ADMIN_ATOM], addIntegrity: [ADMIN_ATOM] },
+        },
+      },
+      required: ["admins"],
+    } as const satisfies JSONSchema;
+
+    const writeAdmins = async (schema: JSONSchema, id: string) => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+      try {
+        const tx = runtime.edit();
+        const sink = runtime.getCell(signer.did(), id, schema, tx);
+        sink.set({ admins: [{ subject: "alice", displayName: "Alice" }] });
+        tx.prepareCfc();
+        return String((await tx.commit()).error?.message ?? "");
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    };
+
+    expect(await writeAdmins(itemMintOnly, "wf-item-mint-sink")).toContain(
+      "write floor failed",
+    );
+    expect(await writeAdmins(alsoPathMint, "wf-path-mint-sink")).toBe("");
   });
 
   it("the floor is a minimum: extra minted integrity is fine", async () => {

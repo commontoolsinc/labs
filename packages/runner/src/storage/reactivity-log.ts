@@ -179,6 +179,7 @@ export function takeCoverageWaits(tx: object): Promise<void>[] {
 }
 
 const uiInputBlindWriteTxs = new WeakSet<object>();
+const durableReadTxs = new WeakSet<object>();
 
 function* blindWriteTxChain(tx: object): Generator<object> {
   let current: object | undefined = tx;
@@ -198,6 +199,22 @@ export function unmarkUiInputBlindWriteTx(tx: object): void {
 }
 export function isUiInputBlindWriteTx(tx: object): boolean {
   return uiInputBlindWriteTxs.has(tx);
+}
+
+/**
+ * Marks an authored direct-capability transaction to read the durable replica
+ * view. Its values and commit basis both exclude process-local speculation,
+ * which cannot be named by a commit sent to the server.
+ */
+export function markDurableReadTx(tx: object): void {
+  for (const layer of blindWriteTxChain(tx)) durableReadTxs.add(layer);
+}
+
+export function isDurableReadTx(tx: object): boolean {
+  for (const layer of blindWriteTxChain(tx)) {
+    if (durableReadTxs.has(layer)) return true;
+  }
+  return false;
 }
 
 // Lazy materialization: a marked transaction hands a reader views that resolve

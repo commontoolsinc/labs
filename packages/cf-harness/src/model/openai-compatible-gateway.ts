@@ -359,8 +359,10 @@ const responsesInputReachesDiscoveryFloor = (
 
 export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
   readonly providerId = OPENAI_COMPATIBLE_GATEWAY_PROVIDER_ID;
+
   /** Input budgets by model id, keyed from the gateway registry. */
   readonly #compactThresholds = new Map<string, number>();
+
   /** Successful registry discovery is shared and cached per client. */
   #budgetDiscovery?: Promise<void>;
 

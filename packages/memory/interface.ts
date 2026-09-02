@@ -108,6 +108,7 @@ export type Result<T extends Unit = Unit, E extends Error = Error> =
 
 export type Ok<T extends Unit> = {
   ok: T;
+
   /**
    * Discriminant to differentiate between Ok and Fail.
    */
@@ -116,6 +117,7 @@ export type Ok<T extends Unit> = {
 
 export type Fail<E extends Error> = {
   error: E;
+
   /**
    * Discriminant to differentiate between Ok and Fail.
    */
@@ -144,6 +146,7 @@ export interface ConflictError extends Error {
 
   /** The commit that was rejected. */
   transaction: ClientCommit;
+
   conflict: Conflict;
   retryAfterSeq?: number;
   readyToRetry?: () => Promise<void>;
@@ -165,6 +168,7 @@ export interface ConnectionError extends Error {
 export interface TransactionError extends Error {
   name: "TransactionError";
   cause: SystemError;
+
   /**
    * The commit being stored when the error occurred.
    */

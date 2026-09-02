@@ -55,8 +55,9 @@ Carry the append intent through the transaction so the commit emits a
 tail-relative, mergeable operation instead of a reconstructed whole-array diff.
 
 An append commits as a dedicated `append` patch op (`{ op: "append", path,
-values }`). On the server this op inserts its elements at the array's *live*
-tail, creating the array (and the path to it) if it is absent. Because the
+values }`), except from a transaction that emits whole documents (below). On
+the server this op inserts its elements at the array's *live* tail, creating
+the array (and the path to it) if it is absent. Because the
 position is resolved on the server against durable state, the op is correct
 regardless of what the committing session had loaded locally — empty, short, or
 up to date.
@@ -186,9 +187,11 @@ The same machinery carries three mergeable ops. `append` is described below;
   earlier path-level exclusion, which dropped any read overlapping the array path
   including the handler's. This drop sits alongside the conflict-granularity work
   (`docs/specs/memory-v2/08-conflict-granularity.md`), which separately keeps a
-  read marked `excludeReadFromConflict` (an `asCell` reference resolution) out of
-  the conflict set; the two exclusions are independent `continue`s in the same
-  loop.
+  read marked `excludeReadFromConflict` (an `asCell` reference resolution) and a
+  runtime-internal read of a document's `["cfc"]` envelope out of the conflict
+  set; the three exclusions are independent `continue`s in the same loop. The
+  `["cfc"]` one is not scoped to a mergeable-op entity, which is what lets a
+  label derivation consult a collection another session is appending to.
 
 - **Engine touched paths (`packages/memory/v2/engine.ts`)** — each op reports its
   array path (like `splice`) in both `touchedPathsForPatch` (which the
@@ -358,6 +361,25 @@ first, since the op carries only the delta.
   guarantee should not rest on that coincidence: nothing obliges a reshape to
   read what it overwrites.
 
+- **A whole-document transaction abandons every intent it holds.** A
+  transaction marked `markWholeDocumentWrites` — or `markAuthoritativeWrites`,
+  which implies it — emits each written document as a whole-document `set` or
+  `delete` and sends no mergeable op at all, so the same rule applies to all of
+  them at once: `getNativeCommit` deletes and poisons every recorded path
+  before the narrowing runs. Here the reads are not belt and braces. The
+  whole-document write is the value the run computed from what it read, so an
+  intent left standing would drop a real dependency.
+
+  Two marks reach this. The client speculation overlay's seal takes it because
+  an entry's operations are layered above a confirmed value that moves under
+  them, and its read set is what the entry's retirement floor is built from
+  (`docs/specs/server-side-execution/speculation.md` §1). Effect-completion
+  writebacks under the serving posture take it through
+  `markAuthoritativeWrites`, and they can hold an intent — llm-dialog's marked
+  update pushes onto the message list. Their commit carries `basisSeq` of NOW
+  and does not export its read set, so what changes there is which local
+  dependencies the transaction registers, not what the server arbitrates.
+
 - **A `removeByValue` that does not account for the whole local array falls back
   too.** Its suppression is `subtree: true` — the array path and everything under
   it — so unlike a tail op it leaves *nothing* to carry the array, not even the
@@ -448,6 +470,16 @@ lunch poll's `addUser`
 ([participant-identity-card.tsx](../../packages/patterns/lunch-poll/participant-identity-card.tsx))
 is a deliberate read-then-push that relies on it.
 
+The narrowing keys on the read's path, and does not care which layer issued the
+read. Runtime machinery that runs during a commit is bound by the same rule as
+handler code. A recursive read at a document's root depends on every path in
+that document, so a concurrent write anywhere in it — including the mergeable
+append the commit is carrying — invalidates that read and conflicts the commit.
+A runtime pass that needs one member of a document reads that member's own path
+instead. The CFC label envelope at `["cfc"]` and the schema meta at
+`["schema"]` are each read at their own path, so each depends on that member
+alone and a concurrent append to the document's value leaves it undisturbed.
+
 Two further responses make the keyed case cheaper and catch misuse (see
 `keyed-collection-writes.md`):
 
@@ -532,10 +564,10 @@ in-app remove button can address the same entity without introspecting the piece
 cell. A space's key is the space name, which the handler already has from the
 event.
 
-The MRU lists — the profile most-recently-used list and the recent-pieces list —
-stay a read-modify-write `set`. Their write is not a set-membership change: it
-moves an entry to the front of the list and caps the length, so its correctness
-depends on reading the current order and count. That is a condition other than
+The profile most-recently-used list stays a read-modify-write `set`. Its write
+is not a set-membership change: it moves an entry to the front of the list and
+caps the length, so its correctness depends on reading the current order and
+count. That is a condition other than
 uniqueness, which the mergeable ops do not preserve: `addUnique` appends at the
 tail and never reorders, and there is no mergeable "keep only the first N". A
 concurrent pair of most-recently-used stamps conflicts and one retries, which

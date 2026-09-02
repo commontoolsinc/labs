@@ -202,6 +202,7 @@ export interface BillExtractorOutput {
     summaryStatsUI: JSX.Element;
     overdueAlertUI: JSX.Element;
     websiteLinkUI: JSX.Element;
+
     /** Banner shown when supportsAutoDetect is false */
     manualTrackingBannerUI: JSX.Element;
   };

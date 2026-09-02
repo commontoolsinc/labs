@@ -49,8 +49,10 @@ interface RecordedRequest {
 
 interface StubReply {
   status?: number;
+
   /** Serialized as JSON. */
   body?: unknown;
+
   /** Sent verbatim, for the not-JSON case. */
   raw?: string;
 }
@@ -122,6 +124,7 @@ describe("resolveSpaceDid", () => {
     // path, so a deployment served under a prefix had every command addressed at
     // the origin — failing as a 404 from somewhere else rather than as a
     // configuration error.
+
     it("keeps the configured base path", () => {
       expect(
         controlPlaneUrl(new URL("https://host.example/fabric"), "mint").href,
@@ -152,9 +155,10 @@ describe("resolveSpaceDid", () => {
       expect(base.href).toBe("https://host.example/fabric");
     });
 
-    // The proof commits to the URL, so signing one path and sending another is
-    // not merely a wrong endpoint — it would fail to verify.
     it("signs the same pathful URL it sends to", async () => {
+      // The proof commits to the URL, so signing one path and sending another
+      // is not merely a wrong endpoint — it would fail to verify.
+
       await withStubbedFetch(
         { body: { channels: [] } },
         async (calls) => {

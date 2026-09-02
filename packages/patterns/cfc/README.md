@@ -97,10 +97,13 @@ or explicitly stores `everyoneIsAdmin: false`. That bootstrap is what answers
 "who may take the first seat" — an empty roster is open, and once a role exists
 the roster gates itself.
 
-`AdminManagerCredential` mints an atom onto a value standing for "this actor may
-edit the roster". It is for a credential the pattern is handed, not one the
-viewer switches on for itself; see "A self-granted flag is not a credential"
-below.
+There is no helper here for "this actor may edit the roster", and a registry
+does not need one. The per-user switch that reveals the admin controls is a
+plain boolean carrying no integrity, and the roster's own `writeAuthorizedBy`
+binding is what decides which code may change it. A separate `*-admin-manager`
+atom standing for the authority to edit is the shape the parking coordinator,
+the lobby and the lot watch were each repaired out of; the next section says why
+it cannot work.
 
 ## Floor An Admin Registry
 
@@ -144,12 +147,22 @@ unreviewed action in the same pattern, or another pattern holding the same cell
 — is refused by the runtime rather than by convention.
 
 **A role names someone who is there.** Once a roster gates itself, a role
-granted to a subject no actor can be — a name nobody answers to, a profile
-nobody holds — fills the roster without giving anyone the authority to change
-it, and the bootstrap that opened the first grant never reopens. Grant only to a
-subject drawn from the pattern's own list of them, and where a subject can be
-renamed or removed, refuse the change rather than leave a role pointing at
-someone who is no longer there.
+granted to a subject no actor can be fills the roster without giving anyone the
+authority to change it, and the bootstrap that opened the first grant never
+reopens. Grant only to a subject drawn from the pattern's own list of them.
+
+Which subject you pick decides how much of that you have to enforce by hand.
+Name a person by name and you own three rules: a rename has to move the role, a
+removal has to drop it, and a later person of that name must not inherit it.
+Name the profile **cell** instead, comparing subjects with
+`activeAdminRoleForSubject` and `subjectHasAdminRole`, and the first and third
+stop existing — a rename moves nothing, and a newcomer arrives holding no
+profile at all. Two traps come with cells, both of them load-bearing. An unset
+optional cell input reads back as a present-but-empty handle, so it is truthy
+and a presence test on it always passes: gate on a name string, which is
+honestly `""` when nothing resolved. And pin the terminal cell with
+`resolveAsCell()` before storing one, or what gets stored is "whoever the reader
+resolves".
 
 Two of these describe this runtime rather than the CFC specification, and an
 author who goes looking for them in the specification will not find them. The
@@ -176,6 +189,9 @@ check it against has moved.
 `packages/patterns/factory-outputs/parking-coordinator/main.tsx` follows all
 five. `packages/patterns/lobby/main.tsx` binds its registry to a reviewed
 handler the same way, with profiles rather than names as role subjects.
+`packages/patterns/factory-outputs/lot-watch/main.tsx` binds a registry whose
+subjects are names, and `packages/patterns/cfc-group-chat-demo/trusted.tsx`
+floors a second list, its rooms, on the same atom as its roster.
 
 ## Use Prompt-Injection Helpers
 

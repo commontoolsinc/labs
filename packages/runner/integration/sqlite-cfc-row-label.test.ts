@@ -43,7 +43,7 @@ async function runTest(base: URL) {
 
   try {
     const patternSource = await Deno.readTextFile(
-      new URL("./sqlite-cfc-row-label.test.tsx", import.meta.url),
+      new URL("./sqlite-cfc-row-label.tsx", import.meta.url),
     );
     const pattern = await runtime.patternManager.compilePattern(patternSource, {
       space,
@@ -111,7 +111,7 @@ async function runTest(base: URL) {
         );
       }
 
-      // --- THE POINT: distinct per-row labels, re-derived from row data. ---
+      // THE POINT: distinct per-row labels, re-derived from row data.
       // Reading row[i] traverses pattern result -> query result -> the row's
       // own entity doc; the labels the consumer observes accumulate across
       // those dereferences (per-row ROOT label + per-column field labels).
@@ -203,7 +203,7 @@ async function runTest(base: URL) {
         "row 1 integrity",
       );
 
-      // --- Aggregate on a rule-bearing table fails closed. ---
+      // Aggregate on a rule-bearing table fails closed.
       const countError = result.key("qCount").key("error").get() as unknown;
       if (
         typeof countError !== "string" || !countError.includes("aggregate")
@@ -217,7 +217,7 @@ async function runTest(base: URL) {
         );
       }
 
-      // --- Declared ceiling + onExceed:"skip": exactly row 1 survives. ---
+      // Declared ceiling + onExceed:"skip": exactly row 1 survives.
       const skim = result.key("qSkim").key("result").get() as
         | { id: number }[]
         | undefined;
@@ -229,9 +229,9 @@ async function runTest(base: URL) {
         );
       }
 
-      // --- Read-time clearance (Phase 3.b): the owner satisfies no row's
+      // Read-time clearance (Phase 3.b): the owner satisfies no row's
       // conjunctive rule (the did:mailto participants are required too), so a
-      // cleared query returns zero rows and reports withheld: 2. ---
+      // cleared query returns zero rows and reports withheld: 2.
       const clearErr = result.key("qClear").key("error").getRaw();
       const cleared = result.key("qClear").key("result").get() as
         | unknown[]

@@ -22,11 +22,12 @@ export class DummyLiveEnvironment extends BaseLiveEnvironment {
 export const dummyEnv = new DummyLiveEnvironment(true);
 
 /**
- * Recursion-callback helpers for exercising the `[DEEP_FREEZE]` /
- * `[IS_DEEP_FROZEN]` protocol members directly (invoking them on an instance
- * with a recursion callback). They use `deepFreeze` / `isDeepFrozen` only as
- * recursion helpers on the nested (plain) sub-values -- never as the entry
- * point for the instance itself.
+ * Recursion-callback helper for exercising the `[DEEP_FREEZE]` protocol member
+ * directly (invoking it on an instance with a recursion callback). It uses
+ * `deepFreeze` only as a recursion helper on the nested (plain) sub-values --
+ * never as the entry point for the instance itself.
  */
 export const subFreeze = (v: FabricValue): FabricValue => deepFreeze(v);
+
+/** Like `subFreeze`, except for `[IS_DEEP_FROZEN]` and `isDeepFrozen`. */
 export const subIsDeepFrozen = (v: FabricValue): boolean => isDeepFrozen(v);

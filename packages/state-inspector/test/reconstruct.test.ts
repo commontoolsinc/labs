@@ -13,7 +13,11 @@ import { Database } from "@db/sqlite";
 
 import { openSpace } from "../db.ts";
 import { annotate, parseSigilLink } from "../decode.ts";
-import { getValueAt, reconstructDocument } from "../reconstruct.ts";
+import {
+  getValueAt,
+  reconstructDocument,
+  reconstructOutcome,
+} from "../reconstruct.ts";
 import {
   entityHistory,
   hotEntities,
@@ -217,6 +221,23 @@ Deno.test("state-inspector autopsy core", async (t) => {
         );
       });
 
+      await t.step("an outcome names why there is no document", () => {
+        // `reconstructDocument` answers "no document" for both of these; only
+        // the outcome separates a deletion from an entity that was never here.
+        assertEquals(
+          reconstructOutcome(space, { id: "of:B" }).status,
+          "deleted",
+        );
+        assertEquals(
+          reconstructOutcome(space, { id: "of:missing" }).status,
+          "absent",
+        );
+        const live = reconstructOutcome(space, { id: "of:B", atSeq: 2 });
+        assertEquals(live.status, "present");
+        assert(live.status === "present");
+        assertEquals(live.document.value, { x: true });
+      });
+
       await t.step("summary counts match the seed", () => {
         const s = summarizeSpace(space);
         assertEquals(s.commits, 8);
@@ -237,6 +258,110 @@ Deno.test("state-inspector autopsy core", async (t) => {
         assertEquals(histA.map((h) => h.op), ["set", "patch"]);
         const hot = hotEntities(space);
         assertEquals(hot.find((h) => h.id === "of:A")?.writes, 2);
+      });
+    } finally {
+      space.close();
+    }
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+/**
+ * Every boundary a reconstruction crosses is a place corruption can be laundered
+ * into a document that looks current. A malformed base, snapshot, or patch is
+ * rejected by memory-v2 at the boundary it appears on — never absorbed and built
+ * over — so reconstruction has to reach the same verdict rather than reporting a
+ * document no read from the engine can produce.
+ */
+const BOUNDARY_SCHEMA = `
+CREATE TABLE "commit" (
+  seq INTEGER NOT NULL PRIMARY KEY, branch TEXT NOT NULL DEFAULT '',
+  session_id TEXT NOT NULL, local_seq INTEGER NOT NULL,
+  invocation_ref TEXT, authorization_ref TEXT,
+  original JSON NOT NULL, resolution JSON NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE revision (
+  branch TEXT NOT NULL DEFAULT '', id TEXT NOT NULL,
+  scope_key TEXT NOT NULL DEFAULT 'space', seq INTEGER NOT NULL,
+  op_index INTEGER NOT NULL, op TEXT NOT NULL, data JSON, commit_seq INTEGER NOT NULL,
+  PRIMARY KEY (branch, id, scope_key, seq, op_index)
+);
+CREATE TABLE snapshot (
+  branch TEXT NOT NULL DEFAULT '', id TEXT NOT NULL,
+  scope_key TEXT NOT NULL DEFAULT 'space', seq INTEGER NOT NULL,
+  value JSON NOT NULL, PRIMARY KEY (branch, id, scope_key, seq)
+);
+`;
+
+Deno.test("a malformed boundary is not laundered by a later valid one", async (t) => {
+  const dir = await Deno.makeTempDir({ prefix: "state-inspector-boundary-" });
+  const dbPath = `${dir}/space.sqlite`;
+  try {
+    const db = new Database(dbPath, { create: true });
+    db.exec(BOUNDARY_SCHEMA);
+    const commit = db.prepare(
+      `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
+       VALUES (?, 'sess', ?, '{}', '{}')`,
+    );
+    const rev = db.prepare(
+      `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
+       VALUES (?, ?, 0, ?, ?, ?)`,
+    );
+    const snap = db.prepare(
+      `INSERT INTO snapshot (id, seq, value) VALUES (?, ?, ?)`,
+    );
+    const setRoot = (value: unknown) =>
+      JSON.stringify([{ op: "replace", path: "", value }]);
+
+    // A snapshot that is not a document, then a patch replacing the root with
+    // one. The snapshot is the base, so reading it unchecked yields a document.
+    commit.run(1, 1);
+    rev.run("of:snap", 1, "set", JSON.stringify({ value: { n: 0 } }), 1);
+    snap.run("of:snap", 2, "[]");
+    commit.run(2, 2);
+    commit.run(3, 3);
+    rev.run("of:snap", 3, "patch", setRoot({ value: { n: 1 } }), 3);
+
+    // A patch replacing the root with a scalar, then one restoring an object.
+    // Only the intermediate step is invalid, so checking the final result alone
+    // reports this current.
+    commit.run(4, 4);
+    rev.run("of:mid", 4, "set", JSON.stringify({ value: { n: 0 } }), 4);
+    commit.run(5, 5);
+    rev.run("of:mid", 5, "patch", setRoot(0), 5);
+    commit.run(6, 6);
+    rev.run("of:mid", 6, "patch", setRoot({ value: { n: 2 } }), 6);
+
+    // The same chain with every boundary valid still reconstructs.
+    commit.run(7, 7);
+    rev.run("of:ok", 7, "set", JSON.stringify({ value: { n: 0 } }), 7);
+    commit.run(8, 8);
+    rev.run("of:ok", 8, "patch", setRoot({ value: { n: 3 } }), 8);
+    db.close();
+
+    const space = openSpace(dbPath);
+    try {
+      await t.step("a snapshot that is not a document is rejected", () => {
+        assertEquals(
+          reconstructOutcome(space, { id: "of:snap" }).status,
+          "undecodable",
+        );
+      });
+
+      await t.step("a patch leaving a non-document is rejected", () => {
+        assertEquals(
+          reconstructOutcome(space, { id: "of:mid" }).status,
+          "undecodable",
+        );
+      });
+
+      await t.step("a chain whose every boundary holds reconstructs", () => {
+        const ok = reconstructOutcome(space, { id: "of:ok" });
+        assertEquals(ok.status, "present");
+        assert(ok.status === "present");
+        assertEquals(ok.document.value, { n: 3 });
       });
     } finally {
       space.close();

@@ -289,9 +289,10 @@ Deno.test("discord snapshot: absent Team aliases do not produce a valid snapshot
   assertEquals(missing, null);
 });
 
-// This is the first test that reaches the history, so it is the one that sees the
-// file being loaded. The load happens once per process, on first use.
 Deno.test("discord online: a snapshot -> good; the reloaded history draws the chart, stale samples age out", async () => {
+  // This is the first test that reaches the history, so it is the one that sees
+  // the file being loaded. The load happens once per process, on first use.
+
   clock = T0;
   const persisted = [
     { t: T0 - 90 * DAY, team: 1, visitors: 1 }, // past the 60-day retention window

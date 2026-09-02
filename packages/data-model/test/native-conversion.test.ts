@@ -60,12 +60,17 @@ import {
 import {
   fabricFromNativeValue,
   isValidFabricConvertibleValue,
-  isValidFabricNativeObject,
   nativeFromFabricValue,
   shallowCleanArray,
   shallowCleanPlainObject,
+  shallowFabricFromNativeObjectElseUndefined,
   shallowFabricFromNativeValue,
 } from "@/native-conversion.ts";
+import { assertValidFabricValueLayer } from "@/type-check.ts";
+import { LAYER_CORPUS, WeirdError } from "./fabric-value-corpus.ts";
+
+/** A concrete fabric class, `toBeInstanceOf()` wanting a constructor. */
+type FabricClass = new (...args: never[]) => object;
 
 /**
  * Helper for the round-trip tests, which encodes a value to fabric form via
@@ -303,6 +308,7 @@ describe("native-conversion", () => {
 
     it("deeply unwraps `Error` internals (C2)", () => {
       // `Error` with a `FabricError` cause and a custom `FabricMap` property.
+
       const innerErr = new Error("inner");
       const innerSe = FabricError.fromNativeError(innerErr);
       const outerErr = new Error("outer");
@@ -340,44 +346,6 @@ describe("native-conversion", () => {
       expect(Object.isFrozen(result)).toBe(false);
       expect(result.cause).toBeInstanceOf(Error);
       expect(Object.isFrozen(result.cause)).toBe(false);
-    });
-  });
-
-  describe("isValidFabricNativeObject()", () => {
-    it("returns `true` for all convertible types", () => {
-      expect(isValidFabricNativeObject(new Error("e"))).toBe(true);
-      expect(isValidFabricNativeObject(new TypeError("e"))).toBe(true);
-      expect(isValidFabricNativeObject(new Map())).toBe(true);
-      expect(isValidFabricNativeObject(new Set())).toBe(true);
-      expect(isValidFabricNativeObject(new Date())).toBe(true);
-      expect(isValidFabricNativeObject(new Uint8Array())).toBe(true);
-    });
-
-    it("returns `true` for exotic `Error` subclass", () => {
-      class WeirdError extends RangeError {}
-      expect(isValidFabricNativeObject(new WeirdError("weird"))).toBe(true);
-    });
-
-    it("returns `true` for `RegExp`", () => {
-      expect(isValidFabricNativeObject(/abc/)).toBe(true);
-    });
-
-    it("returns `false` for non-convertible types", () => {
-      expect(isValidFabricNativeObject({})).toBe(false);
-      expect(isValidFabricNativeObject([])).toBe(false);
-      expect(isValidFabricNativeObject(new WeakMap())).toBe(false);
-    });
-
-    it("returns `false` for objects with `toJSON()`", () => {
-      expect(isValidFabricNativeObject({ toJSON: () => "x" })).toBe(false);
-    });
-
-    it("returns `false` for a non-object", () => {
-      expect(isValidFabricNativeObject(null)).toBe(false);
-      expect(isValidFabricNativeObject(undefined)).toBe(false);
-      expect(isValidFabricNativeObject(1)).toBe(false);
-      expect(isValidFabricNativeObject("a")).toBe(false);
-      expect(isValidFabricNativeObject(() => {})).toBe(false);
     });
   });
 
@@ -474,6 +442,7 @@ describe("native-conversion", () => {
       it("is deep-frozen when `shouldDeepFreeze` is `true`, mutable when `false`", () => {
         // Tag travels separately; the bare inner state is the codec payload,
         // which for this class is a record of the three facts it preserves.
+
         const state = { tag: "Bad@1", state: { x: 1 }, error: "oops" };
         const frozen = ProblematicValue[CODEC].decode(
           "Bad@1",
@@ -505,15 +474,16 @@ describe("native-conversion", () => {
     });
   });
 
-  // Cycle-capable wired impls: `FabricError` (recurses through `error.cause`
-  // + custom enumerable own properties), `ProblematicValue` (recurses through
-  // `state`), `UnknownValue` (recurses through `state`).
-  //
-  // Termination assertion: a cycle without shared-`inProgress` threading
-  // would manifest as `RangeError: Maximum call stack size exceeded` (a
-  // clean fast throw, not a hang); `.not.toThrow()` is the discriminating
-  // assertion.
   describe("cycle behavior via `[DEEP_FREEZE]`", () => {
+    // Cycle-capable wired impls: `FabricError` (recurses through `error.cause`
+    // + custom enumerable own properties), `ProblematicValue` (recurses through
+    // `state`), `UnknownValue` (recurses through `state`).
+    //
+    // Termination assertion: a cycle without shared-`inProgress` threading
+    // would manifest as `RangeError: Maximum call stack size exceeded` (a
+    // clean fast throw, not a hang); `.not.toThrow()` is the discriminating
+    // assertion.
+
     describe("FabricError", () => {
       it("terminates on a cycle through `error.cause`", () => {
         // Build a cycle: a plain-object wrapper holds the FabricError, and the
@@ -521,6 +491,7 @@ describe("native-conversion", () => {
         // `deepFreeze(wrapper)` runs Arm 4 it recurses into the FabricError
         // (Arm 3), which subFreezes `error.cause` = wrapper, which re-enters
         // `deepFreeze()` -> the FabricError again -> ...
+
         const err = new Error("cycle-cause");
         const fe = FabricError.fromNativeError(err);
         const wrapper: Record<string, unknown> = { fe };
@@ -562,6 +533,7 @@ describe("native-conversion", () => {
       // recursing slots. Both must terminate, both must end deep-frozen.
       // FabricError snapshots its FabricValue state at construction, so wire
       // up the native Error's `cause` BEFORE `fromNativeError`.
+
       const peShared: Record<string, unknown> = { tag: "shared" };
       const pv = new ProblematicValue(
         "Cycle@1",
@@ -578,6 +550,77 @@ describe("native-conversion", () => {
       expect(Object.isFrozen(peShared)).toBe(true);
     });
   });
+  describe("shallowFabricFromNativeObjectElseUndefined()", () => {
+    // The `FabricNativeObject`s that have a fabric form, each with the class
+    // it mints.
+
+    const MINTED: ReadonlyArray<[string, unknown, FabricClass]> = [
+      ["a `Date`", new Date(1234), FabricEpochNsec],
+      ["a `Uint8Array`", new Uint8Array([1, 2, 3]), FabricBytes],
+      ["a `RegExp`", /abc/gi, FabricRegExp],
+      ["an `Error`", new Error("boom"), FabricError],
+      [
+        "a custom `Error` subclass instance",
+        new WeirdError("weird"),
+        FabricError,
+      ],
+      [
+        "an `Error` whose prototype was severed",
+        Object.setPrototypeOf(new Error("severed"), null),
+        FabricError,
+      ],
+    ];
+
+    describe("given a `FabricNativeObject` with a fabric form", () => {
+      for (const [label, value, cls] of MINTED) {
+        it(`returns a frozen \`${cls.name}\`, not the input, for ${label}`, () => {
+          const result = shallowFabricFromNativeObjectElseUndefined(value);
+          expect(result).toBeInstanceOf(cls);
+          expect(result).not.toBe(value);
+          expect(Object.isFrozen(result)).toBe(true);
+        });
+      }
+
+      it("throws for a `Date` carrying extra enumerable properties", () => {
+        const date = Object.assign(new Date(0), { extra: 1 });
+        expect(() => shallowFabricFromNativeObjectElseUndefined(date)).toThrow(
+          "Not representable as a `FabricValue`: `Date` with extra " +
+            "enumerable properties",
+        );
+      });
+    });
+
+    describe("given a value with nothing to mint", () => {
+      const mints = new Set(MINTED.map(([label]) => label));
+      for (const [label, value] of LAYER_CORPUS) {
+        if (mints.has(label)) continue;
+        it(`returns \`undefined\` for ${label}`, () => {
+          expect(shallowFabricFromNativeObjectElseUndefined(value)).toBe(
+            undefined,
+          );
+        });
+      }
+    });
+
+    it("leaves a `Map` and a `Set` to the vet, which refuses them", () => {
+      // The `undefined` is not a verdict on the value: it reports that there
+      // was nothing to mint, which is as true of a `Map` -- a
+      // `FabricNativeObject` whose fabric form has yet to be built -- as of a
+      // function. What protects a caller is the pair, so this pins the pair
+      // rather than either half. A `Map` that reached a walk would be rebuilt
+      // from its (empty) entries as a bare `{}`.
+
+      for (const value of [new Map(), new Set()]) {
+        expect(shallowFabricFromNativeObjectElseUndefined(value)).toBe(
+          undefined,
+        );
+        expect(() => assertValidFabricValueLayer(value)).toThrow(
+          "a `FabricNativeObject`, so conversion is what decides it",
+        );
+      }
+    });
+  });
+
   describe("shallowFabricFromNativeValue()", () => {
     describe("passes through primitives", () => {
       it("passes through booleans", () => {
@@ -713,6 +756,7 @@ describe("native-conversion", () => {
       it("leaves an `Error` `cause` unconverted (shallow)", () => {
         // Shallow conversion wraps the top-level `Error` but does not recurse
         // into its `cause`, which therefore stays a raw `Error`.
+
         const cause = new Error("root cause");
         const error = new Error("wrapper", { cause });
         const result = shallowFabricFromNativeValue(error) as FabricError;
@@ -745,6 +789,7 @@ describe("native-conversion", () => {
       // the pass-through is a `switch` with one `case` per class and a
       // throwing `default`, so a class missing a `case` is invisible to any
       // test that only ever hands it a different one.
+
       const PRIMITIVES: readonly FabricPrimitive[] = [
         new FabricBytes(new Uint8Array([1, 2, 3])),
         new FabricEpochDay(1n),
@@ -774,11 +819,12 @@ describe("native-conversion", () => {
           expect(shallowFabricFromNativeValue(value)).toBe(value);
         });
 
-        // `freeze: false` skips the deep-frozen identity shortcut in
-        // `fabricFromNativeValue()`, which is what the sandbox boundary
-        // passes for an action result, so it reaches the `switch` that
-        // `shallowFabricFromNativeValue()` shares.
         it(`carries a \`${name}\` nested in an object, unfrozen`, () => {
+          // `freeze: false` skips the deep-frozen identity shortcut in
+          // `fabricFromNativeValue()`, which is what the sandbox boundary
+          // passes for an action result, so it reaches the `switch` that
+          // `shallowFabricFromNativeValue()` shares.
+
           const result = fabricFromNativeValue({ v: value }, false) as {
             v: unknown;
           };
@@ -795,10 +841,11 @@ describe("native-conversion", () => {
       });
     });
 
-    // "Death before confusion": a native type with a dedicated fabric
-    // representation carries no room for extra state, so silently dropping it
-    // would lose data on a round trip.
     describe("rejects extra enumerable properties", () => {
+      // "Death before confusion": a native type with a dedicated fabric
+      // representation carries no room for extra state, so silently dropping it
+      // would lose data on a round trip.
+
       it("throws for a `Date` carrying an extra property", () => {
         const date = new Date(0) as Date & { extra?: number };
         date.extra = 1;
@@ -834,10 +881,11 @@ describe("native-conversion", () => {
       });
     });
 
-    // A value that has no fabric representation of its own does not acquire
-    // one by naming the JSON protocol's method, and a record that happens to
-    // carry that name is read as the record it is.
     describe("`toJSON()` is intentionally not supported", () => {
+      // A value that has no fabric representation of its own does not acquire
+      // one by naming the JSON protocol's method, and a record that happens to
+      // carry that name is read as the record it is.
+
       it("throws for a function carrying `toJSON()`", () => {
         const fn = Object.assign(() => {}, {
           toJSON: () => "converted function",
@@ -861,6 +909,7 @@ describe("native-conversion", () => {
       it("returns a plain object's `toJSON` as an ordinary member", () => {
         // Shallow conversion validates the container, not its members, so the
         // method comes through as the value it is rather than being called.
+
         const toJSON = () => ({ exposed: true });
         expect(shallowFabricFromNativeValue({ secret: "internal", toJSON }))
           .toEqual({ secret: "internal", toJSON });
@@ -869,6 +918,7 @@ describe("native-conversion", () => {
       it("throws for an array carrying `toJSON()`", () => {
         // An array is handled by the array rule whatever it carries, and that
         // rule rejects the named own property `toJSON` is.
+
         const arr = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
         arr.toJSON = () => "custom array";
         expect(() => shallowFabricFromNativeValue(arr)).toThrow(
@@ -877,14 +927,13 @@ describe("native-conversion", () => {
       });
     });
 
-    // `-0`, `NaN`, `+Infinity`, and `-Infinity` are valid `FabricValue`
-    // members and pass through unchanged.
     describe("property names this runtime reserves", () => {
       // A restriction of this runtime rather than of the data model: such an
       // object is perfectly inert, and its keys are strings like any other.
       // `__proto__` is refused because the assignment that rebuilds records
       // cannot create it, `constructor` because other boundaries here already
       // drop or refuse it.
+
       it("throws for `__proto__`, naming it as the cause", () => {
         expect(() => fabricFromNativeValue({ ["__proto__"]: 1, a: 2 })).toThrow(
           "Not representable as a `FabricValue`: object with a property name " +
@@ -896,6 +945,7 @@ describe("native-conversion", () => {
         // Type dispatch reads the constructor from the prototype, so an own
         // `constructor` property does not decide the value's type. It reaches
         // the object rule, which names it as the reserved property it is.
+
         expect(() => fabricFromNativeValue({ ["constructor"]: "c" })).toThrow(
           "Not representable as a `FabricValue`: object with a property name " +
             "this runtime reserves (`constructor`)",
@@ -915,6 +965,9 @@ describe("native-conversion", () => {
     });
 
     describe("special numbers", () => {
+      // `-0`, `NaN`, `+Infinity`, and `-Infinity` are valid `FabricValue`
+      // members and pass through unchanged.
+
       it("passes `NaN` through", () => {
         expect(Number.isNaN(shallowFabricFromNativeValue(NaN))).toBe(true);
       });
@@ -929,9 +982,10 @@ describe("native-conversion", () => {
       });
     });
 
-    // Registry-interned symbols (`Symbol.for(key)`) are `FabricValue`s and
-    // pass through; unique symbols (`Symbol(desc)`) are rejected.
     describe("interned symbols", () => {
+      // Registry-interned symbols (`Symbol.for(key)`) are `FabricValue`s and
+      // pass through; unique symbols (`Symbol(desc)`) are rejected.
+
       it("passes an interned symbol through", () => {
         const sym = Symbol.for("k");
         // Interned symbols are primitives -- pass-through, no wrapping.
@@ -1098,6 +1152,7 @@ describe("native-conversion", () => {
         // of what a value says as data -- it would not survive the first
         // encoding boundary. Rejecting says so, where accepting would mean
         // carrying a distinction that quietly stops existing.
+
         const obj = Object.create(null) as Record<string, unknown>;
         obj.a = 1;
         expect(() => shallowFabricFromNativeValue(obj, true)).toThrow(
@@ -1166,6 +1221,7 @@ describe("native-conversion", () => {
       it("returns an already-converted `FabricError` as-is", () => {
         // `fabricFromNativeValue(Error)` produces a deep-frozen `FabricError`;
         // feeding that back in is an identity passthrough.
+
         const fe = fabricFromNativeValue(new Error("test"));
         expect(fabricFromNativeValue(fe)).toBe(fe);
       });
@@ -1376,9 +1432,10 @@ describe("native-conversion", () => {
       });
     });
 
-    // Cause and custom properties must be recursively converted to
-    // `FabricValue` before wrapping in `FabricError`.
     describe("converts `Error` internals (cause and custom properties)", () => {
+      // Cause and custom properties must be recursively converted to
+      // `FabricValue` before wrapping in `FabricError`.
+
       it("converts `Error` with raw `Error` cause into nested `FabricError`", () => {
         const inner = new Error("inner");
         const outer = new Error("outer", { cause: inner });
@@ -1525,6 +1582,7 @@ describe("native-conversion", () => {
       it("throws for a plain object whose `toJSON` is its only member", () => {
         // The deep conversion reaches the member and refuses it for what it
         // is, rather than calling it.
+
         expect(() => fabricFromNativeValue({ toJSON: () => ({ x: 1 }) }))
           .toThrow("Not representable as a `FabricValue`: function");
       });
@@ -1612,6 +1670,7 @@ describe("native-conversion", () => {
       it("throws for an array with a getter-backed index", () => {
         // An accessor is live code, not a value: converting would silently
         // flatten it to its momentary answer. Reject it loudly instead.
+
         const arr = [1, 2, 3];
         Object.defineProperty(arr, 1, {
           get: () => 22,
@@ -1644,6 +1703,7 @@ describe("native-conversion", () => {
       it("throws even for an already-frozen array with named properties", () => {
         // Such an array is not a valid `FabricValue`, so it must not slip
         // through the deep-frozen identity short-circuit.
+
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
         arr.foo = "bar";
         Object.freeze(arr);
@@ -1663,6 +1723,7 @@ describe("native-conversion", () => {
       it("throws for an object with a symbol-keyed property", () => {
         // Previously such a property was silently dropped, which is exactly the
         // confusion the array rule already refuses to allow.
+
         const obj = { a: 1 } as Record<string | symbol, unknown>;
         obj[Symbol("s")] = 2;
         expect(() => fabricFromNativeValue(obj)).toThrow(
@@ -1699,6 +1760,7 @@ describe("native-conversion", () => {
         // it to array handling even though `Array.isArray()` is `false` for it.
         // It has no fabric representation as either an array or an object, so
         // it must be rejected rather than quietly converted.
+
         const fake = Object.create(Array.prototype) as Record<string, unknown>;
         fake[0] = "a";
         fake.length = 1;
@@ -1740,6 +1802,7 @@ describe("native-conversion", () => {
         // through unconverted, prototype and all: iteration yields content
         // that the indices never show, and freezing the instance does nothing
         // about the prototype that does it.
+
         class Smuggler extends Array {
           override *[Symbol.iterator](): Generator<unknown> {
             yield "smuggled";
@@ -1767,6 +1830,7 @@ describe("native-conversion", () => {
       it("throws for a subclass instance carrying `toJSON()`", () => {
         // No property an array carries can route it away from the array rule,
         // on the prototype or as an own key.
+
         class ProtoJson extends Array<unknown> {
           toJSON(): unknown[] {
             return [7, 8];
@@ -1787,9 +1851,10 @@ describe("native-conversion", () => {
       });
     });
 
-    // `-0`, `NaN`, `+Infinity`, and `-Infinity` are valid `FabricValue`
-    // members and pass through unchanged.
     describe("special numbers", () => {
+      // `-0`, `NaN`, `+Infinity`, and `-Infinity` are valid `FabricValue`
+      // members and pass through unchanged.
+
       it("passes special numbers through", () => {
         expect(Number.isNaN(fabricFromNativeValue(NaN))).toBe(true);
         expect(fabricFromNativeValue(Infinity)).toBe(Infinity);
@@ -1823,9 +1888,10 @@ describe("native-conversion", () => {
       });
     });
 
-    // Registry-interned symbols (`Symbol.for(key)`) are `FabricValue`s and
-    // pass through; unique symbols (`Symbol(desc)`) are rejected.
     describe("interned symbols", () => {
+      // Registry-interned symbols (`Symbol.for(key)`) are `FabricValue`s and
+      // pass through; unique symbols (`Symbol(desc)`) are rejected.
+
       it("passes an interned symbol through", () => {
         const sym = Symbol.for("top-level");
         expect(fabricFromNativeValue(sym)).toBe(sym);
@@ -1858,6 +1924,7 @@ describe("native-conversion", () => {
       it("round-trips interned symbols with stable identity", () => {
         // Same registry key in any realm yields the same symbol instance
         // -- so the result equals the constructed sentinel by identity.
+
         const out = fabricFromNativeValue(Symbol.for("identity-check"));
         expect(Object.is(out, Symbol.for("identity-check"))).toBe(true);
       });
@@ -1867,6 +1934,7 @@ describe("native-conversion", () => {
         // regardless of the `freeze` flag -- the deep-frozen fast-path
         // (`isValidDeepFrozenFabricValue`) must not admit it and short-circuit
         // the validation that `freeze=false` performs (see below).
+
         expect(() => fabricFromNativeValue(Symbol("bad"))).toThrow(
           "Not representable as a `FabricValue`: unique (uninterned) symbol",
         );
@@ -2340,6 +2408,7 @@ describe("native-conversion", () => {
     it("preserves trailing holes, so `length` survives", () => {
       // Assigning element-by-element without setting `length` first would
       // truncate these away.
+
       const arr: unknown[] = [];
       arr[0] = 1;
       arr.length = 10;
@@ -2355,6 +2424,7 @@ describe("native-conversion", () => {
       // engine still scans the index range to find which keys exist, so this
       // is not O(present elements); what it pins is that the scan is not done
       // here, one property access at a time.
+
       const target: unknown[] = [];
       target.length = 1_000_000;
       target[5] = "x";
@@ -2382,6 +2452,7 @@ describe("native-conversion", () => {
       // A `Proxy` chooses its own key order, so index keys need not come first
       // the way they do on an ordinary array. Stopping at the first non-index
       // key would therefore silently drop elements -- here, all of them.
+
       const target = [10, 20];
       const reordered = new Proxy(target, {
         ownKeys: () => ["foo", "0", "1", "length"],

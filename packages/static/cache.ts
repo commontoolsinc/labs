@@ -30,14 +30,14 @@ export interface CachedAsset {
  * and elsewhere it is fetched over the network.
  */
 export class StaticCache {
-  private cache: Map<string, Promise<CachedAsset>> = new Map();
-  private baseUrl: URL;
+  #cache: Map<string, Promise<CachedAsset>> = new Map();
+  #baseUrl: URL;
 
   /**
    * Constructs an instance which resolves asset names against `baseUrl`.
    */
   constructor(baseUrl: URL) {
-    this.baseUrl = baseUrl;
+    this.#baseUrl = baseUrl;
   }
 
   /**
@@ -66,12 +66,12 @@ export class StaticCache {
    * it against.
    */
   getWithETag(assetName: string): Promise<CachedAsset> {
-    const currentValue = this.cache.get(assetName);
+    const currentValue = this.#cache.get(assetName);
     if (currentValue) {
       return currentValue;
     }
-    const promise = this.requestWithETag(assetName);
-    this.cache.set(assetName, promise);
+    const promise = this.#requestWithETag(assetName);
+    this.#cache.set(assetName, promise);
     return promise;
   }
 
@@ -91,7 +91,7 @@ export class StaticCache {
       throw new Error(`No static asset "${assetName}" found.`);
     }
 
-    const url = new URL(this.baseUrl);
+    const url = new URL(this.#baseUrl);
     url.pathname = join(url.pathname, assetName);
     return url;
   }
@@ -100,7 +100,7 @@ export class StaticCache {
    * Helper for `getWithETag()`, which reads an asset and generates its ETag,
    * off the file system under Deno and over the network elsewhere.
    */
-  private async requestWithETag(assetName: string): Promise<CachedAsset> {
+  async #requestWithETag(assetName: string): Promise<CachedAsset> {
     const url = this.getUrl(assetName);
     let buffer: Uint8Array;
 

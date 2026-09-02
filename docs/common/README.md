@@ -25,6 +25,7 @@ on the Common Fabric runtime.
 | Task | Read |
 |------|------|
 | Build a pattern | [ai/pattern-development-guide.md](ai/pattern-development-guide.md) |
+| Build an iframe-first pattern | [plain DOM](ai/iframe-pattern-guide.md), [React](ai/iframe-pattern-react-guide.md), [D3](ai/iframe-pattern-d3-guide.md), [Phaser](ai/iframe-pattern-phaser-guide.md), or [Babylon.js](ai/iframe-pattern-babylon-guide.md) |
 | Write tests | [ai/pattern-testing-guide.md](ai/pattern-testing-guide.md) (mechanics: [workflows/pattern-testing.md](workflows/pattern-testing.md)) |
 | Review / critique a pattern | [ai/pattern-critique-guide.md](ai/pattern-critique-guide.md) |
 | Manual / runtime testing | [ai/manual-testing-guide.md](ai/manual-testing-guide.md) |
@@ -59,6 +60,7 @@ on the Common Fabric runtime.
 - [patterns/navigation.md](patterns/navigation.md) — navigating to detail views
 - [patterns/composition.md](patterns/composition.md) — composing patterns into reactive graphs
 - [patterns/llm-dialog.md](patterns/llm-dialog.md) — `llmDialog` tool catalog facts: built-in tool injection, reserved built-in tool names, mutation tools as handlers
+- [patterns/held-item-interfaces.md](patterns/held-item-interfaces.md) — shaping what a pattern demands of the pieces it holds, across generations
 - [patterns/primitives.md](patterns/primitives.md) — the composition contract
   for reusable pattern logic and state
 - [patterns/multi-user-patterns.md](patterns/multi-user-patterns.md) — shared spaces, per-user state, collaboration
@@ -89,6 +91,8 @@ on the Common Fabric runtime.
 - [workflows/development.md](workflows/development.md) — `cf` CLI loop: check, deploy, setsrc, inspect, link
 - [workflows/pattern-testing.md](workflows/pattern-testing.md) — writing and running pattern tests
 - [workflows/handlers-cli-testing.md](workflows/handlers-cli-testing.md) — invoking mounted callables from the CLI
+- [workflows/reading-and-writing.md](workflows/reading-and-writing.md) — the tour of reading a piece's cells and writing them: the two cells one piece has and the flag that chooses between them, the shaped read, and why a write recomputes nothing until `cf piece step` observes the piece
+- [workflows/bulk-operations.md](workflows/bulk-operations.md) — the tour of surveying, repairing and retargeting a collection of deployed pieces, walked act by act against the demo that runs it; the contract these operations hold is [features/piece-bulk-operations.md](../features/piece-bulk-operations.md)
 
 ### verbs/ — driving a deployed piece through `cf`
 

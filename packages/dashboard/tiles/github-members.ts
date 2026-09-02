@@ -12,7 +12,6 @@ import {
   friendlyError,
   github,
   multiSparkline,
-  SPARK_FADE,
   thin,
 } from "../lib.ts";
 import { themedChartSeries } from "../theme.ts";
@@ -191,15 +190,15 @@ export function createGithubMembers(): Tile {
             label: String(collaborators),
           },
         ],
-        { fadeFrom: SPARK_FADE.good },
+        { fade: true },
       );
       const swatch = (color: string) =>
         `<span class="swatch" style="background:${escapeHtml(color)}"></span>`;
       const subline = chart
-        ? `<p class="sub">${swatch(membersSeries.color)} members · ${
+        ? `<p class="sub" title="members · collaborators">${swatch(membersSeries.color)} members · ${
           swatch(collaboratorsSeries.color)
         } collaborators</p>`
-        : `<p class="sub">${swatch(membersSeries.color)} members ${members} · ${
+        : `<p class="sub" title="members ${members} · collaborators ${collaborators}">${swatch(membersSeries.color)} members ${members} · ${
           swatch(collaboratorsSeries.color)
         } collaborators ${collaborators}</p>`;
 

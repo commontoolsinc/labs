@@ -42,6 +42,20 @@ A diff shows its whole-diff change totals at the top right corner of its first
 line: the added line count and the removed line count, colored like additions
 and removals.
 
+Press `i` in a diff to open its file and commit list. The list starts in browse
+mode. Press `/` to filter it by file name, commit hash, or commit subject. The
+usual `f`, `F`, `E`, `T`, and `M` file-visibility keys remain active while the
+list is in browse mode, and Space pages through the entries. Its summary reports
+added and removed lines for the complete diff and for the files that are
+currently shown.
+
+Press `D` in that list to cycle its line-count policy. Normal counts include
+every added and removed line. The second policy removes pairs within one file
+whose text differs only in whitespace. The third also removes lines containing
+only whitespace or comments. It compares the remaining lines without comments or
+whitespace across the complete diff, so code moved between files does not count
+as an addition and a removal.
+
 Markdown files can switch between the source and a rendered terminal view with
 `V`. The rendered view formats headings, emphasis, links, quotes, lists, task
 markers, tables, rules, and code. The same view is available for Markdown files
@@ -70,47 +84,83 @@ generate-markdown | cf view --language markdown --rendered
 generate-bytes | cf view --language binary
 ```
 
-## Piece references
+## Cell references
 
-Commands that take a piece accept two textual reference forms:
+A reference names a cell, and one grammar covers every part of the name:
 
-- The canonical fabric reference: the LLM-friendly link form,
-  `/[@did:.../]of:fid1:<id>[@scope][/path]`. This is the one reference syntax of
-  the fabric — the same string names the same cell in patterns, in the shell,
-  and here. A path embedded in a canonical `--piece` reference prefixes the
-  command's positional path argument. A space embedded in it names the target
-  space: it supplies the space when `--space` is absent, and when both are given
-  they must agree — a mismatch is refused rather than resolved, at parse time
-  against a `--space` DID and once the session opens against a `--space` name.
-  An address printed by one command therefore composes into the next with no
-  flag beside it, whatever space the reader has configured.
-- The CLI's bare form: `pieceId[@scope]`, `pieceId[@scope]/path` at link
-  endpoints, and slugs. This is a convenience alias for interactive use.
+```
+/[@<space>/]<piece>[@<scope>][/<path>]
+```
 
-New reference-syntax capabilities land in the canonical form first; the alias
-does not grow a capability the canonical form lacks.
+`<space>` is a space name or a DID; `<piece>` is a slug or a handle
+(`of:fid1:...`). `did:key:...` and `fid1:...` both say what they are, so neither
+can be mistaken for a name and one token holds whichever spelling the caller
+has. `/@my-space/tracker/items/0` and `/@did:key:z6Mk.../of:fid1:abc.../items/0`
+are the same shape.
 
-On `cf get`, `cf set`, and `cf call`, a canonical reference can sit in the first
-positional instead of riding `--piece`: an address begins with `/` and a
-relative path never does, so the two positions cannot collide. The bare and slug
-spellings stay on `--piece`, where no path competes for the position. Naming the
-target twice — `--piece` beside a positional address — is refused rather than
-resolved.
+This is the one reference syntax of the fabric — the same structure names the
+same cell in patterns, in the shell, and here. What differs between those
+readers is what each can resolve, not what the grammar admits: a pattern
+resolves a link from the string alone, so it needs the self-identifying
+spellings; `cf` opens a session before it reads anything, so it resolves a name
+and a slug as well.
 
-Those three commands are also mounted at top level as `cf get`, `cf set`, and
-`cf call`: reading and writing cells is not a piece-management concern, and the
-spelling says so. Each pair is one definition mounted twice, so the two
-spellings take the same flags, behave identically, and complete identically. The
-piece-mounted spellings are deprecated: each invocation prints a stderr notice
-naming the top-level spelling and the literal date the old spelling stops
-working (`PIECE_DATA_SPELLING_END_DATE` in `commands/piece.ts`, the one source
-of that date). Until then both keep working, and the notice never touches stdout
-— `get` and `call` reserve it for machine output.
+A path embedded in a reference prefixes the command's positional path argument.
+A space embedded in it names the target space: it supplies the space when
+`--space` is absent, and when both are given they must agree — a mismatch is
+refused rather than resolved, at parse time when the two are written the same
+way and once the session opens when only a derivation can compare them. An
+address printed by one command therefore composes into the next with no flag
+beside it, whatever space the reader has configured.
 
-A canonical reference may also end in `#argument`, which selects the piece's
-arguments cell the way `--input` does. Only commands that take `--input` accept
-it; `#` is reserved for the suffix, so a path key containing `#` needs the
-positional path spelling.
+Beside the reference, the CLI's bare form — `pieceId[@scope]`,
+`pieceId[@scope]/path` at link endpoints, and slugs — is a convenience alias for
+interactive use. New reference-syntax capabilities land in the reference first;
+the alias does not grow a capability the reference lacks.
+
+### Writing the target
+
+On `cf get`, `cf set`, and `cf call`, the reference goes in the first
+positional, which is the spelling to reach for: a reference begins with `/` and
+a relative path never does, so the two positions cannot collide.
+
+```
+cf get /tracker items/0/title
+cf get /@my-space/tracker/items/0 title
+cf call /tracker addItem '{"title":"Milk"}'
+```
+
+`--cell` takes the same word where a flag suits better, and is where the bare
+and slug spellings go — there no path competes for the position. `--piece` is a
+deprecated name for `--cell`: one option under two names, so the two can never
+disagree, and it goes on working. It carries no expiration date — write new
+commands against `--cell`, but nothing is scheduled to stop taking `--piece`.
+Naming the target twice — the flag beside a positional reference — is refused
+rather than resolved.
+
+`--url` is a convenience for pasting a URL out of a browser. It is not a
+spelling of its own: the host becomes the `--api-url` and the rest becomes a
+reference, and both are read on exactly as if they had been written, so
+`--url https://cf.dev/my-space/tracker/items` means
+`--api-url https://cf.dev /@my-space/tracker/items`.
+
+Those three are top-level commands: reading and writing cells is not a
+piece-management concern, and the spelling says so. They were once mounted under
+`cf piece` as well; those spellings are removed
+(docs/plans/cli-surface-shape.md, step 6b).
+
+A reference may also end in `#argument`, which selects the piece's arguments
+cell the way `--input` does. Only commands that take `--input` accept it; `#` is
+reserved for the suffix, so a path key containing `#` needs the positional path
+spelling.
+
+`cf piece apply` replaces a piece's whole input rather than one path within it.
+It validates the document against the pattern's `argumentSchema` and re-executes
+the pattern with it, so a field the schema requires and the document omits is
+refused before anything is written. `cf set` writes at one path and validates
+only that path, which makes the two different operations on the same cell: reach
+for `apply` when the new input is a whole document, and for `set` when it is one
+value in a document that is otherwise correct.
 
 ## Piece discovery
 
@@ -119,9 +169,10 @@ the default pattern and starts each registered piece to obtain its name and
 pattern metadata. It does not enumerate every stored piece root.
 
 `cf piece inspect --pattern-identity` prints one piece's source pin — pattern
-identity, export symbol, current source revision when the piece keeps a log, and
-whether the identity's source is retained in the space — without running the
-piece and without pulling its input, result, or link graph.
+identity, export symbol, current source revision when the piece keeps a log, the
+origin it follows when it follows one, and whether the identity's source is
+retained in the space — without running the piece and without pulling its input,
+result, or link graph.
 
 `cf piece survey` reads a holder's own collection — the enumeration `piece ls`
 cannot provide — one cheap identity read per member, the holder last, and emits
@@ -130,11 +181,11 @@ collection survey the registry is its cross-check: a registered piece on an
 in-scope identity that the collection lacks makes the survey exit nonzero,
 naming the piece. A `--list` survey reads exactly the pieces named and makes no
 containment claim; each entry takes either reference form, and a canonical
-entry's embedded space composes the way it does on `--piece` — supplying the
+entry's embedded space composes the way it does on `--cell` — supplying the
 space when `--space` is absent, agreeing with it otherwise. Read-only. To watch
 the surface work rather than read about it, `integration/bulk-ops-demo.sh`
-narrates a board-sized survey and repair end to end against a running server,
-with the unbuilt write stages shown as pending acts.
+narrates the whole of it — survey, repair, retarget, and the reversal — end to
+end against a running server.
 
 `cf piece repair` runs a caller-supplied fixer — a TypeScript module whose
 default export is a pure transform from a piece's stored input document to the
@@ -143,6 +194,59 @@ by default, reporting the exact per-piece diff and writing nothing; under
 `--apply` it writes each row in its own transaction, and a plan from a dry run
 drives the apply row for row under its document-hash preconditions (`--plan`).
 The design is `docs/plans/piece-bulk-operations.md`, stage 2.
+
+`cf piece retarget` applies a survey plan's retarget rows: the plan is the whole
+input — it names the pieces, the reference each must still be on, and the source
+each moves to — so the command carries no selection of its own. Serial in plan
+order, each row's precondition proved in the session that writes it, stopping at
+the first failure with every unattempted piece named. Dry by default. Sessions
+are grouped (`--group-size`), so a group boundary is a resume point: a piece
+already on its row's target reads as landed and is not rewritten, which makes
+re-invoking the same command the resume. Applying implies no verdict — the
+verification is `cf piece survey --diff`, a separate invocation by design.
+
+Each write detaches its piece from the origin it follows: what it runs
+afterwards is the source the plan names. That is recorded rather than gated —
+the survey reads the origin into the row's `expect.origin` and every report row
+for that piece carries it, on the dry run as much as under `--apply`, so what an
+apply would detach is in hand while it is still a decision. A row the run wrote
+carries a second value, the origin its write actually detached, which is the one
+to re-attach from: only the pattern reference is a precondition, so a piece
+whose origin alone moved since the survey is still written and detached off what
+it holds at the write. The report names both when they differ, and says so.
+Re-attaching afterwards is by hand.
+
+`--apply` refuses to start over a row whose prior source is not retained
+(`expect.retained: false`), because such a piece cannot be returned once it has
+moved — accepting that after the move is asking past the point of no return.
+Each one must be named on `--accept-unretained <piece>`: repeatable, per piece,
+with no blanket form, and an acceptance covering no unretained row of the plan
+is itself refused. The other way past is to supply the legacy source, so a
+reversal has something to restore. A dry run is not gated — it moves nothing,
+and reporting where such a piece stands is how an operator finds out there is
+something to decide. `cf piece rollback` holds acceptances to the same rule at
+the other moment, in the same spelling.
+
+`cf piece rollback` reverses a retarget from that same plan, needing no second
+artifact: each row's precondition becomes the reference the retarget produced,
+and its operation restores the retained revision carrying the reference the row
+recorded. It runs on the retarget's engine, so preconditions, stops, naming, and
+resume are the same. A piece whose prior source is not retained has no restore
+to run: such a row refuses the derivation by name, and the only way past is
+`--accept-unretained <piece>`, which leaves that one piece out and says so —
+repeatable, per piece, with no blanket form. The other way past is to supply the
+legacy source and retarget onto it.
+
+`cf piece restore` returns one piece to a revision of its own append-only source
+log, in front of the runtime's restore of a retained revision. Without
+`--revision` the run lists what the piece could be returned to — the id, when it
+was accepted, the reference it carries, whether its source is still retained,
+and whether the piece runs it now; with one but without `--apply` it is the
+preflight for that revision alone. A piece already standing where the restore
+would leave it — running the named revision's reference and following no origin
+— is reported as such and not rewritten. A piece that runs that reference while
+still following an origin is not there: restoring severs the origin, so the run
+writes and names the origin it would cut.
 
 `cf piece slugs` lists the space's slug index: every name assigned through
 `--slug` or `set-slug`, each resolved to the piece it names. The index records
@@ -192,14 +296,14 @@ standard error and continues searching that piece and the rest of the space.
 ## Piece CFC labels
 
 `cf piece get-label` returns the effective CFC label view for a result path.
-Pass `--input` to select the input cell — a `--piece` reference ending in
+Pass `--input` to select the input cell — a `--cell` reference ending in
 `#argument` selects it too. The paths in the returned view are relative to the
 selected path, and the view includes declared, derived, and link-carried labels.
 An unlabeled value returns JSON `null`.
 
 ```bash
-cf piece get-label --piece ID messages/0/body
-cf piece get-label --piece ID credentials --input
+cf piece get-label --cell ID messages/0/body
+cf piece get-label --cell ID credentials --input
 ```
 
 `cf piece set-label` reads a declared label update from standard input and
@@ -209,9 +313,9 @@ field selects `value`, `shape`, `enumerate`, or `followRef` consumption.
 
 ```bash
 echo '{"confidentiality":["team"]}' \
-  | cf piece set-label --piece ID notes
+  | cf piece set-label --cell ID notes
 echo '{"integrity":[],"observes":"value"}' \
-  | cf piece set-label --piece ID draft --input
+  | cf piece set-label --cell ID draft --input
 ```
 
 The command updates the label through the same checked write path used by
@@ -222,6 +326,26 @@ An absent path is also rejected rather than creating policy metadata without a
 value. An `observes` update is rejected when it would combine with an existing
 observation class instead of preserving the requested class. Omitting `observes`
 from a later update preserves an existing unambiguous class.
+
+## Invocation sessions
+
+An invocation id is the caller's own word for one call, and another caller can
+choose the same one. What separates them is the session it was chosen within:
+the pair decides which outcome a replay reads, and it is what keeps an outcome's
+address unguessable. `cf invocation-session` is where a session comes from.
+
+```bash
+export CF_INVOCATION_SESSION=$(cf invocation-session new)
+```
+
+`new` prints one id on stdout and nothing else, so a command substitution
+captures exactly it. Mint one per agent run and carry it in the environment
+rather than in `--invocation-session <id>`, which every `cf call` also accepts:
+an environment variable stays out of the process listing an argument shows up
+in. A call naming an invocation id with no session in scope is refused: an id is
+replayable only within the session it was chosen in, and a session minted on the
+spot would make the replay name a different invocation. A call naming neither
+gets both, minted for that one call.
 
 ## Output Conventions
 
@@ -239,7 +363,8 @@ from a later update preserves an existing unambiguous class.
   greps for `load-pattern-by-identity-source-miss`). Use `--log-level error` to
   drop warnings; the two compose.
 - `cf call` accepts its payload as an inline JSON argument, `-` for stdin, an
-  implicit pipe (no payload argument), or schema-derived flags after `--`.
+  implicit pipe (no payload argument), or schema-derived flags in the callable's
+  section — directly after the verb, before any `--`.
 - A `cf get` path that doesn't resolve prints a one-line error on stderr and
   exits 1 — it is a data error, not a usage error. A `piece link` that fails
   validation (a source/target piece or path that doesn't exist) reports the same
@@ -261,7 +386,7 @@ at, the vocabulary that position takes, and the declared name it is one edit
 from:
 
 ```console
-$ cf call --piece ID addItem '{"titel":"Milk","done":false}'
+$ cf call --cell ID addItem '{"titel":"Milk","done":false}'
 Invalid input for "addItem": "titel" at <event> is not a field this verb
 declares. Did you mean "title"? <event> takes "title", "done"
 ```
@@ -294,7 +419,7 @@ passed over — a payload need satisfy only one branch — and so is a position
 marked as a cell or a stream, which may hold a link rather than a value. A call
 reaching either goes out rather than being refused on a guess.
 
-The declared vocabulary is what `cf call --piece ID <verb> --help` prints, which
+The declared vocabulary is what `cf call --cell ID <verb> --help` prints, which
 is the list to check when a field comes back refused. It names the fields the
 verb's handler READS, which can be fewer than its TypeScript event type
 declares: a field the body never touches is one the runtime would have dropped,
@@ -317,17 +442,19 @@ vocabulary is learned once and written wherever you arrived from.
 smaller shape:
 
 ```bash
-cf get --piece ID items --filter '.status == "open"'
-cf get --piece ID items \
+cf get --cell ID items --filter '.status == "open"'
+cf get --cell ID items \
   --filter '.status == "open" and .score >= 10' \
   --select id,title,author.name
 ```
 
-`cf call` writes them before the callable name:
+`cf call` writes them **past the `--` that closes the callable's section**. The
+callable name opens that section, so everything between the two belongs to the
+verb, and a projection reaches the read step by stepping past the marker:
 
 ```bash
-cf call --piece ID --select topic.title addTopic '{"title":"Ship it"}'
-cf call --piece ID --filter '.status == "open"' listTopics
+cf call --cell ID addTopic '{"title":"Ship it"}' -- --select topic.title
+cf call --cell ID listTopics -- --filter '.status == "open"'
 ```
 
 `wish` writes them beside the target it resolves:
@@ -337,13 +464,30 @@ cf wish '#profile' -i ./claude.key --select name,avatar
 cf wish '#mentionable' -i ./claude.key -s my-space --filter '.status == "open"'
 ```
 
-`exec` writes them **before the mounted file**, because everything after the
-file belongs to the callable's own schema-derived interface:
+`exec` writes them the same way, past the marker that closes the section the
+mounted file opened:
 
 ```bash
-cf exec --select id,title /tmp/cf/…/result/search.tool --query milk
-cf exec --select 'entry@' /tmp/cf/…/result/add.handler --title Milk
+cf exec /tmp/cf/…/result/search.tool --query milk -- --select id,title
+cf exec /tmp/cf/…/result/add.handler --title Milk -- --select 'entry@'
 ```
+
+That is one rule rather than two. The read options come after the thing they
+shape on every command that has them, and the marker appears exactly where
+something else owns flags in between:
+
+```text
+cf get  <addr> [path]           --select …
+cf wish <target>                --select …
+cf call <target> <verb> <input> -- --select …
+cf exec <mountedFile> <input>   -- --select …
+```
+
+A projection written before the verb is refused rather than accepted quietly —
+it would name positions in a result nothing has identified yet — and so is one
+written inside the callable's section, where the verb's own fields are read.
+Each refusal names the section the flag belongs to and prints the line that
+works.
 
 A mounted callable run through its own shebang — `./search.tool --query milk` —
 cannot carry them, because the shim appends its arguments after the file. Reach
@@ -507,21 +651,21 @@ A projection marks a position to get that position's address rather than what is
 behind it. A JSON `--schema` marks with `"$link": true`:
 
 ```bash
-cf get --piece ID notes --schema '{"type":"array","items":{"$link":true}}'
+cf get --cell ID notes --schema '{"type":"array","items":{"$link":true}}'
 ```
 
 ```json
 [{ "$link": "/of:fid1:…" }]
 ```
 
-The address is one string in the fabric's canonical reference syntax —
-`/[@did/]<id>[@scope][/path]` — which is exactly what `cf call --piece` and
-`cf get --piece` accept, scheme included, so an address emitted by one command
-composes into the next unchanged, without being reassembled. The space rides in
-front as `@did:key:…` only when it differs from the space the command targeted,
-the scope follows the id as `@user`/`@session` only when it is not the default,
-and the path follows as ordinary segments. No schema is inlined and no
-write-redirect flag rides along.
+The address is one string in the fabric's reference syntax —
+`/[@space/]<piece>[@scope][/path]` — which is exactly what `cf call` and
+`cf get` take in the positional they read a target from, scheme included, so an
+address emitted by one command composes into the next unchanged, without being
+reassembled. The space rides in front as `@did:key:…` only when it differs from
+the space the command targeted, the scope follows the id as `@user`/`@session`
+only when it is not the default, and the path follows as ordinary segments. No
+schema is inlined and no write-redirect flag rides along.
 
 **Every address this CLI publishes is that one string** — a `$link` marker's
 value, a `--select` suffix's, a `--show-links` entry's, and the Invocation
@@ -552,7 +696,7 @@ A field list marks with a trailing `@`, which is that same marker at the
 position the segment names:
 
 ```bash
-cf get --piece ID --select 'topic@,topic.title'
+cf get --cell ID --select 'topic@,topic.title'
 ```
 
 ```json
@@ -571,7 +715,7 @@ array the answer is one address per element, so `notes@` is the concise spelling
 of `{"type":"array","items":{"$link":true}}`:
 
 ```bash
-cf get --piece ID --select 'notes@'
+cf get --cell ID --select 'notes@'
 ```
 
 ```json
@@ -589,7 +733,7 @@ A path that is only `@` names the position the read is already at, which no
 field path reaches because it sits above every field:
 
 ```bash
-cf get --piece ID topic --select '@,title'
+cf get --cell ID topic --select '@,title'
 ```
 
 ```json
@@ -626,7 +770,7 @@ acknowledges at its own handling's commit. On a piece with heavy derived state,
 a shaped call can therefore wait on unrelated recomputation the handler
 triggered elsewhere in the graph. When that wait matters, shape the collect
 instead: call plain (or `--no-wait`), then
-`cf get --piece <receipt id> --select …`.
+`cf get --cell <receipt id> --select …`.
 
 Three cases follow from that:
 
@@ -675,6 +819,21 @@ position renders its address and everything else reads as it always did.
 }
 ```
 
+A verb can also declare a result far narrower than the value behind it — a
+compact row over the piece it hands back, which is how an author keeps a create
+from expanding that piece's prose and every sibling it references. The circle a
+readback of that piece closes is then at a position the declaration does not
+name at all, and the declaration re-enters nowhere, so there is no address to
+render anywhere in it. The bound for that one is the declared shape itself:
+every object position the declaration closes is held to the fields it declares,
+and the row comes back. A position the declaration leaves open — an index
+signature beside its named members — still reads every key stored at it, because
+those keys are declared too.
+
+```json
+{ "topic": { "title": "Rotate signing key", "createdAt": 1756400000000 } }
+```
+
 Three things follow:
 
 - **It is the same `$link` a caller writes by hand.** The derived bound composes
@@ -688,8 +847,11 @@ Three things follow:
   whole — `--select item` — keeps the circle it selected and is bounded on the
   way out, but the bound is a cut into what was selected rather than a shape
   that replaces it: the closing position renders its address, and no position
-  the caller did not name comes back beside it. `--select item.parent` names the
-  closing position itself, and is answered with that one address alone.
+  the caller did not name comes back beside it. A position they asked for the
+  address of — `--select 'item@,item.parent'` — is still answered with that
+  address, which was their whole answer there and is not a field of what sits
+  behind it. `--select item.parent` names the closing position itself, and is
+  answered with that one address alone.
 - **Nothing else pays for it.** A result that renders is written out exactly as
   it was read, and the compiled pattern a declared result is matched through is
   loaded only where a readback cannot render. The bound itself is a cut into the
@@ -697,11 +859,11 @@ Three things follow:
   address walk a written `$link` is composed through as the only work beside it.
 
 Where nothing bounds the circle — the verb declares no result, the declaration
-it made leaves the closing position wide, or a `--filter` is in play — the call
-reports the position the circle closes at, states that the handling committed,
-and names the receipt to collect the outcome from. It exits nonzero: the outcome
-could not be rendered. The write still landed, which is the property the message
-leads with.
+it made describes no less than the value does, or a `--filter` is in play — the
+call reports the position the circle closes at, states that the handling
+committed, and names the receipt to collect the outcome from. It exits nonzero:
+the outcome could not be rendered. The write still landed, which is the property
+the message leads with.
 
 A `--filter` is the case with no bound to reach for rather than one that failed:
 the predicate hands back the elements themselves, which no longer say which
@@ -806,10 +968,15 @@ The supported output switches are:
   `--json`, the full survey result); its tally and findings go to stderr.
   `piece repair` reserves stdout the same way — the emitted plan, or under
   `--json` the full report in the canonical FabricValue encoding — with its
-  verdict tally and dry-run diff going to stderr. `piece render --watch --json`
-  writes only JSON render records to stdout; watch status goes to stderr.
-  Rendering a piece without a UI fails instead of returning an empty successful
-  JSON stream.
+  verdict tally and dry-run diff going to stderr. `piece retarget` and
+  `piece rollback` reserve stdout for their report in every mode — a line per
+  row as each settles, one canonical document under `--json`, or nothing beside
+  `--out` — and start the pieces they write, so the runtime's console goes to
+  stderr whether or not `--json` is on the line. `piece restore` reserves stdout
+  for its revision listing, or the whole outcome as JSON under `--json`.
+  `piece render --watch --json` writes only JSON render records to stdout; watch
+  status goes to stderr. Rendering a piece without a UI fails instead of
+  returning an empty successful JSON stream.
 - `cf get` and `cf wish` always return JSON. Their `--json` options are
   accepted, documented no-ops for callers that select JSON explicitly.
 - `cf check --json` compiles without evaluating and prints one object with a
@@ -836,11 +1003,25 @@ printf '%s' '{"query":"milk"}' | cf call ... search --json
 ```
 
 Bare `--json` reads stdin. An inline value immediately after it is parsed as the
-complete input. `cf call` also accepts a single positional JSON value. Put
-schema-derived piece-call flags after `--`, for example
-`cf call ... search -- --query milk`. Use `-- --json-file <path>` for a
-piece-call JSON file. These rules keep the options before the callable name for
-`cf call` itself and the arguments after the name for the invoked callable.
+complete input. `cf call` also accepts a single positional JSON value.
+Schema-derived piece-call flags are written in the section the callable name
+opened, for example `cf call ... search --query milk`, and `--json-file <path>`
+stands in the same place. These rules keep the options before the callable name
+for `cf call` itself and the arguments after the name for the invoked callable.
+
+`--` belongs to the commands that have a callable section to close. On `cf call`
+and `cf exec` it closes the section the callable name opened and opens the read
+step's, so the only words that follow it are `--select`, `--schema` and
+`--filter`; anything else there is refused with the line that puts it back in
+the section. `--help` is the exception, and deliberately: written past the
+marker it still reaches the callable and prints that verb's own page, since a
+caller wanting this command's page writes it with no verb at all.
+
+`cf get`, `cf set` and `cf wish` have no callable section, so a `--` written on
+one of those is refused rather than read: the parser sets every word after it
+aside, and the command would otherwise return a value the caller did not ask for
+and exit zero. The refusal names the words that were set aside and the line that
+works.
 
 ## Command visibility
 
@@ -849,6 +1030,26 @@ Every registered top-level command appears in `cf --help`. The direct
 launchers use them. Shell completion is the exception: it drops commands whose
 description opens with `Internal:`, because those are spawned by `cf fuse` and
 never typed at a prompt.
+
+## Evaluating patterns from another tool
+
+`cf init` writes a TypeScript environment an external tool can evaluate patterns
+in: the configuration and type declarations an editor, a scratch checkout, or a
+generated workspace needs to resolve `commonfabric` the way this repository
+does. It reaches no space — everything it does is to the current directory,
+where it writes three things:
+
+- `.cf-types/`, holding the declarations for `commonfabric`, `turndown`,
+  `cf-env` and the JSX runtime, one `index.d.ts` each.
+- `.cf-docs/`, holding a copy of the top-level pattern documentation.
+- `tsconfig.json` — **written whole, over whatever was already there.**
+
+The configuration is generated from the runtime's own compiler options and is
+not merged with the file it replaces, so a directory that is already a
+TypeScript project loses its `compilerOptions`, its `include`, and everything
+else it had, without a prompt and without a backup. A second run replaces the
+generated one in turn, discarding any edit made to it. Run it in a directory
+that exists for patterns, or in a copy.
 
 ## Installing `cf` on PATH
 
@@ -983,17 +1184,21 @@ source <(cf completion bash)
 Completion covers the command tree — subcommands, flags, and enumerated values
 such as `--log-level` — plus live values read from the fabric:
 
-| Slot                            | Completes to                                                  |
-| ------------------------------- | ------------------------------------------------------------- |
-| `--piece`                       | the space's slugs, then its piece ids                         |
-| `cf call <callable>`            | the piece's callables, annotated with the doc comment on each |
-| `cf get`/`cf set <path>`        | cell keys, one path segment at a time                         |
-| `cf get --select`/`--schema`    | field paths into the value, and their `@` form                |
-| `piece set-slug <slug>`         | the space's slugs                                             |
-| `piece link <source>/<target>`  | `pieceId/path/to/field` endpoints                             |
-| `--space`                       | space DIDs of local memory-v2 stores                          |
-| `--identity`, pattern arguments | `*.key` / `*.tsx` files, via the shell                        |
-| `--datafile`                    | any file, via the shell                                       |
+| Slot                                                         | Completes to                                                  |
+| ------------------------------------------------------------ | ------------------------------------------------------------- |
+| `--cell`                                                     | the space's slugs, then its piece ids                         |
+| `cf call <callable>`                                         | the piece's callables, annotated with the doc comment on each |
+| `cf get`/`cf set <path>`                                     | cell keys, one path segment at a time                         |
+| `cf get --select`/`--schema`                                 | field paths into the value, and their `@` form                |
+| `piece set-slug <slug>`                                      | the space's slugs                                             |
+| `piece link <source>/<target>`                               | `pieceId/path/to/field` endpoints                             |
+| `--space`, a positional space                                | space DIDs of local memory-v2 stores                          |
+| `inspect <entity>`, `inspect graph --root`                   | that space's entities, as `cf inspect entities` lists them    |
+| `cf wish <target>`, `cf wish --scope`                        | the vocabulary `cf wish --help` enumerates                    |
+| `--identity`, pattern arguments                              | `*.key` / `*.tsx` files, via the shell                        |
+| `--datafile`, `--out`, `--output`, `space clone --from`      | any file, via the shell                                       |
+| `--dir`, a source `--root`, `space clone --to`, a mountpoint | a directory, via the shell                                    |
+| `--remote`                                                   | what `--api-url` takes, in the `--remote=<url>` spelling      |
 
 A callable is annotated with what its author said it is for, falling back to its
 kind where they wrote nothing. A wrapper or deprecated verb — the two
@@ -1020,11 +1225,35 @@ projections shape a verb's result rather than the piece's root, and are not
 completed from it; `cf wish`'s resolution writes to the space, and a Tab must
 not.
 
+An option name can mean two things on two commands, so the ones that do are
+completed per command rather than by name. `--root` is a source directory on the
+commands that compile one and an entity on `cf inspect graph`; `--to` is a clone
+directory on `cf space clone` and a sequence number on `cf inspect diff`;
+`--from` and `--scope` divide the same way. Where the value is a sequence number
+the slot offers nothing, which is the honest answer for a word no set can name —
+offering the wrong set is worse than offering none.
+
+A positional divides the same way. Every `cf inspect` subcommand that opens a
+local space completes it from local stores, but `inspect pull` names a space on
+the remote and resolves it through the remote's own listing, so it offers
+nothing rather than a local DID the command would reject — listing the remote is
+a network round trip a keystroke must not start. The entity beside a space comes
+from the view that subcommand will read: its `--branch` and `--scope`, except on
+`inspect overlay`, which takes no `--scope` and reports every scope, so its
+candidates span every scope too.
+
+`--remote` says the same thing about every `inspect` slot at once. It is a
+global option there and it decides where the space comes from: the token is
+resolved through the remote's own listing and the snapshot it names is fetched,
+so a local DID, a local entity and a local `graph --root` are each a candidate
+that read rejects. Every one of those slots answers nothing while it is on the
+line, in either of its spellings — `--remote=<url>` or bare.
+
 An option's value completes the same whether it is written after a space or
 after `=`, and every spelling of a target reaches the same slots behind it: the
-bare id, the canonical reference (space-qualified or not, with an `@scope`
-suffix, an embedded path, or the `#argument` suffix), and a canonical reference
-written positionally in place of `--piece`.
+bare id, the reference (space-qualified or not, with an `@scope` suffix, an
+embedded path, or the `#argument` suffix), and a reference written positionally
+in place of the flag.
 
 Past a `stopEarly()` boundary — after `cf call`'s callable name, after
 `cf exec`'s mounted file — nothing is offered. The CLI's own flags are refused
@@ -1033,12 +1262,35 @@ do belong there are the callable's, and completing those is not yet built.
 
 Live values need an identity and an api-url. Both are read from the line being
 typed (`-i`, `-a`, `-u`) before falling back to `CF_IDENTITY`/`CF_API_URL`, so
-`cf call -s other-space --piece <TAB>` lists that space's pieces rather than the
+`cf call -s other-space --cell <TAB>` lists that space's pieces rather than the
 environment's. A space DID embedded in a reference supplies one the line did not
 name. When nothing is resolvable, or the server is unreachable, completion
 yields nothing — it never prints an error into the command line. Each request
 costs one CLI invocation plus one round trip, so value completion is as fast as
 the fabric it queries.
+
+A path-shaped slot — a cell path, a link endpoint, a projection path — completes
+one segment at a time and holds the cursor for the next separator. bash gets
+that by having the binding registered `complete -o nospace`, with a candidate
+that should end the word carrying its own space: `compopt` is the per-completion
+switch and it is bash 4 and later, while macOS ships bash 3.2, so the space is
+inverted rather than suppressed. zsh does it natively.
+
+The inversion is registered on the `cf` binding alone. A `deno` line can be
+handed back to whatever completed `deno` beforehand, and that completion's own
+spacing has to survive the handoff, so the `deno` binding keeps bash's default
+and `deno task cf` pays a keystroke per path segment where `cf` does not. On
+bash 4 and later `compopt` reaches that binding too and the cost disappears;
+under bash 3.2 there is no per-completion switch to reach it with, and taking
+the space away from every `deno test` and `deno run` completion is the larger
+loss.
+
+A candidate that opens with `#` — every `cf wish` target but the root — is
+inserted backslash-escaped in bash, as `\#profile`. Written bare it would be a
+comment, and the target would never reach the command; the escape is one word to
+the shell and the bare target to the CLI, and completing it again reads back the
+same target. zsh quotes what it inserts, so it arrives escaped there without the
+script doing anything.
 
 ### `deno task cf` and other invocations
 
@@ -1070,8 +1322,8 @@ earlier, so the line above survives.
 
 Cliffy ships a `CompletionsCommand`, but its dynamic hook passes the callback
 only `(command, parent)` — no cursor word and no access to the options already
-typed — so it cannot answer "the callables of the piece named by the `--piece`
-on this line". `lib/completion/` therefore emits its own scripts, which are
+typed — so it cannot answer "the callables of the piece named by the `--cell` on
+this line". `lib/completion/` therefore emits its own scripts, which are
 deliberately thin: they forward the raw command line and let
 `cf completion complete` decide everything. A sourced completion function lives
 in a user's shell profile and is not updated when the CLI is rebuilt, so it must
@@ -1084,15 +1336,34 @@ Two facts cannot be read off that tree and are carried explicitly in
 stripped from `argv` before Cliffy parses, in `lib/log-level.ts` and
 `lib/color-mode.ts`), and the provider table binding slots to live data.
 
+`deno task check-completion-slots` is what keeps the provider table from falling
+behind that tree. It walks the same commands and names every value-taking option
+and every positional with no provider, no enumerated set, and no recorded reason
+for having none — and the same subtraction the other way, so a provider entry
+matching no slot fails too. It asks per command rather than per option name,
+since a provider scoped to one command answers nothing on the others declaring
+the same flag. It cannot decide that a slot should complete; it requires that
+somebody decided.
+
 The tests divide the same way. `test/completion-*.test.ts` cover everything
 answerable without a fabric — line resolution, candidate shaping, and the
 degrade-to-empty path. Every provider that reads state — a fabric, the local
 memory-v2 stores, or the environment — is exercised by
-`integration/completion-over-the-cli.sh`, which deploys a fixture and asserts
-what a Tab offers at each slot of the chain. The remaining table entries hand
-the shell a constant `files` or `dirs` directive, which a fabric cannot change:
-those are asserted one by one, kind and glob, in
-`test/completion-providers.test.ts`.
+`integration/completion-over-the-cli.sh` at one of the slots it answers: it
+deploys a fixture and asserts what a Tab offers at each slot of the chain. Two
+slots sharing a provider are covered by that one step, since `piece survey`'s
+and `piece repair`'s `--list` take exactly what `--cell` takes. Which slots a
+provider is keyed to is the other question, and
+`deno task check-completion-slots` is what asks it, per command.
+
+The remaining table entries hand the shell a constant `files` or `dirs`
+directive, which a fabric cannot change: those are asserted one by one, kind and
+glob, in `test/completion-providers.test.ts`. The set that has to be asserted is
+derived there rather than remembered — every slot the tree declares is probed
+with no fabric configured, and one that hands the shell a directive no case pins
+fails the test. A case pins one command where the provider says it answers per
+command, and every command at once where it does not — the same distinction the
+slot gate draws, and a provider held to it by a test of its own.
 
 That split is not tidiness: a provider that reaches a fabric and comes back with
 the wrong set is invisible to a unit test and invisible at the prompt, because

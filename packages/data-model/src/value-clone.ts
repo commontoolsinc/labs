@@ -19,17 +19,30 @@ import { backtickQuote } from "@commonfabric/utils/markdown";
 import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
-import { FabricInstance, FabricValue } from "./interface.ts";
-import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
+import {
+  FabricInstance,
+  FabricValue,
+  MutableFabricArrayLayer,
+  MutableFabricContainerValueLayer,
+  MutableFabricPlainObjectLayer,
+} from "./interface.ts";
+import { VALUE_TAGS } from "./VALUE_TAGS.ts";
+import { tagFromNativeValue } from "./native-type-tags.ts";
 import { deepFreeze, isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
+import {
+  isFabricContainerValue,
+  isFabricPlainContainer,
+} from "./type-check.ts";
 import { toDebugKindString } from "./value-debug.ts";
 
 /** Options for `cloneIfNecessary()`. */
 export interface CloneOptions {
   /** Whether the result should be frozen. Default: `true`. */
   frozen?: boolean;
+
   /** Whether to clone deeply or shallowly. Default: `true`. */
   deep?: boolean;
+
   /**
    * Force a copy to be made.
    *
@@ -193,16 +206,16 @@ export function cloneHelper(
   switch (tagFromNativeValue(value)) {
     // Inherently immutable types -- frozenness is irrelevant, no cloning
     // needed regardless of force.
-    case NATIVE_TAGS.Primitive:
-    case NATIVE_TAGS.EpochNsec:
-    case NATIVE_TAGS.EpochDay:
-    case NATIVE_TAGS.FabricBytes:
-    case NATIVE_TAGS.FabricKeyPair:
-    case NATIVE_TAGS.FabricRegExp:
-    case NATIVE_TAGS.Hash:
+    case VALUE_TAGS.Primitive:
+    case VALUE_TAGS.EpochNsec:
+    case VALUE_TAGS.EpochDay:
+    case VALUE_TAGS.FabricBytes:
+    case VALUE_TAGS.FabricKeyPair:
+    case VALUE_TAGS.FabricRegExp:
+    case VALUE_TAGS.Hash:
       return value;
 
-    case NATIVE_TAGS.FabricInstance: {
+    case VALUE_TAGS.FabricInstance: {
       // Identity optimization: already-correct frozenness needs no clone.
       if (canReturnAsIs(value)) {
         return value;
@@ -213,7 +226,7 @@ export function cloneHelper(
       }
     }
 
-    case NATIVE_TAGS.Array: {
+    case VALUE_TAGS.Array: {
       if (canReturnAsIs(value)) return value;
       const arr = value as FabricValue[];
       if (deep) seen = trackForCircularity(arr, seen);
@@ -230,7 +243,7 @@ export function cloneHelper(
       return copy;
     }
 
-    case NATIVE_TAGS.Object: {
+    case VALUE_TAGS.Object: {
       if (canReturnAsIs(value)) return value;
       const obj = value as object;
       if (deep) seen = trackForCircularity(obj, seen);
@@ -373,15 +386,14 @@ export interface CloneForMutationOptions {
   force?: boolean;
 
   /**
-   * Whether to create missing intermediate containers along `path` as the
-   * helper descends. Default: `false` (throws `CloneForMutationError` with kind
-   * `"missing-segment"` on the first missing slot).
+   * Whether to create missing intermediate plain containers along `path` as
+   * the helper descends. Default: `false` (throws `CloneForMutationError` with
+   * kind `"missing-segment"` on the first missing slot).
    *
    * When `createMissing: true`, at each path step where the container at that
-   * key is absent, the helper allocates a fresh container and splices it into
-   * its parent before descending. The new container's shape (array vs. plain
-   * object) is chosen from the NEXT segment that will be used as a key against
-   * it:
+   * key is absent, the helper allocates a fresh plain container and splices it
+   * into its parent before descending. Its shape (array vs. plain object) is
+   * chosen from the NEXT segment that will be used as a key against it:
    *
    * - For intermediate path steps, the next segment is `path[i+1]`.
    * - For the final path step, the next segment is `nextKeyAfterPath` if
@@ -394,8 +406,8 @@ export interface CloneForMutationOptions {
   createMissing?: boolean;
 
   /**
-   * Hint for the container shape to create at the final path step when it's
-   * missing and `createMissing: true`. Should be the next key the caller
+   * Hint for the plain-container shape to create at the final path step when
+   * it's missing and `createMissing: true`. Should be the next key the caller
    * intends to access against the value-at-path. Ignored when `createMissing:
    * false` or when the final path step already exists. Default: `""` (selects a
    * plain object).
@@ -430,7 +442,7 @@ export interface CloneForMutationResult<T extends FabricValue> {
    * own children remain identity-shared with the input. For a
    * `FabricInstance` at `path`, `pathValue` is its `shallowClone(false)`.
    */
-  pathValue: FabricValue;
+  pathValue: MutableFabricContainerValueLayer;
 }
 
 /**
@@ -471,7 +483,7 @@ export interface CloneForMutationResult<T extends FabricValue> {
  *
  * By default (`createMissing: false`), missing segments throw a
  * `CloneForMutationError` with kind `"missing-segment"`. With
- * `createMissing: true`, the helper allocates fresh containers as it
+ * `createMissing: true`, the helper allocates fresh plain containers as it
  * descends through missing slots; see {@link CloneForMutationOptions} for
  * the shape-selection rules (in particular the `nextKeyAfterPath` hint).
  *
@@ -483,8 +495,7 @@ export interface CloneForMutationResult<T extends FabricValue> {
  * propagate as plain `Error`s.
  *
  * @param value - The input value tree.
- * @param path - Path to the container (or `FabricInstance`) to expose as
- *   mutable.
+ * @param path - Path to the container to expose as mutable.
  * @param options - See `CloneForMutationOptions`.
  */
 export function cloneForMutation<T extends FabricValue>(
@@ -496,12 +507,17 @@ export function cloneForMutation<T extends FabricValue>(
   const createMissing = options?.createMissing ?? false;
   const nextKeyAfterPath = options?.nextKeyAfterPath ?? "";
   // Used for every per-container shallow thaw along the spine, and for the
-  // final value-at-`path` thaw if it's a plain container or `FabricInstance`.
+  // final value-at-`path` thaw, whichever container arm that lands on. The
+  // `frozen: false` overload returns the input type, so a thawed container
+  // arrives here as the readonly view of itself; that is what the casts to
+  // `MutableFabricContainerValueLayer` below correct.
   const cloneOpts = { frozen: false as const, deep: false as const, force };
 
   // Empty-path fast path
   if (path.length === 0) {
-    if (!isMutableHandle(value)) {
+    // A non-container is a primitive or a `FabricPrimitive`, and neither has a
+    // mutable handle to hand back.
+    if (!isFabricContainerValue(value)) {
       throw new CloneForMutationError(
         "non-mutable-root",
         -1,
@@ -513,7 +529,10 @@ export function cloneForMutation<T extends FabricValue>(
       );
     }
     const newRoot = cloneIfNecessary(value, cloneOpts) as T;
-    return { value: newRoot, pathValue: newRoot };
+    return {
+      value: newRoot,
+      pathValue: newRoot as MutableFabricContainerValueLayer,
+    };
   }
 
   // Non-empty path: The root must be a plain container; descent through a
@@ -535,9 +554,8 @@ export function cloneForMutation<T extends FabricValue>(
   // `current` is always a plain container at the top of each loop iteration:
   // we enter with `newRoot` (a plain container by the root check above) and
   // before descending we always type-check the next container.
-  let current: Record<string, FabricValue> | FabricValue[] = newRoot as
-    | Record<string, FabricValue>
-    | FabricValue[];
+  let current: MutableFabricArrayLayer | MutableFabricPlainObjectLayer =
+    newRoot as MutableFabricArrayLayer | MutableFabricPlainObjectLayer;
 
   for (let i = 0; i < path.length; i++) {
     const key = path[i]!;
@@ -547,16 +565,16 @@ export function cloneForMutation<T extends FabricValue>(
     if (Object.hasOwn(current, key)) {
       next = (current as Record<string, FabricValue>)[key];
     } else if (createMissing) {
-      // Allocate a fresh container at this slot. Its shape comes from the
-      // next key that will be used against it: `path[i+1]` for
+      // Allocate a fresh plain container at this slot. Its shape comes from
+      // the next key that will be used against it: `path[i+1]` for
       // intermediate steps, `nextKeyAfterPath` for the final step.
       const nextKey = isLast ? nextKeyAfterPath : path[i + 1]!;
-      next = createMissingContainer(nextKey);
-      (current as Record<string, FabricValue>)[key] = next;
-      // `next` is freshly allocated and already mutable; skip the
+      const fresh = createMissingContainer(nextKey);
+      (current as Record<string, FabricValue>)[key] = fresh;
+      // `fresh` is freshly allocated and already mutable; skip the
       // shallow-thaw step below.
-      if (isLast) return { value: newRoot, pathValue: next };
-      current = next as Record<string, FabricValue> | FabricValue[];
+      if (isLast) return { value: newRoot, pathValue: fresh };
+      current = fresh;
       continue;
     } else {
       throw new CloneForMutationError(
@@ -571,7 +589,8 @@ export function cloneForMutation<T extends FabricValue>(
     }
 
     if (isLast) {
-      if (!isMutableHandle(next)) {
+      // A non-container leaf has no mutable handle; see the root check above.
+      if (!isFabricContainerValue(next)) {
         throw new CloneForMutationError(
           "non-mutable-leaf",
           i,
@@ -596,23 +615,26 @@ export function cloneForMutation<T extends FabricValue>(
       }
     }
 
-    // Shallow-thaw the next spine container. For plain containers and
-    // `FabricInstance`s this is a `cloneIfNecessary(_, { frozen: false,
-    // deep: false, force })` call; under `force: false` and an
-    // already-mutable input it short-circuits to identity.
+    // Shallow-thaw the next spine container. Whichever container arm it is,
+    // that is a `cloneIfNecessary(_, { frozen: false, deep: false, force })`
+    // call; under `force: false` and an already-mutable input it
+    // short-circuits to identity.
     const thawed = cloneIfNecessary(next, cloneOpts);
     if (thawed !== next) {
       (current as Record<string, FabricValue>)[key] = thawed;
     }
 
     if (isLast) {
-      return { value: newRoot, pathValue: thawed };
+      return {
+        value: newRoot,
+        pathValue: thawed as MutableFabricContainerValueLayer,
+      };
     }
 
     // Type assertion safe: we type-checked `next` is a plain container,
     // and shallow-thaw preserves prototype, so `thawed` is also a plain
     // container.
-    current = thawed as Record<string, FabricValue> | FabricValue[];
+    current = thawed as MutableFabricArrayLayer | MutableFabricPlainObjectLayer;
   }
 
   // Unreachable: the loop always returns on its final iteration when
@@ -622,25 +644,15 @@ export function cloneForMutation<T extends FabricValue>(
 }
 
 /**
- * Allocates a fresh, mutable container of the right shape for `nextKey`.
- * Array-index-shaped keys (per `isArrayIndexPropertyName`) and the
+ * Allocates a fresh, mutable plain container of the right shape for
+ * `nextKey`. Array-index-shaped keys (per `isArrayIndexPropertyName`) and the
  * JSON-Pointer append marker `"-"` produce an array; everything else
  * produces a plain object.
  */
 function createMissingContainer(
   nextKey: string,
-): Record<string, FabricValue> | FabricValue[] {
+): MutableFabricArrayLayer | MutableFabricPlainObjectLayer {
   return isArrayIndexPropertyName(nextKey) || nextKey === "-" ? [] : {};
-}
-
-/**
- * Returns `true` when `cloneForMutation` can produce a mutable handle for
- * the value at `path`. Plain containers and `FabricInstance`s qualify;
- * primitives and `FabricPrimitive`s (which are immutable by construction)
- * do not.
- */
-function isMutableHandle(value: unknown): boolean {
-  return isPlainContainer(value) || value instanceof FabricInstance;
 }
 
 /**
@@ -678,16 +690,19 @@ const hasChildAt = (
 
 /**
  * Returns a deep-frozen clone of `root` with `value` set at `path`, creating
- * missing intermediate containers as needed (their array-vs-object shape is
- * chosen from the next path segment, per `cloneForMutation`'s `createMissing`).
+ * missing intermediate plain containers as needed (their array-vs-object
+ * shape is chosen from the next path segment, per `cloneForMutation`'s
+ * `createMissing`).
  * Subtrees off the mutated spine are shared by identity. An empty `path`
  * replaces the whole value.
  *
- * Like `cloneForMutation`, descent through a *present* non-container along the
- * path -- a primitive, or a `FabricInstance`/`FabricPrimitive` -- throws a
- * `CloneForMutationError` rather than silently replacing that leaf with fresh
- * spine structure. Cyclic values are not yet supported (see
- * `cloneIfNecessary`).
+ * Like `cloneForMutation`, descent through a *present* value that is not a
+ * plain container -- a primitive, or a `FabricInstance`/`FabricPrimitive` --
+ * throws a `CloneForMutationError` rather than silently replacing that leaf
+ * with fresh spine structure. That reaches the *parent* of `path` as well: a
+ * `FabricInstance` there is a container but not one a key addresses, so it is
+ * refused rather than given an own property. Cyclic values are not yet
+ * supported (see `cloneIfNecessary`).
  */
 export function cloneWithValueAtPath(
   root: FabricValue,
@@ -703,6 +718,22 @@ export function cloneWithValueAtPath(
     path.slice(0, -1),
     { createMissing: true, nextKeyAfterPath: lastKey },
   );
+  if (!isFabricPlainContainer(pathValue)) {
+    // `cloneForMutation()` admits any container arm at the end of its path,
+    // and a `FabricInstance` is one. `lastKey` means nothing against an
+    // instance, whose state is private, so assigning through it would leave an
+    // own property that no reading of the instance as a `FabricValue` sees.
+    const pathIndex = path.length - 2;
+    throw new CloneForMutationError(
+      (pathIndex < 0) ? "non-container-root" : "non-container-descent",
+      pathIndex,
+      toDebugKindString(pathValue),
+      `\`cloneWithValueAtPath()\`: cannot set ${backtickQuote(lastKey)} in ${
+        backtickQuote(toDebugKindString(pathValue))
+      }`,
+    );
+  }
+
   // A canonical array-index `lastKey` indexes (and extends) an array
   // `pathValue` directly; otherwise it's a plain object key.
   (pathValue as Record<string, FabricValue>)[lastKey] = cloneIfNecessary(value);

@@ -1,10 +1,22 @@
 import type { JSONSchema } from "@commonfabric/api";
 import {
   type Cell,
+  cellWithScopedLinkRequiredsRelaxed,
   compileAndSavePattern,
   getPatternIdentityRef,
+  PatternManager,
+  type RuntimeProgram,
 } from "@commonfabric/runner";
-import { validateAgainstSchema } from "@commonfabric/runner/cfc";
+import {
+  type CfcAddress,
+  type CfcConfClause,
+  type CfcRefusalAttribution,
+  type CfcRefusalDetail,
+  type CfcRefusalGate,
+  describeSinkReleaseRefusal,
+  selectReferencedCfcSchemaDefs,
+  validateAgainstSchema,
+} from "@commonfabric/runner/cfc";
 import {
   createLLMFriendlyLink,
   FRAMEWORK_RESULT_KEYS,
@@ -12,10 +24,17 @@ import {
   type NormalizedFullLink,
   parseLLMFriendlyLink,
 } from "@commonfabric/runner/shared";
-import { PieceController } from "@commonfabric/piece/ops";
+import {
+  PieceController,
+  type PiecesController,
+} from "@commonfabric/piece/ops";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
-import { fabricRuntimeObservations } from "../fabric-observations.ts";
+import { keylessInstantiation } from "../fabric-instantiations.ts";
+import {
+  comparableEntityHash,
+  fabricRuntimeObservations,
+} from "../fabric-observations.ts";
 import { defineOwnEntry } from "../handle-table.ts";
 import {
   addressSealedPositions,
@@ -23,10 +42,51 @@ import {
   parseStructuredResultSchema,
   validateAndSanitizeStructuredResult,
 } from "../structured-result.ts";
+import type {
+  HarnessPatternIndexClientFactory,
+  PatternIndexEventType,
+  PatternIndexPublishRequest,
+} from "../pattern-index/client.ts";
+import { PatternIndexError } from "../pattern-index/client.ts";
+import {
+  classifyRenderedHtml,
+  PATTERN_DISCOVERABILITY_REASONS,
+  PATTERN_PUBLICATION_MESSAGES,
+  type PatternPublicationReason,
+  type PatternPublicationStatus,
+  renderPatternUiToHtml,
+  syntheticArgument,
+} from "../pattern-index/publish-render-gate.ts";
+import { openProbeRuntime } from "../pattern-index/probe-runtime.ts";
+import {
+  composedPatternIds,
+  materializeComposedPatterns,
+  PatternCompositionError,
+  patternIndexDependencies,
+  runtimeProgramFromIndex,
+} from "../pattern-index/composition.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
 export interface RunPatternToolInput {
   sourceText?: string;
+
+  /**
+   * What the pattern is for, in one line. Published with the pattern when the
+   * run contributes to the index; a run that gives none publishes nothing,
+   * since a pattern nobody can read the purpose of is a pattern nobody finds.
+   */
+  description?: string;
+
+  /** Tags the published pattern is found under. */
+  hashtags?: readonly string[];
+
+  /**
+   * A pattern published to the index, run in place of inline source. The
+   * program is fetched host-side and compiled down the same path; its source
+   * never reaches the model, on the success path or on any error path.
+   */
+  patternId?: string;
+
   inputs?: Record<string, unknown>;
   resultSchema?: JSONSchema;
 }
@@ -37,8 +97,19 @@ export const RUN_PATTERN_MAX_SOURCE_TEXT_BYTES = 256 * 1024;
 export interface RunPatternToolSuccessOutput {
   outputId: string;
   status: "ok";
+
   /** Canonical LLM-friendly link to the piece's result cell. */
   resultRef: string;
+
+  /**
+   * What the release measurement refused, on a run the enforcement ladder did
+   * not reject it on. Artifact-only, like the other fields the prompt loop
+   * strips: the answer went out, so the model has nothing to act on, while an
+   * operator staging the ladder has the population that raising it would
+   * start refusing.
+   */
+  releaseObservation?: RunPatternPolicyRefusal;
+
   /**
    * The compiled pattern's result schema — the shape of whatever
    * `resultRef` names. Known here for free, since compilation produced it,
@@ -50,6 +121,7 @@ export interface RunPatternToolSuccessOutput {
    * schema.
    */
   resultRefSchema: JSONSchema;
+
   /**
    * Piece id for the persisted tool-output artifact. A bare fabric
    * identifier the handle boundary never swaps, and the piece cell is the
@@ -57,36 +129,161 @@ export interface RunPatternToolSuccessOutput {
    * rendering; only `resultRef` reaches model context.
    */
   pieceId: string;
+
   /** Sanitized result value; present only when `resultSchema` was given. */
   value?: unknown;
+
   linkedStringCount?: number;
+
   /** Why `value` is absent despite a `resultSchema`: the raw result did not
    * match the schema. */
   valueError?: string;
+
   /**
    * Raw result value for the persisted tool-output artifact. Stripped from
    * the model-facing rendering by the prompt loop, so only the sanitized
    * `value` reaches model context.
    */
   rawValue?: unknown;
+
+  /**
+   * What became of this run's contribution to the pattern index, when the
+   * run had one to make. Absent when the run published nothing at all — it
+   * named a `patternId`, it gave no description, or the run has no index.
+   */
+  patternPublication?: RunPatternPublicationReport;
+
+  /**
+   * What the render gate's probe THREW, when one did — never what it
+   * rendered. Retained for the persisted artifact and stripped from the
+   * model-facing rendering, on the same terms as every other thrown message
+   * this tool withholds: a computation over data the model cannot read can
+   * carry that data in what it throws.
+   *
+   * **The artifact root is not a confidentiality boundary.** `bash` does not
+   * reserve it the way `read_file`, `write_file`, `edit_file` and
+   * `view_image` do, and its stdout is model-facing, so a later turn — or a
+   * delegated child sharing the workspace — can read this back. Two
+   * reviewers walked that route independently and one reproduced it with a
+   * planted marker; CT-2117 carries the structural fix. Thrown text is here
+   * because it is the class this artifact already holds and cannot be
+   * recovered any other way. Rendered DOM is NOT, because it can: the
+   * synthetic instance is a deterministic function of the argument schema
+   * and the index records the program, so the render is reproducible rather
+   * than needing to be kept.
+   */
+  rawCauseMessage?: string;
+}
+
+/**
+ * What became of this run's contribution to the index after publication
+ * policy and the render gate were applied.
+ *
+ * Every field is pinned to a fixed set — the two unions and a boolean, with
+ * `message` drawn from `PATTERN_PUBLICATION_MESSAGES` and never composed. See
+ * `pattern-index/publish-render-gate.ts` for why nothing derived from the
+ * rendered DOM may join them.
+ */
+export interface RunPatternPublicationReport {
+  status: PatternPublicationStatus;
+  reason: PatternPublicationReason;
+  message: string;
+
+  /**
+   * Whether the synthetic instance the probe was driven with covers the
+   * pattern's whole argument schema. `false` where the schema declares no
+   * shape, or where generating it hit a depth or node bound.
+   */
+  syntheticInputsComplete: boolean;
+}
+
+/**
+ * What a boundary refused, in terms the caller can act on: the boundary that
+ * refused, the label atoms outside it, and the keys of this
+ * call's own `inputs` that carried those atoms in. When `attribution` is
+ * `complete`, a run without those keys meets the boundary.
+ *
+ * Everything here reaches the model as it stands — the model-facing
+ * rendering strips `rawValue`, `rawCauseMessage`, `pieceId` and
+ * `resultRefSchema` and scrubs the free-text fields, and a structured field
+ * passes through untouched. So nothing here is a document id, a space, or a
+ * path into a document: an offending read that no input key accounts for is
+ * counted rather than named.
+ */
+export interface RunPatternPolicyRefusal {
+  /**
+   * The rules that refused, deduplicated. `sink-ceiling` is an egress whose
+   * confidentiality ceiling the flow exceeded; `writer-fit` is a write whose
+   * target does not admit what the write carries.
+   */
+  gates: readonly CfcRefusalGate[];
+
+  /**
+   * The sinks whose ceilings refused, deduplicated. Empty when what refused
+   * was a write rather than an egress.
+   */
+  sinks: readonly string[];
+
+  /**
+   * The label atoms outside what the boundary admits, rendered as the
+   * boundary renders them.
+   */
+  offendingAtoms: readonly string[];
+
+  /**
+   * Offending atoms left out of `offendingAtoms`. A structured atom can
+   * carry the principal that introduced it, and there is no seam that
+   * redacts a rendered atom, so it is counted rather than named.
+   */
+  withheldAtomCount?: number;
+
+  /**
+   * The keys of this call's own `inputs` whose values carried the offending
+   * atoms in — the inputs to drop and retry without.
+   */
+  inputKeys: readonly string[];
+
+  /**
+   * Offending reads that no key of this call's `inputs` accounts for,
+   * counted by document.
+   */
+  unattributedInputCount?: number;
+
+  /**
+   * Whether `inputKeys` is the whole remedy. `complete` — every offending
+   * atom came in through them, so a run without them proceeds. `partial` —
+   * dropping them narrows the flow without necessarily clearing it. `none` —
+   * nothing was attributed to an input of this call.
+   */
+  attribution: CfcRefusalAttribution;
 }
 
 export interface RunPatternToolErrorOutput {
   outputId: string;
   status: "compile-error" | "error" | "cancelled";
   message: string;
+
   /**
    * The durable piece a post-persistence failure leaves behind, for the
    * persisted artifact's run-to-piece provenance. Stripped from the
    * model-facing rendering like the success output's `pieceId`.
    */
   pieceId?: string;
+
   /**
    * The failing computation's own message, retained for the persisted
    * artifact and stripped from the model-facing rendering: a computation
    * over data the model cannot read may carry that data in its thrown text.
    */
   rawCauseMessage?: string;
+
+  /**
+   * What a boundary refused and which of this call's own inputs carried it,
+   * when a policy refusal is what stopped the run. A refused commit landed no
+   * result; a refused release landed one, which stays in the space under its
+   * own labels while the answer is withheld.
+   */
+  policyRefusal?: RunPatternPolicyRefusal;
 }
 
 export type RunPatternToolOutput =
@@ -105,14 +302,31 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
   toolId: "run_pattern",
   title: "Run Pattern",
   description:
-    "Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. The piece stays out of the space's piece list; assign_slug names and lists it when it deserves a public address.",
+    "Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. Give it either your own sourceText or the patternId of a pattern search_patterns found. The piece stays out of the space's piece list; assign_slug names and lists it when it deserves a public address.",
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
     properties: {
       sourceText: {
         type: "string",
-        description: "Pattern source (TypeScript/TSX). At most 256 KiB.",
+        description:
+          "Pattern source (TypeScript/TSX). At most 256 KiB. Return a durable result object directly. A whole-result derived wrapper is a known smell, but not a deterministic failure: after the run the harness checks the actual pattern pointer and refuses any piece materialized under a session-only identity.",
+      },
+      patternId: {
+        type: "string",
+        description:
+          "Id of a pattern published to the index, as search_patterns reports it. Exactly one of sourceText and patternId is given; the published program is fetched and compiled without passing through this conversation.",
+      },
+      description: {
+        type: "string",
+        description:
+          'One line saying what the pattern you are running does, e.g. "Totals an invoice\'s line items and applies a discount". Source you wrote is recorded in the pattern index when it runs, so fill this in for later evaluation and discovery. A run without one publishes nothing.',
+      },
+      hashtags: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          'Tags the recorded pattern will be found under if it earns discoverability, e.g. ["invoice", "arithmetic"]. Use the words someone searching for this capability would type.',
       },
       inputs: {
         type: "object",
@@ -129,7 +343,9 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
           'JSON Schema for the result value. Without it you get resultRef only and no value at all, so pass it whenever you need to read what the pattern computed. A value is returned only for the fields the schema models: an inert one (a number, a boolean, an enum or const string) comes back as itself; anything else is withheld as text and comes back as a reference token addressing that position, which describe_handle can inspect and a later run_pattern can wire by reference. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. The framework\'s own result keys ($NAME, $UI and the other rendering variants) need not be declared.',
       },
     },
-    required: ["sourceText"],
+    // Exactly one of `sourceText` and `patternId` is required, which is a
+    // condition on the pair rather than on either alone; the tool states it
+    // in prose here and enforces it on invocation.
     additionalProperties: false,
   } satisfies JSONSchema,
   outputSchema: {
@@ -145,6 +361,37 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         linkedStringCount: { type: "integer", minimum: 0 },
         valueError: { type: "string" },
         rawValue: {},
+        patternPublication: {
+          type: "object",
+          properties: {
+            status: {
+              type: "string",
+              enum: ["discoverable", "recorded"],
+            },
+            reason: {
+              type: "string",
+              enum: [
+                "ui-rendered",
+                "no-ui",
+                "recorded-automatically",
+                "ui-default-tostring",
+                "ui-rendered-empty",
+                "probe-failed",
+                "superseded",
+              ],
+            },
+            message: { type: "string" },
+            syntheticInputsComplete: { type: "boolean" },
+          },
+          required: [
+            "status",
+            "reason",
+            "message",
+            "syntheticInputsComplete",
+          ],
+          additionalProperties: false,
+        },
+        rawCauseMessage: { type: "string" },
       },
       required: [
         "outputId",
@@ -165,6 +412,32 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         message: { type: "string" },
         pieceId: { type: "string" },
         rawCauseMessage: { type: "string" },
+        policyRefusal: {
+          type: "object",
+          properties: {
+            gates: {
+              type: "array",
+              items: { type: "string", enum: ["sink-ceiling", "writer-fit"] },
+            },
+            sinks: { type: "array", items: { type: "string" } },
+            offendingAtoms: { type: "array", items: { type: "string" } },
+            withheldAtomCount: { type: "integer", minimum: 0 },
+            inputKeys: { type: "array", items: { type: "string" } },
+            unattributedInputCount: { type: "integer", minimum: 0 },
+            attribution: {
+              type: "string",
+              enum: ["complete", "partial", "none"],
+            },
+          },
+          required: [
+            "gates",
+            "sinks",
+            "offendingAtoms",
+            "inputKeys",
+            "attribution",
+          ],
+          additionalProperties: false,
+        },
       },
       required: ["outputId", "status", "message"],
       additionalProperties: false,
@@ -205,6 +478,281 @@ export const sealedPositionLink = (
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/**
+ * Reports what a run did with an indexed pattern, without letting the report
+ * bear on the run. The index ranks on these events, so a failure to record
+ * one costs ranking accuracy and nothing else — it is logged and dropped
+ * rather than turned into a tool error for a pattern that ran.
+ */
+const recordPatternIndexEvent = (
+  getClient: HarnessPatternIndexClientFactory,
+  patternId: string,
+  eventType: PatternIndexEventType,
+): void => {
+  void (async () => {
+    try {
+      const client = await getClient();
+      await client.recordEvent({ patternId, eventType });
+    } catch (error) {
+      console.error(
+        `run_pattern could not record the ${eventType} event for pattern index entry "${patternId}": ${
+          errorMessage(error)
+        }`,
+      );
+    }
+  })();
+};
+
+/**
+ * The entry path `compileAndSavePattern` wraps bare source under. Written out
+ * here because the published program has to be the one the compile consumed,
+ * down to the name its single file carries into the content hash.
+ */
+const RUN_PATTERN_SOURCE_MAIN = "/main.tsx";
+
+/** What a call naming neither a source nor a published pattern is told. */
+const RUN_PATTERN_NO_PROGRAM_MESSAGE =
+  "run_pattern requires sourceText or patternId";
+
+/**
+ * What a refusal message says about the raw reason, which stays in the
+ * artifact for the same cause the thrown text does: it names the labels and
+ * the documents the flow touched.
+ */
+const RUN_PATTERN_REFUSAL_ARTIFACT_NOTE =
+  "The refusal reason is retained in the run artifact and withheld here, " +
+  "since it names the labels and documents involved";
+
+/** The sink this tool's own answer is, as a refusal names it. */
+const RUN_PATTERN_ANSWER_SINK = "run_pattern";
+
+/**
+ * What that sink admits: nothing. A model's context is outside every space,
+ * so no confidentiality clause names an audience it belongs to, and an empty
+ * ceiling — "public only", per `sink-inventory.ts` — is the one that says so.
+ *
+ * Empty rather than absent, and the difference is the point. A sink absent
+ * from the inventory goes ungated because a deployment has not decided about
+ * it; this sink is not one a deployment declares, since the audience on the
+ * far side of it is fixed by what the tool does rather than by where it runs.
+ */
+const RUN_PATTERN_ANSWER_CEILING: readonly CfcConfClause[] = [];
+
+/** What a refusal the commit boundary described only in prose is told. */
+const RUN_PATTERN_OPAQUE_REFUSAL_MESSAGE =
+  "the pattern ran but the space's policy refused to commit its result: " +
+  "flow enforcement rejected the write at the commit boundary, so the " +
+  `result never landed. ${RUN_PATTERN_REFUSAL_ARTIFACT_NOTE}`;
+
+/**
+ * Where an agent-supplied input landed. A refusal names the reads that
+ * carried the offending labels; turning one back into something the caller
+ * can act on means finding the key whose value that read belongs to, and the
+ * key is the only part of the answer the caller may be told.
+ */
+interface RunPatternInputAddress {
+  readonly key: string;
+
+  /**
+   * The document the caller's link resolved to, through the canonical entity
+   * seam, so a read spelled differently by another seam still compares.
+   */
+  readonly hash: string;
+
+  readonly path: readonly string[];
+}
+
+const pathStartsWith = (
+  path: readonly string[],
+  prefix: readonly string[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((segment, index) => segment === path[index]);
+
+/**
+ * The keys of `inputs` a refused read belongs to, empty when none does.
+ *
+ * A read reaches an input two ways. It reads the document the caller's link
+ * addressed, which the retained addresses match. Or it reads the piece's
+ * argument document, where every input — link or plain JSON — sits under its
+ * own key, so the first path segment is the key. Both are matched, because
+ * one refusal commonly reports the same input through both.
+ *
+ * Every match is returned. One document handed in under two keys is reached
+ * by dropping either alias alone, and a remedy naming one of them would
+ * leave the other carrying the label.
+ */
+const refusalReadInputKeys = (
+  read: CfcAddress,
+  addresses: readonly RunPatternInputAddress[],
+  argumentHash: string | undefined,
+  suppliedKeys: readonly string[],
+): readonly string[] => {
+  const readHash = comparableEntityHash(read.id);
+  if (readHash === undefined) {
+    return [];
+  }
+  const keys: string[] = [];
+  for (const address of addresses) {
+    if (
+      address.hash === readHash && pathStartsWith(read.path, address.path) &&
+      !keys.includes(address.key)
+    ) {
+      keys.push(address.key);
+    }
+  }
+  if (argumentHash !== undefined && readHash === argumentHash) {
+    const first = read.path[0];
+    if (
+      first !== undefined && suppliedKeys.includes(first) &&
+      !keys.includes(first)
+    ) {
+      keys.push(first);
+    }
+  }
+  return keys;
+};
+
+/**
+ * Whether a rendered label atom may be named to the model.
+ *
+ * A scalar atom — `"medical"`, `3`, `true` — is the word the data was tagged
+ * with, and naming it is the whole point of the report. A structured atom is
+ * a CFC atom object, and a `Caveat` among them carries the principal that
+ * introduced it; `redactCaveatSourcesForDisplay` strips that principal from a
+ * whole label view, and there is no seam that strips it from an atom already
+ * rendered to a string. So a structured atom is counted rather than named.
+ */
+const namableRefusalAtom = (rendered: string): boolean => {
+  try {
+    const parsed: unknown = JSON.parse(rendered);
+    return parsed === null || typeof parsed !== "object";
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Fold the boundary's refusal details into the one report the caller reads,
+ * resolving each offending read to a key of this call's `inputs`.
+ *
+ * `attribution` is the harness's own question, stricter than the boundary's:
+ * the boundary asks whether every offending atom reached a named READ, and
+ * this asks whether every such read is an input the caller can drop. A read
+ * the caller does not own leaves the answer at `partial` even when the
+ * boundary called its own attribution complete, because dropping inputs
+ * cannot reach it.
+ */
+export const runPatternPolicyRefusal = (
+  refusals: readonly CfcRefusalDetail[],
+  inputKeysFor: (read: CfcAddress) => readonly string[],
+): RunPatternPolicyRefusal | undefined => {
+  if (refusals.length === 0) {
+    return undefined;
+  }
+  const gates: CfcRefusalGate[] = [];
+  const sinks: string[] = [];
+  const offendingAtoms: string[] = [];
+  const inputKeys: string[] = [];
+  const seenAtoms = new Set<string>();
+  const unattributed = new Set<string>();
+  let withheldAtomCount = 0;
+  let everyDetailComplete = true;
+  for (const detail of refusals) {
+    if (!gates.includes(detail.gate)) gates.push(detail.gate);
+    if (detail.sink !== undefined && !sinks.includes(detail.sink)) {
+      sinks.push(detail.sink);
+    }
+    if (detail.attribution !== "complete") everyDetailComplete = false;
+    for (const atom of detail.offendingAtoms) {
+      if (seenAtoms.has(atom)) continue;
+      seenAtoms.add(atom);
+      if (namableRefusalAtom(atom)) offendingAtoms.push(atom);
+      else withheldAtomCount += 1;
+    }
+    for (const input of detail.inputs) {
+      const keys = inputKeysFor(input.read);
+      if (keys.length === 0) {
+        // Counted by document, so one document read at three paths is one
+        // input the caller cannot name rather than three.
+        unattributed.add(comparableEntityHash(input.read.id) ?? "");
+        continue;
+      }
+      for (const key of keys) {
+        if (!inputKeys.includes(key)) inputKeys.push(key);
+      }
+    }
+  }
+  const attribution: CfcRefusalAttribution = inputKeys.length === 0
+    ? "none"
+    : everyDetailComplete && unattributed.size === 0
+    ? "complete"
+    : "partial";
+  return {
+    gates,
+    sinks,
+    offendingAtoms,
+    ...(withheldAtomCount > 0 ? { withheldAtomCount } : {}),
+    inputKeys,
+    ...(unattributed.size > 0
+      ? { unattributedInputCount: unattributed.size }
+      : {}),
+    attribution,
+  };
+};
+
+const quoteAll = (values: readonly string[]): string =>
+  values.map((value) => `"${value}"`).join(", ");
+
+/**
+ * Which boundary a refusal came from, which decides what the caller is told
+ * became of the result: a refused commit landed no result, while a refused
+ * release has one, in the space under its own labels.
+ */
+export type RunPatternRefusalBoundary = "commit" | "release";
+
+/**
+ * The refusal stated as an instruction: what refused, which of the caller's
+ * inputs carried what it refused, and whether dropping those inputs is the
+ * whole remedy or only narrows the flow.
+ */
+export const policyRefusalMessage = (
+  refusal: RunPatternPolicyRefusal,
+  boundaryRefused: RunPatternRefusalBoundary,
+): string => {
+  const boundary = refusal.sinks.length > 0
+    ? `the sink${refusal.sinks.length > 1 ? "s" : ""} ${
+      quoteAll(refusal.sinks)
+    }`
+    : "the write it attempted";
+  const atoms = refusal.offendingAtoms.length > 0
+    ? ` (${refusal.offendingAtoms.join(", ")})`
+    : "";
+  const refused = boundaryRefused === "commit"
+    ? "commit its result"
+    : "release its result";
+  const became = boundaryRefused === "commit"
+    ? "the result never landed"
+    : "the result stays in the space and is withheld here";
+  const opening =
+    `the pattern ran but the space's policy refused to ${refused}: ` +
+    `${boundary} does not admit the confidentiality${atoms} this run ` +
+    `carries, so ${became}`;
+  const plural = refusal.inputKeys.length > 1;
+  const keys = `input${plural ? "s" : ""} ${quoteAll(refusal.inputKeys)}`;
+  const remedy = refusal.attribution === "complete"
+    ? `Every label refused here came in through ${keys}, so the same run ` +
+      `without ${plural ? "them" : "it"} proceeds`
+    : refusal.attribution === "partial"
+    ? `Some of what was refused came in through ${keys}; dropping ` +
+      `${plural ? "them" : "it"} narrows the flow without necessarily ` +
+      "clearing it, since reads this call does not own carry refused " +
+      "labels too"
+    : "No input of this call accounts for what was refused, so dropping an " +
+      "input will not clear it";
+  return `${opening}. ${remedy}. ${RUN_PATTERN_REFUSAL_ARTIFACT_NOTE}`;
+};
 
 /**
  * Replaces bare fabric identifiers in model-facing diagnostic text with a
@@ -362,6 +910,7 @@ export const runPatternTool: HarnessToolDefinition<
       status: RunPatternToolErrorOutput["status"],
       message: string,
     ): RunPatternToolErrorOutput => ({ outputId, status, message });
+
     /**
      * `detail` is what the cancellation left behind that the caller would
      * otherwise have to discover by looking: a durable effect the run had
@@ -375,24 +924,43 @@ export const runPatternTool: HarnessToolDefinition<
           ? "run_pattern was cancelled"
           : `run_pattern was cancelled; ${detail}`,
       );
+
     if (context.getFabricSession === undefined) {
       return errorOutput(
         "error",
         "run_pattern requires a fabric session; configure --fabric-api-url, --fabric-identity, and --fabric-space",
       );
     }
-    if (input.sourceText === undefined) {
-      return errorOutput("error", "run_pattern requires sourceText");
-    }
-    const sourceText = input.sourceText;
-    const sourceTextBytes = new TextEncoder().encode(sourceText).length;
-    if (sourceTextBytes > RUN_PATTERN_MAX_SOURCE_TEXT_BYTES) {
+    const { sourceText, patternId } = input;
+    if (sourceText !== undefined && patternId !== undefined) {
       return errorOutput(
         "error",
-        `run_pattern sourceText exceeds the ${
-          RUN_PATTERN_MAX_SOURCE_TEXT_BYTES / 1024
-        } KiB limit (${sourceTextBytes} bytes)`,
+        "run_pattern takes sourceText or patternId, not both; pass your own source or the id of an indexed pattern",
       );
+    }
+    if (sourceText === undefined && patternId === undefined) {
+      return errorOutput("error", RUN_PATTERN_NO_PROGRAM_MESSAGE);
+    }
+    // The run's index client, held once: which of the index paths below run
+    // is decided by the call and by whether the run has an index at all, and
+    // both questions are settled here rather than at each of them.
+    const getPatternIndexClient = context.getPatternIndexClient;
+    if (patternId !== undefined && getPatternIndexClient === undefined) {
+      return errorOutput(
+        "error",
+        "run_pattern patternId requires a pattern index; configure --pattern-index-url, or pass sourceText instead",
+      );
+    }
+    if (sourceText !== undefined) {
+      const sourceTextBytes = new TextEncoder().encode(sourceText).length;
+      if (sourceTextBytes > RUN_PATTERN_MAX_SOURCE_TEXT_BYTES) {
+        return errorOutput(
+          "error",
+          `run_pattern sourceText exceeds the ${
+            RUN_PATTERN_MAX_SOURCE_TEXT_BYTES / 1024
+          } KiB limit (${sourceTextBytes} bytes)`,
+        );
+      }
     }
     let parsedResultSchema;
     try {
@@ -428,9 +996,15 @@ export const runPatternTool: HarnessToolDefinition<
     let pieceInput: Record<string, unknown> | undefined;
     const liveCellInputs: Array<{ key: string; cell: Cell<unknown> }> = [];
     const plainInputs: Array<{ key: string; value: unknown }> = [];
+    // Where each input landed, kept for the one path that needs it: a policy
+    // refusal names the reads that carried the offending labels, and a read
+    // is only actionable once it is back to the key the caller passed.
+    const suppliedInputKeys: string[] = [];
+    const inputAddresses: RunPatternInputAddress[] = [];
     if (input.inputs !== undefined) {
       const converted: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(input.inputs)) {
+        suppliedInputKeys.push(key);
         const sealedPath = sealedOpaqueLinkPath(value, key);
         if (sealedPath !== undefined) {
           return errorOutput("error", sealedInputRefusal(key, sealedPath));
@@ -452,6 +1026,10 @@ export const runPatternTool: HarnessToolDefinition<
                 `run_pattern input "${key}" reference targets another space; only references into the configured session space are allowed`,
               );
             }
+            const linkHash = comparableEntityHash(link.id);
+            if (linkHash !== undefined) {
+              inputAddresses.push({ key, hash: linkHash, path: link.path });
+            }
             const cell = pieces.runtime.getCellFromLink(link);
             liveCellInputs.push({ key, cell });
             entry = cell;
@@ -464,16 +1042,109 @@ export const runPatternTool: HarnessToolDefinition<
       }
       pieceInput = converted;
     }
+    // The indexed program is fetched here, on the trusted host side, and goes
+    // straight into the compiler. Nothing read from the index is carried into
+    // any output this tool returns.
+    let program: RuntimeProgram;
+    // What the index recorded the fetched pattern composes, when the run named
+    // one. A published pattern's own imports are materialized on the same
+    // terms as an authored source's.
+    let recordedDependencies: readonly string[] = [];
+    if (sourceText !== undefined) {
+      program = {
+        main: RUN_PATTERN_SOURCE_MAIN,
+        files: [{ name: RUN_PATTERN_SOURCE_MAIN, contents: sourceText }],
+      };
+    } else if (patternId !== undefined && getPatternIndexClient !== undefined) {
+      let indexed;
+      try {
+        const client = await getPatternIndexClient();
+        indexed = await client.getPattern({
+          patternId,
+          includeSource: true,
+        });
+      } catch (error) {
+        // `PatternIndexError.message` is stable by construction; the service
+        // body it withheld can quote indexed source, so it goes only to the
+        // artifact.
+        return {
+          ...errorOutput(
+            "error",
+            `pattern index lookup failed for "${patternId}": ${
+              errorMessage(error)
+            }`,
+          ),
+          ...(error instanceof PatternIndexError && error.detail !== undefined
+            ? { rawCauseMessage: error.detail }
+            : {}),
+        };
+      }
+      if (indexed.program === undefined) {
+        return errorOutput(
+          "error",
+          `the pattern index returned no program for "${patternId}"`,
+        );
+      }
+      program = runtimeProgramFromIndex(indexed.program);
+      recordedDependencies = indexed.dependencies;
+    } else {
+      // Unreachable: a call naming neither was refused above, and one naming
+      // a `patternId` without an index with it. The pair's exclusivity is a
+      // fact about those checks rather than about the input type, so the
+      // branch is written out instead of asserted away.
+      return errorOutput("error", RUN_PATTERN_NO_PROGRAM_MESSAGE);
+    }
+    // A `cf:pattern:` import resolves from the space's own source cache, and
+    // for a pattern this space has never run there is nothing there to
+    // resolve. Each one is fetched from the index and compiled into the space
+    // first, host-side, so the compile below finds it — and so no part of what
+    // was fetched reaches this tool's output, on the success path or on any of
+    // the failure paths.
+    try {
+      await materializeComposedPatterns({
+        runtime: pieces.runtime,
+        space,
+        patternIds: composedPatternIds(program, recordedDependencies),
+        getClient: getPatternIndexClient,
+      });
+    } catch (error) {
+      if (error instanceof PatternCompositionError) {
+        return {
+          ...errorOutput("error", error.message),
+          ...(error.rawCauseMessage !== undefined
+            ? { rawCauseMessage: error.rawCauseMessage }
+            : {}),
+        };
+      }
+      return {
+        ...errorOutput(
+          "error",
+          "the published patterns this source composes could not be made available; the failure text is retained in the run artifact and withheld here, since it can quote source you did not author",
+        ),
+        rawCauseMessage: errorMessage(error),
+      };
+    }
     let pattern;
     try {
-      pattern = await compileAndSavePattern(pieces.runtime, sourceText, {
+      pattern = await compileAndSavePattern(pieces.runtime, program, {
         space,
       });
     } catch (error) {
-      // Compiler diagnostics are the model's feedback loop, so the full
-      // message goes into the artifact; the prompt loop scrubs bare fabric
-      // identifiers from the model-facing rendering.
-      return errorOutput("compile-error", errorMessage(error));
+      // Compiler diagnostics are the model's feedback loop for source it
+      // wrote, so the full message goes into the artifact; the prompt loop
+      // scrubs bare fabric identifiers from the model-facing rendering. An
+      // indexed pattern is source the model never saw and cannot correct, and
+      // a diagnostic quotes the line it failed on, so there the artifact
+      // keeps the diagnostic and the model gets the fact of the failure.
+      return patternId === undefined
+        ? errorOutput("compile-error", errorMessage(error))
+        : {
+          ...errorOutput(
+            "compile-error",
+            `the indexed pattern "${patternId}" did not compile; the diagnostic is retained in the run artifact and withheld here, since it quotes source you did not author`,
+          ),
+          rawCauseMessage: errorMessage(error),
+        };
     }
     // An input's value must match the compiled pattern's argument schema for
     // its key before any piece exists, so a mismatch is a model-correctable
@@ -557,12 +1228,38 @@ export const runPatternTool: HarnessToolDefinition<
         `run_pattern input "${key}" does not match the pattern's argument schema: ${failure}`,
       );
     };
+    // A property schema referring into the argument schema's `$defs` leaves
+    // its root behind when it becomes a cell's whole schema, so the read
+    // schema carries the referenced definitions along —
+    // `selectReferencedCfcSchemaDefs` computes that closure, honoring a
+    // property's own `$defs` scope over the root's.
+    const argumentDefs = isObjectNotArray(argumentSchema) &&
+        isObjectNotArray((argumentSchema as { $defs?: unknown }).$defs)
+      ? (argumentSchema as { $defs: Record<string, JSONSchema> }).$defs
+      : undefined;
+    const readSchemaForKey = (key: string): JSONSchema | undefined => {
+      const propertySchema = argumentSchemaForKey(key);
+      if (propertySchema === undefined || !isObjectNotArray(propertySchema)) {
+        return propertySchema;
+      }
+      const defs = selectReferencedCfcSchemaDefs(propertySchema, argumentDefs);
+      return defs === undefined ? propertySchema : {
+        ...propertySchema,
+        $defs: defs,
+      };
+    };
     for (const { key, cell } of liveCellInputs) {
-      if (argumentSchemaForKey(key) === undefined) {
+      const readSchema = readSchemaForKey(key);
+      if (readSchema === undefined) {
         continue;
       }
-      await cell.sync();
-      const mismatch = argumentMismatch(key, cell.get());
+      // The read goes through the argument schema: a schema-less sync can
+      // complete without data for a referent that needs schema-driven
+      // materialization (a registry grant is one), and its `undefined` would
+      // be measured here as the cell's value.
+      const typedCell = cell.asSchema(readSchema);
+      await typedCell.sync();
+      const mismatch = argumentMismatch(key, typedCell.get());
       if (mismatch !== undefined) {
         return mismatch;
       }
@@ -577,6 +1274,22 @@ export const runPatternTool: HarnessToolDefinition<
     // so the post-settle read covers exactly this invocation's window.
     const observations = fabricRuntimeObservations(pieces.runtime);
     const observationStart = observations.sequence();
+    // The same window over what the runtime materializes, for the check that
+    // the created piece carries a pointer another runtime can load. A session
+    // built without an instantiation recorder asks nothing.
+    const instantiationStart = session.instantiations?.sequence() ?? 0;
+
+    /**
+     * Reports this invocation's outcome to the index, when the pattern came
+     * from there. A cancelled run reports nothing: it neither succeeded nor
+     * failed, and the index ranks on what a pattern did.
+     */
+    const recordOutcome = (eventType: PatternIndexEventType): void => {
+      if (patternId !== undefined && getPatternIndexClient !== undefined) {
+        recordPatternIndexEvent(getPatternIndexClient, patternId, eventType);
+      }
+    };
+
     let piece: PieceController<unknown>;
     try {
       // Deliberately unregistered: no `pieces.add()` and no default-pattern
@@ -593,15 +1306,30 @@ export const runPatternTool: HarnessToolDefinition<
       );
       piece = new PieceController(pieces, pieceCell);
     } catch (error) {
-      return errorOutput("error", errorMessage(error));
+      recordOutcome("run_failed");
+      // The pattern's own body runs inside this call, so what it throws can
+      // quote the source it was written from. For source the model wrote
+      // that is its feedback loop; for an indexed pattern it is source the
+      // model never saw, so the artifact keeps the text and the model gets
+      // the fact of the failure — the same division the compile path makes.
+      return patternId === undefined
+        ? errorOutput("error", errorMessage(error))
+        : {
+          ...errorOutput(
+            "error",
+            `the indexed pattern "${patternId}" failed while starting; the failure text is retained in the run artifact and withheld here, since it can quote source you did not author`,
+          ),
+          rawCauseMessage: errorMessage(error),
+        };
     }
+    recordOutcome("instantiated");
     // Stops the created piece without the usual `stopPiece` idle wait: an
     // abort path must not wait on the very scheduler the signal is escaping.
-    const stopPieceForAbort = () => {
+    const stopPiece = (cell: Cell<unknown>) => {
       try {
-        pieces.runtime.runner.stop(piece.getCell());
+        pieces.runtime.runner.stop(cell);
       } catch {
-        // Best-effort: the cancelled output stands either way.
+        // Best-effort: whatever outcome the caller reached stands either way.
       }
     };
     const barrier = (async () => {
@@ -609,15 +1337,165 @@ export const runPatternTool: HarnessToolDefinition<
       await pieces.synced();
     })();
     if (await raceWithAbort(barrier, signal) === "aborted") {
-      stopPieceForAbort();
+      stopPiece(piece.getCell());
       return cancelledOutput();
     }
     const resultCell = await piece.result.getCell();
+    // A piece whose graph was materialized under a session-synthetic pattern
+    // pointer exists for this session and no other: a fresh runtime asked to
+    // open it cannot resolve the pointer at all. This session renders
+    // nothing, so any keyless instantiation in the window is that shape (see
+    // `keylessInstantiation`). The run is reported as a failure rather than
+    // handed back as a piece that dies on the first visit, and the pattern is
+    // not contributed to the index below, since the same shape would strand
+    // every later run that ran it.
+    const strandedInstantiation = session.instantiations === undefined
+      ? undefined
+      : keylessInstantiation(
+        session.instantiations.keylessSince(instantiationStart),
+      );
+    if (strandedInstantiation !== undefined) {
+      recordOutcome("run_failed");
+      return {
+        ...errorOutput(
+          "error",
+          `the pattern ran, but the harness detected a session-only pattern pointer in the created piece's graph, so the run is reported as a failure. The detected pointer cannot be opened by another runtime. Return a durable result object directly`,
+        ),
+        pieceId: piece.id,
+        rawCauseMessage:
+          `pattern materialized under session-only identity ${strandedInstantiation.identity}#${strandedInstantiation.symbol} on entity ${strandedInstantiation.cell}`,
+      };
+    }
     const resultRef = createLLMFriendlyLink(
       resultCell.getAsNormalizedFullLink(),
       space,
     );
-    const rawValue = asSerializableValue(await piece.result.get());
+    /**
+     * The report a policy refusal produces, whichever boundary stated it.
+     *
+     * The refusal reason stays out of the model-facing message the same way
+     * thrown text does: it names the documents and label atoms involved —
+     * fabric identifiers and policy detail the model does not read — so the
+     * artifact keeps it and the model gets the fact of the refusal.
+     */
+    const policyRefusalOutput = async (
+      details: readonly CfcRefusalDetail[],
+      boundaryRefused: RunPatternRefusalBoundary,
+      rawCauseMessage: string,
+    ) => {
+      recordOutcome("run_failed");
+      // The piece's argument document is where every input reaches the
+      // pattern under its own key, so a refused read of it names an input
+      // by its first path segment. Its address is resolved here rather than
+      // kept from creation because only a refusal asks for it.
+      let argumentHash: string | undefined;
+      try {
+        argumentHash = comparableEntityHash(
+          (await piece.input.getCell()).getAsNormalizedFullLink().id,
+        );
+      } catch {
+        argumentHash = undefined;
+      }
+      const policyRefusal = runPatternPolicyRefusal(
+        details,
+        (read) =>
+          refusalReadInputKeys(
+            read,
+            inputAddresses,
+            argumentHash,
+            suppliedInputKeys,
+          ),
+      );
+      return {
+        ...errorOutput(
+          "error",
+          policyRefusal === undefined
+            ? RUN_PATTERN_OPAQUE_REFUSAL_MESSAGE
+            : policyRefusalMessage(policyRefusal, boundaryRefused),
+        ),
+        pieceId: piece.id,
+        rawCauseMessage,
+        ...(policyRefusal !== undefined ? { policyRefusal } : {}),
+      };
+    };
+
+    // The answer is an egress: what this tool returns is read by a model,
+    // outside every space the fabric labels. A pattern's own egresses are
+    // sink requests the commit boundary gates, and this one records none, so
+    // it is measured here. The measurement is a transaction that reads what
+    // the answer stands for, and its consumed join is what the answer
+    // carries — the result document, and every computed cell the result links
+    // to. Nothing is committed.
+    //
+    // A second transaction reads the piece's argument document, and only that
+    // transaction does. Every input reaches the pattern through that document
+    // under its own key, so a clause it carries names an input the caller can
+    // drop; a clause reaching the answer by another route is reported as
+    // unattributed.
+    //
+    // The ladder decides whether a recorded reason REJECTS, not whether it is
+    // taken: the measurement runs at every rung, so an observe-stage rollout
+    // can size what turning the rung up would refuse, which is what the sink
+    // gate beside it does with the same reason.
+    const releaseGateRejects =
+      pieces.runtime.cfcEnforcementMode !== "disabled" &&
+      pieces.runtime.cfcEnforcementMode !== "observe";
+    let releaseRefusal: CfcRefusalDetail | undefined;
+    let rawValue: unknown;
+    const measureRelease = async () => {
+      const releaseTx = pieces.runtime.edit();
+      const inputsTx = pieces.runtime.edit();
+      try {
+        // The answer the tool returns is read HERE, through the transaction
+        // that measures it, and the value below is that read rather than a
+        // second one. A result the reactive graph advances between two reads
+        // would otherwise let a later clean state answer for an earlier
+        // labeled one. The `required` relaxation is the piece controller's,
+        // so a scoped link the session cannot materialize degrades its member
+        // rather than voiding the whole read.
+        const measuredResult = cellWithScopedLinkRequiredsRelaxed(
+          resultCell.withTx(releaseTx),
+        );
+        await measuredResult.pull();
+        rawValue = asSerializableValue(measuredResult.get());
+        try {
+          const measuredArgument = (await piece.input.getCell())
+            .withTx(inputsTx);
+          await measuredArgument.pull();
+          asSerializableValue(measuredArgument.get());
+        } catch {
+          // An argument cell that will not resolve leaves the caller's own
+          // addresses as the route from a clause back to an input key.
+        }
+        for (const { cell } of liveCellInputs) {
+          const measuredInput = cell.withTx(inputsTx);
+          await measuredInput.pull();
+          asSerializableValue(measuredInput.get());
+        }
+        return describeSinkReleaseRefusal(
+          releaseTx,
+          inputsTx,
+          RUN_PATTERN_ANSWER_SINK,
+          RUN_PATTERN_ANSWER_CEILING,
+        );
+      } finally {
+        releaseTx.abort("run_pattern release measurement");
+        inputsTx.abort("run_pattern release attribution");
+      }
+    };
+    // Raced with the signal like every other wait this tool performs: the
+    // reads resolve a graph, and a caller that gave up while they were in
+    // flight is told it was cancelled rather than handed an answer it stopped
+    // waiting for. The measurement abandons its own transactions whichever
+    // way the race goes.
+    const measuring = (async () => {
+      releaseRefusal = await measureRelease();
+    })();
+    if (await raceWithAbort(measuring, signal) === "aborted") {
+      stopPiece(piece.getCell());
+      return cancelledOutput();
+    }
+
     let value: unknown;
     let linkedStringCount: number | undefined;
     let valueError: string | undefined;
@@ -657,12 +1535,12 @@ export const runPatternTool: HarnessToolDefinition<
     // A result that settled to nothing is not a success to report. When the
     // sanitized value failed its schema, or the raw result holds no fields of
     // its own beyond the framework keys, the runtime's observation window
-    // says why: an action error attributed to this piece names the failing
-    // computation, and a non-settling episode names the other observed shape
-    // — actions deferred past the convergence budget, which is what both a
-    // reactive cycle and a policy-refused commit look like from here. The
-    // refusal reason itself has no channel of its own, so the message names
-    // the shapes rather than claiming to know which one happened.
+    // says why: an action error attributed to this piece names the cause —
+    // a CFC commit refusal arrives there as a terminal
+    // `CfcCommitRefusalError` — and a non-settling episode names the other
+    // observed shape, actions deferred past the convergence budget, which is
+    // what a reactive cycle or a non-idempotent computation looks like from
+    // here.
     const inertResultKeys = isObjectNotArray(rawValue)
       ? Object.keys(rawValue).filter((key) => !key.startsWith("$"))
       : undefined;
@@ -670,11 +1548,23 @@ export const runPatternTool: HarnessToolDefinition<
       (inertResultKeys !== undefined && inertResultKeys.length === 0);
     if (valueError !== undefined || resultAbsent) {
       const pieceErrors = observations.errorsSince(observationStart, piece.id);
+      // A policy refusal is named as what it is.
+      const refusal = pieceErrors.find((record) =>
+        record.name === "CfcCommitRefusalError"
+      );
+      if (refusal !== undefined) {
+        return await policyRefusalOutput(
+          refusal.refusals ?? [],
+          "commit",
+          refusal.message,
+        );
+      }
       if (pieceErrors.length > 0) {
         // The thrown text stays out of the model-facing message: a
         // computation over data the model cannot read may carry that data in
         // what it throws, so the artifact keeps the diagnostic and the model
         // gets the fact of the failure.
+        recordOutcome("run_failed");
         return {
           ...errorOutput(
             "error",
@@ -684,47 +1574,313 @@ export const runPatternTool: HarnessToolDefinition<
           rawCauseMessage: pieceErrors[0].message,
         };
       }
-      // A convergence-budget episode is claimed only when its deferred-action
-      // labels name this pattern's module identity — an unrelated piece
-      // churning during this invocation's settle window is not evidence
-      // about this one. Module identity is as fine as the labels resolve:
-      // another live piece created from the same source shares it, so the
-      // message says "this pattern's module" rather than claiming the
+      // A convergence-budget episode is claimed when a deferred action's
+      // piece attribution matches this piece, or — for an action carrying no
+      // observation identity — when its label names this pattern's module
+      // identity. An unrelated piece churning during this invocation's
+      // settle window is not evidence about this one. The identity match is
+      // exact; the label match is as fine as labels resolve: another live
+      // piece created from the same source shares the module identity, so
+      // the message says "this pattern's module" rather than claiming the
       // episode as this piece's own. An episode lists at most its first ten
       // deferred actions, so a wide episode can omit this pattern and
       // under-report, which falls back to the plain ok-with-valueError
       // rather than misattributing.
-      //
-      // The built-in list coordinators are a systematic miss with the same
-      // fallback: a pattern-body `.map()` runs as the `map` builtin, whose
-      // deferred coordinator is labelled `raw:map:<key>` with no module
-      // identity, so an episode made only of such actions is never claimed
-      // and a refused container write reads as ok over an absent value.
-      // Closing that needs the piece-scoped marker identity CT-2037 asks
-      // for, not a looser match here.
       // The scheduler composes deferred-action ids as
       // `cf:module/<identity>:<symbol>:<instanceKey>` from the same entry
-      // ref this meta stamp stores, so the match is on that composed prefix
-      // rather than a bare substring — a representation drift on either
-      // side fails the settle-cause test that drives this path, loudly.
+      // ref this meta stamp stores, so the label match is on that composed
+      // prefix rather than a bare substring — a representation drift on
+      // either side fails the settle-cause test that drives this path,
+      // loudly.
       const patternIdentity = getPatternIdentityRef(resultCell)?.identity;
-      const ownEpisodes = patternIdentity === undefined
-        ? []
-        : observations.episodesSince(observationStart).filter((episode) =>
-          episode.deferredActions.some((label) =>
-            label.includes(`cf:module/${patternIdentity}:`)
-          )
-        );
+      const pieceHash = comparableEntityHash(piece.id);
+      const ownEpisodes = observations.episodesSince(observationStart).filter(
+        (episode) =>
+          episode.deferredActions.some((entry) =>
+            (pieceHash !== undefined && entry.pieceId === pieceHash) ||
+            (patternIdentity !== undefined &&
+              entry.label.includes(`cf:module/${patternIdentity}:`))
+          ),
+      );
       if (ownEpisodes.length > 0) {
+        recordOutcome("run_failed");
         return {
           ...errorOutput(
             "error",
             `the pattern ran but its result never landed: while it settled, the scheduler deferred ${
               ownEpisodes[ownEpisodes.length - 1].deferredActionCount
-            } action(s) of this pattern's module past its convergence budget — this piece's own, or another live piece created from the same source in an earlier attempt. A reactive cycle, a non-idempotent computation, or a write the space's policy refuses all produce this shape`,
+            } action(s) of this piece or this pattern's module past its convergence budget. A reactive cycle or a non-idempotent computation produces this shape`,
           ),
           pieceId: piece.id,
         };
+      }
+    }
+    // A measurement the ladder does not reject on is still an answer about
+    // this run, and the only place it can be read from is the artifact.
+    const releaseObservation =
+      releaseRefusal === undefined || releaseGateRejects
+        ? undefined
+        : runPatternPolicyRefusal(
+          [releaseRefusal],
+          (read) =>
+            refusalReadInputKeys(
+              read,
+              inputAddresses,
+              undefined,
+              suppliedInputKeys,
+            ),
+        );
+    if (releaseRefusal !== undefined && releaseGateRejects) {
+      return await policyRefusalOutput(
+        [releaseRefusal],
+        "release",
+        releaseRefusal.reason,
+      );
+    }
+    // A result the caller's own `resultSchema` refused is reported as neither
+    // outcome: the pattern ran and landed a result, and the schema it did not
+    // match was written by whoever called the tool, so it is evidence about
+    // the caller's contract rather than about the pattern.
+    if (valueError === undefined) {
+      recordOutcome("run_succeeded");
+    }
+
+    /**
+     * The render gate: what the pattern's own `$UI` does before the pattern
+     * is contributed to the index.
+     *
+     * The render runs against a PROBE — a second, detached instance of the
+     * same compiled pattern, built from a synthetic instance of the pattern's
+     * own argument schema rather than from this run's inputs. The run's own
+     * piece is never rendered, so no labeled data reaches the render through
+     * the argument path. A pattern that reaches the space for itself is the
+     * case that argument does not cover; `pattern-index/publish-render-gate.ts`
+     * carries the whole of the reasoning, including what the verdict may say.
+     *
+     * The probe is unregistered like the run's own piece, and its `cause` is
+     * left to default, so each check gets a piece with no state carried over
+     * from an earlier one.
+     *
+     * A verdict never bears on the run: every path returns a verdict, and the
+     * caller's only use for it is whether to publish.
+     */
+    const renderGateVerdict = async (): Promise<
+      {
+        status: PatternPublicationStatus;
+        reason: PatternPublicationReason;
+        syntheticInputsComplete: boolean;
+        thrown?: string;
+      } | "cancelled"
+    > => {
+      const synthetic = syntheticArgument(pattern.argumentSchema);
+      const recorded = (reason: PatternPublicationReason, thrown?: string) => ({
+        status: "recorded" as const,
+        reason,
+        syntheticInputsComplete: synthetic.complete,
+        ...(thrown !== undefined ? { thrown } : {}),
+      });
+      const discoverable = (reason: PatternPublicationReason) => ({
+        status: "discoverable" as const,
+        reason,
+        syntheticInputsComplete: synthetic.complete,
+      });
+      // The probe runs in an isolated, in-memory runtime — never the
+      // session's space. `probe-runtime.ts` carries the whole reason; the
+      // short version is that a probe in the live space persists its inputs
+      // and its result graph there, `stop()` does not delete them, and the
+      // orphan is reachable from the sandbox's Fabric mount.
+      const probe = async () => {
+        const opened = await openProbeRuntime(
+          session.identity,
+          pieces.runtime.apiUrl,
+          context.cfcEnforcementMode,
+        );
+        // No identity, no isolated runtime, and therefore no probe. Falling
+        // back to the live space would re-enter the leak this exists to close
+        // through the error path, so the gate abstains instead.
+        if (opened === undefined) return recorded("probe-failed");
+        try {
+          return await runProbe(opened.pieces);
+        } finally {
+          // Owned here rather than by the caller, because cancellation can
+          // return from the race while this is still opening, and a runtime
+          // opened after the caller stopped waiting would never be closed by
+          // anything the caller can still see.
+          await opened.close().catch(() => {});
+        }
+      };
+      const runProbe = async (probePieces: PiecesController) => {
+        // A composed source needs its imports in the probe's space too, or
+        // the compile below cannot resolve them. Same helper the live path
+        // uses, pointed at the isolated runtime — which is why composed
+        // patterns still get a verdict instead of degrading to "no verdict".
+        const composed = composedPatternIds(program);
+        if (composed.length > 0 && getPatternIndexClient !== undefined) {
+          await materializeComposedPatterns({
+            runtime: probePieces.runtime,
+            space: probePieces.getSpace(),
+            patternIds: composed,
+            getClient: getPatternIndexClient,
+          });
+        }
+        const probePattern = await compileAndSavePattern(
+          probePieces.runtime,
+          program,
+          { space: probePieces.getSpace() },
+        );
+        const probeCell = await probePieces.runPersistent(
+          probePattern,
+          synthetic.value,
+          undefined,
+          { start: true },
+        );
+        await probePieces.runtime.settled();
+        await probePieces.synced();
+        const probeResult = await new PieceController(probePieces, probeCell)
+          .result.getCell();
+        const rendered = await renderPatternUiToHtml(
+          probeResult,
+          () => probePieces.runtime.idle(),
+        );
+        if (rendered === undefined) return discoverable("no-ui");
+        // What the render means is decided by `classifyRenderedHtml`; what
+        // that meaning costs is decided here. Only a default-`toString` is
+        // positive evidence of a defect — the rest are absences, recorded
+        // uncertified rather than condemned. The DOM itself is read and
+        // discarded, and the runtime that produced it is discarded with it.
+        const reason = classifyRenderedHtml(rendered.html, rendered.errors);
+        return reason === "ui-rendered"
+          ? discoverable(reason)
+          : recorded(reason);
+      };
+      // One consultation of the signal, at the single exit. An abort reaches
+      // this function three ways — the race interrupts it, an await it does
+      // not interrupt throws, or it lands after a verdict — and all three
+      // mean the same thing: the run was cancelled, so nothing is recorded.
+      // Deciding that once is why there is no arm here that only one of the
+      // three orderings can take.
+      let outcome: Awaited<ReturnType<typeof probe>> = recorded("probe-failed");
+      try {
+        const work = (async () => {
+          outcome = await probe();
+        })();
+        // Raced rather than awaited so a probe that never settles cannot hold
+        // the run open; the value is not branched on, since the check below
+        // covers every way the abort could have arrived.
+        await raceWithAbort(work, signal);
+      } catch (error) {
+        // What a probe throws is the pattern's own text, which the artifact
+        // keeps for the run's own failure paths and which has no reading here
+        // beyond "no verdict". A defect in the GATE lands here too and reads
+        // identically from outside, so its text goes to the artifact rather
+        // than nowhere — a check that fails silently for its own reasons is
+        // the failure this gate exists to remove.
+        outcome = recorded("probe-failed", errorMessage(error));
+      }
+      return signal?.aborted === true ? "cancelled" : outcome;
+    };
+    // Source the model wrote and successfully ran is contributed back to the
+    // index. Recording and being offered to search are separate: the default
+    // records the run, while deliberate corpus seeding may request immediate
+    // discoverability. A render-gate failure always withholds discovery with
+    // its own reason. A run naming a `patternId` records nothing: it ran what
+    // the index already holds.
+    const description = input.description?.trim();
+    let publication: RunPatternPublicationReport | undefined;
+    let probeThrown: string | undefined;
+    // The engine hands the ledger over with the index client, in one spread,
+    // so requiring it here is the same condition as requiring the client —
+    // spelled twice because the type cannot say they arrive together. There is
+    // deliberately no second publish path: one that skipped the ledger would
+    // put back the per-iteration duplicates the ledger exists to prevent.
+    const publications = context.patternIndexPublications;
+    if (
+      patternId === undefined &&
+      getPatternIndexClient !== undefined &&
+      publications !== undefined &&
+      context.patternIndexPublishEnabled === true &&
+      description !== undefined && description !== ""
+    ) {
+      // The compile's own entry identity, which is the identity the index
+      // stores a pattern under. Taken from the compiled artifact rather than
+      // recomputed over the source, so it holds for a program the light
+      // identity path does not model: a source composing `cf:pattern:`
+      // imports folds each imported pattern's identity into the entry's.
+      const entryIdentity = pieces.runtime.patternManager
+        .getArtifactEntryRef(pattern)?.identity;
+      // A keyless identity names a pattern only within the session that
+      // minted it, so publishing under one would put an entry in the index
+      // that no other runtime can ever load.
+      if (
+        entryIdentity === undefined ||
+        PatternManager.isKeylessPatternIdentity(entryIdentity)
+      ) {
+        console.error(
+          "run_pattern could not publish the pattern it ran: the compiled pattern carries no durable content-addressed entry identity",
+        );
+      } else {
+        const verdict = await renderGateVerdict();
+        // A cancelled gate is a cancelled run. Nothing is staged: an index
+        // entry is a claim about a run that finished, and this one did not.
+        if (verdict === "cancelled") {
+          return cancelledOutput(
+            `the pattern ran and created piece ${piece.id}, which is not undone; it was not contributed to the pattern index`,
+          );
+        }
+        const publicationVerdict = verdict.status === "recorded" ||
+            context.patternIndexPublishDiscoverable === true
+          ? verdict
+          : {
+            ...verdict,
+            status: "recorded" as const,
+            reason: "recorded-automatically" as const,
+          };
+        publication = {
+          status: publicationVerdict.status,
+          reason: publicationVerdict.reason,
+          message: PATTERN_PUBLICATION_MESSAGES[publicationVerdict.reason],
+          syntheticInputsComplete: publicationVerdict.syntheticInputsComplete,
+        };
+        // What a probe THREW, and never what it rendered: the rendered DOM is
+        // read, classified and discarded. The artifact root is readable
+        // through `bash` (CT-2117), so the only defensible amount of rendered
+        // content to put there is none; thrown text stays because it is the
+        // class that root already holds and cannot be recovered any other way.
+        probeThrown = verdict.thrown;
+        {
+          const request: PatternIndexPublishRequest = {
+            patternId: entryIdentity,
+            program: {
+              main: program.main,
+              files: program.files.map((file) => ({
+                name: file.name,
+                contents: file.contents,
+              })),
+            },
+            description,
+            hashtags: input.hashtags ?? [],
+            // What the pattern was written to answer. The run's own task is
+            // that request; a run carrying no task text has only the model's
+            // description of what it wrote, which is the same claim in the
+            // model's words.
+            directQuery: context.taskText ?? description,
+            argumentSchema: pattern.argumentSchema,
+            resultSchema: pattern.resultSchema,
+            dependencies: patternIndexDependencies(program.files),
+            // Recording and surfacing are separate. Everything that ran is
+            // recorded; only an explicit seed configuration asks search to
+            // offer a passing render immediately.
+            ...(publicationVerdict.status === "recorded"
+              ? {
+                nonDiscoverable: {
+                  reason:
+                    PATTERN_DISCOVERABILITY_REASONS[publicationVerdict.reason],
+                },
+              }
+              : { discoverable: true }),
+          };
+          publications.stage(request);
+        }
       }
     }
     return {
@@ -737,6 +1893,9 @@ export const runPatternTool: HarnessToolDefinition<
       ...(linkedStringCount !== undefined ? { linkedStringCount } : {}),
       ...(valueError !== undefined ? { valueError } : {}),
       ...(rawValue !== undefined ? { rawValue } : {}),
+      ...(releaseObservation !== undefined ? { releaseObservation } : {}),
+      ...(publication !== undefined ? { patternPublication: publication } : {}),
+      ...(probeThrown !== undefined ? { rawCauseMessage: probeThrown } : {}),
     };
   },
 };

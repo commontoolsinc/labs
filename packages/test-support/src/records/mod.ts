@@ -9,6 +9,7 @@ export {
   RECORD_SCHEMA_VERSION,
   serializeContextLine,
   serializeRecordLine,
+  testIdentityKey,
 } from "./schema.ts";
 export type {
   CiContext,
@@ -58,6 +59,26 @@ export {
 } from "./spool.ts";
 export type { HeldSpool, SpoolContents } from "./spool.ts";
 export {
+  activeCapture,
+  asDefinition,
+  buildCapture,
+  fileForName,
+  installRegistrationCapture,
+  NAME_MAP_PREFIX,
+  NAME_MAP_SUFFIX,
+  NAME_SEPARATOR,
+  parseSkipList,
+  readNameMaps,
+  registerFrameworkModule,
+  registeringModule,
+  relativeToRoot,
+  repositoryRootOf,
+  serializeSkipList,
+  SKIP_LIST_VARIABLE,
+} from "./registration.ts";
+export type { NameMap, RegistrationCapture, SkipList } from "./registration.ts";
+export { preloadArgument, preloadModulePath } from "./preload-path.ts";
+export {
   dropContainerCases,
   ingestJUnit,
   isRelativeSourcePath,
@@ -75,10 +96,44 @@ export type { ServiceAccountKey } from "./gcp-auth.ts";
 export {
   createObject,
   gunzipToText,
+  gzipChunks,
   gzipText,
   STORE_WRITE_SCOPE,
 } from "./store.ts";
 export type { CreateObjectOptions, CreateObjectResult } from "./store.ts";
-export { listObjects, parseReportGroups, readObject } from "./store-reader.ts";
-export type { StoredReport, StoredReportGroup } from "./store-reader.ts";
+export {
+  listObjects,
+  listObjectSizes,
+  objectUrl,
+  parseReportGroups,
+  readObject,
+} from "./store-reader.ts";
+export type {
+  ListedObject,
+  StoredReport,
+  StoredReportGroup,
+} from "./store-reader.ts";
 export { recordsSpooledBy } from "./testing.ts";
+export {
+  digestIdentities,
+  MANIFEST_SCHEMA_VERSION,
+  parseManifest,
+  serializeManifest,
+} from "./selection.ts";
+export {
+  freeCalibration,
+  sampleEntry,
+  sampleManifest,
+} from "./selection-testing.ts";
+export type {
+  Calibration,
+  CoverageBaseline,
+  LanePlan,
+  Manifest,
+  ManifestEntry,
+  ScoreInputs,
+  UnavailableEntry,
+  UnschedulableEntry,
+  WithheldEntry,
+  WithheldReason,
+} from "./selection.ts";

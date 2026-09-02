@@ -3,10 +3,11 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isInertArray } from "@commonfabric/utils/arrays";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
+  assertValidFabricValueLayer,
   FabricInstance,
   FabricPrimitive,
-  shallowFabricFromNativeValue,
-} from "@commonfabric/data-model/fabric-value";
+  shallowFabricFromNativeObjectElseUndefined,
+} from "@commonfabric/data-model";
 import { refuseFabricInstance } from "../fabric-special-object.ts";
 import { type AliasBinding } from "../sigil-types.ts";
 import {
@@ -24,6 +25,7 @@ import { getTopFrame } from "./pattern.ts";
 import {
   getArtifactEntryRef,
   getPatternProgram,
+  isKeylessPatternIdentity,
   noteDerivedCopy,
 } from "./pattern-metadata.ts";
 import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
@@ -166,11 +168,11 @@ export function withAliasBindings(
   // `{}`. It refuses instead of doing that quietly.
   if (value instanceof FabricInstance) refuseBoundFabricInstance(value);
 
-  // Whatever reaches here goes to the sanctioned conversion, which mints its
-  // fabric form or rejects it. Three kinds arrive: a native carrying a
-  // canonical fabric form (a `Uint8Array`, a `Date`); a non-inert array, which
-  // the array branch above declines to walk; and a value with no fabric
-  // representation at all.
+  // Whatever reaches here is handed to the sanctioned conversion, which mints
+  // its fabric form or -- there being nothing to mint -- leaves it to the vet
+  // to refuse. Three kinds arrive: a native carrying a canonical fabric form
+  // (a `Uint8Array`, a `Date`); a non-inert array, which the array branch
+  // above declines to walk; and a value with no fabric representation at all.
   //
   // The INERT tests -- this one and the array test above -- are what keep this
   // function's output vetted, and neither is interchangeable with a bare
@@ -189,11 +191,22 @@ export function withAliasBindings(
   if (
     isObjectOrArray(value) && !isPattern(value) && !isInertPlainObject(value)
   ) {
-    value = shallowFabricFromNativeValue(value);
-    // The conversion mints either arm: a `Uint8Array` becomes a `FabricBytes`,
-    // an `Error` a `FabricError`.
-    if (value instanceof FabricPrimitive) return value;
-    if (value instanceof FabricInstance) refuseBoundFabricInstance(value);
+    const minted = shallowFabricFromNativeObjectElseUndefined(value);
+    if (minted === undefined) {
+      // Nothing was minted, so the value would have to be walkable as it
+      // stands, and this is what holds it to that. Everything reaching this
+      // arm is in fact refused: an inert array returned above, an inert plain
+      // object is excluded by the guard just made, and a value already in
+      // fabric form returned earlier still. Routing a non-inert plain object
+      // HERE rather than excluding it above is what gets it refused.
+      assertValidFabricValueLayer(value);
+    } else if (minted instanceof FabricInstance) {
+      // An `Error` mints a `FabricError`.
+      refuseBoundFabricInstance(minted);
+    } else {
+      // A `Uint8Array` mints a `FabricBytes`, a `Date` a `FabricEpochNsec`.
+      return minted as FabricExecValue;
+    }
   }
 
   // If this is an object or a pattern, process each key recursively.
@@ -201,12 +214,11 @@ export function withAliasBindings(
     // Guard against circular object references (e.g. schema objects with
     // shared identity between $defs and sibling properties).
     if (!seen) seen = new WeakMap();
-    // Circularity is keyed on object identity, and identity can CHANGE on the
-    // way here: the conversion above hands back a different object when it
-    // clones in order to freeze. So both identities are marked -- the value as
-    // received and the value as converted -- and a cycle pointing at either is
-    // caught. Keying only the converted object would let a cycle back to the
-    // original recurse undetected until the stack dies.
+    // Circularity is keyed on object identity, and the conversion above is
+    // the only thing that could hand back a different one -- which it does
+    // only for a leaf, and every leaf returns or is refused on the spot. So a
+    // value reaching this walk still carries the identity it arrived under,
+    // and marking that one identity catches every cycle back to it.
     const depth = seen.get(value as object) ?? 0;
     if (depth > 0) return {}; // Actually circular
     seen.set(value as object, depth + 1);
@@ -471,11 +483,19 @@ export function patternToEncodableForm(
   // nothing could resolve its ref. That graph holds LIVE modules, so the walk
   // replaces its artifacts here.
   //
+  // A session-synthetic `keyless:` ref counts as NO entry ref at this
+  // boundary (L3(a), RULED 2026-08-27: keyless identities must never land
+  // durably). The mint (`ensureKeylessPatternIdentity`) sets the value's
+  // forward entry ref for in-session by-identity resolution; without this
+  // check, any later boundary write of the minted VALUE would emit a
+  // `$patternRef` no other session can ever resolve, in place of the designed
+  // full-graph fallback.
+  //
   // `moduleToEncodableForm` reads `getTopFrame()` to decide `$implRef`. A
   // frame inherits its parent's runtime (`builder/pattern.ts`), so
   // `frame.runtime` is the same at every point along one stack.
   const entryRef = getArtifactEntryRef(pattern);
-  return entryRef
+  return entryRef && !isKeylessPatternIdentity(entryRef.identity)
     ? {
       $patternRef: { identity: entryRef.identity, symbol: entryRef.symbol },
       argumentSchema: pattern.argumentSchema,

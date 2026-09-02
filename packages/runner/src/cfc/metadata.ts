@@ -53,22 +53,38 @@ const isCfcMetadata = (value: unknown): value is CfcMetadata =>
   isObjectNotArray(value.labelMap) &&
   Array.isArray(value.labelMap.entries);
 
+// A record at the reserved metadata position whose `version` this build does
+// not interpret. The position is what qualifies the record, never its field
+// names — a future format may rename every field except the version, and
+// requiring today's members would read exactly those envelopes as unlabeled.
+// A record with no `version` at all is not an envelope.
+const isUnknownVersionEnvelope = (
+  value: unknown,
+): value is { version: unknown } =>
+  isObjectNotArray(value) && "version" in value &&
+  !isKnownMetadataVersion(value.version);
+
 /**
  * Throws for a record at the reserved metadata position carrying a
- * `version` outside {@link KNOWN_CFC_METADATA_VERSIONS}. The position is
- * what qualifies the record, never its field names — a future format may
- * rename every field except the version, and requiring today's members
- * would read exactly those envelopes as unlabeled. A record with no
- * `version` at all is not an envelope and stays invisible, as before.
+ * `version` outside {@link KNOWN_CFC_METADATA_VERSIONS}.
  */
 const refuseUnknownMetadataVersion = (value: unknown): void => {
-  if (
-    isObjectNotArray(value) && "version" in value &&
-    !isKnownMetadataVersion(value.version)
-  ) {
+  if (isUnknownVersionEnvelope(value)) {
     throw new UnknownCfcMetadataVersionError(value.version);
   }
 };
+
+/**
+ * Whether a value at a document's reserved metadata position leaves the
+ * document carrying a label map. True for an envelope this build interprets,
+ * and for one whose `version` it does not — that one throws on read and every
+ * consumer fails closed on the throw, so the document is not an unlabeled one.
+ * False for everything {@link readStoredCfcMetadata} reports as absent, `null`
+ * and a record with no `version` among them: a document holding one of those
+ * reads as carrying no confidentiality at all.
+ */
+export const cfcMetadataPresent = (value: unknown): boolean =>
+  isCfcMetadata(value) || isUnknownVersionEnvelope(value);
 
 export const readStoredCfcMetadata = (
   tx: IExtendedStorageTransaction,

@@ -34,6 +34,7 @@ import type { ClientCommit, Operation, PatchOp } from "../v2.ts";
 export interface NaiveOp {
   id: string;
   kind: "set" | "patch";
+
   /** Leaf value paths touched by a patch (unused for `set`). */
   leafPaths: string[][];
 }
@@ -47,6 +48,7 @@ export interface NaiveCommit {
 
 export interface NaiveHistory {
   accepted: NaiveCommit[];
+
   /** sessionId -> localSeq -> resolution seq (accepted commits only). */
   resolution: Map<string, Map<number, number>>;
 }
@@ -194,7 +196,9 @@ export const naiveRecord = (
   sessionRes.set(commit.localSeq, seq);
 };
 
-// --- Reference value semantics (INV-9's naive fold) ---------------------
+//
+// Reference value semantics (INV-9's naive fold)
+//
 
 const clone = <T>(value: T): T => structuredClone(value);
 

@@ -39,11 +39,12 @@ describe("scheduler execution planning", () => {
   });
 });
 
-// The non-settling heuristic only fires once a busy window crosses wall-clock
-// thresholds (5s / 10s), so integration runs cover these branches only when a
-// CI machine happens to run slow enough — which made the coverage gate flap.
-// These tests pin the branches with explicit `now` values instead.
 describe("settling tracker", () => {
+  // The non-settling heuristic only fires once a busy window crosses wall-clock
+  // thresholds (5s / 10s), so integration runs cover these branches only when a
+  // CI machine happens to run slow enough — which made the coverage gate flap.
+  // These tests pin the branches with explicit `now` values instead.
+
   it("emits non-settling telemetry once the busy window crosses thresholds", () => {
     const tracker = createSettlingTracker();
     markExecuteStart(tracker, 0);

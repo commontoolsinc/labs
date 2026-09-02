@@ -65,12 +65,13 @@ describe("serverExecutionEnabledFromEnv", () => {
   });
 });
 
-// OW31 (RULED 2026-08-18/19): the process identity is a DELEGATING
-// principal under the flag (session-level acting-as-owner READ binding;
-// ACL-only service reads), NEVER an OWNER-class service DID by default —
-// the operator's configured list is verbatim on BOTH arms, retiring the
-// Phase-7 implicit-OWNER blanket.
 describe("memoryAclPrincipalsFor", () => {
+  // OW31 (RULED 2026-08-18/19): the process identity is a DELEGATING principal
+  // under the flag (session-level acting-as-owner READ binding; ACL-only
+  // service reads), NEVER an OWNER-class service DID by default — the
+  // operator's configured list is verbatim on BOTH arms, retiring the Phase-7
+  // implicit-OWNER blanket.
+
   const me = "did:key:z6MkToolshedProcess";
   const operator = "did:key:z6MkOperator";
 

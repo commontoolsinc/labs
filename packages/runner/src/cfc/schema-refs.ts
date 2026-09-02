@@ -1,6 +1,6 @@
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
@@ -46,6 +46,7 @@ type SchemaDefinitions = NonNullable<JSONSchemaObj["$defs"]>;
 type SchemaRefSummary = {
   /** All refs below this fragment, excluding dormant `$defs` bodies. */
   all: ReadonlySet<string>;
+
   /** Local definition names resolved by this fragment's definition scope. */
   localDefinitions: ReadonlySet<string>;
 };

@@ -1,9 +1,11 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { resolveScopeKey, type ScopeKey } from "@commonfabric/memory/v2";
+import type { CfcRefusalDetail } from "../cfc/refusal-detail.ts";
 import type { Runtime } from "../runtime.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type {
   ChangeGroup,
+  CommitError,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
 } from "../storage/interface.ts";
@@ -25,6 +27,7 @@ import {
   type DiagnosisRecord,
   runIdempotencyRecheck,
 } from "./diagnosis.ts";
+import { reportDroppedCfcRejectedWrite } from "./cfc-rejection-report.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
 import {
   getSchedulerActionName,
@@ -182,6 +185,7 @@ export function watchReactiveActionCommit(state: {
   readonly queueExecution: () => void;
   readonly restoreInvalidCauses: () => void;
   readonly getActionId: (action: Action) => string;
+  readonly reportTerminalRejection?: (error: Error) => void;
 }): Promise<void> {
   const handleResult = async (error: unknown): Promise<void> => {
     if (!error) {
@@ -287,9 +291,20 @@ export function watchReactiveActionCommit(state: {
     // a count accumulated by earlier transient attempts or the terminal one.
     // Resubscribe still happens (finalizeReactiveActionCommit), so a real input
     // change re-triggers.
+    //
+    // A terminal rejection additionally SURFACES (spec scheduler-v2 §7.6):
+    // it is a verdict on the action's own output, so it reaches the
+    // scheduler's error channel with the refusal carried along, where a
+    // permanent rejection — a benign lost idempotency race — stays quiet.
     if (isPermanentRejection(error) || isTerminalRejection(error)) {
       state.retries.delete(state.action);
       state.offBudgetRetries.delete(state.action);
+      if (isTerminalRejection(error)) {
+        state.reportTerminalRejection?.(
+          toTerminalRejectionError(error, state.action),
+        );
+      }
+      abandonAction(state, error);
       return;
     }
 
@@ -314,6 +329,14 @@ export function watchReactiveActionCommit(state: {
     } else {
       // WATCH(scheduler-v2): exhausted retries can leave a piece registered
       // against rolled-back data (accepted zombie — spec §15 decision 9).
+      // The counters stay set, unlike the success and permanent arms. A spent
+      // budget is spent until this action commits something: clearing it here
+      // would hand every later failure a fresh budget, which under a failure
+      // that persists is a retry loop with no bound at all. So a run that a
+      // later input change triggers gets one attempt, and abandoning here is
+      // what an action that has not committed through a whole budget has
+      // earned.
+      abandonAction(state, error);
     }
   };
   return state.commitPromise.then(
@@ -329,6 +352,32 @@ export function watchReactiveActionCommit(state: {
       error,
     );
   });
+}
+
+/**
+ * Tell the work staged on this run's transaction that no further attempt at it
+ * is coming, and report the write if CFC enforcement is what refused it.
+ *
+ * The scheduler is the only party that knows this. A rejection does not say
+ * whether another attempt would fare better — CFC enforcement refuses a commit
+ * both for a verdict on the data and for metadata this replica has not read
+ * yet, and only the second converges by re-running — so a builtin waiting on
+ * the commit cannot tell a pause from an ending. This is the ending.
+ */
+function abandonAction(
+  state: {
+    readonly action: Action;
+    readonly tx: IExtendedStorageTransaction;
+    readonly getActionId: (action: Action) => string;
+  },
+  error: unknown,
+): void {
+  const actionId = state.getActionId(state.action);
+  reportDroppedCfcRejectedWrite(
+    error as { name?: string; message?: string },
+    actionId,
+  );
+  state.tx.abandonStagedWork(error as CommitError);
 }
 
 export function appendActionRunTrace(state: {
@@ -500,6 +549,7 @@ export async function runSchedulerAction(
   ): Promise<{
     result: unknown;
     log: ReactivityLog | undefined;
+
     /** The run ended in `RetryImmediately` (an unresolved inSpace name):
      * its retry — if any budget is left — is QUEUED, never re-run in the
      * calling pass (see the fan-out loop's deferred set). */
@@ -716,6 +766,7 @@ interface FanOutRunArgs {
   readonly instance: FanOutInstance;
   readonly startGen: number;
   readonly collectLog: (log: ReactivityLog) => void;
+
   /** The run ended in `RetryImmediately`: tell the loop not to offer this
    * instance again in the current pass (its retry, if any budget is
    * left, is queued — never re-run in-loop). */
@@ -824,6 +875,11 @@ function rescheduleActionForImmediateRetry(
     // it runs again on the node's next real invalidation, with a fresh
     // budget — the same "until its input data changes" shape as OFF's.
     state.retries.delete(args.action);
+    abandonAction({
+      action: args.action,
+      tx: args.tx,
+      getActionId: state.getActionId,
+    }, args.error);
     logger.error(
       "schedule-error",
       `Action ${args.actionId} exhausted retries resolving inSpace names`,
@@ -834,6 +890,53 @@ function rescheduleActionForImmediateRetry(
 
 function normalizeThrownError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+/**
+ * A commit rejection is a plain result object, not an Error, so the error
+ * channel gets a constructed one preserving the rejection's name and, for a
+ * CFC refusal, its structured `reasons` and `refusals` — the discriminants a
+ * consumer needs to tell a policy refusal from a thrown computation, and the
+ * remedy detail that names the inputs behind it. A thrown computation
+ * carries a pattern frame the error decoration reads piece attribution from;
+ * a commit rejection has none, so the attribution comes from the action's own
+ * observation identity, with the scope prefix stripped back to the result
+ * cell's id.
+ */
+function toTerminalRejectionError(error: unknown, action: Action): Error {
+  const rejection = error as {
+    name?: string;
+    message?: string;
+    reasons?: readonly string[];
+    refusals?: readonly CfcRefusalDetail[];
+  };
+  const surfaced = new Error(
+    typeof rejection?.message === "string" ? rejection.message : String(error),
+  );
+  if (typeof rejection?.name === "string") surfaced.name = rejection.name;
+  if (rejection?.reasons !== undefined) {
+    (surfaced as { reasons?: readonly string[] }).reasons = rejection.reasons;
+  }
+  if (rejection?.refusals !== undefined) {
+    (surfaced as { refusals?: readonly CfcRefusalDetail[] }).refusals =
+      rejection.refusals;
+  }
+  const identity = (action as Partial<TelemetryAnnotations>)
+    .schedulerObservationIdentity;
+  if (identity !== undefined) {
+    const context = surfaced as Error & { pieceId?: string; space?: string };
+    // `pieceRootId` is the raw result-cell id. `pieceId` is a SCOPE KEY plus
+    // that id, and a scope key is not one segment — `user:<principal>` and
+    // `session:<principal>:<sessionId>` both carry colons — so slicing at the
+    // first one leaves principal segments on a scoped piece and misattributes
+    // it.
+    const rootId = identity.pieceRootId;
+    if (rootId !== undefined) context.pieceId = rootId;
+    if (identity.ownerSpace !== undefined) {
+      context.space = identity.ownerSpace;
+    }
+  }
+  return surfaced;
 }
 
 function finalizeReactiveActionCommit(
@@ -946,6 +1049,7 @@ function finalizeReactiveActionCommit(
         restoreInvalidCauses(state.nodes, args.action, args.invalidCauses);
       }
     },
+    reportTerminalRejection: (error) => state.handleError(error, args.action),
   });
   // The barrier entry commit() registered settles with the commit promise,
   // but the disposition above — a conflict's catch-up-then-requeue in

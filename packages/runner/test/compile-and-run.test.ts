@@ -76,18 +76,18 @@ Deno.test("compileAndRun initializes outputs and handles invalid programs", asyn
   }
 });
 
-// Server-execution v2 Phase 2's compile gate (the builtin's flag-ON
-// posture, stated truthfully): compilation is an EFFECTFUL step whose
-// launch is a floating promise the overlay destination cannot
-// intercept, so the gate lives in the builtin and suppresses fresh
-// compiles for EVERY flag-ON non-wave run — client derivation runs,
-// F10 handler runs, imperative flows alike. Until the serving port
-// lands (stage G's out-of-scope note; the serving side refuses the
-// writebacks), fresh compile-and-run is INERT in the ON arm everywhere:
-// memo'd results still read through, `pending` renders the ordinary
-// loading state. A WAVE-STAMPED run passes the gate (the seam the
-// serving port will drive), and the OFF arm is untouched.
 Deno.test("compileAndRun's Phase-2 gate: flag-ON non-wave runs launch NO fresh compile (pending stands), a wave-stamped run passes, and the OFF arm is unaffected", async () => {
+  // Server-execution v2 Phase 2's compile gate (the builtin's flag-ON posture,
+  // stated truthfully): compilation is an EFFECTFUL step whose launch is a
+  // floating promise the overlay destination cannot intercept, so the gate
+  // lives in the builtin and suppresses fresh compiles for EVERY flag-ON
+  // non-wave run — client derivation runs, F10 handler runs, imperative flows
+  // alike. Until the serving port lands (stage G's out-of-scope note; the
+  // serving side refuses the writebacks), fresh compile-and-run is INERT in the
+  // ON arm everywhere: memo'd results still read through, `pending` renders the
+  // ordinary loading state. A WAVE-STAMPED run passes the gate (the seam the
+  // serving port will drive), and the OFF arm is untouched.
+
   const identity = await Identity.fromPassphrase("compile and run gate");
   const space = identity.did();
 

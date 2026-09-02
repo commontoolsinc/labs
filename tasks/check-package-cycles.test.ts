@@ -90,7 +90,7 @@ const MEMBERS = [
   "ui",
   "patterns",
   "integration",
-  "connectors/agents",
+  "connectors/agents/connector",
 ];
 
 describe("check-package-cycles", () => {
@@ -217,11 +217,16 @@ describe("check-package-cycles", () => {
 
   describe("targetPackage()", () => {
     const workspace = {
-      members: ["runner", "background-piece-service", "a", "connectors/agents"],
+      members: [
+        "runner",
+        "background-piece-service",
+        "a",
+        "connectors/agents/connector",
+      ],
       names: new Map([
         ["@commonfabric/runner", "runner"],
         ["@commonfabric/background-piece", "background-piece-service"],
-        ["@commonfabric/agents-connector", "connectors/agents"],
+        ["@commonfabric/agents-connector", "connectors/agents/connector"],
       ]),
     };
 
@@ -255,17 +260,17 @@ describe("check-package-cycles", () => {
           "@commonfabric/agents-connector",
           workspace,
         ),
-      ).toBe("connectors/agents");
+      ).toBe("connectors/agents/connector");
     });
 
     it("returns the nested member a relative specifier climbs into", () => {
       expect(
         targetPackage(
           "packages/a/src/x.ts",
-          "../../connectors/agents/src/y.ts",
+          "../../connectors/agents/connector/src/y.ts",
           workspace,
         ),
-      ).toBe("connectors/agents");
+      ).toBe("connectors/agents/connector");
     });
 
     it("returns the package a relative specifier climbs into", () => {
@@ -382,11 +387,18 @@ describe("check-package-cycles", () => {
     });
 
     it("returns a nested member under its full directory", async () => {
-      const root = await tree({ "connectors/agents": { "src/mod.ts": "" } });
+      const root = await tree({
+        "connectors/agents/connector": { "src/mod.ts": "" },
+      });
       const workspace = await readWorkspace(root);
-      expect(workspace.members).toEqual(["connectors/agents"]);
+      expect(workspace.members).toEqual(["connectors/agents/connector"]);
       expect(workspace.names).toEqual(
-        new Map([["@commonfabric/connectors/agents", "connectors/agents"]]),
+        new Map([
+          [
+            "@commonfabric/connectors/agents/connector",
+            "connectors/agents/connector",
+          ],
+        ]),
       );
     });
 
@@ -398,6 +410,25 @@ describe("check-package-cycles", () => {
       expect(workspace.members).toEqual(["alpha"]);
       expect(workspace.names).toEqual(new Map());
     });
+
+    it("ignores malformed and non-package workspace entries", async () => {
+      const root = await tree({
+        alpha: { "deno.json": JSON.stringify({ name: "alpha-from-json" }) },
+      });
+      await Deno.writeTextFile(
+        join(root, "deno.jsonc"),
+        JSON.stringify({
+          workspace: [null, 42, "./tools", "./packages/alpha"],
+        }),
+      );
+      await Deno.remove(join(root, "packages", "alpha", "deno.jsonc"));
+
+      const workspace = await readWorkspace(root);
+      expect(workspace.members).toEqual(["alpha"]);
+      expect(workspace.names).toEqual(
+        new Map([["alpha-from-json", "alpha"]]),
+      );
+    });
   });
 
   describe("packageOfPath()", () => {
@@ -407,8 +438,12 @@ describe("check-package-cycles", () => {
     });
 
     it("returns the nested member rather than the directory containing it", () => {
-      expect(packageOfPath("packages/connectors/agents/src/x.ts", MEMBERS))
-        .toBe("connectors/agents");
+      expect(
+        packageOfPath(
+          "packages/connectors/agents/connector/src/x.ts",
+          MEMBERS,
+        ),
+      ).toBe("connectors/agents/connector");
     });
 
     it("returns undefined for a path in no member", () => {

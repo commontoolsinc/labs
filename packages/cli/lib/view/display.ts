@@ -50,8 +50,10 @@ export function displayModeLabel(mode: DisplayMode): string {
 export interface DisplayCell {
   readonly ch: string;
   readonly col: number;
+
   /** Exclusive source column represented by this display cell. */
   readonly sourceEnd: number;
+
   readonly syntax: Style;
   readonly ansi?: Style;
 }
@@ -254,7 +256,9 @@ function displayHidden(src: readonly SourcePoint[]): DisplayCell[] {
   return cells;
 }
 
-// --- non-printable classification & glyphs -----------------------------------
+//
+// non-printable classification & glyphs
+//
 
 /** A control code (C0 or DEL/C1) with no ordinary glyph of its own. */
 function isNonPrintable(cp: string): boolean {
@@ -284,13 +288,17 @@ export function glyphFor(cp: string): string {
   return "␦";
 }
 
-// --- ANSI (CSI) recognition --------------------------------------------------
+//
+// ANSI (CSI) recognition
+//
 
 interface CsiMatch {
   /** Number of source code points the whole sequence spans. */
   readonly len: number;
+
   /** The final byte, e.g. "m" for a color (SGR) sequence. */
   readonly final: string;
+
   /** The parameter bytes between `ESC [` and the final byte. */
   readonly params: string;
 }

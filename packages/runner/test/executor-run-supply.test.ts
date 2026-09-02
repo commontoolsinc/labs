@@ -40,6 +40,7 @@ import type {
   TransactionSealDestination,
 } from "../src/storage/interface.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("p2f run supply");
 const space = signer.did();
@@ -53,6 +54,7 @@ const bob = { principal: "did:key:p2f-bob", sessionId: "bob-s1" as never };
 describe("stage P2-F per-(action × instance) run supply", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+
   /** Every ServerRunInfo the production stamping choke points hand the
    * installed stamper, in order. */
   let stamped: ServerRunInfo[];
@@ -505,16 +507,18 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     }
   });
 
-  // -------------------------------------------------------------------------
+  //
+  // Fan-out stage B, review F1: a bounded RetryImmediately
+  //
   // Fan-out stage B, independent review F1: `RetryImmediately` inside a
-  // fanned-out instance run must be BOUNDED — the OFF arm's shape (one
-  // queued retry per attempt, a macrotask apart, MAX_RETRIES_FOR_REACTIVE
-  // attempts, then the accepted zombie). Before the fix the loop re-ran
-  // the same instance in the SAME pass (its key never became clean, so
-  // the set kept offering it): 501 invocations of a 500-throw action
-  // inside ONE `run()`, and a never-resolving name spun the process's
-  // microtask queue forever — no timer fired, `idle()` never resolved.
-  // -------------------------------------------------------------------------
+  // fanned-out instance run must be BOUNDED — the OFF arm's shape (one queued
+  // retry per attempt, a macrotask apart, MAX_RETRIES_FOR_REACTIVE attempts,
+  // then the accepted zombie). Before the fix the loop re-ran the same instance
+  // in the SAME pass (its key never became clean, so the set kept offering it):
+  // 501 invocations of a 500-throw action inside ONE `run()`, and a
+  // never-resolving name spun the process's microtask queue forever — no timer
+  // fired, `idle()` never resolved.
+  //
 
   it("F1: a demanded action that keeps throwing RetryImmediately is bounded per pass — the loop DEFERS the instance instead of re-running it, the retry rides the queue (a timer fires between attempts), and the budget is MAX_RETRIES_FOR_REACTIVE", async () => {
     const rootId = "of:p2f-retry-root";
@@ -697,11 +701,9 @@ describe("stage P2-F per-(action × instance) run supply", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // F1 (RULED 2026-08-13, option c): the piece-start setup commit's
 // failure must SURFACE — loudly, counted — never be swallowed by the
 // fire-and-forget start path.
-// ---------------------------------------------------------------------------
 
 const V1_NO_HANDLER = [
   "import { Writable, pattern } from 'commonfabric';",
@@ -743,7 +745,6 @@ describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
       servingPosture: true,
       experimental: {
         serverExecution: true,
-        systemPatternAutoUpdate: true,
       },
     });
   });
@@ -785,7 +786,7 @@ describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v3Ref.identity,
       symbol: v3Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     return cell;
   };

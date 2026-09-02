@@ -6,16 +6,25 @@
 
 export { refuseFabricInstance } from "./fabric-special-object.ts";
 export {
+  isStoredArgumentSchemaRefusal,
+  STORED_ARGUMENT_SCHEMA_REFUSAL,
+  storedArgumentRefusalDetail,
+} from "./stored-argument-refusal.ts";
+export {
   addressKey,
   CELL_SCOPE_VALUES,
   createLLMFriendlyLink,
+  encodeJsonPointer,
   isAliasBinding,
+  isPieceHandle,
   isSigilLink,
   linkPathSegmentToCellPathSegment,
   matchLLMFriendlyLink,
   type NormalizedFullLink,
   parseLLMFriendlyLink,
+  parseReferenceParts,
   parseScopedIdSegment,
+  type ReferenceParts,
 } from "./link-types.ts";
 export {
   isLinkRef,
@@ -36,6 +45,7 @@ export {
 export {
   CHIP_UI,
   FRAMEWORK_RESULT_KEYS,
+  type JSONObject,
   type JSONSchema,
   type JSONValue,
   NAME,

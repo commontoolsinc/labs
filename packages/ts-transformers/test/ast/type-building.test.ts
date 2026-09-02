@@ -13,13 +13,17 @@ import {
   createCaptureTreeNode,
 } from "../../src/utils/capture-tree.ts";
 
+//
+// Emitting a type node into another file
+//
 // The printer extracts literal text by source position from the file it is
 // printing. A declaration member's type node reused in ANOTHER file therefore
 // emits garbage tokens for literal types (e.g. the `"n/a"` in
 // `Default<string, "n/a">` printed as whatever sits at those offsets in the
 // emit file). cloneTypeNodeDeepForEmission strips positions throughout so
-// literals print from their own `.text`. (Same guarantee as the helper of
-// this name on the #4078 branch.)
+// literals print from their own `.text`.
+//
+
 Deno.test("cloneTypeNodeDeepForEmission prints cross-file literal types from their own text", () => {
   const declarationFile = ts.createSourceFile(
     "declaration.ts",
@@ -66,6 +70,10 @@ Deno.test("cloneTypeNodeDeepForEmission carries typeRegistry entries onto clones
 
   assertStrictEquals(typeRegistry.get(cloned), fakeType);
 });
+
+//
+// Building capture type elements
+//
 
 Deno.test("buildCaptureTypeElements handles destructured keys and renames identifier captures", () => {
   const sourceText = `

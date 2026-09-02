@@ -14,7 +14,7 @@
 import type { Argument, Command, Option } from "@cliffy/command";
 // Free at completion time: walking the tree means loading the command tree,
 // which already resolves this module.
-import { matchLLMFriendlyLink } from "@commonfabric/runner/shared";
+import { isReference } from "../llm-friendly-ref.ts";
 
 /**
  * A command of any option/argument parameterization.
@@ -28,6 +28,7 @@ export type AnyCommand = Command<any>;
 
 /** What the word under the cursor is a position for. */
 export type CompletionSlot =
+
   /** A subcommand name of `command`. */
   | { readonly kind: "subcommand" }
   /** An option flag (the word starts with `-`). */
@@ -36,6 +37,7 @@ export type CompletionSlot =
   | {
     readonly kind: "option-value";
     readonly option: Option;
+
     /** Set when completing `--name=value`; candidates must carry the prefix. */
     readonly inlinePrefix?: string;
   }
@@ -46,9 +48,11 @@ export type CompletionSlot =
     readonly index: number;
   }
   /**
-   * A word after `--`. `cf piece call` and `cf exec` hand these to the
-   * callable's own schema-derived parser, so the CLI's option tree does not
-   * describe them.
+   * A word after `--`, which on `cf call` and `cf exec` is the read step's
+   * section: `--select`, `--schema` and `--filter`, and `--help` reaching the
+   * callable. Item 6 of
+   * [CLI completion coverage](../../../../docs/plans/cli-completion-coverage.md)
+   * is what fills it, from the verb's declared result.
    */
   | { readonly kind: "passthrough"; readonly index: number }
   /** The value of a pre-parse global such as `--log-level`. */
@@ -70,6 +74,7 @@ export type CompletionSlot =
 export interface PreParseGlobal {
   readonly flags: readonly string[];
   readonly description: string;
+
   /** Accepted values, when the flag takes one. */
   readonly values?: readonly string[];
 }
@@ -94,23 +99,31 @@ function findPreParseGlobal(token: string): PreParseGlobal | undefined {
 export interface CompletionLine {
   /** Deepest command the words resolved to. */
   readonly command: AnyCommand;
-  /** Command path below the program name, e.g. `["piece", "call"]`. */
+
+  /** Command path below the program name, e.g. `["piece", "ls"]`. */
   readonly path: readonly string[];
+
   readonly slot: CompletionSlot | null;
+
   /** The partial word under the cursor; `""` at a fresh position. */
   readonly word: string;
+
   /** Long name -> last value, for value-taking options already on the line. */
   readonly options: ReadonlyMap<string, string>;
+
   /** Long names of valueless flags already on the line. */
   readonly flags: ReadonlySet<string>;
+
   /**
    * A canonical reference written in the first positional, in place of
-   * `--piece`. It does not count as a positional: the command reads it out
+   * `--cell`. It does not count as a positional: the command reads it out
    * before the rest, so `<callable>` is still the argument after it.
    */
   readonly address?: string;
+
   /** Positional words already supplied to `command`. */
   readonly positionals: readonly string[];
+
   /** Words after a `--` separator, excluding the separator itself. */
   readonly passthrough: readonly string[];
 }
@@ -173,7 +186,7 @@ function expandBundle(
  * Subcommands that represent real commands.
  *
  * `main` registers `help` with `.global()`, so Cliffy propagates it to every
- * descendant and `hasCommands()` is true even on leaves like `piece call`.
+ * descendant and `hasCommands()` is true even on leaves like `cf call`.
  * Taking that at face value would resolve every leaf's positional to a
  * subcommand slot and silently disable all dynamic value completion.
  */
@@ -186,7 +199,7 @@ function realSubcommands(command: AnyCommand): AnyCommand[] {
 /**
  * Whether the command ends its own option parsing at the first positional.
  *
- * `cf piece call` and `cf exec` are `stopEarly()`, so every word after the
+ * `cf call` and `cf exec` are `stopEarly()`, so every word after the
  * callable name belongs to the callable's schema-derived parser and the CLI's
  * own flags are refused there. Cliffy stores the property with no accessor, so
  * it is read off the field: keeping the question where the command declares it
@@ -197,8 +210,8 @@ function stopsEarly(command: AnyCommand): boolean {
 }
 
 /**
- * Commands whose first positional may carry a canonical reference in place of
- * `--piece`, keyed the way the provider tables are.
+ * Commands whose first positional may carry a reference in place of the
+ * `--cell` flag, keyed the way the provider tables are.
  *
  * `readTargetPositionals` and `readCallTarget` in `commands/piece.ts` are what
  * implement it, and nothing on the command tree distinguishes those two
@@ -207,9 +220,6 @@ function stopsEarly(command: AnyCommand): boolean {
  * reason `PRE_PARSE_GLOBALS` is.
  */
 const POSITIONAL_ADDRESS_COMMANDS: ReadonlySet<string> = new Set([
-  "piece get",
-  "piece set",
-  "piece call",
   "get",
   "set",
   "call",
@@ -218,15 +228,15 @@ const POSITIONAL_ADDRESS_COMMANDS: ReadonlySet<string> = new Set([
 /**
  * Whether `token` in the first positional of `path` names the target rather
  * than filling that argument. The deciding grammar is the command's:
- * a canonical reference begins with `/`, and neither a cell path nor a
- * callable name ever does.
+ * a reference begins with `/`, and neither a cell path nor a callable name
+ * ever does.
  */
 function isPositionalAddress(
   path: readonly string[],
   token: string,
 ): boolean {
   return POSITIONAL_ADDRESS_COMMANDS.has(path.join(" ")) &&
-    matchLLMFriendlyLink.test(token.trim());
+    isReference(token);
 }
 
 /** Resolve a subcommand by name or alias, skipping Cliffy's own `help`. */
@@ -347,9 +357,10 @@ export function resolveCompletionLine(
       continue;
     }
 
-    // Past a `stopEarly()` boundary every word belongs to the callable, so a
-    // flag-shaped one is data rather than an option. Reading it as an option
-    // would shift the positional index the argument slot depends on.
+    // Past a `stopEarly()` boundary the verb has opened its own section, so
+    // every word belongs to the callable and a flag-shaped one is data rather
+    // than an option. Reading it as an option would shift the positional index
+    // the argument slot depends on.
     if (positionals.length > 0 && stopsEarly(command)) {
       positionals.push(token);
       continue;
@@ -419,7 +430,7 @@ export function resolveCompletionLine(
         positionals = [];
         continue;
       }
-      // A positional address replaces `--piece` rather than filling the
+      // A positional address replaces `--cell` rather than filling the
       // argument, so the words after it keep the indices they would have had.
       if (address === undefined && isPositionalAddress(path, token)) {
         address = token;
@@ -547,3 +558,73 @@ function positionalSlot(
 
 /** Exported for `providers.ts`, which keys context lookups by long name. */
 export { longName, takesValue };
+
+/** One positional a command tree declares, and where it sits. */
+export interface DeclaredPositional {
+  /** `<command path>:<argument name>`, the key its provider carries. */
+  readonly key: string;
+
+  /** The command path, or `<root>` for the root command's own. */
+  readonly where: string;
+
+  /** Its place in that command's argument order, so a line can reach it. */
+  readonly index: number;
+}
+
+/** Every value-taking option and every positional a command tree declares. */
+export interface DeclaredSlots {
+  /** Option long name -> the command paths declaring it. */
+  readonly options: ReadonlyMap<string, readonly string[]>;
+
+  readonly positionals: readonly DeclaredPositional[];
+
+  /**
+   * The option slots whose value may be omitted, as
+   * `<command path>:--<long name>`.
+   *
+   * Such an option never swallows the next word, so the cursor after
+   * `--name ` is on a positional and only `--name=` reaches the option's own
+   * value. Anything walking these slots to drive a line has to spell them that
+   * way or it drives a different slot.
+   */
+  readonly optionalValues: ReadonlySet<string>;
+}
+
+/**
+ * Every slot the tree offers a value at, walked the way `resolveCompletionLine`
+ * walks it: `realSubcommands` decides which children are commands, and
+ * `takesValue` decides which options have a value to complete.
+ *
+ * Both keys the provider tables use fall out of this walk, which is what lets
+ * a check subtract the tables from the tree — in either direction — rather
+ * than remembering what was added.
+ */
+export function declaredSlots(root: AnyCommand): DeclaredSlots {
+  const options = new Map<string, string[]>();
+  const positionals: DeclaredPositional[] = [];
+  const optionalValues = new Set<string>();
+  const walk = (command: AnyCommand, path: readonly string[]): void => {
+    const where = path.join(" ") || "<root>";
+    for (const option of command.getOptions(false)) {
+      if (!takesValue(option)) continue;
+      const seen = options.get(longName(option)) ?? [];
+      if (!seen.includes(where)) seen.push(where);
+      options.set(longName(option), seen);
+      if (valueIsOptional(option)) {
+        optionalValues.add(`${where}:--${longName(option)}`);
+      }
+    }
+    command.getArguments().forEach((argument: Argument, index: number) => {
+      positionals.push({
+        key: `${path.join(" ")}:${argument.name}`,
+        where,
+        index,
+      });
+    });
+    for (const child of realSubcommands(command)) {
+      walk(child, [...path, child.getName()]);
+    }
+  };
+  walk(root, []);
+  return { options, positionals, optionalValues };
+}

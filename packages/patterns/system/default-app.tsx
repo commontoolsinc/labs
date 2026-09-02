@@ -1,6 +1,5 @@
 import {
   computed,
-  equals,
   handler,
   NAME,
   navigateTo,
@@ -13,14 +12,10 @@ import {
 
 import { default as Note, type NotePiece } from "../notes/note.tsx";
 
-// Maximum number of recent pieces to track
-const MAX_RECENT_PIECES = 10;
-
 import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import SummaryIndex from "./summary-index.tsx";
 import Notebook from "../notes/notebook.tsx";
 import PieceGrid from "./piece-grid.tsx";
-import { migratePieceRegistry } from "./piece-registry-migration.ts";
 
 type MinimalPiece = {
   [NAME]?: string;
@@ -136,41 +131,12 @@ const addPiece = handler<
   pieceRegistry.addUnique(piece);
 });
 
-// Handler: Track piece as recently used (add to front, maintain max)
-const trackRecent = handler<
-  { piece: unknown },
-  { recentPieces: Writable<unknown[]> }
->(({ piece }, { recentPieces }) => {
-  const current = recentPieces.get();
-  // Remove if already present
-  const filtered = current.filter((c) => !equals(c as any, piece as any));
-  // Add to front and limit to max
-  const updated = [piece, ...filtered].slice(0, MAX_RECENT_PIECES);
-  recentPieces.set(updated);
-});
+// Retained stream cell for existing default-app roots. Events have no effect.
+const retiredAction = handler<unknown, Record<string, never>>(() => {});
 
 export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // OWN the data cells (not from wish)
-  const legacyPieceRegistry = new Writable<MentionablePiece[]>([]).for(
-    "allPieces",
-  );
   const pieceRegistry = new Writable<MentionablePiece[]>([]);
-  // TODO(2026-08-21): Remove the retired allPieces cell and
-  // pieceRegistryMigrationComplete state.
-  const pieceRegistryMigrationComplete = new Writable(false).for(
-    "pieceRegistryMigrationComplete",
-  );
-  const recentPieces = new Writable<MentionablePiece[]>([]);
-
-  // Copy the retired owned cell into the new registry once. Existing canonical
-  // state wins when both cells contain data.
-  computed(() => {
-    migratePieceRegistry(
-      legacyPieceRegistry,
-      pieceRegistry,
-      pieceRegistryMigrationComplete,
-    );
-  });
 
   // Dropdown menu state
   const menuOpen = new Writable(false);
@@ -191,7 +157,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   const summaryIdx = SummaryIndex({});
 
   const gridView = PieceGrid({ pieces: visiblePieces });
-  const recentGridView = PieceGrid({ pieces: recentPieces });
 
   return {
     backlinksIndex: index,
@@ -296,28 +261,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
         <cf-vscroll flex showScrollbar>
           <cf-vstack gap="6" padding="6">
-            {computed(() => recentPieces.get().length > 0)
-              ? (
-                <cf-vstack gap="4" style={{ marginBottom: "16px" }}>
-                  <cf-hstack gap="2" align="center">
-                    <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
-                    <cf-cell-link $cell={recentGridView} />
-                  </cf-hstack>
-                  <cf-table full-width hover>
-                    <tbody>
-                      {recentPieces.map((piece: any) => (
-                        <tr>
-                          <td>
-                            <cf-render variant="chip" $cell={piece} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </cf-table>
-                </cf-vstack>
-              )
-              : undefined}
-
             <cf-vstack gap="4">
               <cf-hstack gap="2" align="center">
                 <h3 style={{ margin: "0", fontSize: "16px" }}>Pieces</h3>
@@ -377,9 +320,8 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     ),
     // Exported data
     pieceRegistry,
-    recentPieces,
     // Exported handlers (bound to state cells for external callers)
     addPiece: addPiece({ pieceRegistry }),
-    trackRecent: trackRecent({ recentPieces }),
+    trackRecent: retiredAction({}),
   };
 });

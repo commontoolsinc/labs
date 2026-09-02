@@ -5,6 +5,7 @@ import {
 } from "@commonfabric/runner";
 import env from "@/env.ts";
 import createApp from "@/lib/create-app.ts";
+import { publishCfcPosture } from "@/lib/cfc-posture.ts";
 import { publishExperimentalPosture } from "@/lib/experimental-posture.ts";
 import router from "@/routes/meta/meta.index.ts";
 import * as routes from "@/routes/meta/meta.routes.ts";
@@ -39,8 +40,45 @@ Deno.test("meta routes", async (t) => {
       // rather than assumed: the posture is module state, and another test
       // file in the same process publishes one.
       publishExperimentalPosture(null);
+      publishCfcPosture(null);
       const json = await (await app.request("/api/meta")).json();
       assertEquals(json.experimental, null);
+      assertEquals(json.cfc, null);
+    },
+  );
+
+  await t.step(
+    "GET /api/meta reports the published CFC posture",
+    async () => {
+      publishCfcPosture({
+        cfcEnforcementMode: "enforce-explicit",
+        cfcFlowLabels: "persist",
+        cfcWriteFloor: "enforce",
+        cfcTriggerReadGating: true,
+        cfcDecomposedEnvelopes: false,
+        cfcPolicyEvaluation: "enforce",
+        cfcLabelMetadataProtection: "enforce",
+        cfcDeclaredMonotonicity: "enforce",
+        cfcPolicySnapshot: { records: [], digest: "digest-1" },
+        cfcSinkMaxConfidentiality: { fetchText: [], fetchJson: [] },
+      });
+      try {
+        const json = await (await app.request("/api/meta")).json();
+        assertEquals(json.cfc, {
+          enforcementMode: "enforce-explicit",
+          flowLabels: "persist",
+          writeFloor: "enforce",
+          triggerReadGating: true,
+          decomposedEnvelopes: false,
+          policyEvaluation: "enforce",
+          labelMetadataProtection: "enforce",
+          declaredMonotonicity: "enforce",
+          policyDigest: "digest-1",
+          sinkCeilings: ["fetchJson", "fetchText"],
+        });
+      } finally {
+        publishCfcPosture(null);
+      }
     },
   );
 
@@ -88,9 +126,12 @@ Deno.test("meta routes", async (t) => {
         fetch: async (input) =>
           await app.request(new URL(String(input)).pathname),
       });
+      // The published posture declares no readerSchemaPrecedence, so the
+      // client adopts the legacy strict `false` a pre-flag server runs.
       assertEquals(adopted, {
         modernCellRep: false,
         lazyMaterialization: false,
+        readerSchemaPrecedence: false,
       });
     } finally {
       publishExperimentalPosture(null);

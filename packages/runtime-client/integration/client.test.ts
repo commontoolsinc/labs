@@ -1,7 +1,8 @@
 #!/usr/bin/env -S deno run -A
 
-import { assertEquals, assertExists, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { render } from "@commonfabric/html/client";
 import { MockDoc } from "@commonfabric/html/mock-doc";
 import {
@@ -15,15 +16,18 @@ import { Program } from "@commonfabric/js-compiler";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import {
   $conn,
+  attachOptionsFrom,
   CellHandle,
   type JSONSchema,
   RequestType,
+  type RuntimeAttachOptions,
   RuntimeClient,
   type RuntimeClientOptions,
   type VNode,
 } from "@commonfabric/runtime-client";
 import { experimentalOptionsFromEnv } from "@commonfabric/runner";
 import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
+import { MessagePortRuntimeTransport } from "@commonfabric/runtime-client/transports/message-port";
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
 import { defer } from "@commonfabric/utils/defer";
 
@@ -177,6 +181,89 @@ describe("RuntimeClient", () => {
         });
       });
       assertEquals(value, input);
+    });
+
+    it("carries a fabric value through a real worker, set to sync to subscribe", async () => {
+      // The envelope's whole purpose, at the seam it exists for: a real
+      // `RuntimeClient` over a real Worker, with no encoding double standing
+      // in for the crossing. Structured cloning would have stripped the
+      // `FabricBytes` to `{}` on the way, and a `bigint` it refuses outright,
+      // so each arm below fails differently without the envelope rather than
+      // all of them failing the same way.
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const schema = { type: "object" } as const satisfies JSONSchema;
+      const cause = "test-fabric-value-" + Date.now();
+      const cell = await rt.getCell<Record<string, unknown>>(
+        session.space,
+        cause,
+        schema,
+      );
+
+      const content = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+      await cell.set({
+        bytes: new FabricBytes(content),
+        big: 9007199254740993n,
+        tag: Symbol.for("cf.test.interned"),
+      });
+      await rt.idle();
+
+      const synced = await cell.sync() as Record<string, unknown>;
+      assert(
+        synced.bytes instanceof FabricBytes,
+        `synced back ${
+          (synced.bytes as { constructor?: { name?: string } })?.constructor
+            ?.name ?? String(synced.bytes)
+        }, not a FabricBytes`,
+      );
+      assertEquals(synced.bytes.slice(), content);
+      // A `bigint` past `Number.MAX_SAFE_INTEGER`, so a number round trip
+      // would not return it even if one carried the arm at all.
+      assertEquals(synced.big, 9007199254740993n);
+      // Interned, which is the only symbol the fabric boundary admits: a
+      // unique one has no identity to rebuild on the far side.
+      assertEquals(synced.tag, Symbol.for("cf.test.interned"));
+
+      // The notification path is a separate crossing from the response path,
+      // and it is watched from a SECOND handle on the same cell. The writing
+      // handle is no good for it: `set()` updates its own cache and calls its
+      // own subscribers synchronously with the object it was handed, so a
+      // subscriber there would be shown the value it just built and would say
+      // `instanceof FabricBytes` about a `FabricBytes` that never left the
+      // process. `getCell()` returns a fresh handle, and this one never
+      // writes, so every value it is given arrived over the connection.
+      const nextContent = new Uint8Array([1, 2, 3]);
+      const reader = await rt.getCell<Record<string, unknown>>(
+        session.space,
+        cause,
+        schema,
+      );
+      const gotNext = defer<Record<string, unknown>>();
+      const cancel = reader.subscribe((value) => {
+        const record = value as Record<string, unknown> | undefined;
+        if (record?.marker === "second") gotNext.resolve(record);
+      });
+
+      const sent = {
+        bytes: new FabricBytes(nextContent),
+        marker: "second",
+      };
+      await cell.set(sent);
+
+      const delivered = await gotNext.promise;
+      cancel();
+      // Not the object that was written, which is what says this came back
+      // rather than across.
+      assert(delivered !== sent);
+      assert(
+        delivered.bytes instanceof FabricBytes,
+        `delivered ${
+          (delivered.bytes as { constructor?: { name?: string } })?.constructor
+            ?.name ?? String(delivered.bytes)
+        }, not a FabricBytes`,
+      );
+      assertEquals(delivered.bytes.slice(), nextContent);
     });
 
     it("recursively returns VNodes inline with schema-driven serialization", async () => {
@@ -563,103 +650,102 @@ describe("RuntimeClient", () => {
     });
 
     it("confirms an incompatible followed source with a one-use token", async () => {
-      let servedSource = FOLLOWED_SOURCE_V1;
-      const sourceServer = Deno.serve(
-        {
-          hostname: "127.0.0.1",
-          port: 0,
-          onListen: () => {},
-        },
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+      await assertRejects(
         () =>
-          new Response(servedSource, {
+          rt.createPage(
+            new URL("data:text/typescript,export%20default%2042"),
+            session.space,
+          ),
+        Error,
+        "Piece source URL must use HTTP or HTTPS",
+      );
+
+      // A URL is a place to read a program from once, not an origin: the piece
+      // it creates records none, and its owner names one afterwards.
+      const sourceServer = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        () =>
+          new Response(FOLLOWED_SOURCE_V1, {
             headers: { "content-type": "text/typescript-jsx" },
           }),
       );
       const address = sourceServer.addr as Deno.NetAddr;
-      const sourceUrl = new URL(
-        `http://${address.hostname}:${address.port}/followed.tsx`,
-      );
-
       try {
-        const session = await createTestSession();
-        await using rt = await createRuntimeClient(session);
-        await assertRejects(
-          () =>
-            rt.createPage(
-              new URL("data:text/typescript,export%20default%2042"),
-              session.space,
-            ),
-          Error,
-          "Piece source URL must use HTTP or HTTPS",
-        );
-        const page = await rt.createPage(sourceUrl, session.space, {
-          argument: {},
-          run: true,
-        });
-        const followed = await rt.getPieceSource(page.id(), session.space);
-        assertEquals(followed.origin?.url, sourceUrl.href);
-
-        const detached = await rt.updatePieceSource(
-          page.id(),
+        const fetched = await rt.createPage(
+          new URL(`http://${address.hostname}:${address.port}/fetched.tsx`),
           session.space,
-          { kind: "detach" },
+          { argument: {}, run: true },
         );
-        const followedRevision = detached.source.history.find((revision) =>
-          revision.origin?.url === sourceUrl.href
-        );
-        assertExists(followedRevision);
-        servedSource = FOLLOWED_SOURCE_V2;
-        const action = {
-          kind: "follow" as const,
-          revisionId: followedRevision.revisionId,
-        };
-
-        const warning = await rt.updatePieceSource(
-          page.id(),
+        const fetchedSource = await rt.getPieceSource(
+          fetched.id(),
           session.space,
-          action,
         );
-        assertExists(warning.compatibilityWarning);
-        assertExists(warning.confirmationToken);
-
-        await assertRejects(
-          () =>
-            rt.updatePieceSource(page.id(), session.space, action, {
-              confirmationToken: "",
-            }),
-          Error,
-          "confirmationToken must be a non-empty string",
-        );
-        await assertRejects(
-          () =>
-            rt.updatePieceSource(page.id(), session.space, action, {
-              confirmationToken: 42,
-            } as unknown as { confirmationToken: string }),
-          Error,
-          "confirmationToken must be a non-empty string",
-        );
-
-        const applied = await rt.updatePieceSource(
-          page.id(),
-          session.space,
-          action,
-          { confirmationToken: warning.confirmationToken },
-        );
-        assertEquals(applied.compatibilityWarning, undefined);
-        assertEquals(applied.confirmationToken, undefined);
-        assertEquals(applied.source.origin?.url, sourceUrl.href);
-
-        await assertRejects(
-          () =>
-            rt.updatePieceSource(page.id(), session.space, action, {
-              confirmationToken: warning.confirmationToken,
-            }),
-          Error,
-          "compatibility confirmation is no longer valid",
-        );
+        assertEquals(fetchedSource.origin, undefined);
+        assertEquals(fetchedSource.unusableOrigin, undefined);
       } finally {
         await sourceServer.shutdown();
       }
+
+      // The upstream piece runs source whose argument contract differs from
+      // the follower's, so following it is a contract change its owner has to
+      // confirm. That confirmation is what this test drives over the wire.
+      const upstream = await rt.createPage(FOLLOWED_SOURCE_V2, session.space, {
+        argument: {},
+        run: true,
+      });
+      const page = await rt.createPage(FOLLOWED_SOURCE_V1, session.space, {
+        argument: {},
+        run: true,
+      });
+      const url = `cf:/${session.space}/${upstream.id()}`;
+      const action = { kind: "repoint" as const, url };
+
+      const warning = await rt.updatePieceSource(
+        page.id(),
+        session.space,
+        action,
+      );
+      assertExists(warning.compatibilityWarning);
+      assertExists(warning.confirmationToken);
+      assertEquals(warning.source.origin, undefined);
+
+      await assertRejects(
+        () =>
+          rt.updatePieceSource(page.id(), session.space, action, {
+            confirmationToken: "",
+          }),
+        Error,
+        "confirmationToken must be a non-empty string",
+      );
+      await assertRejects(
+        () =>
+          rt.updatePieceSource(page.id(), session.space, action, {
+            confirmationToken: 42,
+          } as unknown as { confirmationToken: string }),
+        Error,
+        "confirmationToken must be a non-empty string",
+      );
+
+      const applied = await rt.updatePieceSource(
+        page.id(),
+        session.space,
+        action,
+        { confirmationToken: warning.confirmationToken },
+      );
+      assertEquals(applied.compatibilityWarning, undefined);
+      assertEquals(applied.confirmationToken, undefined);
+      assertEquals(applied.source.origin?.url, url);
+
+      await assertRejects(
+        () =>
+          rt.updatePieceSource(page.id(), session.space, action, {
+            confirmationToken: warning.confirmationToken,
+          }),
+        Error,
+        "compatibility confirmation is no longer valid",
+      );
     });
 
     it("retrieves a page with its result schema, including UI", async () => {
@@ -742,7 +828,7 @@ export default pattern((_) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const consoleEvents: { method: string; args: unknown[] }[] = [];
+      const consoleEvents: { method: string; args: readonly unknown[] }[] = [];
       const gotHello = defer<void>();
       rt.on(
         "console",
@@ -1674,6 +1760,184 @@ export default pattern<Record<string, never>>(() => {
       );
     });
   });
+
+  describe("multi-document attachment", () => {
+    // Two documents over one worker's runtime, joined the way a family root's
+    // page joins them: the page that spawned the worker hands a port across,
+    // and the document at the far end attaches to the runtime already running.
+    // Everything under here is real -- a real worker, a real backend, real
+    // ports -- because what these pin is exactly what a stand-in on either
+    // side of the IPC cannot show.
+
+    /**
+     * The owner's client and its transport, which is what a port is handed
+     * over through. `createRuntimeClient` drops the transport it connects, and
+     * these tests need to keep it.
+     */
+    async function owningClient(session: Session) {
+      const transport = await WebWorkerRuntimeTransport.connect();
+      const options = await clientOptionsFor(session);
+      const client = await RuntimeClient.initialize(transport, options);
+      await client.synced(session.space);
+      return { client, transport, options };
+    }
+
+    /** A second document, attached over a port the owner hands the worker. */
+    async function attachingClient(
+      owner: { transport: WebWorkerRuntimeTransport },
+      options: RuntimeClientOptions,
+      overrides: Partial<RuntimeAttachOptions> = {},
+    ) {
+      const channel = new MessageChannel();
+      owner.transport.attachClientPort(channel.port2);
+      return await RuntimeClient.attach(
+        new MessagePortRuntimeTransport({ port: channel.port1 }),
+        { ...attachOptionsFrom(options), ...overrides },
+      );
+    }
+
+    const counterSchema = {
+      type: "object",
+      properties: { counter: { type: "number" } },
+    } as const satisfies JSONSchema;
+
+    it("feeds both documents from one runtime, and one unsubscribe stops one feed", async () => {
+      const session = await createTestSession();
+      const owner = await owningClient(session);
+      const second = await attachingClient(owner, owner.options);
+      try {
+        const cause = "multi-document-attachment-" + crypto.randomUUID();
+        const first = await owner.client.getCell<{ counter: number }>(
+          session.space,
+          cause,
+          counterSchema,
+        );
+        const mirror = await second.getCell<{ counter: number }>(
+          session.space,
+          cause,
+          counterSchema,
+        );
+        await first.set({ counter: 0 });
+        await owner.client.idle();
+        await mirror.sync();
+
+        // Both documents watch the same cell. Before this change the second
+        // subscribe was a no-op on the first's, so the second document heard
+        // nothing and the first's unsubscribe silenced both.
+        const firstSeen: number[] = [];
+        const secondSeen: number[] = [];
+        const sawOne = defer<void>();
+        const cancelFirst = first.subscribe((value) => {
+          if (value) firstSeen.push(value.counter);
+        });
+        const cancelSecond = mirror.subscribe((value) => {
+          if (!value) return;
+          secondSeen.push(value.counter);
+          if (value.counter === 1) sawOne.resolve();
+        });
+
+        await first.set({ counter: 1 });
+        await sawOne.promise;
+        assertEquals(secondSeen.includes(1), true);
+        assertEquals(firstSeen.includes(1), true);
+
+        // The first document leaves the cell. The second's feed is its own.
+        cancelFirst();
+        await owner.client.idle();
+
+        const sawTwo = defer<void>();
+        const secondSeenBefore = secondSeen.length;
+        const firstSeenBefore = firstSeen.length;
+        const watchTwo = mirror.subscribe((value) => {
+          if (value?.counter === 2) sawTwo.resolve();
+        });
+        await first.set({ counter: 2 });
+        await sawTwo.promise;
+
+        // The second document heard the write; the first, having left the
+        // cell, heard nothing further. A write's echo can arrive behind the
+        // local delivery it confirms, so this asks what reached each feed
+        // rather than in which order.
+        assert(secondSeen.length > secondSeenBefore);
+        assertEquals(secondSeen.includes(2), true);
+        assertEquals(firstSeen.includes(2), false);
+        assertEquals(firstSeen.length, firstSeenBefore);
+
+        watchTwo();
+        cancelSecond();
+      } finally {
+        await second.dispose();
+        await owner.client.dispose();
+      }
+    });
+
+    it("keeps the runtime and the first document running when the second leaves", async () => {
+      const session = await createTestSession();
+      const owner = await owningClient(session);
+      const second = await attachingClient(owner, owner.options);
+      const cause = "multi-document-departure-" + crypto.randomUUID();
+      try {
+        const cell = await owner.client.getCell<{ counter: number }>(
+          session.space,
+          cause,
+          counterSchema,
+        );
+        await cell.set({ counter: 0 });
+        await owner.client.idle();
+
+        const mirror = await second.getCell<{ counter: number }>(
+          session.space,
+          cause,
+          counterSchema,
+        );
+        const cancelMirror = mirror.subscribe(() => {});
+        await second.idle();
+
+        // The second document's departure is its own: its subscription stops,
+        // and the runtime it was borrowing keeps serving the first.
+        cancelMirror();
+        await second.dispose();
+
+        const seen: number[] = [];
+        const sawThree = defer<void>();
+        const cancel = cell.subscribe((value) => {
+          if (!value) return;
+          seen.push(value.counter);
+          if (value.counter === 3) sawThree.resolve();
+        });
+        await cell.set({ counter: 3 });
+        await sawThree.promise;
+        // Membership rather than the last value: a write's echo can arrive
+        // behind the local delivery it confirms, so the tail of this list is
+        // delivery order and not what the test is about.
+        assertEquals(seen.includes(3), true);
+        cancel();
+      } finally {
+        await owner.client.dispose();
+      }
+    });
+
+    it("refuses a second document asserting a different acting principal", async () => {
+      const session = await createTestSession();
+      const owner = await owningClient(session);
+      try {
+        const stranger = await Identity.fromPassphrase(
+          "a different operator",
+          keyConfig,
+        );
+        await assertRejects(
+          () =>
+            attachingClient(owner, owner.options, {
+              identity: stranger.did(),
+            }),
+          Error,
+          "Attach refused",
+        );
+      } finally {
+        await owner.client.dispose();
+      }
+    });
+  });
 });
 
 async function createTestSession(): Promise<Session> {
@@ -1683,10 +1947,15 @@ async function createTestSession(): Promise<Session> {
   });
 }
 
-async function createRuntimeClient(
+/**
+ * What this process's clients are configured with. A second document attaches
+ * by asserting the security half of these, so the two callers build them from
+ * one place rather than each stating a posture of its own.
+ */
+async function clientOptionsFor(
   session: Session,
   extraOptions: Partial<RuntimeClientOptions> = {},
-): Promise<RuntimeClient> {
+): Promise<RuntimeClientOptions> {
   // If a space identity was created, replace it with a transferrable
   // key in Deno using the same derivation as Session
   if (session.spaceIdentity && session.spaceName) {
@@ -1695,8 +1964,7 @@ async function createRuntimeClient(
     ).derive(session.spaceName, keyConfig);
   }
 
-  const transport = await WebWorkerRuntimeTransport.connect();
-  const worker = await RuntimeClient.initialize(transport, {
+  return {
     apiUrl: new URL(API_URL),
     identity: session.as,
     spaceIdentity: session.spaceIdentity,
@@ -1710,7 +1978,18 @@ async function createRuntimeClient(
       ? {}
       : { serverExecution: SERVER_EXECUTION_FROM_ENV },
     ...extraOptions,
-  });
+  };
+}
+
+async function createRuntimeClient(
+  session: Session,
+  extraOptions: Partial<RuntimeClientOptions> = {},
+): Promise<RuntimeClient> {
+  const transport = await WebWorkerRuntimeTransport.connect();
+  const worker = await RuntimeClient.initialize(
+    transport,
+    await clientOptionsFor(session, extraOptions),
+  );
 
   await worker.synced(session.space);
   return worker;

@@ -578,6 +578,57 @@ describe("committed-write backpressure", () => {
   );
 
   it(
+    "does not mistake a RowLabel verdict with CFC-like text for a boundary refusal",
+    async () => {
+      // OW54 routes a RowLabel verdict through the proven-no-commit terminal
+      // cover. Keep the older client-side CFC reporting arm keyed to its exact
+      // error name: overlapping prose is not a type discriminator.
+      const piece = buildCounterPiece(
+        runtime,
+        tx,
+        "backpressure-cfc-refusal-root",
+      );
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+
+      const commitTelemetry = collectEventCommitMarkers(runtime);
+      const injector = rejectServerTransacts(storageManager, Infinity, {
+        name: "RowLabelCommitError",
+        message: "CFC enforcement rejected commit: relevant transaction was " +
+          "not prepared: writer-fit confidentiality misfit",
+      });
+      const reported: unknown[][] = [];
+      const originalConsoleError = console.error;
+      console.error = (...args: unknown[]) => {
+        reported.push(args);
+      };
+
+      try {
+        piece.queueAdd(
+          4,
+          "evt:backpressure-cfc-refusal:0:backpressure-cfc-refusal-root",
+        );
+        await commitTelemetry.firstMarker;
+        await runtime.idle();
+
+        // The refused write did not land, but this is not the client-side CFC
+        // refusal that owns the legacy report.
+        expect(piece.total()).toBe(0);
+        expect(
+          reported.some((args) =>
+            String(args[0]).includes("Owner-protected write dropped")
+          ),
+        ).toBe(false);
+      } finally {
+        console.error = originalConsoleError;
+        injector.restore();
+        commitTelemetry.dispose();
+      }
+    },
+  );
+
+  it(
     "surfaces a terminal error when a transient conflict never converges",
     async () => {
       await disposeSchedulerTestRuntime({ storageManager, runtime, tx });

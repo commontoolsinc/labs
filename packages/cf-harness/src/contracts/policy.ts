@@ -26,10 +26,13 @@ export interface HarnessBrowserToolInputSummary {
   action?: string;
   kind?: string;
   ref?: string;
+
   /** A bound handle, carried whole: it names an address, not a value. */
   valueHandle?: string;
+
   /** A bound handle, carried whole: it names an address, not a value. */
   urlHandle?: string;
+
   timeoutMs?: number;
   urlBytes?: number;
   urlDigest?: string;
@@ -111,6 +114,10 @@ export interface HarnessRunPatternToolInputSummary {
   toolId: "run_pattern";
   sourceTextBytes?: number;
   sourceTextDigest?: string;
+
+  /** The indexed pattern run, when the call named one instead of source. */
+  patternId?: string;
+
   inputCount?: number;
   resultSchemaBytes?: number;
   resultSchemaDigest?: string;

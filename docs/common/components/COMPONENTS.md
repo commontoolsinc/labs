@@ -137,7 +137,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-hgroup` | Horizontal group with automatic gap management | |
 | `cf-hscroll` | Horizontal scroll container | |
 | `cf-hstack` | Horizontal stack layout (flexbox) (see [stacks](#cf-vstack--cf-hstack)) | |
-| `cf-iframe` | Iframe for executing arbitrary scripts | |
+| `cf-iframe` | Sandboxed guest with explicit cell, stream, SQLite, or service capabilities | |
 | `cf-image-input` | Image capture/upload with compression, EXIF, camera support | |
 | `cf-input` | Text input with validation and reactive binding | `$value` |
 | `cf-input-otp` | One-time-password input with individual digit fields | |
@@ -440,9 +440,11 @@ error at the pattern.
 
 See `packages/patterns/examples/ui-variants-demo.tsx` for a full example.
 
-> Note: `sidebarUI`/`fabUI`/`settingsUI` are shell composition **slots**, a
-> separate concept — not size variants. A vended `uiVariant()` helper for
-> render paths outside `cf-render` is a planned follow-up and does not exist yet.
+> Note: `sidebarUI` is a shell composition **slot**, a separate concept from
+> size variants. Other exported subviews such as `settingsUI` are
+> application-level conventions; the shell does not consume `fabUI`. A vended
+> `uiVariant()` helper for render paths outside `cf-render` is a planned
+> follow-up and does not exist yet.
 
 ### The piece context menu
 

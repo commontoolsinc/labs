@@ -4,6 +4,7 @@ import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import type { CfcPolicyCompilerManifestV1 } from "../core/runtime-contract.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 
 const USER = "https://commonfabric.org/cfc/atom/User";
 const HAS_ROLE = "https://commonfabric.org/cfc/atom/HasRole";
@@ -55,19 +56,6 @@ const assertKeys = (
 
 const isCallOf = (node: ts.Expression, names: ReadonlySet<string>): boolean =>
   ts.isIdentifier(node) && names.has(node.text);
-
-const unwrapExpression = (node: ts.Expression): ts.Expression => {
-  let current = node;
-  while (
-    ts.isParenthesizedExpression(current) ||
-    ts.isAsExpression(current) ||
-    ts.isTypeAssertionExpression(current) ||
-    ts.isSatisfiesExpression(current)
-  ) {
-    current = current.expression;
-  }
-  return current;
-};
 
 const propertyName = (node: ts.PropertyName): string | undefined => {
   if (ts.isIdentifier(node) || ts.isStringLiteral(node)) return node.text;

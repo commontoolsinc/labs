@@ -65,6 +65,7 @@ describe("deep-freeze", () => {
       // that freeze objects-with-methods keep working. A function's internal
       // `prototype` and closure state stays mutable, which the opacity does not
       // and cannot cover.
+
       it("returns `true` for a function", () => {
         expect(isDeepFrozen(() => {})).toBe(true);
         expect(isDeepFrozen(function () {})).toBe(true);
@@ -192,6 +193,7 @@ describe("deep-freeze", () => {
       it("returns `true` after an object is frozen (no stale negative cache)", () => {
         // Regression test: isDeepFrozen must not cache `false` results, because
         // an object that is unfrozen now may be deep-frozen later.
+
         const obj = { a: 1, b: { c: 2 } };
         expect(isDeepFrozen(obj)).toBe(false); // unfrozen
         deepFreeze(obj);
@@ -202,6 +204,7 @@ describe("deep-freeze", () => {
         // Verify caching actually works by wrapping a frozen object in a Proxy
         // that counts property accesses. First call should access properties;
         // second call should hit the cache and skip traversal.
+
         const inner = Object.freeze({ x: 1, y: 2 });
         let accessCount = 0;
         const proxy = new Proxy(inner, {
@@ -247,18 +250,19 @@ describe("deep-freeze", () => {
       });
     });
 
-    // Coverage for `isDeepFrozen` on `FabricInstance` and `FabricPrimitive`
-    // inputs, including a `FabricInstance` participating in a circular
-    // reference. `isDeepFrozen`'s recursion threads an
-    // `inProgress: Set<object>` for cycle-safety and resolves a
-    // `FabricInstance` via its `[IS_DEEP_FROZEN]` protocol member --
-    // inspecting its logical contents, not its enumerable own-props -- so
-    // values held in non-enumerable slots (such as
-    // `FabricError`'s private extras `Map`) are checked too.
-    // (`isValidDeepFrozenFabricValue` uses the same protocol dispatch but
-    // additionally type-guards the value as a `FabricValue`; it has its own
-    // coverage in the sibling describe below.)
     describe("`FabricInstance` and `FabricPrimitive`", () => {
+      // Coverage for `isDeepFrozen` on `FabricInstance` and `FabricPrimitive`
+      // inputs, including a `FabricInstance` participating in a circular
+      // reference. `isDeepFrozen`'s recursion threads an
+      // `inProgress: Set<object>` for cycle-safety and resolves a
+      // `FabricInstance` via its `[IS_DEEP_FROZEN]` protocol member --
+      // inspecting its logical contents, not its enumerable own-props -- so
+      // values held in non-enumerable slots (such as
+      // `FabricError`'s private extras `Map`) are checked too.
+      // (`isValidDeepFrozenFabricValue` uses the same protocol dispatch but
+      // additionally type-guards the value as a `FabricValue`; it has its own
+      // coverage in the sibling describe below.)
+
       it("returns `true` for a `FabricPrimitive` (self-frozen at construction)", () => {
         const epoch = new FabricEpochNsec(1234567890n);
         expect(isDeepFrozen(epoch)).toBe(true);
@@ -281,6 +285,7 @@ describe("deep-freeze", () => {
         // The recursing slots on a `FabricError` are `cause` and any extras.
         // Construct one whose `cause` is a mutable plain object, and freeze
         // only the wrapper.
+
         const err = new Error("partial", { cause: { mutable: true } });
         const fe = FabricError.fromNativeError(err);
         Object.freeze(fe);
@@ -297,6 +302,7 @@ describe("deep-freeze", () => {
         // Here the wrapper is frozen and every enumerable slot is a frozen
         // primitive, but the extras bag holds a mutable array -> not
         // deep-frozen.
+
         const fe = FabricError.fromNativeError(new Error("has-extras"));
         fe.setExtra("payload", [1, 2, 3]);
         Object.freeze(fe);
@@ -311,6 +317,7 @@ describe("deep-freeze", () => {
         // graph is cycle-safe for read-side traversal too. (FabricError
         // snapshots its FabricValue state at construction, so the `cause`
         // must be wired BEFORE `fromNativeError`.)
+
         const wrapper: Record<string, unknown> = {};
         const err = new Error("cycle-cause", { cause: wrapper });
         const fe = FabricError.fromNativeError(err);
@@ -388,6 +395,7 @@ describe("deep-freeze", () => {
 
     it("returns `false` (no throw) for a non-canonical-form instance", () => {
       // Wrapper frozen but `cause` left unfrozen -> not deep-frozen.
+
       const err = new Error("partial", { cause: { mutable: true } });
       const fe = FabricError.fromNativeError(err);
       Object.freeze(fe);
@@ -400,6 +408,7 @@ describe("deep-freeze", () => {
     it("returns `false` for a frozen array with enumerable named properties", () => {
       // An array carrying a named property has no fabric representation, so it
       // is not a valid `FabricValue` even when fully frozen.
+
       const arr = [1, 2, 3] as unknown[] & { foo?: string };
       arr.foo = "bar";
       Object.freeze(arr);
@@ -428,6 +437,7 @@ describe("deep-freeze", () => {
       // executes it and can return a different value every time. Such an
       // object must not be granted the trust level of a deep-frozen
       // `FabricValue`.
+
       const obj = { a: 1 };
       Object.defineProperty(obj, "g", { get: () => 2, enumerable: true });
       Object.freeze(obj);
@@ -445,6 +455,7 @@ describe("deep-freeze", () => {
     it("returns `false` for a frozen array with a getter-backed index", () => {
       // The same principle applies with an array as the container: an index
       // whose reads execute code is not inert, frozen or not.
+
       const arr = [1, 2, 3];
       Object.defineProperty(arr, 1, {
         get: () => 22,
@@ -472,6 +483,7 @@ describe("deep-freeze", () => {
     // Only registry-interned symbols are `FabricValue`s; unique (uninterned)
     // symbols are not portable across realms and are rejected, consistent with
     // `isValidFabricValue()` / `isValidFabricValueLayer()`.
+
     it("returns `true` for an interned symbol", () => {
       expect(isValidDeepFrozenFabricValue(Symbol.for("k"))).toBe(true);
     });
@@ -512,16 +524,17 @@ describe("deep-freeze", () => {
     });
   });
 
-  // Cycle coverage for `deepFreeze()`'s arms (per the function's doc-comment
-  // 4-arm dispatch) and for `isValidDeepFrozenFabricValue()`, which composes
-  // `isValidFabricValue()` and `isDeepFrozen()` -- each threading its own
-  // cycle-tracking set (`seen` / `inProgress`) through its recursion.
-  //
-  // Termination assertion: a cycle without such threading would manifest as
-  // `RangeError: Maximum call stack size exceeded` (a clean fast throw, not a
-  // hang). `.not.toThrow()` is the discriminating assertion for "this call
-  // terminates."
   describe("cycle behavior", () => {
+    // Cycle coverage for `deepFreeze()`'s arms (per the function's doc-comment
+    // 4-arm dispatch) and for `isValidDeepFrozenFabricValue()`, which composes
+    // `isValidFabricValue()` and `isDeepFrozen()` -- each threading its own
+    // cycle-tracking set (`seen` / `inProgress`) through its recursion.
+    //
+    // Termination assertion: a cycle without such threading would manifest as
+    // `RangeError: Maximum call stack size exceeded` (a clean fast throw, not a
+    // hang). `.not.toThrow()` is the discriminating assertion for "this call
+    // terminates."
+
     describe("`deepFreeze()` (plain object / array)", () => {
       it("terminates on a self-referential plain object", () => {
         const a: Record<string, unknown> = { x: 1 };
@@ -562,6 +575,7 @@ describe("deep-freeze", () => {
       // `isDeepFrozen()`, each of which threads its own cycle-tracking set
       // through its recursion, so the composition is cycle-safe. These tests
       // pin that property so a future change does not regress it.
+
       it("terminates on a deep-frozen self-referential plain object", () => {
         const a: Record<string, unknown> = { x: 1 };
         a.self = a;

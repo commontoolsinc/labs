@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env
+
 /**
  * .claude/scripts/block-legacy-cli.ts
  *

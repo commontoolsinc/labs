@@ -20,21 +20,28 @@ export type HarnessAgent = "claude-code" | "codex";
 
 export interface HarnessProvenance {
   invoker: HarnessInvoker;
+
   /** Stable per-process id, so the requests of one run can be grouped. */
   session: string;
+
   /** A label for the machine, stable across runs. */
   principal: string;
+
   /** The subcommand, passed explicitly by the caller. Never read from argv. */
   command?: string;
+
   /** Continuous-integration run, as `<system>:<job>:<run id>`. */
   ci?: string;
+
   /** The dispatch class a Loom run manifest asked for. */
   dispatch?: string;
+
   /**
    * The coding agent whose session the harness is running inside. Absent when
    * no coding agent is in the picture.
    */
   agent?: HarnessAgent;
+
   /** The service that launched the harness, from its `OTEL_SERVICE_NAME`. */
   service?: string;
 }
@@ -167,6 +174,7 @@ function detectPrincipal(env: EnvReader, store?: PrincipalStore): string {
 export interface DetectProvenanceOptions {
   /** The parsed subcommand. Pass the resolved name, never raw arguments. */
   command?: string;
+
   env?: EnvReader;
   session?: string;
   principalStore?: PrincipalStore;

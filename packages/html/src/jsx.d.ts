@@ -2875,7 +2875,7 @@ type CFEvent<T> = {
 
 // A stream of ANY arity is bindable, including one that declares a result.
 // Deliberate, not incidental: the point of the verb contract is that one verb
-// serves both the UI and an agent calling it through `cf piece call`, so a
+// serves both the UI and an agent calling it through `cf call`, so a
 // verb must not become UI-unbindable by declaring what it returns. The result
 // is simply unobserved here — the DOM has nowhere to put it, and the caller
 // that wants it reads the invocation receipt.
@@ -3588,7 +3588,15 @@ interface CFFileDownloadAttributes<T> extends CFHTMLAttributes<T> {
 
 interface CFIframeAttributes<T> extends CFHTMLAttributes<T> {
   "src": string;
-  "$context": CellLike<any>;
+  "bridge"?: {
+    readonly resources: Readonly<Record<string, object>>;
+  };
+  "context"?: object;
+  "$context"?: CellLike<any>;
+  "resourceKinds"?: Record<
+    string,
+    "cell" | "readonly" | "stream" | "sqlite"
+  >;
 }
 
 interface CFRenderAttributes<T> extends CFHTMLAttributes<T> {
@@ -4019,6 +4027,10 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
     | "text/markdown";
   "disabled"?: boolean;
   "readonly"?: boolean;
+  "collaborative"?: boolean;
+  "presenceRoom"?: string;
+  "participantName"?: string;
+  "presenceUrl"?: string;
   "placeholder"?: string;
   "timingStrategy"?: string;
   "timingDelay"?: number;
@@ -4044,6 +4056,8 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-blur"?: any;
   "oncf-file-paste"?: any;
   "oncf-error"?: any;
+  "oncf-collaboration-reconcile"?: any;
+  "oncf-presence-error"?: any;
   "onbacklink-click"?: any;
   "onbacklink-create"?: any;
   "onmention-ref-label-changed"?: any;

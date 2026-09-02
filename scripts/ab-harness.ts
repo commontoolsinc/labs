@@ -29,6 +29,7 @@
  * finding. Nothing here asserts -- it reports, because what counts as correct
  * is the comparison, not any single run.
  */
+
 const ROOT = Deno.env.get("CF_ROOT");
 if (!ROOT) {
   console.error("set CF_ROOT to a checkout root");
@@ -65,7 +66,7 @@ const ju: any = await (async () => {
 })();
 const md: any = await import(`${R}/builder/pattern-metadata.ts`);
 const { fabricFromNativeValue } = await import(
-  "@commonfabric/data-model/fabric-value"
+  "@commonfabric/data-model"
 );
 const { dataUriFromValue } = await import(
   "@commonfabric/data-model/data-uri-codec"
@@ -73,6 +74,7 @@ const { dataUriFromValue } = await import(
 
 /** Identity on a tree with no preflight, so the same probe runs on both. */
 let flatten: (v: unknown) => unknown = (v) => v;
+
 try {
   flatten = (await import(`${R}/storage-preflight.ts`)).flattenBuilderArtifacts;
 } catch { /* baseline */ }

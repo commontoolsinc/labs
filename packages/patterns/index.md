@@ -34,10 +34,21 @@ Composable building blocks designed for embedding in other patterns
 `docs/common/patterns/primitives.md` for the composition contract and the
 adopter-first entry bar.
 
-Currently no occupants. The first candidate (`EditableList`) was built, proven
-against real callers both headless and rendered, and retired under the kill
-criterion — no caller benefited (see the contract doc's "Lessons" section). New
-primitives require a named, real adopter before they are built.
+`amount-ledger.tsx`, `check-list.tsx`, `counter.tsx`, `dice-roller.tsx`,
+`option-picker.tsx`, `sortable-table.tsx`, and the `demo/` host that embeds all
+six. Each is a single self-contained file taking real, optional inputs, with an
+embeddable `[UI]` — a fragment rather than a `cf-screen` — so a host can drop it
+in as a JSX tag or run it standalone.
+
+Their adopter is the pattern index: they are published to it as composable
+parts, and their descriptions are derived from their doc comments by
+`packages/cf-harness/scripts/seed-pattern-index.ts`. So the first paragraph of
+each doc comment is what a search ranks on, and it has to describe what the code
+does rather than what the atom is for.
+
+The earlier candidate (`EditableList`) was built, proven against real callers
+both headless and rendered, and retired under the kill criterion — no caller
+benefited (see the contract doc's "Lessons" section).
 
 ## exemplar
 
@@ -61,15 +72,18 @@ profile roster — every participant's cross-space profile badge), `self.tsx`,
 `self-improving-classifier.tsx`, `shopping-list.tsx`, `store-mapper.tsx`,
 `text-swapper.tsx`.
 
-App and integration directories: `activity-log/`, `agent/`,
-`agent-sessions-debug/`, `airtable/`, `auth/`, `base/`, `battleship/`,
-`budget-tracker/`, `calendar/`, `card-piles/`, `contacts/`, `cozy-poll/`,
-`examples/`, `experimental/` (explicitly unhardened explorations),
-`github-activity/`, `google/` (the `core/` tree; `google/WIP/` is legacy),
+App and integration directories: `activity-log/`, `agent/`, `airtable/`,
+`auth/`, `base/`, `battleship/`, `budget-tracker/`, `calendar/`, `card-piles/`,
+`contacts/`, `cozy-poll/`, `examples/`, `experimental/` (explicitly unhardened
+explorations), `google/` (the `core/` tree; `google/WIP/` is legacy),
 `habit-tracker/`, `lobby/`, `lunch-poll/`, `profile-group-chat/`,
 `project-list/`, `router/`, `scoped-group-chat/`, `scoped-user-directory/`,
 `scrabble/`, `shared-profile-demo/`, `shared-profile-roster/`, `suggestable/`,
 `weekly-calendar/`.
+
+Connector-owned patterns live with their connector families: the
+[agent debug view](../connectors/agents/debug-view/README.md) and
+[GitHub activity view](../connectors/github/activity-view/README.md).
 
 CFC spec demos (intentionally verbose wiring): `cfc/`,
 `cfc-agent-prompt-injection-demo/`, `cfc-authorized-save/`,
@@ -322,20 +336,6 @@ self.markIdle.send({
   learned: "## 2026-04-07\nNew observation",
 });
 ```
-
----
-
-## `agent-sessions-debug/main.tsx`
-
-A read-only operations view for the agent connector host. It receives direct
-links to the recent index, complete index, health, command, and receipt cells.
-It shows source lifecycle, collection state, session metadata, Git context,
-command payloads, receipts, bounded host activity, top-level cell IDs, and raw
-cell values. Tab and filter state are session-scoped. The pattern does not write
-to connector data.
-
-**Keywords:** agents, connector, sessions, debug, health, commands, receipts,
-activity, operations, Fabric cells
 
 ---
 
@@ -890,6 +890,40 @@ interface Output {
   balances: Balance[];
   settlements: Settlement[];
   total: number;
+}
+```
+
+## `collaborative-note/main.tsx`
+
+A minimal multiplayer note built on `cf-code-editor`. The note body is durable
+per-space state synchronized through Memory's operation protocol. Names, carets,
+and selections travel separately as ephemeral co-presence data. Each viewer
+selects or creates a Fabric profile with `wish({ query: "#profile" })`; the
+editor uses that profile's `#profileName` field as its participant label. The
+host provides the WebSocket endpoint, while `cf-code-editor` derives an opaque
+room identifier from the shared note field.
+
+**Keywords:** multiplayer, collaborative editor, note, profile, wish,
+co-presence, CodeMirror
+
+### Input Schema
+
+```ts
+interface CollaborativeNoteInput {
+  note?: PerSpace<
+    string | Default<"# Collaborative note\n\nStart writing together.">
+  >;
+}
+```
+
+### Output Schema
+
+```ts
+interface CollaborativeNoteOutput {
+  note: PerSpace<
+    string | Default<"# Collaborative note\n\nStart writing together.">
+  >;
+  participantName: string;
 }
 ```
 
@@ -1655,32 +1689,6 @@ type Input = {
 
 ```ts
 // Returns a 3-column grid view of pieces with live previews
-```
-
-## `github-activity/main.tsx`
-
-Fetches recent commits from a GitHub repository via the public API, displays
-them as a clickable card list, and uses an LLM to generate a summary of recent
-development activity. Fully reactive — changing the repo URL re-fetches and
-re-summarizes.
-
-**Keywords:** github, commits, fetchJson, generateText, LLM, summary, activity
-
-### Input Schema
-
-```ts
-type Input = {
-  repoUrl: Writable<
-    string | Default<"https://github.com/anthropics/claude-code">
-  >;
-};
-```
-
-### Output Schema
-
-```ts
-// Displays LLM-generated activity summary and scrollable commit list
-// with author, date, and clickable links to GitHub
 ```
 
 ## `bookmarks.tsx`

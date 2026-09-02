@@ -21,13 +21,13 @@
 
 import { type JSONSchema, type Pattern } from "@commonfabric/runner";
 import { validateSchemaDefinition } from "@commonfabric/runner/cfc";
+import type { FabricValue } from "@commonfabric/data-model";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import {
   fabricFromJsonValue,
   jsonFromFabricValue,
 } from "@commonfabric/data-model/codecs";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { assertPatternSchemasBackwardCompatible } from "../packages/piece/src/schema-compatibility.ts";
 
 /**
@@ -48,6 +48,7 @@ export interface Baseline {
 }
 
 export type Finding =
+
   /** The current contract is not recorded, so nothing pins it for the next PR. */
   | { kind: "missing-baseline"; pattern: string; hash: string }
   /** The current contract cannot be applied over a deployed one. */
@@ -262,12 +263,12 @@ export function checkPattern(
   return findings;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Baseline store
 //
 // Parameterized by directory so these are testable against a temp tree rather
 // than only against the real `packages/patterns` layout.
-// ---------------------------------------------------------------------------
+//
 
 /** Read every recorded contract for a pattern. Absent directory → none. */
 export async function readBaselines(
@@ -344,18 +345,14 @@ export async function collectBaselineKeys(
  */
 export async function findRetired(
   baselinesDir: string,
-  patternsDir: string,
+  currentPatterns: ReadonlySet<string>,
 ): Promise<Finding[]> {
   const findings: Finding[] = [];
   for (const key of await collectBaselineKeys(baselinesDir)) {
-    try {
-      Deno.statSync(`${patternsDir}/${key}`);
-    } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) throw error;
-      findings.push(
-        ...checkPattern(key, undefined, await readBaselines(baselinesDir, key)),
-      );
-    }
+    if (currentPatterns.has(key)) continue;
+    findings.push(
+      ...checkPattern(key, undefined, await readBaselines(baselinesDir, key)),
+    );
   }
   return findings;
 }

@@ -5,7 +5,9 @@
 
 import { describe, expect, it } from "./scheduler-test-utils.ts";
 import {
+  isDiscardedAttemptRejection,
   isPermanentRejection,
+  isRetryableCommitRejection,
   isTerminalRejection,
 } from "../src/storage/rejection.ts";
 
@@ -32,6 +34,29 @@ describe("scheduler rejection taxonomy", () => {
     expect(isTerminalRejection({
       name: "RowLabelCommitError",
     })).toBe(true);
+  });
+
+  it("classifies a client-side CFC boundary refusal as terminal", () => {
+    // The boundary refusal (`rejectCommitBeforeStorage`) is the client-side
+    // sibling of the row-label refusal: policy deterministically refused the
+    // transaction's own reads and writes, so re-running cannot converge.
+    expect(isTerminalRejection({
+      name: "CfcCommitRefusalError",
+    })).toBe(true);
+  });
+
+  it("excludes a CFC boundary refusal from every retry allow-list", () => {
+    // The refusal shares the never-reached-storage shape with a discarded
+    // attempt, but not its convergence argument: a discarded attempt asked
+    // for a fresh run, a refusal is a verdict. Both classifiers must agree,
+    // or `editWithRetry` burns its budget on identical doomed attempts.
+    expect(isDiscardedAttemptRejection({ name: "CfcCommitRefusalError" }))
+      .toBe(false);
+    expect(isRetryableCommitRejection({ name: "CfcCommitRefusalError" }))
+      .toBe(false);
+    // The deliberate `tx.abort()` keeps its retryable classification.
+    expect(isRetryableCommitRejection({ name: "StorageTransactionAborted" }))
+      .toBe(true);
   });
 
   it("does not classify retryable/transient rejections as terminal", () => {

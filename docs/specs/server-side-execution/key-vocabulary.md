@@ -176,13 +176,13 @@ resolving `scope` against its identity. The vocabulary:
   instance-NAMED load: `Cell.sync` with the cell's transaction
   identity, `IStorageManager.syncCell(cell, {scopeKeyIdentity})` /
   `syncInstance(address, identity)`, the transaction layer's kick in
-  `V2StorageTransaction.loadRoot` (reserved once per (space,
+  `V2StorageTransaction.#loadRoot` (reserved once per (space,
   instance, id) — `shouldPullDoc(…, identity)`), the traversal's
   absent-target kick (`Runtime.ensureLinkedDocLoaded(link, space,
   identity)`), and the served event's presync/preflight as the
   event's actor. The watch root carries `entityScopeKey` (protocol.md
   §2's read row — lease-holder-only, exactly who issues one), the
-  watch id and the selector tracker (`SelectorTracker.toKey`,
+  watch id and the selector tracker (`SelectorTracker.#toKey`,
   `watchIdForEntry`, the pull dedupe key, the provider's replay map)
   key by the instance, and the pending-load ledger keys the address
   with it (the event preflight's park cross-matches per instance).
@@ -340,6 +340,25 @@ per-run identities where run contexts carry them):
   where a shared memo meets a traversal (the SchemaObjectTraverser
   constructor) and throws on any other identity — a future sharing
   change becomes a loud error, never silent value-bleed.
+- the query evaluation cache — `QueryEvaluationCache`
+  (`packages/memory/v2/query.ts`) serves whole tracked-graph
+  evaluations ACROSS identities, and its sharing rests on an
+  assumption wider than key construction: evaluation is
+  recipient-blind. The walk consults the requesting identity only
+  to resolve scope instances, so `classifyStateScope` decides
+  shareability from scope keys alone — a scope-pure entry serves
+  every identity, an absent-residue entry serves after per-requester
+  absence probes, and anything else keys to the evaluating identity.
+  ACL changes hold the invariant from outside: they are commits, and
+  any commit rotates the cache. A per-recipient filter INSIDE
+  evaluation (CFC label enforcement, say — the runtime's flow-label
+  and sink-ceiling dials own it today, and the server's sqlite read
+  labeling annotates rather than filters) would break the sharing
+  invisibly: clearance differs between identities at one seq, so
+  rotation cannot fence it and scope classification cannot see it.
+  Such a filter must key the cache by its filtering context or
+  bypass it — a separate, deliberate change, never a side effect of
+  landing the filter.
 
 **Instance-safe transients** (why each is fine as-is):
 

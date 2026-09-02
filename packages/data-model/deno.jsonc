@@ -39,7 +39,9 @@
     ]
   },
   "exports": {
-    "./SchemaAndHash": "./src/SchemaAndHash.ts",
+    ".": "./src/index.ts",
+    "./api": "./src/api.ts",
+    "./VALUE_TAGS": "./src/VALUE_TAGS.ts",
     "./cell-rep": "./src/cell-rep.ts",
     "./codec-common": "./src/codec-common/index.ts",
     "./codec-json": "./src/codec-json/index.ts",
@@ -50,11 +52,8 @@
     "./fabric-bases": "./src/fabric-bases/index.ts",
     "./fabric-instances": "./src/fabric-instances/index.ts",
     "./fabric-primitives": "./src/fabric-primitives/index.ts",
-    "./fabric-value": "./src/fabric-value.ts",
     "./frozen-builtins": "./src/frozen-builtins.ts",
     "./native-type-tags": "./src/native-type-tags.ts",
-    "./schema-hash": "./src/schema-hash.ts",
-    "./schema-utils": "./src/schema-utils.ts",
     "./value-clone": "./src/value-clone.ts",
     "./value-debug": "./src/value-debug.ts",
     "./value-hash": "./src/value-hash.ts"

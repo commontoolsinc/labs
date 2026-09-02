@@ -130,7 +130,7 @@ export default pattern(() => {
     const lastEvent = scrabble.gameEvents.at(-1);
     return scrabble.board.length === 7 &&
       lastEvent?.type === "word" &&
-      lastEvent?.details?.includes("ANODES") === true &&
+      lastEvent.details.includes("ANODES") &&
       scrabble.message.startsWith("Scored ");
   });
 
