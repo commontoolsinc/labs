@@ -6656,16 +6656,28 @@ supply; OW29/OW32/OW34 closed):
     pattern once into the next wave. A stop/stopAll/dispose aborts that
     readiness and any named-document pull through the outer registration's
     cancellation signal; a runtime cycle, pointer change, or newer node
-    group wins through exact guards. A second drop tears the exact
-    registration down rather than spinning. A whole-wave abort or abandon
-    is not retried in place. An immediate self-minted instantiate commit
-    refusal/rejection also tears down the exact current registration in every
-    posture, including client/OFF: a graph whose setup writes never landed is
-    a zombie, not a viable self-healing registration. Explicit wave abandon
-    is classified separately and warned without incrementing the serving
-    runtime's structure-load-failure observer; other failures remain loud.
+    group wins through exact guards. Under server execution, an immediate
+    stale-read refusal follows the same catch-up and one-shot reinstantiation
+    path: it is the commit-time form of losing the materialization race, not a
+    terminal graph failure. A second recoverable failure tears the exact
+    registration down rather than spinning. A whole-wave abort or abandon is
+    not retried in place. Non-stale refusals and promise rejections remain
+    terminal in every posture, and client/OFF retains terminal behavior for
+    stale reads: a graph whose setup writes never landed is a zombie unless
+    the serving side's materialization supplies the repair path. Explicit wave
+    abandon is classified separately and warned without incrementing the
+    serving runtime's structure-load-failure observer. A recoverable failure
+    is warned on the same terms while its one retry is outstanding, and is
+    counted only if that retry also loses: the writes have not landed YET,
+    and reporting a loss the retry goes on to repair makes a routine race
+    read as a health regression on the very counter that exists to find real
+    ones. Every other failure remains loud.
     Pinned in `executor-wave.test.ts` by a deterministic whole-document
-    conflict plus a held-readiness teardown companion. And OW46's
+    conflict plus a held-readiness teardown companion, a flag-OFF
+    terminal-behavior companion, and a second-refusal companion for the
+    commit-time arm. The readiness assertions name a real conflicted
+    document, so the catch-up's named-document pull is exercised rather
+    than skipped. And OW46's
     `structure-load-stuck` counter is BLIND here: it fires 6× per run
     in BOTH arms and in the reds names only the HOST's space, because
     it counts deferred structure loads of DEMANDED roots and this

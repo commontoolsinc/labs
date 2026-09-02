@@ -143,6 +143,28 @@ describe("lunch poll: a vote is a keyed, mergeable write", () => {
     expect(await alice.read(["voteCount"])).toBe(0);
   });
 
+  it("shows one session's vote to another after it settles", async () => {
+    // The narrowest statement of what a torn-down poll graph costs. Bob
+    // votes; Alice's session must see the tally move. A session whose piece
+    // lost its instantiation and was never re-instantiated keeps serving its
+    // last durable value instead, so this read stays at zero while Bob's
+    // write is sitting in the store. The burst test below catches the same
+    // loss, but only as a side effect of counting rollbacks.
+    const [, bob] = everyone;
+    const option = options[1];
+
+    await bob.send("castVote", { optionId: option, voteType: "green" });
+    await harness.settle();
+    expect(
+      await host.read(["voteCount"]),
+      "the host's graph must observe a vote another session cast",
+    ).toBe(1);
+
+    await bob.send("clearMyVote", { optionId: option });
+    await harness.settle();
+    expect(await host.read(["voteCount"])).toBe(0);
+  });
+
   it("keeps a lunch-time burst from becoming a retry storm", async () => {
     // Everyone re-votes every option at once, repeatedly — the shape of a real
     // lunch decision, where a whole-list write makes each vote wait seconds.
