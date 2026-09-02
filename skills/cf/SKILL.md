@@ -157,10 +157,10 @@ answer composes into the next command.
   and a slug all take it, since all three designate the same piece. A command
   that takes no `--input` refuses the suffix rather than ignoring it, `cf call`
   among them. A `--url` carries no fragment into the reference it decomposes to,
-  so where the URL names the piece `--input` is the spelling that reaches the
-  arguments cell; where it names only the space, the piece arrives on `--cell`
-  and takes the suffix. A `#argument` written on a piece-naming `--url` is the
-  one place the suffix is dropped rather than refused.
+  whatever the URL names, so a `#argument` written on one is dropped rather than
+  refused. A URL naming the piece admits no target beside it, so `--input` is
+  what reaches the arguments cell there; a URL naming only the space leaves the
+  target to the positional address or `--cell`, which carry the suffix.
 
 ## Where the read options go
 

@@ -5066,9 +5066,10 @@ export function parseLink(
   // same word and has no positional path to fall back on, so a `#` elsewhere
   // in one is part of the key it sits in and stays readable. A reference
   // endpoint is already past `normalizeLLMFriendlyRef`, which reserves `#`
-  // outright, so the two spellings differ here on purpose. The test named
-  // "parseLink() keeps a `#` inside a bare endpoint's path key" is what holds
-  // this apart from the shared reader.
+  // outright, so the two spellings differ here on purpose. What holds this
+  // apart from the shared reader is one case in
+  // `packages/cli/test/piece.test.ts`, "parseLink() keeps a `#` inside a bare
+  // endpoint's path key".
   if (ref.endsWith("#argument")) {
     throw new ValidationError(
       `The "#argument" suffix does not apply to a link endpoint.`,
